@@ -45,6 +45,7 @@ var observerAccountRoutes = map[string]struct{}{
 	"DELETE /api/v1/admin/accounts/:id":                              {},
 	"POST /api/v1/admin/accounts/:id/test":                           {},
 	"POST /api/v1/admin/accounts/:id/pelican-test":                   {},
+	"POST /api/v1/admin/accounts/:id/state-probe":                    {},
 	"POST /api/v1/admin/accounts/:id/recover-state":                  {},
 	"POST /api/v1/admin/accounts/:id/refresh":                        {},
 	"POST /api/v1/admin/accounts/:id/apply-oauth-credentials":        {},

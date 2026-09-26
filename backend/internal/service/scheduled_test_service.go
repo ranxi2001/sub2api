@@ -100,14 +100,23 @@ func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {
 
 func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 	if cfg := plan.PelicanConfig; cfg != nil {
-		if strings.TrimSpace(cfg.Prompt) == "" || len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
+		// 探针题型不需要题目文本；其余题型题目必填。
+		if isOpenAICodexStateProbePlan(cfg) {
+			if len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
+				return time.Time{}, fmt.Errorf("probe model is required (maximum 32000/100 bytes)")
+			}
+		} else if strings.TrimSpace(cfg.Prompt) == "" || len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
 			return time.Time{}, fmt.Errorf("pelican prompt and model are required (maximum 32000/100 bytes)")
 		}
 		if err := validateQualityPolicy(plan); err != nil {
 			return time.Time{}, err
 		}
-		if cfg.QuestionKind != "" && cfg.QuestionKind != "pelican" && cfg.QuestionKind != "candy" {
+		if cfg.QuestionKind != "" && cfg.QuestionKind != "pelican" && cfg.QuestionKind != "candy" && cfg.QuestionKind != OpenAICodexStateProbeQuestionKind {
 			return time.Time{}, fmt.Errorf("invalid question kind")
+		}
+		// 同一账号同一时刻只允许一次探针，并行只会互相挤掉，直接禁止。
+		if isOpenAICodexStateProbePlan(cfg) && cfg.ParallelCount != 1 {
+			return time.Time{}, fmt.Errorf("state probe does not support parallel runs")
 		}
 		if cfg.ParallelCount < 1 || cfg.ParallelCount > 8 {
 			return time.Time{}, fmt.Errorf("parallel count must be 1–8")

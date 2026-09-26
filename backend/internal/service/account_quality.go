@@ -28,10 +28,15 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 	if plan.AutoRecover {
 		return fmt.Errorf("quality plans use auto_restore, not connectivity auto_recover")
 	}
-	if plan.PelicanConfig.QuestionKind != "candy" {
+	if plan.PelicanConfig.QuestionKind != "candy" && plan.PelicanConfig.QuestionKind != OpenAICodexStateProbeQuestionKind {
 		return fmt.Errorf("quality plans require a text answer question")
 	}
-	if strings.TrimSpace(q.ExpectedAnswer) == "" || len(q.ExpectedAnswer) > 4000 {
+	// 探针题型自带满血/降智判定，不需要参考答案与判题模型。
+	if plan.PelicanConfig.QuestionKind != OpenAICodexStateProbeQuestionKind {
+		if strings.TrimSpace(q.ExpectedAnswer) == "" || len(q.ExpectedAnswer) > 4000 {
+			return fmt.Errorf("expected answer must be 1–4000 bytes")
+		}
+	} else if len(q.ExpectedAnswer) > 4000 {
 		return fmt.Errorf("expected answer must be 1–4000 bytes")
 	}
 	if q.Action != "remove_groups" && q.Action != "disable_scheduling" {
@@ -58,7 +63,8 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 func qualityOutcome(results []*ScheduledTestResult) string {
 	allPassed := len(results) > 0
 	for _, r := range results {
-		if r != nil && r.QualityJudgment != nil && r.QualityJudgment.Verdict == "incorrect" && r.Status == "failed" && r.ErrorMessage == "answer_mismatch" {
+		if r != nil && r.QualityJudgment != nil && r.QualityJudgment.Verdict == "incorrect" && r.Status == "failed" &&
+			(r.ErrorMessage == "answer_mismatch" || r.ErrorMessage == openAICodexStateDegradedError) {
 			return "failed"
 		}
 		if r == nil || r.Status != "success" || r.QualityJudgment == nil || r.QualityJudgment.Verdict != "correct" {

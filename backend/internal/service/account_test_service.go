@@ -154,6 +154,7 @@ type AccountTestService struct {
 	openaiGatewayService      *OpenAIGatewayService
 	bpsProbeMu                sync.Mutex
 	bpsProbeAccounts          map[int64]struct{}
+	stateProbeAccounts        sync.Map
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
