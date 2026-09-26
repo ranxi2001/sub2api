@@ -141,7 +141,7 @@ func TestExcelBPSInvalidEncryptedContentRecoversSameRoute(t *testing.T) {
 				for _, req := range upstream.requests {
 					require.Equal(t, "Bearer test-token", req.Header.Get("Authorization"))
 					require.Equal(t, "test-account", req.Header.Get("Chatgpt-Account-Id"))
-					require.Equal(t, HTTPUpstreamProfileLongStream, HTTPUpstreamProfileFromContext(req.Context()))
+					require.Equal(t, HTTPUpstreamProfileExcelBPS, HTTPUpstreamProfileFromContext(req.Context()))
 				}
 				events, exists := c.Get(OpsUpstreamErrorsKey)
 				require.True(t, exists)

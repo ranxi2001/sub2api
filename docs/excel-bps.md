@@ -129,6 +129,13 @@ python backend/scripts/e2e-bps-ignore-images.py --expect ignore --stream --outpu
 
 验证范围: 自动化测试覆盖 HTTPS 测试服务器取图, BPS 请求转换, 普通/compact 与流式/非流式分支, 工具截图, 文件权限, 过期和异常退出清理, 磁盘预留与失败回滚, 非法输入, 日志脱敏, 后台设置及即时生效. 200 并发准入回归使用受控请求验证拒绝发生在读体之前, 以及在途上限和资源释放; 不属于真实上游或生产服务器的容量压测. 真实 BPS 视觉结果和部署容量需由部署方另行验收.
 
+### BPS 传输阶段与 HTTP/2 故障缓解
+
+- BPS 使用独立的传输 profile 和连接池。已确认建立 HTTP/2 连接后发生 EOF、连接重置或 HTTP/2 传输错误时，同一 HTTP/HTTPS 代理的后续 BPS 请求使用独立 HTTP/1.1 连接池，60 秒后重新尝试 HTTP/2；当前失败请求不重放，不切换出口。状态与 Codex 和其他长流隔离，且有容量上限。
+- 正常响应结束、TLS 建连失败、客户端取消、截止时间和应用拒绝不会触发上述降级；流读取中的异常也会反馈，普通 EOF 不等于流传输故障。
+- 运维传输错误增加 transport 字段：phase、protocol、connection_obtained、connection_reused、idle_ms、tls_started、tls_completed、tls_error_kind、headers_written、request_written、body_read、first_response_byte。仅记录固定阶段、布尔值及时间，不记录原始错误、地址、凭据或请求内容。body_read 只表示读取了正文，不证明上游已收到；缺少写入回调也不证明未发送。
+- 该策略缓解共享 HTTP/2 连接故障后的重复影响，不保证修复供应商出口或上游断连。采用真实本地 TLS/H2 端点验证响应头前和流中断连，属于离线验证，真实链路效果需部署后确认。
+
 ### BPS 会话代理故障处理
 
 - 动态/订阅节点和 IP 管理代理池共用有界探测：一次选路最多并行探测 4 个节点，失败后立即补入下一候选，最多尝试 32 个候选；每个节点的探测与确认合计最多 4 秒，整体仍受 15 秒选路时限约束。首个完成 HTTPS 检查的出口即可接单，其余探测取消；并行仅用于免认证连通检查，不并行发送模型请求。探测使用免认证 HTTPS HEAD，不调用模型。
