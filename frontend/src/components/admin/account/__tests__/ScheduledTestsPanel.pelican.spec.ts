@@ -60,6 +60,25 @@ describe('shared scheduled test plans for Pelican', () => {
     expect(adminAPI.scheduledTests.update).toHaveBeenLastCalledWith(4, expect.objectContaining({ pelican_config: { ...config, question_kind: 'candy' } }))
     wrapper.unmount()
   })
+  it('labels state probe plans and their results by verdict', async () => {
+    const probe = { prompt: '', reasoning_effort: 'medium', parallel_count: 1, question_kind: 'state_probe' }
+    vi.mocked(adminAPI.scheduledTests.listByAccount).mockResolvedValue([{ ...plan, auto_recover: false, pelican_config: probe }] as any)
+    vi.mocked(adminAPI.scheduledTests.listResults).mockResolvedValue([
+      { id: 3, plan_id: 4, status: 'failed', error_message: 'state_degraded', response_text: '', pelican_config: probe },
+      { id: 2, plan_id: 4, status: 'failed', error_message: 'state_probe_inconclusive: network', response_text: '', pelican_config: probe },
+      { id: 1, plan_id: 4, status: 'success', error_message: '', response_text: '', pelican_config: probe }
+    ] as any)
+    const wrapper = mountPanel(); await flushPromises()
+    expect(wrapper.find('[data-testid="state-probe-plan-badge"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="result-status"]').map(badge => badge.text())).toEqual([
+      'admin.accounts.pelicanTest.probe.verdictDegraded',
+      'admin.accounts.pelicanTest.probe.verdictInconclusive',
+      'admin.accounts.pelicanTest.probe.verdictHealthy'
+    ])
+    // 只有「无法判断」保留错误详情（失败分类）；降智不再把内部标记当错误展示。
+    expect(wrapper.text().split('admin.scheduledTests.errorMessage')).toHaveLength(2)
+    wrapper.unmount()
+  })
   it('keeps ordinary connection tests free of Pelican options', async () => {
     const wrapper = mountPanel(false); await flushPromises()
     const vm = wrapper.vm as any

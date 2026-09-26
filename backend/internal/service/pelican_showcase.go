@@ -79,7 +79,7 @@ func (s *PelicanShowcaseService) PublishScheduledResult(ctx context.Context, res
 	if s == nil || result == nil || result.ID <= 0 || result.PelicanConfig == nil || result.Status != "success" {
 		return
 	}
-	if cfg := result.PelicanConfig; cfg.Quality != nil || cfg.QuestionKind == "candy" || isBuiltinCandyPlan(cfg) {
+	if cfg := result.PelicanConfig; cfg.Quality != nil || cfg.QuestionKind == "candy" || isBuiltinCandyPlan(cfg) || isOpenAICodexStateProbePlan(cfg) {
 		return
 	}
 	if !pelicanHTMLPattern.MatchString(result.ResponseText) {

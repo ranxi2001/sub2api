@@ -33,10 +33,13 @@ func TestMoveExcelBPSOn403RollsBackFailures(t *testing.T) {
 			for _, stage := range []struct{ name, query string }{
 				{"delete", "DELETE FROM account_groups"},
 				{"insert", "INSERT INTO account_groups"},
-				{"account", "UPDATE accounts SET updated_at"},
+				{"account", "UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object('openai_excel_bps_403_moved_at', $2::text, 'openai_excel_bps_403_moved_group_id', $3::bigint), updated_at = NOW() WHERE id = $1"},
 				{"outbox", "INSERT INTO scheduler_outbox"},
 			} {
 				expect := mock.ExpectExec(regexp.QuoteMeta(stage.query))
+				if stage.name == "account" {
+					expect = expect.WithArgs(int64(27), recentUTCTimestampArg{}, int64(7))
+				}
 				if stage.name == failureAt {
 					expect.WillReturnError(failure)
 					break

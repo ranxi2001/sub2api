@@ -18,7 +18,7 @@
             <h3 class="font-semibold">{{ card.account.name }}</h3>
             <p class="mt-1 text-xs text-gray-500">#{{ card.account.id }}<span v-if="card.resultId"> · {{ t('admin.accounts.pelicanTest.recordId') }} #{{ card.resultId }}</span></p>
             <div class="mt-3 flex justify-between gap-2 text-xs">
-              <span :class="card.record.status === 'success' ? 'text-emerald-600' : 'text-red-500'">{{ t(card.record.status === 'success' ? 'admin.accounts.pelicanTest.success' : 'admin.accounts.pelicanTest.failed') }}</span>
+              <span :class="statusClass(card.record)" data-testid="record-status">{{ statusLabel(card.record) }}</span>
               <span class="text-gray-500">{{ duration(card.record.durationMs) }} · {{ sourceLabel(card.record.source) }}</span>
             </div>
             <div class="mt-2 space-y-1 text-xs text-gray-500">
@@ -31,7 +31,7 @@
               <pre v-else-if="card.record.output && !card.record.html" class="whitespace-pre-wrap break-words p-4 text-sm">{{ card.record.output }}</pre>
               <p v-else class="p-4 text-sm text-red-500">{{ card.loadError || card.record.error || t('admin.accounts.pelicanTest.invalidHtml') }}</p>
             </div>
-            <p v-if="card.record.error" class="mt-2 line-clamp-2 break-words text-xs text-red-500">{{ card.record.error }}</p>
+            <p v-if="card.record.error && !card.record.verdict" class="mt-2 line-clamp-2 break-words text-xs text-red-500">{{ card.record.error }}</p>
           </div>
           <div class="border-t border-gray-100 px-4 py-3 text-sm text-primary-600 dark:border-dark-700">{{ t('admin.accounts.pelicanTest.preview') }}</div>
           <button type="button" class="absolute inset-0 z-10 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500" :aria-label="`${card.account.name} · ${t('admin.accounts.pelicanTest.preview')}`" @click="openRecord(card)" />
@@ -52,7 +52,7 @@
         </header>
         <iframe v-if="selected.record.html" :srcdoc="selected.record.html" class="min-h-0 w-full flex-1 border-0" sandbox="allow-scripts" referrerpolicy="no-referrer" :title="selected.account.name" />
         <p v-else-if="!selected.loaded && !selected.loadError" class="p-4">{{ t('common.loading') }}...</p>
-        <pre v-else class="overflow-auto whitespace-pre-wrap p-4 text-sm">{{ selected.loadError || selected.record.error || selected.record.output }}</pre>
+        <pre v-else class="overflow-auto whitespace-pre-wrap p-4 text-sm">{{ detailText(selected) }}</pre>
       </div>
     </div>
   </div>
@@ -63,7 +63,8 @@ import { useI18n } from 'vue-i18n'
 import { scheduledTestsAPI } from '@/api/admin/scheduledTests'
 import type { PelicanHistoryResult } from '@/api/admin/scheduledTests'
 import { extractPelicanHtml } from '@/utils/pelicanHtml'
-import type { Account, AccountListItem, ScheduledTestResult } from '@/types'
+import { isTextAnswerKind, stateProbeVerdict, type StateProbeVerdict } from '@/utils/intelligenceTest'
+import type { Account, AccountListItem, PelicanTestConfig, ScheduledTestResult } from '@/types'
 
 interface ManualRun {
   id?: string
@@ -75,14 +76,14 @@ interface ManualRun {
   startedAt?: string
   modelId?: string
   reasoningEffort?: string
-  questionKind?: 'candy' | 'pelican'
+  questionKind?: PelicanTestConfig['question_kind']
 }
 interface ManualRecord {
   id?: string
   createdAt: string
   modelId: string
   reasoningEffort: string
-  questionKind?: 'candy' | 'pelican'
+  questionKind?: PelicanTestConfig['question_kind']
   runs: ManualRun[]
 }
 interface DisplayRecord {
@@ -92,6 +93,8 @@ interface DisplayRecord {
   modelId?: string
   reasoningEffort?: string
   status: string
+  // 定时探针结果的判定；有判定时优先展示判定和探针摘要，不展示原始错误标记。
+  verdict?: StateProbeVerdict
   html: string
   output: string
   error: string
@@ -122,6 +125,21 @@ function sourceLabel(source: DisplayRecord['source']) { return t(`admin.accounts
 function formatDate(value?: string) {
   if (!value || !Number.isFinite(Date.parse(value))) return '—'
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'medium' }).format(new Date(value))
+}
+const verdictKeys: Record<StateProbeVerdict, string> = { healthy: 'verdictHealthy', degraded: 'verdictDegraded', inconclusive: 'verdictInconclusive' }
+function statusLabel(record: DisplayRecord) {
+  if (record.verdict) return t(`admin.accounts.pelicanTest.probe.${verdictKeys[record.verdict]}`)
+  return t(record.status === 'success' ? 'admin.accounts.pelicanTest.success' : 'admin.accounts.pelicanTest.failed')
+}
+function statusClass(record: DisplayRecord) {
+  if (record.verdict === 'inconclusive') return 'text-gray-500'
+  if (record.verdict) return record.verdict === 'healthy' ? 'text-emerald-600' : 'text-red-500'
+  return record.status === 'success' ? 'text-emerald-600' : 'text-red-500'
+}
+function detailText(card: Card) {
+  if (card.loadError) return card.loadError
+  if (card.record.verdict) return card.record.output || card.record.error
+  return card.record.error || card.record.output
 }
 function duration(value?: number) { return typeof value === 'number' && Number.isFinite(value) ? `${(value / 1000).toFixed(1)} s` : '—' }
 function timestamp(record: DisplayRecord) { return record.startedAt ? Date.parse(record.startedAt) || 0 : 0 }
@@ -155,7 +173,7 @@ function manualCards(server: PelicanHistoryResult[]): Card[] {
         const key = `manual:${id}:${record.id || record.createdAt}:${run.id || index}`
         if (results.has(key)) return
         const output = run.output || run.html || ''
-        const html = (run.questionKind || record.questionKind) === 'candy' ? '' : extractPelicanHtml(output)
+        const html = isTextAnswerKind(run.questionKind || record.questionKind) ? '' : extractPelicanHtml(output)
         results.set(key, { key, account, loaded: true, record: {
           source: 'manual', startedAt: run.startedAt || record.createdAt, durationMs: run.durationMs,
           modelId: run.modelId || record.modelId, reasoningEffort: run.reasoningEffort || record.reasoningEffort,
@@ -169,7 +187,8 @@ function manualCards(server: PelicanHistoryResult[]): Card[] {
 function serverRecord(result: ScheduledTestResult): DisplayRecord {
   return { source: 'scheduled', startedAt: result.started_at, durationMs: result.latency_ms,
     modelId: result.pelican_config?.model_id, reasoningEffort: result.pelican_config?.reasoning_effort,
-    status: result.status, output: result.response_text || '', html: result.pelican_config?.question_kind === 'candy' ? '' : extractPelicanHtml(result.response_text || ''), error: result.error_message }
+    status: result.status, verdict: stateProbeVerdict(result) ?? undefined, output: result.response_text || '',
+    html: isTextAnswerKind(result.pelican_config?.question_kind) ? '' : extractPelicanHtml(result.response_text || ''), error: result.error_message }
 }
 async function loadBody(card: Card) {
   if (card.loaded || !card.planId || !card.resultId || !alive) return

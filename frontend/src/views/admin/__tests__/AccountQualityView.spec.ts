@@ -73,6 +73,58 @@ describe('quality operations', () => {
     expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.configureJudge')
     wrapper.unmount()
   })
+  it('saves a state probe rule without a question, reference answer, judge or parallel runs', async () => {
+    const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
+    vm.newPlan(); await flushPromises()
+    vm.selectedAccounts = [1]; vm.form.pelican_config.parallel_count = 3
+    await wrapper.find('[data-testid="quality-question-kind"]').setValue('state_probe')
+    expect(wrapper.find('[data-testid="quality-probe-hint"]').exists()).toBe(true)
+    expect(wrapper.find('#quality-prompt').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('qualityOps.judgeTitle')
+    vm.form.pelican_config.quality.remove_group_ids = [21]
+    await vm.save()
+    const request = vi.mocked(scheduledTests.create).mock.calls[0][0] as any
+    expect(request).toMatchObject({ account_id: 1, model_id: 'gpt-6-astra', pelican_config: { question_kind: 'state_probe', prompt: '', parallel_count: 1, quality: { expected_answer: '', action: 'remove_groups', remove_group_ids: [21], auto_restore: false } } })
+    expect(request.pelican_config.quality).not.toHaveProperty('judge')
+    wrapper.unmount()
+  })
+  it('switching a probe rule back to candy restores the question and judge fields', async () => {
+    const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
+    vm.edit({ id: 5, account_id: 1, model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, pelican_config: { question_kind: 'state_probe', prompt: '', reasoning_effort: 'high', parallel_count: 1, quality: { expected_answer: '', action: 'disable_scheduling', remove_group_ids: [], auto_restore: true } } })
+    await flushPromises()
+    expect(wrapper.find('#quality-prompt').exists()).toBe(false)
+    await wrapper.find('[data-testid="quality-question-kind"]').setValue('candy')
+    expect(wrapper.find('#quality-prompt').exists()).toBe(true)
+    expect(vm.form.pelican_config.quality.expected_answer).toBe('21')
+    expect(vm.form.pelican_config.quality.judge).toEqual({ group_id: 0, model_id: '', prompt: 'qualityOps.defaultJudgePrompt' })
+    await vm.save()
+    expect(scheduledTests.update).not.toHaveBeenCalled()
+    expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.configureJudge')
+    wrapper.unmount()
+  })
+  it('tags probe rules and labels probe results as full capability, degraded or inconclusive', async () => {
+    const probe = { question_kind: 'state_probe', prompt: '', reasoning_effort: 'high', parallel_count: 1, quality: { expected_answer: '', action: 'disable_scheduling', remove_group_ids: [], auto_restore: false } }
+    vi.mocked(listQualityPlans).mockResolvedValue([{ id: 1, account_id: 1, account_name: 'Probe account', model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, pelican_config: probe }] as any)
+    vi.mocked(scheduledTests.listResults).mockResolvedValue([
+      { id: 7, status: 'failed', error_message: 'state_degraded', pelican_config: probe },
+      { id: 6, status: 'failed', error_message: 'state_probe_inconclusive: network', pelican_config: probe },
+      { id: 5, status: 'success', error_message: '', pelican_config: probe }
+    ] as any)
+    vi.mocked(scheduledTests.getResult).mockResolvedValue({ id: 7, status: 'failed', error_message: 'state_degraded', response_text: '判定：降智', pelican_config: probe, quality_judgment: { verdict: 'incorrect', reason: 'new ticket' } } as any)
+    const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
+    expect(wrapper.find('[data-testid="quality-probe-tag"]').exists()).toBe(true)
+    expect(wrapper.find('.rule-warning').exists()).toBe(false)
+    await vm.history(vm.plans[0]); await flushPromises()
+    const labels = wrapper.findAll('.result-navigation button').map(button => button.text())
+    expect(labels[0]).toContain('qualityOps.probeDegraded')
+    expect(labels[1]).toContain('qualityOps.probeInconclusive')
+    expect(labels[2]).toContain('qualityOps.probeHealthy')
+    expect(wrapper.find('[data-testid="quality-result-badge"]').text()).toBe('qualityOps.probeDegraded')
+    expect(wrapper.find('pre').text()).toContain('判定：降智')
+    expect(wrapper.find('.answer-reference').exists()).toBe(false)
+    expect(wrapper.find('.judge-reason').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('renders returned model content as text', async () => {
     vi.mocked(scheduledTests.listResults).mockResolvedValue([{ id: 4, status: 'failed', error_message: 'answer_mismatch', quality_action: 'groups_removed' }] as any)
     vi.mocked(scheduledTests.getResult).mockResolvedValue({ id: 4, status: 'failed', error_message: 'answer_mismatch', response_text: '<img src=x onerror=alert(1)>', quality_action: 'groups_removed' } as any)

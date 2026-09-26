@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -113,7 +114,10 @@ FOR UPDATE`, account.ID, string(credentials), strconv.FormatInt(target, 10))
 			return false, err
 		}
 	}
-	if _, err := client.ExecContext(ctx, `UPDATE accounts SET updated_at = NOW() WHERE id = $1`, account.ID); err != nil {
+	// Record the action for the account list, which flags the suspected ban
+	// while the account's groups still match it.
+	if _, err := client.ExecContext(ctx, `UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) || jsonb_build_object('openai_excel_bps_403_moved_at', $2::text, 'openai_excel_bps_403_moved_group_id', $3::bigint), updated_at = NOW() WHERE id = $1`,
+		account.ID, time.Now().UTC().Format(time.RFC3339), target); err != nil {
 		return false, err
 	}
 	payload := buildSchedulerGroupPayload(mergeGroupIDs(current, []int64{target}))
