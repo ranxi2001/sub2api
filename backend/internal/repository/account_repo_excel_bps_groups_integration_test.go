@@ -6,7 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"strconv"
 	"testing"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -66,7 +69,13 @@ func TestMoveExcelBPSOn403Memberships(t *testing.T) {
 			require.NoError(t, err)
 			require.ElementsMatch(t, want, after.GroupIDs)
 			require.ElementsMatch(t, initial, before.GroupIDs, "request snapshots must remain immutable")
-			require.Equal(t, before.Extra, after.Extra)
+			afterExtra := maps.Clone(after.Extra)
+			if wantChange {
+				requireExcelBPS403MoveRecord(t, after.Extra, target)
+				delete(afterExtra, service.ExcelBPS403MovedAtKey)
+				delete(afterExtra, service.ExcelBPS403MovedGroupIDKey)
+			}
+			require.Equal(t, before.Extra, afterExtra, "only the group-action record is added")
 			require.Equal(t, before.Credentials, after.Credentials)
 			require.Equal(t, before.Status, after.Status)
 			require.Equal(t, before.Schedulable, after.Schedulable)
@@ -97,8 +106,66 @@ func TestMoveExcelBPSOn403Memberships(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, after.IsExcelBPSEnabled())
 			require.ElementsMatch(t, want, after.GroupIDs)
+			require.Contains(t, after.Extra, service.ExcelBPS403DisabledAtKey)
+			if wantChange {
+				requireExcelBPS403MoveRecord(t, after.Extra, target)
+			}
 		})
 	}
+}
+
+func requireExcelBPS403MoveRecord(t *testing.T, extra map[string]any, target int64) {
+	t.Helper()
+	at, ok := extra[service.ExcelBPS403MovedAtKey].(string)
+	require.True(t, ok, "the automatic group action records when it happened")
+	parsed, err := time.Parse(time.RFC3339, at)
+	require.NoError(t, err)
+	require.WithinDuration(t, time.Now(), parsed, time.Minute)
+	group, err := json.Marshal(extra[service.ExcelBPS403MovedGroupIDKey])
+	require.NoError(t, err)
+	require.Equal(t, strconv.FormatInt(target, 10), string(group))
+}
+
+func TestExcelBPS403MoveRecordSurvivesAccountEdits(t *testing.T) {
+	tx := testEntTx(t)
+	ctx := dbent.NewTxContext(context.Background(), tx)
+	client := tx.Client()
+	repo := newAccountRepositoryWithSQL(client, tx, nil)
+	oldGroup := mustCreateGroup(t, client, &service.Group{Name: "bps-record-old", Platform: service.PlatformOpenAI})
+	destination := mustCreateGroup(t, client, &service.Group{Name: "bps-record-target", Platform: service.PlatformOpenAI})
+	input := newExcelBPSAutoDisableAccount()
+	input.Extra[service.ExcelBPSAutoMoveOn403Key] = true
+	input.Extra[service.ExcelBPS403TargetGroupIDKey] = destination.ID
+	account := mustCreateAccount(t, client, input)
+	require.NoError(t, repo.BindGroups(ctx, account.ID, []int64{oldGroup.ID}))
+	load := func() *service.Account {
+		t.Helper()
+		loaded, err := repo.GetByID(ctx, account.ID)
+		require.NoError(t, err)
+		return loaded
+	}
+	changed, err := repo.MoveExcelBPSOn403(ctx, load())
+	require.NoError(t, err)
+	require.True(t, changed)
+	record := load().Extra
+	requireExcelBPS403MoveRecord(t, record, destination.ID)
+
+	// An ordinary edit keeps the record, even when it echoes other values.
+	edited := load()
+	edited.Name = "bps-record-renamed"
+	edited.Extra[service.ExcelBPS403MovedAtKey] = "2000-01-01T00:00:00Z"
+	edited.Extra[service.ExcelBPS403MovedGroupIDKey] = 0
+	require.NoError(t, repo.Update(ctx, edited))
+	after := load()
+	require.Equal(t, "bps-record-renamed", after.Name)
+	require.Equal(t, record[service.ExcelBPS403MovedAtKey], after.Extra[service.ExcelBPS403MovedAtKey])
+	require.Equal(t, record[service.ExcelBPS403MovedGroupIDKey], after.Extra[service.ExcelBPS403MovedGroupIDKey])
+
+	// A repeated 403 after the move changes nothing and keeps the first record.
+	changed, err = repo.MoveExcelBPSOn403(ctx, after)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, record[service.ExcelBPS403MovedAtKey], load().Extra[service.ExcelBPS403MovedAtKey])
 }
 
 func TestMoveExcelBPSOn403HonorsCurrentSettings(t *testing.T) {
@@ -144,6 +211,9 @@ func TestMoveExcelBPSOn403HonorsCurrentSettings(t *testing.T) {
 			}
 			require.False(t, changed)
 			require.Equal(t, baseline, bpsGroupEventCount(t, ctx, client, account.ID))
+			var recorded bool
+			require.NoError(t, scanSingleRow(ctx, client, "SELECT extra -> 'openai_excel_bps_403_moved_at' IS NOT NULL FROM accounts WHERE id = $1", []any{account.ID}, &recorded))
+			require.False(t, recorded, "a skipped action leaves no record")
 			var count int
 			require.NoError(t, scanSingleRow(ctx, client, "SELECT COUNT(*) FROM account_groups WHERE account_id = $1 AND group_id = $2", []any{account.ID, oldGroup.ID}, &count))
 			if kind == "groups edited" {
@@ -209,6 +279,7 @@ func TestMoveExcelBPSOn403ConcurrentAndCache(t *testing.T) {
 			after, err := repo.GetByID(ctx, account.ID)
 			require.NoError(t, err)
 			require.ElementsMatch(t, want, after.GroupIDs)
+			requireExcelBPS403MoveRecord(t, after.Extra, target)
 			require.Len(t, cache.setAccounts, 1)
 			require.ElementsMatch(t, want, cache.setAccounts[0].GroupIDs)
 			require.True(t, after.IsExcelBPSEnabled(), "independent from auto-disable")

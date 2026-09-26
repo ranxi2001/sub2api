@@ -65,3 +65,48 @@ func TestMergeExcelBPS403Marker(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeExcelBPS403MoveMarker(t *testing.T) {
+	const at = "2026-09-27T01:02:03Z"
+	stored := map[string]any{"openai_excel_bps": true, ExcelBPS403MovedAtKey: at, ExcelBPS403MovedGroupIDKey: float64(7)}
+	for _, tc := range []struct {
+		name    string
+		extra   map[string]any
+		current map[string]any
+		want    map[string]any
+	}{
+		{
+			name:    "ordinary edit keeps group action",
+			extra:   map[string]any{"openai_excel_bps": true},
+			current: stored,
+			want:    map[string]any{"openai_excel_bps": true, ExcelBPS403MovedAtKey: at, ExcelBPS403MovedGroupIDKey: float64(7)},
+		},
+		{
+			name:    "edit cannot rewrite group action",
+			extra:   map[string]any{ExcelBPS403MovedAtKey: "2000-01-01T00:00:00Z", ExcelBPS403MovedGroupIDKey: float64(9)},
+			current: stored,
+			want:    map[string]any{ExcelBPS403MovedAtKey: at, ExcelBPS403MovedGroupIDKey: float64(7)},
+		},
+		{
+			name:    "edit cannot add group action",
+			extra:   map[string]any{ExcelBPS403MovedAtKey: at, ExcelBPS403MovedGroupIDKey: float64(0)},
+			current: map[string]any{},
+			want:    map[string]any{},
+		},
+		{
+			name:    "re-enabling clears only the shutdown record",
+			extra:   map[string]any{"openai_excel_bps": true},
+			current: map[string]any{ExcelBPS403DisabledAtKey: at, ExcelBPS403MovedAtKey: at, ExcelBPS403MovedGroupIDKey: float64(0)},
+			want:    map[string]any{"openai_excel_bps": true, ExcelBPS403MovedAtKey: at, ExcelBPS403MovedGroupIDKey: float64(0)},
+		},
+		{
+			name:    "nil edit keeps group action",
+			current: stored,
+			want:    map[string]any{ExcelBPS403MovedAtKey: at, ExcelBPS403MovedGroupIDKey: float64(7)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, MergeExcelBPS403Marker(tc.extra, tc.current))
+		})
+	}
+}
