@@ -1,6 +1,13 @@
 <template>
   <div class="mt-3 space-y-3 rounded border p-4 dark:border-dark-600">
     <p class="text-sm" role="status">{{ text('内核状态', 'Kernel status') }}: {{ status?.phase || '—' }} · {{ status?.nodes || 0 }} {{ text('个节点', 'nodes') }} · {{ status?.dynamic_proxies || 0 }} {{ text('个动态代理', 'dynamic proxies') }}</p>
+    <div v-for="pool in warmPools" :key="pool.source" class="rounded bg-gray-50 p-3 text-xs dark:bg-dark-700" data-testid="bps-warm-pool">
+      <p class="font-medium">{{ pool.source }} · Warm IP pool</p>
+      <p>{{ text('就绪', 'Ready') }} {{ pool.ready }} / {{ text('目标', 'Target') }} {{ pool.target }} · {{ text('探测中', 'Checking') }} {{ pool.checking }} · {{ text('冷却中', 'Cooling') }} {{ pool.cooling }}</p>
+      <p>{{ text('目标按已启用账号的并发数汇总；不足时复用就绪出口，用户请求不探测冷节点。', 'Targets follow enabled account concurrency. Ready exits are reused when scarce; user requests never probe cold nodes.') }}</p>
+      <p v-if="pool.target > 0 && pool.ready === 0" class="text-amber-700 dark:text-amber-400">{{ text('暂无通过初筛的出口，后台正在预热；不会退回直连。', 'No qualified exits yet. Background warming continues; direct fallback is disabled.') }}</p>
+      <p v-for="(count, reason) in pool.failure_reasons" :key="reason">{{ reason }}: {{ count }}</p>
+    </div>
     <p v-if="error || status?.error" class="text-sm text-red-600" role="alert">{{ error || status?.error }}</p>
     <div class="flex gap-2">
       <button type="button" class="btn btn-secondary" :disabled="pending" @click="refresh">{{ text('检测状态', 'Check status') }}</button>
@@ -48,7 +55,7 @@ hostname:port@username:password</pre>
   </div>
 </template>
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiClient } from '@/api/client'
 import MihomoCountryFilter from './MihomoCountryFilter.vue'
@@ -56,8 +63,13 @@ import type { CountryFilter, CountryNode } from './mihomoCountry'
 const { locale } = useI18n()
 const text = (zh: string, en: string) => locale.value.startsWith('zh') ? zh : en
 defineEmits<{ ready: [endpoint: string] }>()
-interface Status { installed: boolean; running: boolean; busy: boolean; supported: boolean; phase: string; error?: string; nodes: number; subscriptions: number; dynamic_proxies?: number; endpoint: string; use_once?: boolean; node_states?: CountryNode[]; country_filter?: CountryFilter; country_codes?: string[] }
+interface WarmPoolStatus { target: number; ready: number; checking: number; cooling: number; failure_reasons?: Record<string, number> }
+interface Status { bps_warm_pool?: WarmPoolStatus; bps_ip_warm_pool?: WarmPoolStatus; installed: boolean; running: boolean; busy: boolean; supported: boolean; phase: string; error?: string; nodes: number; subscriptions: number; dynamic_proxies?: number; endpoint: string; use_once?: boolean; node_states?: CountryNode[]; country_filter?: CountryFilter; country_codes?: string[] }
 const status = ref<Status>(); const subscriptions = ref(''); const dynamicProxies = ref(''); const append = ref(false); const pending = ref(false); const error = ref('')
+const warmPools = computed(() => [
+  { source: 'Mihomo', pool: status.value?.bps_warm_pool },
+  { source: text('IP 管理', 'IP Management'), pool: status.value?.bps_ip_warm_pool }
+].flatMap(item => item.pool ? [{ source: item.source, ...item.pool }] : []))
 const dynamicProtocol = ref('http')
 function dynamicProxyLines(): string[] {
   return dynamicProxies.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
@@ -69,7 +81,7 @@ async function refresh() {
   if (timer) clearTimeout(timer)
   try { status.value = (await apiClient.get<Status>('/admin/system/mihomo')).data; error.value = '' }
   catch { error.value = text('无法读取内核状态', 'Cannot read kernel status') }
-  if (!disposed && status.value?.busy) timer = setTimeout(refresh, 1500)
+  if (!disposed && (status.value?.busy || warmPools.value.some(pool => pool.target > 0))) timer = setTimeout(refresh, status.value?.busy ? 1500 : 5000)
 }
 async function operate(action: string, countryFilter?: CountryFilter) {
   pending.value = true; error.value = ''

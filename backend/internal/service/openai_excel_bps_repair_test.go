@@ -107,7 +107,7 @@ func TestExcelBPSToolCorrectionPreservesRouteAndUsage(t *testing.T) {
 					require.Equal(t, basispoints.ResponsesURL, req.URL.String())
 					require.Equal(t, "Bearer test-token", req.Header.Get("Authorization"))
 					require.Equal(t, "test-account", req.Header.Get("Chatgpt-Account-Id"))
-					require.Equal(t, HTTPUpstreamProfileLongStream, HTTPUpstreamProfileFromContext(req.Context()))
+					require.Equal(t, HTTPUpstreamProfileExcelBPS, HTTPUpstreamProfileFromContext(req.Context()))
 					require.True(t, HTTPUpstreamRedirectsDisabled(req.Context()))
 					require.True(t, checked.bodies[i].closed.Load())
 					require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.bodies[i], "model").String())

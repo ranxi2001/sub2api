@@ -486,6 +486,9 @@ func provideCleanup(
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
 ) func() {
+	if openAIGateway != nil {
+		openAIGateway.StartBPSWarmPool()
+	}
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -496,6 +499,12 @@ func provideCleanup(
 		}
 
 		parallelSteps := []cleanupStep{
+			{"BPSWarmPool", func() error {
+				if openAIGateway != nil {
+					openAIGateway.StopBPSWarmPool()
+				}
+				return nil
+			}},
 			{"PluginManager", func() error {
 				if pluginManager != nil {
 					pluginManager.Stop()

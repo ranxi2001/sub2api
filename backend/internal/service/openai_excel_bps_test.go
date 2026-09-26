@@ -81,7 +81,7 @@ func TestExcelBPSForwardContract(t *testing.T) {
 			require.Equal(t, "/basispoints/api/responses", upstream.lastReq.URL.Path)
 			require.Equal(t, "Bearer test-token", upstream.lastReq.Header.Get("Authorization"))
 			require.Empty(t, upstream.lastReq.Header.Get("x-codex-turn-state"))
-			require.Equal(t, HTTPUpstreamProfileLongStream, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
+			require.Equal(t, HTTPUpstreamProfileExcelBPS, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
 			require.True(t, HTTPUpstreamRedirectsDisabled(upstream.lastReq.Context()))
 			require.False(t, gjson.GetBytes(upstream.lastBody, "tools").Exists())
 			require.Equal(t, "xhigh", gjson.GetBytes(upstream.lastBody, "reasoning_effort").String())

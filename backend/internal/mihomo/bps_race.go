@@ -14,6 +14,7 @@ type bpsCandidate struct {
 	node, proxy string
 	generation  uint64
 	score       float64
+	lastProbe   time.Time
 	verified    bool
 }
 
@@ -52,7 +53,7 @@ func (m *Manager) bpsProbeCandidates(scope string, excluded map[string]bool) ([]
 			proxy = fmt.Sprintf("http://127.0.0.1:%d", port)
 		}
 		h := m.bpsHealthAtLocked(node, now)
-		candidate := bpsCandidate{node: node, proxy: proxy, generation: h.generation, score: m.bpsQualityScoreLocked(node, activeLoads[node], loads[node], now), verified: now.Before(h.verifiedUntil)}
+		candidate := bpsCandidate{lastProbe: h.lastProbe, node: node, proxy: proxy, generation: h.generation, score: m.bpsQualityScoreLocked(node, activeLoads[node], loads[node], now), verified: now.Before(h.verifiedUntil)}
 		if binding != nil && binding.node == node && !binding.failed && (binding.active > 0 || candidate.verified) {
 			// Preserve a verified affinity and all in-flight requests. An idle,
 			// unverified binding may compete with alternative candidates.
@@ -63,6 +64,9 @@ func (m *Manager) bpsProbeCandidates(scope string, excluded map[string]bool) ([]
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].verified != candidates[j].verified {
 			return candidates[i].verified
+		}
+		if !candidates[i].verified && !candidates[i].lastProbe.Equal(candidates[j].lastProbe) {
+			return candidates[i].lastProbe.Before(candidates[j].lastProbe)
 		}
 		if candidates[i].score != candidates[j].score {
 			return candidates[i].score > candidates[j].score
@@ -78,7 +82,7 @@ func (m *Manager) bpsProbeCandidates(scope string, excluded map[string]bool) ([]
 	return candidates, previous, nil
 }
 
-func (m *Manager) acquireBPSLease(ctx context.Context, scope string, excluded map[string]bool) (_ *BPSLease, resultErr error) {
+func (m *Manager) probeBPSLease(ctx context.Context, scope string, excluded map[string]bool) (_ *BPSLease, resultErr error) {
 	checked := 0
 	defer func() { resultErr = bpsAcquisitionError(resultErr, checked) }()
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)

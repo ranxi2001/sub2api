@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	bpsHealthTTL           = 30 * time.Second
+	bpsHealthTTL           = 2 * time.Minute
 	bpsFailureCooldown     = time.Minute
 	bpsStreamCooldown      = 5 * time.Minute
 	bpsStreamMaxCooldown   = 30 * time.Minute
@@ -31,6 +31,8 @@ const (
 )
 
 type bpsNodeHealth struct {
+	lastFailureReason string
+	lastProbe         time.Time
 	windowStarted     time.Time
 	generation        uint64
 	modelQuality      bpsQualityRate
@@ -237,7 +239,7 @@ func (m *Manager) bpsStreamFailureLocked(node string, now time.Time) {
 
 // Single-flight by node: hundreds of sessions must not launch hundreds of
 // probes. No manager locks are held during I/O. Cancellation is not node failure.
-func (m *Manager) checkBPSHealth(ctx context.Context, node, proxy string) error {
+func (m *Manager) checkBPSHealth(ctx context.Context, node, proxy string, force ...bool) error {
 	// A candidate's deadline is a proxy failure; the caller's cancellation is
 	// not. Keep both contexts so a slow node cannot consume the whole request
 	// budget or escape health feedback by exhausting its own probe budget.
@@ -254,7 +256,7 @@ func (m *Manager) checkBPSHealth(ctx context.Context, node, proxy string) error 
 			m.bpsMu.Unlock()
 			return errors.New("BPS node is cooling down")
 		}
-		if now.Before(h.verifiedUntil) {
+		if now.Before(h.verifiedUntil) && (len(force) == 0 || !force[0]) {
 			m.bpsMu.Unlock()
 			return nil
 		}
@@ -269,6 +271,7 @@ func (m *Manager) checkBPSHealth(ctx context.Context, node, proxy string) error 
 		}
 		pending := make(chan struct{})
 		h.probing = pending
+		h.lastProbe = now
 		revision := h.revision
 		recovering := h.failures > 0
 		m.bpsMu.Unlock()
@@ -328,6 +331,7 @@ func (m *Manager) checkBPSHealth(ctx context.Context, node, proxy string) error 
 		if !canceled && !stale {
 			if probeErr == nil && successes >= needed {
 				h.failures = 0
+				h.lastFailureReason = ""
 				h.retryAfter = time.Time{}
 				h.verifiedUntil = time.Now().Add(bpsHealthTTL)
 			} else {
@@ -336,6 +340,10 @@ func (m *Manager) checkBPSHealth(ctx context.Context, node, proxy string) error 
 				}
 				if failures == 0 {
 					m.bpsFailureLocked(node, time.Now())
+				}
+				h.lastFailureReason = bpsProbeFailureReason(probeErr)
+				if h.lastFailureReason == "bps_access_denied" || h.lastFailureReason == "proxy_auth_rejected" {
+					h.retryAfter = time.Now().Add(bpsStreamCooldown)
 				}
 				// Even a single budget-exhausting probe gets a short quarantine.
 				// Confirmed/repeated failures retain their longer existing cooldown.
@@ -352,12 +360,14 @@ func (m *Manager) checkBPSHealth(ctx context.Context, node, proxy string) error 
 		if stale {
 			return errors.New("BPS node failed during reachability check")
 		}
-		if probeErr != nil || successes < needed {
+		if (probeErr != nil || successes < needed) && ctx.Value(bpsWarmContextKey{}) == nil {
 			// One summary per failed candidate, not one warning per confirmation.
 			logger.FromContext(ctx).Warn("excel_bps.proxy_probe_failed",
 				zap.String("node_hash", node[:min(16, len(node))]), zap.String("local_proxy", bpsProxyLogValue(m, proxy)),
 				zap.String("error_kind", transportdiag.Classify(probeErr)), zap.String("error_type", fmt.Sprintf("%T", probeErr)),
 				zap.Int("probe_attempts", len(probeResults)), zap.Bool("candidate_budget_exhausted", candidateCtx.Err() != nil))
+		}
+		if probeErr != nil || successes < needed {
 			return errors.New("BPS proxy HTTPS reachability failed")
 		}
 		return nil
@@ -383,23 +393,6 @@ func newBPSProbeClient(proxy string) (*http.Client, error) {
 	transport := &http.Transport{Proxy: http.ProxyURL(parsed), TLSHandshakeTimeout: bpsProbeTimeout, DisableKeepAlives: true}
 	client := &http.Client{Transport: transport, Timeout: bpsProbeTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return client, nil
-}
-
-func probeBPSHTTPSClient(ctx context.Context, client *http.Client) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, "https://bps.openai.com/", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	// A 404/403 from this unauthenticated root still proves tunnel/TLS reachability.
-	if resp.StatusCode == http.StatusProxyAuthRequired || resp.StatusCode >= 500 {
-		return errors.New("BPS proxy probe HTTP unavailable")
-	}
-	return nil
 }
 
 func (m *Manager) logBPSLeaseSelected(ctx context.Context, key, previousNode string, lease *BPSLease) {
