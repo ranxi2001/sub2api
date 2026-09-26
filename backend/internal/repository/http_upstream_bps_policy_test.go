@@ -66,7 +66,7 @@ func TestBPSFallbackBoundariesAndExpiry(t *testing.T) {
 			if tc.expected {
 				key := sha256.Sum256([]byte(tc.proxy))
 				svc.mu.Lock()
-				svc.bpsHTTP2Fallbacks[key] = time.Now().Add(-time.Second)
+				svc.bpsHTTP2Fallbacks[key] = bpsHTTP2Fallback{expiresAt: time.Now().Add(-time.Second), started: true}
 				svc.mu.Unlock()
 				require.Equal(t, upstreamProtocolModeBPSH2, svc.resolveProtocolMode(service.HTTPUpstreamProfileExcelBPS, tc.proxy, nil))
 			}
@@ -90,4 +90,19 @@ func TestBPSFeedbackBodyDoesNotTreatNormalEOFAsFailure(t *testing.T) {
 	_, _ = b.Read(make([]byte, 1))
 	require.Equal(t, 1, calls)
 	require.NoError(t, b.Close())
+}
+
+func TestBPSFallbackWaitsForNodeCooldown(t *testing.T) {
+	svc, ok := NewHTTPUpstream(nil).(*httpUpstreamService)
+	require.True(t, ok)
+	proxy := "http://127.0.0.1:19178"
+	now := time.Now()
+	svc.recordBPSHTTP2Failure(t.Context(), proxy, bpsPolicyTrace("h2"), io.ErrUnexpectedEOF)
+	// This is beyond the longest node cooldown, but within pending retention.
+	reused := now.Add(31 * time.Minute)
+	require.True(t, svc.bpsHTTP1Active(proxy, reused))
+	require.True(t, svc.bpsHTTP1Active(proxy, reused.Add(59*time.Second)))
+	require.False(t, svc.bpsHTTP1Active(proxy, reused.Add(time.Minute)))
+	svc.recordBPSHTTP2Failure(t.Context(), proxy, bpsPolicyTrace("h2"), io.ErrUnexpectedEOF)
+	require.False(t, svc.bpsHTTP1Active(proxy, now.Add(2*time.Hour)), "unused pending state expires")
 }

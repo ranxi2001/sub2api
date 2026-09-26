@@ -17,15 +17,28 @@ import (
 // the provider never supports H2. Future BPS requests keep the same proxy but
 // use a separate H1 pool for one minute. No failed request is replayed here.
 const bpsHTTP2FallbackTTL = time.Minute
+const bpsHTTP2FallbackMaxIdle = time.Hour
+
+type bpsHTTP2Fallback struct {
+	expiresAt time.Time
+	started   bool
+}
 
 func (s *httpUpstreamService) bpsHTTP1Active(proxyKey string, now time.Time) bool {
 	key := sha256.Sum256([]byte(proxyKey))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	until, ok := s.bpsHTTP2Fallbacks[key]
-	if ok && !now.Before(until) {
+	state, ok := s.bpsHTTP2Fallbacks[key]
+	if ok && !now.Before(state.expiresAt) {
 		delete(s.bpsHTTP2Fallbacks, key)
 		return false
+	}
+	if ok && !state.started {
+		// Node health can quarantine a broken stream for up to 30 minutes. Start
+		// the short protocol trial only when a later request actually reuses it.
+		state.started = true
+		state.expiresAt = now.Add(bpsHTTP2FallbackTTL)
+		s.bpsHTTP2Fallbacks[key] = state
 	}
 	return ok
 }
@@ -44,15 +57,15 @@ func (s *httpUpstreamService) recordBPSHTTP2Failure(ctx context.Context, proxyKe
 	key := sha256.Sum256([]byte(proxyKey))
 	now := time.Now()
 	s.mu.Lock()
-	if until := s.bpsHTTP2Fallbacks[key]; now.Before(until) {
+	if state := s.bpsHTTP2Fallbacks[key]; now.Before(state.expiresAt) {
 		s.mu.Unlock()
 		return
 	}
 	if s.bpsHTTP2Fallbacks == nil {
-		s.bpsHTTP2Fallbacks = make(map[[32]byte]time.Time)
+		s.bpsHTTP2Fallbacks = make(map[[32]byte]bpsHTTP2Fallback)
 	}
-	for k, until := range s.bpsHTTP2Fallbacks {
-		if !now.Before(until) {
+	for k, state := range s.bpsHTTP2Fallbacks {
+		if !now.Before(state.expiresAt) {
 			delete(s.bpsHTTP2Fallbacks, k)
 		}
 	}
@@ -61,7 +74,7 @@ func (s *httpUpstreamService) recordBPSHTTP2Failure(ctx context.Context, proxyKe
 		s.mu.Unlock()
 		return
 	}
-	s.bpsHTTP2Fallbacks[key] = now.Add(bpsHTTP2FallbackTTL)
+	s.bpsHTTP2Fallbacks[key] = bpsHTTP2Fallback{expiresAt: now.Add(bpsHTTP2FallbackMaxIdle)}
 	s.mu.Unlock()
 	slog.Warn("excel_bps.http2_fallback_activated", "proxy_hash", fmt.Sprintf("%x", key[:8]), "error_kind", kind, "duration_seconds", int(bpsHTTP2FallbackTTL.Seconds()), "transport", trace.Snapshot())
 }

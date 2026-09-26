@@ -174,7 +174,7 @@ type httpUpstreamService struct {
 	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
 	openAIHTTP2Fallbacks sync.Map
 	// BPS fallback state is isolated from Codex and contains only hashed proxy keys.
-	bpsHTTP2Fallbacks map[[32]byte]time.Time
+	bpsHTTP2Fallbacks map[[32]byte]bpsHTTP2Fallback
 }
 
 // NewHTTPUpstream 创建通用 HTTP 上游服务

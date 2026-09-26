@@ -131,7 +131,7 @@ python backend/scripts/e2e-bps-ignore-images.py --expect ignore --stream --outpu
 
 ### BPS 传输阶段与 HTTP/2 故障缓解
 
-- BPS 使用独立的传输 profile 和连接池。已确认建立 HTTP/2 连接后发生 EOF、连接重置或 HTTP/2 传输错误时，同一 HTTP/HTTPS 代理的后续 BPS 请求使用独立 HTTP/1.1 连接池，60 秒后重新尝试 HTTP/2；当前失败请求不重放，不切换出口。状态与 Codex 和其他长流隔离，且有容量上限。
+- BPS 使用独立的传输 profile 和连接池。已确认建立 HTTP/2 连接后发生 EOF、连接重置或 HTTP/2 传输错误时，同一 HTTP/HTTPS 代理的后续 BPS 请求使用独立 HTTP/1.1 连接池，从该出口再次被请求使用时起计时，60 秒后重新尝试 HTTP/2；待使用状态最多保留 1 小时，避免在节点冷却期间提前失效。当前失败请求不重放，不切换出口。状态与 Codex 和其他长流隔离，且有容量上限。
 - 正常响应结束、TLS 建连失败、客户端取消、截止时间和应用拒绝不会触发上述降级；流读取中的异常也会反馈，普通 EOF 不等于流传输故障。
 - 运维传输错误增加 transport 字段：phase、protocol、connection_obtained、connection_reused、idle_ms、tls_started、tls_completed、tls_error_kind、headers_written、request_written、body_read、first_response_byte。仅记录固定阶段、布尔值及时间，不记录原始错误、地址、凭据或请求内容。body_read 只表示读取了正文，不证明上游已收到；缺少写入回调也不证明未发送。
 - 该策略缓解共享 HTTP/2 连接故障后的重复影响，不保证修复供应商出口或上游断连。采用真实本地 TLS/H2 端点验证响应头前和流中断连，属于离线验证，真实链路效果需部署后确认。
