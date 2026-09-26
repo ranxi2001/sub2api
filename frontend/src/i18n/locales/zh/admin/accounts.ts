@@ -736,6 +736,8 @@ export default {
         apiKeyHint: '您的 OpenAI API Key',
         oauthPassthrough: '自动透传（仅替换认证）',
         excelBPS: 'Excel / BPS 协议',
+        excelBPSOmitUnsupportedTools: '保持 BPS，省略不支持的托管工具',
+        excelBPSOmitUnsupportedToolsDesc: '默认关闭：请求声明实时联网搜索（external_web_access=true）、高搜索上下文或图片生成时走原生 Codex 通道，即使 tool_choice=auto 且本轮尚未调用。开启后保持 BPS，省略适配层不支持的托管工具，并向模型说明能力不可用；搜索和图片生成不会因此获得支持，客户端函数工具不受影响。强制工具选择返回 400；tool_choice=none 不触发工具回退。回退原因记录在响应头及 excel_bps.native_fallback 诊断日志中。',
         excelBPSIgnoreImages: '图片支持关闭时忽略图片输入',
         excelBPSIgnoreImagesDesc: '默认关闭。仅在系统设置中的 Excel / BPS 图片支持关闭时生效：转发前移除当前及历史消息、工具结果中的所有图片，保留文本和工具调用关系，避免历史截图反复报错导致会话无法继续。仅含图片的内容会替换为已忽略提示；模型无法看到被忽略的图片。重新开启图片支持后恢复正常图片处理。',
         excelBPSCacheCreationAsInput: '创建缓存按普通输入计费',
