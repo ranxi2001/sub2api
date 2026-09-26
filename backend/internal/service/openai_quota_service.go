@@ -177,6 +177,11 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 	callCtx, cancel := context.WithTimeout(ctx, openaiQuotaUpstreamTimeout)
 	defer cancel()
 	agentIdentity := s.isAgentIdentityAccount(ctx, accountID)
+	// Observe before querying upstream; a concurrent 429 must survive recovery.
+	var observed *openAIQuotaRecoveryObservation
+	if account, readErr := s.accountRepo.GetByID(callCtx, accountID); readErr == nil {
+		observed = observeOpenAIQuotaRecovery(account, time.Now())
+	}
 
 	var payload OpenAIQuotaUsage
 	for recovered := false; ; {
@@ -208,6 +213,15 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 			body := truncate(s.redactQuotaErrorBody(ctx, accountID, resp.String()), 240)
 			slog.Warn("openai_quota_query_failed", "account_id", accountID, "status", status, "body", body)
 			return nil, infraerrors.Newf(mapUpstreamStatus(status), "OPENAI_QUOTA_UPSTREAM_ERROR", "upstream returned %d: %s", status, body)
+		}
+		if observed != nil {
+			if updates := openAIQuotaRecoveryUsageUpdates(resp.Bytes(), time.Now()); len(updates) > 0 {
+				if err := s.accountRepo.UpdateExtra(callCtx, accountID, updates); err != nil {
+					slog.Warn("openai_quota_recovery_snapshot_failed", "account_id", accountID, "error", err)
+				} else {
+					recoverOpenAIQuotaRateLimit(callCtx, s.accountRepo, observed, updates)
+				}
+			}
 		}
 		break
 	}
