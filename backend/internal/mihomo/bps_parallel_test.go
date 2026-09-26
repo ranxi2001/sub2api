@@ -33,7 +33,7 @@ func TestBPSParallelSelectionDoesNotWaitForSlowPreferredNode(t *testing.T) {
 			return ctx.Err()
 		}
 		start := time.Now()
-		lease, err := m.acquireBPSLease(context.Background(), "race", nil)
+		lease, err := m.probeBPSLease(context.Background(), "race", nil)
 		require.NoError(t, err)
 		defer lease.Release()
 		require.Equal(t, fast, lease.ProxyURL)
@@ -80,7 +80,7 @@ func TestBPSParallelSelectionRefillsBeforeOtherProbesTimeout(t *testing.T) {
 			return ctx.Err()
 		}
 		start := time.Now()
-		lease, err := m.acquireBPSLease(context.Background(), "refill", nil)
+		lease, err := m.probeBPSLease(context.Background(), "refill", nil)
 		require.NoError(t, err)
 		defer lease.Release()
 		require.Equal(t, fast, lease.ProxyURL)

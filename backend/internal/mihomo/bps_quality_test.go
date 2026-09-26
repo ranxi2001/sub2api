@@ -50,7 +50,7 @@ func TestBPSQualitySelectionAndAffinity(t *testing.T) {
 	for node, port := range m.bpsPorts {
 		require.NoError(t, m.checkBPSHealth(context.Background(), node, fmt.Sprintf("http://127.0.0.1:%d", port)))
 	}
-	lease, err := m.acquireBPSLease(context.Background(), "new", nil)
+	lease, err := m.probeBPSLease(context.Background(), "new", nil)
 	require.NoError(t, err)
 	require.Equal(t, good, lease.node)
 	lease.Release()
@@ -59,13 +59,13 @@ func TestBPSQualitySelectionAndAffinity(t *testing.T) {
 	release()
 	require.Equal(t, old, pinned, "healthy affinity survives a ranking change")
 	m.bpsFailureLocked(bad, now)
-	lease, err = m.acquireBPSLease(context.Background(), "old", nil)
+	lease, err = m.probeBPSLease(context.Background(), "old", nil)
 	require.NoError(t, err)
 	require.Equal(t, good, lease.node)
 	lease.Release()
 	require.Less(t, m.bpsQualityScoreLocked(good, 100, 100, now), m.bpsQualityScoreLocked(bad, 0, 0, now), "avoid overloading one successful node")
 	m.bpsHealthLocked(good).retryAfter = now.Add(time.Minute)
-	lease, err = m.acquireBPSLease(context.Background(), "another", nil)
+	lease, err = m.probeBPSLease(context.Background(), "another", nil)
 	require.NoError(t, err)
 	require.Equal(t, bad, lease.node, "a high score cannot bypass cooldown")
 	lease.Release()
@@ -73,7 +73,7 @@ func TestBPSQualitySelectionAndAffinity(t *testing.T) {
 
 func TestBPSQualityFeedbackDeduplicatedAndCacheHitsExcluded(t *testing.T) {
 	m := bpsTestManager(t)
-	lease, err := m.acquireBPSLease(context.Background(), "a", nil)
+	lease, err := m.probeBPSLease(context.Background(), "a", nil)
 	require.NoError(t, err)
 	h := m.bpsHealth[lease.node]
 	require.Equal(t, 1.0, h.connectQuality.samples)
@@ -87,13 +87,13 @@ func TestBPSQualityFeedbackDeduplicatedAndCacheHitsExcluded(t *testing.T) {
 	require.Equal(t, 1.0, h.modelQuality.successes)
 	lease.Release()
 	for i := 0; i < 10; i++ {
-		next, err := m.acquireBPSLease(context.Background(), "a", nil)
+		next, err := m.probeBPSLease(context.Background(), "a", nil)
 		require.NoError(t, err)
 		next.Release()
 	}
 	require.Equal(t, 1.0, h.connectQuality.samples)
 	require.Equal(t, 1.0, h.modelQuality.samples)
-	failed, err := m.acquireBPSLease(context.Background(), "a", nil)
+	failed, err := m.probeBPSLease(context.Background(), "a", nil)
 	require.NoError(t, err)
 	failed.ReportStreamFailure()
 	failed.ReportSuccess()

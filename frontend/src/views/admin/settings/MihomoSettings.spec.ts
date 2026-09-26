@@ -92,3 +92,16 @@ describe('Mihomo settings', () => {
     wrapper.unmount()
   })
 })
+
+it('shows warm target and shortage reuse without probing from the UI', async () => {
+  get.mockResolvedValue({data:{...base,bps_warm_pool:{target:8,ready:2,checking:1,cooling:3,failure_reasons:{bps_access_denied:3}}}})
+  const wrapper=mount(MihomoSettings)
+  try {
+    await flushPromises()
+    const pool=wrapper.get('[data-testid="bps-warm-pool"]')
+    expect(pool.text()).toContain('目标 8')
+    expect(pool.text()).toContain('就绪 2')
+    expect(pool.text()).toContain('不足时复用就绪出口')
+    expect(pool.text()).toContain('bps_access_denied: 3')
+  } finally { wrapper.unmount() }
+})

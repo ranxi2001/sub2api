@@ -39,7 +39,7 @@ func TestBPSHealthSlowCandidatesLeaveTimeForHealthyExit(t *testing.T) {
 			return ctx.Err()
 		}
 		start := time.Now()
-		lease, err := m.acquireBPSLease(context.Background(), "slow-exits", nil)
+		lease, err := m.probeBPSLease(context.Background(), "slow-exits", nil)
 		require.NoError(t, err, "a slow first wave must leave time for another healthy exit")
 		lease.Release()
 		require.Greater(t, len(seen), bpsProbeParallelism)
@@ -69,7 +69,7 @@ func TestBPSHealthAllSlowCandidatesAreBoundedAndDiagnosed(t *testing.T) {
 			return ctx.Err()
 		}
 		start := time.Now()
-		_, err = m.acquireBPSLease(ctx, "all-slow", nil)
+		_, err = m.probeBPSLease(ctx, "all-slow", nil)
 		var diagnostic *BPSAcquireError
 		require.ErrorAs(t, err, &diagnostic)
 		require.Equal(t, "acquisition_timeout", diagnostic.Reason)
@@ -86,7 +86,7 @@ func TestBPSHealthAllSlowCandidatesAreBoundedAndDiagnosed(t *testing.T) {
 func TestBPSHealthRecoveryMustFitCandidateBudget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		m := bpsTestManager(t)
-		lease, err := m.acquireBPSLease(context.Background(), "recovery", nil)
+		lease, err := m.probeBPSLease(context.Background(), "recovery", nil)
 		require.NoError(t, err)
 		lease.ReportFailure()
 		lease.Release()
@@ -111,12 +111,12 @@ func TestBPSHealthRecoveryMustFitCandidateBudget(t *testing.T) {
 
 func TestBPSHealthTransportFailureQuarantinesForOtherSessions(t *testing.T) {
 	m := bpsTestManager(t)
-	lease, err := m.acquireBPSLease(context.Background(), "failed-request", nil)
+	lease, err := m.probeBPSLease(context.Background(), "failed-request", nil)
 	require.NoError(t, err)
 	lease.ReportFailure()
 	lease.Release()
 	require.True(t, m.bpsCoolingLocked(lease.node, time.Now()))
-	other, err := m.acquireBPSLease(context.Background(), "unrelated-request", nil)
+	other, err := m.probeBPSLease(context.Background(), "unrelated-request", nil)
 	require.NoError(t, err)
 	require.NotEqual(t, lease.node, other.node)
 	other.Release()
@@ -124,7 +124,7 @@ func TestBPSHealthTransportFailureQuarantinesForOtherSessions(t *testing.T) {
 
 func TestBPSHealthProbeConfirmationsProduceOneWarning(t *testing.T) {
 	m := bpsTestManager(t)
-	lease, err := m.acquireBPSLease(context.Background(), "probe-log", nil)
+	lease, err := m.probeBPSLease(context.Background(), "probe-log", nil)
 	require.NoError(t, err)
 	lease.Release()
 	m.bpsHealth[lease.node].verifiedUntil = time.Time{}
@@ -146,7 +146,7 @@ func TestBPSHealthCallerDeadlineDoesNotPenalizeNode(t *testing.T) {
 			<-ctx.Done()
 			return ctx.Err()
 		}
-		_, err := m.acquireBPSLease(ctx, "client-deadline", nil)
+		_, err := m.probeBPSLease(ctx, "client-deadline", nil)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		for _, health := range m.bpsHealth {
 			require.Zero(t, health.failures)

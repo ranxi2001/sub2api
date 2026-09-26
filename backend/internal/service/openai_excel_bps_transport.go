@@ -69,7 +69,6 @@ func (s *OpenAIGatewayService) excelBPSAcquireFor(account *Account) excelBPSAcqu
 const excelBPSIPPoolRefreshTTL = 15 * time.Second
 
 func (s *OpenAIGatewayService) acquireExcelBPSIPPoolProxy(ctx context.Context, scope string, excluded ...string) (string, excelBPSLease, error) {
-	s.refreshExcelBPSIPPool(ctx)
 	acquire := mihomo.AcquireBPSStaticLease
 	if strings.HasPrefix(scope, "transient:") {
 		acquire = mihomo.AcquireBPSStaticTransientLease

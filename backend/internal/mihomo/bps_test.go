@@ -112,6 +112,7 @@ func TestBPSSessionsDistribute200Sessions(t *testing.T) {
 
 func TestBPSSessionUnavailableNodeRebinds(t *testing.T) {
 	m := bpsTestManager(t)
+	m.warmBPSPool(t.Context(), 2)
 	proxy, done, err := AcquireBPSSession(context.Background(), "a")
 	require.NoError(t, err)
 	done()
@@ -184,6 +185,7 @@ func TestBPSSessionCountryFilterAndIdentityChanges(t *testing.T) {
 	_, _, err := AcquireBPSSession(context.Background(), "a")
 	require.ErrorContains(t, err, "no eligible")
 	m.saved.CountryFilter = CountryFilter{Mode: "off"}
+	m.warmBPSPool(t.Context(), 2)
 	_, done, err := AcquireBPSSession(context.Background(), "a")
 	require.NoError(t, err)
 	done()
@@ -192,6 +194,7 @@ func TestBPSSessionCountryFilterAndIdentityChanges(t *testing.T) {
 	}
 	_, err = m.config(m.saved)
 	require.NoError(t, err)
+	m.warmBPSPool(t.Context(), 2)
 	_, release, err := AcquireBPSSession(context.Background(), "a")
 	require.NoError(t, err)
 	release()

@@ -136,11 +136,11 @@ func TestBPSDynamicLateFeedbackDoesNotAffectNewWindow(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			m, node := bpsDynamicTestManager(t)
-			old, err := m.acquireBPSLease(context.Background(), "same-session", nil)
+			old, err := m.probeBPSLease(context.Background(), "same-session", nil)
 			require.NoError(t, err)
 			h := m.bpsHealth[node]
 			h.windowStarted = time.Now().Add(-bpsDynamicWindow)
-			fresh, err := m.acquireBPSLease(context.Background(), "same-session", nil)
+			fresh, err := m.probeBPSLease(context.Background(), "same-session", nil)
 			require.NoError(t, err)
 			require.Greater(t, fresh.generation, old.generation)
 			report(old)
@@ -197,7 +197,7 @@ func TestBPSDynamicWindowDoesNotBypassAdmission(t *testing.T) {
 	for _, policy := range []string{"country", "disabled", "excluded", "probe-fails"} {
 		t.Run(policy, func(t *testing.T) {
 			m, node := bpsDynamicTestManager(t)
-			lease, err := m.acquireBPSLease(context.Background(), "session", nil)
+			lease, err := m.probeBPSLease(context.Background(), "session", nil)
 			require.NoError(t, err)
 			lease.Release()
 			m.bpsHealth[node].windowStarted = time.Now().Add(-bpsDynamicWindow)
@@ -213,7 +213,7 @@ func TestBPSDynamicWindowDoesNotBypassAdmission(t *testing.T) {
 			case "probe-fails":
 				m.bpsProbe = func(context.Context, string) error { return errors.New("mock CONNECT rejected") }
 			}
-			_, err = m.acquireBPSLease(context.Background(), "session", excluded)
+			_, err = m.probeBPSLease(context.Background(), "session", excluded)
 			require.Error(t, err)
 			for _, binding := range m.bpsSessions {
 				require.Zero(t, binding.active)
