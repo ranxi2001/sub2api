@@ -63,16 +63,20 @@ func (s *httpUpstreamService) recordBPSHTTP2Failure(ctx context.Context, proxyKe
 	}
 	s.bpsHTTP2Fallbacks[key] = now.Add(bpsHTTP2FallbackTTL)
 	s.mu.Unlock()
-	slog.Warn("excel_bps.http2_fallback_activated", "proxy_hash", fmt.Sprintf("%x", key[:8]), "error_kind", kind, "duration_seconds", int(bpsHTTP2FallbackTTL.Seconds()))
+	slog.Warn("excel_bps.http2_fallback_activated", "proxy_hash", fmt.Sprintf("%x", key[:8]), "error_kind", kind, "duration_seconds", int(bpsHTTP2FallbackTTL.Seconds()), "transport", trace.Snapshot())
 }
 
 type bpsFeedbackBody struct {
+	trace *transportdiag.Trace
 	io.ReadCloser
 	once   sync.Once
 	failed func(error)
 }
 
 func (b *bpsFeedbackBody) Read(p []byte) (int, error) {
+	if b.trace != nil {
+		b.trace.MarkResponseBodyRead()
+	}
 	n, err := b.ReadCloser.Read(p)
 	// Normal EOF includes successful SSE completion. Only a transport error is
 	// feedback; protocol-level missing terminal events remain the bridge's job.

@@ -237,8 +237,11 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	client = httpClientWithGrokAccessDeniedFallback(client)
 	var bpsTrace *transportdiag.Trace
 	if profile == service.HTTPUpstreamProfileExcelBPS {
-		bpsTrace = &transportdiag.Trace{}
-		req = bpsTrace.Request(req)
+		bpsTrace = transportdiag.FromContext(req.Context())
+		if bpsTrace == nil {
+			bpsTrace = &transportdiag.Trace{}
+			req = bpsTrace.Request(req)
+		}
 	}
 	resp, err := doWithOpenAIPreRequestRetry(client, req, proxyURL, profile)
 	if err != nil {
@@ -251,7 +254,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	}
 	s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.proxyKey)
 	if bpsTrace != nil && bpsTrace.NegotiatedHTTP2() {
-		resp.Body = &bpsFeedbackBody{ReadCloser: resp.Body, failed: func(err error) {
+		resp.Body = &bpsFeedbackBody{ReadCloser: resp.Body, trace: bpsTrace, failed: func(err error) {
 			s.recordBPSHTTP2Failure(req.Context(), entry.proxyKey, bpsTrace, err)
 		}}
 	}

@@ -1,6 +1,7 @@
 package transportdiag
 
 import (
+	"context"
 	"crypto/tls"
 	"net/http"
 	"net/http/httptrace"
@@ -11,11 +12,19 @@ import (
 // errors are retained. Flags accumulate across internal reconnects: a later TLS
 // failure must never erase evidence that an earlier connection could send.
 type Trace struct {
+	responseBodyRead                                        atomic.Bool
 	started, connected, reused, tlsStarted, tlsCompleted    atomic.Bool
 	wroteHeaders, wroteRequest, firstByte, bodyRead, handed atomic.Bool
 	protocol                                                atomic.Int32
 	idleMillis                                              atomic.Int64
 	tlsError                                                atomic.Value
+}
+
+type traceContextKey struct{}
+
+func FromContext(ctx context.Context) *Trace {
+	t, _ := ctx.Value(traceContextKey{}).(*Trace)
+	return t
 }
 
 func (t *Trace) Request(req *http.Request) *http.Request {
@@ -55,15 +64,18 @@ func (t *Trace) Request(req *http.Request) *http.Request {
 		},
 		GotFirstResponseByte: func() { t.handed.Store(true); t.firstByte.Store(true) },
 	}
-	return req.Clone(httptrace.WithClientTrace(req.Context(), trace))
+	return req.Clone(httptrace.WithClientTrace(context.WithValue(req.Context(), traceContextKey{}, t), trace))
 }
 
+func (t *Trace) MarkResponseBodyRead()  { t.responseBodyRead.Store(true) }
 func (t *Trace) MarkBodyRead()          { t.bodyRead.Store(true); t.handed.Store(true) }
 func (t *Trace) DefinitelyUnsent() bool { return t.started.Load() && !t.handed.Load() }
 func (t *Trace) NegotiatedHTTP2() bool  { return t.connected.Load() && t.protocol.Load() == 2 }
 func (t *Trace) Snapshot() map[string]any {
 	phase := "unobserved"
 	switch {
+	case t.responseBodyRead.Load():
+		phase = "response_body"
 	case t.firstByte.Load():
 		phase = "response_headers"
 	case t.wroteRequest.Load():
