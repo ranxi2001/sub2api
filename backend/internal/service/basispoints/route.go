@@ -6,12 +6,20 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// NativeFallbackReason reports capabilities that must stay on the native Codex
-// channel because Basispoints cannot execute them. Empty means the request can
-// use the BPS bridge.
+// NativeFallbackReason reports declarations requiring the native Codex channel
+// under the default fallback policy. This describes the bridge's capabilities,
+// not whether the BPS upstream could support them through another protocol.
 func NativeFallbackReason(body []byte) string {
 	if !gjson.ValidBytes(body) {
 		return ""
+	}
+	choice := gjson.GetBytes(body, "tool_choice")
+	if choice.Type == gjson.String && choice.String() == "none" {
+		return ""
+	}
+	switch choice.Get("type").String() {
+	case "web_search", "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26", "image_generation":
+		return "tool_choice"
 	}
 	if tools := gjson.GetBytes(body, "tools"); tools.IsArray() {
 		fallback := ""
@@ -31,13 +39,6 @@ func NativeFallbackReason(body []byte) string {
 		})
 		if fallback != "" {
 			return fallback
-		}
-	}
-	choice := gjson.GetBytes(body, "tool_choice")
-	if choice.Exists() && choice.Type == gjson.JSON {
-		name := choice.Get("name").String()
-		if strings.Contains(strings.ToLower(name), "web_search") || strings.Contains(strings.ToLower(name), "image_generation") {
-			return "tool_choice"
 		}
 	}
 	// Inline data images are handled by Sub2API's local relay before Prepare;

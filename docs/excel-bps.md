@@ -4,6 +4,24 @@
 
 本入口面向 HTTP `/v1/responses` 和 `/v1/responses/compact`。强制上游 HTTP/SSE，优先于账号的自动透传、WS mode 和 Codex ticket 注入。保持原始模型名或显式账号映射，不因模型权限不足偷偷切换模型。现有调度、分组授权和并发额度继续生效；开关不会重新启用已停用的账号。
 
+## 托管工具与原生回退策略
+
+账号编辑和批量编辑中可开启 **保持 BPS，省略不支持的托管工具**，对应账号配置 `extra.openai_excel_bps_omit_unsupported_tools: true`。默认关闭，无需数据库迁移，只影响该账号所选 BPS 模型。分组内有多个可调度账号时，应分别设置或使用批量编辑，避免不同账号采用不同策略。
+
+| 请求声明 | 默认策略 | 开启保持 BPS |
+| --- | --- | --- |
+| `web_search` 及其 preview/日期变体，`external_web_access=true` 或 `search_context_size=high` | 原生 Codex | BPS，省略声明并添加能力不可用提示 |
+| `image_generation` | 原生 Codex | BPS，省略声明并添加能力不可用提示 |
+| 普通搜索声明，无上述实时或高上下文字段 | BPS，省略声明并添加能力不可用提示 | 相同行为 |
+| `tool_choice=none` | BPS，本轮不启用工具 | 相同行为 |
+| 强制指定托管搜索或图片生成工具 | 原生 Codex | 返回 HTTP 400，不调用上游 |
+
+自动模式仅有声明就足以触发默认回退，不要求模型本轮实际调用工具；推理强度 `high` 不是回退条件。保持 BPS 复用现有适配层的工具省略逻辑，模型会收到能力不可用提示，不能声称已经搜索或生成图片。客户端 function/custom 工具继续可用。BPS 仍只支持 `tool_choice=auto/none`，其他强制选择（包括 `required`）返回 `basispoints_request_invalid`，不会静默忽略。
+
+默认回退返回 `X-Codex2API-Upstream: codex` 和 `X-Codex2API-Basispoints-Bypass`，并记录 `excel_bps.native_fallback` 诊断日志。日志沿用请求上下文的 request ID，增加 `account_id`、`policy`、`reason` 和 `upstream_endpoint`，不记录请求正文、工具参数或凭据。原因值为 `web_search`、`image_generation` 或 `tool_choice`。这是发送上游前的路由决定，日志出现不代表原生请求已经成功。
+
+使用记录仍显示最终上游接口；本次没有新增使用记录字段。日志中的 `/v1/responses` 是原生 Responses 通道标记，OAuth 的实际目标为 Codex Responses 接口，不能把标记当成完整 URL。保持 BPS 不会提供网关搜索执行能力，也未验证 BPS 上游是否支持其他原生搜索协议。
+
 ## BPS 403 自动调整分组
 
 1. 编辑现有 OpenAI OAuth 账号, 开启 Excel / BPS 协议.
