@@ -189,6 +189,13 @@
               >
                 {{ t('admin.scheduledTests.autoRecover') }}
               </span>
+              <span
+                v-if="plan.pelican_config?.question_kind === STATE_PROBE_QUESTION"
+                class="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                data-testid="state-probe-plan-badge"
+              >
+                {{ t('admin.accounts.pelicanTest.stateProbeBadge') }}
+              </span>
             </div>
 
             <div class="flex items-center gap-3">
@@ -377,22 +384,10 @@
                   <div class="flex items-center gap-2">
                     <!-- Status Badge -->
                     <span
-                      :class="[
-                        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                        result.status === 'success'
-                          ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400'
-                          : result.status === 'running'
-                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'
-                            : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
-                      ]"
+                      :class="['inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium', statusClass(result)]"
+                      data-testid="result-status"
                     >
-                      {{
-                        result.status === 'success'
-                          ? t('admin.scheduledTests.success')
-                          : result.status === 'running'
-                            ? t('admin.scheduledTests.running')
-                            : t('admin.scheduledTests.failed')
-                      }}
+                      {{ statusLabel(result) }}
                     </span>
 
                     <!-- Latency -->
@@ -414,7 +409,7 @@
                   {{ t('admin.accounts.pelicanTest.preview') }}
                 </button>
                 <!-- Response / Error (collapsible) -->
-                <div v-if="result.error_message" class="mt-2">
+                <div v-if="result.error_message && stateProbeVerdict(result) !== 'degraded'" class="mt-2">
                   <div
                     class="cursor-pointer text-xs font-medium text-red-600 dark:text-red-400"
                     @click="toggleResultDetail(result.id)"
@@ -489,10 +484,32 @@ import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/format'
 import PelicanTestFields from './PelicanTestFields.vue'
+import { STATE_PROBE_QUESTION, stateProbeVerdict, type StateProbeVerdict } from '@/utils/intelligenceTest'
 import type { PelicanTestConfig, ScheduledTestPlan, ScheduledTestResult } from '@/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+
+const probeVerdictLabel: Record<StateProbeVerdict, string> = { healthy: 'verdictHealthy', degraded: 'verdictDegraded', inconclusive: 'verdictInconclusive' }
+const probeVerdictClass: Record<StateProbeVerdict, string> = {
+  healthy: 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400',
+  degraded: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400',
+  inconclusive: 'bg-gray-100 text-gray-600 dark:bg-dark-600 dark:text-gray-300'
+}
+const statusClass = (result: ScheduledTestResult) => {
+  const verdict = stateProbeVerdict(result)
+  if (verdict) return probeVerdictClass[verdict]
+  if (result.status === 'success') return 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400'
+  if (result.status === 'running') return 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'
+  return 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'
+}
+const statusLabel = (result: ScheduledTestResult) => {
+  const verdict = stateProbeVerdict(result)
+  if (verdict) return t(`admin.accounts.pelicanTest.probe.${probeVerdictLabel[verdict]}`)
+  if (result.status === 'success') return t('admin.scheduledTests.success')
+  if (result.status === 'running') return t('admin.scheduledTests.running')
+  return t('admin.scheduledTests.failed')
+}
 
 const props = defineProps<{
   show: boolean

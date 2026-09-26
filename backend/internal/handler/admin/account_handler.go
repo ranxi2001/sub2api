@@ -1383,6 +1383,34 @@ func (h *AccountHandler) PelicanTest(c *gin.Context) {
 	}
 }
 
+type StateProbeRequest struct {
+	ModelID string `json:"model_id"`
+}
+
+// StateProbe runs the two-shot Codex turn-state probe (degraded / healthy).
+// POST /api/v1/admin/accounts/:id/state-probe
+func (h *AccountHandler) StateProbe(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+
+	var req StateProbeRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			response.BadRequest(c, "Invalid request: "+err.Error())
+			return
+		}
+	}
+	result, err := h.accountTestService.ProbeOpenAICodexState(c.Request.Context(), accountID, req.ModelID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 // RecoverState handles unified recovery of recoverable account runtime state.
 // POST /api/v1/admin/accounts/:id/recover-state
 func (h *AccountHandler) RecoverState(c *gin.Context) {
