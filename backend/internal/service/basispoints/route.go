@@ -45,16 +45,19 @@ func NativeFallbackReason(body []byte) string {
 		return fallback
 	}
 	if choice.Exists() && choice.Type == gjson.JSON {
-		switch strings.ToLower(choice.Get("type").String()) {
+		kind := strings.ToLower(choice.Get("type").String())
+		switch kind {
 		case "web_search", "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26", "image_generation":
 			return "tool_choice"
 		}
 		if reason := inspectTools(choice.Get("tools")); reason != "" {
 			return reason
 		}
-		name := strings.ToLower(choice.Get("name").String())
-		if strings.Contains(name, "web_search") || strings.Contains(name, "image_generation") {
-			return "tool_choice"
+		if kind != "function" && kind != "custom" {
+			name := strings.ToLower(choice.Get("name").String())
+			if strings.Contains(name, "web_search") || strings.Contains(name, "image_generation") {
+				return "tool_choice"
+			}
 		}
 	}
 	if reason := inspectTools(gjson.GetBytes(body, "tools")); reason != "" {

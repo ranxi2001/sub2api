@@ -86,7 +86,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		(!account.IsExcelBPSEnabledForModel(modelForBPS) || account.excelBPSNativeFallbackReason(body) != "") {
 		return nil, errors.New("bps probe path is unavailable")
 	}
-	if account.IsExcelBPSEnabledForModel(modelForBPS) {
+	if account.IsExcelBPSEnabledForModel(modelForBPS) && ctx.Value(excelBPSImageChildKey{}) != true {
 		return s.forwardExcelBPS(ctx, c, account, body, startTime)
 	}
 

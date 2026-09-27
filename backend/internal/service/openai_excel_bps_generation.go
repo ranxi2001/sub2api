@@ -18,6 +18,7 @@ import (
 )
 
 type excelBPSImageSlotKey struct{}
+type excelBPSImageChildKey struct{}
 
 // WithExcelBPSImageSlotAcquirer defers the existing handler image limit until
 // the model actually selects the server-owned tool. Ordinary chat holds no slot.
@@ -51,7 +52,9 @@ func (s *OpenAIGatewayService) excelBPSImageGenerator(ctx context.Context, c *gi
 	// native Lite passthrough restrictions elsewhere remain authoritative.
 	snapshot := c.Copy()
 	return func(request basispoints.ImageGenerationRequest) (basispoints.ImageGenerationResult, error) {
-		imageCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+		// The server-owned hosted-image child must use the native channel even
+		// when the account routes ordinary requests through Basispoints.
+		imageCtx, cancel := context.WithTimeout(context.WithValue(ctx, excelBPSImageChildKey{}, true), 4*time.Minute)
 		defer cancel()
 		if err := imageCtx.Err(); err != nil {
 			return basispoints.ImageGenerationResult{}, err

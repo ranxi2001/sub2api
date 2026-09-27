@@ -1,13 +1,16 @@
 # Custom Sub2API upgrade
 
-Upstream version: v2.8.18
-Upstream source commit: c1008182bd1bb8f50ff95133fa486fb9d4676811
+Current upstream production sync (2026-09-27): 76581c9832cb7139882fbcde817b488a0940dced (backend 2.8.19).
+Original upstream import version: v2.8.18
+Original upstream source commit: c1008182bd1bb8f50ff95133fa486fb9d4676811
 Source archive SHA256: 69c3a515e6bd4c8e6a368f348fff33f2e1ce6d0661a03e0ad8e72e65933b4323
 Previous official source: e39898c680ecd69381e549ae54c97011107f1757 (v2.8.14).
 
-This repository starts from a verified source-archive import. Its local import
-commit is not the original upstream Git commit. Custom changes were ported
-from the saved tracked/untracked v2.8.14 deployment snapshot.
+The v2.8.18 custom branch started from a verified source-archive import. Its
+local import commit is not the original upstream Git commit. Custom changes
+were ported from the saved tracked/untracked v2.8.14 deployment snapshot.
+The v2.8.19 custom branch starts from upstream Git history and ports those
+custom changes on top.
 
 Preserved custom functionality:
 - Account-controlled image generation bridge and desktop/Lite tool discovery.
@@ -28,6 +31,14 @@ Integration with v2.8.18:
 - Repair the upstream data-import test mocks for i18n/auth dependencies.
 - Explicitly initialize the supported-platform fixture in the upstream Mihomo
   subscription-failure test so it exercises the same logic on macOS and Linux.
+
+Integration with v2.8.19 production:
+- Preserve upstream BPS agent-history image and attachment handling while
+  retaining the custom image relay, generation bridge, and file delivery.
+- Route hosted web/image tools to native fallback without misclassifying
+  client-owned function or custom tools by their names.
+- Keep the upstream force-BPS policy for client requests; only the
+  server-owned image-generation child uses the native hosted-image channel.
 
 Relay remains the configured deployment mode. A configurable ceiling is not
 a measured production or upstream capacity guarantee. No paid image generation
