@@ -415,6 +415,17 @@ func (b *Bridge) translateHistory(input []any) ([]any, error) {
 		}
 		delete(item, "internal_chat_message_metadata_passthrough")
 		switch text(item["type"]) {
+		case "image_generation_call":
+			if strings.HasPrefix(text(item["id"]), generatedImageIDPrefix) {
+				// Our hosted result has already been delivered to the client. BPS
+				// cannot replay native image items or their base64 as tool history.
+				status := "failed"
+				if text(item["status"]) == "completed" {
+					status = "completed"
+				}
+				result = append(result, message("assistant", "The earlier server-managed image generation "+status+". Its image data is not present in this history; ask for an uploaded reference image before editing or analyzing it."))
+				continue
+			}
 		case "additional_tools":
 			continue
 		case "item_reference":
@@ -428,6 +439,9 @@ func (b *Bridge) translateHistory(input []any) ([]any, error) {
 			}
 			continue
 		case "function_call", "custom_tool_call":
+			if compact, ok := compactImageRenderingCall(item); ok {
+				item = compact
+			}
 			id := text(item["call_id"])
 			if native := b.replay.getForCall(b.scope, id, item); native != nil {
 				item = native
@@ -441,6 +455,13 @@ func (b *Bridge) translateHistory(input []any) ([]any, error) {
 			}
 			seenCalls[id] = true
 		case "function_call_output", "custom_tool_call_output":
+			if isDesktopDelegationMessage(item) {
+				// Codex app cross-task messages are named output records without
+				// a call_id, not results of a model-invoked tool. Preserve their
+				// text at user level; do not invent or execute a corresponding call.
+				result = append(result, message("user", text(item["output"])))
+				continue
+			}
 			id := text(item["call_id"])
 			if !seenCalls[id] {
 				native := b.replay.get(b.scope, id)
@@ -485,6 +506,18 @@ func (b *Bridge) translateHistory(input []any) ([]any, error) {
 		result = append(result, trigger)
 	}
 	return result, nil
+}
+
+func isDesktopDelegationMessage(item object) bool {
+	if text(item["type"]) != "function_call_output" ||
+		text(item["name"]) != "send_message_to_thread" || text(item["namespace"]) != "codex_app" {
+		return false
+	}
+	if id, exists := item["call_id"]; exists && id != "" {
+		return false
+	}
+	output := strings.TrimSpace(text(item["output"]))
+	return strings.HasPrefix(output, "<codex_delegation>") && strings.HasSuffix(output, "</codex_delegation>")
 }
 
 func isTool(item object) bool {
@@ -546,7 +579,9 @@ func (b *Bridge) translateCall(native object) (object, error) {
 		return nil, err
 	}
 	// run_officejs is a real BPS-native tool, so its item replays upstream verbatim.
-	b.rememberReplay(text(native["call_id"]), native, result)
+	if !b.isServerImageTool(result) {
+		b.rememberReplay(text(native["call_id"]), native, result)
+	}
 	return result, nil
 }
 
@@ -604,7 +639,9 @@ func (b *Bridge) translateDirectCatalogCall(native object) (object, error) {
 	if err != nil {
 		return nil, err
 	}
-	b.rememberReplay(text(native["call_id"]), wrapped, result)
+	if !b.isServerImageTool(result) {
+		b.rememberReplay(text(native["call_id"]), wrapped, result)
+	}
 	return result, nil
 }
 

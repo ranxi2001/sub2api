@@ -58,6 +58,14 @@ func (b *Bridge) StreamWithRepairs(ctx context.Context, upstream io.ReadCloser, 
 	ctx, cancel := context.WithCancel(ctx)
 	reader, writer := io.Pipe()
 	body := &streamBody{PipeReader: reader, upstream: upstream, cancel: cancel}
+	bridge := *b
+	if generate := b.imageGenerator; generate != nil {
+		bridge.imageGenerator = func(request ImageGenerationRequest) (ImageGenerationResult, error) {
+			// Release the BPS connection before the nested native image request.
+			_ = body.closeUpstream()
+			return generate(request)
+		}
+	}
 	var continueTool ToolRepairFunc
 	if repair != nil {
 		continueTool = func(ctx context.Context, response object, validation error) (object, error) {
@@ -81,7 +89,7 @@ func (b *Bridge) StreamWithRepairs(ctx context.Context, upstream io.ReadCloser, 
 			_ = body.closeUpstream()
 		})
 		defer stop()
-		err := b.transformWithRepairs(ctx, upstream, writer, continueTool, regenerate)
+		err := bridge.transformWithRepairs(ctx, upstream, writer, continueTool, regenerate)
 		_ = body.closeUpstream()
 		_ = writer.CloseWithError(err)
 	}()
@@ -214,7 +222,16 @@ func (b *Bridge) transformWithRepairs(ctx context.Context, reader io.Reader, wri
 				} else if err := b.translateCompleted(ctx, response, repair); err != nil {
 					return err
 				}
-
+				if err := b.executeImageGeneration(response, emit); err != nil {
+					return err
+				}
+				if text(response["status"]) == "failed" {
+					terminal = true
+					return emit("response.failed", payload)
+				}
+				if err := b.appendImageFiles(response, emit); err != nil {
+					return err
+				}
 				output, _ = response["output"].([]any)
 				for i, raw := range output {
 					item, _ := raw.(object)

@@ -849,7 +849,7 @@ export default {
         codexImageToolInherit: '跟随渠道',
         codexImageToolInheritDesc: '不写入账号覆盖；非 Lite 请求是否注入 hosted 工具由渠道或全局策略决定，客户端显式携带的 hosted 工具和本地 image_gen 声明照常放行。',
         codexImageToolEnabled: '启用 Hosted 桥接',
-        codexImageToolEnabledDesc: '仅为非 Responses Lite 请求注入 hosted image_generation 工具；客户端显式携带的图片工具仍会放行。',
+        codexImageToolEnabledDesc: '非 Responses Lite 请求启用生图桥接。Excel / BPS 开启时，提供按需生图工具：模型调用后才走原生 Codex，每次响应最多生成一张新图片，普通聊天继续走 BPS；需分组允许图片生成。客户端已有 image_gen 工具时优先使用客户端工具。',
         codexImageToolDisabled: '不注入 Hosted 工具',
         codexImageToolDisabledDesc: '不注入 hosted 工具；客户端显式携带的 hosted 工具和本地 image_gen 声明仍会放行。',
         codexImageToolBlock: '移除客户端图片工具',

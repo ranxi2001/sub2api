@@ -11,20 +11,22 @@ import (
 )
 
 const (
-	SettingKeyExcelBPSImageMode           = "excel_bps_image_mode"
-	ExcelBPSImageModeRelay                = "relay"
-	ExcelBPSImageModeNative               = "native"
-	SettingKeyExcelBPSImageRelayEnabled   = "excel_bps_image_relay_enabled"
-	SettingKeyExcelBPSImageBaseURL        = "excel_bps_image_base_url"
-	SettingKeyExcelBPSImageBodyLimitMiB   = "excel_bps_image_body_limit_mib"
-	SettingKeyExcelBPSImageBudgetMiB      = "excel_bps_image_budget_mib"
-	SettingKeyExcelBPSImageMaxRequests    = "excel_bps_image_max_requests"
-	SettingKeyExcelBPSImageMaxImageMiB    = "excel_bps_image_max_image_mib"
-	SettingKeyExcelBPSImageMaxImages      = "excel_bps_image_max_images"
-	SettingKeyExcelBPSImageMaxTotalMiB    = "excel_bps_image_max_total_mib"
-	SettingKeyExcelBPSImageStorageMiB     = "excel_bps_image_storage_mib"
-	SettingKeyExcelBPSImageStorageEntries = "excel_bps_image_storage_entries"
-	SettingKeyExcelBPSImageTTLMinutes     = "excel_bps_image_ttl_minutes"
+	SettingKeyExcelBPSImageMode         = "excel_bps_image_mode"
+	ExcelBPSImageModeRelay              = "relay"
+	ExcelBPSImageModeNative             = "native"
+	SettingKeyExcelBPSImageRelayEnabled = "excel_bps_image_relay_enabled"
+	SettingKeyExcelBPSImageBaseURL      = "excel_bps_image_base_url"
+	SettingKeyExcelBPSImageBodyLimitMiB = "excel_bps_image_body_limit_mib"
+	SettingKeyExcelBPSImageBudgetMiB    = "excel_bps_image_budget_mib"
+	SettingKeyExcelBPSImageMaxRequests  = "excel_bps_image_max_requests"
+	SettingKeyExcelBPSImageMaxImageMiB  = "excel_bps_image_max_image_mib"
+	SettingKeyExcelBPSImageMaxImages    = "excel_bps_image_max_images"
+	// Read-only fallback for the custom v2.8.14 setting; retain it for rollback.
+	SettingKeyExcelBPSImageMaxImagesPerRequest = "excel_bps_image_max_images_per_request"
+	SettingKeyExcelBPSImageMaxTotalMiB         = "excel_bps_image_max_total_mib"
+	SettingKeyExcelBPSImageStorageMiB          = "excel_bps_image_storage_mib"
+	SettingKeyExcelBPSImageStorageEntries      = "excel_bps_image_storage_entries"
+	SettingKeyExcelBPSImageTTLMinutes          = "excel_bps_image_ttl_minutes"
 
 	DefaultExcelBPSImageBodyLimitMiB = 64
 	DefaultExcelBPSImageBudgetMiB    = 1024
@@ -99,6 +101,7 @@ func (s *SettingService) GetExcelBPSImageRelaySettings(ctx context.Context) (Exc
 		SettingKeyExcelBPSImageMode, SettingKeyExcelBPSImageRelayEnabled, SettingKeyExcelBPSImageBaseURL,
 		SettingKeyExcelBPSImageBodyLimitMiB, SettingKeyExcelBPSImageBudgetMiB, SettingKeyExcelBPSImageMaxRequests,
 		SettingKeyExcelBPSImageMaxImageMiB, SettingKeyExcelBPSImageMaxImages, SettingKeyExcelBPSImageMaxTotalMiB, SettingKeyExcelBPSImageStorageMiB, SettingKeyExcelBPSImageStorageEntries, SettingKeyExcelBPSImageTTLMinutes,
+		SettingKeyExcelBPSImageMaxImagesPerRequest,
 	})
 	if err != nil {
 		return ExcelBPSImageRelaySettings{}, infraerrors.ServiceUnavailable("EXCEL_BPS_IMAGE_SETTINGS_UNAVAILABLE", "Excel BPS image settings are unavailable")
@@ -131,7 +134,11 @@ func parseExcelBPSImageLimits(values map[string]string) (basispoints.ImageRelayL
 	if err != nil {
 		return limits, err
 	}
-	limits.MaxImages, err = parseExcelBPSImageCapacity(values[SettingKeyExcelBPSImageMaxImages], limits.MaxImages)
+	imageCount := values[SettingKeyExcelBPSImageMaxImages]
+	if imageCount == "" {
+		imageCount = values[SettingKeyExcelBPSImageMaxImagesPerRequest]
+	}
+	limits.MaxImages, err = parseExcelBPSImageCapacity(imageCount, limits.MaxImages)
 	if err != nil {
 		return limits, err
 	}

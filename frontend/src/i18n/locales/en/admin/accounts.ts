@@ -740,7 +740,7 @@ export default {
         codexImageToolInherit: 'Follow channel',
         codexImageToolInheritDesc: 'No account override; hosted injection for non-Lite requests follows the channel or global policy, while client-provided hosted tools and local image_gen declarations pass through.',
         codexImageToolEnabled: 'Enable hosted bridge',
-        codexImageToolEnabledDesc: 'Inject the hosted image_generation tool only for non-Responses Lite requests; client-provided image tools still pass through.',
+        codexImageToolEnabledDesc: 'Enable image bridging for non-Responses Lite requests. With Excel / BPS enabled, offer an on-demand image tool: only selected generation uses native Codex, with one new image per response; ordinary chat stays on BPS. The group must allow image generation. Prefer an existing client image_gen tool.',
         codexImageToolDisabled: 'No hosted injection',
         codexImageToolDisabledDesc: 'Do not inject the hosted tool; client-provided hosted tools and local image_gen declarations still pass through.',
         codexImageToolBlock: 'Strip client image tools',

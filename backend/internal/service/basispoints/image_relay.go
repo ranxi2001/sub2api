@@ -191,6 +191,7 @@ func (r *ImageRelay) Rewrite(raw []byte, scope string) ([]byte, error) {
 	}
 	input, _ := source["input"].([]any)
 	images := make(map[string]*relayImage)
+	stagedURLs := make(map[string]string)
 	var staged []*relayImage
 	// Every failed/duplicate batch releases both files and quota.
 	defer func() {
@@ -203,6 +204,7 @@ func (r *ImageRelay) Rewrite(raw []byte, scope string) ([]byte, error) {
 		}
 	}()
 	totalBytes := 0
+	inlineCount := 0
 	for _, rawItem := range input {
 		item, _ := rawItem.(object)
 		for _, field := range []string{"content", "output"} {
@@ -219,14 +221,23 @@ func (r *ImageRelay) Rewrite(raw []byte, scope string) ([]byte, error) {
 				if len(rawURL) < len("data:") || !strings.EqualFold(rawURL[:len("data:")], "data:") {
 					continue
 				}
-				if len(staged) >= limits.MaxImages {
+				inlineCount++
+				if inlineCount > limits.MaxImages {
 					return nil, fmt.Errorf("image relay is configured for at most %d inline images per request", limits.MaxImages)
 				}
-				img, token, err := r.storeImageWithLimit(rawURL, scope, limits.MaxImageMiB)
-				if err != nil {
-					return nil, err
+				token, reused := stagedURLs[rawURL]
+				img := images[token]
+				if !reused {
+					var err error
+					img, token, err = r.storeImageWithLimit(rawURL, scope, limits.MaxImageMiB)
+					if err != nil {
+						return nil, err
+					}
+					staged = append(staged, img)
+					stagedURLs[rawURL] = token
+					images[token] = img
 				}
-				staged = append(staged, img)
+				// Repeated parts still count against request limits, but share storage.
 				totalBytes += img.size
 				if totalBytes > limits.MaxTotalMiB<<20 {
 					return nil, fmt.Errorf("image relay inline images exceed the configured %d MiB request limit", limits.MaxTotalMiB)
@@ -235,7 +246,6 @@ func (r *ImageRelay) Rewrite(raw []byte, scope string) ([]byte, error) {
 				if err := validateImage(part); err != nil {
 					return nil, err
 				}
-				images[token] = img
 			}
 		}
 	}
@@ -450,6 +460,7 @@ func (r *ImageRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	file, err := os.Open(img.path)
+	expires := img.expires
 	if err == nil {
 		img.readers++
 	}
@@ -464,6 +475,7 @@ func (r *ImageRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}()
 	w.Header().Set("Content-Type", img.contentType)
 	w.Header().Set("Content-Length", strconv.Itoa(img.size))
+	w.Header().Set("X-BPS-Image-Expires", strconv.FormatInt(expires.Unix(), 10))
 	w.WriteHeader(http.StatusOK)
 	if req.Method == http.MethodGet {
 		_, _ = io.Copy(w, file)

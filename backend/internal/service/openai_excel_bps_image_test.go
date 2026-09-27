@@ -140,3 +140,29 @@ func TestExcelBPS429ImageAndCompactKeepCodexSchedulable(t *testing.T) {
 		}
 	}
 }
+
+func TestExcelBPSPrewarmFailureDoesNotSubmitUpstream(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("EXCEL_BPS_IMAGE_PREWARM", "true")
+	var imageBytes bytes.Buffer
+	require.NoError(t, png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 2, 3))))
+	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(imageBytes.Bytes())
+	server := httptest.NewTLSServer(http.NotFoundHandler())
+	server.Close()
+	upstream := &httpUpstreamRecorder{}
+	svc := openAIClientToolsTestService(upstream)
+	t.Cleanup(func() { require.NoError(t, svc.CloseExcelBPSImages()) })
+	svc.settingService = NewSettingService(&excelBPSImageSettingsRepo{values: map[string]string{SettingKeyExcelBPSImageRelayEnabled: "true", SettingKeyExcelBPSImageBaseURL: server.URL}}, svc.cfg)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := []byte(fmt.Sprintf("{\"model\":\"gpt-6-astra\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_image\",\"image_url\":%q}]}]}", dataURL))
+	_, err := svc.Forward(context.Background(), c, excelAccount(), body)
+	require.Error(t, err)
+	require.Equal(t, 503, rec.Code)
+	require.Empty(t, upstream.requests)
+	require.Contains(t, rec.Body.String(), "basispoints_image_prewarm_unavailable")
+	require.NotContains(t, rec.Body.String(), "data:image")
+	require.NotContains(t, rec.Body.String(), server.URL)
+	require.True(t, IsResponseCommitted(c))
+}

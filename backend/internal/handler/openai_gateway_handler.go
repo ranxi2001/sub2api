@@ -654,6 +654,18 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if imageReleaseFunc != nil {
 			defer imageReleaseFunc()
 		}
+	} else {
+		// BPS can select a server-managed image tool after the text request has
+		// begun. Use the same limiter then, without committing another HTTP body.
+		c.Request = c.Request.WithContext(service.WithExcelBPSImageSlotAcquirer(c.Request.Context(), func(ctx context.Context) (func(), bool) {
+			if h.cfg == nil || h.imageLimiter == nil {
+				return nil, true
+			}
+			limit := h.cfg.Gateway.ImageConcurrency
+			return h.imageLimiter.Acquire(ctx, limit.Enabled, limit.MaxConcurrentRequests,
+				strings.TrimSpace(limit.OverflowMode) == config.ImageConcurrencyOverflowModeWait,
+				time.Duration(limit.WaitTimeoutSeconds)*time.Second, limit.MaxWaitingRequests)
+		}))
 	}
 
 	// 解析渠道级模型映射

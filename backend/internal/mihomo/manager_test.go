@@ -115,6 +115,7 @@ func TestFailedSubscriptionKeepsRunningPhase(t *testing.T) {
 	m := New(t.TempDir())
 	t.Cleanup(m.Close)
 	m.state.Installed = true
+	m.state.Supported = true // Exercise subscription failure independently of the test host OS.
 	m.state.Running = true
 	m.subscriptionProxyURL = server.URL
 	m.saved = saved{URLs: []string{"https://old.example/sub"}, Nodes: []map[string]any{{"name": "node-one", "type": "socks5", "server": "example.org", "port": 1080}}}
