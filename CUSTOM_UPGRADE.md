@@ -1,6 +1,6 @@
 # Custom Sub2API upgrade
 
-Current upstream production sync (2026-09-27): 76581c9832cb7139882fbcde817b488a0940dced (backend 2.8.19).
+Current upstream production sync (2026-09-27): b40055227fcc21f571f9c727d1139bb48ecef95c (backend 2.8.19).
 Original upstream import version: v2.8.18
 Original upstream source commit: c1008182bd1bb8f50ff95133fa486fb9d4676811
 Source archive SHA256: 69c3a515e6bd4c8e6a368f348fff33f2e1ce6d0661a03e0ad8e72e65933b4323
