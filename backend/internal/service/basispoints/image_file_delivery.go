@@ -20,13 +20,21 @@ var imageFileDeliveryJS string
 //go:embed image_file_delivery_v2.js
 var imageFileDeliveryV2JS string
 
+// Keep V2 byte-for-byte for receipts already present in conversation history.
+//
+//go:embed image_file_delivery_v3.js
+var imageFileDeliveryV3Template string
+
+var imageFileDeliveryV3JS = strings.Replace(imageFileDeliveryV3Template, "/* V2_WRITER */", imageFileDeliveryV2JS, 1)
+
 const imageFileDeliveryPrefix = "// sub2api image file delivery v1\nawait ("
 const imageFileDeliveryV2Prefix = "// sub2api image file delivery v2\nawait ("
-const imageFileDeliveryHint = "\nGenerated images are saved in the current client task workspace by a declared client tool. A successful sub2api_image_file_v1 receipt confirms file persistence, not user-visible rendering. The gateway attaches the verified local image to the final answer. Do not regenerate a completed image, invent paths, or claim success when file delivery failed."
+const imageFileDeliveryV3Prefix = "// sub2api image file delivery v3\nawait ("
+const imageFileDeliveryHint = "\nGenerated images are saved in the current client task workspace by a declared client tool. A successful sub2api_image_file_v1 receipt confirms file persistence, not user-visible rendering. The gateway attaches the verified local image to the final answer. If file delivery fails, retry the same completed image's delivery call at most once; never regenerate it, invent a path, or claim success without a verified receipt."
 
 func imageFileDeliveryCode(payload object) string {
 	raw, _ := json.Marshal(payload)
-	return imageFileDeliveryV2Prefix + imageFileDeliveryV2JS + ")(" + string(raw) + ");"
+	return imageFileDeliveryV3Prefix + imageFileDeliveryV3JS + ")(" + string(raw) + ");"
 }
 
 func imageFilePayload(item object) (object, bool) {
@@ -39,7 +47,7 @@ func imageFilePayload(item object) (object, bool) {
 	}
 	code := text(item["input"])
 	prefix := ""
-	for _, candidate := range []string{imageFileDeliveryV2Prefix + imageFileDeliveryV2JS + ")(", imageFileDeliveryPrefix + imageFileDeliveryJS + ")("} {
+	for _, candidate := range []string{imageFileDeliveryV3Prefix + imageFileDeliveryV3JS + ")(", imageFileDeliveryV2Prefix + imageFileDeliveryV2JS + ")(", imageFileDeliveryPrefix + imageFileDeliveryJS + ")("} {
 		if strings.HasPrefix(code, candidate) {
 			prefix = candidate
 			break

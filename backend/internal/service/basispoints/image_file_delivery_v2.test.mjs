@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-const source = fs.readFileSync(new URL('./image_file_delivery_v2.js', import.meta.url), 'utf8');
+const v2 = fs.readFileSync(new URL('./image_file_delivery_v2.js', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('./image_file_delivery_v3.js', import.meta.url), 'utf8').replace('/* V2_WRITER */', v2);
 const legacy = fs.readFileSync(new URL('./image_file_delivery.js', import.meta.url), 'utf8');
 const nl = String.fromCharCode(10);
 const payload = {call_id:'call_test', sha256:'a'.repeat(64), png_b64:'AA=='};
@@ -12,8 +13,9 @@ const running = {session_id:42, output:''};
 const saved = {exit_code:0, output:JSON.stringify(receipt)+nl};
 async function execute({start=ready, responses=[saved], code=source, tick=1000, missingRuntime=false}={}) {
   const outputs=[], writes=[];
-  let clock=0, previews=0, command='';
-  const tools={exec_command:async args=>{command=args.cmd;return start;},view_image:async()=>{previews++;throw Error('unexpected preview');}};
+  let clock=0, previews=0, command='', launches=0;
+  const starts=Array.isArray(start)?[...start]:[start];
+  const tools={exec_command:async args=>{command=args.cmd;launches++;return starts.shift()??ready;},view_image:async()=>{previews++;throw Error('unexpected preview');}};
   if(!missingRuntime) tools.write_stdin=async args=>{
     clock+=tick;writes.push(args);
     const result=responses.shift() ?? running;
@@ -23,7 +25,7 @@ async function execute({start=ready, responses=[saved], code=source, tick=1000, 
   const run=vm.runInNewContext('('+code+')',{tools,Date:{now:()=>clock},text:x=>outputs.push(JSON.parse(JSON.stringify(x))),image:()=>{previews++;}});
   await run(payload);
   assert.equal(outputs.length,1,'one terminal delivery receipt');
-  return {result:outputs[0],writes,previews,command};
+  return {result:outputs[0],writes,previews,command,launches};
 }
 test('immediate delivery succeeds without uploading the saved image again',async()=>{
   const r=await execute();assert.equal(r.result.status,'saved');assert.equal(r.previews,0);assert.equal(r.writes[0].chars,payload.png_b64+nl);
@@ -42,7 +44,15 @@ test('an existing verified image does not retransmit the image bytes',async()=>{
   const r=await execute({start:saved,responses:[]});assert.equal(r.result.status,'saved');assert.equal(r.writes.length,0);
 });
 test('startup permission failures retain a useful class and exit code',async()=>{
-  const r=await execute({start:{exit_code:1,output:'PermissionError: denied'}});assert.equal(r.result.status,'failed');assert.equal(r.result.code,'writer_start_failed');assert.equal(r.result.exit_code,1);assert.match(r.result.reason,/PermissionError/);assert.equal(r.writes.length,0);
+  const r=await execute({start:{exit_code:1,output:'PermissionError: denied'}});assert.equal(r.result.status,'failed');assert.equal(r.result.code,'writer_start_failed');assert.equal(r.result.exit_code,1);assert.match(r.result.reason,/PermissionError/);assert.equal(r.writes.length,0);assert.equal(r.launches,1);
+});
+test('transient writer startup exit retries the same PNG once',async()=>{
+  const r=await execute({start:[{exit_code:1,output:'temporary launcher exit'},ready]});
+  assert.equal(r.result.status,'saved');assert.equal(r.launches,2);assert.deepEqual(r.writes.map(x=>x.chars),[payload.png_b64+nl]);
+});
+test('persistent startup failure stops after two launches without regenerating',async()=>{
+  const r=await execute({start:[{exit_code:1,output:'temporary launcher exit'},{exit_code:1,output:'temporary launcher exit'}]});
+  assert.equal(r.result.code,'writer_start_failed');assert.equal(r.launches,2);assert.equal(r.writes.length,0);assert.match(r.result.instruction,/Do not regenerate/);
 });
 test('a running reader is bounded when the readiness marker never arrives',async()=>{
   const r=await execute({start:running,responses:[],tick:10000});assert.equal(r.result.code,'writer_start_timeout');assert.ok(r.writes.length<10);assert.ok(r.writes.every(x=>x.chars===''||x.chars===nl));

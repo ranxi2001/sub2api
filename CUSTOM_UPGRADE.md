@@ -37,3 +37,20 @@ Release gate: production account BPS/bridge flags and existing settings must be
 read back before and after deployment. Health alone does not validate image
 delivery. Run the existing-image two-turn BPS replay, check actual usage route,
 and confirm no new image charge. Do not enable automatic BPS shutdown policies.
+
+Native image repair r2 (2026-09-27):
+- Offer the server-managed image function on HTTP OAuth desktop routes when
+  image bridging is enabled, including Responses Lite and passthrough with BPS off.
+- Keep model-selected generation, group/account permission checks, image limits,
+  native child authentication, and the established V2 file receipt delivery.
+- Release the parent upstream connection before generation, commit real delivery
+  tool input before slow work, and keep the stream alive during that work.
+- Cancel child work when the delivery stream closes; reject multiple image calls.
+- Attach a validated saved image on the receipt turn even with tool_choice=none,
+  without injecting a new generation tool or repeating images in later user turns.
+- Explicit client image tools, compact, structured output, and WebSocket requests
+  retain their existing behavior. The added tool generates one image from text;
+  it does not implement reference-image editing.
+
+Changing BPS does not enable image bridging: account/channel/global bridge policy
+is still respected. Candidate rollout must check this independent configuration.

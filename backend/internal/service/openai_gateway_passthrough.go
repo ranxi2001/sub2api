@@ -466,6 +466,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 		}
 
+		if err := applyNativeCodexImageResponse(ctx, c, resp); err != nil {
+			return nil, err
+		}
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {
 			maxLineSize := defaultMaxLineSize
 			if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {

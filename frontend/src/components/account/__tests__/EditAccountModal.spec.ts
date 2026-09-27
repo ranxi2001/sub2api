@@ -1919,6 +1919,24 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('codex_image_generation_explicit_tool_policy')
   })
 
+  it.each([true, false])('preserves the image bridge when toggling BPS from %s', async (bps) => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { openai_excel_bps: bps, codex_image_generation_bridge: true }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="excel-bps-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra?.codex_image_generation_bridge).toBe(true)
+    expect(extra?.openai_excel_bps === true).toBe(!bps)
+  })
+
   it('submits Codex image tool no-injection mode without strip policy', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()
