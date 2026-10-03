@@ -229,7 +229,7 @@ func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearsErrorAndRateLi
 	require.True(t, result.ClearedError)
 	require.True(t, result.ClearedRateLimit)
 
-	require.Equal(t, 1, repo.getByIDCalls)
+	require.Equal(t, 2, repo.getByIDCalls)
 	require.Equal(t, 1, repo.clearErrorCalls)
 	require.Equal(t, 1, repo.clearRateLimitCalls)
 	require.Equal(t, 1, repo.clearAntigravityCalls)

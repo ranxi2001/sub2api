@@ -59,7 +59,8 @@ type SuccessfulTestRecoveryResult struct {
 
 // AccountRecoveryOptions 控制账号恢复时的附加行为。
 type AccountRecoveryOptions struct {
-	InvalidateToken bool
+	InvalidateToken          bool
+	preserveGrokScopedBlocks bool
 }
 
 type geminiUsageCacheEntry struct {
@@ -2132,14 +2133,20 @@ func (s *RateLimitService) samplePassiveUsageFromHeaders(ctx context.Context, ac
 
 // ClearRateLimit 清除账号的限流状态
 func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) error {
+	return s.clearRateLimit(ctx, accountID, false)
+}
+
+func (s *RateLimitService) clearRateLimit(ctx context.Context, accountID int64, preserveGrokScopedBlocks bool) error {
 	if err := s.accountRepo.ClearRateLimit(ctx, accountID); err != nil {
 		return err
 	}
 	if err := s.accountRepo.ClearAntigravityQuotaScopes(ctx, accountID); err != nil {
 		return err
 	}
-	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
-		return err
+	if !preserveGrokScopedBlocks {
+		if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
+			return err
+		}
 	}
 	// 清除限流时一并清理临时不可调度状态，避免周限/窗口重置后仍被本地临时状态阻断。
 	if err := s.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
@@ -2151,6 +2158,9 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 		}
 	}
 	s.ResetOpenAI403Counter(ctx, accountID)
+	if !preserveGrokScopedBlocks {
+		s.clearGrokProcessLocalBlocks(ctx, accountID)
+	}
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
 }
@@ -2184,8 +2194,10 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 		}
 	}
 
-	if hasRecoverableRuntimeState(account) {
-		if err := s.ClearRateLimit(ctx, accountID); err != nil {
+	hasScopedGrokState := account.IsGrok() && !options.preserveGrokScopedBlocks &&
+		(hasGrokModelQuotaBlockForAccount(account.ID) || hasGrokTeamModelRateLimitForAccount(account))
+	if hasRecoverableRuntimeState(account) || hasScopedGrokState {
+		if err := s.clearRateLimit(ctx, accountID, options.preserveGrokScopedBlocks && account.IsGrok()); err != nil {
 			return nil, err
 		}
 		result.ClearedRateLimit = true
@@ -2203,7 +2215,9 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 // RecoverAccountAfterSuccessfulTest 将一次成功测试视为正常请求，
 // 按需恢复 error / rate-limit / overload / temp-unsched / model-rate-limit 等运行时状态。
 func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context, accountID int64) (*SuccessfulTestRecoveryResult, error) {
-	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{})
+	// This callback does not identify the tested model. A successful text probe
+	// cannot establish that another model or the shared team quota recovered.
+	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{preserveGrokScopedBlocks: true})
 }
 
 func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
@@ -2219,8 +2233,27 @@ func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID
 	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
 		slog.Warn("clear_model_rate_limits_on_temp_unsched_reset_failed", "account_id", accountID, "error", err)
 	}
+	s.clearGrokProcessLocalBlocks(ctx, accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
+}
+
+func (s *RateLimitService) clearGrokProcessLocalBlocks(ctx context.Context, accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	var account *Account
+	if s.accountRepo != nil {
+		loaded, err := s.accountRepo.GetByID(ctx, accountID)
+		if err == nil {
+			account = loaded
+		}
+	}
+	if account != nil && !account.IsGrok() {
+		return
+	}
+	clearGrokModelQuotaBlocksForAccount(accountID)
+	clearGrokTeamModelRateLimitsForAccount(account)
 }
 
 func hasRecoverableRuntimeState(account *Account) bool {

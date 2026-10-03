@@ -997,6 +997,10 @@ export default {
           official: 'Official API'
         }
       },
+      grokSkipForbiddenPause: {
+        title: 'Keep scheduling after unclassified Grok 403',
+        hint: 'Off by default. When enabled, an unclassified inference 403 skips the default 30-minute account-wide pause and health penalty, with at most one alternate account per request. Explicit revocation, suspension, entitlement denial, content, billing/quota handling and admin rules remain in effect.'
+      },
       grokClientToolCache: {
         title: 'Client Tool Cache (May Change Automatic Tool Selection)',
         hint: 'For detected Grok Free OAuth accounts, this is enabled by default for client function tools such as Codex and Trae. Turn it off to opt out if the automatic tool-selection behavior is not acceptable.'

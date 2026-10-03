@@ -98,7 +98,7 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		shouldFailover = s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody)
 	}
 	if account != nil && account.Platform == PlatformGrok {
-		s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
+		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.StatusCode, resp.Header, respBody)
 	}
 	if !shouldFailover {
 		return nil
@@ -135,7 +135,7 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 		upstreamMsg,
 		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
-	)
+	).WithGrokForbiddenPolicy(account)
 }
 
 // openAIChatCompletionsTargetURL 解析账号的（非 Grok）Chat Completions 上游端点。

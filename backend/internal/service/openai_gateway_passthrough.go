@@ -1708,6 +1708,17 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
+	if account != nil && account.IsGrok() {
+		if isGrokContentPolicyRejection(http.StatusForbidden, payload) {
+			return http.StatusForbidden, false
+		}
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, firstNonEmpty(canonicalModel...)), account, statusCode, nil, payload)
+		return statusCode, false
+	}
 	switch statusCode {
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
@@ -1852,6 +1863,7 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
+	failoverErr = failoverErr.WithGrokForbiddenPolicy(account)
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient {
 		return failoverErr
 	}
@@ -1903,6 +1915,9 @@ func (s *OpenAIGatewayService) nonStreamingTerminalFailureFailover(
 	canonicalModel ...string,
 ) *UpstreamFailoverError {
 	if account == nil || IsResponseCommitted(c) {
+		return nil
+	}
+	if account.IsGrok() && isGrokContentPolicyRejection(http.StatusForbidden, payload) {
 		return nil
 	}
 	shouldFailover := openAIStreamFailedEventShouldFailover(payload, message)
@@ -2555,7 +2570,11 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		writeErr := s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		if account != nil && account.IsGrok() && isGrokContentPolicyRejection(http.StatusForbidden, terminalPayload) {
+			return nil, &grokContentPolicyError{message: msg}
+		}
+		return nil, writeErr
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 

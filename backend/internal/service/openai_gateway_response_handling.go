@@ -257,6 +257,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	responsesSemanticOutputSeen := false
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
+	var grokScopedFailure error
 	clientOutputStarted := false
 	codexFailureTerminal := account != nil && account.IsOpenAIOAuthLike()
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
@@ -414,6 +415,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
 		}
 		if sawFailedEvent {
+			if grokScopedFailure != nil {
+				return resultWithUsage(), grokScopedFailure
+			}
 			return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 		}
 		logOpenAISuccessMissingUsage(ctx, c, account, resp, usage, terminalEventType, clientDisconnected)
@@ -543,6 +547,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				if failedMessage == "" {
 					failedMessage = "Upstream response failed"
 				}
+				if account != nil && account.IsGrok() {
+					status := openAIStreamFailureStatus(dataBytes, failedMessage)
+					if isGrokContentPolicyRejection(http.StatusForbidden, dataBytes) {
+						status = http.StatusForbidden
+					}
+					grokScopedFailure = grokRequestScopedResponseError(account, status, dataBytes, failedMessage)
+				}
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费
 				// 而漏记真实用量。对齐 WS V2 / Chat 流式路径（均先解析 usage 再 Mark）。
@@ -590,6 +601,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						} else {
 							shouldFailover = openAIStreamFailedEventShouldFailover(dataBytes, failedMessage)
 						}
+					}
+					if account != nil && account.IsGrok() && isGrokContentPolicyRejection(http.StatusForbidden, dataBytes) {
+						shouldFailover = false
 					}
 					if shouldFailover {
 						sawFailedEvent = true
@@ -915,6 +929,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 
 		case <-intervalCh:
 			if failureDelivered {
+				if grokScopedFailure != nil {
+					return resultWithUsage(), grokScopedFailure
+				}
 				return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 			}
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
@@ -1727,6 +1744,10 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		msg := extractOpenAISSEErrorMessage(terminalPayload)
 		if msg == "" {
 			msg = "Upstream compact response failed"
+		}
+		if account != nil && account.IsGrok() && isGrokContentPolicyRejection(http.StatusForbidden, terminalPayload) {
+			_ = s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+			return nil, &grokContentPolicyError{message: msg}
 		}
 		if compactErr := newOpenAICompactFallbackSignal(c, terminalPayload, msg); compactErr != nil {
 			return nil, compactErr

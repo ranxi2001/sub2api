@@ -41,7 +41,7 @@ func markGrokModelQuotaBlock(accountID int64, model string, until time.Time) {
 		return
 	}
 	now := time.Now()
-	if !until.After(now.Add(grokModelQuotaBlockMinTTL)) {
+	if !until.After(now) {
 		until = now.Add(grokModelQuotaBlockDefaultTTL)
 	}
 	if max := now.Add(grokModelQuotaBlockMaxTTL); until.After(max) {
@@ -88,6 +88,40 @@ func storeGrokModelQuotaBlock(accountID int64, model string, until, now time.Tim
 }
 
 // isGrokModelQuotaBlocked reports whether this account cannot serve model now.
+func clearGrokModelQuotaBlocksForAccount(accountID int64) {
+	if accountID <= 0 {
+		return
+	}
+	suffix := "|" + strconv.FormatInt(accountID, 10)
+	globalGrokModelQuotaBlocks.mu.Lock()
+	defer globalGrokModelQuotaBlocks.mu.Unlock()
+	for key := range globalGrokModelQuotaBlocks.items {
+		if strings.HasSuffix(key, suffix) {
+			delete(globalGrokModelQuotaBlocks.items, key)
+		}
+	}
+}
+
+func hasGrokModelQuotaBlockForAccount(accountID int64) bool {
+	if accountID <= 0 {
+		return false
+	}
+	suffix := "|" + strconv.FormatInt(accountID, 10)
+	now := time.Now()
+	globalGrokModelQuotaBlocks.mu.Lock()
+	defer globalGrokModelQuotaBlocks.mu.Unlock()
+	for key, block := range globalGrokModelQuotaBlocks.items {
+		if !strings.HasSuffix(key, suffix) {
+			continue
+		}
+		if block.Until.After(now) {
+			return true
+		}
+		delete(globalGrokModelQuotaBlocks.items, key)
+	}
+	return false
+}
+
 func isGrokModelQuotaBlocked(accountID int64, model string, now time.Time) bool {
 	model = strings.TrimSpace(model)
 	if accountID <= 0 || model == "" {

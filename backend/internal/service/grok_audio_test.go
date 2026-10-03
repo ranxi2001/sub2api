@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net/http"
 	"sync/atomic"
 	"testing"
 
@@ -86,4 +88,34 @@ func TestForwardGrokVoice_RejectsUnknownEndpoint(t *testing.T) {
 	_, err := svc.ForwardGrokVoice(context.Background(), nil, &Account{Platform: PlatformGrok}, "unknown", []byte(`{}`), "application/json")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported")
+}
+
+type grokRealtimeDialerStub struct {
+	status  int
+	headers http.Header
+	err     error
+}
+
+func (d grokRealtimeDialerStub) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
+	return nil, d.status, d.headers, d.err
+}
+
+func TestOpenGrokRealtimePreservesTypedHandshakeBody(t *testing.T) {
+	body := []byte(`{"code":"entitlement_required","error":"subscription required"}`)
+	headers := http.Header{"X-Request-Id": []string{"req-realtime"}}
+	svc := &OpenAIGatewayService{openaiWSPassthroughDialer: grokRealtimeDialerStub{
+		status:  http.StatusForbidden,
+		headers: headers,
+		err:     &openAIWSHandshakeError{Body: body, Err: errors.New("handshake forbidden")},
+	}}
+	account := &Account{ID: 880201, Platform: PlatformGrok, Type: AccountTypeOAuth}
+
+	_, err := svc.OpenGrokRealtime(context.Background(), account, "token", "grok-voice-latest")
+
+	var dialErr *GrokRealtimeDialError
+	require.ErrorAs(t, err, &dialErr)
+	require.Equal(t, http.StatusForbidden, dialErr.StatusCode)
+	require.Equal(t, body, dialErr.ResponseBody)
+	require.Equal(t, "req-realtime", dialErr.ResponseHeaders.Get("X-Request-Id"))
+	require.False(t, isGrokUnknownForbidden(dialErr.StatusCode, dialErr.ResponseBody))
 }

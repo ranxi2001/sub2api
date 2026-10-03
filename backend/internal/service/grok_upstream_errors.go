@@ -110,19 +110,59 @@ func isGrokContentPolicyCode(value string) bool {
 func isGrokAccountAccessCode(value string) bool {
 	switch normalizeGrokErrorMarker(value) {
 	case "account_suspended",
+		"deactivated_account",
 		"account_disabled",
 		"user_suspended",
 		"user_disabled",
 		"subscription_required",
 		"entitlement_required",
 		"not_entitled",
-		"plan_required":
+		"plan_required",
+		"invalid_token", "access_token_invalid", "token_revoked", "token_invalidated",
+		"invalid_credentials", "credential_invalid":
 		// permission-denied is omitted: xAI reuses it for both entitlement
 		// refusals and request-scoped safety blocks, so the message decides.
 		return true
 	default:
 		return false
 	}
+}
+
+// isGrokUnknownForbidden identifies a 403 that is neither a request-scoped
+// content refusal nor a recognized quota, billing, or account-access failure.
+// Callers use it to keep an opted-out Grok account schedulable without treating
+// every 403 as harmless.
+func isGrokUnknownForbidden(statusCode int, responseBody []byte) bool {
+	if statusCode != http.StatusForbidden {
+		return false
+	}
+	if isGrokContentPolicyRejection(statusCode, responseBody) {
+		return false
+	}
+	if grokRecognizedForbiddenAccountState(responseBody) {
+		return false
+	}
+	return true
+}
+
+func grokRecognizedForbiddenAccountState(responseBody []byte) bool {
+	if len(responseBody) == 0 {
+		return false
+	}
+	if grokAccountAccessMessage(string(responseBody)) || isGrokSpendingLimitError(responseBody) ||
+		isOpenAIHTTPUpstreamAccessStateError(http.StatusForbidden, "", responseBody) || openAIStreamCredentialAuthFailure(responseBody) {
+		return true
+	}
+	decision := classifyGrokUpstreamFailure(http.StatusForbidden, responseBody, "")
+	switch decision.Class {
+	case GrokFailureFreeUsage, GrokFailureBilling, GrokFailureRateLimit:
+		return true
+	}
+	var payload any
+	if json.Unmarshal(responseBody, &payload) == nil && grokStructuredAccountAccessMarker(payload) {
+		return true
+	}
+	return false
 }
 
 func grokAccountAccessMessage(value string) bool {

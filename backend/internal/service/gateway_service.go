@@ -727,7 +727,7 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 // and inference failures retain their existing scheduler-health behavior,
 // except an Excel BPS 429: it only cools the account's BPS route.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e == nil || e.Reason == ExcelBPSRateLimitedReason {
+	if e == nil || e.Reason == ExcelBPSRateLimitedReason || e.Reason == GrokUnknownForbiddenReason {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount

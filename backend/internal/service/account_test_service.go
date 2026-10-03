@@ -1323,6 +1323,11 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(responseBody))
 	}
+	if isGrokContentPolicyRejection(resp.StatusCode, responseBody) {
+		return
+	}
+	decision := classifyGrokUpstreamFailure(resp.StatusCode, responseBody, grokRequestedModelFromCtx(ctx))
+	skipAccountState := isGrokExplicitModelFreeUsage(decision) || account.SkipGrokForbiddenPause() && isGrokUnknownForbidden(resp.StatusCode, responseBody)
 	snapshot := parseGrokQuotaSnapshot(resp.Header, resp.StatusCode, now)
 	stampGrokQuotaSnapshotForPlan(account, snapshot, grokRequestedModelFromCtx(ctx))
 	if snapshot != nil && s.accountRepo != nil {
@@ -1330,10 +1335,14 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 		if limited {
 			normalizeGrokExhaustedWindowResets(snapshot, resetAt, now)
 		}
-		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{
-			grokQuotaSnapshotExtraKey: snapshot,
-		})
-		if limited {
+		updates := map[string]any{grokQuotaSnapshotExtraKey: snapshot}
+		if !skipAccountState {
+			for key, value := range buildGrokSchedulerExtraUpdates(snapshot) {
+				updates[key] = value
+			}
+		}
+		_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
+		if limited && !skipAccountState {
 			persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
 		} else if isSuccessfulGrokRateLimitRecovery(account, snapshot) {
 			clearGrokRateLimitAfterRecovery(ctx, s.accountRepo, account)
@@ -1349,11 +1358,15 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 		}
 		return
 	}
-	if isGrokContentPolicyRejection(resp.StatusCode, responseBody) {
-		return
-	}
-	decision := classifyGrokUpstreamFailure(resp.StatusCode, responseBody, "")
 	if decision.Class == GrokFailureFreeUsage {
+		if isGrokExplicitModelFreeUsage(decision) {
+			resetAt := now.Add(decision.Cooldown)
+			if observed, limited := grokRateLimitResetAtForAccount(account, snapshot, now); limited && observed.After(now) {
+				resetAt = observed
+			}
+			markGrokModelQuotaBlock(account.ID, decision.Model, resetAt)
+			return
+		}
 		if resetAt, limited := grokRateLimitResetAtForAccount(account, snapshot, now); limited && resetAt.After(now) {
 			persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
 		} else {
@@ -1365,6 +1378,12 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 	}
 	if decision.Class == GrokFailureBilling && (isGrokSpendingLimitError(responseBody) || strings.Contains(strings.ToLower(decision.Reason), "credit")) {
 		persistGrokRateLimit(ctx, s.accountRepo, account, grokSpendingLimitResetAt(account, now))
+		return
+	}
+	if resp.StatusCode == http.StatusForbidden && s.applyGrokTestForbiddenPolicy(ctx, account, responseBody) {
+		return
+	}
+	if account.SkipGrokForbiddenPause() && isGrokUnknownForbidden(resp.StatusCode, responseBody) {
 		return
 	}
 	cooldown := time.Duration(0)
@@ -1398,6 +1417,21 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 			reason,
 		)
 	}
+}
+
+func (s *AccountTestService) applyGrokTestForbiddenPolicy(ctx context.Context, account *Account, responseBody []byte) bool {
+	matches := matchTempUnschedulableRules(account, http.StatusForbidden, responseBody)
+	if len(matches) == 0 || s == nil || s.accountRepo == nil {
+		return false
+	}
+	cooldown := time.Duration(matches[0].rule.DurationMinutes) * time.Minute
+	if cooldown <= 0 {
+		return true
+	}
+	stateCtx, cancel := openAIAccountStateContext(ctx)
+	defer cancel()
+	_ = s.accountRepo.SetTempUnschedulable(stateCtx, account.ID, time.Now().Add(cooldown), "grok configured forbidden rule")
+	return true
 }
 
 func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx context.Context, account *Account, authToken, testModelID string) error {

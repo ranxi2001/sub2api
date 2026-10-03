@@ -1098,6 +1098,10 @@ export default {
           official: '官方 API'
         }
       },
+      grokSkipForbiddenPause: {
+        title: '未分类 Grok 403 后保持调度',
+        hint: '默认关闭。开启后，未分类的推理 403 不再触发默认 30 分钟全账号暂停或健康惩罚，每次请求最多尝试一个备用账号。明确的凭据撤销、封禁、资格拒绝、内容、计费/配额处理及管理员规则仍然生效。'
+      },
       grokClientToolCache: {
         title: '客户端工具缓存（可能改变自动工具选择）',
         hint: '仅对已识别为 Free 的 Grok OAuth 账号生效，默认会为 Codex、Trae 等客户端函数工具请求启用上游提示缓存；如不接受自动工具选择行为，可关闭此开关退出。'

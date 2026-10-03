@@ -241,7 +241,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 			s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.StatusCode, resp.Header, respBody)
 			if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
 				retryable, retryDelay, retryDeadline, retryMax := grokSameAccountRetryMetadata(account, resp.StatusCode, respBody)
-				return nil, &UpstreamFailoverError{
+				return nil, (&UpstreamFailoverError{
 					StatusCode:               resp.StatusCode,
 					ResponseBody:             respBody,
 					ResponseHeaders:          resp.Header.Clone(),
@@ -250,7 +250,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 					SameAccountRetryDelay:    retryDelay,
 					SameAccountRetryDeadline: retryDeadline,
 					SameAccountRetryMax:      retryMax,
-				}
+				}).WithGrokForbiddenPolicy(account)
 			}
 			return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
 		}
