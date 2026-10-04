@@ -471,13 +471,10 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, summary)
 	}
 
-	// 根据状态码返回适当的自定义错误响应（不透传上游详细信息）
-	var errType, errMsg string
-	var statusCode int
-
-	switch resp.StatusCode {
-	case 400:
-		c.Data(http.StatusBadRequest, "application/json", body)
+	// 上游 4xx（400/404/409/413/422 等 invalid_request 类）是确定性的请求错误：
+	// 原样透传状态码与 Anthropic 错误体，避免客户端把请求错误误判为网关故障并重放。
+	if isAnthropicClientRequestStatus(resp.StatusCode) {
+		writeAnthropicUpstreamClientError(c, resp.StatusCode, body, upstreamMsg)
 		summary := upstreamMsg
 		if summary == "" {
 			summary = truncateForLog(body, 512)
@@ -486,6 +483,13 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 			return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, summary)
+	}
+
+	// 根据状态码返回适当的自定义错误响应（不透传上游详细信息）
+	var errType, errMsg string
+	var statusCode int
+
+	switch resp.StatusCode {
 	case 401:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
@@ -502,7 +506,12 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		statusCode = http.StatusServiceUnavailable
 		errType = "overloaded_error"
 		errMsg = "Upstream service overloaded, please retry later"
-	case 500, 502, 503, 504:
+	case http.StatusGatewayTimeout:
+		// 上游 504/超时保持 504，不折叠成 502，保留“超时可重试”的语义。
+		statusCode = http.StatusGatewayTimeout
+		errType = "timeout_error"
+		errMsg = "Upstream request timed out"
+	case 500, 502, 503:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
 		errMsg = "Upstream service temporarily unavailable"

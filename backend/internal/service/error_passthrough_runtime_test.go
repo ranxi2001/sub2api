@@ -37,19 +37,48 @@ func TestApplyErrorPassthroughRule_NoBoundService(t *testing.T) {
 	assert.Equal(t, "Upstream request failed", errMsg)
 }
 
-func TestGatewayHandleErrorResponse_NoRuleKeepsDefault(t *testing.T) {
+// 422 是确定性的请求错误：无透传规则时也必须原样透传状态码与上游 message，
+// 不能折叠成 502 upstream_error（否则客户端会误判为网关故障并重放）。
+func TestGatewayHandleErrorResponse_NoRulePassesThrough422(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 
 	svc := &GatewayService{}
-	respBody := []byte(`{"error":{"message":"Invalid schema for field messages"}}`)
+	respBody := []byte(`{"error":{"type":"invalid_request_error","message":"Invalid schema for field messages"}}`)
 	resp := &http.Response{
 		StatusCode: http.StatusUnprocessableEntity,
 		Body:       io.NopCloser(bytes.NewReader(respBody)),
 		Header:     http.Header{},
 	}
 	account := &Account{ID: 11, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+	errField, ok := payload["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "invalid_request_error", errField["type"])
+	assert.Equal(t, "Invalid schema for field messages", errField["message"])
+}
+
+// 无透传规则时，未单独映射的 5xx 仍然兜底为 502。
+func TestGatewayHandleErrorResponse_NoRuleDefaults5xxTo502(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	svc := &GatewayService{}
+	respBody := []byte(`{"error":{"message":"internal upstream failure"}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       io.NopCloser(bytes.NewReader(respBody)),
+		Header:     http.Header{},
+	}
+	account := &Account{ID: 111, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
 
 	_, err := svc.handleErrorResponse(context.Background(), resp, c, account)
 	require.Error(t, err)
@@ -60,7 +89,27 @@ func TestGatewayHandleErrorResponse_NoRuleKeepsDefault(t *testing.T) {
 	errField, ok := payload["error"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "upstream_error", errField["type"])
-	assert.Equal(t, "Upstream request failed", errField["message"])
+	assert.Equal(t, "Upstream service temporarily unavailable", errField["message"])
+}
+
+// 上游 504 保持 504，不折叠成 502。
+func TestGatewayHandleErrorResponse_504KeepsGatewayTimeout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	svc := &GatewayService{}
+	respBody := []byte(`{"error":{"message":"upstream timeout"}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusGatewayTimeout,
+		Body:       io.NopCloser(bytes.NewReader(respBody)),
+		Header:     http.Header{},
+	}
+	account := &Account{ID: 112, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+
+	_, err := svc.handleErrorResponse(context.Background(), resp, c, account)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusGatewayTimeout, rec.Code)
 }
 
 func TestOpenAIHandleErrorResponse_NoRuleKeepsDefault(t *testing.T) {

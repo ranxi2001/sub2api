@@ -743,14 +743,20 @@ func (s *AntigravityGatewayService) writeMappedClaudeError(c *gin.Context, accou
 		return fmt.Errorf("upstream error: %d message=%s", upstreamStatus, upstreamMsg)
 	}
 
+	// 上游 4xx（400/404/409/413/422 等 invalid_request 类）是确定性的请求错误：
+	// 原样透传状态码与 Anthropic 错误体，避免客户端把请求错误误判为网关故障并盲目重试。
+	if isAnthropicClientRequestStatus(upstreamStatus) {
+		writeAnthropicUpstreamClientError(c, upstreamStatus, body, upstreamMsg)
+		if upstreamMsg == "" {
+			return fmt.Errorf("upstream error: %d", upstreamStatus)
+		}
+		return fmt.Errorf("upstream error: %d message=%s", upstreamStatus, upstreamMsg)
+	}
+
 	var statusCode int
 	var errType, errMsg string
 
 	switch upstreamStatus {
-	case 400:
-		statusCode = http.StatusBadRequest
-		errType = "invalid_request_error"
-		errMsg = getPassthroughOrDefault(upstreamMsg, "Invalid request")
 	case 401:
 		statusCode = http.StatusBadGateway
 		errType = "authentication_error"
@@ -767,6 +773,11 @@ func (s *AntigravityGatewayService) writeMappedClaudeError(c *gin.Context, accou
 		statusCode = http.StatusServiceUnavailable
 		errType = "overloaded_error"
 		errMsg = "Upstream service overloaded"
+	case http.StatusGatewayTimeout:
+		// 上游 504/超时保持 504，不折叠成 502，保留“超时可重试”的语义。
+		statusCode = http.StatusGatewayTimeout
+		errType = "timeout_error"
+		errMsg = "Upstream request timed out"
 	default:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"

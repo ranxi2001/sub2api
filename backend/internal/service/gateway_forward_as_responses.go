@@ -712,6 +712,10 @@ func writeResponsesError(c *gin.Context, statusCode int, code, message string) {
 
 // mapUpstreamStatusCode maps upstream HTTP status codes to appropriate client-facing codes.
 func mapUpstreamStatusCode(code int) int {
+	// 上游 504/超时保持 504：这是“可重试的超时”，不是网关自身故障。
+	if code == http.StatusGatewayTimeout {
+		return http.StatusGatewayTimeout
+	}
 	if code >= 500 {
 		return http.StatusBadGateway
 	}
