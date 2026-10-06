@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -63,5 +64,75 @@ func canFallbackOpenAIWSSSEHandshake(ctx context.Context, c *gin.Context, err er
 		// Authentication, permission and rate-limit failures keep their normal
 		// error handling; changing transports must not circumvent them.
 		return false
+	}
+}
+
+// These errors are produced locally before any response.create/prewarm write.
+// Never infer replay safety from a peer close code or the absence of an event.
+var (
+	errOpenAIWSSSEPayloadTooLarge = errors.New("HTTP SSE acceleration payload exceeds WS limit")
+	errOpenAIWSSSEUnsupportedTool = errors.New("HTTP SSE acceleration does not support hosted web search")
+)
+
+const openAIWSSSEMaxPayloadBytesDefault int64 = 15 * 1024 * 1024
+
+func (s *OpenAIGatewayService) openAIWSSSEMaxPayloadBytes() int64 {
+	if s == nil || s.cfg == nil || s.cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes <= 0 {
+		return openAIWSSSEMaxPayloadBytesDefault
+	}
+	return s.cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes
+}
+
+// Inspect the already decoded payload, not another copy of the request/tools
+// JSON. This is only called for opt-in ordinary OAuth HTTP SSE acceleration.
+func hasOpenAIWSSSEUnsupportedTool(payload map[string]any) bool {
+	tools, _ := payload["tools"].([]any)
+	for _, value := range tools {
+		tool, _ := value.(map[string]any)
+		typ, _ := tool["type"].(string)
+		switch typ {
+		case "web_search", "web_search_preview", "web_search_preview_2025_03_11":
+			return true
+		}
+	}
+	return false
+}
+
+// encodeOpenAIWSSSEPayload uses the same Encoder write-through pattern as
+// wsjson.Write. The encoder's buffer is borrowed only until write returns: no
+// second marshal, full-payload copy, retained buffer, or new shared pool/lock.
+// Validate before invoking write, which may acquire a send quota. Optional
+// prewarm waits stay outside the callback so they do not retain this buffer.
+func encodeOpenAIWSSSEPayload(value any, maxBytes int64, write func([]byte) error) error {
+	return json.NewEncoder(openAIWSSSEPayloadWriter(func(p []byte) (int, error) {
+		if int64(len(p)) > maxBytes {
+			return 0, errOpenAIWSSSEPayloadTooLarge
+		}
+		if err := write(p); err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	})).Encode(value)
+}
+
+type openAIWSSSEPayloadWriter func([]byte) (int, error)
+
+func (w openAIWSSSEPayloadWriter) Write(p []byte) (int, error) {
+	return w(p)
+}
+
+func openAIWSSSEFallbackReason(ctx context.Context, c *gin.Context, err error) string {
+	if err == nil || ctx.Err() != nil || c == nil || c.Writer == nil || c.Writer.Written() {
+		return ""
+	}
+	switch {
+	case errors.Is(err, errOpenAIWSSSEPayloadTooLarge):
+		return "oauth_ws_sse_payload_too_large"
+	case errors.Is(err, errOpenAIWSSSEUnsupportedTool):
+		return "oauth_ws_sse_unsupported_tool"
+	case canFallbackOpenAIWSSSEHandshake(ctx, c, err):
+		return "oauth_ws_sse_handshake_fallback"
+	default:
+		return ""
 	}
 }

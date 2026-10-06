@@ -1485,6 +1485,9 @@ type GatewayOpenAIWSConfig struct {
 	HTTPBridgeEnabled bool `mapstructure:"http_bridge_enabled"`
 	// HTTPBridgeThresholdBytes: 触发 HTTP bridge 的入站 WS payload 阈值。
 	HTTPBridgeThresholdBytes int64 `mapstructure:"http_bridge_threshold_bytes"`
+	// SSEAccelerationMaxPayloadBytes bounds the encoded HTTP-to-WS request, including its JSON newline.
+	// Larger requests remain on HTTP/SSE; native WS ingress is unaffected.
+	SSEAccelerationMaxPayloadBytes int64 `mapstructure:"sse_acceleration_max_payload_bytes"`
 
 	// Feature 开关：v2 优先于 v1
 	ResponsesWebsockets   bool `mapstructure:"responses_websockets"`
@@ -2679,6 +2682,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.client_read_limit_bytes", 64*1024*1024)
 	viper.SetDefault("gateway.openai_ws.http_bridge_enabled", true)
 	viper.SetDefault("gateway.openai_ws.http_bridge_threshold_bytes", 15*1024*1024)
+	viper.SetDefault("gateway.openai_ws.sse_acceleration_max_payload_bytes", 15*1024*1024)
 	viper.SetDefault("gateway.openai_ws.responses_websockets", false)
 	viper.SetDefault("gateway.openai_ws.responses_websockets_v2", true)
 	viper.SetDefault("gateway.openai_ws.max_conns_per_account", 128)
@@ -3751,6 +3755,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIWS.ClientReadLimitBytes <= 0 {
 		return fmt.Errorf("gateway.openai_ws.client_read_limit_bytes must be positive")
+	}
+	if c.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes <= 0 {
+		return fmt.Errorf("gateway.openai_ws.sse_acceleration_max_payload_bytes must be positive")
 	}
 	if c.Gateway.OpenAIWS.HTTPBridgeThresholdBytes < 0 {
 		return fmt.Errorf("gateway.openai_ws.http_bridge_threshold_bytes must be non-negative")

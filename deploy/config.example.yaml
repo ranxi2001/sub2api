@@ -416,6 +416,10 @@ gateway:
     store_disabled_force_new_conn: true
     # 是否启用 WSv2 generate=false 预热（默认 false）
     prewarm_generate_enabled: false
+    # HTTP 流式 WS 加速：编码后的消息超过此字节数时，在发送前保留 HTTP/SSE。
+    # 包含 JSON 换行；默认 15 MiB 是保守路由阈值，不代表上游公布的消息大小限制。
+    # 必须为正数；不影响原生 WS 入口。环境变量 GATEWAY_OPENAI_WS_SSE_ACCELERATION_MAX_PAYLOAD_BYTES。
+    sse_acceleration_max_payload_bytes: 15728640
     # 协议 feature 开关，v2 优先于 v1
     responses_websockets: false
     responses_websockets_v2: true

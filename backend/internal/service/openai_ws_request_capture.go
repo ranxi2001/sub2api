@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
@@ -47,6 +48,9 @@ func WriteCapturedWSClient(ctx context.Context, conn *coderws.Conn, t coderws.Me
 }
 func captureWSLeaseWrite(ctx context.Context, account int64, headers http.Header, value any, write func() error) error {
 	capture := requestcapture.FromContext(ctx)
+	if payload, ok := value.(openAIWSPreparedJSON); ok {
+		value = json.RawMessage(payload)
+	}
 	n := capture.WSRequest(account, value)
 	err := write()
 	capture.AttemptResponse(n, 101, headers, err)
