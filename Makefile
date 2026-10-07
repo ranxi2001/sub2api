@@ -28,6 +28,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/user/__tests__/UsageEntryView.spec.ts \
 	src/components/admin/usage/__tests__/UsageFilters.spec.ts \
 	src/components/admin/usage/__tests__/UsageTimingDialog.spec.ts \
+	src/components/admin/usage/__tests__/UsageTable.spec.ts \
+	src/utils/__tests__/usageTps.spec.ts \
 	src/views/admin/ops/components/__tests__/OpsErrorDetailModal.spec.ts \
 	src/router/__tests__/feature-access.spec.ts \
 	src/api/admin/__tests__/requestCaptures.spec.ts \

@@ -205,8 +205,9 @@ JWT_SECRET=your_jwt_secret_here
 TOTP_ENCRYPTION_KEY=your_totp_key_here
 
 # Optional: Admin account
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=your_admin_password
+# Leave empty to generate a random login email and password on first startup.
+ADMIN_EMAIL=
+ADMIN_PASSWORD=
 
 # Optional: Custom port
 SERVER_PORT=8080
@@ -255,9 +256,9 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 
 Open `http://YOUR_SERVER_IP:8080` in your browser.
 
-If admin password was auto-generated, find it in logs:
+If the admin email (login username) or password was auto-generated, find them in logs:
 ```bash
-docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
+docker compose -f docker-compose.local.yml logs sub2api | grep "Generated admin"
 ```
 
 #### Upgrade

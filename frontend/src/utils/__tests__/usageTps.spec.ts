@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatUsageOutputTps, usageOutputTps } from '../usageTps'
+import { formatUsageOutputTps, usageOutputTps, usageOutputTpsUnavailableReason } from '../usageTps'
 
 describe('usageTps', () => {
   it('averages all output tokens over the full recorded duration', () => {
@@ -49,5 +49,31 @@ describe('usageTps', () => {
     expect(usageOutputTps({ output_tokens: 4_160, duration_ms: 40_000, image_count: 1 })).toBeNull()
     expect(usageOutputTps({ output_tokens: 4_160, duration_ms: 40_000, image_output_tokens: 4_160 })).toBeNull()
     expect(usageOutputTps({ output_tokens: 100, duration_ms: 40_000, billing_mode: 'video' })).toBeNull()
+  })
+
+  it('does not report a rate for a single output token', () => {
+    // Interrupted Anthropic stream: only message_start's placeholder output_tokens=1 was observed,
+    // while the request streamed for 21s before the upstream failed.
+    const interrupted = { output_tokens: 1, duration_ms: 21_135, first_token_ms: 973 }
+    expect(usageOutputTps(interrupted)).toBeNull()
+    expect(formatUsageOutputTps(interrupted)).toBeNull()
+    expect(usageOutputTpsUnavailableReason(interrupted)).toBe('singleToken')
+
+    expect(formatUsageOutputTps({ output_tokens: 2, duration_ms: 4_000 })).toBe('0.5 t/s')
+    expect(usageOutputTpsUnavailableReason({ output_tokens: 2, duration_ms: 4_000 })).toBeNull()
+  })
+
+  it.each([
+    [{ output_tokens: 500, duration_ms: 40_000, image_count: 2 }, 'media'],
+    [{ output_tokens: 1, duration_ms: 40_000, billing_mode: 'video' }, 'media'],
+    [{ output_tokens: 0, duration_ms: 5_000 }, 'noOutput'],
+    [{ output_tokens: NaN, duration_ms: 5_000 }, 'noOutput'],
+    [{ output_tokens: 1, duration_ms: 0 }, 'singleToken'],
+    [{ output_tokens: 100, duration_ms: null }, 'noDuration'],
+    [{ output_tokens: 100, duration_ms: Infinity }, 'noDuration'],
+    [null, 'noOutput'],
+  ] as const)('explains why TPS is unavailable for %o', (row, reason) => {
+    expect(usageOutputTpsUnavailableReason(row)).toBe(reason)
+    expect(usageOutputTps(row)).toBeNull()
   })
 })

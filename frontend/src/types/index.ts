@@ -956,6 +956,8 @@ export interface ClaudeModel {
   type: string
   display_name: string
   created_at: string
+  supported_reasoning_levels?: string[]
+  default_reasoning_level?: string
 }
 
 export interface Proxy {

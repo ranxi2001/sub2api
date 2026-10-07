@@ -7,6 +7,7 @@ package apicompat
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -688,13 +689,37 @@ type ChatCompletionsRequest struct {
 	ParallelToolCalls   *bool              `json:"parallel_tool_calls,omitempty"`
 	ToolChoice          json.RawMessage    `json:"tool_choice,omitempty"`
 	ReasoningEffort     string             `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" | "xhigh"
-	ServiceTier         string             `json:"service_tier,omitempty"`
-	Stop                json.RawMessage    `json:"stop,omitempty"` // string or []string
-	ResponseFormat      json.RawMessage    `json:"response_format,omitempty"`
+	// Reasoning accepts the Responses-style nested form ({"reasoning":{"effort":...}})
+	// that some Chat clients send. EffectiveReasoningEffort gives the nested
+	// value precedence, matching inbound accounting, without mutating either field.
+	Reasoning      *ChatReasoning  `json:"reasoning,omitempty"`
+	ServiceTier    string          `json:"service_tier,omitempty"`
+	Stop           json.RawMessage `json:"stop,omitempty"` // string or []string
+	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
 
 	// Legacy function calling (deprecated but still supported)
 	Functions    []ChatFunction  `json:"functions,omitempty"`
 	FunctionCall json.RawMessage `json:"function_call,omitempty"`
+}
+
+// ChatReasoning is the nested reasoning object accepted on Chat Completions
+// requests for Responses compatibility.
+type ChatReasoning struct {
+	Effort string `json:"effort,omitempty"`
+}
+
+// EffectiveReasoningEffort returns the requested effort using the same
+// precedence as inbound accounting: reasoning.effort, then reasoning_effort.
+func (r *ChatCompletionsRequest) EffectiveReasoningEffort() string {
+	if r == nil {
+		return ""
+	}
+	if r.Reasoning != nil {
+		if effort := strings.TrimSpace(r.Reasoning.Effort); effort != "" {
+			return effort
+		}
+	}
+	return strings.TrimSpace(r.ReasoningEffort)
 }
 
 // ChatStreamOptions configures streaming behavior.

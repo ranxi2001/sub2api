@@ -420,6 +420,12 @@ export default {
     latencyDuration: '总耗时',
     latencyTps: '平均 TPS',
     latencyTpsHint: '平均 TPS = 输出 Token ÷ 总耗时(秒). 包含等待时间及上游计入输出用量的推理 Token, 不代表模型实际生成速度.',
+    latencyTpsUnavailable: {
+      singleToken: '只记到 1 个输出 Token，算不出速度。多是流式请求中途中断（上游报错或客户端断开）：上游没发最终用量，只记下了开头的 1 个 Token。',
+      noOutput: '没有记录到输出 Token，算不出速度。',
+      noDuration: '没有记录总耗时，算不出速度。',
+      media: '图片和视频请求不计算 TPS。'
+    },
     time: '时间',
     ws: 'WS',
     stream: '流式',

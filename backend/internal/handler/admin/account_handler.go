@@ -2919,6 +2919,26 @@ func (h *AccountHandler) SetSchedulable(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
+// GetModelReasoning returns account-specific reasoning choices for a test model.
+func (h *AccountHandler) GetModelReasoning(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	modelID := strings.TrimSpace(c.Query("model_id"))
+	if modelID == "" {
+		response.BadRequest(c, "Model ID is required")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.NotFound(c, "Account not found")
+		return
+	}
+	response.Success(c, h.accountTestService.GetAccountTestReasoning(c.Request.Context(), account, modelID))
+}
+
 // GetAvailableModels handles getting available models for an account
 // GET /api/v1/admin/accounts/:id/models
 func (h *AccountHandler) GetAvailableModels(c *gin.Context) {

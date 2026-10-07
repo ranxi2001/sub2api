@@ -610,6 +610,18 @@ export async function getAvailableModels(id: number): Promise<ClaudeModel[]> {
   return data
 }
 
+export interface AccountTestReasoning {
+  supported_reasoning_levels: string[]
+  default_reasoning_level: string
+}
+
+export async function getModelReasoning(id: number, modelId: string): Promise<AccountTestReasoning> {
+  const { data } = await apiClient.get<AccountTestReasoning>(`/admin/accounts/${id}/models/reasoning`, {
+    params: { model_id: modelId }
+  })
+  return data
+}
+
 export interface SyncUpstreamModelsResult {
   models: string[]
   metadata?: Record<string, UpstreamModelMetadata>
@@ -1423,6 +1435,7 @@ export const accountsAPI = {
   resetTempUnschedulable,
   setSchedulable,
   getAvailableModels,
+  getModelReasoning,
   syncUpstreamModels,
   syncUpstreamModelsPreview,
   generateAuthUrl,

@@ -104,6 +104,9 @@ func TestPrepareVerifiesDigestBeforeExecutingAndReusesCache(t *testing.T) {
 }
 
 func TestStopCancelsPreparationAndCannotRestart(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux runtime preparation")
+	}
 	m := New(t.TempDir(), "1.2.3", "http://127.0.0.1:4040", strings.Repeat("x", 64))
 	entered := make(chan struct{})
 	m.client = &http.Client{Transport: transportFunc(func(req *http.Request) (*http.Response, error) {

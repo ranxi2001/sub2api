@@ -77,6 +77,11 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	}
 	prewarmPayload["generate"] = false
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
+	// wsjson.Write adds a newline. The extra generate=false field may exceed
+	// the limit even when the validated main request fits exactly.
+	if decision.Reason == openAIOAuthWSSSEAccelerationReason && int64(len(prewarmPayloadJSON))+1 > s.openAIWSSSEMaxPayloadBytes() {
+		return errOpenAIWSSSEPayloadTooLarge
+	}
 
 	if err := s.acquireOpenAIRPMForSend(ctx, account); err != nil {
 		return err

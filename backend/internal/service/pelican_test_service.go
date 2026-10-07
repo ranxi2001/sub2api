@@ -53,7 +53,7 @@ func (s *AccountTestService) TestPelicanAccountConnection(c *gin.Context, accoun
 
 func normalizePelicanReasoningEffort(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "minimal", "low", "medium", "high", "xhigh":
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""

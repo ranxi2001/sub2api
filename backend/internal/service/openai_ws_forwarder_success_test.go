@@ -1975,6 +1975,9 @@ func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
 	if c.closed {
 		return errOpenAIWSConnClosed
 	}
+	if prepared, ok := value.(openAIWSPreparedJSON); ok {
+		value = json.RawMessage(prepared)
+	}
 	switch payload := value.(type) {
 	case map[string]any:
 		c.lastWrite = cloneMapStringAny(payload)

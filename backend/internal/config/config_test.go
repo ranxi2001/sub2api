@@ -506,6 +506,9 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if cfg.Gateway.OpenAIWS.ClientReadLimitBytes != 64*1024*1024 {
 		t.Fatalf("Gateway.OpenAIWS.ClientReadLimitBytes = %d, want %d", cfg.Gateway.OpenAIWS.ClientReadLimitBytes, 64*1024*1024)
 	}
+	if cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes != 15*1024*1024 {
+		t.Fatalf("SSEAccelerationMaxPayloadBytes = %d, want 15 MiB", cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes)
+	}
 	if !cfg.Gateway.OpenAIWS.HTTPBridgeEnabled {
 		t.Fatalf("Gateway.OpenAIWS.HTTPBridgeEnabled = false, want true")
 	}
@@ -2676,5 +2679,17 @@ func TestLoadSimpleModeAutoCreateDefaultGroups(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestOpenAIWSSSEPayloadLimitConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_WS_SSE_ACCELERATION_MAX_PAYLOAD_BYTES", "1048576")
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.EqualValues(t, 1048576, cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes)
+	for _, limit := range []int64{0, -1} {
+		cfg.Gateway.OpenAIWS.SSEAccelerationMaxPayloadBytes = limit
+		require.ErrorContains(t, cfg.Validate(), "sse_acceleration_max_payload_bytes must be positive")
 	}
 }
