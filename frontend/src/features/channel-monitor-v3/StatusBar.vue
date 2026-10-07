@@ -1,7 +1,7 @@
 <template>
   <div
     class="flex w-full"
-    :class="size === 'lg' ? 'h-3.5 gap-[2px]' : 'h-2.5 gap-px sm:gap-[2px]'"
+    :class="size === 'lg' ? 'h-5 gap-px sm:h-6 sm:gap-[2px]' : 'h-4 gap-px sm:h-5 sm:gap-[2px]'"
     role="group"
     :aria-label="label"
     data-testid="monitor-v3-bar"

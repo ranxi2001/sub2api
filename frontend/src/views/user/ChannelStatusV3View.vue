@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="mx-auto w-full max-w-[1680px] pb-10">
+    <div class="w-full min-w-0 pb-10">
       <p v-if="error" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200" role="alert">
         {{ error }}
       </p>

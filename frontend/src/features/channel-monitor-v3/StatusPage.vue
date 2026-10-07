@@ -1,10 +1,10 @@
 <template>
-  <div class="space-y-4" data-testid="monitor-v3-page">
+  <div class="space-y-5 sm:space-y-6" data-testid="monitor-v3-page">
     <div class="flex flex-wrap items-center justify-end gap-2">
       <slot name="actions" />
       <button
         type="button"
-        class="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-gray-700 disabled:opacity-60 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
+        class="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-gray-700 disabled:opacity-60 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
         :disabled="loading"
         data-testid="monitor-v3-refresh"
         @click="emit('refresh')"
@@ -22,23 +22,23 @@
     <template v-else-if="status">
       <section
         v-if="status.featured"
-        class="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800 sm:p-5"
+        class="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800 sm:p-6 xl:p-8"
         data-testid="monitor-v3-featured"
       >
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <h2 class="truncate text-lg font-bold text-gray-900 dark:text-white sm:text-xl" :title="status.featured.description || status.featured.name">{{ status.featured.name }}</h2>
-            <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+            <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
               <StatusDot :status="status.featured.status" :label="t(`channelMonitorV3.status.${status.featured.status}`)" />
               <span data-testid="monitor-v3-featured-status">{{ t(`channelMonitorV3.headline.${status.featured.status}`) }}</span>
-              <span v-if="multiplier(status.featured)" class="ml-1 rounded-md bg-gray-100 px-1.5 py-px font-mono text-[10px] text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ multiplier(status.featured) }}</span>
+              <span v-if="multiplier(status.featured)" class="ml-1 rounded-md bg-gray-100 px-1.5 py-px font-mono text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ multiplier(status.featured) }}</span>
             </div>
           </div>
           <div class="shrink-0 text-right">
             <div class="text-3xl font-bold tabular-nums tracking-tight text-gray-900 dark:text-white sm:text-4xl" data-testid="monitor-v3-featured-availability">
               {{ formatMonitorV3Availability(status.featured.availability) }}
             </div>
-            <div class="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{{ t(`channelMonitorV3.page.availabilityRange.r${status.availability_range}`) }}</div>
+            <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t(`channelMonitorV3.page.availabilityRange.r${status.availability_range}`) }}</div>
           </div>
         </div>
         <StatusBar
@@ -52,7 +52,7 @@
           @inspect="(event, cell, index) => openDetail(event, status!.featured!, cell, index)"
           @leave="scheduleClose"
         />
-        <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
           <span>{{ t('channelMonitorV3.page.statsSince', { time: formatMonitorV3Full(status.availability_since), zone: timezoneLabel }) }}</span>
           <span>
             <template v-if="status.featured.requests">{{ t('channelMonitorV3.page.requestCount', { count: status.featured.requests }) }} · </template>
@@ -62,15 +62,15 @@
       </section>
 
       <section
-        class="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800 sm:p-5"
+        class="rounded-2xl border border-gray-200/80 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800 sm:p-6 xl:p-8"
         data-testid="monitor-v3-system"
       >
-        <header class="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <h2 class="text-base font-bold text-gray-900 dark:text-white">{{ t('channelMonitorV3.page.systemStatus') }}</h2>
-          <div class="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
+        <header class="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <h2 class="text-lg font-bold text-gray-900 dark:text-white sm:text-xl">{{ t('channelMonitorV3.page.systemStatus') }}</h2>
+          <div class="flex flex-wrap items-center gap-1 text-xs text-gray-600 sm:gap-2 sm:text-sm dark:text-gray-300">
             <button
               type="button"
-              class="grid h-6 w-6 place-items-center rounded-md transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-dark-700"
+              class="grid h-8 w-8 shrink-0 place-items-center rounded-md transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-dark-700"
               :disabled="loading || !status.window.has_older"
               :aria-label="t('channelMonitorV3.page.older')"
               data-testid="monitor-v3-older"
@@ -78,10 +78,10 @@
             >
               <Icon name="chevronLeft" size="xs" />
             </button>
-            <span class="tabular-nums" data-testid="monitor-v3-window">{{ windowRange.from }} - {{ windowRange.to }}</span>
+            <span class="whitespace-nowrap tabular-nums" data-testid="monitor-v3-window">{{ windowRange.from }} - {{ windowRange.to }}</span>
             <button
               type="button"
-              class="grid h-6 w-6 place-items-center rounded-md transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-dark-700"
+              class="grid h-8 w-8 shrink-0 place-items-center rounded-md transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-dark-700"
               :disabled="loading || status.window.latest"
               :aria-label="t('channelMonitorV3.page.newer')"
               data-testid="monitor-v3-newer"
@@ -99,7 +99,7 @@
               {{ t('channelMonitorV3.page.backToLatest') }}
             </button>
           </div>
-          <div class="ml-auto hidden items-center gap-3 text-[11px] text-gray-500 dark:text-gray-400 sm:flex">
+          <div class="flex w-full flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-500 dark:text-gray-400 xl:ml-auto xl:w-auto">
             <span v-for="item in legend" :key="item" class="inline-flex items-center gap-1" aria-hidden="true">
               <i class="h-2.5 w-2.5 rounded-[2px]" :class="item === 'empty' ? MONITOR_V3_EMPTY_CELL : MONITOR_V3_COLORS[item]" />{{ t(`channelMonitorV3.legend.${item}`) }}
             </span>
@@ -112,17 +112,17 @@
         <div v-if="!status.categories.length" class="py-14 text-center text-sm text-gray-500 dark:text-gray-400" data-testid="monitor-v3-empty">
           {{ t('channelMonitorV3.page.empty') }}
         </div>
-        <div v-else class="mt-4 grid grid-cols-1 gap-x-6 gap-y-6 lg:grid-cols-2">
+        <div v-else class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2 xl:gap-8">
           <div
             v-for="{ category, fullWidth } in layout"
             :key="category.id"
-            class="min-w-0"
-            :class="fullWidth ? 'lg:col-span-2' : ''"
+            class="min-w-0 rounded-xl border border-gray-100 bg-gray-50/60 p-4 dark:border-dark-700/70 dark:bg-dark-900/30 sm:p-5"
+            :class="fullWidth ? 'xl:col-span-2' : ''"
             data-testid="monitor-v3-category"
           >
-            <div class="flex items-center justify-between gap-2 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm">
               <div class="flex min-w-0 items-center gap-1.5">
-                <span class="truncate font-semibold text-gray-900 dark:text-white">{{ category.name }}</span>
+                <span class="truncate text-base font-semibold text-gray-900 dark:text-white">{{ category.name }}</span>
                 <span
                   v-if="category.description"
                   class="inline-flex text-gray-400 dark:text-gray-500"
@@ -134,7 +134,7 @@
                 </span>
                 <button
                   type="button"
-                  class="inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-gray-500 transition hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-700"
+                  class="inline-flex shrink-0 items-center gap-1 rounded px-1 py-1 text-xs text-gray-500 transition hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-700"
                   :aria-expanded="!collapsed.has(category.id)"
                   data-testid="monitor-v3-category-toggle"
                   @click="toggle(category.id)"
@@ -145,18 +145,18 @@
               </div>
               <span class="shrink-0 text-gray-500 dark:text-gray-400">{{ t('channelMonitorV3.page.availabilityValue', { value: formatMonitorV3Availability(category.availability) }) }}</span>
             </div>
-            <div v-show="!collapsed.has(category.id)" class="mt-2.5 space-y-3.5">
+            <div v-show="!collapsed.has(category.id)" class="mt-4 space-y-5 sm:space-y-6">
               <div v-for="component in category.components" :key="component.id" data-testid="monitor-v3-component">
-                <div class="flex items-center justify-between gap-2 text-xs">
+                <div class="flex flex-col gap-1.5 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   <div class="flex min-w-0 items-center gap-1.5">
-                    <StatusDot :status="component.status" :label="t(`channelMonitorV3.status.${component.status}`)" />
-                    <span class="truncate font-medium text-gray-800 dark:text-gray-100" :title="component.description || component.name">{{ component.name }}</span>
-                    <span v-if="multiplier(component)" class="shrink-0 rounded-md bg-gray-100 px-1.5 py-px font-mono text-[10px] text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ multiplier(component) }}</span>
+                    <StatusDot size="md" :status="component.status" :label="t(`channelMonitorV3.status.${component.status}`)" />
+                    <span class="min-w-0 break-words font-medium text-gray-800 dark:text-gray-100" :title="component.description || component.name">{{ component.name }}</span>
+                    <span v-if="multiplier(component)" class="shrink-0 rounded-md bg-gray-100 px-1.5 py-px font-mono text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ multiplier(component) }}</span>
                   </div>
                   <span class="shrink-0 tabular-nums text-gray-500 dark:text-gray-400">{{ t('channelMonitorV3.page.availabilityValue', { value: formatMonitorV3Availability(component.availability) }) }}</span>
                 </div>
                 <StatusBar
-                  class="mt-1.5"
+                  class="mt-2.5"
                   :cells="component.cells"
                   :interval-minutes="status.interval_minutes"
                   :label="t('channelMonitorV3.page.historyOf', { name: component.name })"
@@ -171,19 +171,19 @@
         </div>
       </section>
 
-      <footer class="flex flex-col items-center gap-2 pb-2 pt-1 text-center">
+      <footer class="flex flex-col items-center gap-3 pb-2 pt-1 text-center">
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:bg-dark-700"
+          class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:bg-dark-700"
           data-testid="monitor-v3-incidents"
           @click="emit('open-incidents')"
         >
           <Icon name="document" size="xs" />
           {{ t('channelMonitorV3.page.incidents') }}
-          <span v-if="status.open_incidents" class="rounded-full bg-[#f2715a] px-1.5 text-[10px] font-semibold leading-4 text-white">{{ status.open_incidents }}</span>
+          <span v-if="status.open_incidents" class="rounded-full bg-[#f2715a] px-1.5 text-xs font-semibold leading-5 text-white">{{ status.open_incidents }}</span>
         </button>
         <p class="text-xs text-gray-500 dark:text-gray-400">Powered by <strong class="font-semibold text-gray-700 dark:text-gray-200">{{ siteName }}</strong></p>
-        <p class="max-w-3xl whitespace-pre-line text-[11px] leading-relaxed text-gray-400 dark:text-gray-500" data-testid="monitor-v3-footer-note">
+        <p class="max-w-3xl whitespace-pre-line text-xs leading-relaxed text-gray-500 dark:text-gray-400" data-testid="monitor-v3-footer-note">
           {{ status.footer_note || t('channelMonitorV3.page.defaultFooter') }}
         </p>
       </footer>

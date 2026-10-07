@@ -68,8 +68,8 @@ describe('V3 status page', () => {
 
     const categories = wrapper.findAll('[data-testid="monitor-v3-category"]')
     expect(categories).toHaveLength(3)
-    expect(categories[2].classes()).toContain('lg:col-span-2')
-    expect(categories[0].classes()).not.toContain('lg:col-span-2')
+    expect(categories[2].classes()).toContain('xl:col-span-2')
+    expect(categories[0].classes()).not.toContain('xl:col-span-2')
     expect(categories[0].text()).toContain('channelMonitorV3.page.componentCount:{"count":2}')
     expect(categories[0].text()).toContain('88.6%')
 
