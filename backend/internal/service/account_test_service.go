@@ -383,7 +383,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 			if model == "" {
 				model = openai.DefaultTestModel
 			}
-			if !account.IsExcelBPSEnabledForModel(model) || s.openaiGatewayService == nil {
+			if !account.IsExcelBPSEnabledForModel(model) || s.openaiGatewayService == nil || !s.openaiGatewayService.excelBPSGloballyEnabled(ctx) {
 				return s.sendErrorAndEnd(c, "BPS observation unavailable: BPS must be enabled for this model; native fallback is disabled")
 			}
 		}
@@ -418,7 +418,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	}
 
 	if account.IsOpenAI() {
-		if account.IsPrismBrowserEnabledForModel(modelID) {
+		if account.IsPrismBrowserEnabledForModel(modelID) && s.openaiGatewayService != nil && s.openaiGatewayService.prismBrowserGloballyEnabled(c.Request.Context()) {
 			if normalizeAccountTestMode(mode) != AccountTestModeDefault || testOpts.ImageDataURL != "" || testOpts.AudioDataURL != "" {
 				return s.sendErrorAndEnd(c, "Prism supports the default text test only")
 			}
@@ -865,11 +865,14 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// silently bypasses the account's protocol toggle, producing misleading
 	// quality-test results.
 	if mode == AccountTestModeBPSTools {
+		if s.openaiGatewayService == nil || !s.openaiGatewayService.excelBPSGloballyEnabled(ctx) {
+			return s.sendErrorAndEnd(c, "Excel BPS is disabled globally")
+		}
 		return s.testExcelBPSToolRoundtrip(c, account, modelID)
 	}
 	// Image models use the image test below, which applies the gateway's BPS
 	// image routing; the text BPS test would send them to /responses.
-	if account.IsExcelBPSEnabled() && s.openaiGatewayService != nil && !isOpenAIImageModel(account.GetMappedModel(strings.TrimSpace(modelID))) {
+	if account.IsExcelBPSEnabled() && s.openaiGatewayService != nil && s.openaiGatewayService.excelBPSGloballyEnabled(ctx) && !isOpenAIImageModel(account.GetMappedModel(strings.TrimSpace(modelID))) {
 		return s.testExcelBPSAccountConnection(c, account, modelID, prompt)
 	}
 
@@ -3377,7 +3380,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	applyOpenAIImagesDefaults(parsed)
 
 	upstreamModel := account.GetMappedModel(parsed.Model)
-	if s.openaiGatewayService != nil && account.IsExcelBPSImagesEnabledForModel(parsed.Model) {
+	if s.openaiGatewayService != nil && s.openaiGatewayService.excelBPSGloballyEnabled(ctx) && account.IsExcelBPSImagesEnabledForModel(parsed.Model) {
 		if handled, err := s.testExcelBPSImages(c, ctx, account, parsed, upstreamModel); handled {
 			return err
 		}

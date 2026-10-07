@@ -399,6 +399,7 @@ export function deriveWeChatConnectStoredMode(
  * System settings interface
  */
 export interface SystemSettings {
+	excel_bps_enabled: boolean;
 	prism_browser_enabled: boolean;
 	prism_browser_base_url: string;
 	prism_browser_api_key_configured: boolean;
@@ -793,6 +794,7 @@ export interface SystemSettings {
 }
 
 export interface UpdateSettingsRequest {
+	excel_bps_enabled?: boolean;
 	prism_browser_enabled?: boolean;
 	prism_browser_base_url?: string;
 	prism_browser_api_key?: string;

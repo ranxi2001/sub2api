@@ -1,6 +1,6 @@
 <template>
   <span
-    v-if="actions.length"
+    v-if="protocolEnabled && actions.length"
     data-test="excel-bps-403-badge"
     class="mt-1 inline-flex items-center self-start rounded bg-amber-400 px-1.5 py-0.5 text-[11px] font-semibold leading-4 text-amber-950 ring-1 ring-amber-500"
     :title="title"
@@ -15,13 +15,15 @@ import { useI18n } from 'vue-i18n'
 import type { AccountListItem } from '@/types'
 import { formatDateTime } from '@/utils/format'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   account: Pick<AccountListItem, 'platform' | 'type' | 'extra' | 'group_ids'>
+  globalBpsEnabled?: boolean
   // The account's current groups, used to name the destination group.
   groups?: { id: number; name: string }[]
-}>()
+}>(), { globalBpsEnabled: true })
 
 const { t } = useI18n()
+const protocolEnabled = computed(() => props.globalBpsEnabled)
 
 function parseTime(value: unknown): Date | null {
   if (typeof value !== 'string') return null

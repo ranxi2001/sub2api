@@ -415,6 +415,12 @@ export default {
     latencyDuration: 'Total',
     latencyTps: 'Avg TPS',
     latencyTpsHint: 'Average TPS = output tokens ÷ total duration (seconds). Includes waiting time and any reasoning tokens reported in output usage; not model generation speed.',
+    latencyTpsUnavailable: {
+      singleToken: 'Only 1 output token was recorded, so no speed can be computed. This is usually an interrupted stream (upstream error or client disconnect): the upstream never sent the final usage, so only the initial 1-token count was recorded.',
+      noOutput: 'No output tokens were recorded, so no speed can be computed.',
+      noDuration: 'No total duration was recorded, so no speed can be computed.',
+      media: 'TPS is not computed for image and video requests.'
+    },
     time: 'Time',
     ws: 'WS',
     stream: 'Stream',

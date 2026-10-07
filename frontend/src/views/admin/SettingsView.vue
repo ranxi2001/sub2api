@@ -207,13 +207,9 @@
           <div class="card" data-testid="prism-browser-settings">
             <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Prism 浏览器桥</h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">管理员在这里启用全局开关；账号仍需单独勾选 Prism。</p>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">账号可单独选择 Prism 模型范围。</p>
             </div>
             <div class="space-y-4 p-6">
-              <label class="flex items-center gap-3">
-                <input v-model="form.prism_browser_enabled" type="checkbox" class="h-4 w-4" data-testid="prism-browser-enabled" />
-                <span class="font-medium text-gray-900 dark:text-white">启用 Prism 浏览器桥</span>
-              </label>
               <label class="block">
                 <span class="mb-1 block text-sm text-gray-600 dark:text-gray-300">适配器 Base URL</span>
                 <input v-model="form.prism_browser_base_url" class="input w-full" placeholder="http://127.0.0.1:8319/v1" />
@@ -7375,8 +7371,24 @@
         </div>
         <!-- /Tab: Login Agreement -->
 
-	        <!-- Tab: Features (功能开关) -->
+        <!-- Tab: Features (功能开关) -->
         <div v-show="activeTab === 'features'" class="space-y-6">
+        <div class="card" data-testid="protocol-feature-switches">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">协议功能</h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">关闭后立即停止使用对应协议，并隐藏账号编辑中的相关选项。</p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <span class="font-medium text-gray-900 dark:text-white">Excel / BPS 协议</span>
+              <Toggle v-model="form.excel_bps_enabled" />
+            </div>
+            <div class="flex items-center justify-between gap-4">
+              <span class="font-medium text-gray-900 dark:text-white">Prism 浏览器桥</span>
+              <Toggle v-model="form.prism_browser_enabled" />
+            </div>
+          </div>
+        </div>
         <div class="card" data-testid="request-capture-settings">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <h2 id="settings-section-request-capture" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('admin.requestCapture.title') }}</h2>
@@ -10155,6 +10167,7 @@ let loadedChannelMonitorMode: 'v1' | 'v2' | 'v3' = 'v1'
 const channelMonitorModes = ['v1', 'v2', 'v3'] as const
 
 const form = reactive<SettingsForm>({
+  excel_bps_enabled: true,
   prism_browser_enabled: false,
   prism_browser_base_url: "http://127.0.0.1:8319/v1",
   prism_browser_api_key_configured: false,
@@ -11559,6 +11572,7 @@ async function loadSettings() {
     form.channel_monitor_hide_user_ranking = Boolean(
       settings.channel_monitor_hide_user_ranking
     );
+    form.excel_bps_enabled = settings.excel_bps_enabled !== false;
     form.prism_browser_enabled = Boolean(settings.prism_browser_enabled);
     form.prism_browser_base_url = settings.prism_browser_base_url || "http://127.0.0.1:8319/v1";
     form.prism_browser_api_key_configured = Boolean(settings.prism_browser_api_key_configured);
@@ -12002,6 +12016,7 @@ async function saveSettings() {
 
     const payload: UpdateSettingsRequest = {
       prism_browser_enabled: form.prism_browser_enabled,
+      excel_bps_enabled: form.excel_bps_enabled,
       prism_browser_base_url: form.prism_browser_base_url,
       ...(form.prism_browser_api_key ? { prism_browser_api_key: form.prism_browser_api_key } : {}),
       registration_enabled: form.registration_enabled,

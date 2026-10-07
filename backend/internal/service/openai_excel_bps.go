@@ -103,6 +103,14 @@ func (s *OpenAIGatewayService) excelBPSImageRelay(ctx context.Context) (*basispo
 
 func (s *OpenAIGatewayService) excelBPSImageRelayForSettings(settings ExcelBPSImageRelaySettings) (*basispoints.ImageRelay, error) {
 	if !settings.Enabled || settings.Mode == ExcelBPSImageModeNative {
+		if s != nil {
+			s.excelBPSImagesMu.Lock()
+			if s.excelBPSImages != nil {
+				_ = s.excelBPSImages.Close()
+				s.excelBPSImages = nil
+			}
+			s.excelBPSImagesMu.Unlock()
+		}
 		return nil, nil
 	}
 	var err error
@@ -135,7 +143,12 @@ func (s *OpenAIGatewayService) CloseExcelBPSImages() error {
 
 // ServeExcelBPSImage allows the upstream to retrieve an unguessable temporary URL.
 func (s *OpenAIGatewayService) ServeExcelBPSImage(c *gin.Context) {
-	relay, _ := s.excelBPSImageRelay(c.Request.Context())
+	c.Header("Cache-Control", "private, no-store")
+	relay, err := s.excelBPSImageRelay(c.Request.Context())
+	if err != nil || relay == nil {
+		http.NotFound(c.Writer, c.Request)
+		return
+	}
 	relay.ServeHTTP(c.Writer, c.Request)
 }
 

@@ -63,6 +63,21 @@ func accountHasPrismBrowser(account *Account) bool {
 	return enabled
 }
 
+func (s *OpenAIGatewayService) prismBrowserGloballyEnabled(ctx context.Context) bool {
+	if s == nil || s.settingService == nil {
+		return s != nil && s.cfg != nil && s.cfg.Gateway.PrismBrowser.Enabled
+	}
+	return s.settingService.GetPrismBrowserRuntime(ctx).Enabled
+}
+
+func (s *OpenAIGatewayService) excelBPSGloballyEnabled(ctx context.Context) bool {
+	if s == nil || s.settingService == nil {
+		return true
+	}
+	enabled, err := s.settingService.GetProtocolFeatureEnabled(ctx, SettingKeyExcelBPSEnabled)
+	return err == nil && enabled
+}
+
 func prismBrowserResponsesURL(baseURL string) string {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
@@ -141,14 +156,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	modelForBPS := gjson.GetBytes(body, "model").String()
-	if account.IsPrismBrowserEnabledForModel(modelForBPS) {
+	if account.IsPrismBrowserEnabledForModel(modelForBPS) && s.prismBrowserGloballyEnabled(ctx) {
 		return s.forwardPrismBrowser(ctx, c, account, body, startTime)
 	}
 	if c.GetBool(bpsAccountProbeRequiredContextKey) &&
 		(!account.IsExcelBPSEnabledForModel(modelForBPS) || account.excelBPSNativeFallbackReason(body) != "") {
 		return nil, errors.New("bps probe path is unavailable")
 	}
-	if account.IsExcelBPSEnabledForModel(modelForBPS) {
+	if account.IsExcelBPSEnabledForModel(modelForBPS) && s.excelBPSGloballyEnabled(ctx) {
 		return s.forwardExcelBPS(ctx, c, account, body, startTime)
 	}
 

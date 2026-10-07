@@ -11,11 +11,12 @@ const mocks = vi.hoisted(() => ({
   createPlan: vi.fn(),
   updatePlan: vi.fn(),
   showError: vi.fn(),
-  showWarning: vi.fn()
+  showWarning: vi.fn(),
+  publicSettings: { excel_bps_enabled: true, prism_browser_enabled: true }
 }))
 
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ showError: mocks.showError, showSuccess: vi.fn(), showInfo: vi.fn(), showWarning: mocks.showWarning })
+  useAppStore: () => ({ showError: mocks.showError, showSuccess: vi.fn(), showInfo: vi.fn(), showWarning: mocks.showWarning, cachedPublicSettings: mocks.publicSettings })
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -93,9 +94,20 @@ const toggleSelector = '[data-testid="account-auto-bps-toggle"]'
 
 describe('EditAccountModal Prism OAuth switch', () => {
   beforeEach(() => {
-    Object.values(mocks).forEach(mock => mock.mockReset())
+    Object.entries(mocks).forEach(([key, mock]) => {
+      if (key !== 'publicSettings') mock.mockReset()
+    })
+    mocks.publicSettings = { excel_bps_enabled: true, prism_browser_enabled: true }
     mocks.updateAccount.mockImplementation(async (_id: number, payload: Record<string, unknown>) => ({ ...buildOAuthAccount(), ...payload }))
     mocks.listByAccount.mockResolvedValue([])
+  })
+
+  it('hides BPS and Prism account settings when the global switches are off', () => {
+    mocks.publicSettings = { excel_bps_enabled: false, prism_browser_enabled: false }
+    const wrapper = mountModal()
+    expect(wrapper.find('[data-testid="openai-prism-browser-oauth-settings"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="excel-bps-all-models"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('persists the Prism switch while preserving unrelated extra fields', async () => {
@@ -145,7 +157,11 @@ describe('EditAccountModal Prism OAuth switch', () => {
 
 describe('EditAccountModal auto BPS switch', () => {
   beforeEach(() => {
-    Object.values(mocks).forEach(mock => mock.mockReset())
+    Object.values(mocks).forEach(mock => {
+      if (typeof mock === 'function') mock.mockReset()
+    })
+    mocks.publicSettings.excel_bps_enabled = true
+    mocks.publicSettings.prism_browser_enabled = true
     mocks.updateAccount.mockImplementation(async (_id: number, payload: Record<string, unknown>) => ({ ...buildOAuthAccount(), ...payload }))
     mocks.listByAccount.mockResolvedValue([])
     mocks.createPlan.mockImplementation(async (request: Record<string, unknown>) => ({ ...buildRule(), ...request, id: 40 }))

@@ -70,6 +70,19 @@ function movedAccount(groupID: number, groupIDs: number[] | undefined, extra: Re
 }
 
 describe('ExcelBPS403Badge', () => {
+  it('hides the 403 tag when the global protocol switch is off', () => {
+    const wrapper = mount(ExcelBPS403Badge, {
+      props: {
+        account: makeAccount({
+          extra: { openai_excel_bps: false, openai_excel_bps_403_disabled_at: disabledAt }
+        }),
+        globalBpsEnabled: false,
+      }
+    })
+
+    expect(wrapper.find(badge).exists()).toBe(false)
+  })
+
   it('BPS 403 自动关闭协议后显示标签和触发时间', () => {
     const wrapper = mount(ExcelBPS403Badge, {
       props: {

@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col items-start gap-1">
     <span
-      v-if="isExcelBPSEnabled"
+      v-if="protocolEnabled && isExcelBPSEnabled"
       data-testid="bps-status-badge"
       class="inline-flex items-center rounded bg-[#217346] px-1.5 py-0.5 text-[10px] font-semibold leading-3 text-white"
       :title="t('admin.accounts.openai.excelBPS')"
@@ -155,13 +155,16 @@ import { formatCountdown, formatDateTime, formatDateTimeToMinute, formatCountdow
 
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   account: Account
-}>()
+  globalBpsEnabled?: boolean
+}>(), { globalBpsEnabled: true })
 
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
+
+const protocolEnabled = computed(() => props.globalBpsEnabled)
 
 // Keep eligibility aligned with Account.IsExcelBPSEnabled on the backend.
 const isExcelBPSEnabled = computed(() => {

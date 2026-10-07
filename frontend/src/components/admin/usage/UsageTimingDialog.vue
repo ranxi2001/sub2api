@@ -31,7 +31,7 @@
           <details class="mt-3 text-xs text-sky-800 dark:text-sky-300"><summary class="cursor-pointer">{{ t('requestTiming.health.thresholdTitle') }}</summary><p class="mt-2 leading-relaxed">{{ t('requestTiming.health.thresholds') }}</p></details>
         </div>
         <p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('requestTiming.scope') }}</p>
-        <p class="text-sm"><strong>{{ t('usage.latencyTps') }} {{ formatUsageOutputTps(record) ?? '—' }}</strong> · {{ t('requestTiming.tpsNote') }}</p>
+        <p class="text-sm"><strong>{{ t('usage.latencyTps') }} {{ formatUsageOutputTps(record) ?? '—' }}</strong> · {{ tpsUnavailableReason ? t(`usage.latencyTpsUnavailable.${tpsUnavailableReason}`) : t('requestTiming.tpsNote') }}</p>
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('requestTiming.health.attemptGuide') }}</p>
         <p v-if="trace.truncated" class="text-amber-600">{{ t('requestTiming.truncated') }}</p>
         <div class="grid gap-4 lg:grid-cols-3">
@@ -65,7 +65,7 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { AdminUsageLog } from '@/types'
 import { formatDateTime } from '@/utils/format'
-import { formatUsageOutputTps } from '@/utils/usageTps'
+import { formatUsageOutputTps, usageOutputTpsUnavailableReason } from '@/utils/usageTps'
 import { timingHealth, stageScale, TIMING_TEXT, TIMING_SURFACE, TIMING_BAR, type TimingHealth, type TimingScale } from '@/utils/requestTimingHealth'
 import { getUsageTiming, type RequestTiming, type TimingAttempt, type TimingSpan } from '@/api/admin/usageTiming'
 import { observerUsageAPI } from '@/api/observerUsage'
@@ -77,6 +77,7 @@ const { t } = useI18n()
 const traces = ref<RequestTiming[]>([]), selected = ref(0), loading = ref(false), error = ref(false), retention = ref(30)
 let controller: AbortController | undefined
 const trace = computed(() => traces.value[selected.value])
+const tpsUnavailableReason = computed(() => usageOutputTpsUnavailableReason(props.record))
 const label = (name: string) => t(`requestTiming.fields.${name}`)
 const ms = (value: number | null | undefined) => value == null ? t('requestTiming.missing') : value < 1 ? '<1ms' : value < 1000 ? `${value.toFixed(0)}ms` : `${(value / 1000).toFixed(2)}s`
 const bytes = (value: number) => value < 0 ? t('requestTiming.missing') : `${(value / 1048576).toFixed(3)} MiB`

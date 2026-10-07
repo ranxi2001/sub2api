@@ -1001,7 +1001,23 @@ describe('admin UsageTable latency TPS', () => {
     ])
 
     expect(tpsCell(wrapper, 'req-tps-empty').text()).toBe('-')
-    expect(tpsCell(wrapper, 'req-tps-empty').attributes('title')).toBeUndefined()
+    expect(tpsCell(wrapper, 'req-tps-empty').attributes('title')).toBe('usage.latencyTpsUnavailable.noOutput')
     expect(tpsCell(wrapper, 'req-tps-image').text()).toBe('-')
+    expect(tpsCell(wrapper, 'req-tps-image').attributes('title')).toBe('usage.latencyTpsUnavailable.media')
+  })
+
+  it('explains the placeholder instead of showing 0.0 t/s for an interrupted stream with one output token', () => {
+    const wrapper = mountLatency([
+      // first token 973ms (good), total 21.14s (good); only the 1-token placeholder was recorded
+      { request_id: 'req-tps-interrupted', input_tokens: 0, output_tokens: 1, cache_read_tokens: 15_729, cache_creation_tokens: 4_898, duration_ms: 21_135, first_token_ms: 973 },
+    ])
+
+    const cell = tpsCell(wrapper, 'req-tps-interrupted')
+    expect(cell.text()).toBe('-')
+    expect(cell.attributes('title')).toBe('usage.latencyTpsUnavailable.singleToken')
+    expect(cell.classes()).not.toContain('text-red-600')
+    expect(barClasses(wrapper, 'req-tps-interrupted')).toEqual(
+      expect.arrayContaining(['from-emerald-500', 'via-emerald-500', 'to-emerald-500']),
+    )
   })
 })

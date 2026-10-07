@@ -255,7 +255,7 @@
                 :class="LATENCY_TEXT_CLASSES[tpsSeverity(usageOutputTps(row) ?? 0)]"
                 :title="t('usage.latencyTpsHint')"
               >{{ formatUsageOutputTps(row) }}</span>
-              <span v-else data-testid="latency-tps" class="text-gray-400 dark:text-gray-500">-</span>
+              <span v-else data-testid="latency-tps" class="text-gray-400 dark:text-gray-500" :title="tpsUnavailableHint(row)">-</span>
             </div>
           </component>
         </template>
@@ -561,7 +561,7 @@ import {
   firstTokenSeverity,
   tpsSeverity,
 } from '@/utils/latencyHealth'
-import { formatUsageOutputTps, usageOutputTps } from '@/utils/usageTps'
+import { formatUsageOutputTps, usageOutputTps, usageOutputTpsUnavailableReason } from '@/utils/usageTps'
 import {
   BILLING_MODE_TOKEN,
   getBillingModeLabel,
@@ -755,6 +755,12 @@ const formatDuration = (ms: number | null | undefined): string => {
   const totalSec = Math.round(ms / 1000)
   if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
   return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
+}
+
+// TPS 显示占位符时说明原因（只有 1 个输出 Token 的多是中断的流式请求）
+const tpsUnavailableHint = (row: AdminUsageLog): string | undefined => {
+  const reason = usageOutputTpsUnavailableReason(row)
+  return reason ? t(`usage.latencyTpsUnavailable.${reason}`) : undefined
 }
 
 // 延迟色条三段依次对应首字/总耗时/TPS 三行（30%/50%/70% 分别落在三行内）；无首字或无 TPS 的段沿用总耗时档
