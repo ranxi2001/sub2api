@@ -45,6 +45,25 @@ func TestNormalizeOpenAIResponsesLegacyIngressConvertsChatTopLevelFields(t *test
 	require.False(t, gjson.GetBytes(normalized, "reasoning_effort").Exists())
 }
 
+func TestNormalizeOpenAIResponsesLegacyIngressPreservesNativeReasoning(t *testing.T) {
+	for _, reasoning := range []string{
+		`{"effort":"high","summary":"detailed"}`,
+		`{"effort":"high","summary":"concise"}`,
+		`{"effort":"high"}`,
+		`{"effort":"high","summary":null}`,
+	} {
+		t.Run(reasoning, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-6-sol","messages":[{"role":"user","content":"hello"}],"reasoning":` + reasoning + `}`)
+			normalized, changed, err := normalizeOpenAIResponsesLegacyIngress(body)
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.False(t, gjson.GetBytes(normalized, "messages").Exists())
+			require.Equal(t, "hello", gjson.GetBytes(normalized, "input.0.content").String())
+			require.JSONEq(t, reasoning, gjson.GetBytes(normalized, "reasoning").Raw)
+		})
+	}
+}
+
 func TestNormalizeOpenAIResponsesLegacyIngressNativeInputRemainsAuthoritative(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":[{"id":"msg_native","type":"message","role":"user","content":[{"type":"input_text","text":"keep me"}]}],"messages":[{"role":"user","content":"do not merge"}],"tools":[{"type":"function","function":{"name":"native_shape"}}],"tool_choice":{"type":"function","function":{"name":"native_shape"}},"previous_response_id":"resp_keep"}`)
 
