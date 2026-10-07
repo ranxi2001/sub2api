@@ -1,0 +1,17 @@
+{
+  "source_commit": "133aff7d85121eaa9e70e471967924d0e86d46f2",
+  "before_commit": "1c28a9f5a1e9fbc00eb4f25c7f0e77a81c8e45fd",
+  "component": "frontend/src/components/account/CreateAccountModal.vue",
+  "mode": "actual component and styles with mocked HTTP API; no full-page navigation, account creation or production validation",
+  "fixtures": "empty groups/proxies; credential encryption configured; web search disabled",
+  "screenshots": [
+    "before.png",
+    "entry.png",
+    "oauth-off.png",
+    "oauth-on.png",
+    "two-fa-on.png",
+    "dark.png",
+    "mobile.png"
+  ],
+  "browser_errors": []
+}

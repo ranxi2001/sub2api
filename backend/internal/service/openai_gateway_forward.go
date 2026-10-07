@@ -1163,7 +1163,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, wsErr
 		}
 		// Discard the unused WS handshake header before HTTP commits its own.
-		c.Writer.Header().Del(http.CanonicalHeaderKey(openAIWSTurnStateHeader))
+		c.Writer.Header().Del(openAIWSTurnStateHeader)
 		// WS skipped the HTTP namespace policy above. A local pre-send or
 		// handshake fallback must honor the same request/response mapping as
 		// ordinary HTTP, not just change the transport metadata.

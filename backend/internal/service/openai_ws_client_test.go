@@ -145,7 +145,7 @@ func TestCoderOpenAIWSClientConn_PreparedJSONOwnershipAndRawValidation(t *testin
 					got.err = err
 					return
 				}
-				defer conn.CloseNow()
+				defer func() { _ = conn.CloseNow() }()
 				conn.SetReadLimit(1 << 20)
 				// Keep the socket open without consuming messages until the caller
 				// has overwritten its buffers and checked invalid RawMessage.
@@ -176,7 +176,7 @@ func TestCoderOpenAIWSClientConn_PreparedJSONOwnershipAndRawValidation(t *testin
 			}()
 			conn, resp, err := coderws.Dial(ctx, srv.URL, &coderws.DialOptions{CompressionMode: tc.mode})
 			require.NoError(t, err)
-			defer conn.CloseNow()
+			defer func() { _ = conn.CloseNow() }()
 			if tc.mode == coderws.CompressionContextTakeover {
 				require.Contains(t, resp.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate")
 				require.NotContains(t, resp.Header.Get("Sec-WebSocket-Extensions"), "no_context_takeover")
