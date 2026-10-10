@@ -137,7 +137,7 @@ func (r *newAPIAuthorizationRepository) Save(ctx context.Context, p *service.New
 		if e != nil {
 			return e
 		}
-		_, e = tx.ExecContext(ctx, `UPDATE accounts SET extra=(COALESCE(extra,'{}'::jsonb)-'upstream_billing_probe') || '{"upstream_billing_provider":"new_api","upstream_billing_probe_enabled":true,"upstream_billing_rate_sync_enabled":false}'::jsonb,updated_at=NOW() WHERE id=$1`, b.Account.ID)
+		_, e = tx.ExecContext(ctx, `UPDATE accounts SET extra=(COALESCE(extra,'{}'::jsonb)-'upstream_billing_probe') || jsonb_build_object('upstream_billing_provider','new_api','upstream_billing_site',$2::text,'upstream_billing_user_id',$3::bigint,'upstream_billing_probe_enabled',true,'upstream_billing_rate_sync_enabled',false),updated_at=NOW() WHERE id=$1`, b.Account.ID, p.SiteURL, p.UserID)
 		if e != nil {
 			return e
 		}
@@ -156,7 +156,7 @@ func (r *newAPIAuthorizationRepository) Unbind(ctx context.Context, id int64) er
 		return e
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, e = tx.ExecContext(ctx, `UPDATE accounts SET extra=COALESCE(extra,'{}'::jsonb)-'upstream_billing_provider'-'upstream_billing_probe',updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id); e != nil {
+	if _, e = tx.ExecContext(ctx, `UPDATE accounts SET extra=COALESCE(extra,'{}'::jsonb)-'upstream_billing_provider'-'upstream_billing_site'-'upstream_billing_user_id'-'upstream_billing_probe',updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id); e != nil {
 		return e
 	}
 	if _, e = tx.ExecContext(ctx, `DELETE FROM new_api_account_bindings WHERE account_id=$1`, id); e != nil {

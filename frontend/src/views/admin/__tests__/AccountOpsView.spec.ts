@@ -4,27 +4,28 @@ import { reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import AccountOpsView from '../AccountOpsView.vue'
 import { useAppStore } from '@/stores/app'
-import { getAccountOpsSettings, getAccountOpsEvents, getAccountOpsThresholdAccounts, saveAccountOpsNotificationSettings, saveAccountOpsRule, testAccountOpsWebhook } from '@/api/admin/accountOps'
+import { getAccountOpsSettings, getAccountOpsEvents, getAccountOpsThresholdAccounts, getAccountOpsThresholdGroups, saveAccountOpsGroups, saveAccountOpsNotificationSettings, saveAccountOpsRulesBatch, saveAccountOpsRuleGroups, testAccountOpsWebhook } from '@/api/admin/accountOps'
 const state = vi.hoisted(() => ({ auth: null as any }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => state.auth }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@/api/admin/accountOps', () => ({ getAccountOpsSettings: vi.fn(), getAccountOpsEvents: vi.fn(), getAccountOpsThresholdAccounts: vi.fn(), saveAccountOpsNotificationSettings: vi.fn(), saveAccountOpsRule: vi.fn(), saveAccountOpsRulesBatch: vi.fn(), saveAccountOpsRuleGroups: vi.fn(), deleteAccountOpsRule: vi.fn(), saveAccountOpsWebhook: vi.fn(), deleteAccountOpsWebhook: vi.fn(), testAccountOpsWebhook: vi.fn() }))
+vi.mock('@/api/admin/accountOps', () => ({ getAccountOpsSettings: vi.fn(), getAccountOpsEvents: vi.fn(), getAccountOpsThresholdAccounts: vi.fn(), getAccountOpsThresholdGroups: vi.fn(), saveAccountOpsNotificationSettings: vi.fn(), saveAccountOpsRulesBatch: vi.fn(), saveAccountOpsRuleGroups: vi.fn(), saveAccountOpsGroups: vi.fn(), deleteAccountOpsRule: vi.fn(), saveAccountOpsWebhook: vi.fn(), deleteAccountOpsWebhook: vi.fn(), testAccountOpsWebhook: vi.fn() }))
 const config = { enabled: false, recipient: '', balance_low: true, weekly_quota: true, cooldown_minutes: 60, webhooks: [], balance_thresholds: [], quota_thresholds: [] }
 const settings = () => ({ config: { ...config }, smtp_configured: true, dropped_signals: 0, storage_failures: 0, encryption_key_configured: true })
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }
 const create = () => mount(AccountOpsView, { global: { plugins: [createPinia()], stubs: { teleport: true } } })
-beforeEach(() => { vi.resetAllMocks(); state.auth = reactive({ user: { id: 1, role: 'admin' } }); vi.mocked(getAccountOpsSettings).mockResolvedValue(settings()); vi.mocked(getAccountOpsEvents).mockResolvedValue({ items: [], has_more: false }); vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([]); vi.mocked(testAccountOpsWebhook).mockResolvedValue({ ok: true }); vi.mocked(saveAccountOpsNotificationSettings).mockImplementation(async c => ({ ...config, ...c })); vi.mocked(saveAccountOpsRule).mockResolvedValue(config) })
+beforeEach(() => { vi.resetAllMocks(); state.auth = reactive({ user: { id: 1, role: 'admin' } }); vi.mocked(getAccountOpsSettings).mockResolvedValue(settings()); vi.mocked(getAccountOpsEvents).mockResolvedValue({ items: [], has_more: false }); vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([]); vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue([]); vi.mocked(saveAccountOpsGroups).mockResolvedValue(config); vi.mocked(saveAccountOpsRulesBatch).mockResolvedValue(config); vi.mocked(saveAccountOpsRuleGroups).mockResolvedValue(config); vi.mocked(testAccountOpsWebhook).mockResolvedValue({ ok: true }); vi.mocked(saveAccountOpsNotificationSettings).mockImplementation(async c => ({ ...config, ...c })) })
 describe('account operations tabs and independent saves', () => {
   it('initializes a dynamically opened dialog from saved recovery-only flags', async () => {
     vi.mocked(getAccountOpsSettings).mockResolvedValue({ ...settings(), config: { ...config, balance_thresholds: [{ account_id: 1, enabled: true, threshold: 5, unit: 'USD', notify_alert: false, notify_recovery: true }] } } as any)
     vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([{ account_id: 1, account_name: 'key', type: 'apikey', platform: 'openai', balance: 3, unit: 'USD', balance_status: 'ok', received_at: null, usage_windows: [] }])
+    vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue([{ id: 'manual-recovery', name: 'Recovery', default_name: 'Recovery', provider: 'sub2api', site: 'https://example.com', mode: 'manual', account_ids: [1] }])
     const wrapper = create(); await flushPromises()
     await wrapper.get('[data-testid="account-ops-tab-settings"]').trigger('click'); await flushPromises()
-    await wrapper.get('[data-testid="edit-rule-1"]').trigger('click'); await flushPromises()
-    expect((wrapper.get('[data-testid="rule-notify-alert"]').element as HTMLInputElement).checked).toBe(false)
-    expect((wrapper.get('[data-testid="rule-threshold"]').element as HTMLInputElement).value).toBe('5')
+    await wrapper.get('[data-testid="edit-rule-manual-recovery"]').trigger('click'); await flushPromises()
+    expect((wrapper.get('[data-testid="batch-rule-notify-alert"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-testid="batch-rule-threshold"]').element as HTMLInputElement).value).toBe('5')
     wrapper.unmount()
   })
 
@@ -52,6 +53,34 @@ describe('account operations tabs and independent saves', () => {
     expect(wrapper.get('[data-testid="notifications-enabled"]').attributes('aria-checked')).toBe('true')
     await wrapper.get('[data-testid="account-ops-tab-settings"]').trigger('keydown', { key: 'End' })
     expect(wrapper.get('[data-testid="account-ops-tab-records"]').attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+  it('renames an automatic group and creates a manual membership group', async () => {
+    vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([{ account_id: 1, account_name: 'key', type: 'apikey', platform: 'openai', balance: 3, unit: 'USD', balance_status: 'ok', received_at: null, usage_windows: [] }])
+    vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue([{ id: 'manual-primary', name: 'example.com', default_name: 'example.com', provider: 'sub2api', site: 'https://example.com', mode: 'manual', account_ids: [1] }])
+    const wrapper = create(); await flushPromises()
+    await wrapper.get('[data-testid="edit-account-groups"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="account-group-name-manual-primary"]').setValue('主站余额')
+    await wrapper.get('[data-testid="add-account-group"]').trigger('click')
+    const manual = wrapper.findAll('[data-testid^="account-group-name-manual-"]').at(-1)!
+    await manual.setValue('手动组')
+    const member = wrapper.findAll('[data-testid^="account-group-member-manual-"]').at(-1)!
+    await member.setValue(true)
+    await wrapper.get('[data-testid="save-account-groups"]').trigger('click'); await flushPromises()
+    expect(saveAccountOpsGroups).toHaveBeenCalledWith(expect.arrayContaining([
+      { id: 'manual-primary', name: '主站余额', provider: 'sub2api', site: 'https://example.com', account_ids: [] },
+      expect.objectContaining({ name: '手动组', account_ids: [1] })
+    ]))
+    wrapper.unmount()
+  })
+  it('keeps empty groups editable when the API returns a null member list', async () => {
+    vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([{ account_id: 1, account_name: 'key', type: 'apikey', platform: 'openai', balance: 3, unit: 'USD', balance_status: 'ok', received_at: null, usage_windows: [] }])
+    vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue([{ id: 'manual-empty', name: '空组', default_name: '空组', provider: 'sub2api', site: '', mode: 'manual', account_ids: null }] as any)
+    const wrapper = create(); await flushPromises()
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="edit-account-groups"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-testid="account-group-name-manual-empty"]').exists()).toBe(true)
+    expect((wrapper.get('[data-testid="account-group-member-manual-empty-1"]').element as HTMLInputElement).checked).toBe(false)
     wrapper.unmount()
   })
   it('adds and removes an email channel without posting the global switch or failure rules', async () => {
@@ -129,13 +158,33 @@ describe('account operations tabs and independent saves', () => {
   })
   it('opens a rule dialog with amount and two independent notification switches', async () => {
     vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([{ account_id: 1, account_name: 'key', type: 'apikey', platform: 'openai', balance: 3, unit: 'USD', balance_status: 'ok', received_at: null, usage_windows: [] }])
+    vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue([{ id: 'manual-rule', name: 'Rule group', default_name: 'Rule group', provider: 'sub2api', site: 'https://example.com', mode: 'manual', account_ids: [1] }])
     const wrapper = create(); await flushPromises()
     await wrapper.get('[data-testid="account-ops-tab-settings"]').trigger('click'); await flushPromises()
-    await wrapper.get('[data-testid="edit-rule-1"]').trigger('click'); await flushPromises()
-    await wrapper.get('[data-testid="rule-threshold"]').setValue('5')
-    await wrapper.get('[data-testid="rule-notify-alert"]').setValue(false)
-    await wrapper.get('#account-ops-rule-form').trigger('submit'); await flushPromises()
-    expect(saveAccountOpsRule).toHaveBeenCalledWith(1, { metric: 'balance', enabled: true, threshold: 5, unit: 'USD', notify_alert: false, notify_recovery: true })
+    await wrapper.get('[data-testid="edit-rule-manual-rule"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="batch-rule-threshold"]').setValue('5')
+    await wrapper.get('[data-testid="batch-rule-notify-alert"]').setValue(false)
+    await wrapper.get('#account-ops-batch-rule-form').trigger('submit'); await flushPromises()
+    expect(saveAccountOpsRulesBatch).toHaveBeenCalledWith([1], { metric: 'balance', enabled: true, threshold: 5, unit: 'USD', notify_alert: false, notify_recovery: true })
+    wrapper.unmount()
+  })
+  it('toggles a mixed-unit group without replacing each rule value', async () => {
+    vi.mocked(getAccountOpsSettings).mockResolvedValue({ ...settings(), config: {
+      ...config,
+      balance_thresholds: [
+        { account_id: 1, enabled: true, threshold: 5, unit: 'USD', notify_alert: false, notify_recovery: true },
+        { account_id: 2, enabled: true, threshold: 3, unit: 'CNY', notify_alert: true, notify_recovery: false },
+      ],
+    } } as any)
+    vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([
+      { account_id: 1, account_name: 'usd', type: 'apikey', platform: 'openai', balance: 4, unit: 'USD', balance_status: 'ok', received_at: null, usage_windows: [] },
+      { account_id: 2, account_name: 'cny', type: 'apikey', platform: 'openai', balance: 2, unit: 'CNY', balance_status: 'ok', received_at: null, usage_windows: [] },
+    ])
+    vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue([{ id: 'manual-mixed', name: 'Mixed', default_name: 'Mixed', provider: 'sub2api', site: 'https://example.com', mode: 'manual', account_ids: [1, 2] }])
+    const wrapper = create(); await flushPromises()
+    const inputs = wrapper.get('[data-testid="rule-row-manual-mixed"]').findAll('input')
+    await inputs[1]!.setValue(false); await flushPromises()
+    expect(saveAccountOpsRuleGroups).toHaveBeenCalledWith([{ account_ids: [1, 2], rule: { metric: 'balance', enabled: false, enabled_only: true } }])
     wrapper.unmount()
   })
   it('renders alert and recovery as different historical rows', async () => {
@@ -151,8 +200,9 @@ describe('account operations tabs and independent saves', () => {
   it('requires a new amount if a selected account changes currency while the bulk dialog is open', async () => {
     const account = { account_id: 1, account_name: 'key', type: 'apikey' as const, platform: 'openai', balance: 3, unit: 'USD', balance_status: 'ok' as const, received_at: null, usage_windows: [] }
     vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([account])
+    vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue([{ id: 'manual-currency', name: 'Currency', default_name: 'Currency', provider: 'sub2api', site: 'https://example.com', mode: 'manual', account_ids: [1] }])
     const wrapper = create(); await flushPromises()
-    await wrapper.get('[data-testid="select-account-1"]').setValue(true)
+    await wrapper.get('[data-testid="select-group-manual-currency"]').setValue(true)
     await wrapper.get('[data-testid="batch-edit-rules"]').trigger('click'); await flushPromises()
     await wrapper.get('[data-testid="batch-rule-threshold"]').setValue('5')
     vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([{ ...account, unit: 'CNY' }])

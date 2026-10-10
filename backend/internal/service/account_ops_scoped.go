@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -16,6 +18,7 @@ type AccountOpsNotificationSettings struct {
 type AccountOpsRuleUpdate struct {
 	Metric           string   `json:"metric"`
 	Enabled          bool     `json:"enabled"`
+	EnabledOnly      bool     `json:"enabled_only,omitempty"`
 	Threshold        *float64 `json:"threshold"`
 	Unit             string   `json:"unit"`
 	ThresholdPercent *float64 `json:"threshold_percent"`
@@ -27,6 +30,62 @@ type AccountOpsRuleGroup struct {
 	AccountIDs []int64              `json:"account_ids"`
 	Rule       AccountOpsRuleUpdate `json:"rule"`
 }
+
+func (s *AccountOpsService) SaveGroups(ctx context.Context, groups []AccountOpsGroup) (AccountOpsConfig, error) {
+	normalized := make([]AccountOpsGroup, len(groups))
+	for i, group := range groups {
+		normalized[i] = group
+		if normalized[i].ID == "" || legacyAccountOpsGroupID(normalized[i].ID) {
+			normalized[i].ID = manualAccountOpsGroupID(group.ID + ":" + strconv.Itoa(i) + ":" + group.Name)
+		}
+		normalized[i].Name = strings.TrimSpace(group.Name)
+		normalized[i].Provider = strings.TrimSpace(group.Provider)
+		normalized[i].Site = canonicalAccountOpsSite(group.Site)
+		normalized[i].AccountIDs = append([]int64(nil), group.AccountIDs...)
+	}
+	if err := validateAccountOpsGroups(normalized); err != nil {
+		return AccountOpsConfig{}, accountOpsConfigValidation(err.Error())
+	}
+	return s.updateConfig(ctx, func(c *AccountOpsConfig) error {
+		c.Groups = normalized
+		c.GroupsInitialized = true
+		if s.accounts != nil {
+			accounts, err := s.accounts.ListAllWithFilters(ctx, "", "", "", "", 0, "")
+			if err != nil {
+				return err
+			}
+			byID := make(map[int64]*Account, len(accounts))
+			for i := range accounts {
+				byID[accounts[i].ID] = &accounts[i]
+			}
+			for i := range c.Groups {
+				provider, site := accountOpsGroupSite(c.Groups[i], byID)
+				if c.Groups[i].Provider == "" {
+					c.Groups[i].Provider = provider
+				}
+				if c.Groups[i].Site == "" {
+					c.Groups[i].Site = site
+				}
+			}
+			members := make(map[int64]bool)
+			for _, group := range c.Groups {
+				for _, id := range group.AccountIDs {
+					members[id] = true
+				}
+			}
+			ungrouped := make([]int64, 0)
+			for _, account := range accounts {
+				if !members[account.ID] {
+					ungrouped = append(ungrouped, account.ID)
+				}
+			}
+			c.UngroupedAccountIDs = ungrouped
+			normalizeAccountOpsGroupRules(c, byID)
+		}
+		return nil
+	})
+}
+
 type opsConfigResultKey struct{}
 type opsConfigResult struct {
 	cfg AccountOpsConfig
@@ -157,6 +216,17 @@ func (s *AccountOpsService) SaveRuleGroupsBatch(ctx context.Context, groups []Ac
 			seen[id] = true
 		}
 		v := group.Rule
+		if v.EnabledOnly {
+			if v.Threshold != nil || v.Unit != "" || v.ThresholdPercent != nil || v.Window != "" || v.NotifyAlert != nil || v.NotifyRecovery != nil {
+				return AccountOpsConfig{}, accountOpsConfigValidation("enabled-only batch rules cannot include threshold fields")
+			}
+			switch v.Metric {
+			case "balance", "quota":
+			default:
+				return AccountOpsConfig{}, accountOpsConfigValidation("invalid threshold rule")
+			}
+			continue
+		}
 		if v.NotifyAlert == nil || v.NotifyRecovery == nil {
 			return AccountOpsConfig{}, accountOpsConfigValidation("batch notification flags are required")
 		}
@@ -186,6 +256,34 @@ func (s *AccountOpsService) SaveRuleGroupsBatch(ctx context.Context, groups []Ac
 }
 
 func (s *AccountOpsService) applyRule(ctx context.Context, c *AccountOpsConfig, id int64, v AccountOpsRuleUpdate, requireCurrentUnit bool) error {
+	if v.EnabledOnly {
+		switch v.Metric {
+		case "balance":
+			for i := range c.BalanceThresholds {
+				if c.BalanceThresholds[i].AccountID == id {
+					if _, err := s.balanceRuleAccount(ctx, id); err != nil {
+						return err
+					}
+					c.BalanceThresholds[i].Enabled = v.Enabled
+					return nil
+				}
+			}
+			return accountOpsConfigValidation("balance rule is required for enabled-only updates")
+		case "quota":
+			for i := range c.QuotaThresholds {
+				if c.QuotaThresholds[i].AccountID == id {
+					if err := s.validateQuotaRules(ctx, []AccountOpsQuotaRule{c.QuotaThresholds[i]}); err != nil {
+						return err
+					}
+					c.QuotaThresholds[i].Enabled = v.Enabled
+					return nil
+				}
+			}
+			return accountOpsConfigValidation("quota rule is required for enabled-only updates")
+		default:
+			return accountOpsConfigValidation("invalid threshold rule")
+		}
+	}
 	if v.Metric == "balance" {
 		r := AccountOpsBalanceRule{AccountID: id, Enabled: v.Enabled, NotifyAlert: v.NotifyAlert, NotifyRecovery: v.NotifyRecovery}
 		index := -1

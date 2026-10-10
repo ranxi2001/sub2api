@@ -27,7 +27,7 @@ export default {
   "eventsHint": "按账号和提醒类型合并，查看各通道的发送结果。",
   "observing": "提醒已开启",
   "disabled": "提醒未开启",
-  "search": "搜索账号名称或编号",
+  "search": "搜索账号组、站点或成员",
   "allTypes": "全部异常",
   "captureIssue": "部分信号未能入库或队列已满，请检查服务日志及数据库状态。",
   "failureType": "上游异常",
@@ -188,7 +188,7 @@ export default {
   "selectAccount": "选择 {name}",
   "selectVisibleAccounts": "全选当前可见账号",
   "clearSelection": "清空选择",
-  "batchSelectionHint": "支持全选 API Key 和 OAuth 账号，在编辑弹窗中分别设置金额与百分比阈值。筛选后只选择当前可见账号。",
+  "batchSelectionHint": "按账号组批量选择，编辑弹窗会分别设置 API Key 金额和 OAuth 百分比阈值。筛选后只选择当前可见账号组。",
   "batchRuleTitle": "批量编辑账号规则",
   "batchBalanceRules": "API Key 余额规则",
   "batchQuotaRules": "OAuth 用量规则",
@@ -205,4 +205,22 @@ export default {
   "channelName": "通道名称（可选）",
   "channelNamePlaceholder": "例如：运维通知",
   "channelNameHint": "最多 80 个字，留空使用默认名称。"
+  ,"accountGroups": "账号组"
+  ,"accountGroupsSummary": "按上游站点或用户合并提醒，共 {count} 组；可自定义名称和手动调整成员。"
+  ,"accountGroupsHint": "账号组由管理员手动维护。每个账号只能属于一个组；新账号会加入同站点的第一个组。"
+  ,"noAccountGroups": "暂无可配置的账号组"
+  ,"groupName": "账号组名称"
+  ,"manualGroup": "手动组"
+  ,"autoGroup": "自动组"
+  ,"addAccountGroup": "新增账号组"
+  ,"deleteAccountGroup": "删除账号组"
+  ,"newAccountGroup": "新账号组"
+  ,"manualGroupNameRequired": "手动账号组必须填写名称。"
+  ,"saveAccountGroups": "保存账号组"
+  ,"groupLabel": "账号组"
+  ,"accountGroup": "账号组"
+  ,"groupMemberCount": "{count} 个成员"
+  ,"selectedGroups": "已选 {count} 个账号组"
+  ,"selectGroup": "选择 {name}"
+  ,"selectVisibleGroups": "全选当前可见账号组"
 }

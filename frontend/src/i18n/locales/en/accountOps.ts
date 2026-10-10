@@ -27,7 +27,7 @@ export default {
   "eventsHint": "Coalesced by account and category, with delivery results for each channel.",
   "observing": "Alerts enabled",
   "disabled": "Alerts disabled",
-  "search": "Search account name or ID",
+  "search": "Search group, site or member",
   "allTypes": "All categories",
   "captureIssue": "Some signals could not be stored or the queue filled. Check service logs and database health.",
   "failureType": "Upstream failure",
@@ -188,7 +188,7 @@ export default {
   "selectAccount": "Select {name}",
   "selectVisibleAccounts": "Select all visible accounts",
   "clearSelection": "Clear selection",
-  "batchSelectionHint": "Select API Key and OAuth accounts together, then set amount and percentage thresholds separately. Only visible accounts are selected after filtering.",
+  "batchSelectionHint": "Select account groups in bulk, then set API Key amounts and OAuth percentages separately. Only visible groups are selected after filtering.",
   "batchRuleTitle": "Edit account rules in bulk",
   "batchBalanceRules": "API Key balance rules",
   "batchQuotaRules": "OAuth usage rules",
@@ -205,4 +205,22 @@ export default {
   "channelName": "Channel name (optional)",
   "channelNamePlaceholder": "e.g. Operations notifications",
   "channelNameHint": "Up to 80 characters. Leave blank to use the default name."
+  ,"accountGroups": "Account groups"
+  ,"accountGroupsSummary": "Merge alerts by upstream site or user. {count} groups are available; names and membership can be customized."
+  ,"accountGroupsHint": "Administrators manage account groups manually. Each account belongs to at most one group; new accounts join the first group for their site."
+  ,"noAccountGroups": "No configurable account groups"
+  ,"groupName": "Group name"
+  ,"manualGroup": "Manual group"
+  ,"autoGroup": "Automatic group"
+  ,"addAccountGroup": "Add account group"
+  ,"deleteAccountGroup": "Delete account group"
+  ,"newAccountGroup": "New account group"
+  ,"manualGroupNameRequired": "A manual account group needs a name."
+  ,"saveAccountGroups": "Save account groups"
+  ,"groupLabel": "Group"
+  ,"accountGroup": "Account group"
+  ,"groupMemberCount": "{count} members"
+  ,"selectedGroups": "{count} account groups selected"
+  ,"selectGroup": "Select {name}"
+  ,"selectVisibleGroups": "Select all visible account groups"
 }

@@ -24,6 +24,38 @@ type onceObserver interface {
 	ObserveThreshold(context.Context, service.AccountOpsEvent, string, time.Time, bool, bool) error
 }
 
+func TestAccountOpsOnceThresholdCriteriaTransitionsNotify(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, initialObservation, nextObservation, wantPhase string
+	}{
+		{name: "compliant to adverse", initialObservation: "resolved", nextObservation: "active", wantPhase: "alert"},
+		{name: "adverse to compliant", initialObservation: "active", nextObservation: "resolved", wantPhase: "recovery"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var id int64
+			require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO accounts(name,platform,type,status,schedulable) VALUES($1,'openai','apikey','active',true) RETURNING id`, "criteria-transition-"+tc.name).Scan(&id))
+			defer cleanupOnce(t, id)
+			repo := NewAccountOpsRepository(integrationDB).(*accountOpsRepository)
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			e := service.AccountOpsEvent{AccountID: id, Kind: "balance_threshold", Identity: "same", Criteria: "old-rule"}
+			require.NoError(t, repo.ObserveThreshold(ctx, e, tc.initialObservation, now, true, true))
+			e.Criteria = "new-rule"
+			require.NoError(t, repo.ObserveThreshold(ctx, e, tc.nextObservation, now.Add(time.Second), true, true))
+			claimed, err := repo.Claim(ctx)
+			require.NoError(t, err)
+			require.NotNil(t, claimed)
+			require.Equal(t, tc.wantPhase, claimed.Phase)
+			require.Equal(t, "new-rule", claimed.Criteria)
+			require.NoError(t, repo.Complete(ctx, claimed, "sent", time.Hour))
+			require.NoError(t, repo.ObserveThreshold(ctx, e, tc.nextObservation, now.Add(2*time.Second), true, true))
+			claimed, err = repo.Claim(ctx)
+			require.NoError(t, err)
+			require.Nil(t, claimed)
+		})
+	}
+}
+
 func TestAccountOpsOnceEpisodeConcurrentRestartRecovery(t *testing.T) {
 	ctx := context.Background()
 	var id int64
@@ -149,6 +181,45 @@ func cleanupOnce(t *testing.T, id int64) {
 		require.NoError(t, err)
 	}
 	_, err := integrationDB.Exec(`DELETE FROM accounts WHERE id=$1`, id)
+	require.NoError(t, err)
+}
+
+// applyLegacyThresholdEpisodeTransfer applies the data-transfer part of the
+// pre-account-group migration to the current grouped schema. Production runs
+// migration 267 before 272, so the original SQL is valid there. These tests
+// run against the already-migrated integration database; keeping this adapter
+// here exercises the same transfer semantics without inserting blank group
+// keys into grouped primary keys.
+func applyLegacyThresholdEpisodeTransfer(t *testing.T, ids []int64) {
+	t.Helper()
+	ctx := context.Background()
+	groupID := `('account:' || account_id::text)`
+	_, err := integrationDB.ExecContext(ctx, `
+		INSERT INTO account_ops_threshold_monitors(account_id,group_id,kind,identity,episode_id,adverse)
+		SELECT account_id,`+groupID+`,kind,identity,'legacy:'||account_id||':'||kind,state<>'resolved'
+		FROM account_ops_alerts
+		WHERE account_id=ANY($1) AND kind IN ('balance_threshold','quota_threshold')
+		ON CONFLICT(group_id,kind) DO NOTHING`, pq.Array(ids))
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `
+		INSERT INTO account_ops_threshold_events(
+			id,episode_id,phase,notification_enabled,account_id,group_id,group_name,kind,account_name,signal,http_status,
+			first_seen,last_seen,occurrences,state,last_sent_at,next_send_at,attempts,details,deliveries,identity,criteria)
+		SELECT 'legacy-transition:'||account_id||':'||kind,'legacy:'||account_id||':'||kind,
+			'alert',TRUE,account_id,`+groupID+`,account_name,kind,account_name,signal,http_status,
+			first_seen,last_seen,occurrences,CASE WHEN state='sending' THEN 'pending' ELSE state END,
+			last_sent_at,next_send_at,attempts,details,deliveries,identity,''
+		FROM account_ops_alerts
+		WHERE account_id=ANY($1) AND kind IN ('balance_threshold','quota_threshold')
+			AND state IN ('pending','sending','failed')
+			AND (last_sent_at IS NULL OR deliveries<>'{}'::jsonb)
+		ON CONFLICT(episode_id,phase) DO NOTHING`, pq.Array(ids))
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `
+		UPDATE account_ops_alerts
+		SET state='suppressed',lease='',lease_until=NULL
+		WHERE account_id=ANY($1) AND kind IN ('balance_threshold','quota_threshold')
+			AND state IN ('pending','sending','failed')`, pq.Array(ids))
 	require.NoError(t, err)
 }
 
@@ -478,12 +549,7 @@ func TestAccountOpsOnceMigrationTransfersRemainingWorkWithoutReplay(t *testing.T
 		require.NoError(t, err)
 		original[id] = *old
 	}
-	raw, err := migrations.FS.ReadFile("267_account_ops_threshold_episodes.sql")
-	require.NoError(t, err)
-	start := strings.Index(string(raw), "-- Every old adverse row")
-	require.GreaterOrEqual(t, start, 0)
-	_, err = integrationDB.ExecContext(ctx, string(raw)[start:])
-	require.NoError(t, err)
+	applyLegacyThresholdEpisodeTransfer(t, ids)
 	var n int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM account_ops_threshold_events WHERE account_id=ANY($1)`, pq.Array(ids)).Scan(&n))
 	require.Equal(t, 3, n, "pending/partial/exhausted work must transfer; sent history must not replay")
@@ -606,12 +672,7 @@ func TestAccountOpsOnceMigratedPartialReceiptRetriesOnlyRobot(t *testing.T) {
 	require.NoError(t, repo.Record(ctx, service.AccountOpsEvent{AccountID: id, Kind: "balance_threshold", AccountName: a.Name, Details: &service.AccountOpsDetails{Balance: &amount, Threshold: &threshold, Unit: "USD"}}))
 	_, err = integrationDB.ExecContext(ctx, `UPDATE account_ops_alerts SET state='failed',attempts=1,deliveries=$2::jsonb,next_send_at=NOW()-INTERVAL '1 second' WHERE account_id=$1`, id, string(rawReceipts))
 	require.NoError(t, err)
-	migration, err := migrations.FS.ReadFile("267_account_ops_threshold_episodes.sql")
-	require.NoError(t, err)
-	start := strings.Index(string(migration), "-- Every old adverse row")
-	require.GreaterOrEqual(t, start, 0)
-	_, err = integrationDB.ExecContext(ctx, string(migration)[start:])
-	require.NoError(t, err)
+	applyLegacyThresholdEpisodeTransfer(t, []int64{id})
 	require.NoError(t, repo.SuppressDisabled(ctx, cfg))
 	none, err := repo.Claim(ctx)
 	require.NoError(t, err)
@@ -671,12 +732,7 @@ func TestAccountOpsOnceMigrationRuleEditSuppressesUnboundWarning(t *testing.T) {
 	require.NoError(t, svc.SaveConfig(ctx, cfg))
 	amount, threshold := 2.0, 5.0
 	require.NoError(t, repo.Record(ctx, service.AccountOpsEvent{AccountID: id, Kind: "balance_threshold", AccountName: a.Name, Details: &service.AccountOpsDetails{Balance: &amount, Threshold: &threshold, Unit: "USD"}}))
-	migration, err := migrations.FS.ReadFile("267_account_ops_threshold_episodes.sql")
-	require.NoError(t, err)
-	start := strings.Index(string(migration), "-- Every old adverse row")
-	require.GreaterOrEqual(t, start, 0)
-	_, err = integrationDB.ExecContext(ctx, string(migration)[start:])
-	require.NoError(t, err)
+	applyLegacyThresholdEpisodeTransfer(t, []int64{id})
 	// An unchanged startup refresh must preserve the waiting transferred warning.
 	require.NoError(t, repo.SuppressDisabled(ctx, cfg))
 	var state string

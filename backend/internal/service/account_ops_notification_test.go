@@ -47,7 +47,7 @@ func TestAccountOpsRobotNotificationContainsFourFields(t *testing.T) {
 					var payload map[string]any
 					require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
 					var content string
-					title := "Sub2API · " + tc.title
+					title := tc.title
 					if provider == "feishu" {
 						card := requireOpsType[map[string]any](t, payload["card"])
 						header := requireOpsType[map[string]any](t, card["header"])

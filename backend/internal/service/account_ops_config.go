@@ -87,6 +87,7 @@ type storedOpsConfig struct {
 }
 
 var opsID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+var opsGroupID = regexp.MustCompile(`^(?:auto:[A-Za-z0-9_-]{16,64}|manual-[A-Za-z0-9_-]{8,64}|account:[0-9]+)$`)
 var opsWindowID = regexp.MustCompile(`^[A-Za-z0-9_.:/-]{1,128}$`)
 
 func (c AccountOpsConfig) hasDestination() bool {
@@ -118,6 +119,11 @@ func (c AccountOpsConfig) hasQuotaThreshold() bool {
 }
 func (c AccountOpsConfig) public() AccountOpsConfig {
 	c.Webhooks = append([]AccountOpsWebhook{}, c.Webhooks...)
+	c.Groups = append([]AccountOpsGroup{}, c.Groups...)
+	for i := range c.Groups {
+		c.Groups[i].AccountIDs = append([]int64{}, c.Groups[i].AccountIDs...)
+	}
+	c.UngroupedAccountIDs = append([]int64{}, c.UngroupedAccountIDs...)
 	c.BalanceThresholds = append([]AccountOpsBalanceRule{}, c.BalanceThresholds...)
 	c.QuotaThresholds = append([]AccountOpsQuotaRule{}, c.QuotaThresholds...)
 	normalizeOpsFlags(&c, AccountOpsConfig{})
@@ -164,8 +170,11 @@ func validateAccountOpsExtras(c AccountOpsConfig) error {
 	if err := validateAccountOpsChannelName(c.EmailName); err != nil {
 		return err
 	}
-	if len(c.Webhooks) > 5 || len(c.BalanceThresholds)+len(c.QuotaThresholds) > 1000 {
+	if len(c.Webhooks) > 5 || len(c.Groups) > 200 || len(c.BalanceThresholds)+len(c.QuotaThresholds) > 1000 {
 		return errors.New("too many robot destinations or balance rules")
+	}
+	if err := validateAccountOpsGroups(c.Groups); err != nil {
+		return err
 	}
 	ids := map[string]bool{}
 	for _, w := range c.Webhooks {
@@ -216,6 +225,33 @@ func validateAccountOpsExtras(c AccountOpsConfig) error {
 	return nil
 }
 
+func validateAccountOpsGroups(groups []AccountOpsGroup) error {
+	seenGroups := map[string]bool{}
+	seenAccounts := map[int64]bool{}
+	for _, group := range groups {
+		if !opsGroupID.MatchString(group.ID) || seenGroups[group.ID] {
+			return errors.New("invalid or duplicate account group ID")
+		}
+		seenGroups[group.ID] = true
+		name := strings.TrimSpace(group.Name)
+		if name != "" {
+			if err := validateAccountOpsChannelName(name); err != nil {
+				return errors.New("invalid account group name")
+			}
+		}
+		if len(group.AccountIDs) > 1000 {
+			return errors.New("too many accounts in an account group")
+		}
+		for _, id := range group.AccountIDs {
+			if id <= 0 || seenAccounts[id] {
+				return errors.New("account group members must be positive and unique")
+			}
+			seenAccounts[id] = true
+		}
+	}
+	return nil
+}
+
 func validateAccountOpsChannelName(name string) error {
 	if !utf8.ValidString(name) || utf8.RuneCountInString(strings.TrimSpace(name)) > 80 || strings.ContainsFunc(name, unicode.IsControl) {
 		return errors.New("channel names must be at most 80 characters and contain no control characters")
@@ -230,6 +266,11 @@ func (s *AccountOpsService) SetNotificationDependencies(accounts AccountReposito
 	if loc, err := time.LoadLocation(timezone); err == nil {
 		s.timezone = loc
 	}
+}
+func (s *AccountOpsService) SetNewAPIGroupReader(reader interface {
+	GetBinding(context.Context, int64) (*NewAPIAccountBinding, error)
+}) {
+	s.newAPIGroupReader = reader
 }
 func (s *AccountOpsService) EncryptionKeyConfigured() bool { return s.fixedKey && s.encryptor != nil }
 func (s *AccountOpsService) loadConfig(ctx context.Context) (AccountOpsConfig, error) {
@@ -277,6 +318,10 @@ func (s *AccountOpsService) saveConfig(ctx context.Context, c AccountOpsConfig) 
 }
 func (s *AccountOpsService) saveConfigWithRuleScope(ctx context.Context, c AccountOpsConfig, all bool) error {
 	c.Webhooks = append([]AccountOpsWebhook(nil), c.Webhooks...)
+	c.Groups = append([]AccountOpsGroup(nil), c.Groups...)
+	for i := range c.Groups {
+		c.Groups[i].AccountIDs = append([]int64(nil), c.Groups[i].AccountIDs...)
+	}
 	c.BalanceThresholds = append([]AccountOpsBalanceRule(nil), c.BalanceThresholds...)
 	c.QuotaThresholds = append([]AccountOpsQuotaRule(nil), c.QuotaThresholds...)
 	c.Recipient = strings.TrimSpace(c.Recipient)

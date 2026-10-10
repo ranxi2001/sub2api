@@ -101,6 +101,27 @@ func (h *AccountOpsHandler) ThresholdAccounts(c *gin.Context) {
 	response.Success(c, gin.H{"items": items})
 }
 
+func (h *AccountOpsHandler) Groups(c *gin.Context) {
+	groups, err := h.svc.ThresholdGroups(c.Request.Context())
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "Account groups unavailable")
+		return
+	}
+	response.Success(c, gin.H{"groups": groups})
+}
+
+func (h *AccountOpsHandler) SaveGroups(c *gin.Context) {
+	var v struct {
+		Groups []service.AccountOpsGroup `json:"groups"`
+	}
+	if c.ShouldBindJSON(&v) != nil {
+		response.BadRequest(c, "Invalid account groups")
+		return
+	}
+	cfg, err := h.svc.SaveGroups(c.Request.Context(), v.Groups)
+	h.scopedResult(c, cfg, err)
+}
+
 func (h *AccountOpsHandler) scopedResult(c *gin.Context, cfg service.AccountOpsConfig, err error) {
 	if err != nil {
 		if errors.Is(err, service.ErrAccountOpsConfigValidation) {

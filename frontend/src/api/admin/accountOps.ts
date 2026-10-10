@@ -39,6 +39,9 @@ export type AccountOpsObservationStatus = 'ok' | 'stale' | 'failed' | 'unsupport
 export interface AccountOpsThresholdAccount {
   account_id: number
   account_name: string
+  group_id?: string
+  group_name?: string
+  group_mode?: 'auto' | 'manual' | 'account'
   platform: string
   type: 'apikey' | 'oauth'
   balance: number | null
@@ -54,6 +57,15 @@ export interface AccountOpsThresholdAccount {
     resets_at?: string
   }>
 }
+export interface AccountOpsGroup {
+  id: string
+  name: string
+  default_name: string
+  provider: string
+  site: string
+  mode: 'auto' | 'manual' | 'account'
+  account_ids: number[]
+}
 export interface AccountOpsConfig {
   enabled: boolean
   recipient: string
@@ -62,6 +74,7 @@ export interface AccountOpsConfig {
   weekly_quota: boolean
   cooldown_minutes: number
   webhooks?: AccountOpsWebhook[]
+  groups?: Array<{ id: string; name: string; provider?: string; site?: string; account_ids?: number[] }>
   balance_thresholds?: AccountOpsBalanceThreshold[]
   quota_thresholds?: AccountOpsQuotaThreshold[]
 }
@@ -73,6 +86,8 @@ export interface AccountOpsEvent {
   notification_enabled?: boolean
   account_id: number
   account_name: string
+  group_id?: string
+  group_name?: string
   kind: 'balance_low' | 'weekly_quota' | 'balance_threshold' | 'quota_threshold'
   signal: string
   http_status: number
@@ -90,12 +105,13 @@ export type AccountOpsNotificationSettings = Partial<Pick<AccountOpsConfig, 'ena
 export interface AccountOpsRuleInput {
   metric: 'balance' | 'quota'
   enabled: boolean
+  enabled_only?: boolean
   threshold?: number
   unit?: string
   threshold_percent?: number
   window?: string
-  notify_alert: boolean
-  notify_recovery: boolean
+  notify_alert?: boolean
+  notify_recovery?: boolean
 }
 export async function saveAccountOpsNotificationSettings(settings: AccountOpsNotificationSettings): Promise<AccountOpsConfig> {
   return (await apiClient.put('/admin/account-ops/notification-settings', settings)).data
@@ -138,6 +154,16 @@ export async function saveAccountOpsSettings(config: AccountOpsConfigInput): Pro
 export async function getAccountOpsThresholdAccounts(): Promise<AccountOpsThresholdAccount[]> {
   const { data } = await apiClient.get<{ items: AccountOpsThresholdAccount[] }>('/admin/account-ops/threshold-accounts')
   return data.items ?? []
+}
+export async function getAccountOpsThresholdGroups(): Promise<AccountOpsGroup[]> {
+  const { data } = await apiClient.get<{ groups: AccountOpsGroup[] }>('/admin/account-ops/groups')
+  return (data.groups ?? []).map(group => ({
+    ...group,
+    account_ids: Array.isArray(group.account_ids) ? [...group.account_ids] : [],
+  }))
+}
+export async function saveAccountOpsGroups(groups: Array<{ id: string; name: string; provider?: string; site?: string; account_ids: number[] }>): Promise<AccountOpsConfig> {
+  return (await apiClient.put('/admin/account-ops/groups', { groups })).data
 }
 export async function testAccountOpsWebhook(id: string): Promise<{ ok: boolean }> {
   return (await apiClient.post(`/admin/account-ops/webhooks/${encodeURIComponent(id)}/test`)).data

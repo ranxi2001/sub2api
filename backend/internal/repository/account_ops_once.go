@@ -20,7 +20,8 @@ func (r *accountOpsRepository) ObserveThreshold(ctx context.Context, e service.A
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `INSERT INTO account_ops_threshold_monitors(account_id,kind,criteria,identity) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, e.AccountID, e.Kind, e.Criteria, e.Identity)
+	groupID := accountOpsEventGroupID(&e)
+	_, err = tx.ExecContext(ctx, `INSERT INTO account_ops_threshold_monitors(account_id,group_id,kind,criteria,identity) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, e.AccountID, groupID, e.Kind, e.Criteria, e.Identity)
 	if err != nil {
 		return err
 	}
@@ -28,7 +29,7 @@ func (r *accountOpsRepository) ObserveThreshold(ctx context.Context, e service.A
 	var criteria, identity, episode string
 	var adverse, eligible bool
 	var healthy, checked sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT criteria,identity,episode_id,adverse,eligible,healthy_since,checked_at FROM account_ops_threshold_monitors WHERE account_id=$1 AND kind=$2 FOR UPDATE`, e.AccountID, e.Kind).Scan(&criteria, &identity, &episode, &adverse, &eligible, &healthy, &checked)
+	err = tx.QueryRowContext(ctx, `SELECT criteria,identity,episode_id,adverse,eligible,healthy_since,checked_at FROM account_ops_threshold_monitors WHERE group_id=$1 AND kind=$2 FOR UPDATE`, groupID, e.Kind).Scan(&criteria, &identity, &episode, &adverse, &eligible, &healthy, &checked)
 	if err != nil {
 		return err
 	}
@@ -37,14 +38,19 @@ func (r *accountOpsRepository) ObserveThreshold(ctx context.Context, e service.A
 	}
 	phase := ""
 	notify := false
-	changed := criteria != "" && criteria != e.Criteria || e.Identity != "" && identity != "" && identity != e.Identity
+	criteriaChanged := criteria != "" && criteria != "invalid" && criteria != e.Criteria
+	identityChanged := e.Identity != "" && identity != "" && identity != e.Identity
+	baselineInvalid := criteria == "invalid"
+	changed := criteriaChanged || identityChanged || baselineInvalid
+	previousAdverse := adverse
+	previousEpisode := episode
 	invalid := observation == "invalid"
 	if changed || invalid {
 		adverse = false
 		eligible = false
 		healthy = sql.NullTime{}
 		episode = ""
-		if _, err = tx.ExecContext(ctx, `UPDATE account_ops_threshold_events SET state='suppressed',lease='',lease_until=NULL WHERE account_id=$1 AND kind=$2 AND state IN ('pending','failed','sending')`, e.AccountID, e.Kind); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE account_ops_threshold_events SET state='suppressed',lease='',lease_until=NULL WHERE group_id=$1 AND kind=$2 AND state IN ('pending','failed','sending')`, groupID, e.Kind); err != nil {
 			return err
 		}
 	}
@@ -70,11 +76,23 @@ func (r *accountOpsRepository) ObserveThreshold(ctx context.Context, e service.A
 			if !changed && !invalid {
 				phase = "alert"
 				notify = alert
+			} else if criteriaChanged && !identityChanged && !invalid && !previousAdverse {
+				phase = "alert"
+				notify = alert
 			}
 		}
 	case "resolved":
 		eligible = true
-		if adverse {
+		if criteriaChanged && !identityChanged && !invalid && previousAdverse {
+			adverse = false
+			healthy = sql.NullTime{}
+			if previousEpisode == "" {
+				previousEpisode = uuid.NewString()
+			}
+			episode = previousEpisode
+			phase = "recovery"
+			notify = recovery
+		} else if adverse {
 			if !healthy.Valid {
 				healthy = sql.NullTime{Time: now, Valid: true}
 			} else if now.Sub(healthy.Time) >= 15*time.Second {
@@ -88,9 +106,10 @@ func (r *accountOpsRepository) ObserveThreshold(ctx context.Context, e service.A
 		eligible = false
 		healthy = sql.NullTime{}
 	}
-	// A first observation for a new rule can warn. Criteria changes establish a
-	// silent baseline, while migrated blank criteria adopts the old episode.
-	if _, err = tx.ExecContext(ctx, `UPDATE account_ops_threshold_monitors SET criteria=$3,identity=$4,episode_id=$5,adverse=$6,eligible=$7,healthy_since=$8,checked_at=$9 WHERE account_id=$1 AND kind=$2`, e.AccountID, e.Kind, criteria, identity, episode, adverse, eligible, healthy, now); err != nil {
+	// A first observation for a new rule can warn. Criteria changes notify only
+	// when the adjustment itself crosses the current state boundary, while
+	// migrated blank criteria adopts the old episode.
+	if _, err = tx.ExecContext(ctx, `UPDATE account_ops_threshold_monitors SET account_id=$3,criteria=$4,identity=$5,episode_id=$6,adverse=$7,eligible=$8,healthy_since=$9,checked_at=$10 WHERE group_id=$1 AND kind=$2`, groupID, e.Kind, e.AccountID, criteria, identity, episode, adverse, eligible, healthy, now); err != nil {
 		return err
 	}
 	if phase != "" {
@@ -102,7 +121,7 @@ func (r *accountOpsRepository) ObserveThreshold(ctx context.Context, e service.A
 		if !notify {
 			state = "suppressed"
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO account_ops_threshold_events(id,episode_id,phase,notification_enabled,account_id,kind,account_name,signal,first_seen,last_seen,state,details,identity,criteria) VALUES($1,$2,$3,$4,$5,$6,$7,$6,$8,$8,$9,$10::jsonb,$11,$12) ON CONFLICT(episode_id,phase) DO NOTHING`, uuid.NewString(), episode, phase, notify, e.AccountID, e.Kind, e.AccountName, now, state, string(raw), identity, criteria)
+		_, err = tx.ExecContext(ctx, `INSERT INTO account_ops_threshold_events(id,episode_id,phase,notification_enabled,account_id,group_id,group_name,kind,account_name,signal,http_status,first_seen,last_seen,occurrences,state,details,identity,criteria) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$8,0,$10,$10,1,$11,$12::jsonb,$13,$14) ON CONFLICT(episode_id,phase) DO NOTHING`, uuid.NewString(), episode, phase, notify, e.AccountID, groupID, e.GroupName, e.Kind, e.AccountName, now, state, string(raw), identity, criteria)
 		if err != nil {
 			return err
 		}
@@ -116,7 +135,7 @@ func (r *accountOpsRepository) ObserveThreshold(ctx context.Context, e service.A
 }
 func (r *accountOpsRepository) ThresholdEventEligible(ctx context.Context, e *service.AccountOpsEvent) (bool, error) {
 	var valid bool
-	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_ops_threshold_monitors WHERE account_id=$1 AND kind=$2 AND criteria<>'' AND criteria=$3 AND identity=$4 AND ($5='recovery' OR (adverse AND episode_id=$6)))`, e.AccountID, e.Kind, e.Criteria, e.Identity, e.Phase, e.EpisodeID).Scan(&valid)
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_ops_threshold_monitors WHERE group_id=$1 AND kind=$2 AND criteria<>'' AND criteria=$3 AND identity=$4 AND ($5='recovery' OR (adverse AND episode_id=$6)))`, accountOpsEventGroupID(e), e.Kind, e.Criteria, e.Identity, e.Phase, e.EpisodeID).Scan(&valid)
 	return valid, err
 }
 
@@ -125,7 +144,7 @@ const opsTransitionColumns = `id,episode_id,phase,notification_enabled,` + accou
 func scanOpsTransition(row scannable) (*service.AccountOpsEvent, error) {
 	var e service.AccountOpsEvent
 	var details, deliveries []byte
-	err := row.Scan(&e.ID, &e.EpisodeID, &e.Phase, &e.NotificationEnabled, &e.AccountID, &e.Kind, &e.AccountName, &e.Signal, &e.HTTPStatus, &e.FirstSeen, &e.LastSeen, &e.Occurrences, &e.State, &e.LastSentAt, &e.NextSendAt, &e.Attempts, &e.Lease, &details, &deliveries, &e.Identity, &e.Criteria)
+	err := row.Scan(&e.ID, &e.EpisodeID, &e.Phase, &e.NotificationEnabled, &e.AccountID, &e.GroupID, &e.GroupName, &e.Kind, &e.AccountName, &e.Signal, &e.HTTPStatus, &e.FirstSeen, &e.LastSeen, &e.Occurrences, &e.State, &e.LastSentAt, &e.NextSendAt, &e.Attempts, &e.Lease, &details, &deliveries, &e.Identity, &e.Criteria)
 	if err == nil {
 		if err = json.Unmarshal(details, &e.Details); err == nil {
 			err = json.Unmarshal(deliveries, &e.Deliveries)

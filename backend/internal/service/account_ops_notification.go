@@ -39,7 +39,11 @@ func (s *AccountOpsService) notificationMessage(e *AccountOpsEvent) accountOpsMe
 		}
 		action = "本记录表示恢复时的有效数据，请以最新账号数据判断当前状态。"
 	}
-	fields := [][2]string{{"账号", fmt.Sprintf("%s（#%d）", e.AccountName, e.AccountID)}, {"提醒原因", reason}}
+	accountLabel := e.AccountName
+	if e.GroupName != "" && !strings.HasPrefix(e.GroupID, "account:") {
+		accountLabel = e.GroupName
+	}
+	fields := [][2]string{{"账号", fmt.Sprintf("%s（#%d）", accountLabel, e.AccountID)}, {"提醒原因", reason}}
 	if e.Details != nil {
 		d := e.Details
 		if d.UsedPercent != nil {
@@ -73,7 +77,7 @@ func (s *AccountOpsService) notificationMessage(e *AccountOpsEvent) accountOpsMe
 		fields = append(fields, [2]string{"上游状态", fmt.Sprintf("HTTP %d", e.HTTPStatus)}, [2]string{"识别信号", accountOpsSignalLabel(e.Signal)})
 	}
 	fields = append(fields, [2]string{"检测时间", e.LastSeen.In(s.timezone).Format("2006-01-02 15:04:05 MST")}, [2]string{"累计触发", fmt.Sprintf("%d 次", e.Occurrences)}, [2]string{"建议操作", action})
-	title := "Sub2API 账号运维：" + reason
+	title := reason
 	body := "<h2>" + html.EscapeString(title) + "</h2><table style=\"border-collapse:collapse\">"
 	for _, f := range fields {
 		body += "<tr><th style=\"text-align:left;padding:8px\">" + html.EscapeString(f[0]) + "</th><td style=\"padding:8px\">" + html.EscapeString(f[1]) + "</td></tr>"
@@ -95,13 +99,16 @@ func (s *AccountOpsService) notificationMessage(e *AccountOpsEvent) accountOpsMe
 			robotReason = "上游账户额度已恢复"
 		}
 	}
-	message := s.compactRobotMessage(e, "Sub2API · "+robotReason)
+	message := s.compactRobotMessage(e, robotReason)
 	message.title, message.html = title, body
 	return message
 }
 
 func (s *AccountOpsService) compactRobotMessage(e *AccountOpsEvent, title string) accountOpsMessage {
 	account := strings.Join(strings.Fields(e.AccountName), " ")
+	if e.GroupName != "" && !strings.HasPrefix(e.GroupID, "account:") {
+		account = strings.Join(strings.Fields(e.GroupName), " ")
+	}
 	if account == "" {
 		account = "未命名账号"
 	}

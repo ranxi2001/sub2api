@@ -32,7 +32,7 @@ func opsBatchFixture(t *testing.T) (*AccountOpsService, *accountOpsSettingsStub)
 	settings := &accountOpsSettingsStub{raw: `{"enabled":true,"recipient":"ops@example.test","balance_low":true,"weekly_quota":true,"cooldown_minutes":90,"balance_thresholds":[{"account_id":41,"enabled":true,"threshold":5,"unit":"USD","notify_alert":false,"notify_recovery":true},{"account_id":99,"enabled":true,"threshold":3,"unit":"CNY"}],"quota_thresholds":[{"account_id":61,"enabled":false,"threshold_percent":70,"window":"7d"}],"encrypted_webhooks":[{"id":"old","provider":"dingtalk","enabled":true,"url_cipher":"old-url-cipher","secret_cipher":"old-secret-cipher","revision":"old-revision"}]}`}
 	svc := NewAccountOpsService(settings, &accountOpsRepoStub{}, nil)
 	svc.SetNotificationDependencies(opsBatchAccounts{accounts: map[int64]*Account{
-		41: {ID: 41, Type: AccountTypeAPIKey}, 2048: {ID: 2048, Type: AccountTypeAPIKey},
+		41: {ID: 41, Type: AccountTypeAPIKey}, 99: {ID: 99, Type: AccountTypeAPIKey}, 2048: {ID: 2048, Type: AccountTypeAPIKey},
 		61: {ID: 61, Type: AccountTypeOAuth}, 62: {ID: 62, Type: AccountTypeOAuth},
 	}}, nil, false, "UTC")
 	return svc, settings
@@ -166,6 +166,27 @@ func TestAccountOpsBatchRejectsChangedAccountCurrency(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrAccountOpsConfigValidation)
 	require.Equal(t, before, settings.raw)
+}
+
+func TestAccountOpsGroupedBatchEnabledOnlyPreservesMixedUnits(t *testing.T) {
+	svc, _ := opsBatchFixture(t)
+	groups := []AccountOpsRuleGroup{
+		{AccountIDs: []int64{41, 99}, Rule: AccountOpsRuleUpdate{Metric: "balance", Enabled: false, EnabledOnly: true}},
+	}
+
+	out, err := svc.SaveRuleGroupsBatch(context.Background(), groups)
+	require.NoError(t, err)
+	require.Len(t, out.BalanceThresholds, 2)
+	byID := make(map[int64]AccountOpsBalanceRule, len(out.BalanceThresholds))
+	for _, rule := range out.BalanceThresholds {
+		byID[rule.AccountID] = rule
+	}
+	require.False(t, byID[41].Enabled)
+	require.False(t, byID[99].Enabled)
+	require.Equal(t, 5.0, byID[41].Threshold)
+	require.Equal(t, "USD", byID[41].Unit)
+	require.Equal(t, 3.0, byID[99].Threshold)
+	require.Equal(t, "CNY", byID[99].Unit)
 }
 
 func opsMixedBatchGroups() []AccountOpsRuleGroup {

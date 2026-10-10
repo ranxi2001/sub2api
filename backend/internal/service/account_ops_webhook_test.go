@@ -119,7 +119,7 @@ func TestAccountOpsCustomWebhookTemplatePreservesEscapingAndCompactFields(t *tes
 		var decoded map[string]any
 		require.NoError(t, json.Unmarshal(body, &decoded))
 		require.Contains(t, string(body), `1234567890123456789`)
-		require.Equal(t, "Sub2API · 上游账户余额不足\n账户：Example \"quote\" {{threshold}} (#17)\n余额：$2.5\n阈值：$3\n时间：2026-10-08 01:02:03", decoded["content"])
+		require.Equal(t, "上游账户余额不足\n账户：Example \"quote\" {{threshold}} (#17)\n余额：$2.5\n阈值：$3\n时间：2026-10-08 01:02:03", decoded["content"])
 		embeds, ok := decoded["embeds"].([]any)
 		require.True(t, ok)
 		require.Len(t, embeds, 1)

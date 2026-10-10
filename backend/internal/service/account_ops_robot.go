@@ -191,7 +191,7 @@ func (s *AccountOpsService) TestWebhook(ctx context.Context, id string) error {
 			if !same {
 				return errors.New("saved robot destination changed during test")
 			}
-			message := s.compactRobotMessage(&AccountOpsEvent{AccountName: "测试账号", LastSeen: time.Now()}, "Sub2API 账号运维测试")
+			message := s.compactRobotMessage(&AccountOpsEvent{AccountName: "测试账号", LastSeen: time.Now()}, "账号运维测试")
 			return s.sendRobot(send, w, message)
 		}
 	}

@@ -56,7 +56,7 @@
               <tr v-for="event in filteredEvents" :key="eventKey(event)" class="border-t border-gray-100 align-top dark:border-dark-700"
                 data-testid="notification-record">
                 <td class="px-5 py-4">
-                  <p class="font-medium">{{ event.account_name }}</p>
+                  <p class="font-medium">{{ event.group_name || event.account_name }}</p>
                   <p class="mt-1 text-xs text-gray-500">#{{ event.account_id }} · {{ t(`accountOps.${event.kind}`) }}</p>
                 </td>
                 <td class="px-4 py-4"><span class="rounded px-2 py-1 text-xs"
@@ -136,9 +136,18 @@
               @click="showAddChannel = true">{{ t('accountOps.addChannel') }}</button>
           </div>
         </section>
-        <AccountOpsRuleList ref="ruleList" :accounts="thresholdAccounts" :config="remote.config" :loading="thresholdLoading"
-          :ready="thresholdReady" :error="thresholdError" :busy="mutating" @edit="editingAccount = $event"
-          @batch-edit="batchAccounts = $event" @toggle="toggleRule" @remove="removeRule">
+        <section class="rounded-xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900" data-testid="account-ops-groups">
+          <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+            <div>
+              <h2 class="text-sm font-semibold">{{ t('accountOps.accountGroups') }}</h2>
+              <p class="mt-1 text-xs text-gray-500">{{ t('accountOps.accountGroupsSummary', { count: accountGroups.length }) }}</p>
+            </div>
+            <button type="button" class="btn btn-secondary text-sm" :disabled="thresholdLoading || mutating" data-testid="edit-account-groups" @click="showGroupDialog = true">{{ t('common.edit') }}</button>
+          </div>
+        </section>
+        <AccountOpsRuleList ref="ruleList" :accounts="thresholdAccounts" :groups="accountGroups" :config="remote.config" :loading="thresholdLoading"
+          :ready="thresholdReady" :error="thresholdError" :busy="mutating"
+          @batch-edit="batchAccounts = $event" @edit-group="showGroupDialog = true" @toggle="toggleGroup">
           <template #global-settings>
             <AccountOpsGlobalSettings :config="remote.config" :disabled="mutating" @saving="globalSaving = $event" @saved="acceptConfig"
               @error="app.showError" />
@@ -146,19 +155,17 @@
         </AccountOpsRuleList>
       </section>
       <template v-if="remote && auth.user">
-        <AccountOpsBatchRuleDialog :show="batchAccounts.length > 0" :accounts="batchAccounts" @close="batchAccounts = []"
+        <AccountOpsBatchRuleDialog :show="batchAccounts.length > 0" :accounts="batchAccounts" :config="remote.config" @close="batchAccounts = []"
           @saved="acceptBatchConfig" @error="app.showError" />
         <AccountOpsAddChannelDialog :show="showAddChannel" :email-configured="!!remote.config.recipient"
           :webhook-count="remote.config.webhooks?.length ?? 0" :encryption-configured="remote.encryption_key_configured === true"
           @close="showAddChannel = false" @select="addChannel" />
-        <AccountOpsRuleDialog :show="editingAccount !== null" :account="editingAccount"
-          :balance-rule="remote.config.balance_thresholds?.find(r => r.account_id === editingAccount?.account_id) ?? null"
-          :quota-rule="remote.config.quota_thresholds?.find(r => r.account_id === editingAccount?.account_id) ?? null"
-          @close="editingAccount = null" @saved="acceptConfig" @error="app.showError" />
         <AccountOpsWebhookDialog :show="showWebhook" :hook="editingHook" :encryption-configured="remote.encryption_key_configured === true"
           :testing-id="testingId" @close="showWebhook = false" @saved="acceptConfig" @error="app.showError" @test="testWebhook" />
         <AccountOpsEmailDialog :show="showEmail" :config="remote.config" :smtp-configured="remote.smtp_configured"
           @close="showEmail = false" @saved="acceptConfig" @error="app.showError" />
+        <AccountOpsGroupDialog :show="showGroupDialog" :groups="accountGroups" :accounts="thresholdAccounts"
+          @close="showGroupDialog = false" @saved="acceptGroupConfig" @error="app.showError" />
       </template>
     </div>
   </AppLayout>
@@ -177,19 +184,20 @@ import Toggle from '@/components/common/Toggle.vue'
 import AccountOpsRuleList from '@/components/admin/operations/AccountOpsRuleList.vue'
 import AccountOpsBatchRuleDialog from '@/components/admin/operations/AccountOpsBatchRuleDialog.vue'
 import AccountOpsDeliveryDetails from '@/components/admin/operations/AccountOpsDeliveryDetails.vue'
-import AccountOpsRuleDialog from '@/components/admin/operations/AccountOpsRuleDialog.vue'
 import AccountOpsWebhookDialog from '@/components/admin/operations/AccountOpsWebhookDialog.vue'
 import AccountOpsEmailDialog from '@/components/admin/operations/AccountOpsEmailDialog.vue'
 import AccountOpsAddChannelDialog from '@/components/admin/operations/AccountOpsAddChannelDialog.vue'
 import AccountOpsGlobalSettings from '@/components/admin/operations/AccountOpsGlobalSettings.vue'
-import { getAccountOpsSettings, saveAccountOpsNotificationSettings, getAccountOpsEvents, getAccountOpsThresholdAccounts, testAccountOpsWebhook, saveAccountOpsRule, deleteAccountOpsRule, deleteAccountOpsWebhook } from '@/api/admin/accountOps'
-import type { AccountOpsConfig, AccountOpsEvent, AccountOpsThresholdAccount, AccountOpsWebhook, AccountOpsRuleInput } from '@/api/admin/accountOps'
+import AccountOpsGroupDialog from '@/components/admin/operations/AccountOpsGroupDialog.vue'
+import { getAccountOpsSettings, saveAccountOpsNotificationSettings, getAccountOpsEvents, getAccountOpsThresholdAccounts, getAccountOpsThresholdGroups, testAccountOpsWebhook, saveAccountOpsRuleGroups, deleteAccountOpsWebhook } from '@/api/admin/accountOps'
+import type { AccountOpsConfig, AccountOpsEvent, AccountOpsThresholdAccount, AccountOpsWebhook, AccountOpsGroup, AccountOpsRuleBatchGroup } from '@/api/admin/accountOps'
 import { extractApiErrorMessage } from '@/utils/apiError'
 const { t } = useI18n(), auth = useAuthStore(), app = useAppStore()
 const { remote, events, hasMore } = storeToRefs(useAccountOpsStore())
 const tabs = ['settings','records'] as const, activeTab = ref<'records'|'settings'>('settings')
 const loading = ref(false), loadingMore = ref(false), mutating = ref(false)
 const thresholdAccounts = ref<AccountOpsThresholdAccount[]>([]), thresholdLoading = ref(false), thresholdReady = ref(false), thresholdError = ref('')
+const accountGroups = ref<AccountOpsGroup[]>([]), showGroupDialog = ref(false)
 const enabledDraft = ref(false), globalSaving = ref(false), showAddChannel = ref(false)
 const canAddChannel = computed(() => !!remote.value && (!remote.value.config.recipient || ((remote.value.config.webhooks?.length ?? 0) < 5 && remote.value.encryption_key_configured === true)))
 watch(() => remote.value?.config.enabled, enabled => { enabledDraft.value = enabled ?? false }, { immediate: true })
@@ -201,9 +209,9 @@ watch(thresholdAccounts, accounts => {
   batchAccounts.value = accounts.filter(account => selected.has(account.account_id))
 })
 const query = ref(''), kind = ref('all'), phase = ref('all'), alertKinds = ['balance_threshold','quota_threshold','balance_low','weekly_quota']
-const editingAccount = ref<AccountOpsThresholdAccount|null>(null), editingHook = ref<AccountOpsWebhook|null>(null), showWebhook = ref(false), showEmail = ref(false), testingId = ref<string|null>(null)
+const editingHook = ref<AccountOpsWebhook|null>(null), showWebhook = ref(false), showEmail = ref(false), testingId = ref<string|null>(null)
 let version = 0, accountsVersion = 0, testSequence = 0, mutationSequence = 0, paginationSequence = 0, alive = true, timer: ReturnType<typeof setInterval>|null = null
-const normalize = (c: AccountOpsConfig): AccountOpsConfig => ({ enabled:c.enabled, recipient:c.recipient,email_name:c.email_name ?? '', balance_low:c.balance_low, weekly_quota:c.weekly_quota, cooldown_minutes:c.cooldown_minutes, webhooks:(c.webhooks??[]).map(h=>({id:h.id,name:h.name,provider:h.provider,enabled:h.enabled,url_configured:h.url_configured===true,secret_configured:h.secret_configured===true,message_template:h.message_template})), balance_thresholds:(c.balance_thresholds??[]).map(r=>({...r,notify_alert:r.notify_alert??true,notify_recovery:r.notify_recovery??true})), quota_thresholds:(c.quota_thresholds??[]).map(r=>({...r,notify_alert:r.notify_alert??true,notify_recovery:r.notify_recovery??true})) })
+const normalize = (c: AccountOpsConfig): AccountOpsConfig => ({ enabled:c.enabled, recipient:c.recipient,email_name:c.email_name ?? '', balance_low:c.balance_low, weekly_quota:c.weekly_quota, cooldown_minutes:c.cooldown_minutes, webhooks:(c.webhooks??[]).map(h=>({id:h.id,name:h.name,provider:h.provider,enabled:h.enabled,url_configured:h.url_configured===true,secret_configured:h.secret_configured===true,message_template:h.message_template})), groups:(c.groups??[]).map(g=>({id:g.id,name:g.name,provider:g.provider,site:g.site,account_ids:g.account_ids ? [...g.account_ids] : []})), balance_thresholds:(c.balance_thresholds??[]).map(r=>({...r,notify_alert:r.notify_alert??true,notify_recovery:r.notify_recovery??true})), quota_thresholds:(c.quota_thresholds??[]).map(r=>({...r,notify_alert:r.notify_alert??true,notify_recovery:r.notify_recovery??true})) })
 const eventKey = (e: AccountOpsEvent) => e.id ?? `${e.account_id}:${e.kind}:${e.phase??'legacy'}:${e.first_seen}`
 const filteredEvents = computed(()=>events.value.filter(e=>(kind.value==='all'||kind.value===e.kind)&&(phase.value==='all'||phase.value===(e.phase??'alert'))&&`${e.account_name} ${e.account_id}`.toLowerCase().includes(query.value.toLowerCase().trim())))
 const date = (value: string) => { const d=new Date(value);return Number.isFinite(d.getTime())?d.toLocaleString():'-' }
@@ -224,13 +232,15 @@ async function refresh() {
 async function loadAccounts() {
   if(!auth.user)return
   const current=++accountsVersion;thresholdLoading.value=true
-  try{const a=await getAccountOpsThresholdAccounts();if(alive&&current===accountsVersion){thresholdAccounts.value=a;thresholdReady.value=true;thresholdError.value=''}}
+  try{const [a, g] = await Promise.all([getAccountOpsThresholdAccounts(), getAccountOpsThresholdGroups()]);if(alive&&current===accountsVersion){thresholdAccounts.value=a;accountGroups.value=g;thresholdReady.value=true;thresholdError.value=''}}
   catch(e){if(alive&&current===accountsVersion){thresholdError.value=message(e);app.showError(thresholdError.value)}}
   finally{if(alive&&current===accountsVersion)thresholdLoading.value=false}
 }
 function selectTab(tab:'records'|'settings'){activeTab.value=tab;if(tab==='settings'&&!thresholdReady.value&&!thresholdLoading.value)void loadAccounts()}
 function tabKey(event:KeyboardEvent,tab:'records'|'settings'){if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?'settings':event.key==='End'?'records':tab==='records'?'settings':'records';selectTab(next);document.getElementById(`ops-tab-${next}`)?.focus()}
 function acceptConfig(config: AccountOpsConfig){if(!alive||!auth.user||!remote.value)return;version++;loading.value=false;remote.value={...remote.value,config:normalize(config)};app.showSuccess(t('accountOps.settingsSaved'))}
+function acceptGroupConfig(config: AccountOpsConfig){showGroupDialog.value=false;acceptConfig(config);void loadGroups()}
+async function loadGroups(){try{const groups=await getAccountOpsThresholdGroups();if(alive)accountGroups.value=groups}catch(e){if(alive)app.showError(message(e))}}
 function acceptBatchConfig(config: AccountOpsConfig){acceptConfig(config);ruleList.value?.clearSelection()}
 function editWebhook(hook:AccountOpsWebhook|null){editingHook.value=hook;showWebhook.value=true}
 function addChannel(provider: 'email'|'webhook') {
@@ -251,12 +261,19 @@ async function toggleNotifications(enabled: boolean) {
   await mutate(() => saveAccountOpsNotificationSettings({ enabled: enabledDraft.value }))
   enabledDraft.value = remote.value?.config.enabled ?? false
 }
-async function toggleRule(a:AccountOpsThresholdAccount,enabled:boolean){const r=a.type==='apikey'?remote.value?.config.balance_thresholds?.find(x=>x.account_id===a.account_id):remote.value?.config.quota_thresholds?.find(x=>x.account_id===a.account_id);if(!r)return;const input:AccountOpsRuleInput={metric:a.type==='apikey'?'balance':'quota',enabled,notify_alert:r.notify_alert??true,notify_recovery:r.notify_recovery??true,...('threshold'in r?{threshold:r.threshold,unit:r.unit}:{threshold_percent:r.threshold_percent,window:r.window})};await mutate(()=>saveAccountOpsRule(a.account_id,input))}
-async function removeRule(id:number,metric:'balance'|'quota'){await mutate(()=>deleteAccountOpsRule(id,metric))}
+async function toggleGroup(_group:AccountOpsGroup, accounts:AccountOpsThresholdAccount[], enabled:boolean){
+  if (!remote.value) return
+  const groups: AccountOpsRuleBatchGroup[] = []
+  const apiKeys = accounts.filter(account => account.type === 'apikey')
+  const oauth = accounts.filter(account => account.type === 'oauth')
+  if (apiKeys.length) groups.push({ account_ids: apiKeys.map(account => account.account_id), rule: { metric: 'balance' as const, enabled, enabled_only: true } })
+  if (oauth.length) groups.push({ account_ids: oauth.map(account => account.account_id), rule: { metric: 'quota' as const, enabled, enabled_only: true } })
+  if (groups.length) await mutate(() => saveAccountOpsRuleGroups(groups))
+}
 async function removeWebhook(id:string){await mutate(()=>deleteAccountOpsWebhook(id))}
 async function testWebhook(id:string){if(testingId.value)return;const current=++testSequence;testingId.value=id;try{await testAccountOpsWebhook(id);if(alive&&current===testSequence)app.showSuccess(t('accountOps.testSuccess'))}catch(e){if(alive&&current===testSequence)app.showError(message(e))}finally{if(alive&&current===testSequence)testingId.value=null}}
 async function more(){if(loadingMore.value||loading.value)return;const current=version, sequence=++paginationSequence;loadingMore.value=true;try{const p=await getAccountOpsEvents(events.value.length);if(alive&&current===version){const merged=new Map([...events.value,...p.items].map(e=>[eventKey(e),e]));events.value=[...merged.values()];hasMore.value=p.has_more}}catch(e){if(alive&&current===version)app.showError(message(e))}finally{if(alive&&sequence===paginationSequence)loadingMore.value=false}}
-watch(()=>auth.user?`${auth.user.id}:${auth.user.role}`:'',()=>{version++;accountsVersion++;testSequence++;mutationSequence++;paginationSequence++;loading.value=loadingMore.value=mutating.value=thresholdLoading.value=false;thresholdAccounts.value=[];thresholdReady.value=false;editingAccount.value=null;showWebhook.value=showEmail.value=showAddChannel.value=false;testingId.value=null;enabledDraft.value=globalSaving.value=false;activeTab.value='settings';batchAccounts.value=[]},{flush:'sync'})
+watch(()=>auth.user?`${auth.user.id}:${auth.user.role}`:'',()=>{version++;accountsVersion++;testSequence++;mutationSequence++;paginationSequence++;loading.value=loadingMore.value=mutating.value=thresholdLoading.value=false;thresholdAccounts.value=[];accountGroups.value=[];thresholdReady.value=false;showWebhook.value=showEmail.value=showAddChannel.value=showGroupDialog.value=false;testingId.value=null;enabledDraft.value=globalSaving.value=false;activeTab.value='settings';batchAccounts.value=[]},{flush:'sync'})
 onMounted(()=>{void load();void loadAccounts();timer=setInterval(()=>{if(document.visibilityState==='visible'&&!loadingMore.value&&!mutating.value&&!globalSaving.value){void load();if(activeTab.value==='settings')void loadAccounts()}},30000)})
 onBeforeUnmount(()=>{alive=false;version++;accountsVersion++;testSequence++;mutationSequence++;paginationSequence++;if(timer)clearInterval(timer)})
 </script>

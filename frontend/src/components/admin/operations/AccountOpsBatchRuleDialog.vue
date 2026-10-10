@@ -164,7 +164,7 @@ interface RuleSection {
   testIdPrefix: string
 }
 
-const props = defineProps<{ show: boolean; accounts: AccountOpsThresholdAccount[] }>()
+const props = defineProps<{ show: boolean; accounts: AccountOpsThresholdAccount[]; config?: AccountOpsConfig }>()
 const emit = defineEmits<{
   (event: 'close'): void
   (event: 'saved', config: AccountOpsConfig): void
@@ -212,6 +212,10 @@ watch(() => [props.show, scopeKey.value] as const, () => {
   busy.value = false
   Object.assign(balanceForm, newForm())
   Object.assign(quotaForm, newForm())
+  const balance = props.config?.balance_thresholds?.find(rule => rule.account_id === balanceAccounts.value[0]?.account_id)
+  if (balance) Object.assign(balanceForm, { enabled: balance.enabled, threshold: balance.threshold, notifyAlert: balance.notify_alert ?? true, notifyRecovery: balance.notify_recovery ?? true })
+  const quota = props.config?.quota_thresholds?.find(rule => rule.account_id === quotaAccounts.value[0]?.account_id)
+  if (quota) Object.assign(quotaForm, { enabled: quota.enabled, threshold: quota.threshold_percent, window: quota.window, notifyAlert: quota.notify_alert ?? true, notifyRecovery: quota.notify_recovery ?? true })
 }, { immediate: true, flush: 'pre' })
 
 function close() {

@@ -14,15 +14,18 @@ import (
 const accountOpsSettingsKey = "account_ops_notifications_v1"
 
 type AccountOpsConfig struct {
-	Enabled           bool                    `json:"enabled"`
-	Recipient         string                  `json:"recipient"`
-	EmailName         string                  `json:"email_name,omitempty"`
-	BalanceLow        bool                    `json:"balance_low"`
-	WeeklyQuota       bool                    `json:"weekly_quota"`
-	CooldownMinutes   int                     `json:"cooldown_minutes"`
-	Webhooks          []AccountOpsWebhook     `json:"webhooks"`
-	BalanceThresholds []AccountOpsBalanceRule `json:"balance_thresholds"`
-	QuotaThresholds   []AccountOpsQuotaRule   `json:"quota_thresholds"`
+	Enabled             bool                    `json:"enabled"`
+	Recipient           string                  `json:"recipient"`
+	EmailName           string                  `json:"email_name,omitempty"`
+	BalanceLow          bool                    `json:"balance_low"`
+	WeeklyQuota         bool                    `json:"weekly_quota"`
+	CooldownMinutes     int                     `json:"cooldown_minutes"`
+	Webhooks            []AccountOpsWebhook     `json:"webhooks"`
+	Groups              []AccountOpsGroup       `json:"groups"`
+	GroupsInitialized   bool                    `json:"groups_initialized,omitempty"`
+	UngroupedAccountIDs []int64                 `json:"ungrouped_account_ids,omitempty"`
+	BalanceThresholds   []AccountOpsBalanceRule `json:"balance_thresholds"`
+	QuotaThresholds     []AccountOpsQuotaRule   `json:"quota_thresholds"`
 }
 
 func defaultAccountOpsConfig() AccountOpsConfig {
@@ -63,6 +66,8 @@ type AccountOpsEvent struct {
 	Criteria            string                        `json:"-"`
 	AccountID           int64                         `json:"account_id"`
 	AccountName         string                        `json:"account_name"`
+	GroupID             string                        `json:"group_id,omitempty"`
+	GroupName           string                        `json:"group_name,omitempty"`
 	Kind                string                        `json:"kind"`
 	Signal              string                        `json:"signal"`
 	HTTPStatus          int                           `json:"http_status"`
@@ -93,32 +98,36 @@ type AccountOpsService struct {
 	thresholdLookupTimeout time.Duration
 	usageLogs              UsageLogRepository
 	geminiQuota            *GeminiQuotaService
-	accounts               AccountRepository
-	usageCache             *UsageCache
-	encryptor              SecretEncryptor
-	fixedKey               bool
-	timezone               *time.Location
-	robotClient            *http.Client
-	robotMu                sync.Mutex
-	robotLast              map[string]time.Time
-	autoSeen               map[int64]bool
-	autoConfigMu           sync.Mutex
-	autoGroups             GroupRepository
-	autoAccounts           AccountConcurrencyRepository
-	autoConfig             atomic.Value
-	autoBlocked            atomic.Bool
-	autoResults            chan AccountConcurrencyResult
-	settings               SettingRepository
-	repo                   AccountOpsRepository
-	email                  accountOpsEmailSender
-	config                 atomic.Value
-	queue                  chan AccountOpsEvent
-	cancel                 context.CancelFunc
-	wg                     sync.WaitGroup
-	lifecycle              sync.Mutex
-	settingsMu             sync.Mutex
-	dropped                atomic.Uint64
-	failures               atomic.Uint64
+	newAPIGroupReader      interface {
+		GetBinding(context.Context, int64) (*NewAPIAccountBinding, error)
+	}
+	newAPIGroupCache sync.Map
+	accounts         AccountRepository
+	usageCache       *UsageCache
+	encryptor        SecretEncryptor
+	fixedKey         bool
+	timezone         *time.Location
+	robotClient      *http.Client
+	robotMu          sync.Mutex
+	robotLast        map[string]time.Time
+	autoSeen         map[int64]bool
+	autoConfigMu     sync.Mutex
+	autoGroups       GroupRepository
+	autoAccounts     AccountConcurrencyRepository
+	autoConfig       atomic.Value
+	autoBlocked      atomic.Bool
+	autoResults      chan AccountConcurrencyResult
+	settings         SettingRepository
+	repo             AccountOpsRepository
+	email            accountOpsEmailSender
+	config           atomic.Value
+	queue            chan AccountOpsEvent
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
+	lifecycle        sync.Mutex
+	settingsMu       sync.Mutex
+	dropped          atomic.Uint64
+	failures         atomic.Uint64
 }
 
 func NewAccountOpsService(settings SettingRepository, repo AccountOpsRepository, email accountOpsEmailSender) *AccountOpsService {
@@ -172,7 +181,8 @@ func (s *AccountOpsService) Observe(account *Account, status int, headers http.H
 	if len(name) > 120 {
 		name = name[:120]
 	}
-	event := AccountOpsEvent{AccountID: account.ID, AccountName: string(name), Kind: kind, Signal: signal, HTTPStatus: status}
+	group := s.cachedAccountOpsGroupAssignment(account, c)
+	event := AccountOpsEvent{AccountID: account.ID, AccountName: string(name), GroupID: group.ID, GroupName: group.Name, Kind: kind, Signal: signal, HTTPStatus: status}
 	// The hot request path never waits for SMTP or the database. Raw errors and credentials do not enter the queue.
 	select {
 	case s.queue <- event:
@@ -241,6 +251,14 @@ func (s *AccountOpsService) refreshConfig(ctx context.Context) bool {
 		s.config.Store(defaultAccountOpsConfig())
 		s.failures.Add(1)
 		return false
+	}
+	if s.accounts != nil {
+		if reconciled, reconcileErr := s.ensureManualAccountOpsGroups(query); reconcileErr != nil {
+			s.failures.Add(1)
+			return false
+		} else {
+			c = reconciled
+		}
 	}
 	if err = s.repo.SuppressDisabled(query, c); err != nil {
 		s.failures.Add(1)
