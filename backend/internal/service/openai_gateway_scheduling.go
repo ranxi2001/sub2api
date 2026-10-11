@@ -1124,6 +1124,7 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		rateOrder = newOpenAILegacyUpstreamRateOrder(eligible, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
 	}
 	bpsPreferred := strings.TrimSpace(requestedModel) != ""
+	ticketDeferred := s.openAICodexTicketDeferredAccounts(eligible, requestedModel, requireCompact)
 	sort.SliceStable(eligible, func(i, j int) bool {
 		a, b := eligible[i], eligible[j]
 		if bpsPreferred {
@@ -1135,6 +1136,9 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		}
 		if requireCompact && compactTiers[a.ID] != compactTiers[b.ID] {
 			return compactTiers[a.ID] > compactTiers[b.ID]
+		}
+		if ticketDeferred[a.ID] != ticketDeferred[b.ID] {
+			return ticketDeferred[b.ID]
 		}
 		if rateCmp := rateOrder.compare(a, b); rateCmp != 0 {
 			return rateCmp < 0
@@ -1456,6 +1460,14 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if preferLowUpstreamRate {
 		rateOrder = newOpenAILegacyUpstreamRateOrder(candidates, time.Now(), s.openAIOAuthSchedulingRateMultiplier(ctx))
 	}
+	ticketDeferred := s.openAICodexTicketDeferredAccounts(candidates, requestedModel, requireCompact)
+	preferTicketHolders := func(accounts []*Account) {
+		if len(ticketDeferred) > 0 {
+			sort.SliceStable(accounts, func(i, j int) bool {
+				return !ticketDeferred[accounts[i].ID] && ticketDeferred[accounts[j].ID]
+			})
+		}
+	}
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
@@ -1518,6 +1530,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return rateOrder.compare(available[i].account, available[j].account) < 0
 			})
 		}
+		if len(ticketDeferred) > 0 {
+			sort.SliceStable(available, func(i, j int) bool {
+				return !ticketDeferred[available[i].account.ID] && ticketDeferred[available[j].account.ID]
+			})
+		}
 
 		selectionOrder := make([]accountWithLoad, 0, len(available))
 		if requireCompact {
@@ -1574,6 +1591,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				return rateOrder.compare(ordered[i], ordered[j]) < 0
 			})
 		}
+		preferTicketHolders(ordered)
 		if requireCompact {
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
@@ -1624,6 +1642,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			return rateOrder.compare(candidates[i], candidates[j]) < 0
 		})
 	}
+	preferTicketHolders(candidates)
 	if requireCompact {
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}

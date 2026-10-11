@@ -31,12 +31,13 @@ type CodexHarvestBound struct {
 }
 
 type CodexHarvestControls struct {
-	EdgeIP            string            `json:"edge_ip"`
-	Transport         string            `json:"transport"`
-	TargetGateway     string            `json:"target_gateway"`
-	Version           int               `json:"version"`
-	NodeMemoryEnabled bool              `json:"node_memory_enabled"`
-	Speed             CodexHarvestSpeed `json:"speed"`
+	EdgeIP                string            `json:"edge_ip"`
+	Transport             string            `json:"transport"`
+	TargetGateway         string            `json:"target_gateway"`
+	Version               int               `json:"version"`
+	NodeMemoryEnabled     bool              `json:"node_memory_enabled"`
+	TicketFirstScheduling bool              `json:"ticket_first_scheduling"`
+	Speed                 CodexHarvestSpeed `json:"speed"`
 }
 
 type CodexHarvestRuntime struct {

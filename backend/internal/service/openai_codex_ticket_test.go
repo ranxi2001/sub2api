@@ -797,6 +797,50 @@ func TestOpenAICodexTicketShouldNotYieldStickyWithoutBetterTicket(t *testing.T) 
 	require.False(t, svc.openAICodexTicketShouldYieldSticky(context.Background(), low, nil, PlatformOpenAI, "gpt-6-astra", false, nil))
 }
 
+func TestOpenAICodexTicketTicketlessStickyYieldsRegardlessOfPriority(t *testing.T) {
+	ticketless := ticketTestAccount(20)
+	ticketless.Priority = 1
+	ticketed := ticketTestAccount(5)
+	ticketed.Priority = 100
+	attachReadyCodexTicket(ticketed, "gpt-6-astra")
+
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
+		Enabled:      true,
+		TargetLength: 292,
+		TTLSeconds:   3600,
+		Models:       []string{"gpt-6-astra"},
+	}, nil)
+	svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{*ticketless, *ticketed}}
+
+	require.False(t, svc.openAICodexTicketShouldYieldSticky(context.Background(), ticketless, nil, PlatformOpenAI, "gpt-6-astra", false, nil), "switch off keeps priority")
+	enableTicketFirstScheduling(svc)
+	require.True(t, svc.openAICodexTicketShouldYieldSticky(context.Background(), ticketless, nil, PlatformOpenAI, "gpt-6-astra", false, nil))
+	require.False(t, svc.openAICodexTicketShouldYieldSticky(context.Background(), ticketless, nil, PlatformOpenAI, "gpt-6-astra", false, map[int64]struct{}{ticketed.ID: {}}))
+	require.False(t, svc.openAICodexTicketShouldYieldSticky(context.Background(), ticketless, nil, PlatformOpenAI, "gpt-5.5", false, nil))
+	require.False(t, svc.openAICodexTicketShouldYieldSticky(context.Background(), ticketed, nil, PlatformOpenAI, "gpt-6-astra", false, nil))
+}
+
+func TestOpenAICodexTicketDeferredAccounts(t *testing.T) {
+	ticketed := ticketTestAccount(1)
+	attachReadyCodexTicket(ticketed, "gpt-6-astra")
+	ticketless := ticketTestAccount(2)
+	apiKey := &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
+
+	svc := ticketTestService(t, config.OpenAICodexTicketConfig{
+		Enabled:      true,
+		TargetLength: 292,
+		TTLSeconds:   3600,
+		Models:       []string{"gpt-6-astra"},
+	}, nil)
+
+	require.Nil(t, svc.openAICodexTicketDeferredAccounts([]*Account{ticketed, ticketless}, "gpt-6-astra", false), "switch off")
+	enableTicketFirstScheduling(svc)
+	require.Equal(t, map[int64]bool{2: true}, svc.openAICodexTicketDeferredAccounts([]*Account{ticketed, ticketless, apiKey}, "gpt-6-astra", false))
+	require.Equal(t, map[int64]bool{2: true}, svc.openAICodexTicketDeferredAccounts([]*Account{apiKey, ticketless}, "gpt-6-astra", false))
+	require.Nil(t, svc.openAICodexTicketDeferredAccounts([]*Account{ticketless, ticketTestAccount(4)}, "gpt-6-astra", false), "nothing to prefer")
+	require.Nil(t, svc.openAICodexTicketDeferredAccounts([]*Account{ticketed, ticketless}, "gpt-5.5", false), "ungated model")
+}
+
 func TestOpenAICodexTicketShouldNotYieldStickyWhenPriorityTied(t *testing.T) {
 	a := ticketTestAccount(5)
 	a.Priority = 1

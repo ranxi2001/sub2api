@@ -202,8 +202,15 @@ func (c *ticketCountingSnapshotCache) GetAccounts(_ context.Context, ids []int64
 	return out, nil
 }
 
+func enableTicketFirstScheduling(svc *OpenAIGatewayService) {
+	svc.codexHarvest = &CodexHarvestService{
+		current:     CodexHarvestControls{Version: 1, Transport: "sse", TargetGateway: "unified-88", TicketFirstScheduling: true},
+		loadedUntil: time.Now().Add(time.Hour),
+	}
+}
+
 func TestCodexTicketCandidateHydrationScope(t *testing.T) {
-	for _, name := range []string{"enabled", "fail_open", "disabled", "ungated", "excluded", "compact_ungated"} {
+	for _, name := range []string{"enabled", "fail_open", "fail_open_ticket_first", "disabled", "ungated", "excluded", "compact_ungated"} {
 		t.Run(name, func(t *testing.T) {
 			svc, snapshot, account, groupID := ticketSchedulerFixture(t, true, true)
 			cache := &ticketCountingSnapshotCache{openAISnapshotCacheStub: snapshot}
@@ -213,6 +220,9 @@ func TestCodexTicketCandidateHydrationScope(t *testing.T) {
 			switch name {
 			case "fail_open":
 				svc.cfg.Gateway.OpenAICodexTicket.FailClosed = false
+			case "fail_open_ticket_first":
+				svc.cfg.Gateway.OpenAICodexTicket.FailClosed = false
+				enableTicketFirstScheduling(svc)
 			case "disabled":
 				svc.cfg.Gateway.OpenAICodexTicket.Enabled = false
 			case "ungated":
@@ -226,7 +236,7 @@ func TestCodexTicketCandidateHydrationScope(t *testing.T) {
 			_, err := svc.listSchedulableAccountsForRequest(context.Background(), &groupID,
 				PlatformOpenAI, model, compact, excluded)
 			require.NoError(t, err)
-			if name == "enabled" {
+			if name == "enabled" || name == "fail_open_ticket_first" {
 				require.Equal(t, 1, cache.batchReads)
 			} else {
 				require.Zero(t, cache.batchReads)
@@ -285,6 +295,95 @@ func TestCodexTicketSchedulerStorageFailureDoesNotFailOpen(t *testing.T) {
 			require.Nil(t, result)
 			require.Equal(t, 1, cache.batchReads)
 		})
+	}
+}
+
+func TestCodexTicketSchedulerFailOpenHydrationFailureKeepsServing(t *testing.T) {
+	for _, advanced := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy", true: "advanced"}[advanced], func(t *testing.T) {
+			svc, snapshot, account, groupID := ticketSchedulerFixture(t, advanced, true)
+			svc.cfg.Gateway.OpenAICodexTicket.FailClosed = false
+			enableTicketFirstScheduling(svc)
+			cache := &ticketCountingSnapshotCache{openAISnapshotCacheStub: snapshot, err: errors.New("cache unavailable")}
+			svc.schedulerSnapshot.cache = cache
+			svc.schedulerSnapshot.cfg = svc.cfg
+			result, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "",
+				"gpt-6-astra", nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, account.ID, result.Account.ID)
+			require.GreaterOrEqual(t, cache.batchReads, 1)
+			if result.ReleaseFunc != nil {
+				result.ReleaseFunc()
+			}
+		})
+	}
+}
+
+// A higher-priority account without a ticket must not outrank a ticket holder
+// under fail-open, where the ticketless account is still admissible.
+func ticketFirstFixture(t *testing.T, advanced, loadBatch bool) (*OpenAIGatewayService, *Account, *Account, int64) {
+	t.Helper()
+	svc, cache, ticketed, groupID := ticketSchedulerFixture(t, advanced, loadBatch)
+	svc.cfg.Gateway.OpenAICodexTicket.FailClosed = false
+	enableTicketFirstScheduling(svc)
+	ticketed.Priority = 50
+	cache.snapshotAccounts = []*Account{ticketSchedulerProjection(t, ticketed)}
+	ticketless := *ticketed
+	ticketless.ID = 399
+	ticketless.Priority = -100
+	ticketless.Extra = nil
+	cache.snapshotAccounts = append([]*Account{ticketSchedulerProjection(t, &ticketless)}, cache.snapshotAccounts...)
+	cache.accountsByID[ticketless.ID] = &ticketless
+	svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{ticketless, *ticketed}}
+	return svc, ticketed, &ticketless, groupID
+}
+
+func TestCodexTicketSchedulerPrefersTicketHolders(t *testing.T) {
+	for _, path := range []struct {
+		name                string
+		advanced, loadBatch bool
+	}{
+		{"advanced", true, true},
+		{"legacy_batch", false, true},
+		{"legacy_nonbatch", false, false},
+	} {
+		for _, scenario := range []string{"ticket_first", "fallback_when_excluded", "ungated_keeps_priority", "sticky_migrates", "switch_off", "switch_off_sticky_stays"} {
+			t.Run(path.name+"/"+scenario, func(t *testing.T) {
+				svc, ticketed, ticketless, groupID := ticketFirstFixture(t, path.advanced, path.loadBatch)
+				model, session, want := "gpt-6-astra", "", ticketed.ID
+				var excluded map[int64]struct{}
+				var cache *schedulerTestGatewayCache
+				switch scenario {
+				case "fallback_when_excluded":
+					excluded, want = map[int64]struct{}{ticketed.ID: {}}, ticketless.ID
+				case "ungated_keeps_priority":
+					model, want = "gpt-5.5", ticketless.ID
+				case "switch_off":
+					svc.codexHarvest.current.TicketFirstScheduling = false
+					want = ticketless.ID
+				case "switch_off_sticky_stays":
+					svc.codexHarvest.current.TicketFirstScheduling = false
+					want = ticketless.ID
+					fallthrough
+				case "sticky_migrates":
+					session = "synthetic-session"
+					cache = &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + session: ticketless.ID}}
+					svc.cache = cache
+				}
+				result, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", session,
+					model, excluded, OpenAIUpstreamTransportAny, false)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, want, result.Account.ID)
+				if cache != nil {
+					require.Equal(t, want, cache.sessionBindings["openai:"+session])
+				}
+				if result.ReleaseFunc != nil {
+					result.ReleaseFunc()
+				}
+			})
+		}
 	}
 }
 

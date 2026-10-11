@@ -839,7 +839,7 @@ func (s *OpenAIGatewayService) openAICodexTicketReadyForRequest(account *Account
 		return false
 	}
 	outbound := s.openAICodexTicketOutboundModel(account, requestedModel, requireCompact)
-	if !isOpenAICodexTicketAccount(account, outbound) {
+	if account.isPrismBrowserUpstreamModelEnabled(outbound) || !isOpenAICodexTicketAccount(account, outbound) {
 		return false
 	}
 	model := normalizeOpenAICodexTicketModel(outbound)
@@ -852,6 +852,57 @@ func (s *OpenAIGatewayService) openAICodexTicketReadyForRequest(account *Account
 	}
 	ticket := s.lookupOpenAICodexTicket(account, model)
 	return ticket.valid(time.Now(), openAICodexTicketTargetLength(account, cfg))
+}
+
+func (s *OpenAIGatewayService) openAICodexTicketFirstEnabled(ctx context.Context) bool {
+	if s == nil || !s.openAICodexTicketEnabledContext(ctx) {
+		return false
+	}
+	controls, _ := s.harvestControls(ctx)
+	return controls.TicketFirstScheduling
+}
+
+// openAICodexTicketDeferredForRequest reports an account that would send a
+// gated model through the native Codex route without a valid ticket. With
+// ticket-first scheduling, ticket holders are tried first regardless of
+// account priority; deferred accounts only take what they cannot serve. BPS
+// and Prism routes never carry a ticket. Callers check the switch.
+func (s *OpenAIGatewayService) openAICodexTicketDeferredForRequest(account *Account, requestedModel string, requireCompact bool) bool {
+	if s == nil || account == nil {
+		return false
+	}
+	outbound := s.openAICodexTicketOutboundModel(account, requestedModel, requireCompact)
+	if account.isPrismBrowserUpstreamModelEnabled(outbound) || !isOpenAICodexTicketAccount(account, outbound) || !s.openAICodexTicketGatedModel(outbound) {
+		return false
+	}
+	return !s.openAICodexTicketReadyForRequest(account, requestedModel, requireCompact)
+}
+
+// openAICodexTicketDeferredAccounts returns nil when no candidate is deferred,
+// so callers can skip reordering entirely.
+func (s *OpenAIGatewayService) openAICodexTicketDeferredAccounts(accounts []*Account, requestedModel string, requireCompact bool) map[int64]bool {
+	if s == nil || len(accounts) < 2 || !s.openAICodexTicketFirstEnabled(context.Background()) {
+		return nil
+	}
+	var deferred map[int64]bool
+	preferred := false
+	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		if !s.openAICodexTicketDeferredForRequest(account, requestedModel, requireCompact) {
+			preferred = true
+			continue
+		}
+		if deferred == nil {
+			deferred = make(map[int64]bool, len(accounts))
+		}
+		deferred[account.ID] = true
+	}
+	if !preferred {
+		return nil
+	}
+	return deferred
 }
 
 func extraTruthy(value any) bool {
@@ -960,9 +1011,11 @@ func (s *OpenAIGatewayService) openAICodexTicketHarvestExcluded(account *Account
 	return !scope.includes(account)
 }
 
-// Sticky sessions ignore account priority. A leftover 292 on a low-priority
-// account (for example a 5x that is no longer harvested) would otherwise pin
-// traffic forever even after a higher-priority account such as 20x harvests.
+// Sticky sessions bypass ticket-first ordering and account priority. With
+// ticket-first scheduling, a session bound to an account without a ticket
+// would never reach a ticket holder; independently, a leftover 292 on a
+// low-priority account (for example a 5x that is no longer harvested) would
+// pin traffic even after a higher-priority 20x harvests.
 func (s *OpenAIGatewayService) openAICodexTicketShouldYieldStickyTo(sticky *Account, candidates []*Account, requestedModel string, requireCompact bool, excludedIDs map[int64]struct{}) bool {
 	if s == nil || sticky == nil || !s.openAICodexTicketEnabled() {
 		return false
@@ -971,6 +1024,7 @@ func (s *OpenAIGatewayService) openAICodexTicketShouldYieldStickyTo(sticky *Acco
 	if !s.openAICodexTicketGatedModel(outbound) {
 		return false
 	}
+	stickyDeferred := s.openAICodexTicketFirstEnabled(context.Background()) && s.openAICodexTicketDeferredForRequest(sticky, requestedModel, requireCompact)
 	stickyPriority := openAIAccountSchedulingPriority(sticky)
 	for _, account := range candidates {
 		if account == nil || account.ID == sticky.ID {
@@ -981,7 +1035,7 @@ func (s *OpenAIGatewayService) openAICodexTicketShouldYieldStickyTo(sticky *Acco
 				continue
 			}
 		}
-		if openAIAccountSchedulingPriority(account) >= stickyPriority {
+		if !stickyDeferred && openAIAccountSchedulingPriority(account) >= stickyPriority {
 			continue
 		}
 		if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {

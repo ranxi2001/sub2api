@@ -1223,6 +1223,33 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		return append(primary, overflow...)
 	}
 
+	candidateAccounts := make([]*Account, 0, len(plan.candidates))
+	for _, candidate := range plan.candidates {
+		candidateAccounts = append(candidateAccounts, candidate.account)
+	}
+	ticketDeferred := s.service.openAICodexTicketDeferredAccounts(candidateAccounts, req.RequestedModel, req.RequireCompact)
+	buildTicketPreferredOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+		if len(ticketDeferred) == 0 {
+			return buildSelectionOrder(pool)
+		}
+		ready := make([]openAIAccountCandidateScore, 0, len(pool))
+		deferred := make([]openAIAccountCandidateScore, 0, len(pool))
+		for _, candidate := range pool {
+			if candidate.account != nil && ticketDeferred[candidate.account.ID] {
+				deferred = append(deferred, candidate)
+			} else {
+				ready = append(ready, candidate)
+			}
+		}
+		if len(ready) == 0 || len(deferred) == 0 {
+			return buildSelectionOrder(pool)
+		}
+		ordered := make([]openAIAccountCandidateScore, 0, len(pool))
+		ordered = append(ordered, buildSelectionOrder(ready)...)
+		ordered = append(ordered, buildSelectionOrder(deferred)...)
+		return ordered
+	}
+
 	// Excel/BPS is a per-account protocol. Once a request model has a BPS
 	// candidate, try those accounts before native Codex accounts so a pool of
 	// accounts does not randomly send the same model to /v1/responses. Native
@@ -1231,10 +1258,10 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	// enabled.
 	buildBPSPreferredOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
 		if s.service.balancesPriorityProtocols(req) {
-			return buildSelectionOrder(pool)
+			return buildTicketPreferredOrder(pool)
 		}
 		if req.Platform != PlatformOpenAI || strings.TrimSpace(req.RequestedModel) == "" || len(pool) < 2 {
-			return buildSelectionOrder(pool)
+			return buildTicketPreferredOrder(pool)
 		}
 		bps := make([]openAIAccountCandidateScore, 0, len(pool))
 		native := make([]openAIAccountCandidateScore, 0, len(pool))
@@ -1246,11 +1273,11 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 			}
 		}
 		if len(bps) == 0 || len(native) == 0 {
-			return buildSelectionOrder(pool)
+			return buildTicketPreferredOrder(pool)
 		}
 		ordered := make([]openAIAccountCandidateScore, 0, len(pool))
 		ordered = append(ordered, buildSelectionOrder(bps)...)
-		ordered = append(ordered, buildSelectionOrder(native)...)
+		ordered = append(ordered, buildTicketPreferredOrder(native)...)
 		return ordered
 	}
 

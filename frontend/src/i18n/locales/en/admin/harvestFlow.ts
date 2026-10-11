@@ -186,9 +186,11 @@ export default {
     },
     controls: {
       title: 'Node memory and harvest speed',
-      description: 'Remember qualified exits per account, model and ticket shape. Background harvesting only.',
+      description: 'Remember qualified exits per account, model and ticket shape. Background harvesting only, except ticket-first scheduling.',
       enabled: 'Remember and prefer successful nodes',
       enabledHint: 'Switch nodes within a bounded round. Disabling restores rotation without deleting history.',
+      ticketFirst: 'Schedule ticket holders first',
+      ticketFirstHint: 'Affects live traffic: ticket-gated models go to accounts holding a valid ticket first, and priority only orders accounts within the ticketed and ticketless groups. Sessions on ticketless accounts move to ticket holders and lose their prompt cache. When off, accounts are scheduled by priority as before.',
       unavailable: 'Directed exit unavailable:',
       unsaved: 'Unsaved changes',
       loading: 'Loading harvest settings…',

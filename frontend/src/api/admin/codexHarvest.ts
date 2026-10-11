@@ -16,6 +16,7 @@ export interface CodexHarvestControls {
   transport?: 'sse' | 'websocket'
   version: number
   node_memory_enabled: boolean
+  ticket_first_scheduling?: boolean
   speed: CodexHarvestSpeed
 }
 

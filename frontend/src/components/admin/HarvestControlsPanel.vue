@@ -39,6 +39,13 @@
                 <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.enabledHint`) }}</span>
               </span>
             </label>
+            <label class="flex items-start gap-3">
+              <input v-model="draft.ticket_first_scheduling" data-testid="ticket-first-toggle" type="checkbox" class="mt-1 rounded text-primary-600" />
+              <span>
+                <span class="text-sm font-medium text-gray-900 dark:text-white">{{ t(`${prefix}.ticketFirst`) }}</span>
+                <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.ticketFirstHint`) }}</span>
+              </span>
+            </label>
           </div>
           <div class="rounded-2xl border border-gray-100 p-4 dark:border-dark-700">
             <div class="flex flex-wrap items-center justify-between gap-3">
@@ -116,7 +123,7 @@ const advanced = ref(false)
 const error = ref('')
 let requestId = 0
 let disposed = false
-const copy = (v: CodexHarvestControls): CodexHarvestControls => ({ ...v, edge_ip: v.edge_ip || '', target_gateway: v.target_gateway || 'unified-88', transport: v.transport || 'sse', speed: { ...v.speed } })
+const copy = (v: CodexHarvestControls): CodexHarvestControls => ({ ...v, edge_ip: v.edge_ip || '', target_gateway: v.target_gateway || 'unified-88', transport: v.transport || 'sse', ticket_first_scheduling: !!v.ticket_first_scheduling, speed: { ...v.speed } })
 const defaultSpeedFields: { key: keyof CodexHarvestSpeed; min: number; max: number; step: number }[] = [
   { key: 'round_interval_seconds', min: 1, max: 3600, step: 1 },
   { key: 'probe_interval_seconds', min: 0, max: 60, step: 1 },
@@ -130,7 +137,7 @@ const speedFields = computed(() => defaultSpeedFields.map(field => {
   const bound = remote.value?.bounds?.[field.key]
   return bound ? { ...field, min: bound.min, max: bound.max } : field
 }))
-const same = (a: CodexHarvestControls | null, b: CodexHarvestControls | null) => !!a && !!b && a.version === b.version && a.edge_ip === b.edge_ip && a.target_gateway === b.target_gateway && a.transport === b.transport && a.node_memory_enabled === b.node_memory_enabled && speedFields.value.every(f => a.speed[f.key] === b.speed[f.key])
+const same = (a: CodexHarvestControls | null, b: CodexHarvestControls | null) => !!a && !!b && a.version === b.version && a.edge_ip === b.edge_ip && a.target_gateway === b.target_gateway && a.transport === b.transport && a.node_memory_enabled === b.node_memory_enabled && a.ticket_first_scheduling === b.ticket_first_scheduling && speedFields.value.every(f => a.speed[f.key] === b.speed[f.key])
 const dirty = computed(() => !!draft.value && !same(draft.value, saved.value))
 const live = computed(() => props.runtime || remote.value?.runtime)
 const selectionLabel = computed(() => {

@@ -95,6 +95,19 @@ describe('Harvest controls draft and request ordering', () => {
     expect(wrapper.get(selector('save-controls')).attributes('disabled')).toBeDefined()
   })
 
+  it('saves the ticket-first scheduling switch, which defaults off', async () => {
+    api.save.mockImplementation(async settings => settings)
+    wrapper = mount(HarvestControlsPanel)
+    await flushPromises()
+    expect(input(wrapper, 'ticket-first-toggle').checked).toBe(false)
+    await wrapper.get(selector('ticket-first-toggle')).setValue(true)
+    expect(wrapper.text()).toContain('admin.harvestFlow.controls.unsaved')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ ticket_first_scheduling: true }))
+    expect(input(wrapper, 'ticket-first-toggle').checked).toBe(true)
+  })
+
   it('keeps an edited draft across automatic refreshes', async () => {
     wrapper = mount(HarvestControlsPanel)
     await flushPromises()
