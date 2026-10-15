@@ -737,6 +737,17 @@ type ForwardResult struct {
 	// claudeCodeMimic 记录 Anthropic API Key「模拟 Claude Code」在 system 前补的身份句，
 	// 记账时从用量里扣回（见 deductClaudeCodeMimicUsage）。
 	claudeCodeMimic claudeCodeMimicInjection
+	// UpstreamPriceMultiplier 是上游按实际请求端点计价相对计费模型价格的倍数（见 VertexUpstreamPriceMultiplier），
+	// 只作用于 token 费用；0 按 1 处理。
+	UpstreamPriceMultiplier float64
+}
+
+// upstreamPriceFactor 返回 UpstreamPriceMultiplier，未设置时为 1。
+func (r *ForwardResult) upstreamPriceFactor() float64 {
+	if r == nil || r.UpstreamPriceMultiplier <= 0 {
+		return 1
+	}
+	return r.UpstreamPriceMultiplier
 }
 
 // GatewayFailureStage identifies which request stage failed. The zero value is
