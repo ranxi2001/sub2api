@@ -191,6 +191,7 @@ func prepareOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey
 		// default. Enforce it before conversion or account/model normalization.
 		requested := service.CanonicalRequestedReasoningEffort(nil, requestModel)
 		if requested == nil || *requested != "ultra" {
+			c.Request = c.Request.WithContext(service.WithOpenAIReasoningEffortPolicy(c.Request.Context(), maxEffort, mappings, overLimit, requestModel))
 			return body, nil
 		}
 		payload, err := sjson.SetBytes(body, "output_config.effort", "ultra")
