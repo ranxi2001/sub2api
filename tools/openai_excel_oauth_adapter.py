@@ -42,6 +42,12 @@ def excel_source(source):
                            '      scope: "openid offline_access email profile organization.read",')
     source = replace_exact(source, '    maxProxySessionAttempts: process.env.CHATGPT_PROXY_MAX_ATTEMPTS || 10,',
                            '    maxProxySessionAttempts: 1,\n    sameProxyRiskRetries: 0,\n    cloudflareSolver: false,')
+    # Excel starts at auth.openai.com, without a ChatGPT Web session. The
+    # initial probe and both saved-session restart paths must check that same
+    # service: a ChatGPT homepage 403 does not establish an OAuth failure.
+    source = replace_exact(source,
+                           'await transport.prepareProxy(proxyTemplate, `${chatgptBase}/`);',
+                           'await transport.prepareProxy(proxyTemplate, `${authBase}/`);', count=3)
     old_callback = '(parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&\n      parsed.pathname === "/auth/callback"'
     source = replace_exact(source, old_callback,
                            'parsed.origin === new URL(DEFAULT_CODEX_REDIRECT_URI).origin &&\n      parsed.pathname === new URL(DEFAULT_CODEX_REDIRECT_URI).pathname && !parsed.username && !parsed.password')

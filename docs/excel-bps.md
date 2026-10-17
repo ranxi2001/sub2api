@@ -23,6 +23,8 @@
 
 [官方 manifest](https://bps.openai.com/basispoints/api/office/manifest.xml)指向的[前端 x-square-G80magJa.js](https://bps.openai.com/basispoints/extension/360590d7-f8f9-4d88-bf75-0edfe0a4b9f3/assets/x-square-G80magJa.js)公开了生产客户端 `app_fnr0pYvVwwFDocDumLG3H2Bp`、授权 scope、回调和刷新参数；2026-10-08 已独立核对。固定官方回调路径是协议依赖，将来变更时需要更新。没有修改凭证守护的密码/2FA 自动重登逻辑；不要将 Codex 自动重登流程绑定到 Excel 会话账号。
 
+密码/TOTP Worker 为 Excel 临时生成的登录运行副本，只向 OAuth 授权域 `auth.openai.com` 做代理预检，不再要求先通过 ChatGPT 首页检查；普通 Codex 登录仍使用原有预检。授权域预检或实际 authorize 返回安全检查、额外验证时仍会停止，不自动换出口重试。这个调整不保证 BPS 模型质量或延长票据寿命。
+
 ## 托管工具与原生回退策略
 
 账号编辑和批量编辑中可开启 **保持 BPS，省略不支持的托管工具**，对应账号配置 `extra.openai_excel_bps_omit_unsupported_tools: true`。默认关闭，无需数据库迁移，只影响该账号所选 BPS 模型。分组内有多个可调度账号时，应分别设置或使用批量编辑，避免不同账号采用不同策略。
