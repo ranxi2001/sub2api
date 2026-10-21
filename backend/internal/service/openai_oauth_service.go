@@ -473,3 +473,15 @@ func (s *OpenAIOAuthService) Stop() {
 func normalizeOpenAIOAuthPlatform(platform string) string {
 	return openai.OAuthPlatformOpenAI
 }
+
+
+// WithSessionStore replaces the OAuth session store. Wire injects a
+// Redis-backed store when Redis is configured so SIWC authorization sessions
+// survive restarts and work across replicas.
+func (s *OpenAIOAuthService) WithSessionStore(store *openai.SessionStore) *OpenAIOAuthService {
+	if store != nil {
+		s.sessionStore.Stop()
+		s.sessionStore = store
+	}
+	return s
+}

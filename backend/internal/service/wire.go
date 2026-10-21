@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
@@ -114,9 +115,15 @@ func ProvideOpenAIOAuthService(
 	oauthClient OpenAIOAuthClient,
 	privacyClientFactory PrivacyClientFactory,
 	cfg *config.Config,
+	redisClient *redis.Client,
 ) *OpenAIOAuthService {
 	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
 	svc.SetPrivacyClientFactory(privacyClientFactory)
+	// Mirror OAuth sessions to Redis so SIWC authorization flows survive
+	// restarts (same pattern as ProvideGrokOAuthService).
+	if redisClient != nil {
+		svc = svc.WithSessionStore(openai.NewRedisSessionStore(redisClient))
+	}
 	return svc
 }
 
