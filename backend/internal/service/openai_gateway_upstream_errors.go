@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"log/slog"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -250,6 +251,18 @@ func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool 
 	}
 }
 
+// isOpenAISubscriptionSharingNotEligible reports whether the upstream returned
+// subscription_sharing_user_not_eligible (ChatGPT plan usage denied for this
+// user). Community experience ties this error to risk-flagged accounts rather
+// than plan type, so treat it as account-specific: log it clearly and rotate.
+func isOpenAISubscriptionSharingNotEligible(statusCode int, upstreamBody []byte) bool {
+	if statusCode != http.StatusForbidden {
+		return false
+	}
+	return bytes.Contains(upstreamBody, []byte("subscription_sharing_user_not_eligible")) ||
+		bytes.Contains(upstreamBody, []byte("not eligible for subscription sharing"))
+}
+
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	// cyber_policy is request-scoped even when an intermediary wraps the
 	// provider response in a retryable 5xx status. Never punish or rotate the
@@ -259,6 +272,10 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Acc
 	}
 	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
 		return false
+	}
+	if isOpenAISubscriptionSharingNotEligible(statusCode, upstreamBody) {
+		slog.Warn("openai subscription sharing denied for account; account is likely risk-flagged, rotating to another account", "status_code", statusCode)
+		return true
 	}
 	if isOpenAIHTTPUpstreamAccessStateError(statusCode, upstreamMsg, upstreamBody) {
 		return true
