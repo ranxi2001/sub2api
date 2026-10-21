@@ -1113,7 +1113,7 @@ def _siwc_password_failure(output: str, exit_code: int) -> str:
         (("SIWC_WORKSPACE_MISMATCH",), "workspace_mismatch"),
         (("SIWC_AUTH_URL_INVALID",), "invalid_auth_url"),
         (("SIWC_CALLBACK_INVALID",), "invalid_callback"),
-        (("PROXY_RISK_CONTROL", "security-check"), "security_check"),
+        (("PROXY_RISK_CONTROL", "security-check", "返回安全校验页面"), "security_check"),
         (("ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "fetch failed"), "transport_error"),
         (("ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND", "ENOENT", "SyntaxError", "ReferenceError"), "runtime_error"),
         (("SIWC_INTERACTION_REQUIRED",), "browser_interaction_required"),
@@ -1121,7 +1121,7 @@ def _siwc_password_failure(output: str, exit_code: int) -> str:
         if any(marker in output for marker in markers):
             reason = label
             break
-    guidance = "; use browser authorization in account edit" if reason == "browser_interaction_required" else ""
+    guidance = "; use browser authorization in account edit" if reason in {"browser_interaction_required", "security_check"} else ""
     return f"SIWC authorization failed (stage={stage}, reason={reason}, exit={exit_code}); credentials retained{guidance}"
 
 

@@ -57,6 +57,7 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
             ("SIWC_WORKSPACE_MISMATCH", "starting", "workspace_mismatch"),
             ("SIWC_AUTH_URL_INVALID", "starting", "invalid_auth_url"),
             ("PROXY_RISK_CONTROL", "starting", "security_check"),
+            ("[proxy] 代理检测失败：HTTP 403，返回安全校验页面\n[error] 代理检测失败：HTTP 403，返回安全校验页面", "starting", "security_check"),
             ("ERR_MODULE_NOT_FOUND", "starting", "runtime_error"),
             ("ECONNREFUSED", "starting", "transport_error"),
             ("unknown upstream response", "starting", "protocol_error"),
@@ -69,7 +70,7 @@ class OpenAIOAuthReauthWorkerTest(unittest.TestCase):
                 self.assertNotIn("synthetic", result)
                 self.assertNotIn("secret", result)
                 self.assertNotIn("https://", result)
-                self.assertEqual("use browser authorization" in result, reason == "browser_interaction_required")
+                self.assertEqual("use browser authorization" in result, reason in {"browser_interaction_required", "security_check"})
 
     def test_parent_death_terminates_managed_protocol_descendants(self):
         with patch("os.getpgrp", return_value=123), patch("os.getpid", return_value=123), patch("os.killpg") as kill:

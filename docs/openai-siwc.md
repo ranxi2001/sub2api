@@ -33,11 +33,33 @@ uses the retained ID token as an account hint. Normal requests refresh expiring
 access tokens without password/TOTP login. A revoked refresh token or a policy
 challenge requires renewed authorization; no different billing path is selected.
 
+SIWC access-token authentication metadata is opaque. It does not expose the
+Codex `chatgpt_account_id` / `chatgpt_user_id` fields and is not decoded to prove
+identity. The token client verifies the ID-token signature, issuer, issued-client
+audience, expiry and nonce. First binding requires its email to match the parent
+account's stored email; subsequent authorization also pins the verified subject.
+Refresh retains that identity when no new ID token is returned, and rejects a
+changed subject or email when one is returned. Access-token expiry comes from
+the validated token response's `expires_in`.
+
+The issued client ID pins the workspace selected during official registration.
+The locally saved `workspace` is the parent-account snapshot used to invalidate
+stale local bindings if that account changes; it is not an extracted or verified
+upstream workspace claim. Administrators must choose the intended workspace in
+the official first-time consent flow. Same-email workspace equality cannot be
+inferred from the opaque metadata or from the ID-token subject.
+
 Worker failures report fixed `stage` and `reason` labels without copying raw
 runner output. `browser_interaction_required` after `mfa_accepted` means the
 password and TOTP steps completed but further browser interaction is needed;
 it does not mean the account is bound. Other reasons distinguish credential
 rejection, workspace mismatch, network/security checks and runtime failures.
+For a fixed proxy, a preflight HTTP 403 with a security challenge also reports
+`security_check` and recommends browser authorization. A normal browser may
+reach the login page through the same proxy even when the protocol Worker
+cannot; this error alone does not establish that the saved password or TOTP
+was rejected. Completing browser authorization stores the grant for normal
+token refresh without repeating the password flow.
 An old automatic-task error is hidden while a new browser session is displayed;
 callback failures remain visible and preserve the entered callback for correction.
 
@@ -115,6 +137,7 @@ was bound and no inference request was made during that check.
 Protocol references, checked 2026-10-20:
 
 - [Registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)
+- [Token reference](https://developers.openai.com/siwc/token-sharing-open-source/token-reference)
 - [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
 - [Preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
 - [Errors and recovery](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery)
