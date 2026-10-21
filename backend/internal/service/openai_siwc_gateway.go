@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"runtime"
+	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -118,8 +121,17 @@ func (s *OpenAIGatewayService) buildSIWCRequest(ctx context.Context, c *gin.Cont
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("User-Agent", "Sub2API")
+	if gjson.GetBytes(body, "stream").Bool() {
+		req.Header.Set("Accept", "text/event-stream")
+	} else {
+		req.Header.Set("Accept", "application/json")
+	}
+	req.Header.Set("Connection", "Keep-Alive")
+	req.Header.Set("User-Agent", fmt.Sprintf("Sub2API (%s; %s)", runtime.GOOS, runtime.GOARCH))
+	if sid := strings.TrimSpace(c.GetHeader("Session-Id")); sid != "" {
+		req.Header.Set("session_id", sid)
+		req.Header.Set("X-Client-Request-Id", sid)
+	}
 	return req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI)), nil
 }
 
