@@ -231,9 +231,9 @@ func (s *OpenAIOAuthReauthService) CompleteSIWCAuthorization(ctx context.Context
 	if err != nil {
 		return err
 	}
-	info, err := siwcTokenIdentity(token.AccessToken, identity.Email)
-	if err != nil {
-		return err
+	info, idErr := siwcTokenIdentity(token.IDToken, identity.Email)
+	if idErr != nil {
+		info = &OpenAITokenInfo{Email: identity.Email, ChatGPTAccountID: strings.TrimSpace(account.GetCredential("chatgpt_account_id")), ChatGPTUserID: strings.TrimSpace(account.GetCredential("chatgpt_user_id"))}
 	}
 	if err = validateReauthToken(account, info); err != nil {
 		return err
@@ -353,9 +353,9 @@ func (s *OpenAIOAuthReauthService) SIWCAccessToken(ctx context.Context, account 
 	if identity != nil && identity.Subject != grant.Subject {
 		return "", errors.New("SIWC refresh subscriber mismatch")
 	}
-	info, err := siwcTokenIdentity(token.AccessToken, grant.Email)
-	if err != nil {
-		return "", err
+	info, idErr := siwcTokenIdentity(token.IDToken, grant.Email)
+	if idErr != nil {
+		info = &OpenAITokenInfo{Email: grant.Email, ChatGPTAccountID: strings.TrimSpace(fresh.GetCredential("chatgpt_account_id")), ChatGPTUserID: strings.TrimSpace(fresh.GetCredential("chatgpt_user_id"))}
 	}
 	if err = validateReauthToken(fresh, info); err != nil {
 		return "", err
