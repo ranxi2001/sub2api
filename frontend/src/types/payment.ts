@@ -19,7 +19,12 @@ export type OrderStatus =
   | 'REFUNDED'
   | 'REFUND_FAILED'
 
-export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex'
+export type BEpusdtPaymentType =
+  | `usdt.${'trc20' | 'erc20' | 'bep20' | 'polygon' | 'aptos' | 'solana' | 'xlayer' | 'arbitrum' | 'plasma' | 'ton'}`
+  | `usdc.${'trc20' | 'erc20' | 'bep20' | 'polygon' | 'aptos' | 'solana' | 'xlayer' | 'arbitrum' | 'base'}`
+  | 'tron.trx' | 'ethereum.eth' | 'bsc.bnb' | 'ton.gram'
+
+export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex' | 'bepusdt' | BEpusdtPaymentType
 
 export type OrderType = 'balance' | 'subscription'
 export type SubscriptionRenewalMode = 'restart' | 'extend'

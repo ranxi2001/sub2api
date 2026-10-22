@@ -306,6 +306,21 @@ export default {
     actualPay: 'Actual Payment',
     createOrder: 'Confirm Payment',
     methods: {
+      bepusdt: 'BEpusdt Crypto',
+      usdt: {
+        trc20: 'USDT (TRC20)', erc20: 'USDT (ERC20)', bep20: 'USDT (BEP20)',
+        polygon: 'USDT (Polygon)', aptos: 'USDT (Aptos)', solana: 'USDT (Solana)',
+        xlayer: 'USDT (X-Layer)', arbitrum: 'USDT (Arbitrum)', plasma: 'USDT (Plasma)', ton: 'USDT (TON)',
+      },
+      usdc: {
+        trc20: 'USDC (TRC20)', erc20: 'USDC (ERC20)', bep20: 'USDC (BEP20)',
+        polygon: 'USDC (Polygon)', aptos: 'USDC (Aptos)', solana: 'USDC (Solana)',
+        xlayer: 'USDC (X-Layer)', arbitrum: 'USDC (Arbitrum)', base: 'USDC (Base)',
+      },
+      tron: { trx: 'TRX (Tron)' },
+      ethereum: { eth: 'ETH (Ethereum)' },
+      bsc: { bnb: 'BNB (BSC)' },
+      ton: { gram: 'TON (TON)' },
       easypay: 'EasyPay',
       alipay: 'Alipay',
       wxpay: 'WeChat Pay',

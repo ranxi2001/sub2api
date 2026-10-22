@@ -96,6 +96,28 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
 }
 
 describe('PaymentProviderDialog callback URLs', () => {
+  it('saves a BEpusdt instance with selected networks and generated callback URLs', async () => {
+    const wrapper = mountDialog()
+    ;(wrapper.vm as unknown as { reset: (key: string) => void }).reset('bepusdt')
+    await nextTick()
+    expect(wrapper.text()).toContain('USDT (TRC20)')
+    expect(wrapper.text()).toContain('USDT (BEP20)')
+    expect(wrapper.text()).toContain('USDC (Base)')
+    const fields = wrapper.findAll('input')
+    await fields[0].setValue('Crypto')
+    await fields[1].setValue('https://gateway.example')
+    await fields[2].setValue('test-token')
+    await wrapper.findAll('button').find(button => button.text() === 'USDT (BEP20)')!.trigger('click')
+    await wrapper.get('#provider-form').trigger('submit')
+    const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
+    expect(payload.provider_key).toBe('bepusdt')
+    expect(payload.supported_types).toEqual(['usdt.trc20', 'usdt.bep20'])
+    expect(payload.refund_enabled).toBe(false)
+    expect(payload.config).toMatchObject({ apiBase: 'https://gateway.example', apiToken: 'test-token', currency: 'CNY' })
+    expect((payload.config as Record<string, string>).notifyUrl).toContain('/api/v1/payment/webhook/bepusdt')
+    expect((payload.config as Record<string, string>).returnUrl).toContain('/payment/result')
+  })
+
   it.each([
     ['https://notify.example.com/', 'https://return.example.com///', 'https://notify.example.com', 'https://return.example.com'],
     [' https://notify.example.com/sub/ ', ' https://return.example.com/site/ ', 'https://notify.example.com/sub', 'https://return.example.com/site'],

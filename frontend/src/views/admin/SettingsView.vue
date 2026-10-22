@@ -13314,6 +13314,7 @@ async function saveBetaPolicySettings() {
 // ==================== Provider Management ====================
 
 const allPaymentTypes = computed(() => [
+  { value: "bepusdt", label: t("admin.settings.payment.providerBEpusdt") },
   { value: "easypay", label: t("payment.methods.easypay") },
   { value: "alipay", label: t("payment.methods.alipay") },
   { value: "wxpay", label: t("payment.methods.wxpay") },
@@ -13371,6 +13372,7 @@ const providerDialogRef = ref<InstanceType<
 > | null>(null);
 
 const providerKeyOptions = computed(() => [
+  { value: "bepusdt", label: t("admin.settings.payment.providerBEpusdt") },
   { value: "easypay", label: t("admin.settings.payment.providerEasypay") },
   { value: "alipay", label: t("admin.settings.payment.providerAlipay") },
   { value: "wxpay", label: t("admin.settings.payment.providerWxpay") },
