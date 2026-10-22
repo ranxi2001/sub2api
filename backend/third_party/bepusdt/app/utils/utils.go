@@ -1,0 +1,284 @@
+package utils
+
+import (
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"math"
+	"math/big"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/btcsuite/btcd/btcutil/base58"
+	"github.com/gin-gonic/gin"
+	nid "github.com/matoous/go-nanoid/v2"
+)
+
+// IsExist 判断文件是否存在
+func IsExist(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+
+		return true
+	}
+
+	if os.IsExist(err) {
+
+		return true
+	}
+
+	return false
+}
+
+func EpusdtSign(data map[string]interface{}, token string) string {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		if k == "signature" {
+
+			continue
+		}
+
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+	var sign strings.Builder
+	for _, k := range keys {
+		v := data[k]
+		if v == nil || v == "" {
+
+			continue
+		}
+
+		sign.WriteString(k)
+		sign.WriteString("=")
+		sign.WriteString(fmt.Sprintf("%v", v))
+		sign.WriteString("&")
+	}
+
+	signString := strings.TrimRight(sign.String(), "&")
+
+	return Md5String(signString + token)
+}
+
+func GenerateTradeId() (string, error) {
+	var defaultAlphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+	return nid.Generate(defaultAlphabet, 18)
+}
+
+func Md5String(text string) string {
+
+	return fmt.Sprintf("%x", md5.Sum([]byte(text)))
+}
+
+func Ec(str string) string {
+	escapeChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+
+	for _, char := range escapeChars {
+		str = strings.ReplaceAll(str, char, "\\"+char)
+	}
+
+	return str
+}
+
+func IsNumber(s string) bool {
+	match, err := regexp.MatchString(`^\d+\.?\d*$`, s)
+
+	return match && err == nil
+}
+
+func IsValidTronAddress(address string) bool {
+	match, err := regexp.MatchString(`^T[a-zA-Z0-9]{33}$`, address)
+
+	return match && err == nil
+}
+
+func IsValidEvmAddress(address string) bool {
+	if len(address) != 42 || !strings.HasPrefix(address, "0x") {
+
+		return false
+	}
+
+	addrWithoutPrefix := address[2:]
+	if _, err := hex.DecodeString(addrWithoutPrefix); err != nil {
+
+		return false
+	}
+
+	return true
+}
+
+func IsValidSolanaAddress(address string) bool {
+	data := base58.Decode(address)
+
+	return len(data) == 32
+}
+
+func IsValidAptosAddress(address string) bool {
+	if strings.HasPrefix(address, "0x") || strings.HasPrefix(address, "0X") {
+
+		address = address[2:]
+	}
+
+	if len(address) != 64 {
+
+		return false
+	}
+
+	matched, _ := regexp.MatchString("^[0-9a-fA-F]{64}$", address)
+
+	return matched
+}
+
+func MaskAddress(address string) string {
+	if len(address) <= 20 {
+
+		return address
+	}
+
+	return address[:8] + " ***** " + address[len(address)-10:]
+}
+
+func MaskAddress2(address string) string {
+	if len(address) <= 20 {
+
+		return address
+	}
+
+	return "*** " + address[len(address)-8:]
+}
+
+func MaskHash(hash string) string {
+	if len(hash) <= 20 {
+
+		return hash
+	}
+
+	return hash[:6] + " ***** " + hash[len(hash)-8:]
+}
+
+func CalcNextNotifyTime(base time.Time, num int) time.Time {
+
+	return base.Add(time.Minute * time.Duration(math.Pow(2, float64(num))))
+}
+
+func HexStr2Int(str string) *big.Int {
+	var n = new(big.Int)
+	var val = strings.TrimLeft(strings.TrimPrefix(str, "0x"), "0")
+
+	n.SetString(val, 16)
+
+	return n
+}
+
+func InStrings(str string, list []string) bool {
+	for _, item := range list {
+		if item == str {
+
+			return true
+		}
+	}
+
+	return false
+}
+
+func Capitalize(s string) string {
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	for i := 1; i < len(runes); i++ {
+		runes[i] = unicode.ToLower(runes[i])
+	}
+	return string(runes)
+}
+
+func StrSha256(str string) string {
+	hash := sha256.New()
+	hash.Write([]byte(str))
+	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+func IsAllowedCallbackURL(raw string) bool {
+	// IsAllowedCallbackURL 校验回调/跳转地址格式是否合法
+	// 规则：必须是合法 URL，且 scheme 只允许 http 或 https
+	if raw == "" {
+		return false
+	}
+	u, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	return u.Host != ""
+}
+
+// GetRequestHost 识别完整的请求主机地址
+func GetRequestHost(r *http.Request) string {
+	scheme := "http"
+
+	if r.TLS != nil {
+		scheme = "https"
+	} else {
+		// 检查各种代理转发的协议头
+		// Nginx、Apache、Caddy 通用
+		if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+			scheme = "https"
+		} else if r.Header.Get("X-Forwarded-Ssl") == "on" {
+			scheme = "https"
+		} else if r.Header.Get("Front-End-Https") == "on" {
+			// Apache mod_proxy
+			scheme = "https"
+		} else if r.Header.Get("X-Url-Scheme") == "https" {
+			// Caddy
+			scheme = "https"
+		} else if r.Header.Get("CF-Visitor") != "" {
+			// Cloudflare
+			// CF-Visitor 格式: {"scheme":"https"}
+			if strings.Contains(r.Header.Get("CF-Visitor"), `"scheme":"https"`) {
+				scheme = "https"
+			}
+		}
+	}
+
+	return scheme + "://" + r.Host
+}
+
+// ClientFingerprint 客户端指纹
+func ClientFingerprint(ctx *gin.Context) string {
+	ip := ctx.ClientIP()
+
+	if parsed := net.ParseIP(ip); parsed != nil {
+		if v4 := parsed.To4(); v4 != nil {
+			ip = fmt.Sprintf("%d.%d.%d.0", v4[0], v4[1], v4[2])
+		} else if v6 := parsed.To16(); v6 != nil {
+			var masked [16]byte
+			copy(masked[:8], v6[:8])
+			ip = net.IP(masked[:]).String()
+		}
+	}
+
+	parts := []string{
+		ip,
+		ctx.GetHeader("User-Agent"),
+		ctx.GetHeader("Accept-Language"),
+		ctx.GetHeader("Accept-Encoding"),
+		ctx.GetHeader("Accept"),
+		ctx.GetHeader("Sec-CH-UA"),
+		ctx.GetHeader("Sec-CH-UA-Platform"),
+	}
+
+	return StrSha256(strings.Join(parts, "|"))
+}

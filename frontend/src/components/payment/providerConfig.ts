@@ -160,6 +160,7 @@ export const PROVIDER_CALLBACK_PATHS: Record<string, CallbackPaths> = {
 /** Per-provider config fields (excludes notifyUrl/returnUrl which are handled separately). */
 export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
   bepusdt: [
+    { key: 'mode', label: '', sensitive: false, defaultValue: 'embedded' },
     { key: 'apiBase', label: '', sensitive: false, hintKey: 'admin.settings.payment.bepusdtApiBaseHint' },
     { key: 'apiToken', label: 'API Token', sensitive: true },
     { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.bepusdtCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS.filter(option => ['CNY', 'USD', 'EUR', 'GBP', 'JPY'].includes(option.value)) },
@@ -200,6 +201,13 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
     { key: 'accountId', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_accountIdHint' },
   ],
+}
+
+export function getProviderConfigFields(providerKey: string, config: Record<string, string>): ConfigFieldDef[] {
+  const fields = PROVIDER_CONFIG_FIELDS[providerKey] || []
+  return providerKey === 'bepusdt' && config.mode === 'embedded'
+    ? fields.filter(field => !['apiBase', 'apiToken'].includes(field.key))
+    : fields
 }
 
 // --- Helpers ---

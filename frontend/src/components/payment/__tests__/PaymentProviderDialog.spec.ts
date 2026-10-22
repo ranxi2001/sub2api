@@ -96,10 +96,35 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
 }
 
 describe('PaymentProviderDialog callback URLs', () => {
+  it('defaults to built-in collection and saves without gateway credentials', async () => {
+    const wrapper = mountDialog()
+    ;(wrapper.vm as unknown as { reset: (key: string) => void }).reset('bepusdt')
+    await nextTick()
+    expect((wrapper.get('[data-testid="bepusdt-mode"]').element as HTMLSelectElement).value).toBe('embedded')
+    expect(wrapper.text()).not.toContain('API Token')
+    await wrapper.findAll('input')[0].setValue('Built-in Crypto')
+    await wrapper.get('#provider-form').trigger('submit')
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string> }
+    expect(payload.config.mode).toBe('embedded')
+    expect(payload.config.currency).toBe('CNY')
+    expect(payload.config).not.toHaveProperty('apiToken')
+    expect(payload.config).not.toHaveProperty('apiBase')
+  })
+
+  it('preserves external mode when editing legacy BEpusdt providers', async () => {
+    const provider = providerFactory({ provider_key: 'bepusdt', config: { apiBase: 'https://gateway.example', currency: 'CNY' } })
+    const wrapper = mountDialog({ editing: provider })
+    ;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+    await nextTick()
+    expect((wrapper.get('[data-testid="bepusdt-mode"]').element as HTMLSelectElement).value).toBe('external')
+    expect(wrapper.text()).toContain('API Token')
+  })
+
   it('saves a BEpusdt instance with selected networks and generated callback URLs', async () => {
     const wrapper = mountDialog()
     ;(wrapper.vm as unknown as { reset: (key: string) => void }).reset('bepusdt')
     await nextTick()
+    await wrapper.get('[data-testid="bepusdt-mode"]').setValue('external')
     expect(wrapper.text()).toContain('USDT (TRC20)')
     expect(wrapper.text()).toContain('USDT (BEP20)')
     expect(wrapper.text()).toContain('USDC (Base)')

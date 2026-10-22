@@ -1,0 +1,605 @@
+package task
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"fmt"
+	"math/big"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/btcsuite/btcd/btcutil/base58"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/panjf2000/ants/v2"
+	"github.com/shopspring/decimal"
+	"github.com/smallnest/chanx"
+	"github.com/spf13/cast"
+	"github.com/v03413/bepusdt/app/conf"
+	"github.com/v03413/bepusdt/app/log"
+	"github.com/v03413/bepusdt/app/model"
+	"github.com/v03413/bepusdt/app/utils"
+	"github.com/v03413/tronprotocol/api"
+	"github.com/v03413/tronprotocol/core"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
+)
+
+var gasFreeUsdtTokenAddress = []byte{0xa6, 0x14, 0xf8, 0x03, 0xb6, 0xfd, 0x78, 0x09, 0x86, 0xa4, 0x2c, 0x78, 0xec, 0x9c, 0x7f, 0x77, 0xe6, 0xde, 0xd1, 0x3c}
+var gasFreeOwnerAddress = []byte{0x41, 0x3b, 0x41, 0x50, 0x50, 0xb1, 0xe7, 0x9e, 0x38, 0x50, 0x7c, 0xb6, 0xe4, 0x8d, 0xac, 0xc2, 0x27, 0xaf, 0xfd, 0xd5, 0x0c}
+var gasFreeContractAddress = []byte{0x41, 0x39, 0xdd, 0x12, 0xa5, 0x4e, 0x2b, 0xab, 0x7c, 0x82, 0xaa, 0x14, 0xa1, 0xe1, 0x58, 0xb3, 0x42, 0x63, 0xd2, 0xd5, 0x10}
+var usdtTrc20ContractAddress = []byte{0x41, 0xa6, 0x14, 0xf8, 0x03, 0xb6, 0xfd, 0x78, 0x09, 0x86, 0xa4, 0x2c, 0x78, 0xec, 0x9c, 0x7f, 0x77, 0xe6, 0xde, 0xd1, 0x3c}
+var usdcTrc20ContractAddress = []byte{0x41, 0x34, 0x87, 0xb6, 0x3d, 0x30, 0xb5, 0xb2, 0xc8, 0x7f, 0xb7, 0xff, 0xa8, 0xbc, 0xfa, 0xde, 0x38, 0xea, 0xac, 0x1a, 0xbe}
+
+type tron struct {
+	lastBlockNum         atomic.Int64
+	blockConfirmedOffset int
+	blockScanQueue       *chanx.UnboundedChan[int]
+	conn                 map[string]*grpc.ClientConn
+	connMu               sync.RWMutex
+	retryMu              sync.Mutex
+	retryAttempts        map[int]int
+	retryScheduled       map[int]*time.Timer
+}
+
+var tr tron
+
+func init() {
+	tr = newTron()
+	Register(Task{Duration: time.Second, Callback: tr.blockDispatch})
+	Register(Task{Duration: time.Second * 3, Callback: tr.syncBlocksForward})
+	Register(Task{Duration: time.Second * 5, Callback: tr.tradeConfirmHandle})
+	Register(Task{Duration: time.Second * 15, Callback: tr.lookbackBlocks})
+}
+
+func newTron() tron {
+	return tron{
+		blockConfirmedOffset: 30,
+		blockScanQueue:       chanx.NewUnboundedChan[int](context.Background(), 30),
+		conn:                 make(map[string]*grpc.ClientConn),
+		retryAttempts:        make(map[int]int),
+		retryScheduled:       make(map[int]*time.Timer),
+	}
+}
+
+// syncBlocksForward 正向同步区块
+func (t *tron) syncBlocksForward(context.Context) {
+	if t.syncBreak() {
+
+		return
+	}
+	gotHead := false
+	defer func() {
+		if !gotHead {
+			conf.RecordFailure(conf.Tron)
+		}
+	}()
+
+	conn, err := t.client()
+	if err != nil {
+		log.Task.Error("grpc.NewClient", err)
+
+		return
+	}
+
+	var ctx, cancel = context.WithTimeout(context.Background(), time.Second*15)
+	block, err1 := api.NewWalletClient(conn).GetNowBlock2(ctx, nil)
+	defer cancel()
+
+	if err1 != nil {
+		log.Task.Warn("GetNowBlock2 超时：", err1)
+
+		return
+	}
+
+	var now = int(block.GetBlockHeader().GetRawData().GetNumber())
+	if now <= 0 {
+		return
+	}
+	gotHead = true
+	conf.RecordHead(conf.Tron, cast.ToString(now))
+	last := int(t.lastBlockNum.Load())
+
+	// 区块高度变化过大，强制丢块重扫
+	if now-last > cast.ToInt(model.GetC(model.BlockHeightMaxDiff)) {
+		last = now - 1
+		invalidateLookback(conf.Tron)
+	}
+
+	// 区块高度没有变化
+	if now <= last {
+
+		return
+	}
+
+	// 待扫描区块入列
+	for n := last + 1; n <= now; n++ {
+
+		t.blockScanQueue.In <- n
+	}
+
+	t.lastBlockNum.Store(int64(now))
+}
+
+func (t *tron) lookbackBlocks(ctx context.Context) {
+	replayOrders(ctx, conf.Tron, 1, 250*time.Millisecond, t.syncBreak, t.lookbackRange,
+		func(ctx context.Context, from, to int64) error {
+			select {
+			case t.blockScanQueue.In <- int(from):
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+}
+
+func (t *tron) blockDispatch(ctx context.Context) {
+	p, err := ants.NewPoolWithFunc(2, func(n any) { retryScan(ctx, func() bool { return t.blockParse(n) }) })
+	if err != nil {
+		log.Task.Warn("Error creating pool:", err)
+
+		return
+	}
+
+	defer p.Release()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case n, ok := <-t.blockScanQueue.Out:
+			if !ok {
+				return
+			}
+			if err := p.Invoke(n); err != nil {
+				t.scheduleBlockRetry(n, 0)
+
+				log.Task.Warn("Tron Error invoking process block:", err)
+			}
+		}
+	}
+}
+
+func (t *tron) blockParse(n any) bool {
+	var num = n.(int)
+
+	var conn *grpc.ClientConn
+	var err error
+	if conn, err = t.client(); err != nil {
+		log.Task.Error("grpc.NewClient", err)
+
+		return false
+	}
+
+	var ctx, cancel = context.WithTimeout(context.Background(), time.Second*5)
+	bok, err2 := api.NewWalletClient(conn).GetBlockByNum2(ctx, &api.NumberMessage{Num: int64(num)})
+	cancel()
+	if err2 != nil {
+		conf.RecordFailure(conf.Tron)
+		log.Task.Warn("GetBlockByNum2 ", err2)
+
+		return false
+	}
+
+	if bok.GetBlockHeader().GetRawData().GetNumber() != int64(num) || bok.GetBlockHeader().GetRawData().GetTimestamp() <= 0 {
+		conf.RecordFailure(conf.Tron)
+		return false
+	}
+	var resources = make([]resource, 0)
+	var transfers = make([]transfer, 0)
+	var timestamp = time.UnixMilli(bok.GetBlockHeader().GetRawData().GetTimestamp())
+	for _, trans := range bok.GetTransactions() {
+		if !trans.GetResult().GetResult() {
+
+			continue
+		}
+
+		var itm = trans.GetTransaction()
+		var id = hex.EncodeToString(trans.Txid)
+		for _, contract := range itm.GetRawData().GetContract() {
+			// 资源代理 DelegateResourceContract
+			if contract.GetType() == core.Transaction_Contract_DelegateResourceContract {
+				var foo = &core.DelegateResourceContract{}
+				err := contract.GetParameter().UnmarshalTo(foo)
+				if err != nil {
+
+					continue
+				}
+
+				resources = append(resources, resource{
+					ID:           id,
+					Type:         core.Transaction_Contract_DelegateResourceContract,
+					Balance:      foo.Balance,
+					ResourceCode: foo.Resource,
+					FromAddress:  t.base58CheckEncode(foo.OwnerAddress),
+					RecvAddress:  t.base58CheckEncode(foo.ReceiverAddress),
+					Timestamp:    timestamp,
+				})
+			}
+
+			// 资源回收 UnDelegateResourceContract
+			if contract.GetType() == core.Transaction_Contract_UnDelegateResourceContract {
+				var foo = &core.UnDelegateResourceContract{}
+				err := contract.GetParameter().UnmarshalTo(foo)
+				if err != nil {
+
+					continue
+				}
+
+				resources = append(resources, resource{
+					ID:           id,
+					Type:         core.Transaction_Contract_UnDelegateResourceContract,
+					Balance:      foo.Balance,
+					ResourceCode: foo.Resource,
+					FromAddress:  t.base58CheckEncode(foo.OwnerAddress),
+					RecvAddress:  t.base58CheckEncode(foo.ReceiverAddress),
+					Timestamp:    timestamp,
+				})
+			}
+
+			// TRX转账交易
+			if contract.GetType() == core.Transaction_Contract_TransferContract {
+				var foo = &core.TransferContract{}
+				err := contract.GetParameter().UnmarshalTo(foo)
+				if err != nil {
+
+					continue
+				}
+
+				transfers = append(transfers, transfer{
+					Network:     conf.Tron,
+					TxHash:      id,
+					Amount:      decimal.NewFromBigInt(new(big.Int).SetInt64(foo.Amount), -6),
+					FromAddress: t.base58CheckEncode(foo.OwnerAddress),
+					RecvAddress: t.base58CheckEncode(foo.ToAddress),
+					Timestamp:   timestamp,
+					TradeType:   model.TronTrx,
+					BlockNum:    cast.ToInt(num),
+				})
+			}
+
+			// 触发智能合约
+			if contract.GetType() == core.Transaction_Contract_TriggerSmartContract {
+				var foo = &core.TriggerSmartContract{}
+				if err := contract.GetParameter().UnmarshalTo(foo); err != nil {
+
+					continue
+				}
+
+				data := foo.GetData()
+				if len(data) < 4 {
+
+					continue
+				}
+
+				// Gas Free 钱包 合约授权转账
+				if bytes.Equal(foo.OwnerAddress, gasFreeOwnerAddress) && bytes.Equal(foo.ContractAddress, gasFreeContractAddress) {
+					from, receiver, amount := t.gasFreePermitTransfer(data)
+					if amount != nil {
+						transfers = append(transfers, transfer{
+							Network:     conf.Tron,
+							TxHash:      id,
+							Amount:      decimal.NewFromBigInt(amount, conf.UsdtTronDecimals),
+							FromAddress: from,
+							RecvAddress: receiver,
+							Timestamp:   timestamp,
+							TradeType:   model.UsdtTrc20,
+							BlockNum:    cast.ToInt(num),
+						})
+					}
+				}
+
+				// trc20 合约解析
+				var tradeType model.TradeType = "None"
+				if bytes.Equal(foo.GetContractAddress(), usdtTrc20ContractAddress) {
+					tradeType = model.UsdtTrc20
+				} else if bytes.Equal(foo.GetContractAddress(), usdcTrc20ContractAddress) {
+					tradeType = model.UsdcTrc20
+				} else {
+					continue
+				}
+
+				if bytes.Equal(data[:4], []byte{0xa9, 0x05, 0x9c, 0xbb}) { //  a9059cbb transfer
+					receiver, amount := t.parseTrc20ContractTransfer(data)
+					if amount != nil {
+						transfers = append(transfers, transfer{
+							Network:     conf.Tron,
+							TxHash:      id,
+							Amount:      decimal.NewFromBigInt(amount, model.GetTradeDecimal(tradeType)),
+							FromAddress: t.base58CheckEncode(foo.OwnerAddress),
+							RecvAddress: receiver,
+							Timestamp:   timestamp,
+							TradeType:   tradeType,
+							BlockNum:    cast.ToInt(num),
+						})
+					}
+				}
+				if bytes.Equal(data[:4], []byte{0x23, 0xb8, 0x72, 0xdd}) { //  transferFrom (23b872dd)
+					from, to, amount := t.parseTrc20ContractTransferFrom(data)
+					if amount != nil {
+						transfers = append(transfers, transfer{
+							Network:     conf.Tron,
+							TxHash:      id,
+							Amount:      decimal.NewFromBigInt(amount, model.GetTradeDecimal(tradeType)),
+							FromAddress: from,
+							RecvAddress: to,
+							Timestamp:   timestamp,
+							TradeType:   tradeType,
+							BlockNum:    cast.ToInt(num),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	if len(transfers) > 0 {
+		transferQueue.In <- transfers
+	}
+	if len(resources) > 0 {
+		resourceQueue.In <- resources
+	}
+
+	log.Task.Info(fmt.Sprintf("区块扫描完成(Tron): %d 成功率：%s", num, conf.GetSuccessRate(conf.Tron)))
+	conf.RecordSuccess(conf.Tron, cast.ToString(num))
+	return true
+}
+
+func (t *tron) parseTrc20ContractTransfer(data []byte) (string, *big.Int) {
+	if len(data) != 68 {
+
+		return "", nil
+	}
+
+	receiver := t.base58CheckEncode(append([]byte{0x41}, data[16:36]...))
+	amount := big.NewInt(0).SetBytes(data[36:68])
+
+	return receiver, amount
+}
+
+func (t *tron) parseTrc20ContractTransferFrom(data []byte) (string, string, *big.Int) {
+	if len(data) != 100 {
+
+		return "", "", nil
+	}
+
+	from := t.base58CheckEncode(append([]byte{0x41}, data[16:36]...))
+	to := t.base58CheckEncode(append([]byte{0x41}, data[48:68]...))
+	amount := big.NewInt(0).SetBytes(data[68:100])
+
+	return from, to, amount
+}
+
+func (t *tron) gasFreePermitTransfer(data []byte) (string, string, *big.Int) {
+	// https://tronscan.org/#/contract/TFFAMQLZybALaLb4uxHA9RBE7pxhUAjF3U/code?func=Tab-proxywrite-F3proxyNonePayable
+	if len(data) != 420 {
+
+		return "", "", nil
+	}
+
+	if !bytes.Equal(data[:4], []byte{0x6f, 0x21, 0xb8, 0x98}) {
+		// not permitTransfer (6f21b898) function
+
+		return "", "", nil
+	}
+
+	if !bytes.Equal(data[16:36], gasFreeUsdtTokenAddress) {
+		// not gas free usdt token address
+
+		return "", "", nil
+	}
+
+	user := t.base58CheckEncode(append([]byte{0x41}, data[48:68]...))
+	receiver := t.base58CheckEncode(append([]byte{0x41}, data[80:100]...))
+	amount := big.NewInt(0).SetBytes(data[100:132])
+
+	return user, receiver, amount
+}
+
+func (t *tron) tradeConfirmHandle(ctx context.Context) {
+	var orders = getConfirmingOrders([]model.TradeType{model.TronTrx, model.UsdtTrc20, model.UsdcTrc20})
+
+	var wg sync.WaitGroup
+
+	var handle = func(o model.Order) {
+		if model.GetC(model.BlockOffsetConfirm) == "1" {
+			last := int(t.lastBlockNum.Load())
+			if last == 0 || last-o.RefBlockNum < t.blockConfirmedOffset {
+				return
+			}
+		}
+
+		conn, err := t.client()
+		if err != nil {
+			log.Task.Error("grpc.NewClient", err)
+
+			return
+		}
+
+		var c = api.NewWalletClient(conn)
+
+		idBytes, err := hex.DecodeString(o.RefHash)
+		if err != nil {
+			log.Task.Error("hex.DecodeString", err)
+
+			return
+		}
+
+		if o.TradeType == model.TronTrx {
+			trans, err := c.GetTransactionById(ctx, &api.BytesMessage{Value: idBytes})
+			if err != nil {
+				log.Task.Error("GetTransactionById", err)
+
+				return
+			}
+
+			if len(trans.GetRet()) > 0 && trans.GetRet()[0].ContractRet == core.Transaction_Result_SUCCESS {
+				markFinalConfirmed(o)
+			}
+
+			return
+		}
+
+		info, err := c.GetTransactionInfoById(ctx, &api.BytesMessage{Value: idBytes})
+		if err != nil {
+			log.Task.Error("GetTransactionInfoById", err)
+
+			return
+		}
+
+		if bytes.Equal(info.GetId(), idBytes) && info.GetBlockNumber() == int64(o.RefBlockNum) && info.GetReceipt() != nil && info.GetReceipt().GetResult() == core.Transaction_Result_SUCCESS {
+			markFinalConfirmed(o)
+		}
+	}
+
+	for _, order := range orders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			handle(order)
+		}()
+	}
+
+	wg.Wait()
+}
+
+func (t *tron) base58CheckEncode(input []byte) string {
+	checksum := chainhash.DoubleHashB(input)
+	checksum = checksum[:4]
+
+	input = append(input, checksum...)
+
+	return base58.Encode(input)
+}
+
+func (t *tron) syncBreak() bool {
+	if t.blockScanQueue.Len() >= blockQueueLimit {
+		log.Task.Warn("tron 同步阻塞，当前区块消费堆积数量：", t.blockScanQueue.Len())
+
+		return true
+	}
+
+	if mqttSubscribed(conf.Tron) {
+		return false
+	}
+
+	trade := []model.TradeType{model.TronTrx, model.UsdtTrc20, model.UsdcTrc20}
+	if hasLookbackOrders(trade) {
+
+		return false
+	}
+
+	var count int64 = 0
+	model.Db.Model(&model.Wallet{}).Where("other_notify = ? and trade_type in (?)", model.WaOtherEnable, trade).Count(&count)
+	if count > 0 {
+
+		return false
+	}
+
+	return true
+}
+
+func (t *tron) scheduleBlockRetry(num int, delay time.Duration) {
+	t.retryMu.Lock()
+	if _, ok := t.retryScheduled[num]; ok {
+		t.retryMu.Unlock()
+
+		return
+	}
+
+	attempt := t.retryAttempts[num] + 1
+	t.retryAttempts[num] = attempt
+
+	if delay <= 0 {
+		delay = tronRetryDelay(attempt)
+	}
+
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
+		t.retryMu.Lock()
+		if t.retryScheduled[num] != timer {
+			t.retryMu.Unlock()
+
+			return
+		}
+		delete(t.retryScheduled, num)
+		t.retryMu.Unlock()
+
+		if t.blockScanQueue.Len() >= blockQueueLimit {
+			log.Task.Warn("Tron 重试延后，当前区块消费堆积数量：", t.blockScanQueue.Len())
+			t.scheduleBlockRetry(num, delay)
+
+			return
+		}
+
+		t.blockScanQueue.In <- num
+	})
+	t.retryScheduled[num] = timer
+	t.retryMu.Unlock()
+}
+
+func (t *tron) resetBlockRetry(num int) {
+	t.retryMu.Lock()
+	defer t.retryMu.Unlock()
+
+	delete(t.retryAttempts, num)
+	if timer, ok := t.retryScheduled[num]; ok {
+		timer.Stop()
+		delete(t.retryScheduled, num)
+	}
+}
+
+func tronRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > 5 {
+		attempt = 5
+	}
+
+	return time.Duration(1<<uint(attempt-1)) * 5 * time.Second
+}
+
+func (t *tron) client() (*grpc.ClientConn, error) {
+	var endpoint = model.Endpoint(conf.Tron)
+
+	t.connMu.RLock()
+	if c, ok := t.conn[endpoint]; ok {
+		state := c.GetState()
+		if state == connectivity.Ready || state == connectivity.Idle {
+			t.connMu.RUnlock()
+
+			return c, nil
+		}
+
+		t.connMu.RUnlock()
+	} else {
+		t.connMu.RUnlock()
+	}
+
+	t.connMu.Lock()
+	defer t.connMu.Unlock()
+
+	if c, ok := t.conn[endpoint]; ok {
+		state := c.GetState()
+		if state == connectivity.Ready || state == connectivity.Idle {
+
+			return c, nil
+		}
+
+		c.Close()
+	}
+
+	conn, err := utils.NewTronGrpcClient(endpoint, model.GetTronGridApiKeys())
+	if err != nil {
+
+		return nil, fmt.Errorf("连接失败: %w", err)
+	}
+
+	t.conn[endpoint] = conn
+	log.Task.Info("Tron gRPC 连接已建立:", endpoint)
+
+	return conn, nil
+}

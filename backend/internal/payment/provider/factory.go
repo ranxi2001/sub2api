@@ -10,6 +10,12 @@ import (
 func CreateProvider(providerKey string, instanceID string, config map[string]string) (payment.Provider, error) {
 	switch providerKey {
 	case payment.TypeBEpusdt:
+		if config["mode"] == "embedded" {
+			return NewEmbeddedBEpusdt(instanceID, config)
+		}
+		if config["mode"] != "" && config["mode"] != "external" {
+			return nil, fmt.Errorf("invalid bepusdt mode")
+		}
 		return NewBEpusdt(instanceID, config)
 	case payment.TypeEasyPay:
 		return NewEasyPay(instanceID, config)

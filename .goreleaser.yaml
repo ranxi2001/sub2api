@@ -41,6 +41,8 @@ archives:
         format: zip
     files:
       - LICENSE*
+      - LICENSES/**
+      - THIRD_PARTY_NOTICES.md
       - README*
       - deploy/*
 
@@ -64,6 +66,8 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     extra_files:
+      - THIRD_PARTY_NOTICES.md
+      - LICENSES/BEpusdt-GPL-3.0.txt
       - deploy/docker-entrypoint.sh
       - backend/resources
     build_flag_templates:
@@ -80,6 +84,8 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     extra_files:
+      - THIRD_PARTY_NOTICES.md
+      - LICENSES/BEpusdt-GPL-3.0.txt
       - deploy/docker-entrypoint.sh
       - backend/resources
     build_flag_templates:
@@ -96,6 +102,8 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     extra_files:
+      - THIRD_PARTY_NOTICES.md
+      - LICENSES/BEpusdt-GPL-3.0.txt
       - deploy/docker-entrypoint.sh
       - backend/resources
     build_flag_templates:
@@ -112,6 +120,8 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     extra_files:
+      - THIRD_PARTY_NOTICES.md
+      - LICENSES/BEpusdt-GPL-3.0.txt
       - deploy/docker-entrypoint.sh
       - backend/resources
     build_flag_templates:

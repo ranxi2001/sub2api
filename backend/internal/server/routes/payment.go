@@ -47,6 +47,7 @@ func RegisterPaymentRoutes(
 		authenticated.GET("/checkout-info", paymentHandler.GetCheckoutInfo)
 		authenticated.GET("/plans", paymentHandler.GetPlans)
 		authenticated.GET("/limits", paymentHandler.GetLimits)
+		authenticated.GET("/crypto/:out_trade_no", paymentHandler.GetCryptoCheckout)
 
 		orders := authenticated.Group("/orders")
 		{
@@ -102,6 +103,17 @@ func RegisterPaymentRoutes(
 		// Config
 		adminGroup.GET("/config", adminPaymentHandler.GetConfig)
 		adminGroup.PUT("/config", adminPaymentHandler.UpdateConfig)
+
+		// Built-in collection management uses the existing administrator guard.
+		collection := adminGroup.Group("/bepusdt")
+		collection.GET("", adminPaymentHandler.GetBEpusdt)
+		collection.POST("/nodes/check", adminPaymentHandler.CheckBEpusdtNodes)
+		collection.PUT("/settings", adminPaymentHandler.SaveBEpusdtSettings)
+		collection.POST("/wallets", adminPaymentHandler.SaveBEpusdtWallet)
+		collection.PUT("/wallets/:id", adminPaymentHandler.SaveBEpusdtWallet)
+		collection.DELETE("/wallets/:id", adminPaymentHandler.DeleteBEpusdtWallet)
+		collection.POST("/rates/sync", adminPaymentHandler.SyncBEpusdtRates)
+		collection.POST("/rates", adminPaymentHandler.SaveBEpusdtRate)
 
 		// Orders
 		adminOrders := adminGroup.Group("/orders")

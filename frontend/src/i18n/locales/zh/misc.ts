@@ -311,6 +311,17 @@ export default {
 
   // Payment System
   payment: {
+    cryptoCheckout: {
+      networkDelayed: '收款确认暂有延迟',
+      networkDelayHint: '当前收款网络异常，系统正在自动重试和核对历史转账。请暂勿转账；如果已经付款，请勿重复付款，确认到账后订单会自动更新。',
+      title: '加密货币付款', back: '返回购买页面', address: '收款地址', addressQR: '收款地址二维码',
+      instruction: '请使用 {network} 转入下方精确金额。其他网络的转账无法完成此订单。',
+      exactAmount: '精确转账金额', copyAmount: '复制金额', copyAddress: '复制地址', copied: '已复制',
+      remaining: '剩余时间：{time}', waiting: '等待转账', confirming: '已检测到转账，等待网络确认',
+      paid: '付款已完成', fulfillment: '已收款，正在完成订单', cancelled: '订单已取消', failed: '付款失败', expired: '订单已过期',
+      check: '检查付款状态', viewResult: '查看结果', cancelConfirm: '确认取消此订单？已转账后请勿取消。', keepWaiting: '继续等待',
+      loadError: '无法加载付款信息。', copyError: '复制失败，请手动选择并复制。',
+    },
     title: '充值/订阅',
     amountLabel: '充值金额',
     paymentAmount: '支付金额',

@@ -287,6 +287,17 @@ export default {
 
   // Payment System
   payment: {
+    cryptoCheckout: {
+      networkDelayed: 'Payment confirmation is delayed',
+      networkDelayHint: 'The payment network is unavailable. We are retrying and checking earlier transfers. Please wait before sending funds. If you have already paid, do not pay again; the order will update after confirmation.',
+      title: 'Crypto payment', back: 'Back to billing', address: 'Receiving address', addressQR: 'Receiving address QR code',
+      instruction: 'Send the exact amount below using {network}. Transfers on another network cannot pay this order.',
+      exactAmount: 'Exact transfer amount', copyAmount: 'Copy amount', copyAddress: 'Copy address', copied: 'Copied',
+      remaining: 'Time remaining: {time}', waiting: 'Waiting for transfer', confirming: 'Transfer detected, waiting for network confirmation',
+      paid: 'Payment completed', fulfillment: 'Payment received, completing your order', cancelled: 'Order cancelled', failed: 'Payment failed', expired: 'Order expired',
+      check: 'Check payment', viewResult: 'View result', cancelConfirm: 'Cancel this order? Do not cancel after sending a transfer.', keepWaiting: 'Keep waiting',
+      loadError: 'Unable to load payment details.', copyError: 'Copy failed. Select and copy the value manually.',
+    },
     title: 'Recharge / Subscription',
     amountLabel: 'Amount',
     paymentAmount: 'Payment Amount',

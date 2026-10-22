@@ -189,6 +189,11 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	previousStatus := o.Status
 	now := time.Now()
 	grace := now.Add(-paymentGraceMinutes * time.Minute)
+	if pk == payment.TypeBEpusdt && psSnapshotStringValue(o.ProviderSnapshot["collection_mode"]) == "embedded" {
+		// Match the collection engine's three-hour historical scan window.
+		// Chain confirmations and callback retries can exceed the fiat grace.
+		grace = now.Add(-3 * time.Hour)
+	}
 	c, err := s.entClient.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		paymentorder.Or(

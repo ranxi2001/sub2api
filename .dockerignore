@@ -9,6 +9,7 @@
 
 # Documentation
 *.md
+!THIRD_PARTY_NOTICES.md
 !deploy/DOCKER.md
 docs/
 # admin-compliance gate (LegalDocumentView.vue) build-time imports

@@ -389,6 +389,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/payment/crypto/:outTradeNo',
+    name: 'CryptoPayment',
+    component: () => import('@/views/user/CryptoPaymentView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Crypto Payment',
+      titleKey: 'payment.cryptoCheckout.title',
+      requiresPayment: false
+    }
+  },
+  {
     path: '/payment/stripe',
     name: 'StripePayment',
     component: () => import('@/views/user/StripePaymentView.vue'),

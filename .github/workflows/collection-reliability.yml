@@ -1,0 +1,32 @@
+name: Embedded collection reliability
+
+on:
+  pull_request:
+    paths:
+      - 'backend/third_party/bepusdt/**'
+      - 'backend/internal/bepusdt/**'
+      - 'backend/internal/payment/**'
+      - 'backend/internal/service/payment*'
+      - 'backend/go.*'
+      - '.github/workflows/collection-reliability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  collection:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify scanner retries, payment matching and callbacks
+        working-directory: backend
+        run: |
+          go test -race -p 2 github.com/v03413/bepusdt/app/conf github.com/v03413/bepusdt/app/task github.com/v03413/bepusdt/app/task/notify
+          go test -race -p 2 -tags unit ./internal/bepusdt ./internal/payment/provider
+          go test -p 2 -tags unit ./internal/service ./internal/handler/admin -run 'Test.*(Payment|BEpusdt|Crypto)' -count=1

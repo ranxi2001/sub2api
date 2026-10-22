@@ -46,6 +46,9 @@ WORKDIR /app
 COPY sub2api /app/sub2api
 COPY --chown=sub2api:sub2api backend/resources /app/resources
 
+COPY THIRD_PARTY_NOTICES.md /app/THIRD_PARTY_NOTICES.md
+COPY LICENSES/BEpusdt-GPL-3.0.txt /app/LICENSES/BEpusdt-GPL-3.0.txt
+
 # Create data directory
 RUN mkdir -p /app/data && chown -R sub2api:sub2api /app
 

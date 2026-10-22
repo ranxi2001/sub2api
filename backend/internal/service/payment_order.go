@@ -326,6 +326,13 @@ func buildPaymentOrderProviderSnapshot(sel *payment.InstanceSelection, req Creat
 	if providerKey == payment.TypeStripe || providerKey == payment.TypeBEpusdt {
 		snapshot["currency"] = paymentProviderConfigCurrency(providerKey, sel.Config)
 	}
+	if providerKey == payment.TypeBEpusdt {
+		mode := strings.TrimSpace(sel.Config["mode"])
+		if mode == "" {
+			mode = "external"
+		}
+		snapshot["collection_mode"] = mode
+	}
 	if providerKey == payment.TypeAirwallex {
 		if accountID := strings.TrimSpace(sel.Config["accountId"]); accountID != "" {
 			snapshot["merchant_id"] = accountID
