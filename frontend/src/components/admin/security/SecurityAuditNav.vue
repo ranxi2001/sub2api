@@ -26,6 +26,7 @@ const items = computed(() => [
   ...(isFeatureFlagEnabled(FeatureFlags.riskControl) ? [
     { path: '/admin/risk-control', label: 'nav.contentModeration' },
     { path: '/admin/prompt-audit', label: 'nav.promptAudit' },
+    { path: '/admin/safety-prompt-audit', label: 'admin.safetyPromptAudit.nav' },
   ] : []),
   { path: '/admin/ip-audit', label: 'ipAudit.title' },
 ])
