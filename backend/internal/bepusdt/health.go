@@ -81,7 +81,11 @@ func checkNetwork(ctx context.Context, network string) (NodeCheck, error) {
 		if value.Err != nil {
 			return NodeCheck{}, value.Err
 		}
-		return value.Val.(NodeCheck), nil
+		check, ok := value.Val.(NodeCheck)
+		if !ok {
+			return NodeCheck{}, fmt.Errorf("unexpected node check result type: %T", value.Val)
+		}
+		return check, nil
 	}
 }
 

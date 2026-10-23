@@ -376,7 +376,7 @@ func SaveSettings(ctx context.Context, values map[string]string) error {
 			host, port, err := net.SplitHostPort(value)
 			n, portErr := strconv.Atoi(port)
 			if err != nil || host == "" || portErr != nil || n < 1 || n > 65535 || strings.ContainsAny(host, "/ \t\r\n") {
-				return fmt.Errorf("Tron gRPC endpoint must be host:port")
+				return fmt.Errorf("tron gRPC endpoint must be host:port")
 			}
 		} else if (strings.HasPrefix(key, "rpc_") && !strings.HasSuffix(key, "api_key")) || key == string(model.RateSyncCoingeckoApiUrl) {
 			u, err := url.Parse(value)

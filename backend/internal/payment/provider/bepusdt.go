@@ -278,7 +278,7 @@ func (b *BEpusdt) post(ctx context.Context, path string, fields map[string]any, 
 	if err != nil {
 		return nil, fmt.Errorf("bepusdt request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("bepusdt HTTP status %d", resp.StatusCode)
 	}
