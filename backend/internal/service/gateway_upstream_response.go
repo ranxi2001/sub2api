@@ -1370,9 +1370,9 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 		if v, ok := parseSSEUsageInt(usageObj["input_tokens"]); ok {
 			patch.inputTokens = v
 		}
-		patch.hasCacheCreationInput = true
 		if v, ok := parseSSEUsageInt(usageObj["cache_creation_input_tokens"]); ok {
 			patch.cacheCreationInputTokens = v
+			patch.hasCacheCreationInput = true
 		}
 		patch.hasCacheReadInput = true
 		if v, ok := parseSSEUsageInt(usageObj["cache_read_input_tokens"]); ok {
@@ -1405,7 +1405,7 @@ func (s *GatewayService) extractSSEUsagePatch(event map[string]any) *sseUsagePat
 			patch.outputTokens = v
 			patch.hasOutputTokens = true
 		}
-		if v, ok := parseSSEUsageInt(usageObj["cache_creation_input_tokens"]); ok && v > 0 {
+		if v, ok := parseSSEUsageInt(usageObj["cache_creation_input_tokens"]); ok && v >= 0 {
 			patch.cacheCreationInputTokens = v
 			patch.hasCacheCreationInput = true
 		}
@@ -1439,6 +1439,7 @@ func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 	}
 	if patch.hasCacheCreationInput {
 		usage.CacheCreationInputTokens = patch.cacheCreationInputTokens
+		usage.cacheCreationInputTokensPresent = true
 	}
 	if patch.hasCacheReadInput {
 		usage.CacheReadInputTokens = patch.cacheReadInputTokens
@@ -1451,6 +1452,9 @@ func mergeSSEUsagePatch(usage *ClaudeUsage, patch *sseUsagePatch) {
 	}
 	if patch.hasCacheCreation1h {
 		usage.CacheCreation1hTokens = patch.cacheCreation1hTokens
+	}
+	if !usage.cacheCreationInputTokensPresent && (patch.hasCacheCreation5m || patch.hasCacheCreation1h) {
+		usage.CacheCreationInputTokens = max(usage.CacheCreation5mTokens, 0) + max(usage.CacheCreation1hTokens, 0)
 	}
 }
 
@@ -1578,13 +1582,7 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	// 解析嵌套的 cache_creation 对象中的 5m/1h 明细
-	cc5m := gjson.GetBytes(body, "usage.cache_creation.ephemeral_5m_input_tokens")
-	cc1h := gjson.GetBytes(body, "usage.cache_creation.ephemeral_1h_input_tokens")
-	if cc5m.Exists() || cc1h.Exists() {
-		response.Usage.CacheCreation5mTokens = int(cc5m.Int())
-		response.Usage.CacheCreation1hTokens = int(cc1h.Int())
-	}
+	mergeRawAnthropicCacheCreationUsage(gjson.GetBytes(body, "usage"), &response.Usage)
 
 	// 兼容 Kimi cached_tokens → cache_read_input_tokens
 	if response.Usage.CacheReadInputTokens == 0 {
