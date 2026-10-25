@@ -154,6 +154,25 @@ func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTie
 	}
 }
 
+func (usage OpenAIUsage) billingUsageTokens() UsageTokens {
+	tokens := UsageTokens{
+		InputTokens:           max(usage.InputTokens-usage.CacheReadInputTokens-usage.CacheCreationInputTokens, 0),
+		ImageInputTokens:      max(usage.ImageInputTokens-usage.ImageCacheReadTokens, 0),
+		ImageCacheReadTokens:  usage.ImageCacheReadTokens,
+		OutputTokens:          usage.OutputTokens,
+		CacheCreationTokens:   usage.CacheCreationInputTokens,
+		CacheCreation5mTokens: usage.CacheCreation5mTokens,
+		CacheCreation1hTokens: usage.CacheCreation1hTokens,
+		CacheReadTokens:       usage.CacheReadInputTokens,
+		ImageOutputTokens:     usage.ImageOutputTokens,
+	}
+	if usage.cacheCreationInputTokensPresent && usage.CacheCreationInputTokens == 0 {
+		tokens.CacheCreation5mTokens = 0
+		tokens.CacheCreation1hTokens = 0
+	}
+	return tokens
+}
+
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
 	if input == nil {
@@ -191,31 +210,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
-	cacheCreationTokens := result.Usage.CacheCreationInputTokens
-	cache30m, cache12h := result.Usage.CacheCreation30mInputTokens, result.Usage.CacheCreation12hInputTokens
+	billingUsage := result.Usage
 	if excelBPSCacheCreationBilledAsInput(account, result) {
-		// Total input already includes cache creation. Retain those tokens in the
-		// ordinary input bucket without changing the original upstream usage.
-		cacheCreationTokens = 0
-		cache30m, cache12h = 0, 0
+		// BPS bills cache creation as ordinary input; preserve raw upstream usage.
+		billingUsage.CacheCreationInputTokens = 0
+		billingUsage.CacheCreation5mTokens, billingUsage.CacheCreation1hTokens = 0, 0
+		billingUsage.CacheCreation30mInputTokens, billingUsage.CacheCreation12hInputTokens = 0, 0
 	}
-	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - cacheCreationTokens
-	if actualInputTokens < 0 {
-		actualInputTokens = 0
-	}
-
-	// Calculate cost
-	tokens := UsageTokens{
-		InputTokens:            actualInputTokens,
-		ImageInputTokens:       max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
-		ImageCacheReadTokens:   result.Usage.ImageCacheReadTokens,
-		OutputTokens:           result.Usage.OutputTokens,
-		CacheCreationTokens:    cacheCreationTokens,
-		CacheReadTokens:        result.Usage.CacheReadInputTokens,
-		ImageOutputTokens:      result.Usage.ImageOutputTokens,
-		CacheCreation30mTokens: cache30m,
-		CacheCreation12hTokens: cache12h,
-	}
+	tokens := billingUsage.billingUsageTokens()
+	actualInputTokens := tokens.InputTokens
 
 	// Keep candidate fallback, response-model selection and Free Fast on one policy snapshot.
 	ctx = withModelBillingConfig(ctx, s.settingService)
@@ -463,9 +466,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		UpstreamEndpoint:         optionalTrimmedStringPtr(input.UpstreamEndpoint),
 		InputTokens:              actualInputTokens,
 		OutputTokens:             result.Usage.OutputTokens,
-		CacheCreationTokens:      cacheCreationTokens,
-		CacheCreation30mTokens:   cache30m,
-		CacheCreation12hTokens:   cache12h,
+		CacheCreationTokens: billingUsage.CacheCreationInputTokens,
+		CacheCreation5mTokens: billingUsage.CacheCreation5mTokens,
+		CacheCreation1hTokens: billingUsage.CacheCreation1hTokens,
+		CacheCreation30mTokens: billingUsage.CacheCreation30mInputTokens,
+		CacheCreation12hTokens: billingUsage.CacheCreation12hInputTokens,
 		CacheReadTokens:          result.Usage.CacheReadInputTokens,
 		ImageInputTokens:         result.Usage.ImageInputTokens,
 		ImageOutputTokens:        result.Usage.ImageOutputTokens,
