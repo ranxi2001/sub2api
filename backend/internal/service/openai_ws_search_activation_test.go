@@ -85,7 +85,7 @@ func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {
 					serverErr <- err
 					return
 				}
-				defer conn.CloseNow()
+				defer func() { _ = conn.CloseNow() }()
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
 				c.Request = r
 				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -101,7 +101,7 @@ func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {
 			defer cancel()
 			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 			require.NoError(t, err)
-			defer client.CloseNow()
+			defer func() { _ = client.CloseNow() }()
 			write := func(fields, input string) {
 				payload := fmt.Sprintf(`{"type":"response.create","model":"gpt-6.1-sol","store":false,"input":%s%s}`, input, fields)
 				require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(payload)))
