@@ -110,7 +110,7 @@ func ResolveOperationsUpstream(a *Account, grokDefaults ...string) (string, stri
 		}
 		return identity, "current_config"
 	case a.IsOpenAI() && a.Type != AccountTypeAPIKey && a.Type != AccountTypeUpstream:
-		if a.IsSIWCEnabled() || a.Extra["openai_prism_browser"] == true || a.Extra["openai_excel_bps"] == true {
+		if a.IsSIWCEnabled() || a.IsExcelOAuth() || a.Extra["openai_prism_browser"] == true || a.Extra["openai_excel_bps"] == true {
 			return "", "oauth_dynamic_endpoint"
 		}
 		if a.Type == AccountTypeSetupToken && !a.IsOpenAIOAuthLike() {

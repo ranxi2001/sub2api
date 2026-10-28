@@ -26,6 +26,24 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
       - run: git rev-parse HEAD
+      - name: Excel-only OAuth attribution assertion RED against previous head
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=internal/service/upstream_operations.go
+          cp "$target" "$RUNNER_TEMP/upstream-current-service.go"
+          trap 'cp "$RUNNER_TEMP/upstream-current-service.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin ecf63af98587c151fe40893f3e3c322a777b17df
+          git show ecf63af98587c151fe40893f3e3c322a777b17df:backend/internal/service/upstream_operations.go > "$target"
+          set +e
+          go test -tags=unit ./internal/service -run '^TestUpstreamOperationsExcelOAuthCannotMasqueradeAsNativeCodex$' -count=1 -v > "$RUNNER_TEMP/upstream-excel-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/upstream-excel-red.log"
+          test "$result" -ne 0
+          grep -q 'FAIL: TestUpstreamOperationsExcelOAuthCannotMasqueradeAsNativeCodex' "$RUNNER_TEMP/upstream-excel-red.log"
+          grep -q 'Excel-only OAuth cannot be attributed to native Codex' "$RUNNER_TEMP/upstream-excel-red.log"
       - run: go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^TestUpstreamOperations' -count=1 -v
         working-directory: backend
       - name: Repository assertion RED against initial scaffold (not compile failure)

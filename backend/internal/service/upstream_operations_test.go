@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
@@ -118,4 +119,11 @@ func TestUpstreamOperationsGrokTextDefaultDoesNotRewriteMediaOrVoice(t *testing.
 	got, status = ResolveOperationsUpstream(key)
 	require.Empty(t, got)
 	require.Equal(t, "multiple_effective_bases", status, "voice leaves the CLI text/media base")
+}
+
+func TestUpstreamOperationsExcelOAuthCannotMasqueradeAsNativeCodex(t *testing.T) {
+	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"client_id": openai.ExcelClientID}, Extra: map[string]any{"openai_excel_bps": false}}
+	got, status := ResolveOperationsUpstream(a)
+	require.Empty(t, got, "Excel-only OAuth cannot be attributed to native Codex")
+	require.Equal(t, "oauth_dynamic_endpoint", status)
 }

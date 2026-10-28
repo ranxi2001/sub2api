@@ -35,7 +35,7 @@
 
 - 普通 OpenAI、Anthropic、Gemini、TypeSafe 和多协议 API 账号复用当前 forwarding getter/default provider profile。scheme/host 转小写，保留显式端口、path 大小写和转义边界（含末尾 `%2F`，不会当作普通尾斜杠裁掉），不将 `/tenant-A/v1` 与 `/tenant-B/v1` 或不同端口并为一组。普通拼接按客户端 trim-right 语义处理尾斜杠；Antigravity upstream 透传只 trim 一个尾斜杠，与实际 builder 一致。
 - Antigravity upstream 的静态 `base_url` 可归属；OAuth fallback / Vertex ServiceAccount / Bedrock 等无法可靠还原单一 API base 的账号保留未知，不编造域名。
-- 普通 OpenAI OAuth/SetupToken 使用代码定义的官方 Codex base；SIWC、Prism、BPS 等动态适配路径保留 `oauth_dynamic_endpoint`。Anthropic OAuth 官方 base 和已启用的自定义中继遵循原 getter。Grok 读取当前站点默认模式；文本/媒体/语音可能走不同 base 时保留 `multiple_effective_bases`。
+- 普通 OpenAI OAuth/SetupToken 使用代码定义的官方 Codex base；Excel 专用 OAuth（即使 BPS 已关闭）、SIWC、Prism、BPS 等动态适配路径保留 `oauth_dynamic_endpoint`。Anthropic OAuth 官方 base 和已启用的自定义中继遵循原 getter。Grok 读取当前站点默认模式；文本/媒体/语音可能走不同 base 时保留 `multiple_effective_bases`。
 - 多协议 `api_base_urls` 候选若规范化后不同，整笔历史记录保留 `multiple_effective_bases`，不因相同 host、模型或当前 API protocol 就伪造过去选择。当前没有账号多 key endpoint override schema；只发现单个账号 api_key 以及分协议 base overrides。影子账号没有凭据归属快照，明确 `shadow_parent_unresolved`。
 - 含 userinfo/query/fragment、非法 URL 及包含秘密的筛选 URL 都拒绝/进入未知，不把已剥离秘密的 URL 冒充确定上游。软删账号在窗口有 usage 时保留估算来源；物理缺失账号为 `account_missing`。没有 URL 历史快照，响应明确 snapshot 请求数为0。
 

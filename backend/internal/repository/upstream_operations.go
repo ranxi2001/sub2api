@@ -33,7 +33,7 @@ func operationsAccounts(ctx context.Context, tx *sql.Tx, f service.UpstreamOpera
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.name,a.platform,a.type,
- jsonb_build_object('base_url',a.credentials->'base_url','api_base_urls',a.credentials->'api_base_urls','account_mode',a.credentials->'account_mode','api_protocol',a.credentials->'api_protocol','provider_profile',a.credentials->'provider_profile','auth_mode',a.credentials->'auth_mode','openai_auth_mode',a.credentials->'openai_auth_mode'),
+ jsonb_build_object('base_url',a.credentials->'base_url','api_base_urls',a.credentials->'api_base_urls','account_mode',a.credentials->'account_mode','api_protocol',a.credentials->'api_protocol','provider_profile',a.credentials->'provider_profile','client_id',a.credentials->'client_id','auth_mode',a.credentials->'auth_mode','openai_auth_mode',a.credentials->'openai_auth_mode'),
  jsonb_build_object('cost_multiplier',a.extra->'cost_multiplier','custom_base_url_enabled',a.extra->'custom_base_url_enabled','custom_base_url',a.extra->'custom_base_url','openai_siwc',a.extra->'openai_siwc','openai_prism_browser',a.extra->'openai_prism_browser','openai_excel_bps',a.extra->'openai_excel_bps'),
  a.updated_at,a.deleted_at IS NOT NULL,a.parent_account_id,a.schedulable,a.concurrency,a.status
  FROM accounts a WHERE ($3::bigint=0 OR a.id=$3) AND (a.deleted_at IS NULL OR EXISTS(SELECT 1 FROM usage_logs u WHERE u.account_id=a.id AND u.created_at >= $1 AND u.created_at < $2))`, f.From, f.Until, f.AccountID)
