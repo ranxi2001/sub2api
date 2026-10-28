@@ -145,3 +145,30 @@ func TestUpstreamOperationsHalfOpenPagingGroupsAndPathIsolation(t *testing.T) {
 	empty := read()
 	require.Equal(t, 0.0, empty["summary"].(map[string]any)["requests"])
 }
+
+func TestUpstreamOperationsQualityRetainsCompleteFrozenRoundBoundary(t *testing.T) {
+	f := newChannelOperationsFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err := integrationDB.Exec(`UPDATE accounts SET type='apikey',credentials='{"base_url":"https://quality.example/v1"}' WHERE id=$1`, f.account)
+	require.NoError(t, err)
+	var plan int64
+	require.NoError(t, integrationDB.QueryRow(`INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config) VALUES($1,'current-model','*/30 * * * *',false,'{"quality":{}}') RETURNING id`, f.account).Scan(&plan))
+	_, err = integrationDB.Exec(`INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message) VALUES($1,'success',$2,$2,$2,'{"quality":{},"model_id":"a","model_ids":["a","b"],"parallel_count":1}','frozen-peer','passed','{"verdict":"correct"}','')`, plan, now.Add(-time.Minute))
+	require.NoError(t, err)
+	q := service.UpstreamOperationsFilter{From: now.Add(-time.Hour), Until: now, Upstream: "https://quality.example/v1", AccountID: f.account, Model: "a", ModelScope: "upstream", Dimension: "model", Sort: "requests", Direction: "desc", Page: 1, PageSize: 20}
+	out, err := f.repo.ReadUpstreamOperations(context.Background(), q)
+	require.NoError(t, err)
+	require.Equal(t, "ready", out.Quality.Status)
+	var quality struct {
+		Summary struct{ Passed, Inconclusive int }
+		Rows    []struct {
+			Complete bool `json:"round_complete"`
+			Outcome  string
+		}
+	}
+	require.NoError(t, json.Unmarshal(out.Quality.Data, &quality))
+	require.Zero(t, quality.Summary.Passed, "missing peer still cannot pass after changing upstream cohort")
+	require.Equal(t, 1, quality.Summary.Inconclusive)
+	require.Len(t, quality.Rows, 1)
+	require.False(t, quality.Rows[0].Complete)
+}

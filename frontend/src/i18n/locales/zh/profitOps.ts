@@ -1,4 +1,5 @@
 export default {
+ "capacity":"当前配置容量","schedulable":"可调度账号","concurrency":"配置并发","capacityNote":"当前账号集合和当前分组的配置统计，与模型无关，不是实时负载或历史容量。",
   "discovery": "当前上游自动发现",
   "discoveryNote": "按当前账号配置发现，包括范围内没有请求的账号；此处数量是当前账号数，不是历史请求数。未知桶保留原因。模型筛选不证明当前账号支持该模型。",
   "title": "利润运维",

@@ -20,6 +20,9 @@ type operationsAccount struct {
 	Deleted     bool      `json:"deleted"`
 	Multiplier  *float64  `json:"multiplier"`
 	CostBasis   string    `json:"cost_basis"`
+	Schedulable bool      `json:"schedulable"`
+	Concurrency int       `json:"concurrency"`
+	Status      string    `json:"status"`
 }
 
 // The projection never includes credentials. Only the selected endpoint fields
@@ -32,7 +35,7 @@ func operationsAccounts(ctx context.Context, tx *sql.Tx, f service.UpstreamOpera
 	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.name,a.platform,a.type,
  jsonb_build_object('base_url',a.credentials->'base_url','api_base_urls',a.credentials->'api_base_urls','account_mode',a.credentials->'account_mode','api_protocol',a.credentials->'api_protocol','provider_profile',a.credentials->'provider_profile','auth_mode',a.credentials->'auth_mode','openai_auth_mode',a.credentials->'openai_auth_mode'),
  jsonb_build_object('cost_multiplier',a.extra->'cost_multiplier','custom_base_url_enabled',a.extra->'custom_base_url_enabled','custom_base_url',a.extra->'custom_base_url','openai_siwc',a.extra->'openai_siwc','openai_prism_browser',a.extra->'openai_prism_browser','openai_excel_bps',a.extra->'openai_excel_bps'),
- a.updated_at,a.deleted_at IS NOT NULL,a.parent_account_id
+ a.updated_at,a.deleted_at IS NOT NULL,a.parent_account_id,a.schedulable,a.concurrency,a.status
  FROM accounts a WHERE ($3::bigint=0 OR a.id=$3) AND (a.deleted_at IS NULL OR EXISTS(SELECT 1 FROM usage_logs u WHERE u.account_id=a.id AND u.created_at >= $1 AND u.created_at < $2))`, f.From, f.Until, f.AccountID)
 	if err != nil {
 		return nil, err
@@ -44,7 +47,7 @@ func operationsAccounts(ctx context.Context, tx *sql.Tx, f service.UpstreamOpera
 		var creds, extra []byte
 		var deleted bool
 		var parent sql.NullInt64
-		if err = rows.Scan(&a.ID, &a.Name, &a.Platform, &a.Type, &creds, &extra, &a.UpdatedAt, &deleted, &parent); err != nil {
+		if err = rows.Scan(&a.ID, &a.Name, &a.Platform, &a.Type, &creds, &extra, &a.UpdatedAt, &deleted, &parent, &a.Schedulable, &a.Concurrency, &a.Status); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(creds, &a.Credentials); err != nil {
@@ -64,7 +67,7 @@ func operationsAccounts(ctx context.Context, tx *sql.Tx, f service.UpstreamOpera
 			key = "unknown:" + attribution
 		}
 		multiplier, basis := service.OperationsCostMultiplier(&a)
-		out = append(out, operationsAccount{ID: a.ID, Name: a.Name, Key: key, Attribution: attribution, UpdatedAt: a.UpdatedAt, Deleted: deleted, Multiplier: multiplier, CostBasis: basis})
+		out = append(out, operationsAccount{ID: a.ID, Name: a.Name, Key: key, Attribution: attribution, UpdatedAt: a.UpdatedAt, Deleted: deleted, Multiplier: multiplier, CostBasis: basis, Schedulable: a.Schedulable, Concurrency: a.Concurrency, Status: a.Status})
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
@@ -73,7 +76,7 @@ func operationsAccounts(ctx context.Context, tx *sql.Tx, f service.UpstreamOpera
 }
 
 const upstreamOperationsCohort = `accounts_config AS (
- SELECT * FROM jsonb_to_recordset($3::jsonb) AS c(id bigint,name text,key text,attribution text,updated_at timestamptz,deleted boolean,multiplier numeric,cost_basis text)
+ SELECT * FROM jsonb_to_recordset($3::jsonb) AS c(id bigint,name text,key text,attribution text,updated_at timestamptz,deleted boolean,multiplier numeric,cost_basis text,schedulable boolean,concurrency integer,status text)
 ), cohort AS (
  SELECT * FROM accounts_config WHERE ($4='' OR key=$4) AND ($5::bigint=0 OR id=$5)
 )`
@@ -153,6 +156,7 @@ func (r *channelRepository) ReadUpstreamOperations(ctx context.Context, f servic
  'rows',COALESCE((SELECT jsonb_agg(to_jsonb(b)) FROM (SELECT * FROM buckets ORDER BY ` + order + ` LIMIT $9 OFFSET $10)b),'[]'::jsonb),
  'accounts',COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM (SELECT id,name,key,attribution,updated_at,deleted,multiplier,cost_basis FROM cohort WHERE ($5::bigint>0 OR id IN (SELECT account_id FROM scoped)) ORDER BY id LIMIT 100)c),'[]'::jsonb),
  'catalog',COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM (SELECT key AS key,key AS name,count(*) AS accounts FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6)) GROUP BY key ORDER BY key LIMIT $9 OFFSET $10)g),'[]'::jsonb),
+ 'capacity',(SELECT jsonb_build_object('accounts',count(*),'schedulable',count(*) FILTER(WHERE schedulable AND status='active'),'configured_concurrency',COALESCE(sum(concurrency),0)) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'catalog_total',(SELECT count(DISTINCT key) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'account_details_limit',100,'historical_upstream_snapshot_requests',0,'historical_cost_multiplier_snapshot_requests',0,
  'cost_formula','COALESCE(usage_logs.account_stats_cost, usage_logs.total_cost) * current extra.cost_multiplier; missing multiplier uses scheduling default 0.1',

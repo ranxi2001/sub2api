@@ -7,6 +7,9 @@ on:
       - '**/UpstreamChannelOperations*'
       - '**/OperationsAnalytics*'
       - '.github/workflows/upstream-profit-operations.yml'
+      - '.github/scripts/upstream-profit-operations-screenshot.mjs'
+      - 'frontend/src/api/admin/upstreamOperations.ts'
+      - 'frontend/src/i18n/locales/*/profitOps.ts'
   workflow_dispatch:
 permissions:
   contents: read
@@ -64,3 +67,18 @@ jobs:
       - run: pnpm exec vitest run src/views/admin/__tests__/ProfitOperationsView.spec.ts src/views/admin/__tests__/UpstreamChannelOperationsView.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
         working-directory: frontend
       - run: pnpm --dir frontend run build
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/upstream-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/upstream-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Two real pages with synthetic data and zero live requests
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/upstream-browser/node_modules/playwright
+          UPSTREAM_SCREENSHOT_DIR: ${{ runner.temp }}/upstream-screenshots
+        run: node .github/scripts/upstream-profit-operations-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: upstream-profit-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/upstream-screenshots
+          if-no-files-found: error
