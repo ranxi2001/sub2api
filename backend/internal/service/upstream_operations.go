@@ -46,6 +46,15 @@ func ValidateUpstreamOperationsFilter(f UpstreamOperationsFilter) error {
 		!slices.Contains([]string{"requests", "standard_charge", "request_income", "estimated_cost", "estimated_profit", "margin", "name"}, f.Sort) || !slices.Contains([]string{"asc", "desc"}, f.Direction) {
 		return ErrChannelOperationsValidation
 	}
+	if f.Upstream != "" {
+		if strings.HasPrefix(f.Upstream, "unknown:") {
+			if !slices.Contains([]string{"unknown:account_missing", "unknown:shadow_parent_unresolved", "unknown:multiple_effective_bases", "unknown:oauth_dynamic_endpoint", "unknown:invalid_url", "unknown:unsupported_account_type", "unknown:missing_base_url"}, f.Upstream) {
+				return ErrChannelOperationsValidation
+			}
+		} else if _, err := normalizeOperationsBaseURL(f.Upstream); err != nil {
+			return ErrChannelOperationsValidation
+		}
+	}
 	return nil
 }
 func (s *ChannelService) UpstreamOperations(ctx context.Context, f UpstreamOperationsFilter) (*UpstreamOperationsSnapshot, error) {

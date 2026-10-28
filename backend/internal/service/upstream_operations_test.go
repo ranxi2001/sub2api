@@ -86,3 +86,12 @@ func TestUpstreamOperationsProviderDefaultsAndAntigravityRelayPath(t *testing.T)
 		require.NotEqual(t, "current_config", status)
 	}
 }
+
+func TestUpstreamOperationsNeverEchoSecretURLFilter(t *testing.T) {
+	now := time.Now().UTC()
+	f := UpstreamOperationsFilter{From: now.Add(-time.Hour), Until: now, Dimension: "upstream", ModelScope: "public", Sort: "requests", Direction: "desc", Page: 1, PageSize: 20}
+	for _, url := range []string{"https://user:private@example.test/v1", "https://example.test/v1?token=private", "https://example.test/v1#private", "unknown:private"} {
+		f.Upstream = url
+		require.Error(t, ValidateUpstreamOperationsFilter(f))
+	}
+}
