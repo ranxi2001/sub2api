@@ -59,10 +59,7 @@ func operationsAccounts(ctx context.Context, tx *sql.Tx, f service.UpstreamOpera
 		if parent.Valid {
 			a.ParentAccountID = &parent.Int64
 		}
-		if a.IsGrok() && a.GetCredential("base_url") == "" {
-			a.Credentials["base_url"] = service.GrokBaseURLForMode(grokMode)
-		}
-		key, attribution := service.ResolveOperationsUpstream(&a)
+		key, attribution := service.ResolveOperationsUpstream(&a, service.GrokBaseURLForMode(grokMode))
 		if key == "" {
 			key = "unknown:" + attribution
 		}

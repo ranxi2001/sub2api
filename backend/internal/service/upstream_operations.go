@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"net/url"
 	"slices"
 	"strings"
@@ -72,7 +73,7 @@ func (s *ChannelService) UpstreamOperations(ctx context.Context, f UpstreamOpera
 
 // ResolveOperationsUpstream never claims the current account configuration is a
 // historical URL snapshot. Unsupported or ambiguous dispatch stays unassigned.
-func ResolveOperationsUpstream(a *Account) (string, string) {
+func ResolveOperationsUpstream(a *Account, grokDefaults ...string) (string, string) {
 	if a == nil {
 		return "", "account_missing"
 	}
@@ -85,11 +86,27 @@ func ResolveOperationsUpstream(a *Account) (string, string) {
 		if a.Type != AccountTypeAPIKey && a.Type != AccountTypeOAuth {
 			return "", "unsupported_account_type"
 		}
-		text, media := a.GetGrokBaseURL(), a.GetGrokMediaBaseURL()
-		if text != media {
-			return "", "multiple_effective_bases"
+		grokDefault := GrokBaseURLForMode("")
+		if len(grokDefaults) > 0 {
+			grokDefault = grokDefaults[0]
 		}
-		raw = text
+		text, media := a.GetGrokBaseURLOr(grokDefault), a.GetGrokMediaBaseURL()
+		voice := media
+		if isGrokCLIProxyBaseURL(voice) {
+			voice = xai.DefaultBaseURL
+		}
+		var identity string
+		for _, base := range []string{text, media, voice} {
+			clean, err := normalizeOperationsBaseURL(base)
+			if err != nil {
+				return "", "invalid_url"
+			}
+			if identity != "" && identity != clean {
+				return "", "multiple_effective_bases"
+			}
+			identity = clean
+		}
+		return identity, "current_config"
 	case a.IsOpenAI() && a.Type != AccountTypeAPIKey && a.Type != AccountTypeUpstream:
 		if a.IsSIWCEnabled() || a.Extra["openai_prism_browser"] == true || a.Extra["openai_excel_bps"] == true {
 			return "", "oauth_dynamic_endpoint"
@@ -192,13 +209,19 @@ func normalizeOperationsBaseURLTrailing(raw string, trimAll bool) (string, error
 	// Preserve ports, escaped path boundaries and path case. Forwarding builders
 	// append endpoints after trimming trailing slash; do not collapse /v1 or tenants.
 	u.Host = strings.ToLower(u.Host)
+	// Trim literal separators in the escaped path. Trimming decoded Path would
+	// silently turn a trailing %2F into a different API base.
+	escaped := u.EscapedPath()
 	if trimAll {
-		u.Path = strings.TrimRight(u.Path, "/")
-		u.RawPath = strings.TrimRight(u.RawPath, "/")
+		escaped = strings.TrimRight(escaped, "/")
 	} else {
-		u.Path = strings.TrimSuffix(u.Path, "/")
-		u.RawPath = strings.TrimSuffix(u.RawPath, "/")
+		escaped = strings.TrimSuffix(escaped, "/")
 	}
+	u.Path, err = url.PathUnescape(escaped)
+	if err != nil {
+		return "", ErrChannelOperationsValidation
+	}
+	u.RawPath = escaped
 	return u.String(), nil
 }
 

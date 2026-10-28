@@ -2,6 +2,7 @@ package service
 
 import (
 	"github.com/stretchr/testify/require"
+	"strings"
 	"testing"
 	"time"
 )
@@ -94,4 +95,27 @@ func TestUpstreamOperationsNeverEchoSecretURLFilter(t *testing.T) {
 		f.Upstream = url
 		require.Error(t, ValidateUpstreamOperationsFilter(f))
 	}
+}
+
+func TestUpstreamOperationsEscapedTrailingSlashIsNotASeparator(t *testing.T) {
+	for _, raw := range []string{"https://relay.example/tenant%2F", "https://relay.example/a%2Fb", "https://relay.example/a%2fb/"} {
+		a := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": raw}}
+		got, status := ResolveOperationsUpstream(a)
+		require.Equal(t, strings.TrimSuffix(raw, "/"), got, "escaped path boundary must survive")
+		require.Equal(t, "current_config", status)
+	}
+}
+func TestUpstreamOperationsGrokTextDefaultDoesNotRewriteMediaOrVoice(t *testing.T) {
+	key := &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey}
+	got, status := ResolveOperationsUpstream(key, "https://cli-chat-proxy.grok.com/v1")
+	require.Empty(t, got)
+	require.Equal(t, "multiple_effective_bases", status, "text site default and API-key media default differ")
+	require.Nil(t, key.Credentials, "attribution must not modify account configuration")
+	got, status = ResolveOperationsUpstream(key, "https://api.x.ai/v1")
+	require.Equal(t, "https://api.x.ai/v1", got)
+	require.Equal(t, "current_config", status)
+	key.Credentials = map[string]any{"base_url": "https://cli-chat-proxy.grok.com/v1"}
+	got, status = ResolveOperationsUpstream(key)
+	require.Empty(t, got)
+	require.Equal(t, "multiple_effective_bases", status, "voice leaves the CLI text/media base")
 }
