@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -50,4 +51,97 @@ func TestUpstreamOperationsPersistedProfitIndependentFromAccountDebit(t *testing
 	require.Len(t, data.Rows, 1)
 	require.Equal(t, "https://relay.example:8443/tenant/v1", data.Rows[0].Key)
 	require.NotContains(t, string(out.Usage), "fixture-secret")
+}
+
+func TestUpstreamOperationsZeroLossUnknownAndCurrentConfiguration(t *testing.T) {
+	f := newChannelOperationsFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err := integrationDB.Exec(`UPDATE accounts SET type='apikey',credentials='{"base_url":"https://source.example/tenant/v1"}',extra='{"cost_multiplier":0.5}' WHERE id=$1`, f.account)
+	require.NoError(t, err)
+	_, err = integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,account_stats_cost,created_at) VALUES($1,$2,$3,'loss-fixture','model',10,0,8,$4)`, f.user, f.key, f.account, now.Add(-time.Hour))
+	require.NoError(t, err)
+	q := service.UpstreamOperationsFilter{From: now.Add(-24 * time.Hour), Until: now, AccountID: f.account, Dimension: "account", ModelScope: "public", Sort: "requests", Direction: "desc", Page: 1, PageSize: 20}
+	read := func() map[string]any {
+		out, e := f.repo.ReadUpstreamOperations(context.Background(), q)
+		require.NoError(t, e)
+		var data map[string]any
+		require.NoError(t, json.Unmarshal(out.Usage, &data))
+		return data
+	}
+	data := read()
+	sum := data["summary"].(map[string]any)
+	require.Equal(t, 4.0, sum["estimated_cost"])
+	require.Equal(t, -4.0, sum["estimated_profit"])
+	require.Nil(t, sum["margin"], "zero revenue margin is unknown")
+	for _, tc := range []struct {
+		extra    string
+		cost     any
+		defaults float64
+		unknown  float64
+	}{
+		{`{"cost_multiplier":0}`, 0.0, 0, 0}, {`{}`, 0.8, 1, 0}, {`{"cost_multiplier":"bad"}`, nil, 0, 1}, {`{"cost_multiplier":-1}`, nil, 0, 1},
+	} {
+		_, err = integrationDB.Exec(`UPDATE accounts SET extra=$2::jsonb,updated_at=clock_timestamp() WHERE id=$1`, f.account, tc.extra)
+		require.NoError(t, err)
+		data = read()
+		sum = data["summary"].(map[string]any)
+		require.Equal(t, tc.cost, sum["estimated_cost"])
+		require.Equal(t, tc.defaults, sum["default_multiplier_requests"])
+		require.Equal(t, tc.unknown, sum["unknown_cost_requests"])
+	}
+	_, err = integrationDB.Exec(`UPDATE accounts SET credentials='{"base_url":"https://new.example/different/v1"}',extra='{"cost_multiplier":0.25}',deleted_at=NOW() WHERE id=$1`, f.account)
+	require.NoError(t, err)
+	data = read()
+	sum = data["summary"].(map[string]any)
+	require.Equal(t, 1.0, sum["deleted_account_requests"])
+	require.Equal(t, 2.0, sum["estimated_cost"])
+	var base, income, stats float64
+	require.NoError(t, integrationDB.QueryRow(`SELECT total_cost,actual_cost,account_stats_cost FROM usage_logs WHERE account_id=$1`, f.account).Scan(&base, &income, &stats))
+	require.Equal(t, 10.0, base)
+	require.Zero(t, income)
+	require.Equal(t, 8.0, stats, "configuration edits never rewrite history")
+}
+
+func TestUpstreamOperationsHalfOpenPagingGroupsAndPathIsolation(t *testing.T) {
+	f := newChannelOperationsFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	from := now.Add(-24 * time.Hour)
+	for _, a := range []struct {
+		id   int64
+		base string
+	}{{f.account, "https://same.example:8443/A/v1/"}, {f.outsider, "https://same.example:8443/B/v1/"}} {
+		_, err := integrationDB.Exec(`UPDATE accounts SET type='apikey',credentials=jsonb_build_object('base_url',$2::text),extra='{"cost_multiplier":0}' WHERE id=$1`, a.id, a.base)
+		require.NoError(t, err)
+		for i, at := range []time.Time{from, now, from.Add(-time.Microsecond)} {
+			_, err = integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,group_id,created_at) VALUES($1,$2,$3,$4,'per-request',2,1,$5,$6)`, f.user, f.key, a.id, fmt.Sprintf("range-%d-%d", a.id, i), f.group, at)
+			require.NoError(t, err)
+		}
+	}
+	q := service.UpstreamOperationsFilter{From: from, Until: now, GroupID: f.group, Dimension: "upstream", ModelScope: "public", Sort: "name", Direction: "asc", Page: 1, PageSize: 1}
+	read := func() map[string]any {
+		out, err := f.repo.ReadUpstreamOperations(context.Background(), q)
+		require.NoError(t, err)
+		var data map[string]any
+		require.NoError(t, json.Unmarshal(out.Usage, &data))
+		require.Equal(t, "ready", out.Errors.Status)
+		if q.Model != "" && q.ModelScope != "upstream" {
+			require.Equal(t, "unsupported_scope", out.Quality.Status)
+		} else {
+			require.Equal(t, "ready", out.Quality.Status)
+		}
+		return data
+	}
+	first := read()
+	require.Equal(t, 2.0, first["total"])
+	require.Equal(t, 2.0, first["summary"].(map[string]any)["requests"])
+	require.Len(t, first["rows"], 1)
+	require.Equal(t, "https://same.example:8443/A/v1", first["rows"].([]any)[0].(map[string]any)["key"])
+	require.Equal(t, 1.0, first["summary"].(map[string]any)["margin"], "zero procurement cost remains an explicit 100 percent margin")
+	q.Page = 2
+	second := read()
+	require.Equal(t, first["summary"], second["summary"])
+	require.Equal(t, "https://same.example:8443/B/v1", second["rows"].([]any)[0].(map[string]any)["key"])
+	q.Model = "nonexistent"
+	empty := read()
+	require.Equal(t, 0.0, empty["summary"].(map[string]any)["requests"])
 }

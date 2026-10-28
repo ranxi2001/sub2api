@@ -33,3 +33,36 @@ func TestUpstreamOperationsRejectUnboundedAndInvalidQueries(t *testing.T) {
 		require.Error(t, ValidateUpstreamOperationsFilter(f), "invalid query must fail before SQL")
 	}
 }
+
+func TestUpstreamOperationsOAuthAmbiguityAndMultiplierSources(t *testing.T) {
+	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"base_url": "https://ignored.example"}}
+	got, status := ResolveOperationsUpstream(oauth)
+	require.Equal(t, "https://chatgpt.com/backend-api/codex", got)
+	require.Equal(t, "current_config", status)
+	oauth.Extra = map[string]any{OpenAISIWCEnabledKey: true}
+	got, status = ResolveOperationsUpstream(oauth)
+	require.Empty(t, got)
+	require.Equal(t, "oauth_dynamic_endpoint", status)
+	multi := &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_protocol": "adaptive", "api_base_urls": map[string]any{"chat_completions": "https://relay.example/v1", "anthropic": "https://relay.example/anthropic", "responses": "https://relay.example/v1"}}}
+	got, status = ResolveOperationsUpstream(multi)
+	require.Empty(t, got)
+	require.Equal(t, "multiple_effective_bases", status)
+	missing, basis := OperationsCostMultiplier(nil)
+	require.Nil(t, missing)
+	require.Equal(t, "account_missing", basis)
+	for _, tc := range []struct {
+		extra map[string]any
+		want  *float64
+		basis string
+	}{
+		{map[string]any{}, ptrOps(.1), "current_default_0.1"},
+		{map[string]any{"cost_multiplier": 0.0}, ptrOps(0), "current_saved_multiplier"},
+		{map[string]any{"cost_multiplier": -1}, nil, "invalid_multiplier"},
+		{map[string]any{"cost_multiplier": "0.25"}, nil, "invalid_multiplier"},
+	} {
+		v, b := OperationsCostMultiplier(&Account{Extra: tc.extra})
+		require.Equal(t, tc.want, v)
+		require.Equal(t, tc.basis, b)
+	}
+}
+func ptrOps(v float64) *float64 { return &v }
