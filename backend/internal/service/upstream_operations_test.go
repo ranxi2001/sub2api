@@ -127,3 +127,10 @@ func TestUpstreamOperationsExcelOAuthCannotMasqueradeAsNativeCodex(t *testing.T)
 	require.Empty(t, got, "Excel-only OAuth cannot be attributed to native Codex")
 	require.Equal(t, "oauth_dynamic_endpoint", status)
 }
+
+func TestUpstreamOperationsPinnedResponsesPreservesExplicitRelayBase(t *testing.T) {
+	a := &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_protocol": APIProtocolResponses, "base_url": "https://pinned-relay.example:8443/tenant/v1/"}}
+	got, status := ResolveOperationsUpstream(a)
+	require.Equal(t, "https://pinned-relay.example:8443/tenant/v1", got, "pinned Responses must retain explicit relay base just like buildUpstreamRequest")
+	require.Equal(t, "current_config", status)
+}

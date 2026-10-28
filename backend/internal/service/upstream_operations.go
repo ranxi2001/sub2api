@@ -146,8 +146,6 @@ func ResolveOperationsUpstream(a *Account, grokDefaults ...string) (string, stri
 		}
 		if a.IsAnthropicProtocol() {
 			raw = a.GetAnthropicProtocolBaseURL()
-		} else if a.GetAPIProtocol() == APIProtocolResponses {
-			raw = a.GetCNProtocolBaseURL(APIProtocolResponses)
 		} else {
 			raw = a.GetOpenAIBaseURL()
 		}
