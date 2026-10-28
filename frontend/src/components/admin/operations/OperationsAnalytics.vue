@@ -69,10 +69,10 @@ async function load() {
  catch { if(alive && request===id) error.value=t('profitOps.queryFailed') }
  finally { if(alive && request===id) loading.value=false }
 }
-function apply() { const a=new Date(from.value), b=new Date(until.value); if(!Number.isFinite(a.getTime())||!Number.isFinite(b.getTime())||b<=a||b.getTime()-a.getTime()>31*86400000){error.value=t('profitOps.invalidRange');return}; applied.value={...draft.value,from:a.toISOString(),until:b.toISOString(),page:1};void load() }
+function apply() { const a=new Date(from.value), b=new Date(until.value); if(!Number.isFinite(a.getTime())||!Number.isFinite(b.getTime())||b<=a||b.getTime()-a.getTime()>31*86400000){error.value=t('profitOps.invalidRange');return} applied.value={...draft.value,from:a.toISOString(),until:b.toISOString(),page:1};void load() }
 function last24h(){const end=new Date();applied.value={...draft.value,from:new Date(end.getTime()-86400000).toISOString(),until:end.toISOString(),page:1};from.value=local(new Date(applied.value.from));until.value=local(end);void load()}
 function page(delta:number){applied.value={...applied.value,page:applied.value.page+delta};void load()}
-function drill(row:OperationsRow){if(applied.value.dimension==='upstream'){applied.value={...applied.value,upstream:row.key,account_id:0,dimension:'account',page:1}}else if(applied.value.dimension==='account'){applied.value={...applied.value,account_id:Number(row.key),dimension:'model',page:1}};draft.value={...applied.value};void load()}
+function drill(row:OperationsRow){if(applied.value.dimension==='upstream'){applied.value={...applied.value,upstream:row.key,account_id:0,dimension:'account',page:1}}else if(applied.value.dimension==='account'){applied.value={...applied.value,account_id:Number(row.key),dimension:'model',page:1}}draft.value={...applied.value};void load()}
 function selectUpstream(key:string){applied.value={...applied.value,upstream:key,account_id:0,dimension:'account',page:1};draft.value={...applied.value};void load()}
 function overview(){applied.value={...applied.value,upstream:'',account_id:0,dimension:'upstream',page:1};draft.value={...applied.value};void load()}
 onMounted(load)
