@@ -27,19 +27,25 @@ const openAINonStreamRegressionSSE = "event: response.created\n" +
 
 func runOpenAIOAuthNonStreamRegression(t *testing.T, passthrough bool, requestBody string, upstreamSSE ...string) (*httptest.ResponseRecorder, *httpUpstreamRecorder, *OpenAIForwardResult) {
 	t.Helper()
+	sseBody := openAINonStreamRegressionSSE
+	if len(upstreamSSE) > 0 {
+		sseBody = upstreamSSE[0]
+	}
+	header := http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_7978"}}
+	return runOpenAIOAuthNonStreamRegressionWithHeader(t, passthrough, requestBody, header, sseBody)
+}
+
+func runOpenAIOAuthNonStreamRegressionWithHeader(t *testing.T, passthrough bool, requestBody string, upstreamHeader http.Header, sseBody string) (*httptest.ResponseRecorder, *httpUpstreamRecorder, *OpenAIForwardResult) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("Accept", "application/json")
 
-	sseBody := openAINonStreamRegressionSSE
-	if len(upstreamSSE) > 0 {
-		sseBody = upstreamSSE[0]
-	}
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_7978"}},
+		Header:     upstreamHeader,
 		Body:       io.NopCloser(strings.NewReader(sseBody)),
 	}}
 	cfg := &config.Config{}
@@ -137,5 +143,20 @@ func TestOpenAIGatewayService_OAuthStreamFalseCancelledReturnsJSON(t *testing.T)
 
 		require.True(t, strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json"), "passthrough=%v Content-Type=%q", passthrough, rec.Header().Get("Content-Type"))
 		require.Equal(t, "cancelled", gjson.GetBytes(rec.Body.Bytes(), "status").String(), "passthrough=%v body=%s", passthrough, rec.Body.String())
+	}
+}
+
+// The ChatGPT OAuth upstream can answer with SSE but no Content-Type header;
+// the body framing alone must route the response through SSE-to-JSON.
+func TestOpenAIGatewayService_OAuthStreamFalseWithoutUpstreamContentTypeReturnsJSON(t *testing.T) {
+	for _, passthrough := range []bool{true, false} {
+		header := http.Header{"x-request-id": []string{"rid_7978"}}
+		rec, upstream, result := runOpenAIOAuthNonStreamRegressionWithHeader(t, passthrough,
+			`{"model":"gpt-5.4","instructions":"x","input":"Reply with exactly OK.","stream":false}`,
+			header, openAINonStreamRegressionSSE)
+
+		require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool(), "passthrough=%v", passthrough)
+		require.False(t, result.Stream, "passthrough=%v", passthrough)
+		requireSingleJSONResponsesObject(t, rec)
 	}
 }
