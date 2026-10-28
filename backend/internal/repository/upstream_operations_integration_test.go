@@ -236,3 +236,50 @@ func TestUpstreamOperationsIdleAccountsDiscoveredWithoutAnyModelChannel(t *testi
 	require.Equal(t, id, data.Members[0].ID)
 	require.Equal(t, 1, data.MemberTotal)
 }
+
+func TestUpstreamOperationsSameURLWeightedMarginWithoutGroupJoinDuplication(t *testing.T) {
+	f := newChannelOperationsFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	var otherGroup int64
+	require.NoError(t, integrationDB.QueryRow(`INSERT INTO groups(name,platform) VALUES('profit duplicate-group fixture','openai') RETURNING id`).Scan(&otherGroup))
+	t.Cleanup(func() { _, _ = integrationDB.Exec(`DELETE FROM groups WHERE id=$1`, otherGroup) })
+	for _, id := range []int64{f.account, f.outsider} {
+		_, err := integrationDB.Exec(`UPDATE accounts SET type='apikey',credentials='{"base_url":"https://shared.example:8443/tenant/v1"}',extra='{"cost_multiplier":0.5}' WHERE id=$1`, id)
+		require.NoError(t, err)
+		_, err = integrationDB.Exec(`INSERT INTO account_groups(account_id,group_id) VALUES($1,$2)`, id, otherGroup)
+		require.NoError(t, err)
+	}
+	for i, v := range []struct {
+		id           int64
+		income, base float64
+	}{{f.account, 10, 10}, {f.outsider, 2, 8}} {
+		_, err := integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,account_stats_cost,created_at) VALUES($1,$2,$3,$4,'cached-per-request',10,$5,$6,$7)`, f.user, f.key, v.id, fmt.Sprintf("weighted-%d-%d", f.account, i), v.income, v.base, now.Add(-time.Minute))
+		require.NoError(t, err)
+	}
+	q := service.UpstreamOperationsFilter{From: now.Add(-time.Hour), Until: now, Upstream: "https://shared.example:8443/tenant/v1", Dimension: "account", ModelScope: "public", Sort: "request_income", Direction: "desc", Page: 1, PageSize: 1}
+	out, err := f.repo.ReadUpstreamOperations(context.Background(), q)
+	require.NoError(t, err)
+	var data struct {
+		Summary struct {
+			Requests int
+			Income   float64 `json:"request_income"`
+			Cost     float64 `json:"estimated_cost"`
+			Margin   float64
+		}
+		Rows  []struct{ Margin float64 }
+		Total int
+	}
+	require.NoError(t, json.Unmarshal(out.Usage, &data))
+	require.Equal(t, 2, data.Summary.Requests)
+	require.Equal(t, 12.0, data.Summary.Income)
+	require.Equal(t, 9.0, data.Summary.Cost)
+	require.InDelta(t, .25, data.Summary.Margin, 1e-9, "weighted margin is (12-9)/12, not average of 50 percent and -100 percent")
+	require.Equal(t, 2, data.Total)
+	require.Len(t, data.Rows, 1)
+	require.InDelta(t, .5, data.Rows[0].Margin, 1e-9)
+	q.Dimension = "upstream"
+	out, err = f.repo.ReadUpstreamOperations(context.Background(), q)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(out.Usage, &data))
+	require.Equal(t, 1, data.Total, "same effective URL groups independent accounts once")
+}

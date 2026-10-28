@@ -21,7 +21,7 @@ export async function readOperations(kind,query){
  const metrics={requests:1604,standard_charge:120,request_income:45,estimated_cost:30,estimated_profit:15,margin:1/3,covered_estimated_cost:30,covered_income:45,cost_covered_requests:1604,unknown_cost_requests:0,unknown_upstream_requests:4,saved_multiplier_requests:1600,default_multiplier_requests:4,saved_stats_base_requests:1500,standard_base_fallback_requests:104,subscription_requests:10,deleted_account_requests:2,samples:1320,unknown_samples:88,p50_ms:820,p90_ms:1900,p95_ms:2450,duration_p90_ms:4300,oldest_config_updated_at:now,latest_config_updated_at:now};
  const key=query.dimension==='upstream'?'https://relay.example:8443/tenant/v1':query.dimension==='account'?'42':'vendor-model';
  return {scope:query,queried_at:now,attribution:'current_account_config_estimate_no_historical_snapshot',currency:'USD billing units',
- usage:{summary:metrics,total:1,rows:[{...metrics,key,name:key}],catalog:[{key:'https://relay.example:8443/tenant/v1',name:'https://relay.example:8443/tenant/v1',accounts:2}],catalog_total:1,account_details_limit:100,accounts:[{id:42,name:'合成账号 A',key:'https://relay.example:8443/tenant/v1',attribution:'current_config',multiplier:0.25,cost_basis:'current_saved_multiplier',updated_at:now,deleted:false}],capacity:{accounts:2,schedulable:2,configured_concurrency:20}},
+ usage:{summary:metrics,total:1,rows:[{...metrics,key,name:key}],catalog:[{key:'https://relay.example:8443/tenant/v1',name:'https://relay.example:8443/tenant/v1',accounts:2}],catalog_total:1,member_total:1,members:[{id:42,name:'合成账号 A',cost_basis:'current_saved_multiplier',multiplier:0.25}],account_details_limit:100,accounts:[{id:42,name:'合成账号 A',key:'https://relay.example:8443/tenant/v1',attribution:'current_config',multiplier:0.25,cost_basis:'current_saved_multiplier',updated_at:now,deleted:false}],capacity:{accounts:2,schedulable:2,configured_concurrency:20}},
  quality:{status:'ready',data:{summary:{rounds:2,passed:1,degraded:0,inconclusive:1},total:2,rows:[{id:9,account_id:42,plan_id:8,measured_model:'vendor-model',observed_at:now,probes:1,passed_probes:1,expected:2,outcome:'inconclusive',round_complete:false,round_probes:1,round_expected:2,actions:[]}]},queried_at:now},
  errors:{status:'ready',data:{records:5,upstream_5xx:2,rows:[{error_type:'upstream',error_phase:'forward',status_code:502,records:5}]},queried_at:now}};
 }
@@ -52,7 +52,8 @@ try {
   await page.screenshot({path:path.join(output,`${kind}-desktop-synthetic.png`),fullPage:true})
   await page.getByTestId('drill-row').click()
   await page.waitForFunction(()=>globalThis.__upstreamFixture.queries.at(-1).dimension==='account')
-  await page.getByTestId('drill-row').click()
+  await page.getByTestId('member-drill').waitFor()
+  await page.getByTestId('member-drill').click()
   await page.waitForFunction(()=>globalThis.__upstreamFixture.queries.at(-1).dimension==='model' && globalThis.__upstreamFixture.queries.at(-1).account_id===42)
   await page.getByText('vendor-model',{exact:true}).first().waitFor()
   await page.setViewportSize({width:390,height:844})
