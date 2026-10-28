@@ -19,6 +19,7 @@ func TestUpstreamOperationsHTTPValidation(t *testing.T) {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest("GET", "/profit"+q, nil))
 		require.Equal(t, 400, w.Code, "reject invalid input before repository")
+		require.Contains(t, w.Body.String(), "UPSTREAM_OPERATIONS_VALIDATION", "independent analytics must not report model-channel membership errors")
 	}
 }
 

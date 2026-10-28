@@ -16,7 +16,7 @@ func (h *ChannelHandler) UpstreamOperations(c *gin.Context) {
 	from, e5 := time.Parse(time.RFC3339, c.Query("from"))
 	until, e6 := time.Parse(time.RFC3339, c.Query("until"))
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil || e6 != nil {
-		response.ErrorFrom(c, service.ErrChannelOperationsValidation)
+		response.ErrorFrom(c, service.ErrUpstreamOperationsValidation)
 		return
 	}
 	f := service.UpstreamOperationsFilter{From: from, Until: until, Upstream: c.Query("upstream"), AccountID: account, GroupID: group, Model: c.Query("model"), ModelScope: c.DefaultQuery("model_scope", "public"), Dimension: c.DefaultQuery("dimension", "upstream"), Sort: c.DefaultQuery("sort", "requests"), Direction: c.DefaultQuery("direction", "desc"), Page: int(page), PageSize: int(size)}

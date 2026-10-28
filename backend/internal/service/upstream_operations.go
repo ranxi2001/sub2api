@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+var ErrUpstreamOperationsValidation = infraerrors.BadRequest("UPSTREAM_OPERATIONS_VALIDATION", "运维查询参数无效：请检查时间范围、分页、模型口径及安全上游网址")
+
 type UpstreamOperationsFilter struct {
 	From       time.Time `json:"from"`
 	Until      time.Time `json:"until"`
@@ -45,15 +47,15 @@ func ValidateUpstreamOperationsFilter(f UpstreamOperationsFilter) error {
 	if f.From.IsZero() || !f.Until.After(f.From) || f.Until.Sub(f.From) > 31*24*time.Hour || f.Until.After(time.Now().Add(time.Minute)) || f.AccountID < 0 || f.GroupID < 0 || f.Page < 1 || f.Page > 1000000 || f.PageSize < 1 || f.PageSize > 100 || len(f.Model) > 200 || len(f.Upstream) > 2048 ||
 		!slices.Contains([]string{"upstream", "account", "model"}, f.Dimension) || !slices.Contains([]string{"public", "recorded", "upstream"}, f.ModelScope) ||
 		!slices.Contains([]string{"requests", "standard_charge", "request_income", "estimated_cost", "estimated_profit", "margin", "name"}, f.Sort) || !slices.Contains([]string{"asc", "desc"}, f.Direction) {
-		return ErrChannelOperationsValidation
+		return ErrUpstreamOperationsValidation
 	}
 	if f.Upstream != "" {
 		if strings.HasPrefix(f.Upstream, "unknown:") {
 			if !slices.Contains([]string{"unknown:account_missing", "unknown:shadow_parent_unresolved", "unknown:multiple_effective_bases", "unknown:oauth_dynamic_endpoint", "unknown:invalid_url", "unknown:unsupported_account_type", "unknown:missing_base_url"}, f.Upstream) {
-				return ErrChannelOperationsValidation
+				return ErrUpstreamOperationsValidation
 			}
 		} else if _, err := normalizeOperationsBaseURL(f.Upstream); err != nil {
-			return ErrChannelOperationsValidation
+			return ErrUpstreamOperationsValidation
 		}
 	}
 	return nil
@@ -196,15 +198,15 @@ func normalizeOperationsBaseURL(raw string) (string, error) {
 }
 func normalizeOperationsBaseURLTrailing(raw string, trimAll bool) (string, error) {
 	if len(raw) > 2048 {
-		return "", ErrChannelOperationsValidation
+		return "", ErrUpstreamOperationsValidation
 	}
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
-		return "", ErrChannelOperationsValidation
+		return "", ErrUpstreamOperationsValidation
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
-		return "", ErrChannelOperationsValidation
+		return "", ErrUpstreamOperationsValidation
 	}
 	// Preserve ports, escaped path boundaries and path case. Forwarding builders
 	// append endpoints after trimming trailing slash; do not collapse /v1 or tenants.
@@ -219,7 +221,7 @@ func normalizeOperationsBaseURLTrailing(raw string, trimAll bool) (string, error
 	}
 	u.Path, err = url.PathUnescape(escaped)
 	if err != nil {
-		return "", ErrChannelOperationsValidation
+		return "", ErrUpstreamOperationsValidation
 	}
 	u.RawPath = escaped
 	return u.String(), nil
