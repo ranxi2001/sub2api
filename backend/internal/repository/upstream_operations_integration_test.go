@@ -172,3 +172,37 @@ func TestUpstreamOperationsQualityRetainsCompleteFrozenRoundBoundary(t *testing.
 	require.Len(t, quality.Rows, 1)
 	require.False(t, quality.Rows[0].Complete)
 }
+
+func TestUpstreamOperationsUnknownURLNoSecretsAndInvalidAmounts(t *testing.T) {
+	f := newChannelOperationsFixture(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err := integrationDB.Exec(`UPDATE accounts SET type='apikey',credentials='{"base_url":"https://user:private@secret.example/v1?token=private#private","api_key":"not-for-response"}',extra='{"cost_multiplier":0.25}' WHERE id=$1`, f.account)
+	require.NoError(t, err)
+	_, err = integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,account_stats_cost,created_at) VALUES($1,$2,$3,'unknown-fixture','missing-price',10,2,'NaN'::numeric,$4)`, f.user, f.key, f.account, now.Add(-time.Minute))
+	require.NoError(t, err)
+	q := service.UpstreamOperationsFilter{From: now.Add(-time.Hour), Until: now, AccountID: f.account, Dimension: "upstream", ModelScope: "public", Sort: "estimated_profit", Direction: "desc", Page: 1, PageSize: 20}
+	out, err := f.repo.ReadUpstreamOperations(context.Background(), q)
+	require.NoError(t, err)
+	var data struct {
+		Summary struct {
+			Cost            *float64 `json:"estimated_cost"`
+			Unknown         int      `json:"unknown_cost_requests"`
+			UpstreamUnknown int      `json:"unknown_upstream_requests"`
+		}
+		Rows []struct{ Key string }
+	}
+	require.NoError(t, json.Unmarshal(out.Usage, &data))
+	require.Nil(t, data.Summary.Cost)
+	require.Equal(t, 1, data.Summary.Unknown)
+	require.Equal(t, 1, data.Summary.UpstreamUnknown)
+	require.Len(t, data.Rows, 1)
+	require.Equal(t, "unknown:invalid_url", data.Rows[0].Key)
+	for _, secret := range []string{"private", "secret.example", "not-for-response", "NaN", "Infinity"} {
+		require.NotContains(t, string(out.Usage), secret)
+	}
+	q.Upstream = data.Rows[0].Key
+	filtered, err := f.repo.ReadUpstreamOperations(context.Background(), q)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(filtered.Usage, &data))
+	require.Len(t, data.Rows, 1, "unknown attribution stays reachable by its bucket")
+}

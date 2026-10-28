@@ -85,9 +85,9 @@ const upstreamOperationsBase = `WITH ` + upstreamOperationsCohort + `, scoped AS
  COALESCE(c.attribution,'account_missing') AS attribution,c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,c.multiplier,COALESCE(c.cost_basis,'account_missing') AS cost_basis,
  COALESCE(NULLIF(u.requested_model,''),u.model) AS public_model,
  COALESCE(u.account_stats_cost,u.total_cost) AS cost_base
- FROM usage_logs u LEFT JOIN cohort c ON c.id=u.account_id
+ FROM usage_logs u LEFT JOIN accounts_config c ON c.id=u.account_id
  WHERE u.created_at >= $1 AND u.created_at < $2 AND ($5::bigint=0 OR u.account_id=$5)
- AND ($4='' OR c.id IS NOT NULL) AND ($6::bigint=0 OR u.group_id=$6)
+ AND ($4='' OR COALESCE(c.key,'unknown:account_missing')=$4) AND ($6::bigint=0 OR u.group_id=$6)
  AND ($7='' OR CASE $8 WHEN 'public' THEN COALESCE(NULLIF(u.requested_model,''),u.model) WHEN 'recorded' THEN u.model WHEN 'upstream' THEN u.upstream_model END=$7)
 ), priced AS (
  SELECT *,CASE WHEN cost_base>=0 AND cost_base<'Infinity'::numeric AND multiplier>=0 AND multiplier<'Infinity'::numeric THEN cost_base*multiplier END AS estimated,
@@ -98,8 +98,8 @@ const upstreamOperationsBase = `WITH ` + upstreamOperationsCohort + `, scoped AS
  FROM scoped
 )`
 const upstreamOperationsAggregate = `count(*) AS requests,
- CASE WHEN count(*)=0 THEN 0 ELSE sum(standard) END AS standard_charge,
- CASE WHEN count(*)=0 THEN 0 ELSE sum(income) END AS request_income,
+ CASE WHEN count(*)=0 THEN 0 WHEN count(standard)=count(*) THEN sum(standard) END AS standard_charge,
+ CASE WHEN count(*)=0 THEN 0 WHEN count(income)=count(*) THEN sum(income) END AS request_income,
  count(*) FILTER(WHERE standard IS NULL) AS unknown_standard_requests,
  count(*) FILTER(WHERE income IS NULL) AS unknown_income_requests,
  CASE WHEN count(*)=0 THEN 0 WHEN count(estimated)=count(*) THEN sum(estimated) END AS estimated_cost,
@@ -173,12 +173,14 @@ func (r *channelRepository) ReadUpstreamOperations(ctx context.Context, f servic
 	} else {
 		// Reuse canonical complete frozen plan×round×model classification. Only the
 		// account cohort changes; filtering by model still follows round integrity.
-		quality := channelOperationsQualityBase
-		for _, p := range []string{"$3", "$4", "$5", "$6"} {
-			quality = strings.ReplaceAll(quality, p, "0")
-		}
-		quality = strings.Replace(quality, "WITH scoped AS (", "WITH "+upstreamOperationsCohort+", params AS (SELECT $6::bigint AS group_id,$8::text AS model_scope), scoped AS (", 1)
-		quality = strings.Replace(quality, "WHERE r.created_at >= $1", "WHERE p.account_id IN (SELECT id FROM cohort) AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=p.account_id AND ag.group_id=$6)) AND r.created_at >= $1", 1)
+		classifier := channelOperationsQualityBase[strings.Index(channelOperationsQualityBase, "), model_sets AS ("):]
+		quality := `WITH ` + upstreamOperationsCohort + `, scoped AS (
+          SELECT p.account_id,r.id,r.plan_id,r.status,r.created_at,r.pelican_config,r.quality_round_id,r.quality_action,r.quality_judgment,r.error_message,NULLIF(r.pelican_config->>'model_id','') AS measured_model
+          FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id=r.plan_id
+          WHERE p.account_id IN (SELECT id FROM cohort) AND r.created_at >= $1 AND r.created_at < $2
+          AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=p.account_id AND ag.group_id=$6))
+          AND jsonb_typeof(r.pelican_config->'quality')='object' AND $8::text IS NOT NULL
+        ` + classifier
 		quality += ` SELECT jsonb_build_object('source','scheduled_test_results complete frozen plan+round+model; current account cohort', 'summary',(SELECT jsonb_build_object('rounds',count(*),'passed',count(*) FILTER(WHERE outcome='passed'),'degraded',count(*) FILTER(WHERE outcome='degraded'),'inconclusive',count(*) FILTER(WHERE outcome='inconclusive')) FROM classified),'rows',COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM (SELECT * FROM classified ORDER BY id DESC LIMIT $9 OFFSET $10)c),'[]'::jsonb),'total',(SELECT count(*) FROM classified))`
 		out.Quality = readUpstreamSection(ctx, tx, quality, args...)
 	}

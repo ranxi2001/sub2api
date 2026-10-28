@@ -147,6 +147,9 @@ func ResolveOperationsUpstream(a *Account) (string, string) {
 }
 
 func normalizeOperationsBaseURL(raw string) (string, error) {
+	if len(raw) > 2048 {
+		return "", ErrChannelOperationsValidation
+	}
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return "", ErrChannelOperationsValidation

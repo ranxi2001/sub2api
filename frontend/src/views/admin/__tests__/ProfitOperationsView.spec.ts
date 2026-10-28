@@ -47,3 +47,16 @@ describe('independent profit operations', () => {
   w.unmount()
  })
 })
+
+it('does not overwrite the latest filters with an earlier request response', async () => {
+ let resolveOld: ((v: OperationsSnapshot) => void) | undefined
+ vi.mocked(readOperations).mockImplementationOnce(() => new Promise(resolve => { resolveOld=resolve }))
+ const w=mount(ProfitOperationsView); await flushPromises()
+ await w.get('[data-testid="model-filter"]').setValue('new-model')
+ const latest=fixture();latest.usage.summary.requests=77;vi.mocked(readOperations).mockResolvedValue(latest)
+ await w.get('[data-testid="profit-filters"]').trigger('submit');await flushPromises()
+ expect(w.get('[data-testid="profit-summary"]').text()).toContain('77')
+ const stale=fixture();stale.usage.summary.requests=999;resolveOld!(stale);await flushPromises()
+ expect(w.get('[data-testid="profit-summary"]').text()).toContain('77');expect(w.get('[data-testid="profit-summary"]').text()).not.toContain('999')
+ w.unmount()
+})

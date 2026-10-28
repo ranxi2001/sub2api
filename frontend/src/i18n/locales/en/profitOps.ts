@@ -1,4 +1,5 @@
 export default {
+ "unknownIncome":"Unknown charge records","unknownStandard":"Unknown standard-base records","unmeteredZero":"Zero-amount rows without metering evidence",
  "capacity":"Current configured capacity","schedulable":"Schedulable accounts","concurrency":"Configured concurrency","capacityNote":"Current account cohort and group configuration, independent of model. This is neither live load nor historical capacity.",
   "discovery": "Current upstream discovery",
   "discoveryNote": "Includes configured accounts without requests in this range. These are current account counts, not historical request counts. Unknown buckets retain their reason. Model filters do not prove current model support.",
