@@ -8,7 +8,7 @@ import SmartOpsNav from '../SmartOpsNav.vue'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 
 const smartOpsPaths = ['/admin/auto-config', '/admin/priority-scheduling',
-  '/admin/channel-operations', '/admin/account-quality', '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
+  '/admin/channel-operations', '/admin/profit-operations', '/admin/account-quality', '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
 
 async function mountAt(path: string) {
   const router = createRouter({

@@ -23,8 +23,26 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
       - run: git rev-parse HEAD
-      - run: go test -tags=unit ./internal/service ./internal/handler/admin -run '^TestUpstreamOperations' -count=1 -v
+      - run: go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^TestUpstreamOperations' -count=1 -v
         working-directory: backend
+      - name: Repository assertion RED against initial scaffold (not compile failure)
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=internal/repository/upstream_operations.go
+          cp "$target" "$RUNNER_TEMP/upstream-current.go"
+          trap 'cp "$RUNNER_TEMP/upstream-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 739fe7cac7da349539cd0d1795019249c8e3cf5e
+          git show 739fe7cac7da349539cd0d1795019249c8e3cf5e:backend/internal/repository/upstream_operations.go > "$target"
+          set +e
+          go test -tags=integration ./internal/repository -run '^TestUpstreamOperationsPersistedProfitIndependentFromAccountDebit$' -count=1 -v > "$RUNNER_TEMP/upstream-repository-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/upstream-repository-red.log"
+          test "$result" -ne 0
+          grep -q 'FAIL: TestUpstreamOperationsPersistedProfitIndependentFromAccountDebit' "$RUNNER_TEMP/upstream-repository-red.log"
+          grep -q 'automatically attributed usage must not need model-channel bindings' "$RUNNER_TEMP/upstream-repository-red.log"
       - run: go test -tags=integration ./internal/repository -run '^TestUpstreamOperations' -count=1 -v
         working-directory: backend
   frontend:
@@ -43,6 +61,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
-      - run: pnpm exec vitest run src/views/admin/__tests__/ProfitOperationsView.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - run: pnpm exec vitest run src/views/admin/__tests__/ProfitOperationsView.spec.ts src/views/admin/__tests__/UpstreamChannelOperationsView.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
         working-directory: frontend
       - run: pnpm --dir frontend run build

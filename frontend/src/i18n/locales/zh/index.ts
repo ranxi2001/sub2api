@@ -1,3 +1,4 @@
+import profitOps from './profitOps'
 import channelOps from './channelOps'
 import ipAudit from './ipAudit'
 import traffic from './traffic'
@@ -36,6 +37,7 @@ export default {
   priorityScheduling,
   qualityOps,
   channelOps,
+  profitOps,
   controlledExperiments,
   accountOps,
   tokenGuard,
