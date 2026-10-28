@@ -1,4 +1,5 @@
 export default {
+ "currentMembers":"当前账号归属","memberNote":"当前配置成员独立分页，包括窗口内没有请求的账号；可下钻模型。这里只展示配置归属，不声明历史真实去向或模型支持状态。",
  "unknownIncome":"未知收费记录","unknownStandard":"未知标准基数记录","unmeteredZero":"无计量证据的零额记录",
  "capacity":"当前配置容量","schedulable":"可调度账号","concurrency":"配置并发","capacityNote":"当前账号集合和当前分组的配置统计，与模型无关，不是实时负载或历史容量。",
   "discovery": "当前上游自动发现",

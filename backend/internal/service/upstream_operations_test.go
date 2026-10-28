@@ -66,3 +66,23 @@ func TestUpstreamOperationsOAuthAmbiguityAndMultiplierSources(t *testing.T) {
 	}
 }
 func ptrOps(v float64) *float64 { return &v }
+
+func TestUpstreamOperationsProviderDefaultsAndAntigravityRelayPath(t *testing.T) {
+	for _, tc := range []struct{ platform, kind, raw, want string }{
+		{PlatformAnthropic, AccountTypeAPIKey, "", "https://api.anthropic.com"},
+		{PlatformGemini, AccountTypeAPIKey, "", "https://generativelanguage.googleapis.com"},
+		{PlatformTypeSafe, AccountTypeAPIKey, "", "https://api.typesafe.ai"},
+		{PlatformAntigravity, AccountTypeUpstream, "https://relay.example/tenant/", "https://relay.example/tenant"},
+		{PlatformAntigravity, AccountTypeUpstream, "https://relay.example/tenant//", "https://relay.example/tenant/"},
+		{PlatformDeepseek, AccountTypeAPIKey, "", DefaultDeepseekBaseURL},
+	} {
+		got, status := ResolveOperationsUpstream(&Account{Platform: tc.platform, Type: tc.kind, Credentials: map[string]any{"base_url": tc.raw}})
+		require.Equal(t, tc.want, got)
+		require.Equal(t, "current_config", status)
+	}
+	for _, a := range []*Account{{Platform: PlatformGemini, Type: AccountTypeServiceAccount}, {Platform: PlatformGrok, Type: "legacy_unknown"}, {Platform: PlatformOpenAI, Type: AccountTypeBedrock}, {Platform: PlatformDeepseek, Type: AccountTypeOAuth}} {
+		got, status := ResolveOperationsUpstream(a)
+		require.Empty(t, got)
+		require.NotEqual(t, "current_config", status)
+	}
+}

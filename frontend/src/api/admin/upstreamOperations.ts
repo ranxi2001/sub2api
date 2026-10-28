@@ -19,7 +19,7 @@ export interface OperationsRow extends ProfitMetrics { key: string; name: string
 export interface AccountBasis { id: number; name: string; key: string; attribution: string; updated_at: string; deleted: boolean; multiplier: number | null; cost_basis: string }
 export interface OperationsSnapshot {
  scope: OperationsQuery; queried_at: string; attribution: string; currency: string
- usage: { summary: ProfitMetrics; rows: OperationsRow[]; total: number; accounts: AccountBasis[]; capacity: { accounts: number; schedulable: number; configured_concurrency: number }; account_details_limit: number; catalog: Array<{key: string; name: string; accounts: number}>; catalog_total: number; historical_upstream_snapshot_requests: number; historical_cost_multiplier_snapshot_requests: number; cost_formula: string; income_source: string; standard_source: string }
+ usage: { summary: ProfitMetrics; rows: OperationsRow[]; total: number; accounts: AccountBasis[]; members: AccountBasis[]; member_total: number; capacity: { accounts: number; schedulable: number; configured_concurrency: number }; account_details_limit: number; catalog: Array<{key: string; name: string; accounts: number}>; catalog_total: number; historical_upstream_snapshot_requests: number; historical_cost_multiplier_snapshot_requests: number; cost_formula: string; income_source: string; standard_source: string }
  quality: Section<Quality & { total: number }>; errors: Section<ErrorLogs>
 }
 export async function readOperations(kind: 'profit' | 'upstream', params: OperationsQuery, signal?: AbortSignal): Promise<OperationsSnapshot> {

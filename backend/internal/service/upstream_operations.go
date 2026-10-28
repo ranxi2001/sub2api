@@ -73,6 +73,9 @@ func ResolveOperationsUpstream(a *Account) (string, string) {
 	var raw string
 	switch {
 	case a.IsGrok():
+		if a.Type != AccountTypeAPIKey && a.Type != AccountTypeOAuth {
+			return "", "unsupported_account_type"
+		}
 		text, media := a.GetGrokBaseURL(), a.GetGrokMediaBaseURL()
 		if text != media {
 			return "", "multiple_effective_bases"
@@ -90,6 +93,9 @@ func ResolveOperationsUpstream(a *Account) (string, string) {
 			return "", "unsupported_account_type"
 		}
 	case a.IsMultiProtocolAPIKey():
+		if a.Type != AccountTypeAPIKey && a.Type != AccountTypeUpstream {
+			return "", "unsupported_account_type"
+		}
 		if a.IsAdaptiveAPIProtocol() {
 			bases := map[string]bool{}
 			for _, protocol := range []string{APIProtocolChatCompletions, APIProtocolAnthropic, APIProtocolResponses} {
@@ -118,6 +124,9 @@ func ResolveOperationsUpstream(a *Account) (string, string) {
 			raw = a.GetOpenAIBaseURL()
 		}
 	case a.IsOpenAI():
+		if a.Type != AccountTypeAPIKey {
+			return "", "unsupported_account_type"
+		}
 		raw = a.GetOpenAIBaseURL()
 	case a.Platform == PlatformTypeSafe:
 		raw = a.GetTypeSafeBaseURL()
@@ -130,6 +139,16 @@ func ResolveOperationsUpstream(a *Account) (string, string) {
 		} else if a.Type == AccountTypeAPIKey || a.Type == AccountTypeUpstream {
 			raw = a.GetBaseURL()
 		}
+	case a.Platform == PlatformAntigravity && a.Type == AccountTypeUpstream:
+		raw = strings.TrimSpace(a.GetCredential("base_url"))
+		if raw == "" {
+			return "", "missing_base_url"
+		}
+		clean, err := normalizeOperationsBaseURLTrailing(raw, false)
+		if err != nil {
+			return "", "invalid_url"
+		}
+		return clean, "current_config"
 	case a.Platform == PlatformGemini || a.Platform == PlatformAntigravity:
 		if a.Type != AccountTypeAPIKey {
 			return "", "oauth_dynamic_endpoint"
@@ -147,6 +166,9 @@ func ResolveOperationsUpstream(a *Account) (string, string) {
 }
 
 func normalizeOperationsBaseURL(raw string) (string, error) {
+	return normalizeOperationsBaseURLTrailing(raw, true)
+}
+func normalizeOperationsBaseURLTrailing(raw string, trimAll bool) (string, error) {
 	if len(raw) > 2048 {
 		return "", ErrChannelOperationsValidation
 	}
@@ -161,8 +183,13 @@ func normalizeOperationsBaseURL(raw string) (string, error) {
 	// Preserve ports, escaped path boundaries and path case. Forwarding builders
 	// append endpoints after trimming trailing slash; do not collapse /v1 or tenants.
 	u.Host = strings.ToLower(u.Host)
-	u.Path = strings.TrimRight(u.Path, "/")
-	u.RawPath = strings.TrimRight(u.RawPath, "/")
+	if trimAll {
+		u.Path = strings.TrimRight(u.Path, "/")
+		u.RawPath = strings.TrimRight(u.RawPath, "/")
+	} else {
+		u.Path = strings.TrimSuffix(u.Path, "/")
+		u.RawPath = strings.TrimSuffix(u.RawPath, "/")
+	}
 	return u.String(), nil
 }
 

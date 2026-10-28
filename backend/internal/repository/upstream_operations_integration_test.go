@@ -206,3 +206,33 @@ func TestUpstreamOperationsUnknownURLNoSecretsAndInvalidAmounts(t *testing.T) {
 	require.NoError(t, json.Unmarshal(filtered.Usage, &data))
 	require.Len(t, data.Rows, 1, "unknown attribution stays reachable by its bucket")
 }
+
+func TestUpstreamOperationsIdleAccountsDiscoveredWithoutAnyModelChannel(t *testing.T) {
+	var id int64
+	require.NoError(t, integrationDB.QueryRow(`INSERT INTO accounts(name,platform,type,credentials) VALUES('idle upstream discovery','openai','apikey','{"base_url":"https://idle.example:8443/A/v1/"}') RETURNING id`).Scan(&id))
+	t.Cleanup(func() { _, _ = integrationDB.Exec(`DELETE FROM accounts WHERE id=$1`, id) })
+	now := time.Now().UTC()
+	q := service.UpstreamOperationsFilter{From: now.Add(-time.Hour), Until: now, AccountID: id, Dimension: "upstream", ModelScope: "public", Sort: "requests", Direction: "desc", Page: 1, PageSize: 20}
+	out, err := (&channelRepository{db: integrationDB}).ReadUpstreamOperations(context.Background(), q)
+	require.NoError(t, err)
+	var data struct {
+		Summary struct{ Requests int }
+		Catalog []struct {
+			Key      string
+			Accounts int
+		}
+		Members []struct {
+			ID  int64
+			Key string
+		}
+		MemberTotal int `json:"member_total"`
+	}
+	require.NoError(t, json.Unmarshal(out.Usage, &data))
+	require.Zero(t, data.Summary.Requests)
+	require.Len(t, data.Catalog, 1)
+	require.Equal(t, "https://idle.example:8443/A/v1", data.Catalog[0].Key)
+	require.Equal(t, 1, data.Catalog[0].Accounts)
+	require.Len(t, data.Members, 1)
+	require.Equal(t, id, data.Members[0].ID)
+	require.Equal(t, 1, data.MemberTotal)
+}

@@ -1,4 +1,5 @@
 export default {
+ "currentMembers":"Current account membership","memberNote":"Paged current configuration includes accounts with no requests in the window. Drill into models without claiming historical destinations or model support.",
  "unknownIncome":"Unknown charge records","unknownStandard":"Unknown standard-base records","unmeteredZero":"Zero-amount rows without metering evidence",
  "capacity":"Current configured capacity","schedulable":"Schedulable accounts","concurrency":"Configured concurrency","capacityNote":"Current account cohort and group configuration, independent of model. This is neither live load nor historical capacity.",
   "discovery": "Current upstream discovery",
