@@ -1,0 +1,48 @@
+name: Upstream profit operations exact head
+on:
+  pull_request:
+    paths:
+      - '**/upstream_operations*'
+      - '**/ProfitOperations*'
+      - '**/UpstreamChannelOperations*'
+      - '**/OperationsAnalytics*'
+      - '.github/workflows/upstream-profit-operations.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: git rev-parse HEAD
+      - run: go test -tags=unit ./internal/service ./internal/handler/admin -run '^TestUpstreamOperations' -count=1 -v
+        working-directory: backend
+      - run: go test -tags=integration ./internal/repository -run '^TestUpstreamOperations' -count=1 -v
+        working-directory: backend
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm exec vitest run src/views/admin/__tests__/ProfitOperationsView.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+        working-directory: frontend
+      - run: pnpm --dir frontend run build
