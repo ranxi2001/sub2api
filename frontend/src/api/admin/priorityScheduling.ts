@@ -117,6 +117,20 @@ export interface PriorityLifecycleEvent {
   recorded_at: string
   policy: PriorityLifecyclePolicy
 }
+export interface PriorityLifecycleRefreshJob {
+  job_id: string
+  scope: PriorityLifecycleScope
+  target_revision: number
+  queued_at: string
+  completed_at: string | null
+  generation: number | null
+}
+export async function queuePriorityLifecycleCollection(scope: PriorityLifecycleScope): Promise<PriorityLifecycleRefreshJob> {
+  return (await apiClient.post('/admin/priority-scheduling/collect', null, { params: lifecycleParams(scope) })).data
+}
+export async function getPriorityLifecycleRefreshJob(id: string): Promise<PriorityLifecycleRefreshJob> {
+  return (await apiClient.get('/admin/priority-scheduling/refresh-jobs/' + encodeURIComponent(id))).data
+}
 function lifecycleParams(scope: PriorityLifecycleScope) {
   return { group_id: scope.group_id ?? 'ungrouped', model: scope.model, endpoint: scope.endpoint, request_type: scope.request_type, measurement_schema: scope.measurement_schema }
 }

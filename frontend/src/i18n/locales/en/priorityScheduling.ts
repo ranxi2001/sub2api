@@ -1,5 +1,6 @@
 export default {
   lifecycle: {
+    collect: 'Queue collection for this scope', queued: 'Queued; target facts not published yet', collected: 'Target facts included in published generation',
     coverageLoss: 'Audit coverage incomplete',
     title: 'Lifecycle state and immutable history',
     shadow: 'Shadow observation only. Compatibility routing still decides admission; no additional upstream requests or second penalty engine. Unapproved v2 trigger, renewal and recovery rules remain pending.',

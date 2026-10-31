@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"time"
 
@@ -74,26 +76,31 @@ func (r *usageLogRepository) AdvancePriorityLifecycle(ctx context.Context, cfg s
 		return err
 	}
 	measurement, spec, revision := service.PriorityLifecycleVersions(cfg)
-	// Every explicitly configured model/group has an empty-ready population,
-	// even before any traffic; unknown historical ingress stays separate.
-	for _, model := range cfg.Models {
+	// Configured cross products are seeded in persistent bounded pages.
+	// Policy-only changes retain the inventory cursor.
+	if len(cfg.Models) > 0 {
 		groups := cfg.GroupIDs
 		if len(groups) == 0 {
 			groups = []int64{0}
 		}
-		for _, id := range groups {
-			for _, endpoint := range []string{"/v1/responses", "/v1/chat/completions", "/v1/messages"} {
-				for _, kind := range []service.RequestType{service.RequestTypeSync, service.RequestTypeStream, service.RequestTypeWSV2} {
-					scope := service.PriorityLifecycleScope{Model: model, Endpoint: endpoint, RequestType: kind}
-					if id != 0 {
-						value := id
-						scope.GroupID = &value
-					}
-					if _, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_scopes(identity) VALUES($1) ON CONFLICT DO NOTHING", scope.Identity()); err != nil {
-						return err
-					}
-				}
-			}
+		inventoryRevision := priorityLifecycleInventoryRevision(cfg.Models, groups)
+		var position int64
+		if _, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_inventory_cursor(revision) VALUES($1) ON CONFLICT DO NOTHING", inventoryRevision); err != nil {
+			return err
+		}
+		if err = tx.QueryRowContext(ctx, "SELECT position FROM priority_lifecycle_inventory_cursor WHERE revision=$1 FOR UPDATE", inventoryRevision).Scan(&position); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_scopes(identity) SELECT priority_lifecycle_scope_identity(NULLIF(g,0),m,e,k::smallint) FROM unnest($1::bigint[]) g CROSS JOIN unnest($2::text[]) m CROSS JOIN unnest(ARRAY['/v1/responses','/v1/chat/completions','/v1/messages']) e CROSS JOIN generate_series(1,3) k ORDER BY g,m,e,k OFFSET $3 LIMIT 64 ON CONFLICT DO NOTHING", pq.Array(groups), pq.Array(cfg.Models), position)
+		if err != nil {
+			return err
+		}
+		next := position + 64
+		if next >= int64(len(groups)*len(cfg.Models)*9) {
+			next = 0
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_inventory_cursor SET position=$2 WHERE revision=$1", inventoryRevision, next); err != nil {
+			return err
 		}
 	}
 	// Includes quiet scopes forever. Fair oldest-first rotation is persistent;
@@ -208,6 +215,9 @@ func (r *usageLogRepository) AdvancePriorityLifecycle(ctx context.Context, cfg s
 			if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_outbox SET processed_at=clock_timestamp() WHERE sequence=ANY($1) AND processed_at IS NULL", pq.Array(sequences)); err != nil {
 				return err
 			}
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_refresh_jobs SET completed_at=clock_timestamp(),generation=$4 WHERE identity=$1 AND statistics_spec=$2 AND measurement_schema=$3 AND target_revision<=$5 AND completed_at IS NULL", scope.Identity(), scope.StatisticsSpec, scope.MeasurementSchema, stats.Generation, w.source); err != nil {
+			return err
 		}
 		if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_scopes SET published_revision=$2,last_collected_at=$3,last_processed_at=clock_timestamp(),last_error='',refresh_state='IDLE' WHERE identity=$1 AND source_revision=$2", scope.Identity(), w.source, now); err != nil {
 			return err
@@ -442,4 +452,51 @@ func (r *usageLogRepository) ReadPriorityLifecycleEvents(ctx context.Context, sc
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+func priorityLifecycleInventoryRevision(models []string, groups []int64) string {
+	raw, _ := json.Marshal(struct {
+		Models []string
+		Groups []int64
+	}{models, groups})
+	return fmt.Sprintf("%x", sha256.Sum256(raw))
+}
+func (r *usageLogRepository) QueuePriorityLifecycleRefresh(ctx context.Context, scope service.PriorityLifecycleScope) (*service.PriorityLifecycleRefreshJob, error) {
+	if r.db == nil {
+		return nil, errors.New("refresh requires primary database")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	job := &service.PriorityLifecycleRefreshJob{ID: uuid.NewString(), Scope: scope}
+	err = tx.QueryRowContext(ctx, "INSERT INTO priority_lifecycle_scopes(identity) VALUES($1) ON CONFLICT(identity) DO UPDATE SET refresh_state='QUEUED' RETURNING source_revision", scope.Identity()).Scan(&job.TargetRevision)
+	if err != nil {
+		return nil, err
+	}
+	err = tx.QueryRowContext(ctx, "INSERT INTO priority_lifecycle_refresh_jobs(job_id,identity,statistics_spec,measurement_schema,target_revision) VALUES($1,$2,$3,$4,$5) RETURNING queued_at", job.ID, scope.Identity(), scope.StatisticsSpec, scope.MeasurementSchema, job.TargetRevision).Scan(&job.QueuedAt)
+	if err != nil {
+		return nil, err
+	}
+	return job, tx.Commit()
+}
+func (r *usageLogRepository) ReadPriorityLifecycleRefresh(ctx context.Context, id string) (*service.PriorityLifecycleRefreshJob, error) {
+	rows, err := r.sql.QueryContext(ctx, "SELECT identity,statistics_spec,measurement_schema,target_revision,queued_at,completed_at,generation FROM priority_lifecycle_refresh_jobs WHERE job_id=$1", id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	job := &service.PriorityLifecycleRefreshJob{ID: id}
+	var raw []byte
+	if err = rows.Scan(&raw, &job.Scope.StatisticsSpec, &job.Scope.MeasurementSchema, &job.TargetRevision, &job.QueuedAt, &job.CompletedAt, &job.Generation); err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal(raw, &job.Scope); err != nil {
+		return nil, err
+	}
+	return job, rows.Err()
 }

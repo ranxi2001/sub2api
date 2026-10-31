@@ -14,7 +14,9 @@
       <div class="my-3 flex flex-wrap gap-2">
         <button v-for="value in tabs" :key="value" type="button" class="btn btn-secondary" :aria-pressed="tab === value" :data-testid="'lifecycle-tab-' + value" @click="changeTab(value)">{{ t('priorityScheduling.lifecycle.' + value) }}</button>
         <button type="button" class="btn btn-secondary" data-testid="lifecycle-refresh" @click="refresh()">{{ t('priorityScheduling.refresh') }}</button>
+        <button type="button" class="btn btn-secondary" data-testid="lifecycle-collect" :disabled="collecting" @click="collect">{{ t('priorityScheduling.lifecycle.collect') }}</button>
       </div>
+      <p v-if="job" role="status" class="my-2 break-all text-sm">{{ job.job_id }} · {{ job.target_revision }} · {{ t(job.completed_at ? 'priorityScheduling.lifecycle.collected' : 'priorityScheduling.lifecycle.queued') }}</p>
       <p v-if="failure || offline" role="alert" class="mb-3 text-amber-700" data-testid="lifecycle-error">{{ t('priorityScheduling.lifecycle.lastGood') }} {{ failure }}</p>
       <p v-if="loading" role="status">{{ t('priorityScheduling.loading') }}</p>
       <template v-if="tab === 'current' && state">
@@ -54,7 +56,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { getPriorityLifecycleState, getPriorityLifecycleDecisions, getPriorityLifecycleEvents, type PriorityLifecycleScope, type PriorityLifecycleState, type PriorityLifecycleDecision, type PriorityLifecycleEvent } from '@/api/admin/priorityScheduling'
+import { getPriorityLifecycleState, getPriorityLifecycleDecisions, getPriorityLifecycleEvents, queuePriorityLifecycleCollection, getPriorityLifecycleRefreshJob, type PriorityLifecycleScope, type PriorityLifecycleState, type PriorityLifecycleDecision, type PriorityLifecycleEvent, type PriorityLifecycleRefreshJob } from '@/api/admin/priorityScheduling'
 const { t } = useI18n(), auth = useAuthStore()
 const group = ref(''), model = ref(''), endpoint = ref('/v1/responses'), requestType = ref(2)
 const chosen = ref<PriorityLifecycleScope | null>(null), state = ref<PriorityLifecycleState | null>(null)
@@ -62,6 +64,7 @@ const tabs = ['current', 'decisions', 'events'] as const
 type Tab = typeof tabs[number]
 const tab = ref<Tab>('current'), decisions = ref<PriorityLifecycleDecision[]>([]), events = ref<PriorityLifecycleEvent[]>([])
 const failure = ref(''), loading = ref(false), offline = ref(false), now = ref(Date.now())
+const collecting = ref(false), job = ref<PriorityLifecycleRefreshJob | null>(null)
 const failed = computed(() => !!failure.value || offline.value)
 let generation = 0, alive = true, timer: ReturnType<typeof setTimeout> | undefined, clock: ReturnType<typeof setInterval> | undefined, serverOffset = 0
 function stop() { if (timer) clearTimeout(timer); timer = undefined }
@@ -69,7 +72,7 @@ function same(a: PriorityLifecycleScope, b: PriorityLifecycleScope) { return a.g
 function selectScope() {
   const id = group.value.trim() ? Number(group.value) : null
   if ((id !== null && (!Number.isSafeInteger(id) || id <= 0)) || !model.value.trim()) { failure.value = t('priorityScheduling.invalid'); return }
-  generation++; stop(); state.value = null; decisions.value = []; events.value = []
+  generation++; stop(); state.value = null; decisions.value = []; events.value = []; job.value = null
   chosen.value = { group_id: id, model: model.value.trim(), endpoint: endpoint.value, request_type: requestType.value }
   void refresh()
 }
@@ -84,6 +87,11 @@ async function refresh(after = 0) {
       if (!alive || request !== generation) return
       if (!same(scope, value.scope) || (state.value?.statistics && value.statistics && value.statistics.generation < state.value.statistics.generation)) throw new Error('scope_or_revision_mismatch')
       state.value = value; serverOffset = Date.parse(value.server_now) - Date.now()
+      if (job.value && !job.value.completed_at) {
+        const latest = await getPriorityLifecycleRefreshJob(job.value.job_id)
+        if (!alive || request !== generation) return
+        job.value = latest
+      }
     } else if (target === 'decisions') {
       const result = await getPriorityLifecycleDecisions(scope, after)
       if (!alive || request !== generation) return
@@ -100,6 +108,16 @@ async function refresh(after = 0) {
     if (alive && request === generation) { loading.value = false; timer = setTimeout(() => { void refresh() }, failed.value ? 15000 : 5000) }
   }
 }
+async function collect() {
+  if (!chosen.value || collecting.value) return
+  const selected = chosen.value, scope = { ...selected }
+  collecting.value = true
+  try {
+    const value = await queuePriorityLifecycleCollection(scope)
+    if (alive && chosen.value === selected) job.value = value
+  } catch { if (alive && chosen.value === selected) failure.value = t('priorityScheduling.error') }
+  finally { collecting.value = false }
+}
 function changeTab(value: Tab) { tab.value = value; void refresh() }
 function more() { void refresh(Math.max(0, ...(tab.value === 'decisions' ? decisions.value : events.value).map(item => item.sequence))) }
 function remaining(expires: string) {
@@ -109,7 +127,7 @@ function remaining(expires: string) {
 function visibility() { if (document.visibilityState === 'hidden') { generation++; loading.value = false; stop() } else void refresh() }
 function disconnected() { offline.value = true; generation++; loading.value = false; stop() }
 function connected() { void refresh() }
-watch(() => auth.user ? auth.user.id + ':' + auth.user.role : '', () => { generation++; stop(); chosen.value = null; state.value = null; decisions.value = []; events.value = []; model.value = ''; group.value = ''; failure.value = ''; loading.value = false }, { flush: 'sync' })
+watch(() => auth.user ? auth.user.id + ':' + auth.user.role : '', () => { generation++; stop(); chosen.value = null; state.value = null; decisions.value = []; events.value = []; job.value = null; collecting.value = false; model.value = ''; group.value = ''; failure.value = ''; loading.value = false }, { flush: 'sync' })
 onMounted(() => {
   clock = setInterval(() => { now.value = Date.now() }, 1000)
   document.addEventListener('visibilitychange', visibility); window.addEventListener('offline', disconnected); window.addEventListener('online', connected)

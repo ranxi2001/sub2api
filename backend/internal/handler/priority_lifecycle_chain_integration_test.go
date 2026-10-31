@@ -9,6 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -134,7 +137,11 @@ func TestPriorityLifecycleRealHandlerUsagePolicyAndState(t *testing.T) {
 	ah := adminhandler.NewAccountHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	ah.SetOpenAIGatewayService(gateway)
 	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Header("Access-Control-Allow-Origin", "*"); c.Next() })
 	router.GET("/state", ah.PriorityLifecycleState)
+	router.GET("/admin/priority-scheduling/state", ah.PriorityLifecycleState)
+	router.GET("/admin/priority-scheduling/decisions", ah.PriorityLifecycleDecisions)
+	router.GET("/admin/priority-scheduling/policy-events", ah.PriorityLifecycleEvents)
 	read := httptest.NewRecorder()
 	router.ServeHTTP(read, httptest.NewRequest("GET", fmt.Sprintf("/state?group_id=%d&model=%s&endpoint=/v1/responses&request_type=2", groupID, model), nil))
 	require.Equal(t, 200, read.Code, read.Body.String())
@@ -146,4 +153,17 @@ func TestPriorityLifecycleRealHandlerUsagePolicyAndState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, decisions)
 	require.Equal(t, collector.Identity(), decisions[0].TraceID, "handler -> transport -> usage and decision share an actual trace")
+	if os.Getenv("ISSUE614_REAL_BROWSER") == "1" {
+		server := httptest.NewServer(router)
+		defer server.Close()
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		root := filepath.Clean(filepath.Join(cwd, "../../.."))
+		command := exec.CommandContext(ctx, "node", filepath.Join(root, ".github/scripts/issue614-lifecycle-browser.mjs"))
+		command.Dir = root
+		command.Env = append(os.Environ(), "ISSUE614_REAL_ADMIN_URL="+server.URL, "ISSUE614_REAL_MODEL="+model, fmt.Sprintf("ISSUE614_REAL_GROUP=%d", groupID), fmt.Sprintf("ISSUE614_REAL_ACCOUNT=%d", account.ID))
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, string(output))
+		t.Log("REAL_ADMIN_BROWSER_PASS: Chinese English desktop/mobile actual component -> actual admin handlers -> PostgreSQL")
+	}
 }

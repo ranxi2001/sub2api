@@ -9,15 +9,27 @@ const { createServer } = requireFrontend('vite')
 const vueModule = requireFrontend('@vitejs/plugin-vue'), vue = vueModule.default || vueModule
 const { chromium } = createRequire(path.join(process.env.PLAYWRIGHT_ROOT, 'package.json'))('playwright')
 const output = process.env.ISSUE614_BROWSER_DIR
+const realBackend = process.env.ISSUE614_REAL_ADMIN_URL || ''
+const realModel = process.env.ISSUE614_REAL_MODEL || 'synthetic-public'
+const realGroup = process.env.ISSUE614_REAL_GROUP || '11'
+const realAccount = process.env.ISSUE614_REAL_ACCOUNT || '7'
 await fs.mkdir(output, { recursive: true })
 const fixture = `
 import { apiClient } from '/src/api/client.ts'
+const realBackend = ${JSON.stringify(realBackend)}
 const now = new Date().toISOString(), until = new Date(Date.now() + 2000).toISOString()
 const policy = {account_id:7,state:'PENALIZED_SHADOW',evidence_id:'synthetic-immutable-evidence',evidence_at:now,expires_at:until,policy_revision:'original-policy',observed_value:16000,threshold:15000,percentile:90,mode:'stop',rule:'legacy shadow; v2 trigger contract pending'}
 window.__offline = false
 window.__lifecycleRequests = []
 apiClient.defaults.adapter = async request => {
   window.__lifecycleRequests.push({url:request.url,params:request.params})
+  if(realBackend) {
+    const target=new URL(request.url,realBackend)
+    for(const [key,value] of Object.entries(request.params||{}))if(value!=null)target.searchParams.set(key,String(value))
+    const response=await fetch(target)
+    if(!response.ok)throw new Error('synthetic backend '+response.status)
+    return {data:await response.json(),status:response.status,statusText:'OK',headers:{},config:request}
+  }
   if(window.__offline) throw new Error('synthetic offline')
   const p=request.params, scope={group_id:p.group_id==='ungrouped'?null:Number(p.group_id),model:p.model,endpoint:p.endpoint,request_type:Number(p.request_type),measurement_schema:'ingress_alias_v1/legacy_forward',statistics_spec:'synthetic-statistics-v1'}
   let data={scope,server_now:new Date().toISOString(),policy_revision:'current-policy',mode:'shadow',last_error:'',attempted_at:now,statistics:{scope,generation:4,watermark:6,observed_at:now,window_start:now,window_end:now,policy_revision:'current-policy',signals:{}},accounts:[
@@ -67,13 +79,27 @@ try {
     // the test's interaction state.
     await page.waitForLoadState('networkidle')
     await page.getByTestId('lifecycle-select').waitFor()
-    await page.getByTestId('lifecycle-model').fill('synthetic-public')
-    await page.getByTestId('lifecycle-group').fill('11')
+    await page.getByTestId('lifecycle-model').fill(realModel)
+    await page.getByTestId('lifecycle-group').fill(realGroup)
     await page.getByTestId('lifecycle-select').click()
-    await page.getByTestId('lifecycle-account-7').waitFor()
+    await page.getByTestId('lifecycle-account-'+realAccount).waitFor()
+    const prefix=lang+'-'+viewport.width
+    if(realBackend) {
+      const text=await page.getByTestId('lifecycle-account-'+realAccount).innerText()
+      if(!text.includes('ADMIN_DISABLED'))throw new Error('real disabled/error catalog row missing')
+      await page.screenshot({path:path.join(output,prefix+'-real-admin.png'),fullPage:true})
+      await page.getByTestId('lifecycle-tab-decisions').click()
+      await page.getByTestId('lifecycle-decision').first().waitFor()
+      await page.screenshot({path:path.join(output,prefix+'-real-decisions.png'),fullPage:true})
+      await page.getByTestId('lifecycle-tab-events').click()
+      await page.getByTestId('lifecycle-event').first().waitFor()
+      await page.screenshot({path:path.join(output,prefix+'-real-timeline.png'),fullPage:true})
+      results.push({lang,viewport,actualAdminHandler:true,realPGPolicy:true,disabledVisible:true})
+      await page.close()
+      continue
+    }
     if(!(await page.getByTestId('lifecycle-account-7').innerText()).includes('ADMIN_DISABLED'))throw new Error('disabled account missing')
     if((await page.getByTestId('lifecycle-account-7').innerText()).includes('42500'))throw new Error('P90 substituted for absent P70')
-    const prefix=lang+'-'+viewport.width
     await page.screenshot({path:path.join(output,prefix+'-current.png'),fullPage:true})
     await page.getByTestId('lifecycle-tab-decisions').click();await page.getByTestId('lifecycle-decision').waitFor()
     await page.screenshot({path:path.join(output,prefix+'-decisions.png'),fullPage:true})

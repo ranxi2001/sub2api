@@ -32,7 +32,24 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated real-admin browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/issue614-real-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/issue614-real-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Actual handler transport usage repository policy state chain
+        env:
+          ISSUE614_REAL_BROWSER: '1'
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/issue614-real-browser/node_modules/playwright
+          ISSUE614_BROWSER_DIR: ${{ runner.temp }}/issue614-chain/browser
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/issue614-chain"
@@ -40,6 +57,7 @@ jobs:
           (cd backend && go test -tags=unit,integration ./internal/handler -run '^TestPriorityLifecycleRealHandlerUsagePolicyAndState$' -count=1 -v -timeout=25m) > "$RUNNER_TEMP/issue614-chain/chain.log" 2>&1 || { cat "$RUNNER_TEMP/issue614-chain/chain.log"; exit 1; }
           cat "$RUNNER_TEMP/issue614-chain/chain.log"
           grep -q -- '--- PASS: TestPriorityLifecycleRealHandlerUsagePolicyAndState' "$RUNNER_TEMP/issue614-chain/chain.log"
+          grep -q 'REAL_ADMIN_BROWSER_PASS' "$RUNNER_TEMP/issue614-chain/chain.log"
           git diff --exit-code HEAD
       - uses: actions/upload-artifact@v7
         if: always()

@@ -401,6 +401,7 @@ func (s *OpenAIGatewayService) recordPriorityLifecycleDecision(ctx context.Conte
 	if err != nil {
 		s.priorityLifecycle.mu.Lock()
 		s.priorityLifecycle.failure = "audit_incomplete"
+		s.priorityLifecycle.auditLost++
 		s.priorityLifecycle.mu.Unlock()
 		slog.Warn("priority_lifecycle_audit_incomplete", "phase", phase)
 	}
@@ -416,6 +417,42 @@ type PriorityLifecycleRepository interface {
 type PriorityLifecycleScopeRegistrar interface {
 	RegisterPriorityLifecycleScope(context.Context, PriorityLifecycleScope) error
 }
+type PriorityLifecycleRefreshJob struct {
+	ID             string                 `json:"job_id"`
+	Scope          PriorityLifecycleScope `json:"scope"`
+	TargetRevision int64                  `json:"target_revision"`
+	QueuedAt       time.Time              `json:"queued_at"`
+	CompletedAt    *time.Time             `json:"completed_at"`
+	Generation     *int64                 `json:"generation"`
+}
+type PriorityLifecycleRefreshRepository interface {
+	QueuePriorityLifecycleRefresh(context.Context, PriorityLifecycleScope) (*PriorityLifecycleRefreshJob, error)
+	ReadPriorityLifecycleRefresh(context.Context, string) (*PriorityLifecycleRefreshJob, error)
+}
+
+func (s *OpenAIGatewayService) QueuePriorityLifecycleRefresh(ctx context.Context, scope PriorityLifecycleScope) (*PriorityLifecycleRefreshJob, error) {
+	repo, ok := s.usageLogRepo.(PriorityLifecycleRefreshRepository)
+	if !ok {
+		return nil, errors.New("refresh queue unavailable")
+	}
+	cfg, err := s.settingService.GetPrioritySchedulingConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.Enabled || cfg.LifecycleMode == "off" {
+		return nil, errors.New("lifecycle collection disabled")
+	}
+	scope.MeasurementSchema, scope.StatisticsSpec, _ = PriorityLifecycleVersions(cfg)
+	return repo.QueuePriorityLifecycleRefresh(ctx, scope)
+}
+func (s *OpenAIGatewayService) ReadPriorityLifecycleRefresh(ctx context.Context, id string) (*PriorityLifecycleRefreshJob, error) {
+	repo, ok := s.usageLogRepo.(PriorityLifecycleRefreshRepository)
+	if !ok {
+		return nil, errors.New("refresh queue unavailable")
+	}
+	return repo.ReadPriorityLifecycleRefresh(ctx, id)
+}
+
 type PriorityLifecycleCoverageRepository interface {
 	RecordPriorityLifecycleCoverage(context.Context, string, string) error
 	ReadPriorityLifecycleCoverage(context.Context) (map[string]string, error)
@@ -486,7 +523,6 @@ func (s *OpenAIGatewayService) startPriorityLifecycle() {
 					s.priorityLifecycle.mu.Lock()
 					s.priorityLifecycle.attempted = time.Now()
 					if err != nil {
-						s.priorityLifecycle.failure = "refresh_failed"
 						slog.Warn("priority_lifecycle_refresh_failed", "reason", "query_failed")
 					}
 					s.priorityLifecycle.mu.Unlock()
@@ -557,7 +593,13 @@ func (s *OpenAIGatewayService) PriorityLifecycleState(ctx context.Context, scope
 		out.Mode = "off"
 	}
 	s.priorityLifecycle.mu.Lock()
-	out.LastError, out.AttemptedAt = s.priorityLifecycle.failure, s.priorityLifecycle.attempted
+	out.AttemptedAt = s.priorityLifecycle.attempted
+	if s.priorityLifecycle.failure != "" {
+		if out.Coverage == nil {
+			out.Coverage = make(map[string]string)
+		}
+		out.Coverage["audit_local"] = s.priorityLifecycle.failure
+	}
 	s.priorityLifecycle.mu.Unlock()
 	byID := make(map[int64]PriorityLifecyclePolicy)
 	for _, p := range policies {
@@ -565,10 +607,14 @@ func (s *OpenAIGatewayService) PriorityLifecycleState(ctx context.Context, scope
 	}
 	for _, a := range accounts {
 		row := PriorityLifecycleAccountState{AccountID: a.ID, AccountName: a.Name, Configuration: "ENABLED", Admission: "NOT_EVALUATED", Reasons: []string{"shadow_only; execution remains compatibility_v1"}, Content: "NO_OBSERVATIONS", Freshness: "UNKNOWN", Refresh: "IDLE"}
-		if !a.Schedulable || a.Status != StatusActive {
+		if !a.Schedulable || a.Status == StatusDisabled {
 			row.Configuration = "ADMIN_DISABLED"
 			row.Admission = "BLOCKED"
 			row.Reasons = append(row.Reasons, "account_not_schedulable")
+		}
+		if a.Status != StatusActive && a.Status != StatusDisabled {
+			row.Admission = "BLOCKED"
+			row.Reasons = append(row.Reasons, "account_status_"+a.Status)
 		}
 		if scope.GroupID != nil {
 			member := false
@@ -610,6 +656,19 @@ func (s *OpenAIGatewayService) PriorityLifecycleState(ctx context.Context, scope
 			row.Refresh = "ERROR"
 		}
 		out.Accounts = append(out.Accounts, row)
+	}
+	// Deleted accounts keep their policy/evidence timeline and remain visible
+	// as tombstones; absence from the live catalog must not erase a penalty.
+	seen := make(map[int64]bool, len(accounts))
+	for _, a := range accounts {
+		seen[a.ID] = true
+	}
+	for _, p := range policies {
+		if seen[p.AccountID] {
+			continue
+		}
+		value := p
+		out.Accounts = append(out.Accounts, PriorityLifecycleAccountState{AccountID: p.AccountID, Configuration: "DELETED", Admission: "BLOCKED", Reasons: []string{"account_deleted"}, Content: "NO_OBSERVATIONS", Freshness: "UNKNOWN", Refresh: "IDLE", Policy: &value})
 	}
 	return out, nil
 }

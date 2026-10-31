@@ -1,5 +1,6 @@
 export default {
   lifecycle: {
+    collect: '排队采集此范围', queued: '已排队，目标事实尚未发布', collected: '目标事实已纳入发布 generation',
     coverageLoss: '审计覆盖不完整',
     title: '生命周期当前态与不可变历史',
     shadow: '当前仅作 shadow 观测。准入仍由兼容策略决定，不新增上游请求或第二套处罚；未批准的 V2 触发、续期和恢复规则保持待定。',
