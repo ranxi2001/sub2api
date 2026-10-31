@@ -8,7 +8,13 @@ import (
 	"time"
 )
 
-const priorityExplorationShare = 0.10
+const (
+	priorityExplorationShare = 0.10
+	// A configured concurrency is a ceiling, not proof of real upstream slots.
+	// Without a cap, a 10k-slot relay receives 100x the routing weight of a
+	// 100-slot account and latency penalties cannot offset it.
+	priorityCapacityWeightCap = 16.0
+)
 
 // Ten-percentage-point cohorts prefer genuinely idle capacity while preserving
 // weighted diversity among similarly loaded accounts. The atomic slot race
@@ -70,6 +76,7 @@ func prioritySelectionWeightWithQuota(item openAIAccountCandidateScore, headroom
 	if item.loadKnown && item.loadInfo != nil {
 		remaining = math.Max(0.05, float64(max(1, item.account.Concurrency)-max(0, item.loadInfo.CurrentConcurrency))) /
 			(1 + float64(max(0, item.loadInfo.WaitingCount)))
+		remaining = math.Min(remaining, priorityCapacityWeightCap)
 	}
 	score := math.Mod(item.score, 200)
 	if math.IsNaN(score) || math.IsInf(score, 0) {
@@ -196,7 +203,7 @@ func (s *defaultOpenAIAccountScheduler) shouldRebalancePrioritySticky(ctx contex
 		}
 		candidate := openAIAccountCandidateScore{account: account, loadKnown: true, loadInfo: load}
 		score := applyPriorityCandidate(cfg, &candidate, history.signals[account.ID], now)
-		if candidate.priorityUnhealthy || slices.Contains(score.Reasons, "latency_above_target") {
+		if candidate.priorityUnhealthy || candidate.priorityLatencyRecovery || slices.Contains(score.Reasons, "latency_above_target") {
 			continue
 		}
 		if rpm, ok := accountRPMStateFromContext(ctx, account); ok && rpm.Enabled && rpm.Limit > 0 && rpm.Current >= rpm.Limit {
@@ -209,6 +216,24 @@ func (s *defaultOpenAIAccountScheduler) shouldRebalancePrioritySticky(ctx contex
 		}
 	}
 	return false
+}
+
+// Keep recovery and active latency penalties out of the normal weighted race.
+// Both are latency-limited; rank them together by score/capacity instead of
+// claiming that an older bad sample is always better than a recent one. A
+// latency-limited account may still be selected when every normal candidate
+// loses its slot race, or through the explicit exploration lane below; it must
+// never outrank a normal account merely because it is idle or has a large
+// configured concurrency.
+func prioritySelectionCategory(item openAIAccountCandidateScore) int {
+	switch {
+	case item.priorityUnhealthy:
+		return 2
+	case item.priorityLatencyRecovery || item.priorityLatencyPenalty:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // Weighted sampling without replacement avoids a deterministic best-account
@@ -228,8 +253,8 @@ func buildPrioritySelectionOrder(pool []openAIAccountCandidateScore, req OpenAIA
 	}
 	sort.Slice(choices, func(i, j int) bool {
 		a, b := choices[i].candidate, choices[j].candidate
-		if a.priorityUnhealthy != b.priorityUnhealthy {
-			return !a.priorityUnhealthy
+		if categoryA, categoryB := prioritySelectionCategory(a), prioritySelectionCategory(b); categoryA != categoryB {
+			return categoryA < categoryB
 		}
 		if choices[i].band != choices[j].band {
 			return choices[i].band < choices[j].band
@@ -248,15 +273,28 @@ func buildPrioritySelectionOrder(pool []openAIAccountCandidateScore, req OpenAIA
 
 	// Cold accounts otherwise never gain enough evidence when an
 	// established eligible cohort exists. Reserve a 10% exploration probability
-	// for safe unknown accounts at that same explicit priority. Known degraded
-	// accounts, busy accounts, protocol partitions and hard bindings cannot use
-	// this lane; the ordinary eligibility/profit/slot checks still follow.
+	// for safe unknown accounts at that same explicit priority. When no eligible
+	// cohort exists, the same lane carries recovery probes instead: recovery
+	// accounts stay out of the ordinary race, but the configured recovery share
+	// can still collect fresh samples. Known degraded accounts, busy accounts,
+	// protocol partitions and hard bindings cannot use this lane; the ordinary
+	// eligibility/profit/slot checks still follow.
 	explorationRoll := rng.nextFloat64()
-	if len(choices) > 1 && int(choices[0].candidate.score/200) == 2 && explorationRoll < priorityExplorationShare {
+	topTier := 0
+	if len(choices) > 0 {
+		topTier = int(choices[0].candidate.score / 200)
+	}
+	if len(choices) > 1 && topTier >= 1 && explorationRoll < priorityExplorationShare {
 		best := -1
 		for i := 1; i < len(choices); i++ {
 			candidate := choices[i].candidate
-			if int(candidate.score/200) == 1 && candidate.priorityExploration &&
+			if topTier == 2 && int(candidate.score/200) != 1 && !candidate.priorityLatencyRecovery {
+				continue
+			}
+			if topTier == 1 && !candidate.priorityLatencyRecovery {
+				continue
+			}
+			if candidate.priorityExploration &&
 				(!candidate.priorityLatencyRecovery || explorationRoll < float64(candidate.priorityRecoveryExplorationPercent)/100) &&
 				!candidate.priorityUnhealthy && choices[i].band <= choices[0].band &&
 				candidate.account.Priority == choices[0].candidate.account.Priority &&

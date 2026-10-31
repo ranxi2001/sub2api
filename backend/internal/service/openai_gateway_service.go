@@ -294,8 +294,12 @@ type OpenAIForwardResult struct {
 	// 0 for new non-queued requests and NULL for unknown.
 	QueueTiming       *QueueTiming
 	QueueWaitMeasured bool
-	ClientDisconnect  bool
-	ImageCount        int
+	// HeaderTimeoutRetries counts submitted attempts that timed out waiting for
+	// response headers before the successful attempt. The usage record adds one
+	// 1:1 surcharge unit per retry because the upstream may have billed it.
+	HeaderTimeoutRetries int
+	ClientDisconnect     bool
+	ImageCount           int
 	// ImageEndpoint 标记请求来自专用图片端点；分组 image_count_billing 开关
 	// 只对这类请求生效，混合 Responses/Chat/WS 请求仍按 token 计费。
 	ImageEndpoint      bool

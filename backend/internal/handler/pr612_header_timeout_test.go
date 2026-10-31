@@ -55,7 +55,7 @@ func pr612HTTPHandler(t *testing.T, cfg *config.Config, baseURL, mode string) *O
 		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 }
 
-func TestPR612DelayedHeadersNeverReplaySubmittedPOST(t *testing.T) {
+func TestPR612DelayedHeadersFailoverToNextAccount(t *testing.T) {
 	for _, mode := range []string{"responses", "chat", "passthrough"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%v", mode, stream), func(t *testing.T) {
@@ -88,10 +88,8 @@ func TestPR612DelayedHeadersNeverReplaySubmittedPOST(t *testing.T) {
 				c, rec := newOpenAIResponsesFailoverTestContext(t, ctx)
 				c.Request.Body = io.NopCloser(strings.NewReader(fmt.Sprintf(`{"model":"gpt-5.1","stream":%v,"input":"synthetic"}`, stream)))
 				h.Responses(c)
-				require.Equal(t, int32(1), submissions.Load(), "submitted POST was replayed")
-				require.Equal(t, http.StatusGatewayTimeout, rec.Code, rec.Body.String())
-				require.Contains(t, rec.Body.String(), "response_header_timeout")
-				require.Contains(t, rec.Body.String(), "automatic replay disabled")
+				require.Equal(t, int32(2), submissions.Load(), "header timeout should fail over to the next account")
+				require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
 				wantPath := "/v1/responses"
 				if mode == "chat" {
 					wantPath = "/v1/chat/completions"
@@ -232,4 +230,28 @@ func TestPR612NativeUpstreamWSIgnoresHTTPHeaderTimeout(t *testing.T) {
 		t.Fatal("native upstream WS did not finish its response")
 	}
 	require.Equal(t, int32(1), submissions.Load())
+}
+
+func TestPR612HeaderTimeoutFailoverSucceedsWithSecondAccount(t *testing.T) {
+	var submissions atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if submissions.Add(1) == 1 {
+			// First account: read the complete POST but never send headers.
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_synthetic","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstream.Close()
+
+	h := pr612HTTPHandler(t, pr612HTTPConfig(), upstream.URL, "responses")
+	h.maxAccountSwitches = 2
+	c, rec := newOpenAIResponsesFailoverTestContext(t, t.Context())
+	c.Request.Body = io.NopCloser(strings.NewReader(`{"model":"gpt-5.1","stream":false,"input":"synthetic"}`))
+	h.Responses(c)
+
+	require.Equal(t, int32(2), submissions.Load(), "first header timeout should fail over to the second account")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }

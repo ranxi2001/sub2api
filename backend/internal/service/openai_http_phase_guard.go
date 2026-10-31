@@ -299,8 +299,10 @@ func openAIHTTPPhaseError(resp *http.Response) error {
 	return nil
 }
 
-// These deadlines never authorize replay: upload may have partially reached
-// upstream, and metadata alone does not prove that an upstream did no work.
+// Upload/pre-output deadlines never authorize replay. A response-header timeout
+// after the request was written is replayable only because the caller explicitly
+// bills a 1:1 retry surcharge for the first attempt's possible upstream cost.
+// If the response is already committed, even that path stays terminal.
 func handleOpenAIHTTPPhaseError(c *gin.Context, account *Account, err error) error {
 	var phaseErr *openAIHTTPPhaseTimeout
 	if !errors.As(err, &phaseErr) {
@@ -313,6 +315,26 @@ func handleOpenAIHTTPPhaseError(c *gin.Context, account *Account, err error) err
 		return err
 	}
 	StopOpenAICompactSSEKeepaliveCommitted(c)
+	if phaseErr.phase == "response_header_timeout" && !IsResponseCommitted(c) {
+		written := c.Writer.Written()
+		if written {
+			MarkOpsStreamFailure(c, phaseErr.phase, phaseErr.phase, phaseErr.Error(), http.StatusGatewayTimeout)
+		}
+		// Replay is deliberately allowed here: the caller has chosen to pay the
+		// first attempt's possible upstream cost and charge it back 1:1.
+		const replayMessage = "OpenAI upstream response header timeout; retrying another account (first attempt may be billed)"
+		return &UpstreamFailoverError{
+			StatusCode:               http.StatusGatewayTimeout,
+			ResponseBody:             []byte(replayMessage),
+			Stage:                    GatewayFailureStageInference,
+			Scope:                    GatewayFailureScopeRequest,
+			NextAccountAction:        NextAccountRetry,
+			ClientStatusCode:         http.StatusGatewayTimeout,
+			ClientMessage:            replayMessage,
+			HeaderTimeoutSubmitted:   true,
+			SafeToFailoverAfterWrite: written,
+		}
+	}
 	if c.Writer.Written() {
 		MarkOpsStreamFailure(c, phaseErr.phase, phaseErr.phase, phaseErr.Error(), http.StatusGatewayTimeout)
 	}

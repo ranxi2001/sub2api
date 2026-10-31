@@ -3390,3 +3390,36 @@ func TestOpenAIGatewayServiceRecordUsage_ServiceTierNeverRaisedByUpstreamRespons
 	require.NoError(t, calcErr)
 	require.InDelta(t, baseCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
 }
+
+func TestOpenAIGatewayServiceRecordUsage_HeaderTimeoutRetriesAddSurcharge(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	newResult := func(retries int) *OpenAIForwardResult {
+		return &OpenAIForwardResult{
+			RequestID:            "header_timeout_surcharge",
+			Model:                "gpt-5.1",
+			Usage:                OpenAIUsage{InputTokens: 100, OutputTokens: 50},
+			Duration:             2 * time.Second,
+			HeaderTimeoutRetries: retries,
+		}
+	}
+	input := func(result *OpenAIForwardResult) *OpenAIRecordUsageInput {
+		return &OpenAIRecordUsageInput{
+			Result:  result,
+			APIKey:  &APIKey{ID: 10, GroupID: i64p(11), Group: &Group{ID: 11, RateMultiplier: 1.2}},
+			User:    &User{ID: 20},
+			Account: &Account{ID: 30},
+		}
+	}
+
+	require.NoError(t, svc.RecordUsage(context.Background(), input(newResult(0))))
+	require.NotNil(t, usageRepo.lastLog)
+	baseActual := usageRepo.lastLog.ActualCost
+	baseTotal := usageRepo.lastLog.TotalCost
+	require.Greater(t, baseActual, 0.0)
+
+	require.NoError(t, svc.RecordUsage(context.Background(), input(newResult(2))))
+	require.NotNil(t, usageRepo.lastLog)
+	require.InDelta(t, baseActual*3, usageRepo.lastLog.ActualCost, 1e-9)
+	require.InDelta(t, baseTotal*3, usageRepo.lastLog.TotalCost, 1e-9)
+}

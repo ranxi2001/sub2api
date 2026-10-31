@@ -109,6 +109,8 @@ func TestPrioritySchedulingOrderingAndFallback(t *testing.T) {
 	require.Equal(t, int64(1), order[2].account.ID)
 	snap := gateway.PrioritySchedulingSnapshot()
 	require.True(t, snap.HistoryReady)
+	require.Equal(t, PriorityLatencyDeprioritize, snap.LatencyPenaltyMode)
+	require.False(t, snap.LatencyFallback)
 	require.Equal(t, int64(2), snap.Candidates[0].AccountID)
 	for _, other := range []OpenAIAccountScheduleRequest{{Platform: PlatformOpenAI, RequestedModel: "m", RequiredImageCapability: OpenAIImagesCapabilityNative}, {Platform: PlatformGemini, RequestedModel: "m", UseUpstreamTokenCost: true}, {Platform: PlatformOpenAI, RequestedModel: "m"}} {
 		p := openAIAccountLoadPlan{candidates: candidates}

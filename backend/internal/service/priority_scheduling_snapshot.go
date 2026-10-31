@@ -10,6 +10,7 @@ import (
 // These owned copies cannot be mutated by a later account/load cache update.
 type prioritySnapshotInput struct {
 	limited    bool
+	fallback   bool
 	at         time.Time
 	request    OpenAIAccountScheduleRequest
 	config     PrioritySchedulingConfig
@@ -86,7 +87,7 @@ func (s *OpenAIGatewayService) prioritySchedulingSnapshotWithHistory(input *prio
 		id := *input.request.GroupID
 		group = &id
 	}
-	snapshot := &PrioritySchedulingSnapshot{LatencyPercentile: input.config.LatencyPercentile, LatencyMeasurement: input.config.LatencyMeasurement, MinSamples: input.config.MinSamples, WindowMinutes: input.config.WindowMinutes, ConfigRevision: priorityConfigRevision(input.config), At: input.at, EvaluatedAt: now, Model: priorityHistoryModel(input.request), GroupID: group, Mode: input.config.Mode, SelectionPolicy: "capacity_first", HistoryReady: h.ready(), HistoryStatus: h.status, HistoryObservedAt: h.observed, HistoryWindowEnd: h.windowEnd, HistoryError: h.failure, HistoryRefreshing: h.refreshing, Candidates: make([]PrioritySchedulingScore, 0, len(input.candidates))}
+	snapshot := &PrioritySchedulingSnapshot{LatencyPercentile: input.config.LatencyPercentile, LatencyMeasurement: input.config.LatencyMeasurement, LatencyPenaltyMode: input.config.LatencyPenaltyMode, LatencyFallback: input.fallback, MinSamples: input.config.MinSamples, WindowMinutes: input.config.WindowMinutes, ConfigRevision: priorityConfigRevision(input.config), At: input.at, EvaluatedAt: now, Model: priorityHistoryModel(input.request), GroupID: group, Mode: input.config.Mode, SelectionPolicy: "capacity_first", HistoryReady: h.ready(), HistoryStatus: h.status, HistoryObservedAt: h.observed, HistoryWindowEnd: h.windowEnd, HistoryError: h.failure, HistoryRefreshing: h.refreshing, Candidates: make([]PrioritySchedulingScore, 0, len(input.candidates))}
 	if input.config.OAuthQuotaPriority {
 		snapshot.SelectionPolicy = "oauth_quota_priority"
 	}
@@ -117,21 +118,34 @@ func (s *OpenAIGatewayService) prioritySchedulingSnapshotWithHistory(input *prio
 	return snapshot, h
 }
 
+// Keep the dashboard order identical to the actual selection order: normal
+// candidates first, then latency-limited accounts (recovery or active penalty),
+// and known quality/error/loss risk last. Capacity bands only break ties inside
+// a class.
 func comparePrioritySnapshotScores(a, b PrioritySchedulingScore) int {
-	risk := func(v PrioritySchedulingScore) bool {
-		return slices.Contains(v.Reasons, "quality_below_target") || slices.Contains(v.Reasons, "recent_errors") || slices.Contains(v.Reasons, "historical_loss")
-	}
-	if risk(a) != risk(b) {
-		if risk(a) {
+	category := func(v PrioritySchedulingScore) int {
+		switch {
+		case slices.Contains(v.Reasons, "quality_below_target") ||
+			slices.Contains(v.Reasons, "recent_errors") ||
+			slices.Contains(v.Reasons, "historical_loss"):
+			return 2
+		case v.LatencyRecovery || slices.Contains(v.Reasons, "latency_above_target"):
 			return 1
+		default:
+			return 0
 		}
-		return -1
+	}
+	if v := cmp.Compare(category(a), category(b)); v != 0 {
+		return v
 	}
 	if v := cmp.Compare(a.CapacityBand, b.CapacityBand); v != 0 {
 		return v
 	}
-	tier := func(t string) int {
-		switch t {
+	tier := func(v PrioritySchedulingScore) int {
+		if v.LatencyRecovery {
+			return 0
+		}
+		switch v.Tier {
 		case "eligible":
 			return 2
 		case "insufficient":
@@ -140,7 +154,7 @@ func comparePrioritySnapshotScores(a, b PrioritySchedulingScore) int {
 			return 0
 		}
 	}
-	if v := cmp.Compare(tier(b.Tier), tier(a.Tier)); v != 0 {
+	if v := cmp.Compare(tier(b), tier(a)); v != 0 {
 		return v
 	}
 	if v := cmp.Compare(a.Priority, b.Priority); v != 0 {

@@ -96,6 +96,21 @@ describe('priority scheduling', () => {
     wrapper.unmount()
   })
 
+  it('shows the active penalty mode, soft-penalty fallback, and explicit pool fallback', async () => {
+    const candidate: PriorityCandidate = { account_id: 1, account_name: 'Mock slow', score: 61.6, tier: 'degraded', reasons: ['latency_above_target'], priority: 1, concurrency: 10000, load_factor: 10000, load_percent: 0, waiting: 0, rate: 0.1, revenue: 0.41, theoretical_cost: 0.07, profit: 0.34, margin: 0.83, economics_source: 'usage', profit_samples: 11, samples: 11, p90_ttft_ms: 15884, quality_passed: 0, quality_samples: 0, latency_penalty_until: '2026-10-31T05:33:18Z' }
+    const snapshot = { at: '2026-10-31T05:23:23Z', model: 'gpt-test', group_id: 11, mode: 'custom', latency_penalty_mode: 'deprioritize' as const, latency_fallback: true, history_ready: true, candidates: [candidate] }
+    vi.mocked(getPrioritySnapshot).mockResolvedValue(snapshot)
+    const wrapper = mount(PrioritySchedulingView); await flushPromises()
+    expect(wrapper.text()).toContain('priorityScheduling.latencyPenaltyMode: priorityScheduling.latencyPenaltyModes.deprioritize')
+    expect(wrapper.text()).toContain('priorityScheduling.softPenalty')
+    expect(wrapper.get('[data-testid="priority-latency-fallback"]').text()).toBe('priorityScheduling.latencyFallback')
+    vi.mocked(getPrioritySnapshot).mockResolvedValue({ ...snapshot, latency_penalty_mode: 'stop' })
+    await (wrapper.vm as any).refresh(); await flushPromises()
+    expect(wrapper.text()).toContain('priorityScheduling.latencyPenaltyModes.stop')
+    expect(wrapper.text()).not.toContain('priorityScheduling.softPenalty')
+    wrapper.unmount()
+  })
+
   it('defaults legacy settings off and saves the quota cutoff and explicit disable', async () => {
     const legacy = { ...config }; delete legacy.oauth_quota_priority; delete legacy.oauth_quota_threshold
     vi.mocked(getPriorityConfig).mockResolvedValue(legacy)

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -29,9 +28,10 @@ func TestPR612HeaderTimeoutSubmissionBoundary(t *testing.T) {
 			err = (&OpenAIGatewayService{}).handleOpenAIUpstreamTransportError(context.Background(), c, account, err, false)
 			var failover *UpstreamFailoverError
 			if submitted {
-				require.False(t, errors.As(err, &failover))
-				require.Equal(t, http.StatusGatewayTimeout, c.Writer.Status())
-				require.ErrorIs(t, err, original)
+				require.ErrorAs(t, err, &failover, "header timeout after submission is replayable with surcharge")
+				require.True(t, failover.HeaderTimeoutSubmitted)
+				require.Equal(t, http.StatusGatewayTimeout, failover.StatusCode)
+				require.False(t, c.Writer.Written(), "handler must not commit before failover")
 			} else {
 				require.ErrorAs(t, err, &failover, "pre-execution failure retains safe failover")
 			}

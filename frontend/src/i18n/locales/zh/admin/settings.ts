@@ -1201,7 +1201,7 @@ export default {
       openaiResponseHeaderTimeout: {
         title: 'OpenAI 响应头超时',
         description:
-          '限制 OpenAI/Codex HTTP 上传完成后的响应头等待。已提交请求超时后终止且不自动重放；上游可能继续执行和计费。',
+          '限制 OpenAI/Codex HTTP 上传完成后的响应头等待。超时后切到下一个账号；第一次尝试可能已在上游计费，成功请求会按 1:1 追加一次费用。已收到响应头的正文流、原生上游 WebSocket 使用各自时限。',
         enabled: '启用响应头超时',
         enabledHint: '关闭后不设 OpenAI 专用响应头超时（等价于 0）',
         seconds: '超时时间（秒）',
