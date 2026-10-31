@@ -1,5 +1,5 @@
 <template>
-  <section class="min-w-0 rounded-2xl border border-gray-200 p-5 dark:border-dark-700" data-testid="priority-lifecycle">
+  <section v-if="auth.user?.role === 'admin'" class="min-w-0 rounded-2xl border border-gray-200 p-5 dark:border-dark-700" data-testid="priority-lifecycle">
     <h2 class="text-lg font-semibold">{{ t('priorityScheduling.lifecycle.title') }}</h2>
     <p class="mt-2 text-sm text-amber-700 dark:text-amber-300">{{ t('priorityScheduling.lifecycle.shadow') }}</p>
     <form class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5" @submit.prevent="selectScope">
@@ -105,7 +105,7 @@ function remaining(expires: string) {
 function visibility() { if (document.visibilityState === 'hidden') { generation++; loading.value = false; stop() } else void refresh() }
 function disconnected() { offline.value = true; generation++; loading.value = false; stop() }
 function connected() { void refresh() }
-watch(() => auth.user ? auth.user.id + ':' + auth.user.role : '', () => { generation++; stop(); chosen.value = null; state.value = null; decisions.value = []; events.value = []; model.value = ''; group.value = ''; failure.value = ''; loading.value = false })
+watch(() => auth.user ? auth.user.id + ':' + auth.user.role : '', () => { generation++; stop(); chosen.value = null; state.value = null; decisions.value = []; events.value = []; model.value = ''; group.value = ''; failure.value = ''; loading.value = false }, { flush: 'sync' })
 onMounted(() => {
   clock = setInterval(() => { now.value = Date.now() }, 1000)
   document.addEventListener('visibilitychange', visibility); window.addEventListener('offline', disconnected); window.addEventListener('online', connected)

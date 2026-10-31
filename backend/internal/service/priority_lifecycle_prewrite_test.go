@@ -44,6 +44,23 @@ func TestPriorityLifecycleAdminGETReadOnly(t *testing.T) {
 	}
 }
 
+func TestPriorityLifecyclePolicyOnlyChangeRetainsStatistics(t *testing.T) {
+	cfg := DefaultPrioritySchedulingConfig()
+	cfg.Enabled = true
+	svc := priorityGateway(cfg, &priorityReaderStub{})
+	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: "synthetic", UseUpstreamTokenCost: true}
+	pool := []openAIAccountCandidateScore{priorityCandidate(1, .1, 0)}
+	entry := &prioritySignalEntry{observed: time.Now(), expires: time.Now().Add(time.Hour), signals: map[int64]PrioritySchedulingSignal{1: {Samples: 20, P90TTFTMs: 1234}}, accounts: map[int64]time.Time{1: time.Now()}}
+	svc.priorityScheduling.entries = map[string]*prioritySignalEntry{priorityHistoryKey(req, cfg): entry}
+	cfg.CostWeight = 35
+	cfg.LatencyPenaltyMode = PriorityLatencyStop
+	cfg.LatencyPenaltyMinutes = 30
+	history := svc.priorityHistory(req, cfg, pool)
+	if !history.ready() || history.signals[1].Samples != 20 {
+		t.Fatal("LIFECYCLE_STATISTICS: policy-only change discarded the measured population")
+	}
+}
+
 // A loopback WS enters the production proxy and relay; only the provider socket
 // is in-memory. The observation clock publishes a stop after frame admission,
 // at the relay activity boundary before the physical write. Deadlines stay real.

@@ -17,6 +17,35 @@ concurrency:
   group: issue614-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
+  handler-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: 'true'
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Actual handler transport usage repository policy state chain
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/issue614-chain"
+          test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
+          (cd backend && go test -tags=unit,integration ./internal/handler -run '^TestPriorityLifecycleRealHandlerUsagePolicyAndState$' -count=1 -v -timeout=25m) > "$RUNNER_TEMP/issue614-chain/chain.log" 2>&1 || { cat "$RUNNER_TEMP/issue614-chain/chain.log"; exit 1; }
+          cat "$RUNNER_TEMP/issue614-chain/chain.log"
+          grep -q -- '--- PASS: TestPriorityLifecycleRealHandlerUsagePolicyAndState' "$RUNNER_TEMP/issue614-chain/chain.log"
+          git diff --exit-code HEAD
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue614-chain-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue614-chain
   lifecycle-ui:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -112,7 +141,7 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/issue614-red" "$BASELINE"
           cp backend/internal/service/priority_lifecycle_prewrite_test.go "$RUNNER_TEMP/issue614-red/backend/internal/service/"
           set +e
-          (cd "$RUNNER_TEMP/issue614-red/backend" && go test -tags=unit ./internal/service -run '^TestPriorityLifecycle(PassthroughPhysicalWriteFence|AdminGETReadOnly)$' -count=1 -v -timeout=12m) > "$RUNNER_TEMP/issue614-proof/red.log" 2>&1
+          (cd "$RUNNER_TEMP/issue614-red/backend" && go test -tags=unit ./internal/service -run '^TestPriorityLifecycle(PassthroughPhysicalWriteFence|AdminGETReadOnly|PolicyOnlyChangeRetainsStatistics)$' -count=1 -v -timeout=12m) > "$RUNNER_TEMP/issue614-proof/red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue614-proof/red.log"
@@ -121,6 +150,7 @@ jobs:
           grep -q -- '--- FAIL: TestPriorityLifecyclePassthroughPhysicalWriteFence' "$RUNNER_TEMP/issue614-proof/red.log"
           grep -q 'LIFECYCLE_GET: management read launched or mutated routing history' "$RUNNER_TEMP/issue614-proof/red.log"
           grep -q -- '--- FAIL: TestPriorityLifecycleAdminGETReadOnly' "$RUNNER_TEMP/issue614-proof/red.log"
+          grep -q 'LIFECYCLE_STATISTICS: policy-only change discarded the measured population' "$RUNNER_TEMP/issue614-proof/red.log"
           ! grep -Eq 'undefined:|build failed|no tests to run|fixture must publish' "$RUNNER_TEMP/issue614-proof/red.log"
       - name: GREEN exact head production adapters handlers and physical writes
         run: |

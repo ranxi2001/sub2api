@@ -131,12 +131,14 @@ func TestPriorityQuantileCacheSeparatesMeasurementTargetAndRevision(t *testing.T
 		func(c *PrioritySchedulingConfig) { c.LatencyPercentile = 70 },
 		func(c *PrioritySchedulingConfig) { c.LatencyMeasurement = "attributed_v1" },
 		func(c *PrioritySchedulingConfig) { c.TargetTTFTMs = 9000 },
-		func(c *PrioritySchedulingConfig) { c.RecoveryExplorationPercent = 5 },
 	} {
 		changed := cfg
 		mutate(&changed)
 		require.NotEqual(t, key, priorityHistoryKey(req, changed))
 	}
+	changed := cfg
+	changed.RecoveryExplorationPercent = 5
+	require.Equal(t, key, priorityHistoryKey(req, changed), "exploration is a policy change, not a new statistical population")
 	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 1, LatencyEvidenceVersion: 1,
 		LatencyPercentile: 90, LatencyMeasurement: "legacy_forward", QualitySamples: 10, QualityPassed: 10}
 	cfg.LatencyMeasurement = "attributed_v1"

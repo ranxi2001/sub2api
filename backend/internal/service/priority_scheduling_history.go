@@ -344,7 +344,8 @@ func priorityHistoryKey(req OpenAIAccountScheduleRequest, c PrioritySchedulingCo
 	// The action changes admission, not the measured population. Switching soft
 	// and stop must retain the exact same model/group/measurement evidence.
 	c.LatencyPenaltyMode = PriorityLatencyDeprioritize
-	return fmt.Sprintf("%q/%q/%d/%t/%d/%d/%t/%q", priorityHistoryModel(req), strings.TrimSpace(req.RequestedModel), derefGroupID(req.GroupID), req.GroupID != nil, c.WindowMinutes, c.QualityMaxAgeHours, req.ObservationEffortScoped, req.ObservationEffort) + "/" + priorityConfigRevision(c)
+	_, statistics, _ := PriorityLifecycleVersions(c)
+	return fmt.Sprintf("%q/%q/%d/%t/%d/%d/%t/%q", priorityHistoryModel(req), strings.TrimSpace(req.RequestedModel), derefGroupID(req.GroupID), req.GroupID != nil, c.WindowMinutes, c.QualityMaxAgeHours, req.ObservationEffortScoped, req.ObservationEffort) + "/" + statistics
 }
 
 // Include every scoring setting so stale scopes never mix targets or semantics.
