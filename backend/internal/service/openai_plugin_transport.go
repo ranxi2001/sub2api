@@ -151,8 +151,7 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		return gateway.doOpenAIUpstream(request, proxyURL, account)
 	}
 	if s.pluginManager != nil {
-		pluginRequest := s.priorityLifecyclePluginRequest(request, account)
-		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(pluginRequest.Context(), pluginRequest, proxyURL, account)
+		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			return response, err
 		}

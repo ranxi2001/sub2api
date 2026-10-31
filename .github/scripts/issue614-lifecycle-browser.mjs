@@ -47,7 +47,7 @@ const server = await createServer({
   resolve: { alias: { '@': path.join(frontend, 'src') } },
   css: { postcss: { plugins: [requireFrontend('tailwindcss')(),requireFrontend('autoprefixer')()] } },
   server: { host: '127.0.0.1', port: 0 },
-  optimizeDeps: { noDiscovery: true, include: ['vue','vue-i18n','pinia','axios','vue-router','@vueuse/core'] },
+  optimizeDeps: { noDiscovery: true, include: ['vue','vue-i18n','pinia','axios','vue-router','@vueuse/core','@tanstack/vue-virtual','chart.js','vue-chartjs','dompurify','qrcode','driver.js'] },
 })
 await server.listen()
 const browser = await chromium.launch({headless:true}), results=[], errors=[], blocked=[]
@@ -62,6 +62,11 @@ try {
       return route.continue()
     })
     await page.goto('http://127.0.0.1:'+server.httpServer.address().port+'/lifecycle?lang='+lang)
+    // Vite can finish its first dependency optimization after mount. Wait for
+    // network stabilization before entering values; a reload must not erase
+    // the test's interaction state.
+    await page.waitForLoadState('networkidle')
+    await page.getByTestId('lifecycle-select').waitFor()
     await page.getByTestId('lifecycle-model').fill('synthetic-public')
     await page.getByTestId('lifecycle-group').fill('11')
     await page.getByTestId('lifecycle-select').click()
