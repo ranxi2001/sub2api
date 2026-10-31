@@ -243,6 +243,7 @@ func (s *OpenAIGatewayService) observePriorityAttempt(req *http.Request, account
 
 // Used by HTTP adapters whose physical sends bypass the native proxy pipeline.
 func (s *OpenAIGatewayService) doPriorityObservedHTTP(req *http.Request, proxy string, account *Account) (*http.Response, error) {
+	req = s.guardPriorityGenerationHTTP(req, account)
 	if s.excelOAuthReauth != nil {
 		if err := s.excelOAuthReauth.validateAuthConnectionPolicy(req.Context(), account); err != nil {
 			return nil, err

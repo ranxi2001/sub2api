@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/generationwrite"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"github.com/google/uuid"
 	"log/slog"
@@ -145,6 +146,41 @@ type priorityLifecycleConsumed struct {
 }
 
 type priorityLifecycleRequestTypeKey struct{}
+type priorityLifecycleHTTPDeferredKey struct{}
+type priorityLifecyclePrimaryReadKey struct{}
+
+func (s *OpenAIGatewayService) guardPriorityGenerationHTTP(req *http.Request, account *Account) *http.Request {
+	turn, _ := req.Context().Value(priorityLatencyTurnKey{}).(*priorityLatencyTurn)
+	if turn == nil || account == nil {
+		return req
+	}
+	original := req.Context()
+	deferred := context.WithValue(original, priorityLifecycleHTTPDeferredKey{}, true)
+	req = req.WithContext(deferred)
+	return generationwrite.With(req, func(ctx context.Context) error {
+		physical := context.WithValue(ctx, priorityLifecycleHTTPDeferredKey{}, false)
+		physical = context.WithValue(physical, priorityLifecyclePrimaryReadKey{}, true)
+		turn.mu.Lock()
+		request := turn.request
+		started := turn.started
+		turn.mu.Unlock()
+		if started {
+			return nil
+		}
+		group, enforce := int64(0), request.GroupID != nil
+		if enforce {
+			group = *request.GroupID
+		}
+		if _, err := s.admitOpenAITurnForGroup(physical, group, enforce, account, request.RequestedModel); err != nil {
+			return err
+		}
+		if err := s.fenceAuthConnectionEgress(physical, req, account); err != nil {
+			return err
+		}
+		return s.priorityLatencyBeforeSend(physical, account)
+	})
+}
+
 type priorityLifecyclePluginBoundaryKey struct{}
 type priorityLifecyclePluginBoundary struct {
 	before func(context.Context) error
@@ -192,6 +228,9 @@ func (s *OpenAIGatewayService) priorityLifecycleWriteResult(ctx context.Context,
 		return
 	}
 	turn.mu.Lock()
+	if !IsOpenAITurnAdmissionError(writeErr) {
+		turn.started = true
+	} // uncertain writes never replay
 	req := turn.request
 	turn.mu.Unlock()
 	cfg := s.prioritySchedulingRuntimeConfig()
@@ -203,6 +242,12 @@ func (s *OpenAIGatewayService) priorityLifecycleWriteResult(ctx context.Context,
 	if writeErr != nil {
 		event.Phase = "SUBMISSION_UNCERTAIN"
 		event.Reason = "write_error_no_replay"
+		if IsOpenAITurnAdmissionError(writeErr) {
+			event.Phase = "PREWRITE_BLOCKED"
+			event.PhysicalWrite = "zero"
+			event.Allowed = false
+			event.Reason = "admission_denied"
+		}
 	}
 	select {
 	case s.priorityLifecycle.audit <- event:

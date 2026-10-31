@@ -277,7 +277,7 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 		}
 		authoritativeRead = true
 	} else {
-		if ttl := s.openAITurnAdmissionCacheTTL(); ttl > 0 {
+		if ttl := s.openAITurnAdmissionCacheTTL(); ttl > 0 && ctx.Value(priorityLifecyclePrimaryReadKey{}) != true {
 			if cached, cachedParent, ok := s.openAITurnAdmissionCache.load(selected.ID, ttl); ok {
 				latest, parent, authoritativeRead = cached, cachedParent, true
 			}

@@ -253,7 +253,9 @@ func (s *OpenAIGatewayService) priorityLatencyBeforeSend(ctx context.Context, ac
 	if err := s.priorityLatencyAdmission(turn.request, account); err != nil {
 		return err
 	}
-	turn.started = true
+	if ctx.Value(priorityLifecycleHTTPDeferredKey{}) != true {
+		turn.started = true
+	}
 	return nil
 }
 

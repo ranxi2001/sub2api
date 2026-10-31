@@ -30,6 +30,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/generationwrite"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -387,6 +388,9 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 // doUpstreamRequest owns cancellation for one attempt, without cancelling the
 // caller's context (which may be detached for billing or reused for retries).
 func doUpstreamRequest(client *http.Client, req *http.Request) (result *http.Response, resultErr error) {
+	guarded, releaseBoundary, boundaryError := generationwrite.HTTP(req)
+	req = guarded
+	defer func() { resultErr = boundaryError(resultErr) }()
 	req, timingTrace := requesttiming.StartTransport(req)
 	defer func() { timingTrace.Response(result, resultErr) }()
 	_, observeCapture := requestcapture.FromContext(req.Context()).ObserveHTTPRequest(req, requestcapture.AccountFromContext(req.Context()))
@@ -395,6 +399,7 @@ func doUpstreamRequest(client *http.Client, req *http.Request) (result *http.Res
 	ctx, cancel := context.WithCancel(req.Context())
 	resp, err := servertiming.Do(client, req.WithContext(ctx))
 	if err != nil {
+		releaseBoundary()
 		cancel()
 		return resp, err
 	}
@@ -408,7 +413,7 @@ func doUpstreamRequest(client *http.Client, req *http.Request) (result *http.Res
 	if encoding := strings.TrimSpace(resp.Header.Get("Content-Encoding")); encoding == "" || strings.EqualFold(encoding, "identity") {
 		resp.Body = requesttiming.WrapStage(req.Context(), resp.Body, "decoded_body_first")
 	}
-	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
+	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: func() { cancel(); releaseBoundary() }}
 	return resp, nil
 }
 
