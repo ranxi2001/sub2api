@@ -264,6 +264,9 @@ func ownedPriorityScheduleRequest(req OpenAIAccountScheduleRequest) OpenAIAccoun
 		id := *req.GroupID
 		copy.GroupID = &id
 	}
+	copy.priorityDecisionID = req.priorityDecisionID
+	copy.LifecycleRequestType = req.LifecycleRequestType
+	copy.ObservationEffort, copy.ObservationEffortScoped = req.ObservationEffort, req.ObservationEffortScoped
 	return copy
 }
 
@@ -350,6 +353,15 @@ func (s *OpenAIGatewayService) beginPriorityLatencyTurn(ctx context.Context, c *
 	if account == nil {
 		return ctx, nil
 	}
+	if req.priorityDecisionID == "" {
+		req.priorityDecisionID = newPriorityLifecycleDecisionID()
+	}
+	if kind, ok := ctx.Value(priorityLifecycleRequestTypeKey{}).(RequestType); ok {
+		req.LifecycleRequestType = kind
+	}
+	if c != nil && c.Request != nil && strings.EqualFold(c.Request.Header.Get("Upgrade"), "websocket") {
+		req.LifecycleRequestType = RequestTypeWSV2
+	}
 	return context.WithValue(ctx, priorityLatencyTurnKey{}, &priorityLatencyTurn{accountID: account.ID, request: req}), nil
 }
 
@@ -359,6 +371,7 @@ func (s *OpenAIGatewayService) nextPriorityLatencyWSTurn(ctx context.Context, c 
 	ctx = context.WithValue(ctx, priorityLatencyTurnKey{}, (*priorityLatencyTurn)(nil))
 	if req, ok := ctx.Value(prioritySelectionRequestKey{}).(OpenAIAccountScheduleRequest); ok {
 		req.priorityLatencyPool = nil
+		req.priorityDecisionID = newPriorityLifecycleDecisionID()
 		req.RequestedModel = strings.TrimSpace(model)
 		if c != nil && c.Request != nil {
 			identity := priorityObservationFromContext(c.Request.Context(), model)

@@ -9,6 +9,7 @@ import (
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -39,6 +40,16 @@ func bindOpenAIPriorityObservation(c *gin.Context, group *int64, model string, b
 	if len(body) > 0 {
 		c.Request = c.Request.WithContext(service.WithObservationRequestEffort(c.Request.Context(), body[0]))
 	}
+	kind := service.RequestTypeUnknown
+	if strings.EqualFold(c.Request.Header.Get("Upgrade"), "websocket") {
+		kind = service.RequestTypeWSV2
+	} else if len(body) > 0 {
+		kind = service.RequestTypeSync
+		if gjson.GetBytes(body[0], "stream").Bool() {
+			kind = service.RequestTypeStream
+		}
+	}
+	c.Request = c.Request.WithContext(service.WithPriorityLifecycleRequestType(c.Request.Context(), kind))
 }
 
 func clientRequestedUsageFields(c *gin.Context, mapping service.ChannelMappingResult, fallbackModel, upstreamModel string) service.ChannelUsageFields {

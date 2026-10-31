@@ -505,6 +505,7 @@ type OpenAIGatewayService struct {
 	stopAstraSetup          func()
 	codexWSAnchors          codexWSAnchorStore
 	priorityScheduling      prioritySchedulingState
+	priorityLifecycle       priorityLifecycleRuntime
 	excelBPSRecoveryMu      sync.Mutex
 	excelBPSRecoveryCancel  context.CancelFunc
 	excelBPSRecoveryDone    chan struct{}
@@ -723,6 +724,7 @@ func NewOpenAIGatewayService(
 		registrar.SetAstraTicketLifecycle(svc)
 	}
 	svc.logOpenAIWSModeBootstrap()
+	svc.startPriorityLifecycle()
 	svc.StartOpenAICodexTicketHarvester()
 	return svc
 }
@@ -855,6 +857,7 @@ func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 // 应在应用优雅关闭时调用。
 func (s *OpenAIGatewayService) CloseOpenAIWSPool() {
 	if s != nil {
+		s.stopPriorityLifecycle()
 		s.codexSnapshotMu.Lock()
 		s.codexSnapshotClosed = true
 		throttle := s.codexSnapshotThrottle

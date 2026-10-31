@@ -69,6 +69,8 @@ var openAIAdvancedSchedulerSettingCache atomic.Value // *cachedOpenAIAdvancedSch
 var openAIAdvancedSchedulerSettingSF singleflight.Group
 
 type OpenAIAccountScheduleRequest struct {
+	priorityDecisionID      string
+	LifecycleRequestType    RequestType
 	ObservationEffort       string
 	ObservationEffortScoped bool
 	priorityLatencyPool     *priorityLatencyPool
@@ -426,6 +428,12 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	}
 
 	start := time.Now()
+	if req.priorityDecisionID == "" {
+		req.priorityDecisionID = newPriorityLifecycleDecisionID()
+	}
+	if kind, ok := ctx.Value(priorityLifecycleRequestTypeKey{}).(RequestType); ok {
+		req.LifecycleRequestType = kind
+	}
 	latencyOwnerID := int64(0)
 	// 命名返回值保证 defer 写入的耗时同时返回给调用方。
 	defer func() {
@@ -451,6 +459,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			}
 		}
 		decision.LatencyMs = time.Since(start).Milliseconds()
+		s.service.recordPriorityLifecycleDecision(ctx, req, decision.SelectedAccountID, "SELECTED", err)
 		s.metrics.recordSelect(decision)
 	}()
 

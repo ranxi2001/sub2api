@@ -96,6 +96,16 @@ func From(ctx context.Context) *Collector {
 	c, _ := ctx.Value(key{}).(*Collector)
 	return c
 }
+
+// Identity is immutable and safe to use for a body-free decision/usage join.
+func (c *Collector) Identity() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.data.TraceID
+}
 func (c *Collector) offset(t time.Time) float64 {
 	return float64(t.Sub(c.start)) / float64(time.Millisecond)
 }

@@ -160,9 +160,20 @@ func (r *usageLogRepository) ReadPrioritySchedulingSignals(ctx context.Context, 
  LEFT JOIN latest_quality lq ON lq.account_id=ids.id
  `
 	args := []any{pq.Array(query.AccountIDs), query.Model, query.UsageSince, query.QualitySince, query.GroupID, query.LatencyPercentile, query.LatencyMeasurement, query.TargetTTFTMs, query.UsageUntil, qualityModel}
+	if query.HalfOpen {
+		querySQL = strings.ReplaceAll(querySQL, "created_at <= $9", "created_at < $9")
+	}
+	if query.InboundEndpoint != nil {
+		args = append(args, *query.InboundEndpoint)
+		querySQL = strings.Replace(querySQL, "AND group_id IS NOT DISTINCT FROM $5::bigint", fmt.Sprintf("AND group_id IS NOT DISTINCT FROM $5::bigint AND (%s)=$%d", priorityLifecycleEndpointSQL, len(args)), 1)
+	}
+	if query.RequestType != nil {
+		args = append(args, int16(*query.RequestType))
+		querySQL = strings.Replace(querySQL, "AND group_id IS NOT DISTINCT FROM $5::bigint", fmt.Sprintf("AND group_id IS NOT DISTINCT FROM $5::bigint AND request_type=$%d", len(args)), 1)
+	}
 	if query.ObservationEffort != nil {
 		// Exact effort population; no max/xhigh inference or cross-effort fallback.
-		querySQL = strings.Replace(querySQL, "AND group_id IS NOT DISTINCT FROM $5::bigint", "AND group_id IS NOT DISTINCT FROM $5::bigint AND COALESCE(reasoning_effort,'')=$11", 1)
+		querySQL = strings.Replace(querySQL, "AND group_id IS NOT DISTINCT FROM $5::bigint", fmt.Sprintf("AND group_id IS NOT DISTINCT FROM $5::bigint AND COALESCE(reasoning_effort,'')=$%d", len(args)+1), 1)
 		args = append(args, *query.ObservationEffort)
 	}
 	rows, err := r.sql.QueryContext(ctx, querySQL, args...)

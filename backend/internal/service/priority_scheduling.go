@@ -21,6 +21,7 @@ const (
 // new-request stops. A stopped owner is rejected rather than reassigned.
 // Account eligibility, continuity, profit gates and concurrency acquisition stay authoritative.
 type PrioritySchedulingConfig struct {
+	LifecycleMode              string   `json:"lifecycle_mode"`
 	ErrorRateWeight            float64  `json:"error_rate_weight"`
 	ErrorRateWindowMinutes     int      `json:"error_rate_window_minutes"`
 	ErrorRatePriorSamples      int      `json:"error_rate_prior_samples"`
@@ -49,10 +50,13 @@ type PrioritySchedulingConfig struct {
 }
 
 func DefaultPrioritySchedulingConfig() PrioritySchedulingConfig {
-	return PrioritySchedulingConfig{ErrorRateWeight: 25, ErrorRateWindowMinutes: 10, ErrorRatePriorSamples: 5, OAuthQuotaThreshold: 90, BalanceProtocols: true, Mode: "balanced", GroupIDs: []int64{}, Models: []string{}, WindowMinutes: 60, MinSamples: 5, TargetTTFTMs: 15000, LatencyPercentile: 90, LatencyMeasurement: "legacy_forward", LatencyPenaltyMode: PriorityLatencyDeprioritize, LatencyPenaltyMinutes: 10, MaxLoadPercent: 80, MinQualityPercent: 90, QualityMaxAgeHours: 24, QualityWeight: 30, LatencyWeight: 25, LoadWeight: 25, CostWeight: 20}
+	return PrioritySchedulingConfig{LifecycleMode: "shadow", ErrorRateWeight: 25, ErrorRateWindowMinutes: 10, ErrorRatePriorSamples: 5, OAuthQuotaThreshold: 90, BalanceProtocols: true, Mode: "balanced", GroupIDs: []int64{}, Models: []string{}, WindowMinutes: 60, MinSamples: 5, TargetTTFTMs: 15000, LatencyPercentile: 90, LatencyMeasurement: "legacy_forward", LatencyPenaltyMode: PriorityLatencyDeprioritize, LatencyPenaltyMinutes: 10, MaxLoadPercent: 80, MinQualityPercent: 90, QualityMaxAgeHours: 24, QualityWeight: 30, LatencyWeight: 25, LoadWeight: 25, CostWeight: 20}
 }
 
 func ValidatePrioritySchedulingConfig(c PrioritySchedulingConfig) error {
+	if c.LifecycleMode != "" && c.LifecycleMode != "off" && c.LifecycleMode != "shadow" {
+		return errors.New("lifecycle mode must be off or shadow; enforcement contract pending")
+	}
 	if math.IsNaN(c.ErrorRateWeight) || math.IsInf(c.ErrorRateWeight, 0) || c.ErrorRateWeight < 0 || c.ErrorRateWeight > 100 || c.ErrorRateWindowMinutes < 1 || c.ErrorRateWindowMinutes > 60 || c.ErrorRatePriorSamples < 1 || c.ErrorRatePriorSamples > 1000 {
 		return errors.New("error rate parameters outside allowed range")
 	}
@@ -244,6 +248,9 @@ type PrioritySchedulingSignal struct {
 }
 
 type PrioritySchedulingQuery struct {
+	InboundEndpoint    *string
+	RequestType        *RequestType
+	HalfOpen           bool
 	ObservationEffort  *string
 	LatencyPercentile  int
 	LatencyMeasurement string

@@ -11,6 +11,37 @@ concurrency:
   group: issue614-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
+  durable-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: 'true'
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Real PostgreSQL outbox and independent durable evidence
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/issue614-durable"
+          test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestPriorityLifecycle' -count=1 -v -timeout=25m) > "$RUNNER_TEMP/issue614-durable/integration.log" 2>&1 || { cat "$RUNNER_TEMP/issue614-durable/integration.log"; exit 1; }
+          cat "$RUNNER_TEMP/issue614-durable/integration.log"
+          grep -q -- '--- PASS: TestPriorityLifecycleDurableOutboxScopeAndDeadline' "$RUNNER_TEMP/issue614-durable/integration.log"
+          ! grep -q -- '--- SKIP: TestPriorityLifecycle' "$RUNNER_TEMP/issue614-durable/integration.log"
+          git diff --exit-code HEAD
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue614-durable-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue614-durable
+          if-no-files-found: error
   physical-write:
     runs-on: ubuntu-latest
     timeout-minutes: 35
