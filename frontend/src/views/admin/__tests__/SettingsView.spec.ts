@@ -1,4 +1,5 @@
 import { excelBPSImageLimits } from "@/utils/excelBPSImageLimits";
+import { createPinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, reactive } from "vue";
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
@@ -144,6 +145,7 @@ vi.mock("@/api", () => ({
 }));
 
 vi.mock("@/stores", () => ({
+  useAuthStore: () => ({ user: { id: 41 }, isAdmin: true }),
   useAppStore: () => ({
     showError,
     showSuccess,
@@ -602,6 +604,7 @@ function mountView() {
         BackupSettings: true,
         EmailTemplateEditor: true,
       },
+      plugins: [createPinia()],
     },
   });
 }
@@ -696,6 +699,7 @@ describe("admin SettingsView payment visible method controls", () => {
     showError.mockReset();
     showSuccess.mockReset();
     localeRef.value = "zh-CN";
+    localStorage.removeItem("sub2api:new-feature-notices:v1:41");
 
     getSettings.mockResolvedValue({ ...baseSettingsResponse });
     updateSettings.mockImplementation(async (payload) => ({
@@ -760,6 +764,19 @@ describe("admin SettingsView payment visible method controls", () => {
     });
     fetchPublicSettings.mockResolvedValue(undefined);
     adminSettingsFetch.mockResolvedValue(undefined);
+  });
+
+  it("shares one dismissible notice between the feature tab and its settings section", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const badges = wrapper.findAll('[data-testid="new-feature-badge"]');
+    expect(badges).toHaveLength(2);
+    await badges[0]!.trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll('[data-testid="new-feature-badge"]')).toHaveLength(0);
+    expect(wrapper.get("#settings-tab-features").attributes("aria-selected")).toBe("false");
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 
   it("keeps the IP risk form on IP Audit without loading or saving it from Settings", async () => {
@@ -1976,6 +1993,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
         },
+        plugins: [createPinia()],
       },
     });
 
@@ -2347,6 +2365,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
         },
+        plugins: [createPinia()],
       },
     });
 

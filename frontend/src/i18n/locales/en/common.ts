@@ -29,6 +29,8 @@ export default {
       noResults: 'No matching features. Try another name or keyword.',
       hint: '↑ ↓ Select · Enter Open · Esc Close'
     },
+    newFeature: 'New feature',
+    dismissNewFeature: 'Hide this new feature notice',
     filter: 'Filter',
     export: 'Export',
     import: 'Import',

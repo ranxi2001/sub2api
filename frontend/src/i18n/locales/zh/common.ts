@@ -29,6 +29,8 @@ export default {
       noResults: '未找到匹配功能，请尝试其他名称或关键词',
       hint: '↑ ↓ 选择 · Enter 打开 · Esc 关闭'
     },
+    newFeature: '新功能',
+    dismissNewFeature: '隐藏此新功能提示',
     filter: '筛选',
     export: '导出',
     import: '导入',
