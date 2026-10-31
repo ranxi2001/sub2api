@@ -232,10 +232,11 @@ type prioritySelectionRequestKey struct{}
 type priorityLatencyTurnKey struct{}
 
 type priorityLatencyTurn struct {
-	mu        sync.Mutex
-	accountID int64
-	request   OpenAIAccountScheduleRequest
-	started   bool
+	mu                sync.Mutex
+	accountID         int64
+	request           OpenAIAccountScheduleRequest
+	started           bool
+	outcomeRegistered bool
 }
 
 // First physical HTTP/plugin send rechecks after preparation waits. Any attempted
@@ -341,6 +342,12 @@ func (s *OpenAIGatewayService) beginPriorityLatencyTurn(ctx context.Context, c *
 			id := identity.groupID
 			req.GroupID = &id
 		}
+	}
+	if kind, ok := ctx.Value(priorityLifecycleRequestTypeKey{}).(RequestType); ok {
+		req.LifecycleRequestType = kind
+	}
+	if c != nil && c.Request != nil && strings.EqualFold(c.Request.Header.Get("Upgrade"), "websocket") {
+		req.LifecycleRequestType = RequestTypeWSV2
 	}
 	if !selectedRequest && req.priorityLatencyPool == nil && priorityHardStopApplies(s.prioritySchedulingRuntimeConfig(), req) && (s.accountRepo != nil || s.schedulerSnapshot != nil) {
 		scheduler := &defaultOpenAIAccountScheduler{service: s, stats: s.openaiAccountStats}

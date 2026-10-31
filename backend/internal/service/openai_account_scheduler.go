@@ -438,6 +438,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	if kind, ok := ctx.Value(priorityLifecycleRequestTypeKey{}).(RequestType); ok {
 		req.LifecycleRequestType = kind
 	}
+	s.service.capturePriorityLifecycleCatalog(ctx, req)
 	latencyOwnerID := int64(0)
 	// 命名返回值保证 defer 写入的耗时同时返回给调用方。
 	defer func() {

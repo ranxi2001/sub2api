@@ -49,6 +49,7 @@ export interface PriorityLifecyclePolicy {
   rule: string
 }
 export interface PriorityLifecycleState {
+  coverage?: Record<string, string>
   scope: PriorityLifecycleScope
   server_now: string
   policy_revision: string
@@ -64,6 +65,10 @@ export interface PriorityLifecycleState {
     observed_at: string
     policy_revision: string
     signals: Record<string, Partial<PriorityCandidate>>
+    collected_through?: string
+    published_at?: string
+    refresh_state?: string
+    source_visibility?: string
   }
   accounts: {
     account_id: number
@@ -79,6 +84,18 @@ export interface PriorityLifecycleState {
   }[]
 }
 export interface PriorityLifecycleDecision {
+  consumed_source?: string
+  consumed_revision?: string
+  consumed_observed_at?: string
+  consumed_window_end?: string
+  candidates?: PriorityCandidate[]
+  excluded_account_ids?: number[]
+  fallback?: string
+  fallback_members?: number[]
+  phase: string
+  transport?: string
+  physical_write?: string
+  outcome?: string
   sequence: number
   decision_id: string
   parent_decision_id: string
@@ -89,7 +106,6 @@ export interface PriorityLifecycleDecision {
   watermark: number | null
   selected_account_id: number
   at: string
-  phase: string
   allowed: boolean
   reason: string
   mode: string
@@ -102,7 +118,7 @@ export interface PriorityLifecycleEvent {
   policy: PriorityLifecyclePolicy
 }
 function lifecycleParams(scope: PriorityLifecycleScope) {
-  return { group_id: scope.group_id ?? 'ungrouped', model: scope.model, endpoint: scope.endpoint, request_type: scope.request_type }
+  return { group_id: scope.group_id ?? 'ungrouped', model: scope.model, endpoint: scope.endpoint, request_type: scope.request_type, measurement_schema: scope.measurement_schema }
 }
 export async function getPriorityLifecycleState(scope: PriorityLifecycleScope): Promise<PriorityLifecycleState> {
   return (await apiClient.get('/admin/priority-scheduling/state', { params: lifecycleParams(scope) })).data

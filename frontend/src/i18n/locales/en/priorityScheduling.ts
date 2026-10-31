@@ -1,5 +1,6 @@
 export default {
   lifecycle: {
+    coverageLoss: 'Audit coverage incomplete',
     title: 'Lifecycle state and immutable history',
     shadow: 'Shadow observation only. Compatibility routing still decides admission; no additional upstream requests or second penalty engine. Unapproved v2 trigger, renewal and recovery rules remain pending.',
     group: 'Group ID (blank = ungrouped)', endpoint: 'Ingress endpoint', requestType: 'Request category', select: 'Select scope',

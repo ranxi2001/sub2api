@@ -471,7 +471,12 @@ func (s *defaultOpenAIAccountScheduler) applyPriorityScheduling(req OpenAIAccoun
 		req.priorityConsumed.digest = priorityLifecycleHash(history.signals)
 		req.priorityConsumed.candidates = make([]PrioritySchedulingScore, 0, len(plan.candidates))
 		for _, item := range plan.candidates {
-			req.priorityConsumed.candidates = append(req.priorityConsumed.candidates, scorePriorityCandidate(c, item, history.signals[item.account.ID], now))
+			score := scorePriorityCandidate(c, item, history.signals[item.account.ID], now)
+			score.SelectionWeight = prioritySelectionWeight(item, now)
+			score.CapacityBand = priorityCapacityBand(item)
+			score.ExplorationEligible = item.priorityExploration
+			score.HistoryStatus = history.accountStatus(item.account.ID)
+			req.priorityConsumed.candidates = append(req.priorityConsumed.candidates, score)
 		}
 		req.priorityConsumed.mu.Unlock()
 	}

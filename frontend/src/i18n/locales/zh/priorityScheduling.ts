@@ -1,5 +1,6 @@
 export default {
   lifecycle: {
+    coverageLoss: '审计覆盖不完整',
     title: '生命周期当前态与不可变历史',
     shadow: '当前仅作 shadow 观测。准入仍由兼容策略决定，不新增上游请求或第二套处罚；未批准的 V2 触发、续期和恢复规则保持待定。',
     group: '分组 ID（空为未分组）', endpoint: '入站端点', requestType: '请求类别', select: '固定此范围',

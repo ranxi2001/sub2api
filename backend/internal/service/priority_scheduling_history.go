@@ -172,6 +172,9 @@ func (s *OpenAIGatewayService) priorityHistory(req OpenAIAccountScheduleRequest,
 			group = &value
 		}
 		query := PrioritySchedulingQuery{LatencyPercentile: c.LatencyPercentile, LatencyMeasurement: c.LatencyMeasurement, TargetTTFTMs: c.TargetTTFTMs, AccountIDs: ids, Model: priorityHistoryModel(req), QualityModel: strings.TrimSpace(req.RequestedModel), GroupID: group, UsageUntil: now, UsageSince: now.Add(-time.Duration(c.WindowMinutes) * time.Minute), QualitySince: now.Add(-time.Duration(c.QualityMaxAgeHours) * time.Hour)}
+		endpoint, kind := PriorityLifecycleEndpoint(req.InboundEndpoint), req.LifecycleRequestType
+		query.InboundEndpoint, query.RequestType = &endpoint, &kind
+		query.HalfOpen = true
 		if req.ObservationEffortScoped {
 			value := req.ObservationEffort
 			query.ObservationEffort = &value
@@ -345,7 +348,7 @@ func priorityHistoryKey(req OpenAIAccountScheduleRequest, c PrioritySchedulingCo
 	// and stop must retain the exact same model/group/measurement evidence.
 	c.LatencyPenaltyMode = PriorityLatencyDeprioritize
 	_, statistics, _ := PriorityLifecycleVersions(c)
-	return fmt.Sprintf("%q/%q/%d/%t/%d/%d/%t/%q", priorityHistoryModel(req), strings.TrimSpace(req.RequestedModel), derefGroupID(req.GroupID), req.GroupID != nil, c.WindowMinutes, c.QualityMaxAgeHours, req.ObservationEffortScoped, req.ObservationEffort) + "/" + statistics
+	return fmt.Sprintf("%q/%q/%d/%t/%d/%d/%t/%q/%q/%d", priorityHistoryModel(req), strings.TrimSpace(req.RequestedModel), derefGroupID(req.GroupID), req.GroupID != nil, c.WindowMinutes, c.QualityMaxAgeHours, req.ObservationEffortScoped, req.ObservationEffort, PriorityLifecycleEndpoint(req.InboundEndpoint), req.LifecycleRequestType) + "/" + statistics
 }
 
 // Include every scoring setting so stale scopes never mix targets or semantics.

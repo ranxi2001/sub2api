@@ -165,7 +165,7 @@ func (r *usageLogRepository) ReadPrioritySchedulingSignals(ctx context.Context, 
 	}
 	if query.InboundEndpoint != nil {
 		args = append(args, *query.InboundEndpoint)
-		querySQL = strings.Replace(querySQL, "AND group_id IS NOT DISTINCT FROM $5::bigint", fmt.Sprintf("AND group_id IS NOT DISTINCT FROM $5::bigint AND (%s)=$%d", priorityLifecycleEndpointSQL, len(args)), 1)
+		querySQL = strings.ReplaceAll(querySQL, "AND group_id IS NOT DISTINCT FROM $5::bigint", fmt.Sprintf("AND group_id IS NOT DISTINCT FROM $5::bigint AND (%s)=$%d", priorityLifecycleEndpointSQL, len(args)))
 	}
 	if query.RequestType != nil {
 		args = append(args, int16(*query.RequestType))

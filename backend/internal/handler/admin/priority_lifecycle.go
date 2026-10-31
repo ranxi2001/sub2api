@@ -12,6 +12,13 @@ import (
 
 func priorityLifecycleScope(c *gin.Context) (service.PriorityLifecycleScope, int64, bool) {
 	scope := service.PriorityLifecycleScope{Model: strings.TrimSpace(c.Query("model")), Endpoint: service.PriorityLifecycleEndpoint(c.Query("endpoint"))}
+	if measurement := c.Query("measurement_schema"); measurement != "" {
+		if len(measurement) > 120 {
+			response.BadRequest(c, "invalid measurement_schema")
+			return scope, 0, false
+		}
+		scope.MeasurementSchema = measurement
+	}
 	if scope.Model == "" || len(scope.Model) > 200 || c.Query("endpoint") == "" {
 		response.BadRequest(c, "model and explicit ingress endpoint are required")
 		return scope, 0, false

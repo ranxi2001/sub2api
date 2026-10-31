@@ -113,28 +113,40 @@ type PriorityLifecycleEvent struct {
 }
 
 type PriorityLifecycleDecision struct {
-	Transport            string                    `json:"transport"`
-	PhysicalWrite        string                    `json:"physical_write"`
-	ConsumedSource       string                    `json:"consumed_source"`
-	ConsumedRevision     string                    `json:"consumed_revision"`
-	ConsumedObservedAt   *time.Time                `json:"consumed_observed_at"`
-	ConsumedWindowEnd    *time.Time                `json:"consumed_window_end"`
-	Candidates           []PrioritySchedulingScore `json:"candidates"`
-	ExcludedAccountIDs   []int64                   `json:"excluded_account_ids"`
-	Sequence             int64                     `json:"sequence"`
-	ParentID             string                    `json:"parent_decision_id"`
-	TraceID              string                    `json:"trace_id,omitempty"`
-	StatisticsGeneration *int64                    `json:"statistics_generation"`
-	Watermark            *int64                    `json:"watermark"`
-	ID                   string                    `json:"decision_id"`
-	Scope                PriorityLifecycleScope    `json:"scope"`
-	PolicyRevision       string                    `json:"policy_revision"`
-	SelectedAccountID    int64                     `json:"selected_account_id"`
-	At                   time.Time                 `json:"at"`
-	Phase                string                    `json:"phase"`
-	Allowed              bool                      `json:"allowed"`
-	Reason               string                    `json:"reason"`
-	Mode                 string                    `json:"mode"`
+	Fallback             string                          `json:"fallback"`
+	FallbackMembers      []int64                         `json:"fallback_members"`
+	Catalog              []PriorityLifecycleCatalogEntry `json:"catalog"`
+	Outcome              string                          `json:"outcome,omitempty"`
+	HTTPStatus           int                             `json:"http_status,omitempty"`
+	AttemptCount         int                             `json:"attempt_count,omitempty"`
+	Canceled             bool                            `json:"canceled"`
+	Transport            string                          `json:"transport"`
+	PhysicalWrite        string                          `json:"physical_write"`
+	ConsumedSource       string                          `json:"consumed_source"`
+	ConsumedRevision     string                          `json:"consumed_revision"`
+	ConsumedObservedAt   *time.Time                      `json:"consumed_observed_at"`
+	ConsumedWindowEnd    *time.Time                      `json:"consumed_window_end"`
+	Candidates           []PrioritySchedulingScore       `json:"candidates"`
+	ExcludedAccountIDs   []int64                         `json:"excluded_account_ids"`
+	Sequence             int64                           `json:"sequence"`
+	ParentID             string                          `json:"parent_decision_id"`
+	TraceID              string                          `json:"trace_id,omitempty"`
+	StatisticsGeneration *int64                          `json:"statistics_generation"`
+	Watermark            *int64                          `json:"watermark"`
+	ID                   string                          `json:"decision_id"`
+	Scope                PriorityLifecycleScope          `json:"scope"`
+	PolicyRevision       string                          `json:"policy_revision"`
+	SelectedAccountID    int64                           `json:"selected_account_id"`
+	At                   time.Time                       `json:"at"`
+	Phase                string                          `json:"phase"`
+	Allowed              bool                            `json:"allowed"`
+	Reason               string                          `json:"reason"`
+	Mode                 string                          `json:"mode"`
+}
+type PriorityLifecycleCatalogEntry struct {
+	AccountID     int64    `json:"account_id"`
+	Configuration string   `json:"configuration"`
+	Exclusions    []string `json:"exclusions"`
 }
 type priorityLifecycleConsumed struct {
 	mu                  sync.Mutex
@@ -143,6 +155,45 @@ type priorityLifecycleConsumed struct {
 	digest              string
 	observed, windowEnd *time.Time
 	candidates          []PrioritySchedulingScore
+	catalog             []PriorityLifecycleCatalogEntry
+}
+
+func (s *OpenAIGatewayService) capturePriorityLifecycleCatalog(ctx context.Context, req OpenAIAccountScheduleRequest) {
+	if req.priorityConsumed == nil || s.accountRepo == nil {
+		return
+	}
+	if _, ok := s.usageLogRepo.(PriorityLifecycleRepository); !ok {
+		return
+	}
+	catalog, ok := s.accountRepo.(PriorityLifecycleAccountCatalog)
+	if !ok {
+		return
+	}
+	rows, err := catalog.ListPriorityLifecycleAccounts(ctx)
+	if err != nil {
+		return
+	}
+	values := make([]PriorityLifecycleCatalogEntry, 0, len(rows))
+	for _, a := range rows {
+		value := PriorityLifecycleCatalogEntry{AccountID: a.ID, Configuration: "ENABLED", Exclusions: []string{}}
+		if !a.IsSchedulable() {
+			value.Configuration = "DISABLED_OR_BLOCKED"
+			value.Exclusions = append(value.Exclusions, "not_schedulable")
+		}
+		if !s.openAIAccountMatchesSchedulingGroup(&a, req.GroupID) {
+			value.Exclusions = append(value.Exclusions, "group_membership")
+		}
+		if _, excluded := req.ExcludedIDs[a.ID]; excluded {
+			value.Exclusions = append(value.Exclusions, "request_excluded")
+		}
+		if !a.SupportsOpenAIEndpointCapability(req.RequiredCapability) {
+			value.Exclusions = append(value.Exclusions, "capability")
+		}
+		values = append(values, value)
+	}
+	req.priorityConsumed.mu.Lock()
+	req.priorityConsumed.catalog = values
+	req.priorityConsumed.mu.Unlock()
 }
 
 type priorityLifecycleRequestTypeKey struct{}
@@ -232,6 +283,8 @@ func (s *OpenAIGatewayService) priorityLifecycleWriteResult(ctx context.Context,
 		turn.started = true
 	} // uncertain writes never replay
 	req := turn.request
+	registerOutcome := !turn.outcomeRegistered
+	turn.outcomeRegistered = true
 	turn.mu.Unlock()
 	cfg := s.prioritySchedulingRuntimeConfig()
 	if !cfg.Enabled || cfg.LifecycleMode == "off" {
@@ -257,6 +310,28 @@ func (s *OpenAIGatewayService) priorityLifecycleWriteResult(ctx context.Context,
 		s.priorityLifecycle.auditLost++
 		s.priorityLifecycle.mu.Unlock()
 	}
+	if registerOutcome {
+		if collector := requesttiming.From(ctx); collector != nil {
+			collector.WhenFinished(func(snapshot requesttiming.Snapshot) {
+				final := event
+				final.ID = uuid.NewString()
+				final.At = time.Now().UTC()
+				final.Phase = "OUTCOME"
+				final.Outcome = snapshot.Outcome
+				final.HTTPStatus = snapshot.Status
+				final.AttemptCount = len(snapshot.Attempts)
+				final.Canceled = snapshot.Canceled
+				select {
+				case s.priorityLifecycle.audit <- final:
+				default:
+					s.priorityLifecycle.mu.Lock()
+					s.priorityLifecycle.auditLost++
+					s.priorityLifecycle.failure = "audit_queue_overflow"
+					s.priorityLifecycle.mu.Unlock()
+				}
+			})
+		}
+	}
 }
 
 // The compatibility executor remains authoritative. A failed shadow audit is
@@ -277,6 +352,15 @@ func (s *OpenAIGatewayService) recordPriorityLifecycleDecision(ctx context.Conte
 	scope := PriorityLifecycleScope{GroupID: req.GroupID, Model: priorityHistoryModel(req), Endpoint: PriorityLifecycleEndpoint(req.InboundEndpoint), RequestType: req.LifecycleRequestType, MeasurementSchema: measurement, StatisticsSpec: spec}
 	d := PriorityLifecycleDecision{ID: uuid.NewString(), ParentID: req.priorityDecisionID, Scope: scope, SelectedAccountID: accountID, At: time.Now().UTC(), Phase: phase, Allowed: denied == nil, Mode: "compatibility_v1/shadow_v2", PolicyRevision: revision}
 	d.TraceID = requesttiming.From(ctx).Identity()
+	d.FallbackMembers = []int64{}
+	if pool := req.priorityLatencyPool; pool != nil && pool.fallbackActive() {
+		d.Fallback = "LATENCY_FALLBACK"
+		if frozen := pool.fallback.Load(); frozen != nil {
+			for id := range frozen.allowed {
+				d.FallbackMembers = append(d.FallbackMembers, id)
+			}
+		}
+	}
 	d.ConsumedSource = "not_observed"
 	d.Candidates = []PrioritySchedulingScore{}
 	d.ExcludedAccountIDs = []int64{}
@@ -291,6 +375,7 @@ func (s *OpenAIGatewayService) recordPriorityLifecycleDecision(ctx context.Conte
 			d.ConsumedObservedAt, d.ConsumedWindowEnd = consumed.observed, consumed.windowEnd
 			d.Candidates = append(d.Candidates, consumed.candidates...)
 		}
+		d.Catalog = append([]PriorityLifecycleCatalogEntry{}, consumed.catalog...)
 		consumed.mu.Unlock()
 	}
 	for id := range req.ExcludedIDs {
@@ -533,6 +618,13 @@ func (s *OpenAIGatewayService) PriorityLifecycleHistory(ctx context.Context, sco
 	repo, ok := s.usageLogRepo.(PriorityLifecycleRepository)
 	if !ok {
 		return nil, errors.New("lifecycle storage unavailable")
+	}
+	cfg, err := s.settingService.GetPrioritySchedulingConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if scope.MeasurementSchema == "" {
+		scope.MeasurementSchema, scope.StatisticsSpec, _ = PriorityLifecycleVersions(cfg)
 	}
 	if events {
 		return repo.ReadPriorityLifecycleEvents(ctx, scope, after)

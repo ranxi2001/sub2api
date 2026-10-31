@@ -21,6 +21,7 @@
         <p class="break-all text-xs text-gray-500">{{ state.scope.measurement_schema }} · {{ state.scope.statistics_spec }} · {{ t('priorityScheduling.configRevision') }}: {{ state.policy_revision }} · {{ t('priorityScheduling.lifecycle.generation') }}: {{ state.statistics?.generation ?? '—' }}</p>
         <p class="my-2 text-xs">{{ t('priorityScheduling.historyObservedAt') }}: {{ state.statistics?.observed_at ?? '—' }} · {{ t('priorityScheduling.windowEnd') }}: {{ state.statistics?.window_end ?? '—' }} · {{ t('priorityScheduling.lifecycle.watermark') }}: {{ state.statistics?.watermark ?? '—' }}</p>
         <p v-if="state.last_error" role="alert" class="text-amber-700">{{ state.last_error }}</p>
+        <p v-for="(reason, category) in state.coverage" :key="category" role="alert" class="text-amber-700">{{ t('priorityScheduling.lifecycle.coverageLoss') }}: {{ category }} · {{ reason }}</p>
         <div class="overflow-x-auto"><table class="w-full whitespace-nowrap text-left text-sm" data-testid="lifecycle-accounts"><thead><tr><th v-for="key in ['account','configuration','data','policy','admission']" :key="key" class="p-3">{{ t('priorityScheduling.lifecycle.' + key) }}</th></tr></thead>
           <tbody><tr v-for="row in state.accounts" :key="row.account_id" :data-testid="'lifecycle-account-' + row.account_id" class="border-t border-gray-100 dark:border-dark-700">
             <td class="p-3">{{ row.account_name }}<small class="block">#{{ row.account_id }}</small></td>
@@ -33,7 +34,10 @@
       <div v-if="tab === 'decisions'" class="space-y-3">
         <article v-for="decision in decisions" :key="decision.decision_id" class="rounded border border-gray-200 p-3 text-sm" data-testid="lifecycle-decision">
           <p class="break-all">{{ decision.decision_id }} · {{ decision.at }} · {{ decision.phase }}</p><p>{{ decision.selected_account_id }} · {{ decision.allowed }} · {{ decision.reason }}</p>
-          <p class="break-all text-xs">{{ decision.policy_revision }} · {{ decision.statistics_generation ?? '—' }} · {{ decision.trace_id ?? '—' }}</p>
+          <p class="break-all text-xs">{{ decision.policy_revision }} · {{ decision.consumed_source ?? '—' }} · {{ decision.consumed_revision ?? '—' }} · {{ decision.trace_id ?? '—' }}</p>
+          <p>{{ decision.transport ?? '—' }} · {{ decision.physical_write ?? '—' }} · {{ decision.outcome ?? '—' }}</p>
+          <p v-if="decision.fallback" class="font-medium text-amber-700">{{ decision.fallback }} · {{ decision.fallback_members?.join(', ') }}</p>
+          <div v-if="decision.candidates?.length" class="mt-2 overflow-x-auto"><table class="w-full text-left"><thead><tr><th>{{ t('priorityScheduling.account') }}</th><th>{{ t('priorityScheduling.score') }}</th><th>{{ t('priorityScheduling.selectionWeight') }}</th><th>{{ t('priorityScheduling.lifecycle.admission') }}</th></tr></thead><tbody><tr v-for="candidate in decision.candidates" :key="candidate.account_id"><td class="pr-3">#{{ candidate.account_id }}</td><td class="pr-3">{{ candidate.score }}</td><td class="pr-3">{{ candidate.selection_weight }}</td><td>{{ candidate.reasons.join(', ') }}</td></tr></tbody></table></div>
         </article>
         <button v-if="decisions.length" type="button" class="btn btn-secondary" @click="more">{{ t('priorityScheduling.lifecycle.more') }}</button>
       </div>
