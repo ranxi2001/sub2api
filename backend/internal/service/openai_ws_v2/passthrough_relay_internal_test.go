@@ -279,6 +279,24 @@ func TestHelperFunctionsCoverage(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestParseUsageAndAccumulateRejectsEmptyOrUnrelatedUsage(t *testing.T) {
+	t.Parallel()
+
+	state := &relayState{}
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{}}`), "response.in_progress", nil)
+	require.False(t, state.turnUsageObserved, "empty usage must remain unknown")
+
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"request_id":"x","foo":"bar"}}`), "response.in_progress", nil)
+	require.False(t, state.turnUsageObserved, "unrelated fields must remain unknown")
+
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"total_tokens":10}}`), "response.in_progress", nil)
+	require.False(t, state.turnUsageObserved, "total_tokens alone cannot be split into billing usage")
+
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"input_tokens":0,"output_tokens":0}}`), "response.in_progress", nil)
+	require.True(t, state.turnUsageObserved, "explicit zero token fields are valid observations")
+	require.Equal(t, Usage{}, finalizeRelayTurnUsage(state))
+}
+
 func TestParseUsageAndEnrichCoverage(t *testing.T) {
 	t.Parallel()
 

@@ -85,6 +85,8 @@ export interface PriorityCandidate {
 export interface PrioritySnapshot {
   latency_percentile?: number
   latency_measurement?: string
+  latency_penalty_mode?: 'deprioritize' | 'stop'
+  latency_fallback?: boolean
   min_samples?: number
   window_minutes?: number
   history_window_end?: string

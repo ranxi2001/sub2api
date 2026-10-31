@@ -1,0 +1,91 @@
+name: Issue605 isolated smart upstream protocol
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/issue605-smart-protocol.yml'
+      - '.github/scripts/issue605-proof.py'
+      - 'docs/design/issue605-smart-upstream-protocol.md'
+permissions:
+  contents: read
+concurrency:
+  group: issue605-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+jobs:
+  acceptance:
+    if: github.head_ref == 'feat/issue605-smart-upstream-protocol' || github.ref_name == 'feat/issue605-smart-upstream-protocol'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact source identity
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code HEAD
+          mkdir -p "$RUNNER_TEMP/issue605-proof"
+          git rev-parse HEAD > "$RUNNER_TEMP/issue605-proof/head.txt"
+      - name: Actual service handler repository packages and race regressions
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository ./internal/pkg/requesttiming ./internal/pkg/openai ./internal/service/openai_ws_v2 -run 'TestSmartProtocol|TestAccountConnectionTiming|TestOpenAIWSHTTPBridge|TestOpenAIResponsesWebSocket|TestOpenAIWSTurn|TestOpenAIWSFirstTurn|TestTimingWrite|TestTimingBinding|TestOpenAITurnAdmission|TestOpenAIWSKeyAdmission|TestIssue594SIWCFinalEgress|TestRelay|TestObserveUpstream|TestParseUsage' -count=1 -timeout=20m -json > "$RUNNER_TEMP/issue605-proof/packages.jsonl" 2>&1
+      - name: Repeat real network lifecycle and sticky sessions three times
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service -run '^TestSmartProtocol(HTTPFirstSession|NetworkModes|ConcurrentSticky|NoReplayAndCleanup|ForeignContinuation|TurnGuardBeforeSend|MissingUsageIsUnknown|Legacy15MiB|StatelessRequestRetainsWS|PassthroughNetwork|ToolContinuation|LegacyNoReplay|ActualContentNetwork|PassthroughNoReplay|PassthroughPartialUsage)$' -count=3 -timeout=10m -json > "$RUNNER_TEMP/issue605-proof/repeated.jsonl" 2>&1
+      - name: Actual isolated PostgreSQL Redis repository integration
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -race -tags=integration ./internal/repository -run 'TestSmartProtocol|TestUsageBillingRepositoryApply|TestOpenAIConnectionDatabaseRegistrationBoundary|TestIssue594ProductionGatewayConnectionRouteAndAccountSafety|TestSharedAccountAndUserConcurrencyAcrossIndependentClients|TestGatewayCacheSuite' -count=1 -timeout=15m -json > "$RUNNER_TEMP/issue605-proof/integration.jsonl" 2>&1
+      - name: Candidate real legacy 17 MiB send lifecycle
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service -run '^TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB$' -count=1 -timeout=5m -json > "$RUNNER_TEMP/issue605-proof/legacy-head.jsonl" 2>&1
+      - name: Identical legacy test against full production baseline package
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          baseline=c81e2a9e735c5fc53c7175448d29441cb777a143
+          baseline_tree="$RUNNER_TEMP/issue605-baseline"
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git worktree add --detach "$baseline_tree" "$baseline"
+          trap 'git worktree remove --force "$baseline_tree"' EXIT
+          cp backend/internal/service/openai_ws_http_bridge_test.go "$baseline_tree/backend/internal/service/"
+          cp backend/internal/service/issue605_legacy_probe_test.go "$baseline_tree/backend/internal/service/"
+          test "$(git -C "$baseline_tree" rev-parse HEAD)" = "$baseline"
+          git -C "$baseline_tree" diff --exit-code -- '*.go' ':!**/*_test.go'
+          git -C "$baseline_tree" rev-parse HEAD > "$RUNNER_TEMP/issue605-proof/baseline-head.txt"
+          cd "$baseline_tree/backend"
+          go test -race -tags=unit ./internal/service -run '^TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB$' -count=1 -timeout=5m -json > "$RUNNER_TEMP/issue605-proof/legacy-baseline.jsonl" 2>&1
+      - name: Whitelist evidence and reject skip or empty acceptance
+        if: always()
+        run: timeout 120s python3 .github/scripts/issue605-proof.py "$RUNNER_TEMP/issue605-proof"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue605-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/issue605-proof/head.txt
+            ${{ runner.temp }}/issue605-proof/baseline-head.txt
+            ${{ runner.temp }}/issue605-proof/summary.json
+            ${{ runner.temp }}/issue605-proof/whitelist.jsonl
+          if-no-files-found: error

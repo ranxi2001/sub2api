@@ -1,0 +1,129 @@
+name: Issue605 P1 passthrough usage repair
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/issue605-p1-repair.yml'
+      - '.github/scripts/issue605-p1-proof.py'
+permissions:
+  contents: read
+concurrency:
+  group: issue605-p1-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+jobs:
+  intended-red:
+    if: github.head_ref == 'feat/issue605-smart-upstream-protocol'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      DEFECTIVE_HEAD: 19a441a79e5980c81506f2775d09f3317364305a
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact defective production sources and candidate tests
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          mkdir -p "$RUNNER_TEMP/issue605-p1-red"
+          git rev-parse HEAD > "$RUNNER_TEMP/issue605-p1-red/test-head.txt"
+          git fetch --no-tags --depth=1 origin "$DEFECTIVE_HEAD"
+          git worktree add --detach "$RUNNER_TEMP/issue605-p1-source" "$DEFECTIVE_HEAD"
+          for path in \
+            backend/internal/service/openai_ws_smart_protocol_network_test.go \
+            backend/internal/service/openai_ws_passthrough_partial_usage_test.go \
+            backend/internal/repository/issue605_passthrough_partial_billing_integration_test.go; do
+            cp "$path" "$RUNNER_TEMP/issue605-p1-source/$path"
+          done
+          git -C "$RUNNER_TEMP/issue605-p1-source" rev-parse HEAD > "$RUNNER_TEMP/issue605-p1-red/source-head.txt"
+          git -C "$RUNNER_TEMP/issue605-p1-source" diff --exit-code -- '*.go' ':!**/*_test.go'
+          for path in backend/internal/service/openai_ws_v2/passthrough_relay.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/handler/openai_gateway_handler.go; do
+            test "$(git -C "$RUNNER_TEMP/issue605-p1-source" hash-object "$path")" = "$(git rev-parse "$DEFECTIVE_HEAD:$path")"
+            git -C "$RUNNER_TEMP/issue605-p1-source" hash-object "$path" >> "$RUNNER_TEMP/issue605-p1-red/production-blobs.txt"
+          done
+      - name: RED actual service must lose authoritative current-turn result
+        working-directory: ${{ runner.temp }}/issue605-p1-source/backend
+        run: |
+          set +e
+          go test -race -tags=unit ./internal/service -run '^TestSmartProtocolPassthroughPartialUsage$' -count=1 -timeout=10m -json > "$RUNNER_TEMP/issue605-p1-red/service.jsonl" 2>&1
+          result=$?
+          printf '%s\n' "$result" > "$RUNNER_TEMP/issue605-p1-red/service-exit.txt"
+          test "$result" -ne 0
+      - name: RED authenticated handler PG Redis must miss observed settlement
+        if: ${{ !cancelled() }}
+        working-directory: ${{ runner.temp }}/issue605-p1-source/backend
+        run: |
+          set +e
+          go test -race -tags=integration ./internal/repository -run '^TestSmartProtocolPassthroughPartialBilling$' -count=1 -timeout=10m -json > "$RUNNER_TEMP/issue605-p1-red/integration.jsonl" 2>&1
+          result=$?
+          printf '%s\n' "$result" > "$RUNNER_TEMP/issue605-p1-red/integration-exit.txt"
+          test "$result" -ne 0
+      - name: Require intended behavioral RED and whitelist evidence
+        if: always()
+        run: timeout 120s python3 .github/scripts/issue605-p1-proof.py red "$RUNNER_TEMP/issue605-p1-red"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue605-p1-red-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/issue605-p1-red/*.txt
+            ${{ runner.temp }}/issue605-p1-red/summary.json
+            ${{ runner.temp }}/issue605-p1-red/whitelist.jsonl
+          if-no-files-found: error
+  repaired-green:
+    needs: intended-red
+    if: github.head_ref == 'feat/issue605-smart-upstream-protocol'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact repaired source
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code HEAD
+          mkdir -p "$RUNNER_TEMP/issue605-p1-green"
+          git rev-parse HEAD > "$RUNNER_TEMP/issue605-p1-green/source-head.txt"
+          for path in backend/internal/service/openai_ws_v2/passthrough_relay.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/handler/openai_gateway_handler.go; do
+            git hash-object "$path" >> "$RUNNER_TEMP/issue605-p1-green/production-blobs.txt"
+          done
+      - name: GREEN actual service current-turn result
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/service -run '^TestSmartProtocolPassthroughPartialUsage$' -count=1 -timeout=10m -json > "$RUNNER_TEMP/issue605-p1-green/service.jsonl" 2>&1
+      - name: GREEN authenticated handler PG Redis exact billing
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: go test -race -tags=integration ./internal/repository -run '^TestSmartProtocolPassthroughPartialBilling$' -count=1 -timeout=10m -json > "$RUNNER_TEMP/issue605-p1-green/integration.jsonl" 2>&1
+      - name: Require complete per-case GREEN
+        if: always()
+        run: timeout 120s python3 .github/scripts/issue605-p1-proof.py green "$RUNNER_TEMP/issue605-p1-green"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue605-p1-green-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/issue605-p1-green/*.txt
+            ${{ runner.temp }}/issue605-p1-green/summary.json
+            ${{ runner.temp }}/issue605-p1-green/whitelist.jsonl
+          if-no-files-found: error
