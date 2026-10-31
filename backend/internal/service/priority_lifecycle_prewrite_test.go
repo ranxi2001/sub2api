@@ -13,6 +13,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type priorityLifecycleBlockingSignals struct {
+	UsageLogRepository
+	release chan struct{}
+}
+
+func (r *priorityLifecycleBlockingSignals) ReadPrioritySchedulingSignals(ctx context.Context, q PrioritySchedulingQuery) (map[int64]PrioritySchedulingSignal, error) {
+	select {
+	case <-r.release:
+		return map[int64]PrioritySchedulingSignal{}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestPriorityLifecycleAdminGETReadOnly(t *testing.T) {
+	cfg := DefaultPrioritySchedulingConfig()
+	cfg.Enabled = true
+	svc := priorityGateway(cfg, &priorityReaderStub{})
+	reader := &priorityLifecycleBlockingSignals{release: make(chan struct{})}
+	defer close(reader.release)
+	svc.usageLogRepo = reader
+	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: "synthetic", UseUpstreamTokenCost: true}
+	svc.priorityScheduling.latestInput = newPrioritySnapshotInput(req, cfg, []openAIAccountCandidateScore{priorityCandidate(1, .1, 0)}, time.Now())
+	require.NotNil(t, svc.PrioritySchedulingSnapshot())
+	svc.priorityScheduling.mu.Lock()
+	defer svc.priorityScheduling.mu.Unlock()
+	if svc.priorityScheduling.active != 0 || len(svc.priorityScheduling.entries) != 0 {
+		t.Fatal("LIFECYCLE_GET: management read launched or mutated routing history")
+	}
+}
+
 // A loopback WS enters the production proxy and relay; only the provider socket
 // is in-memory. The observation clock publishes a stop after frame admission,
 // at the relay activity boundary before the physical write. Deadlines stay real.

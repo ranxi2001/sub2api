@@ -4,6 +4,12 @@ on:
     branches: [production]
     paths:
       - 'backend/**'
+      - 'frontend/src/components/admin/PriorityLifecyclePanel.vue'
+      - 'frontend/src/components/admin/__tests__/PriorityLifecyclePanel.spec.ts'
+      - 'frontend/src/views/admin/PrioritySchedulingView.vue'
+      - 'frontend/src/api/admin/priorityScheduling.ts'
+      - 'frontend/src/i18n/locales/*/priorityScheduling.ts'
+      - '.github/scripts/issue614-lifecycle-browser.mjs'
       - '.github/workflows/issue614-lifecycle.yml'
 permissions:
   contents: read
@@ -11,6 +17,43 @@ concurrency:
   group: issue614-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
+  lifecycle-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Actual components and production typecheck build
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
+          pnpm --dir frontend exec vitest run src/components/admin/__tests__/PriorityLifecyclePanel.spec.ts src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1
+          pnpm --dir frontend run typecheck
+          pnpm --dir frontend run build
+      - name: Isolated synthetic browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/issue614-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/issue614-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Chinese English desktop mobile browser evidence
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/issue614-browser/node_modules/playwright
+          ISSUE614_BROWSER_DIR: ${{ runner.temp }}/issue614-browser-evidence
+        run: node .github/scripts/issue614-lifecycle-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue614-browser-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue614-browser-evidence
   durable-shadow:
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -69,13 +112,15 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/issue614-red" "$BASELINE"
           cp backend/internal/service/priority_lifecycle_prewrite_test.go "$RUNNER_TEMP/issue614-red/backend/internal/service/"
           set +e
-          (cd "$RUNNER_TEMP/issue614-red/backend" && go test -tags=unit ./internal/service -run '^TestPriorityLifecyclePassthroughPhysicalWriteFence$' -count=1 -v -timeout=12m) > "$RUNNER_TEMP/issue614-proof/red.log" 2>&1
+          (cd "$RUNNER_TEMP/issue614-red/backend" && go test -tags=unit ./internal/service -run '^TestPriorityLifecycle(PassthroughPhysicalWriteFence|AdminGETReadOnly)$' -count=1 -v -timeout=12m) > "$RUNNER_TEMP/issue614-proof/red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue614-proof/red.log"
           test "$result" -ne 0
           grep -q 'LIFECYCLE_PREWRITE: stopped follow-up generation reached physical upstream write' "$RUNNER_TEMP/issue614-proof/red.log"
           grep -q -- '--- FAIL: TestPriorityLifecyclePassthroughPhysicalWriteFence' "$RUNNER_TEMP/issue614-proof/red.log"
+          grep -q 'LIFECYCLE_GET: management read launched or mutated routing history' "$RUNNER_TEMP/issue614-proof/red.log"
+          grep -q -- '--- FAIL: TestPriorityLifecycleAdminGETReadOnly' "$RUNNER_TEMP/issue614-proof/red.log"
           ! grep -Eq 'undefined:|build failed|no tests to run|fixture must publish' "$RUNNER_TEMP/issue614-proof/red.log"
       - name: GREEN exact head production adapters handlers and physical writes
         run: |

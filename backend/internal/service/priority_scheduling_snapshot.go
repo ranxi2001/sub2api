@@ -59,7 +59,8 @@ func (s *OpenAIGatewayService) PrioritySchedulingSnapshot() *PrioritySchedulingS
 	if input == nil {
 		return nil
 	}
-	return s.prioritySchedulingSnapshot(input)
+	snapshot, _ := s.prioritySchedulingSnapshotWithHistory(input, true)
+	return snapshot
 }
 
 func (s *OpenAIGatewayService) prioritySchedulingSnapshot(input *prioritySnapshotInput) *PrioritySchedulingSnapshot {
@@ -67,13 +68,17 @@ func (s *OpenAIGatewayService) prioritySchedulingSnapshot(input *prioritySnapsho
 	return snapshot
 }
 
-func (s *OpenAIGatewayService) prioritySchedulingSnapshotWithHistory(input *prioritySnapshotInput) (*PrioritySchedulingSnapshot, priorityHistoryResult) {
+func (s *OpenAIGatewayService) prioritySchedulingSnapshotWithHistory(input *prioritySnapshotInput, readOnly ...bool) (*PrioritySchedulingSnapshot, priorityHistoryResult) {
 	if s == nil || input == nil {
 		return nil, priorityHistoryResult{}
 	}
 	h := priorityHistoryResult{status: "limited"}
 	if !input.limited {
-		h = s.priorityHistory(input.request, input.config, input.candidates)
+		if len(readOnly) > 0 && readOnly[0] {
+			h = s.readOnlyPriorityHistory(input.request, input.config, input.candidates)
+		} else {
+			h = s.priorityHistory(input.request, input.config, input.candidates)
+		}
 	}
 	now := time.Now()
 	var group *int64

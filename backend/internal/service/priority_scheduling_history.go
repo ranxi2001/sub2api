@@ -304,6 +304,42 @@ func (s *OpenAIGatewayService) cachedPriorityHistory(req OpenAIAccountScheduleRe
 	return h
 }
 
+// Management GETs must not launch workers, prune scope membership, acknowledge
+// generations or recompute policy. Explicit POST recompute retains its own path.
+func (s *OpenAIGatewayService) readOnlyPriorityHistory(req OpenAIAccountScheduleRequest, c PrioritySchedulingConfig, pool []openAIAccountCandidateScore) priorityHistoryResult {
+	s.priorityScheduling.mu.Lock()
+	defer s.priorityScheduling.mu.Unlock()
+	h := priorityHistoryResult{status: "loading", signals: make(map[int64]PrioritySchedulingSignal)}
+	entry := s.priorityScheduling.entries[priorityHistoryKey(req, c)]
+	if entry == nil {
+		return h
+	}
+	h.entry = entry
+	h.completedReadGeneration = entry.completedReadGeneration
+	h.refreshing = entry.refreshing
+	h.failure = entry.failure
+	if !entry.observed.IsZero() {
+		observed, window := entry.observed, entry.windowEnd
+		h.observed, h.windowEnd = &observed, &window
+		for _, item := range pool {
+			if value, ok := entry.signals[item.account.ID]; ok {
+				h.signals[item.account.ID] = value
+			}
+		}
+	}
+	if len(h.signals) == len(pool) && len(pool) > 0 {
+		h.status = "ready"
+		if time.Since(entry.observed) > priorityHistoryTTL || h.failure != "" {
+			h.status = "stale"
+		}
+	} else if len(h.signals) > 0 {
+		h.status = "partial"
+	} else if h.failure != "" {
+		h.status = "error"
+	}
+	return h
+}
+
 func priorityHistoryKey(req OpenAIAccountScheduleRequest, c PrioritySchedulingConfig) string {
 	// The action changes admission, not the measured population. Switching soft
 	// and stop must retain the exact same model/group/measurement evidence.

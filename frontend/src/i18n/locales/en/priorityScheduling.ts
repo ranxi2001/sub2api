@@ -1,4 +1,13 @@
 export default {
+  lifecycle: {
+    title: 'Lifecycle state and immutable history',
+    shadow: 'Shadow observation only. Compatibility routing still decides admission; no additional upstream requests or second penalty engine. Unapproved v2 trigger, renewal and recovery rules remain pending.',
+    group: 'Group ID (blank = ungrouped)', endpoint: 'Ingress endpoint', requestType: 'Request category', select: 'Select scope',
+    current: 'Current state', decisions: 'Request decisions', events: 'Policy timeline', more: 'Load next page',
+    account: 'Account', configuration: 'Configuration', data: 'Content / freshness / refresh', policy: 'Stored evidence', admission: 'Admission assessment',
+    generation: 'Statistics generation', watermark: 'Committed-event watermark',
+    lastGood: 'Read failed or offline. Retaining last-good data as stale.', awaitingServer: 'Deadline reached; waiting for server state (not recovered)',
+  },
   errorRate: "Attempt error rate",
   error_rate_weight: "Error penalty weight (%)",
   error_rate_window_minutes: "Error window (minutes)",

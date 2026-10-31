@@ -38,6 +38,7 @@
           <button class="btn btn-primary" type="submit">{{ t(saving ? 'priorityScheduling.saving' : 'priorityScheduling.save') }}</button>
         </fieldset>
       </form>
+      <PriorityLifecyclePanel />
       <section class="card p-5" data-testid="latency-panel">
         <header class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-lg font-semibold">{{ t('priorityScheduling.latencyPanel.title') }}</h2>
@@ -170,6 +171,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
+import PriorityLifecyclePanel from '@/components/admin/PriorityLifecyclePanel.vue'
 import {
   getPriorityConfig, savePriorityConfig, getPrioritySnapshot, getPriorityLatency,
   recomputePriorityScheduling, getPriorityStickyBindings, clearPriorityStickyBindings,
@@ -208,7 +210,7 @@ let alive = true, generation = 0, recomputeRequestGeneration = 0, stickyRequestG
 let historyTimer: ReturnType<typeof setTimeout> | undefined
 function stopHistoryRefresh() { clearTimeout(historyTimer); historyTimer = undefined }
 const active = (version: number) => alive && generation === version
-const latencyRows = computed(() => [...(latency.value?.accounts ?? [])].sort((a, b) => bucketMetric(b) - bucketMetric(a)))
+const latencyRows = computed(() => [...(latency.value?.accounts ?? [])].sort((a, b) => (bucketMetric(b) ?? -1) - (bucketMetric(a) ?? -1)))
 const latencyBuckets = computed(() => {
   const buckets = new Set<string>()
   for (const account of latency.value?.accounts ?? []) for (const bucket of account.buckets ?? []) buckets.add(bucket.bucket)
@@ -231,8 +233,8 @@ const recomputeCanClearSticky = computed(() => {
 function metricValue(item: { selected_ttft_ms?: number; p50_ttft_ms: number; p70_ttft_ms?: number; p90_ttft_ms: number; p95_ttft_ms?: number; p99_ttft_ms: number }, percentile: number) {
   if (item.selected_ttft_ms != null) return item.selected_ttft_ms
   if (percentile === 50) return item.p50_ttft_ms
-  if (percentile === 70) return item.p70_ttft_ms ?? item.p90_ttft_ms
-  if (percentile === 95) return item.p95_ttft_ms ?? item.p90_ttft_ms
+  if (percentile === 70) return item.p70_ttft_ms ?? null
+  if (percentile === 95) return item.p95_ttft_ms ?? null
   if (percentile === 99) return item.p99_ttft_ms
   return item.p90_ttft_ms
 }

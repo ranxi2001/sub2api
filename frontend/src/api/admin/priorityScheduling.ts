@@ -1,5 +1,6 @@
 import { apiClient } from '../client'
 export interface PrioritySchedulingConfig {
+  lifecycle_mode?: 'off' | 'shadow'
   error_rate_weight?: number
   error_rate_window_minutes?: number
   error_rate_prior_samples?: number
@@ -25,6 +26,92 @@ export interface PrioritySchedulingConfig {
   latency_weight: number
   load_weight: number
   cost_weight: number
+}
+export interface PriorityLifecycleScope {
+  group_id: number | null
+  model: string
+  endpoint: string
+  request_type: number
+  measurement_schema?: string
+  statistics_spec?: string
+}
+export interface PriorityLifecyclePolicy {
+  account_id: number
+  state: string
+  evidence_id: string
+  evidence_at: string
+  expires_at: string
+  policy_revision: string
+  observed_value: number | null
+  threshold: number
+  percentile: number
+  mode: string
+  rule: string
+}
+export interface PriorityLifecycleState {
+  scope: PriorityLifecycleScope
+  server_now: string
+  policy_revision: string
+  mode: 'off' | 'shadow'
+  last_error: string
+  attempted_at: string
+  statistics: null | {
+    scope: PriorityLifecycleScope
+    generation: number
+    watermark: number
+    window_start: string
+    window_end: string
+    observed_at: string
+    policy_revision: string
+    signals: Record<string, Partial<PriorityCandidate>>
+  }
+  accounts: {
+    account_id: number
+    account_name: string
+    configuration: string
+    admission: string
+    reasons: string[]
+    content: string
+    freshness: string
+    refresh: string
+    signal: Partial<PriorityCandidate> | null
+    policy: PriorityLifecyclePolicy | null
+  }[]
+}
+export interface PriorityLifecycleDecision {
+  sequence: number
+  decision_id: string
+  parent_decision_id: string
+  trace_id?: string
+  scope: PriorityLifecycleScope
+  policy_revision: string
+  statistics_generation: number | null
+  watermark: number | null
+  selected_account_id: number
+  at: string
+  phase: string
+  allowed: boolean
+  reason: string
+  mode: string
+}
+export interface PriorityLifecycleEvent {
+  sequence: number
+  kind: string
+  event_at: string
+  recorded_at: string
+  policy: PriorityLifecyclePolicy
+}
+function lifecycleParams(scope: PriorityLifecycleScope) {
+  return { group_id: scope.group_id ?? 'ungrouped', model: scope.model, endpoint: scope.endpoint, request_type: scope.request_type }
+}
+export async function getPriorityLifecycleState(scope: PriorityLifecycleScope): Promise<PriorityLifecycleState> {
+  return (await apiClient.get('/admin/priority-scheduling/state', { params: lifecycleParams(scope) })).data
+}
+export async function getPriorityLifecycleDecisions(scope: PriorityLifecycleScope, after = 0): Promise<{ items: PriorityLifecycleDecision[] }> {
+  return (await apiClient.get('/admin/priority-scheduling/decisions', { params: { ...lifecycleParams(scope), after } })).data
+}
+export async function getPriorityLifecycleEvents(scope: PriorityLifecycleScope, after = 0): Promise<{ items: PriorityLifecycleEvent[] }> {
+  return (await apiClient.get('/admin/priority-scheduling/policy-events', { params: { ...lifecycleParams(scope), after } })).data
 }
 export type PriorityHistoryStatus = 'ready' | 'stale' | 'partial' | 'loading' | 'error' | 'unavailable' | 'limited'
 export interface PriorityCandidate {

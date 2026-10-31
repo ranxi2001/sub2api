@@ -1,4 +1,13 @@
 export default {
+  lifecycle: {
+    title: '生命周期当前态与不可变历史',
+    shadow: '当前仅作 shadow 观测。准入仍由兼容策略决定，不新增上游请求或第二套处罚；未批准的 V2 触发、续期和恢复规则保持待定。',
+    group: '分组 ID（空为未分组）', endpoint: '入站端点', requestType: '请求类别', select: '固定此范围',
+    current: '完整当前态', decisions: '请求决策', events: '策略时间线', more: '读取下一页',
+    account: '账号', configuration: '配置状态', data: '内容 / 新鲜度 / 刷新', policy: '持久证据', admission: '准入评估',
+    generation: '统计 generation', watermark: '已提交事件水位',
+    lastGood: '读取失败或已断线，保留上次成功数据并标为过期。', awaitingServer: '期限已到，等待服务端状态（不代表恢复）',
+  },
   errorRate: "上游尝试错误率",
   error_rate_weight: "错误惩罚权重（%）",
   error_rate_window_minutes: "错误窗口（分钟）",
