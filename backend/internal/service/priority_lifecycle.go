@@ -111,20 +111,34 @@ type PriorityLifecycleEvent struct {
 }
 
 type PriorityLifecycleDecision struct {
-	Sequence             int64                  `json:"sequence"`
-	ParentID             string                 `json:"parent_decision_id"`
-	TraceID              string                 `json:"trace_id,omitempty"`
-	StatisticsGeneration *int64                 `json:"statistics_generation"`
-	Watermark            *int64                 `json:"watermark"`
-	ID                   string                 `json:"decision_id"`
-	Scope                PriorityLifecycleScope `json:"scope"`
-	PolicyRevision       string                 `json:"policy_revision"`
-	SelectedAccountID    int64                  `json:"selected_account_id"`
-	At                   time.Time              `json:"at"`
-	Phase                string                 `json:"phase"`
-	Allowed              bool                   `json:"allowed"`
-	Reason               string                 `json:"reason"`
-	Mode                 string                 `json:"mode"`
+	ConsumedSource       string                    `json:"consumed_source"`
+	ConsumedRevision     string                    `json:"consumed_revision"`
+	ConsumedObservedAt   *time.Time                `json:"consumed_observed_at"`
+	ConsumedWindowEnd    *time.Time                `json:"consumed_window_end"`
+	Candidates           []PrioritySchedulingScore `json:"candidates"`
+	ExcludedAccountIDs   []int64                   `json:"excluded_account_ids"`
+	Sequence             int64                     `json:"sequence"`
+	ParentID             string                    `json:"parent_decision_id"`
+	TraceID              string                    `json:"trace_id,omitempty"`
+	StatisticsGeneration *int64                    `json:"statistics_generation"`
+	Watermark            *int64                    `json:"watermark"`
+	ID                   string                    `json:"decision_id"`
+	Scope                PriorityLifecycleScope    `json:"scope"`
+	PolicyRevision       string                    `json:"policy_revision"`
+	SelectedAccountID    int64                     `json:"selected_account_id"`
+	At                   time.Time                 `json:"at"`
+	Phase                string                    `json:"phase"`
+	Allowed              bool                      `json:"allowed"`
+	Reason               string                    `json:"reason"`
+	Mode                 string                    `json:"mode"`
+}
+type priorityLifecycleConsumed struct {
+	mu                  sync.Mutex
+	config              PrioritySchedulingConfig
+	generation          uint64
+	digest              string
+	observed, windowEnd *time.Time
+	candidates          []PrioritySchedulingScore
 }
 
 type priorityLifecycleRequestTypeKey struct{}
@@ -152,6 +166,25 @@ func (s *OpenAIGatewayService) recordPriorityLifecycleDecision(ctx context.Conte
 	scope := PriorityLifecycleScope{GroupID: req.GroupID, Model: priorityHistoryModel(req), Endpoint: PriorityLifecycleEndpoint(req.InboundEndpoint), RequestType: req.LifecycleRequestType, MeasurementSchema: measurement, StatisticsSpec: spec}
 	d := PriorityLifecycleDecision{ID: uuid.NewString(), ParentID: req.priorityDecisionID, Scope: scope, SelectedAccountID: accountID, At: time.Now().UTC(), Phase: phase, Allowed: denied == nil, Mode: "compatibility_v1/shadow_v2", PolicyRevision: revision}
 	d.TraceID = requesttiming.From(ctx).Identity()
+	d.ConsumedSource = "not_observed"
+	d.Candidates = []PrioritySchedulingScore{}
+	d.ExcludedAccountIDs = []int64{}
+	if req.priorityConsumed != nil {
+		consumed := req.priorityConsumed
+		consumed.mu.Lock()
+		if consumed.digest != "" {
+			cfg = consumed.config
+			d.PolicyRevision = priorityConfigRevision(cfg)
+			d.ConsumedSource = "compatibility_cache"
+			d.ConsumedRevision = fmt.Sprintf("%d/%s", consumed.generation, consumed.digest)
+			d.ConsumedObservedAt, d.ConsumedWindowEnd = consumed.observed, consumed.windowEnd
+			d.Candidates = append(d.Candidates, consumed.candidates...)
+		}
+		consumed.mu.Unlock()
+	}
+	for id := range req.ExcludedIDs {
+		d.ExcludedAccountIDs = append(d.ExcludedAccountIDs, id)
+	}
 	if denied != nil {
 		d.Reason = "admission_denied"
 		var admission *OpenAITurnAdmissionError
@@ -166,14 +199,9 @@ func (s *OpenAIGatewayService) recordPriorityLifecycleDecision(ctx context.Conte
 			slog.Warn("priority_lifecycle_scope_registration_failed")
 		}
 	}
-	stats, _, err := repo.ReadPriorityLifecycle(audit, scope)
-	if err == nil && stats != nil {
-		d.StatisticsGeneration = &stats.Generation
-		d.Watermark = &stats.Watermark
-	}
-	if err == nil {
-		err = repo.RecordPriorityLifecycleDecision(audit, d)
-	}
+	// No post-selection read may masquerade as the snapshot consumed by the
+	// compatibility scorer. Durable shadow generation is intentionally null.
+	err := repo.RecordPriorityLifecycleDecision(audit, d)
 	if err != nil {
 		s.priorityLifecycle.mu.Lock()
 		s.priorityLifecycle.failure = "audit_incomplete"
@@ -350,9 +378,6 @@ func (s *OpenAIGatewayService) PriorityLifecycleState(ctx context.Context, scope
 			}
 		}
 		if p, found := byID[a.ID]; found {
-			if !now.Before(p.ExpiresAt) {
-				p.State = "RECOVERY_SHADOW"
-			}
 			row.Policy = &p
 		}
 		if out.LastError != "" {

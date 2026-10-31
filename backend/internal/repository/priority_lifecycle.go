@@ -30,7 +30,17 @@ func (r *usageLogRepository) AdvancePriorityLifecycle(ctx context.Context, cfg s
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	var attempted []string
+	defer func() {
+		_ = tx.Rollback()
+		if result != nil {
+			report, end := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			defer end()
+			for _, identity := range attempted {
+				_, _ = r.db.ExecContext(report, "UPDATE priority_lifecycle_scopes SET last_error='refresh_failed',refresh_state='ERROR' WHERE identity=$1", identity)
+			}
+		}
+	}()
 	var locked bool
 	if err = tx.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock(6142026)").Scan(&locked); err != nil {
 		return err
@@ -98,12 +108,7 @@ func (r *usageLogRepository) AdvancePriorityLifecycle(ctx context.Context, cfg s
 	scoped := &usageLogRepository{sql: tx}
 	for _, w := range batch {
 		scope := w.scope
-		// Each failure retains the last-good JSON, and is shared by instances.
-		defer func(identity string) {
-			if result != nil {
-				_, _ = r.db.ExecContext(context.WithoutCancel(ctx), "UPDATE priority_lifecycle_scopes SET last_error='refresh_failed',refresh_state='ERROR' WHERE identity=$1", identity)
-			}
-		}(scope.Identity())
+		attempted = append(attempted, scope.Identity())
 		pending, err := tx.QueryContext(ctx, "SELECT sequence FROM priority_lifecycle_outbox o WHERE processed_at IS NULL AND (scope_identity=$1 OR (scope_identity IS NULL AND EXISTS(SELECT 1 FROM usage_logs u WHERE u.id=o.usage_log_id AND priority_lifecycle_scope_identity(u.group_id,COALESCE(NULLIF(u.requested_model,''),u.model),u.inbound_endpoint,u.request_type)=$1))) ORDER BY sequence", scope.Identity())
 		if err != nil {
 			return err
@@ -215,9 +220,70 @@ func publishPriorityLifecyclePolicies(ctx context.Context, tx *sql.Tx, scope ser
 			return err
 		}
 		if changed > 0 {
+			if _, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_evidence(scope_key,account_id,evidence_id,evidence) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", scope.PolicyKey(), id, evidence, string(raw)); err != nil {
+				return err
+			}
 			if _, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_policy_events(scope_key,account_id,evidence_id,kind,event_at,event) VALUES($1,$2,$3,'OBSERVED_SHADOW',$4,$5) ON CONFLICT DO NOTHING", scope.PolicyKey(), id, evidence, policy.EvidenceAt, string(raw)); err != nil {
 				return err
 			}
+		}
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT account_id,state,evaluated_revision FROM priority_lifecycle_policy WHERE scope_key=$1 FOR UPDATE", scope.PolicyKey())
+	if err != nil {
+		return err
+	}
+	type evaluation struct {
+		id       int64
+		policy   service.PriorityLifecyclePolicy
+		revision string
+	}
+	values := make([]evaluation, 0)
+	for rows.Next() {
+		var value evaluation
+		var raw []byte
+		if err = rows.Scan(&value.id, &raw, &value.revision); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err = json.Unmarshal(raw, &value.policy); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		values = append(values, value)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, value := range values {
+		p := value.policy
+		if value.revision != "" && value.revision != revision {
+			raw, err := json.Marshal(p)
+			if err != nil {
+				return err
+			}
+			// Configuration reevaluation is a distinct event. It records the
+			// new revision in kind and never rewrites the original evidence.
+			if _, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_policy_events(scope_key,account_id,evidence_id,kind,event_at,event) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING", scope.PolicyKey(), value.id, p.EvidenceID, "CONFIG_REEVALUATED:"+revision, now, string(raw)); err != nil {
+				return err
+			}
+		}
+		if !now.Before(p.ExpiresAt) && p.State == "PENALIZED_SHADOW" {
+			p.State = "RECOVERY_SHADOW"
+			raw, err := json.Marshal(p)
+			if err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_policy_events(scope_key,account_id,evidence_id,kind,event_at,event) VALUES($1,$2,$3,'EXPIRED',$4,$5) ON CONFLICT DO NOTHING", scope.PolicyKey(), value.id, p.EvidenceID, p.ExpiresAt, string(raw)); err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_policy SET state=$3 WHERE scope_key=$1 AND account_id=$2 AND evidence_id=$4", scope.PolicyKey(), value.id, string(raw), p.EvidenceID); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_policy SET evaluated_revision=$3,evaluated_at=$4 WHERE scope_key=$1 AND account_id=$2", scope.PolicyKey(), value.id, revision, now); err != nil {
+			return err
 		}
 	}
 	return nil

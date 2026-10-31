@@ -69,6 +69,7 @@ var openAIAdvancedSchedulerSettingCache atomic.Value // *cachedOpenAIAdvancedSch
 var openAIAdvancedSchedulerSettingSF singleflight.Group
 
 type OpenAIAccountScheduleRequest struct {
+	priorityConsumed        *priorityLifecycleConsumed
 	priorityDecisionID      string
 	LifecycleRequestType    RequestType
 	ObservationEffort       string
@@ -430,6 +431,9 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	start := time.Now()
 	if req.priorityDecisionID == "" {
 		req.priorityDecisionID = newPriorityLifecycleDecisionID()
+	}
+	if req.priorityConsumed == nil {
+		req.priorityConsumed = &priorityLifecycleConsumed{}
 	}
 	if kind, ok := ctx.Value(priorityLifecycleRequestTypeKey{}).(RequestType); ok {
 		req.LifecycleRequestType = kind

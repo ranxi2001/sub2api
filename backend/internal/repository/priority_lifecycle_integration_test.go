@@ -97,7 +97,8 @@ func TestPriorityLifecycleDurableOutboxScopeAndDeadline(t *testing.T) {
 	require.Equal(t, beforeGeneration, after.Generation, "GET/read must not publish statistics")
 	events, err := repo.ReadPriorityLifecycleEvents(ctx, scope, 0)
 	require.NoError(t, err)
-	require.Len(t, events, 1)
+	require.Len(t, events, 2)
+	require.Contains(t, events[1].Kind, "CONFIG_REEVALUATED")
 	require.Equal(t, evidence, events[0].Policy.EvidenceID)
 }
 
@@ -143,4 +144,49 @@ func TestPriorityLifecycleProgressesBeyond32QuietAndEmptyScopes(t *testing.T) {
 	stats, _, err := repo.ReadPriorityLifecycle(ctx, scope)
 	require.NoError(t, err)
 	require.Zero(t, stats.Signals[999].Samples, "quiet windows are recomputed without new traffic")
+}
+
+func TestPriorityLifecycleLateCommitAndWorkerFencing(t *testing.T) {
+	ctx := context.Background()
+	repo := newUsageLogRepositoryWithSQL(integrationEntClient, integrationDB)
+	cfg := service.DefaultPrioritySchedulingConfig()
+	cfg.Enabled = true
+	measurement, spec, _ := service.PriorityLifecycleVersions(cfg)
+	prefix := fmt.Sprintf("late-%d", time.Now().UnixNano())
+	scope := service.PriorityLifecycleScope{Model: prefix, Endpoint: "/v1/responses", RequestType: service.RequestTypeStream, MeasurementSchema: measurement, StatisticsSpec: spec}
+	require.NoError(t, repo.RegisterPriorityLifecycleScope(ctx, scope))
+	tx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	// Allocate a lower sequence in a transaction the worker cannot see.
+	var lower int64
+	require.NoError(t, tx.QueryRowContext(ctx, "INSERT INTO priority_lifecycle_outbox(usage_log_id,kind,scope_identity) VALUES(-614,$1,$2) RETURNING sequence", prefix, scope.Identity()).Scan(&lower))
+	var upper int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "INSERT INTO priority_lifecycle_outbox(usage_log_id,kind,scope_identity) VALUES(-615,$1,$2) RETURNING sequence", prefix, scope.Identity()).Scan(&upper))
+	require.Greater(t, upper, lower)
+	require.NoError(t, repo.AdvancePriorityLifecycle(ctx, cfg))
+	require.NoError(t, tx.Commit())
+	var pending bool
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT processed_at IS NULL FROM priority_lifecycle_outbox WHERE sequence=$1", lower).Scan(&pending))
+	require.True(t, pending, "unseen low sequence must remain pending, allocation is not commit order")
+	for range 8 {
+		require.NoError(t, repo.AdvancePriorityLifecycle(ctx, cfg))
+	}
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT processed_at IS NULL FROM priority_lifecycle_outbox WHERE sequence=$1", lower).Scan(&pending))
+	require.False(t, pending, "next owner processes the late committed low sequence")
+	lock, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = lock.ExecContext(ctx, "SELECT pg_advisory_xact_lock(6142026)")
+	require.NoError(t, err)
+	before, _, err := repo.ReadPriorityLifecycle(ctx, scope)
+	require.NoError(t, err)
+	require.NotNil(t, before)
+	require.NoError(t, repo.AdvancePriorityLifecycle(ctx, cfg))
+	after, _, err := repo.ReadPriorityLifecycle(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, before.Generation, after.Generation, "losing fencing owner does not publish")
+	require.NoError(t, lock.Rollback())
+	_, _ = integrationDB.Exec("DELETE FROM priority_lifecycle_outbox WHERE kind=$1", prefix)
+	_, _ = integrationDB.Exec("DELETE FROM priority_lifecycle_statistics WHERE scope_key=$1", scope.Key())
+	_, _ = integrationDB.Exec("DELETE FROM priority_lifecycle_scopes WHERE identity=$1", scope.Identity())
 }

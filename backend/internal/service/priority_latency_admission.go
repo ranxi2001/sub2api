@@ -265,6 +265,7 @@ func ownedPriorityScheduleRequest(req OpenAIAccountScheduleRequest) OpenAIAccoun
 		copy.GroupID = &id
 	}
 	copy.priorityDecisionID = req.priorityDecisionID
+	copy.priorityConsumed = req.priorityConsumed
 	copy.LifecycleRequestType = req.LifecycleRequestType
 	copy.ObservationEffort, copy.ObservationEffortScoped = req.ObservationEffort, req.ObservationEffortScoped
 	return copy

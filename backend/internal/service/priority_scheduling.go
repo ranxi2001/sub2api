@@ -460,6 +460,19 @@ func (s *defaultOpenAIAccountScheduler) applyPriorityScheduling(req OpenAIAccoun
 		plan.candidates[i].priorityErrors = s.priorityErrorEvidence(req, c, plan.candidates[i].account.ID, now)
 		applyPriorityCandidate(c, &plan.candidates[i], history.signals[plan.candidates[i].account.ID], now)
 	}
+	if req.priorityConsumed != nil {
+		req.priorityConsumed.mu.Lock()
+		req.priorityConsumed.config = c
+		req.priorityConsumed.generation = history.completedReadGeneration
+		req.priorityConsumed.observed = history.observed
+		req.priorityConsumed.windowEnd = history.windowEnd
+		req.priorityConsumed.digest = priorityLifecycleHash(history.signals)
+		req.priorityConsumed.candidates = make([]PrioritySchedulingScore, 0, len(plan.candidates))
+		for _, item := range plan.candidates {
+			req.priorityConsumed.candidates = append(req.priorityConsumed.candidates, scorePriorityCandidate(c, item, history.signals[item.account.ID], now))
+		}
+		req.priorityConsumed.mu.Unlock()
+	}
 	plan.priorityScheduling = true
 	plan.topK = len(plan.candidates)
 	plan.includeOverflowFallback = true
