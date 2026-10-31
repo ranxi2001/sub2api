@@ -100,3 +100,47 @@ func TestPriorityLifecycleDurableOutboxScopeAndDeadline(t *testing.T) {
 	require.Len(t, events, 1)
 	require.Equal(t, evidence, events[0].Policy.EvidenceID)
 }
+
+func TestPriorityLifecycleProgressesBeyond32QuietAndEmptyScopes(t *testing.T) {
+	ctx := context.Background()
+	repo := newUsageLogRepositoryWithSQL(integrationEntClient, integrationDB)
+	cfg := service.DefaultPrioritySchedulingConfig()
+	cfg.Enabled = true
+	measurement, spec, _ := service.PriorityLifecycleVersions(cfg)
+	scopes := make([]service.PriorityLifecycleScope, 41)
+	prefix := fmt.Sprintf("fair-%d-", time.Now().UnixNano())
+	for i := range scopes {
+		scopes[i] = service.PriorityLifecycleScope{Model: fmt.Sprintf("%s%02d", prefix, i), Endpoint: "/v1/responses", RequestType: service.RequestTypeStream, MeasurementSchema: measurement, StatisticsSpec: spec}
+		require.NoError(t, repo.RegisterPriorityLifecycleScope(ctx, scopes[i]))
+	}
+	t.Cleanup(func() {
+		for _, scope := range scopes {
+			_, _ = integrationDB.Exec("DELETE FROM priority_lifecycle_statistics WHERE scope_key=$1", scope.Key())
+			_, _ = integrationDB.Exec("DELETE FROM priority_lifecycle_scopes WHERE identity=$1", scope.Identity())
+		}
+	})
+	for range 8 {
+		require.NoError(t, repo.AdvancePriorityLifecycle(ctx, cfg))
+	}
+	for _, scope := range scopes {
+		stats, _, err := repo.ReadPriorityLifecycle(ctx, scope)
+		require.NoError(t, err)
+		require.NotNil(t, stats, "every scope must progress, including empty and quiet ones")
+		require.NotZero(t, stats.CollectedThrough)
+		require.Equal(t, "IDLE", stats.RefreshState)
+		for _, signal := range stats.Signals {
+			require.Zero(t, signal.Samples)
+		}
+	}
+	// A previously valid, now quiet window must publish empty instead of
+	// retaining VALID forever. Registering inventory is a command, GET is pure.
+	scope := scopes[0]
+	_, err := integrationDB.Exec("UPDATE priority_lifecycle_statistics SET snapshot=jsonb_set(snapshot,'{signals}', '{\"999\":{\"samples\":20,\"p90_ttft_ms\":500}}'),observed_at=NOW()-INTERVAL '2 hours' WHERE scope_key=$1", scope.Key())
+	require.NoError(t, err)
+	for range 8 {
+		require.NoError(t, repo.AdvancePriorityLifecycle(ctx, cfg))
+	}
+	stats, _, err := repo.ReadPriorityLifecycle(ctx, scope)
+	require.NoError(t, err)
+	require.Zero(t, stats.Signals[999].Samples, "quiet windows are recomputed without new traffic")
+}

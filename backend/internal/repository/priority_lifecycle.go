@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lib/pq"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -21,7 +22,7 @@ var _ service.PriorityLifecycleRepository = (*usageLogRepository)(nil)
 // and immutable shadow evidence, and acknowledges the reliable outbox together.
 // The rolling compensation query includes new accounts and ready-empty scopes;
 // it does not depend on any instance's last candidate pool.
-func (r *usageLogRepository) AdvancePriorityLifecycle(ctx context.Context, cfg service.PrioritySchedulingConfig) error {
+func (r *usageLogRepository) AdvancePriorityLifecycle(ctx context.Context, cfg service.PrioritySchedulingConfig) (result error) {
 	if r.db == nil {
 		return errors.New("lifecycle worker requires primary database")
 	}
@@ -37,119 +38,189 @@ func (r *usageLogRepository) AdvancePriorityLifecycle(ctx context.Context, cfg s
 	if !locked {
 		return nil
 	}
-	now := time.Now().UTC()
-	since := now.Add(-time.Duration(cfg.WindowMinutes) * time.Minute)
-	var watermark int64
-	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence),0) FROM priority_lifecycle_outbox").Scan(&watermark); err != nil {
-		return err
-	}
-	rows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT DISTINCT group_id,COALESCE(NULLIF(requested_model,''),model),%s,request_type FROM usage_logs WHERE created_at >= $1 AND created_at < $2 ORDER BY 2,3,4 LIMIT 33", priorityLifecycleEndpointSQL), since, now)
-	if err != nil {
+	var now time.Time
+	if err = tx.QueryRowContext(ctx, "SELECT transaction_timestamp()").Scan(&now); err != nil {
 		return err
 	}
 	measurement, spec, revision := service.PriorityLifecycleVersions(cfg)
-	scopes := make([]service.PriorityLifecycleScope, 0)
+	// Every explicitly configured model/group has an empty-ready population,
+	// even before any traffic; unknown historical ingress stays separate.
+	for _, model := range cfg.Models {
+		groups := cfg.GroupIDs
+		if len(groups) == 0 {
+			groups = []int64{0}
+		}
+		for _, id := range groups {
+			for _, endpoint := range []string{"/v1/responses", "/v1/chat/completions", "/v1/messages"} {
+				for _, kind := range []service.RequestType{service.RequestTypeSync, service.RequestTypeStream, service.RequestTypeWSV2} {
+					scope := service.PriorityLifecycleScope{Model: model, Endpoint: endpoint, RequestType: kind}
+					if id != 0 {
+						value := id
+						scope.GroupID = &value
+					}
+					if _, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_scopes(identity) VALUES($1) ON CONFLICT DO NOTHING", scope.Identity()); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	// Includes quiet scopes forever. Fair oldest-first rotation is persistent;
+	// hot/new scopes cannot monopolize progress or block a >32-scope universe.
+	rows, err := tx.QueryContext(ctx, "SELECT identity,source_revision FROM priority_lifecycle_scopes ORDER BY last_processed_at NULLS FIRST,identity::text LIMIT 8")
+	if err != nil {
+		return err
+	}
+	type work struct {
+		scope  service.PriorityLifecycleScope
+		source int64
+	}
+	batch := make([]work, 0, 8)
 	for rows.Next() {
-		var scope service.PriorityLifecycleScope
-		if err = rows.Scan(&scope.GroupID, &scope.Model, &scope.Endpoint, &scope.RequestType); err != nil {
+		var raw []byte
+		var w work
+		if err = rows.Scan(&raw, &w.source); err != nil {
 			_ = rows.Close()
 			return err
 		}
-		scope.MeasurementSchema, scope.StatisticsSpec = measurement, spec
-		scopes = append(scopes, scope)
+		if err = json.Unmarshal(raw, &w.scope); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		w.scope.MeasurementSchema, w.scope.StatisticsSpec = measurement, spec
+		batch = append(batch, w)
 	}
 	err = rows.Err()
 	_ = rows.Close()
 	if err != nil {
 		return err
 	}
-	// A bounded worker must expose saturation instead of silently acknowledging
-	// events for a truncated population. No new penalties are enforced.
-	if len(scopes) > 32 {
-		return errors.New("lifecycle scope budget exceeded")
-	}
 	scoped := &usageLogRepository{sql: tx}
-	for _, scope := range scopes {
-		accounts, err := tx.QueryContext(ctx, "SELECT id FROM accounts WHERE platform='openai' AND deleted_at IS NULL ORDER BY id LIMIT 2001")
+	for _, w := range batch {
+		scope := w.scope
+		// Each failure retains the last-good JSON, and is shared by instances.
+		defer func(identity string) {
+			if result != nil {
+				_, _ = r.db.ExecContext(context.WithoutCancel(ctx), "UPDATE priority_lifecycle_scopes SET last_error='refresh_failed',refresh_state='ERROR' WHERE identity=$1", identity)
+			}
+		}(scope.Identity())
+		pending, err := tx.QueryContext(ctx, "SELECT sequence FROM priority_lifecycle_outbox o WHERE processed_at IS NULL AND (scope_identity=$1 OR (scope_identity IS NULL AND EXISTS(SELECT 1 FROM usage_logs u WHERE u.id=o.usage_log_id AND priority_lifecycle_scope_identity(u.group_id,COALESCE(NULLIF(u.requested_model,''),u.model),u.inbound_endpoint,u.request_type)=$1))) ORDER BY sequence", scope.Identity())
 		if err != nil {
 			return err
 		}
-		ids := make([]int64, 0)
-		for accounts.Next() {
-			var id int64
-			if err = accounts.Scan(&id); err != nil {
-				_ = accounts.Close()
+		sequences := make([]int64, 0)
+		var watermark int64
+		for pending.Next() {
+			var seq int64
+			if err = pending.Scan(&seq); err != nil {
+				_ = pending.Close()
 				return err
 			}
-			ids = append(ids, id)
+			sequences = append(sequences, seq)
+			if seq > watermark {
+				watermark = seq
+			}
 		}
-		err = accounts.Err()
-		_ = accounts.Close()
+		err = pending.Err()
+		_ = pending.Close()
 		if err != nil {
 			return err
 		}
-		if len(ids) > 2000 {
-			return errors.New("lifecycle account budget exceeded")
+		signals := make(map[int64]service.PrioritySchedulingSignal)
+		after := int64(0)
+		for {
+			accounts, err := tx.QueryContext(ctx, "SELECT id FROM accounts WHERE platform='openai' AND deleted_at IS NULL AND id>$1 ORDER BY id LIMIT 500", after)
+			if err != nil {
+				return err
+			}
+			ids := make([]int64, 0, 500)
+			for accounts.Next() {
+				var id int64
+				if err = accounts.Scan(&id); err != nil {
+					_ = accounts.Close()
+					return err
+				}
+				ids = append(ids, id)
+			}
+			err = accounts.Err()
+			_ = accounts.Close()
+			if err != nil {
+				return err
+			}
+			if len(ids) == 0 {
+				break
+			}
+			kind, endpoint := scope.RequestType, scope.Endpoint
+			page, err := scoped.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{AccountIDs: ids, Model: scope.Model, GroupID: scope.GroupID, InboundEndpoint: &endpoint, RequestType: &kind, HalfOpen: true, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, TargetTTFTMs: cfg.TargetTTFTMs, UsageSince: now.Add(-time.Duration(cfg.WindowMinutes) * time.Minute), UsageUntil: now, QualitySince: now.Add(-time.Duration(cfg.QualityMaxAgeHours) * time.Hour)})
+			if err != nil {
+				return err
+			}
+			for _, id := range ids {
+				value, ok := page[id]
+				if !ok {
+					return errors.New("incomplete lifecycle account page")
+				}
+				signals[id] = value
+			}
+			after = ids[len(ids)-1]
 		}
-		requestType, endpoint := scope.RequestType, scope.Endpoint
-		signals, err := scoped.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{
-			AccountIDs: ids, Model: scope.Model, GroupID: scope.GroupID, InboundEndpoint: &endpoint, RequestType: &requestType, HalfOpen: true,
-			LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, TargetTTFTMs: cfg.TargetTTFTMs,
-			UsageSince: since, UsageUntil: now, QualitySince: now.Add(-time.Duration(cfg.QualityMaxAgeHours) * time.Hour),
-		})
-		if err != nil {
-			return err
-		}
-		stats := service.PriorityLifecycleStatistics{Scope: scope, PolicyRevision: revision, Watermark: watermark, WindowStart: since, WindowEnd: now, ObservedAt: now, Signals: signals}
+		stats := service.PriorityLifecycleStatistics{Scope: scope, PolicyRevision: revision, SourceRevision: w.source, Watermark: watermark, WindowStart: now.Add(-time.Duration(cfg.WindowMinutes) * time.Minute), WindowEnd: now, ObservedAt: now, CollectedThrough: now, PublishedAt: time.Now().UTC(), SourceVisibility: "primary_repeatable_read_visible_commits; allocation_sequence_not_commit_order", RefreshState: "IDLE", Signals: signals}
 		raw, err := json.Marshal(stats)
 		if err != nil {
 			return err
 		}
-		// Serialized primary transaction is the fencing owner. Generation is
-		// allocated by SQL, not a wall clock or per-instance counter.
-		if err = tx.QueryRowContext(ctx, `INSERT INTO priority_lifecycle_statistics(scope_key,generation,watermark,observed_at,snapshot)
-            VALUES($1,1,$2,$3,$4) ON CONFLICT(scope_key) DO UPDATE
-            SET generation=priority_lifecycle_statistics.generation+1,watermark=EXCLUDED.watermark,observed_at=EXCLUDED.observed_at,snapshot=EXCLUDED.snapshot
-            WHERE priority_lifecycle_statistics.watermark<=EXCLUDED.watermark RETURNING generation`, scope.Key(), watermark, now, string(raw)).Scan(&stats.Generation); err != nil {
+		// Generation CAS and the single primary fencing owner reject older
+		// source revisions. Watermark is diagnostic, never a permanent cursor.
+		err = tx.QueryRowContext(ctx, "INSERT INTO priority_lifecycle_statistics(scope_key,generation,watermark,observed_at,snapshot,source_revision) VALUES($1,1,$2,$3,$4,$5) ON CONFLICT(scope_key) DO UPDATE SET generation=priority_lifecycle_statistics.generation+1,watermark=GREATEST(priority_lifecycle_statistics.watermark,EXCLUDED.watermark),observed_at=EXCLUDED.observed_at,snapshot=EXCLUDED.snapshot,source_revision=EXCLUDED.source_revision WHERE priority_lifecycle_statistics.source_revision<=EXCLUDED.source_revision RETURNING generation", scope.Key(), watermark, now, string(raw), w.source).Scan(&stats.Generation)
+		if err != nil {
 			return err
 		}
-		for id, signal := range signals {
-			// Preserve the deployed predicate as explicitly named shadow
-			// evidence. Aggregate crossing/renewal remains unapproved. A single
-			// new slow point must not silently implement a new v2 rule.
-			if signal.Samples < cfg.MinSamples || signal.SelectedTTFTMs == nil || *signal.SelectedTTFTMs <= float64(cfg.TargetTTFTMs) || signal.LatestBadLatencyAt == nil {
-				continue
-			}
-			evidence := fmt.Sprintf("legacy-shadow/%d/%d", id, signal.LatestBadLatencyAt.UnixNano())
-			policy := service.PriorityLifecyclePolicy{AccountID: id, State: "PENALIZED_SHADOW", EvidenceID: evidence, EvidenceAt: *signal.LatestBadLatencyAt, ExpiresAt: signal.LatestBadLatencyAt.Add(time.Duration(cfg.LatencyPenaltyMinutes) * time.Minute), PolicyRevision: revision, ObservedValue: signal.SelectedTTFTMs, Threshold: cfg.TargetTTFTMs, Percentile: cfg.LatencyPercentile, Mode: cfg.LatencyPenaltyMode, Rule: "legacy_shadow_v1; v2 trigger and renewal pending"}
-			raw, err = json.Marshal(policy)
-			if err != nil {
+		if err = publishPriorityLifecyclePolicies(ctx, tx, scope, cfg, signals, revision, now); err != nil {
+			return err
+		}
+		if len(sequences) > 0 {
+			if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_outbox SET processed_at=clock_timestamp() WHERE sequence=ANY($1) AND processed_at IS NULL", pq.Array(sequences)); err != nil {
 				return err
 			}
-			result, err := tx.ExecContext(ctx, `INSERT INTO priority_lifecycle_policy(scope_key,account_id,evidence_id,evidence_at,policy_revision,expires_at,state)
-                VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(scope_key,account_id) DO UPDATE
-                SET evidence_id=EXCLUDED.evidence_id,evidence_at=EXCLUDED.evidence_at,policy_revision=EXCLUDED.policy_revision,expires_at=EXCLUDED.expires_at,state=EXCLUDED.state
-                WHERE priority_lifecycle_policy.evidence_at<EXCLUDED.evidence_at`, scope.PolicyKey(), id, evidence, policy.EvidenceAt, revision, policy.ExpiresAt, string(raw))
-			if err != nil {
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_scopes SET published_revision=$2,last_collected_at=$3,last_processed_at=clock_timestamp(),last_error='',refresh_state='IDLE' WHERE identity=$1 AND source_revision=$2", scope.Identity(), w.source, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *usageLogRepository) RegisterPriorityLifecycleScope(ctx context.Context, scope service.PriorityLifecycleScope) error {
+	_, err := r.sql.ExecContext(ctx, "INSERT INTO priority_lifecycle_scopes(identity) VALUES($1) ON CONFLICT DO NOTHING", scope.Identity())
+	return err
+}
+
+func publishPriorityLifecyclePolicies(ctx context.Context, tx *sql.Tx, scope service.PriorityLifecycleScope, cfg service.PrioritySchedulingConfig, signals map[int64]service.PrioritySchedulingSignal, revision string, now time.Time) error {
+	for id, signal := range signals {
+		if signal.Samples < cfg.MinSamples || signal.SelectedTTFTMs == nil || *signal.SelectedTTFTMs <= float64(cfg.TargetTTFTMs) || signal.LatestBadLatencyAt == nil {
+			continue
+		}
+		evidence := fmt.Sprintf("legacy-shadow/%s/%d/%d", scope.MeasurementSchema, id, signal.LatestBadLatencyAt.UnixNano())
+		policy := service.PriorityLifecyclePolicy{AccountID: id, State: "PENALIZED_SHADOW", EvidenceID: evidence, EvidenceAt: *signal.LatestBadLatencyAt, ExpiresAt: signal.LatestBadLatencyAt.Add(time.Duration(cfg.LatencyPenaltyMinutes) * time.Minute), PolicyRevision: revision, ObservedValue: signal.SelectedTTFTMs, Threshold: cfg.TargetTTFTMs, Percentile: cfg.LatencyPercentile, Mode: cfg.LatencyPenaltyMode, Rule: "legacy_shadow_v1; v2 trigger and renewal pending"}
+		raw, err := json.Marshal(policy)
+		if err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_policy(scope_key,account_id,evidence_id,evidence_at,policy_revision,expires_at,state) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(scope_key,account_id) DO UPDATE SET evidence_id=EXCLUDED.evidence_id,evidence_at=EXCLUDED.evidence_at,policy_revision=EXCLUDED.policy_revision,expires_at=EXCLUDED.expires_at,state=EXCLUDED.state WHERE priority_lifecycle_policy.evidence_at<EXCLUDED.evidence_at", scope.PolicyKey(), id, evidence, policy.EvidenceAt, revision, policy.ExpiresAt, string(raw))
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed > 0 {
+			if _, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_policy_events(scope_key,account_id,evidence_id,kind,event_at,event) VALUES($1,$2,$3,'OBSERVED_SHADOW',$4,$5) ON CONFLICT DO NOTHING", scope.PolicyKey(), id, evidence, policy.EvidenceAt, string(raw)); err != nil {
 				return err
-			}
-			changed, err := result.RowsAffected()
-			if err != nil {
-				return err
-			}
-			if changed > 0 {
-				_, err = tx.ExecContext(ctx, "INSERT INTO priority_lifecycle_policy_events(scope_key,account_id,evidence_id,kind,event_at,event) VALUES($1,$2,$3,'OBSERVED_SHADOW',$4,$5) ON CONFLICT DO NOTHING", scope.PolicyKey(), id, evidence, policy.EvidenceAt, string(raw))
-				if err != nil {
-					return err
-				}
 			}
 		}
 	}
-	// Timing updates arriving after this repeatable-read snapshot remain pending.
-	if _, err = tx.ExecContext(ctx, "UPDATE priority_lifecycle_outbox SET processed_at=clock_timestamp() WHERE sequence <= $1 AND processed_at IS NULL", watermark); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
 func (r *usageLogRepository) ReadPriorityLifecycle(ctx context.Context, scope service.PriorityLifecycleScope) (*service.PriorityLifecycleStatistics, []service.PriorityLifecyclePolicy, error) {
@@ -191,6 +262,27 @@ func (r *usageLogRepository) ReadPriorityLifecycle(ctx context.Context, scope se
 	_ = rows.Close()
 	if err != nil {
 		return nil, nil, err
+	}
+	if stats != nil {
+		status, err := r.sql.QueryContext(ctx, "SELECT source_revision,published_revision,last_error,refresh_state FROM priority_lifecycle_scopes WHERE identity=$1", scope.Identity())
+		if err != nil {
+			return nil, nil, err
+		}
+		if status.Next() {
+			var source, published int64
+			if err = status.Scan(&source, &published, &stats.LastError, &stats.RefreshState); err != nil {
+				_ = status.Close()
+				return nil, nil, err
+			}
+			if source > published {
+				stats.RefreshState = "QUEUED"
+			}
+		}
+		err = status.Err()
+		_ = status.Close()
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	rows, err = r.sql.QueryContext(ctx, "SELECT state FROM priority_lifecycle_policy WHERE scope_key=$1 ORDER BY account_id", scope.PolicyKey())
 	if err != nil {

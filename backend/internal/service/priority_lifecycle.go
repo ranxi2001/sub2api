@@ -55,23 +55,37 @@ func PriorityLifecycleEndpoint(raw string) string {
 }
 
 func (s PriorityLifecycleScope) Key() string { return priorityLifecycleHash(s) }
+func (s PriorityLifecycleScope) Identity() string {
+	b, _ := json.Marshal(struct {
+		GroupID     *int64      `json:"group_id"`
+		Model       string      `json:"model"`
+		Endpoint    string      `json:"endpoint"`
+		RequestType RequestType `json:"request_type"`
+	}{s.GroupID, s.Model, s.Endpoint, s.RequestType})
+	return string(b)
+}
 
 // Penalties and audit identity survive statistical-spec and configuration changes.
 func (s PriorityLifecycleScope) PolicyKey() string {
-	s.MeasurementSchema = ""
 	s.StatisticsSpec = ""
 	return priorityLifecycleHash(s)
 }
 
 type PriorityLifecycleStatistics struct {
-	PolicyRevision string                             `json:"policy_revision"`
-	Scope          PriorityLifecycleScope             `json:"scope"`
-	Generation     int64                              `json:"generation"`
-	Watermark      int64                              `json:"watermark"`
-	WindowStart    time.Time                          `json:"window_start"`
-	WindowEnd      time.Time                          `json:"window_end"`
-	ObservedAt     time.Time                          `json:"observed_at"`
-	Signals        map[int64]PrioritySchedulingSignal `json:"signals"`
+	CollectedThrough time.Time                          `json:"collected_through"`
+	PublishedAt      time.Time                          `json:"published_at"`
+	SourceRevision   int64                              `json:"source_revision"`
+	SourceVisibility string                             `json:"source_visibility"`
+	RefreshState     string                             `json:"refresh_state"`
+	LastError        string                             `json:"last_error"`
+	PolicyRevision   string                             `json:"policy_revision"`
+	Scope            PriorityLifecycleScope             `json:"scope"`
+	Generation       int64                              `json:"generation"`
+	Watermark        int64                              `json:"watermark"`
+	WindowStart      time.Time                          `json:"window_start"`
+	WindowEnd        time.Time                          `json:"window_end"`
+	ObservedAt       time.Time                          `json:"observed_at"`
+	Signals          map[int64]PrioritySchedulingSignal `json:"signals"`
 }
 
 type PriorityLifecyclePolicy struct {
@@ -147,6 +161,11 @@ func (s *OpenAIGatewayService) recordPriorityLifecycleDecision(ctx context.Conte
 	}
 	audit, end := context.WithTimeout(context.WithoutCancel(ctx), 100*time.Millisecond)
 	defer end()
+	if registrar, ok := repo.(PriorityLifecycleScopeRegistrar); ok {
+		if err := registrar.RegisterPriorityLifecycleScope(audit, scope); err != nil {
+			slog.Warn("priority_lifecycle_scope_registration_failed")
+		}
+	}
 	stats, _, err := repo.ReadPriorityLifecycle(audit, scope)
 	if err == nil && stats != nil {
 		d.StatisticsGeneration = &stats.Generation
@@ -169,6 +188,9 @@ type PriorityLifecycleRepository interface {
 	RecordPriorityLifecycleDecision(context.Context, PriorityLifecycleDecision) error
 	ReadPriorityLifecycleDecisions(context.Context, PriorityLifecycleScope, int64) ([]PriorityLifecycleDecision, error)
 	ReadPriorityLifecycleEvents(context.Context, PriorityLifecycleScope, int64) ([]PriorityLifecycleEvent, error)
+}
+type PriorityLifecycleScopeRegistrar interface {
+	RegisterPriorityLifecycleScope(context.Context, PriorityLifecycleScope) error
 }
 
 // Management inventory is deliberately separate from active-only routing reads.
@@ -309,8 +331,13 @@ func (s *OpenAIGatewayService) PriorityLifecycleState(ctx context.Context, scope
 		}
 		if stats != nil {
 			row.Freshness = "STALE"
-			if now.Sub(stats.ObservedAt) <= priorityHistoryTTL {
+			if !stats.CollectedThrough.IsZero() && now.Sub(stats.CollectedThrough) <= priorityHistoryTTL && stats.RefreshState == "IDLE" && stats.LastError == "" {
 				row.Freshness = "FRESH"
+			}
+			row.Refresh = stats.RefreshState
+			if stats.LastError != "" {
+				out.LastError = stats.LastError
+				row.Refresh = "ERROR"
 			}
 			if signal, found := stats.Signals[a.ID]; found {
 				row.Signal = &signal

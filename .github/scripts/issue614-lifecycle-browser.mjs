@@ -15,7 +15,9 @@ import { apiClient } from '/src/api/client.ts'
 const now = new Date().toISOString(), until = new Date(Date.now() + 2000).toISOString()
 const policy = {account_id:7,state:'PENALIZED_SHADOW',evidence_id:'synthetic-immutable-evidence',evidence_at:now,expires_at:until,policy_revision:'original-policy',observed_value:16000,threshold:15000,percentile:90,mode:'stop',rule:'legacy shadow; v2 trigger contract pending'}
 window.__offline = false
+window.__lifecycleRequests = []
 apiClient.defaults.adapter = async request => {
+  window.__lifecycleRequests.push({url:request.url,params:request.params})
   if(window.__offline) throw new Error('synthetic offline')
   const p=request.params, scope={group_id:p.group_id==='ungrouped'?null:Number(p.group_id),model:p.model,endpoint:p.endpoint,request_type:Number(p.request_type),measurement_schema:'ingress_alias_v1/legacy_forward',statistics_spec:'synthetic-statistics-v1'}
   let data={scope,server_now:new Date().toISOString(),policy_revision:'current-policy',mode:'shadow',last_error:'',attempted_at:now,statistics:{scope,generation:4,watermark:6,observed_at:now,window_start:now,window_end:now,policy_revision:'current-policy',signals:{}},accounts:[
@@ -49,9 +51,11 @@ const server = await createServer({
 })
 await server.listen()
 const browser = await chromium.launch({headless:true}), results=[], errors=[], blocked=[]
+let activePage,activePrefix='startup'
 try {
   for(const lang of ['zh','en']) for(const viewport of [{width:1440,height:1000},{width:390,height:844}]) {
     const page=await browser.newPage({viewport})
+    activePage=page;activePrefix=lang+'-'+viewport.width
     page.on('pageerror',error=>errors.push(String(error)))
     await page.route('**/*',route=>{
       if(new URL(route.request().url()).hostname!=='127.0.0.1'){blocked.push(route.request().url());return route.abort()}
@@ -88,4 +92,10 @@ try {
   }
   if(errors.length||blocked.length)throw new Error(JSON.stringify({errors,blocked}))
   await fs.writeFile(path.join(output,'evidence.json'),JSON.stringify({head:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),results,errors,blocked},null,2))
+} catch(error) {
+  if(activePage) {
+    await activePage.screenshot({path:path.join(output,activePrefix+'-failure.png'),fullPage:true}).catch(()=>{})
+    await fs.writeFile(path.join(output,activePrefix+'-failure.json'),JSON.stringify({error:String(error),errors,blocked,body:await activePage.locator('body').innerText(),requests:await activePage.evaluate(()=>window.__lifecycleRequests)},null,2))
+  }
+  throw error
 } finally {await browser.close();await server.close()}
