@@ -1,5 +1,6 @@
 export default {
   lifecycle: {
+    published: 'Aggregate published at',
     collect: 'Queue collection for this scope', queued: 'Queued; target facts not published yet', collected: 'Target facts included in published generation',
     coverageLoss: 'Audit coverage incomplete',
     title: 'Lifecycle state and immutable history',

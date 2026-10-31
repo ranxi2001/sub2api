@@ -49,6 +49,7 @@ export interface PriorityLifecyclePolicy {
   rule: string
 }
 export interface PriorityLifecycleState {
+  effective_configuration?: PrioritySchedulingConfig
   coverage?: Record<string, string>
   scope: PriorityLifecycleScope
   server_now: string

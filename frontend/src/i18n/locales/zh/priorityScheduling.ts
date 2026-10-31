@@ -1,5 +1,6 @@
 export default {
   lifecycle: {
+    published: '聚合发布时间',
     collect: '排队采集此范围', queued: '已排队，目标事实尚未发布', collected: '目标事实已纳入发布 generation',
     coverageLoss: '审计覆盖不完整',
     title: '生命周期当前态与不可变历史',

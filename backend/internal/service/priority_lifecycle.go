@@ -546,15 +546,16 @@ type PriorityLifecycleAccountState struct {
 }
 
 type PriorityLifecycleState struct {
-	Coverage       map[string]string               `json:"coverage"`
-	Scope          PriorityLifecycleScope          `json:"scope"`
-	ServerNow      time.Time                       `json:"server_now"`
-	PolicyRevision string                          `json:"policy_revision"`
-	Mode           string                          `json:"mode"`
-	Statistics     *PriorityLifecycleStatistics    `json:"statistics"`
-	LastError      string                          `json:"last_error"`
-	AttemptedAt    time.Time                       `json:"attempted_at"`
-	Accounts       []PriorityLifecycleAccountState `json:"accounts"`
+	EffectiveConfiguration PrioritySchedulingConfig        `json:"effective_configuration"`
+	Coverage               map[string]string               `json:"coverage"`
+	Scope                  PriorityLifecycleScope          `json:"scope"`
+	ServerNow              time.Time                       `json:"server_now"`
+	PolicyRevision         string                          `json:"policy_revision"`
+	Mode                   string                          `json:"mode"`
+	Statistics             *PriorityLifecycleStatistics    `json:"statistics"`
+	LastError              string                          `json:"last_error"`
+	AttemptedAt            time.Time                       `json:"attempted_at"`
+	Accounts               []PriorityLifecycleAccountState `json:"accounts"`
 }
 
 // Pure primary reads, never scheduling SQL refresh or changing policy/expiry.
@@ -582,7 +583,7 @@ func (s *OpenAIGatewayService) PriorityLifecycleState(ctx context.Context, scope
 		return nil, err
 	}
 	now := time.Now().UTC()
-	out := &PriorityLifecycleState{Scope: scope, ServerNow: now, PolicyRevision: priorityConfigRevision(cfg), Mode: "shadow", Statistics: stats, Accounts: make([]PriorityLifecycleAccountState, 0, len(accounts))}
+	out := &PriorityLifecycleState{EffectiveConfiguration: cfg, Scope: scope, ServerNow: now, PolicyRevision: priorityConfigRevision(cfg), Mode: "shadow", Statistics: stats, Accounts: make([]PriorityLifecycleAccountState, 0, len(accounts))}
 	if coverage, ok := repo.(PriorityLifecycleCoverageRepository); ok {
 		out.Coverage, err = coverage.ReadPriorityLifecycleCoverage(ctx)
 		if err != nil {

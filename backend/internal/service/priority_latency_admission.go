@@ -241,13 +241,18 @@ type priorityLatencyTurn struct {
 
 // First physical HTTP/plugin send rechecks after preparation waits. Any attempted
 // send (even an uncertain result) freezes admission for this generation's retries.
-func (s *OpenAIGatewayService) priorityLatencyBeforeSend(ctx context.Context, account *Account) error {
+func (s *OpenAIGatewayService) priorityLatencyBeforeSend(ctx context.Context, account *Account) (result error) {
 	turn, _ := ctx.Value(priorityLatencyTurnKey{}).(*priorityLatencyTurn)
 	if turn == nil || account == nil || turn.accountID != account.ID {
 		return nil
 	}
 	turn.mu.Lock()
-	defer turn.mu.Unlock()
+	defer func() {
+		turn.mu.Unlock()
+		if result != nil {
+			s.priorityLifecycleWriteResult(ctx, account, "prewrite_guard", result)
+		}
+	}()
 	if turn.started {
 		return nil
 	}
@@ -346,9 +351,6 @@ func (s *OpenAIGatewayService) beginPriorityLatencyTurn(ctx context.Context, c *
 	if kind, ok := ctx.Value(priorityLifecycleRequestTypeKey{}).(RequestType); ok {
 		req.LifecycleRequestType = kind
 	}
-	if c != nil && c.Request != nil && strings.EqualFold(c.Request.Header.Get("Upgrade"), "websocket") {
-		req.LifecycleRequestType = RequestTypeWSV2
-	}
 	if !selectedRequest && req.priorityLatencyPool == nil && priorityHardStopApplies(s.prioritySchedulingRuntimeConfig(), req) && (s.accountRepo != nil || s.schedulerSnapshot != nil) {
 		scheduler := &defaultOpenAIAccountScheduler{service: s, stats: s.openaiAccountStats}
 		prepared, err := scheduler.preparePriorityLatencyRequest(ctx, req)
@@ -368,9 +370,6 @@ func (s *OpenAIGatewayService) beginPriorityLatencyTurn(ctx context.Context, c *
 	}
 	if kind, ok := ctx.Value(priorityLifecycleRequestTypeKey{}).(RequestType); ok {
 		req.LifecycleRequestType = kind
-	}
-	if c != nil && c.Request != nil && strings.EqualFold(c.Request.Header.Get("Upgrade"), "websocket") {
-		req.LifecycleRequestType = RequestTypeWSV2
 	}
 	return context.WithValue(ctx, priorityLatencyTurnKey{}, &priorityLatencyTurn{accountID: account.ID, request: req}), nil
 }
