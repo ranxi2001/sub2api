@@ -420,7 +420,21 @@ func (s *PaymentService) finishRefund(ctx context.Context, p *RefundPlan, resp *
 	}
 	switch strings.TrimSpace(resp.Status) {
 	case payment.ProviderStatusSuccess, payment.ProviderStatusRefunded:
-		return s.markRefundOk(ctx, p)
+		result, err := s.markRefundOk(ctx, p)
+		if err == nil || s.lottery == nil || p.Order.OrderType != payment.OrderTypeBalance {
+			return result, err
+		}
+		// The gateway has already refunded. Preserve the held deduction and
+		// retry through refund reconciliation, never submit another gateway refund.
+		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		pending, pendingErr := s.markRefundPending(recoveryCtx, p, resp)
+		if pendingErr != nil {
+			return nil, fmt.Errorf("refund accounting failed: %w; preserve pending state: %v", err, pendingErr)
+		}
+		slog.Error("refund accounting awaiting reconciliation", "orderID", p.OrderID, "error", err)
+		pending.Warning = "gateway refund succeeded; local accounting is pending reconciliation"
+		return pending, nil
 	case payment.ProviderStatusPending:
 		return s.markRefundPending(ctx, p, resp)
 	default:
@@ -763,6 +777,21 @@ func (s *PaymentService) handleGwFail(ctx context.Context, p *RefundPlan, gErr e
 }
 
 func (s *PaymentService) markRefundOk(ctx context.Context, p *RefundPlan) (*RefundResult, error) {
+	if s.lottery != nil {
+		tx, err := s.entClient.Tx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		result, err := s.markRefundOkTx(dbent.NewTxContext(ctx, tx), tx.Client(), p)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
 	fs := OrderStatusRefunded
 	if p.RefundAmount < p.Order.Amount {
 		fs = OrderStatusPartiallyRefunded
@@ -785,6 +814,11 @@ func (s *PaymentService) markRefundOkTx(ctx context.Context, client *dbent.Clien
 	_, err := client.PaymentOrder.UpdateOneID(p.OrderID).SetStatus(fs).SetRefundAmount(p.RefundAmount).SetRefundReason(p.Reason).SetRefundAt(now).SetForceRefund(p.Force).Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("mark refund: %w", err)
+	}
+	if p.Order.OrderType == payment.OrderTypeBalance {
+		if err := s.lottery.RefundPaymentTx(ctx, p.Order.UserID, p.OrderID, p.RefundAmount); err != nil {
+			return nil, err
+		}
 	}
 	detail, err := json.Marshal(map[string]any{"refundAmount": p.RefundAmount, "reason": p.Reason, "balanceDeducted": p.BalanceToDeduct, "force": p.Force})
 	if err != nil {

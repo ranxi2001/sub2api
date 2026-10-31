@@ -239,6 +239,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// Support tickets (default disabled; opt-in). A missing config means the defaults.
 		SettingKeySupportTicketEnabled: "false",
+		SettingKeyLotteryEnabled:       "false",
 
 		// Affiliate (邀请返利) feature (default disabled; opt-in)
 		SettingKeyAffiliateEnabled:              "false",

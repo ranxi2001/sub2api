@@ -91,6 +91,7 @@
           </div>
         </div>
         <!-- Actions -->
+        <router-link v-if="lottery.enabled && order?.status === 'COMPLETED' && hasAmountFields(order) && order.order_type === 'balance'" to="/lottery" class="btn btn-secondary w-full">{{ t('lottery.goLottery') }}</router-link>
         <div class="flex gap-3">
           <button class="btn btn-secondary flex-1" @click="router.push('/purchase')">{{ t('payment.result.backToRecharge') }}</button>
           <button class="btn btn-primary flex-1" @click="router.push('/orders')">{{ t('payment.result.viewOrders') }}</button>
@@ -112,6 +113,7 @@ import {
 } from '@/components/payment/paymentFlow'
 import { usePaymentStore } from '@/stores/payment'
 import { useAuthStore } from '@/stores/auth'
+import { useLotteryStore } from '@/stores/lottery'
 import { paymentAPI } from '@/api/payment'
 import type { PublicOrderVerifyResult } from '@/api/payment'
 import type { OrderStatus, PaymentOrder } from '@/types/payment'
@@ -124,6 +126,7 @@ const route = useRoute()
 const router = useRouter()
 const paymentStore = usePaymentStore()
 const authStore = useAuthStore()
+const lottery = useLotteryStore()
 
 type ResolvedOrder = PaymentOrder | PublicOrderVerifyResult
 
@@ -216,6 +219,7 @@ function refreshUserBalanceForSuccessfulOrder(nextOrder: ResolvedOrder | null): 
   }
 
   userBalanceRefreshStarted = true
+  void lottery.refresh(true)
   void authStore.refreshUser().catch(() => {
     // The order result remains authoritative even if refreshing profile data fails.
   })

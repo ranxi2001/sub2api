@@ -189,6 +189,7 @@ type TopUsersByCurrency map[string][]TopUserStat
 // --- Service ---
 
 type PaymentService struct {
+	lottery                  *LotteryService
 	providerMu               sync.Mutex
 	providersLoaded          bool
 	entClient                *dbent.Client

@@ -1105,6 +1105,186 @@ var (
 			},
 		},
 	}
+	// LotteryAccountsColumns holds the columns for the "lottery_accounts" table.
+	LotteryAccountsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "pool_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "total_units", Type: field.TypeInt64, Default: 0},
+		{Name: "earned", Type: field.TypeInt64, Default: 0},
+		{Name: "used", Type: field.TypeInt64, Default: 0},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// LotteryAccountsTable holds the schema information for the "lottery_accounts" table.
+	LotteryAccountsTable = &schema.Table{
+		Name:       "lottery_accounts",
+		Columns:    LotteryAccountsColumns,
+		PrimaryKey: []*schema.Column{LotteryAccountsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "lotteryaccount_pool_id_user_id",
+				Unique:  true,
+				Columns: []*schema.Column{LotteryAccountsColumns[1], LotteryAccountsColumns[2]},
+			},
+			{
+				Name:    "lotteryaccount_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryAccountsColumns[2]},
+			},
+		},
+	}
+	// LotteryContributionsColumns holds the columns for the "lottery_contributions" table.
+	LotteryContributionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "pool_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "source_type", Type: field.TypeString, Size: 20},
+		{Name: "source_id", Type: field.TypeString, Size: 128},
+		{Name: "amount_units", Type: field.TypeInt64},
+		{Name: "net_units", Type: field.TypeInt64},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// LotteryContributionsTable holds the schema information for the "lottery_contributions" table.
+	LotteryContributionsTable = &schema.Table{
+		Name:       "lottery_contributions",
+		Columns:    LotteryContributionsColumns,
+		PrimaryKey: []*schema.Column{LotteryContributionsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "lotterycontribution_pool_id_source_type_source_id",
+				Unique:  true,
+				Columns: []*schema.Column{LotteryContributionsColumns[1], LotteryContributionsColumns[3], LotteryContributionsColumns[4]},
+			},
+			{
+				Name:    "lotterycontribution_user_id_pool_id",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryContributionsColumns[2], LotteryContributionsColumns[1]},
+			},
+			{
+				Name:    "lotterycontribution_source_type_source_id",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryContributionsColumns[3], LotteryContributionsColumns[4]},
+			},
+		},
+	}
+	// LotteryDrawsColumns holds the columns for the "lottery_draws" table.
+	LotteryDrawsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "pool_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "prize_id", Type: field.TypeInt64},
+		{Name: "request_key", Type: field.TypeString, Size: 128},
+		{Name: "prize_snapshot", Type: field.TypeJSON},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// LotteryDrawsTable holds the schema information for the "lottery_draws" table.
+	LotteryDrawsTable = &schema.Table{
+		Name:       "lottery_draws",
+		Columns:    LotteryDrawsColumns,
+		PrimaryKey: []*schema.Column{LotteryDrawsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "lotterydraw_user_id_request_key",
+				Unique:  true,
+				Columns: []*schema.Column{LotteryDrawsColumns[2], LotteryDrawsColumns[4]},
+			},
+			{
+				Name:    "lotterydraw_pool_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryDrawsColumns[1], LotteryDrawsColumns[6]},
+			},
+			{
+				Name:    "lotterydraw_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryDrawsColumns[2], LotteryDrawsColumns[6]},
+			},
+		},
+	}
+	// LotteryLedgerColumns holds the columns for the "lottery_ledger" table.
+	LotteryLedgerColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "pool_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "action", Type: field.TypeString, Size: 20},
+		{Name: "source_type", Type: field.TypeString, Size: 20},
+		{Name: "source_id", Type: field.TypeString, Size: 128},
+		{Name: "amount_units", Type: field.TypeInt64},
+		{Name: "ticket_delta", Type: field.TypeInt64},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// LotteryLedgerTable holds the schema information for the "lottery_ledger" table.
+	LotteryLedgerTable = &schema.Table{
+		Name:       "lottery_ledger",
+		Columns:    LotteryLedgerColumns,
+		PrimaryKey: []*schema.Column{LotteryLedgerColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "lotteryledger_pool_id_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryLedgerColumns[1], LotteryLedgerColumns[2], LotteryLedgerColumns[8]},
+			},
+			{
+				Name:    "lotteryledger_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryLedgerColumns[2]},
+			},
+		},
+	}
+	// LotteryPoolsColumns holds the columns for the "lottery_pools" table.
+	LotteryPoolsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "mode", Type: field.TypeString, Size: 20},
+		{Name: "threshold_units", Type: field.TypeInt64},
+		{Name: "grant_enabled", Type: field.TypeBool, Default: false},
+		{Name: "draw_enabled", Type: field.TypeBool, Default: false},
+		{Name: "rule_locked", Type: field.TypeBool, Default: false},
+		{Name: "sort_order", Type: field.TypeInt, Default: 0},
+		{Name: "activated_at", Type: field.TypeTime, Nullable: true},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// LotteryPoolsTable holds the schema information for the "lottery_pools" table.
+	LotteryPoolsTable = &schema.Table{
+		Name:       "lottery_pools",
+		Columns:    LotteryPoolsColumns,
+		PrimaryKey: []*schema.Column{LotteryPoolsColumns[0]},
+	}
+	// LotteryPrizesColumns holds the columns for the "lottery_prizes" table.
+	LotteryPrizesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "pool_id", Type: field.TypeInt64},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "kind", Type: field.TypeString, Size: 20},
+		{Name: "weight", Type: field.TypeInt64},
+		{Name: "stock", Type: field.TypeInt64, Default: -1},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "sort_order", Type: field.TypeInt, Default: 0},
+		{Name: "amount_units", Type: field.TypeInt64, Default: 0},
+		{Name: "plan_id", Type: field.TypeInt64, Default: 0},
+		{Name: "plan_name", Type: field.TypeString, Default: ""},
+		{Name: "group_id", Type: field.TypeInt64, Default: 0},
+		{Name: "validity_days", Type: field.TypeInt, Default: 0},
+		{Name: "text", Type: field.TypeString, Default: ""},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// LotteryPrizesTable holds the schema information for the "lottery_prizes" table.
+	LotteryPrizesTable = &schema.Table{
+		Name:       "lottery_prizes",
+		Columns:    LotteryPrizesColumns,
+		PrimaryKey: []*schema.Column{LotteryPrizesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "lotteryprize_pool_id",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryPrizesColumns[1]},
+			},
+		},
+	}
 	// PaymentAuditLogsColumns holds the columns for the "payment_audit_logs" table.
 	PaymentAuditLogsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2129,6 +2309,12 @@ var (
 		GroupsTable,
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
+		LotteryAccountsTable,
+		LotteryContributionsTable,
+		LotteryDrawsTable,
+		LotteryLedgerTable,
+		LotteryPoolsTable,
+		LotteryPrizesTable,
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
@@ -2225,6 +2411,24 @@ func init() {
 	IdentityAdoptionDecisionsTable.ForeignKeys[1].RefTable = PendingAuthSessionsTable
 	IdentityAdoptionDecisionsTable.Annotation = &entsql.Annotation{
 		Table: "identity_adoption_decisions",
+	}
+	LotteryAccountsTable.Annotation = &entsql.Annotation{
+		Table: "lottery_accounts",
+	}
+	LotteryContributionsTable.Annotation = &entsql.Annotation{
+		Table: "lottery_contributions",
+	}
+	LotteryDrawsTable.Annotation = &entsql.Annotation{
+		Table: "lottery_draws",
+	}
+	LotteryLedgerTable.Annotation = &entsql.Annotation{
+		Table: "lottery_ledger",
+	}
+	LotteryPoolsTable.Annotation = &entsql.Annotation{
+		Table: "lottery_pools",
+	}
+	LotteryPrizesTable.Annotation = &entsql.Annotation{
+		Table: "lottery_prizes",
 	}
 	PaymentAuditLogsTable.Annotation = &entsql.Annotation{
 		Table: "payment_audit_logs",

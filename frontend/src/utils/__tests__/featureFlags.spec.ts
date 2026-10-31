@@ -41,6 +41,12 @@ describe('FeatureFlags.subscription', () => {
 })
 
 describe('resolveFeatureFlag', () => {
+  it('keeps lottery hidden until explicitly enabled', () => {
+    expect(resolveFeatureFlag(undefined, FeatureFlags.lottery)).toBe(false)
+    expect(resolveFeatureFlag({}, FeatureFlags.lottery)).toBe(false)
+    expect(resolveFeatureFlag({ lottery_enabled: false }, FeatureFlags.lottery)).toBe(false)
+    expect(resolveFeatureFlag({ lottery_enabled: true }, FeatureFlags.lottery)).toBe(true)
+  })
   beforeEach(() => {
     setActivePinia(createPinia())
   })

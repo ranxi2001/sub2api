@@ -293,6 +293,7 @@ export interface PublicSettings {
   plugin_management_enabled: boolean
   /** Opt-in support tickets (sidebar「网站工单」for users and admins). */
   support_ticket_enabled?: boolean
+  lottery_enabled?: boolean
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean

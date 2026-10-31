@@ -730,6 +730,7 @@ var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_ST
 
 // adminServiceImpl implements AdminService
 type adminServiceImpl struct {
+	lottery              *LotteryService
 	mihomoProxyMu        sync.Mutex
 	excelOAuthReauth     *OpenAIOAuthReauthService
 	cfg                  *config.Config

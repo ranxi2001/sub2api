@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import SmartOpsNav from '../SmartOpsNav.vue'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 
-const smartOpsPaths = ['/admin/auto-config', '/admin/priority-scheduling',
+const smartOpsPaths = ['/admin/lottery', '/admin/auto-config', '/admin/priority-scheduling',
   '/admin/channel-operations', '/admin/profit-operations', '/admin/account-quality', '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
 
 async function mountAt(path: string) {
@@ -25,6 +25,12 @@ const hrefs = (wrapper: Awaited<ReturnType<typeof mountAt>>) => wrapper.findAll(
 
 describe('SmartOpsNav', () => {
   beforeEach(() => setActivePinia(createPinia()))
+
+  it('keeps lottery administration reachable and marks the selected pool management page', async () => {
+    const wrapper = await mountAt('/admin/lottery')
+    expect(hrefs(wrapper)).toContain('/admin/lottery')
+    expect(wrapper.find('[aria-current="page"]').text()).toBe('lottery.adminTitle')
+  })
 
   it('ends with the ticket harvest flow and hides request capture while the feature is off', async () => {
     const wrapper = await mountAt('/admin/harvest-flow')

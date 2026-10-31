@@ -474,6 +474,7 @@ type PublicSettings struct {
 
 	// Support tickets ("网站工单") feature switch
 	SupportTicketEnabled bool `json:"support_ticket_enabled"`
+	LotteryEnabled       bool `json:"lottery_enabled"`
 
 	// Affiliate (邀请返利) feature toggle
 	AffiliateEnabled bool `json:"affiliate_enabled"`

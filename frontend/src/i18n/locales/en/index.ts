@@ -1,3 +1,4 @@
+import lottery from './lottery'
 import accountTestTiming from './accountTestTiming'
 import openaiAuth from './openaiAuth'
 import upstreamEntities from './upstreamEntities'
@@ -34,6 +35,7 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
+	lottery,
   accountTestTiming,
   openaiAuth,
   upstreamEntities,

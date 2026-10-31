@@ -141,6 +141,7 @@ type RedeemCodeBatchUpdateResult struct {
 
 // RedeemService 兑换码服务
 type RedeemService struct {
+	lottery              *LotteryService
 	redeemRepo           RedeemCodeRepository
 	userRepo             UserRepository
 	redeemUserRepo       RedeemUserAdjustmentRepository
@@ -541,6 +542,12 @@ func (s *RedeemService) redeem(ctx context.Context, userID int64, code string, r
 
 	default:
 		return nil, unsupportedRedeemTypeError(redeemCode.Type)
+	}
+
+	if redeemCode.Type == RedeemTypeBalance && redeemCode.Value > 0 {
+		if err := s.lottery.RecordRechargeTx(txCtx, userID, "redeem", fmt.Sprint(redeemCode.ID), redeemCode.Value); err != nil {
+			return nil, fmt.Errorf("record lottery recharge: %w", err)
+		}
 	}
 
 	// 提交事务
