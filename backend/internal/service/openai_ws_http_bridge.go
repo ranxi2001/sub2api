@@ -616,6 +616,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 					message = "OpenAI upstream response header timeout; retrying current WebSocket turn on the same account; submitted attempts may be billed"
 				} else if headerTimeoutRetries > 0 && phaseTimeout.phase == "response_header_timeout" {
 					message = "OpenAI upstream response header timeout; current WebSocket turn retry exhausted; upstream attempts may still complete"
+				} else if account.Platform == PlatformOpenAI && phaseTimeout.phase == "response_header_timeout" && headerTimeoutRetryLimit == 0 {
+					message = "OpenAI upstream response header timeout; current WebSocket turn retry is disabled by settings"
 				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID,
 					UpstreamStatusCode: http.StatusGatewayTimeout, Kind: phaseTimeout.phase, Message: message})

@@ -78,6 +78,7 @@ func TestWSBridgeHeaderTimeoutRetryPreservesTurnAndBillsOnce(t *testing.T) {
 				require.Nil(t, result)
 				require.Equal(t, 1, upstream.callCount, "zero disables same-account retries")
 				require.Len(t, writes, 1)
+				require.Contains(t, string(writes[0]), "retry is disabled by settings")
 				return
 			}
 			require.NoError(t, err)
