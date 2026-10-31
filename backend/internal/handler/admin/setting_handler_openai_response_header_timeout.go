@@ -38,7 +38,7 @@ func (h *SettingHandler) UpdateOpenAIResponseHeaderTimeoutSettings(c *gin.Contex
 		response.BadRequest(c, "enabled and seconds are required")
 		return
 	}
-	maxRetries := 1
+	var maxRetries int
 	if req.MaxRetries != nil {
 		maxRetries = *req.MaxRetries
 	} else {
