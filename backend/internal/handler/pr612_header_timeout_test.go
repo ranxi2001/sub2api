@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -123,7 +124,7 @@ func TestPR612ExplicitHTTPRefusalRetainsFailover(t *testing.T) {
 	require.Equal(t, int32(2), submissions.Load(), "explicit HTTP refusals retain account failover")
 }
 
-func TestPR612WSHTTPBridgeDelayedHeadersNeverReplay(t *testing.T) {
+func TestPR612WSHTTPBridgeDelayedHeadersRetryOnceThenStop(t *testing.T) {
 	var submissions atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
@@ -163,14 +164,102 @@ func TestPR612WSHTTPBridgeDelayedHeadersNeverReplay(t *testing.T) {
 	_, payload, err := client.Read(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "error", gjson.GetBytes(payload, "type").String())
-	require.Contains(t, string(payload), "automatic replay disabled")
+	require.Contains(t, string(payload), "current WebSocket turn retry exhausted")
 	select {
 	case err := <-finished:
 		require.Error(t, err)
 	case <-ctx.Done():
 		t.Fatal("bridge did not return its terminal error")
 	}
-	require.Equal(t, int32(1), submissions.Load(), "bridge must submit exactly once")
+	require.Equal(t, int32(2), submissions.Load(), "bridge retries the current turn once, then sends one terminal error")
+}
+
+func TestWSBridgeHeaderTimeoutRealTransportRetryThenNextTurn(t *testing.T) {
+	var submissions atomic.Int32
+	var mu sync.Mutex
+	var bodies []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read synthetic request: %v", err)
+			return
+		}
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		attempt := submissions.Add(1)
+		if attempt == 1 {
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, `data: {"type":"response.completed","response":{"id":"resp_bridge_%d","status":"completed","usage":{"input_tokens":10,"output_tokens":2}}}`+"\n\n", attempt)
+	}))
+	defer upstream.Close()
+	cfg := pr612HTTPConfig()
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 2
+	account := service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "synthetic", "base_url": upstream.URL},
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_mode": service.OpenAIWSIngressModeHTTPBridge}}
+	gateway := service.NewOpenAIGatewayService(&openAIWSUsageHandlerAccountRepoStub{account: account}, nil, nil, nil, nil, nil, nil, nil,
+		cfg, nil, nil, nil, nil, nil, repository.NewHTTPUpstream(cfg), nil, nil, nil, nil, nil, nil, nil, nil)
+	t.Cleanup(gateway.CloseOpenAIWSPool)
+	recorded := make(chan *service.OpenAIForwardResult, 2)
+	finished := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			finished <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = r
+		finished <- gateway.ProxyResponsesWebSocketFromClient(r.Context(), c, conn, &account, "synthetic",
+			[]byte(`{"type":"response.create","model":"gpt-5.1","input":"synthetic first turn"}`),
+			&service.OpenAIWSIngressHooks{AfterTurn: func(_ int, result *service.OpenAIForwardResult, err error) {
+				if err != nil {
+					t.Errorf("unexpected turn error: %v", err)
+				}
+				recorded <- result
+			}})
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseNow() }()
+	for turn := 1; turn <= 2; turn++ {
+		_, payload, err := client.Read(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "response.completed", gjson.GetBytes(payload, "type").String(), "no timeout error may precede the retried success")
+		select {
+		case result := <-recorded:
+			require.NotNil(t, result)
+			require.Equal(t, 2-turn, result.HeaderTimeoutRetries)
+		case <-ctx.Done():
+			t.Fatal("turn completion hook was not called")
+		}
+		if turn == 1 {
+			require.NoError(t, client.Write(ctx, coderws.MessageText,
+				[]byte(`{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_bridge_2","input":"synthetic continuation"}`)))
+		}
+	}
+	require.Equal(t, int32(3), submissions.Load())
+	mu.Lock()
+	require.Len(t, bodies, 3)
+	require.JSONEq(t, bodies[0], bodies[1])
+	require.Contains(t, bodies[2], "synthetic continuation")
+	mu.Unlock()
+	_ = client.CloseNow()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		t.Fatal("bridge did not release the client session")
+	}
 }
 
 func TestPR612NativeUpstreamWSIgnoresHTTPHeaderTimeout(t *testing.T) {

@@ -1,0 +1,98 @@
+name: WS bridge header retry validation and artifact
+on:
+  push:
+    branches: [fix/ws-bridge-header-timeout-retry]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ws-bridge-header-retry-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Record pinned source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git rev-parse HEAD
+          git diff --check
+          test -z "$(git status --porcelain)"
+      - name: New behavior fails against the exact deployed bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/service/openai_ws_http_bridge.go
+          cp "$target" "$RUNNER_TEMP/fixed-bridge.go"
+          trap 'cp "$RUNNER_TEMP/fixed-bridge.go" "$target"' EXIT
+          git show 4c17aeac7da28f563079f0ecafa765ad4b774b92:"$target" > "$target"
+          set +e
+          (cd backend && go test ./internal/service -run '^TestWSBridgeHeaderTimeoutRetryPreservesTurnAndBillsOnce$' -count=1 -v -timeout=8m) > "$RUNNER_TEMP/ws-bridge-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-bridge-red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestWSBridgeHeaderTimeoutRetryPreservesTurnAndBillsOnce' "$RUNNER_TEMP/ws-bridge-red.log"
+          ! grep -Eq 'build failed|undefined:|syntax error' "$RUNNER_TEMP/ws-bridge-red.log"
+      - name: Race regression for retry, continuation, cancellation and billing
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service ./internal/handler -run '^(TestWSBridgeHeaderTimeout|TestPR612|TestProxyOpenAIWSHTTPBridge|TestOpenAIWSHTTPBridgeLaterTurn|TestOpenAIGatewayServiceRecordUsage_HeaderTimeoutRetriesAddSurcharge)' -count=1 -v -timeout=12m 2>&1 | tee "$RUNNER_TEMP/ws-bridge-green.log"
+          grep -q -- '--- PASS: TestWSBridgeHeaderTimeoutRetryPreservesTurnAndBillsOnce' "$RUNNER_TEMP/ws-bridge-green.log"
+          grep -q -- '--- PASS: TestWSBridgeHeaderTimeoutRealTransportRetryThenNextTurn' "$RUNNER_TEMP/ws-bridge-green.log"
+      - name: Compile ordinary production packages
+        working-directory: backend
+        run: go test ./internal/service ./internal/handler ./internal/repository ./internal/server/... -run '^$' -timeout=8m
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Frozen frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Actual settings page and bilingual locale tests
+        working-directory: frontend
+        run: pnpm test:run src/views/admin/__tests__/SettingsView.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts
+      - name: Frontend typecheck and production build
+        working-directory: frontend
+        run: pnpm build
+      - name: Build immutable linux amd64 hotfix artifact
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code -- internal/service/openai_ws_http_bridge.go
+          mkdir -p ../artifacts
+          VERSION=0.2.19-wsbridge-retry1
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embed -trimpath -ldflags "-s -w -X main.Version=$VERSION -X main.Commit=$GITHUB_SHA -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildType=trial" -o ../artifacts/sub2api ./cmd/server
+          cd ../artifacts
+          sha256sum sub2api > SHA256SUMS
+          printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT
+          git -C .. rev-parse HEAD^{tree} > SOURCE_TREE
+          printf 'linux/amd64\n' > ARCHITECTURE
+          ./sub2api --version > VERSION.txt 2>&1
+          cp "$RUNNER_TEMP/ws-bridge-red.log" .
+          cp "$RUNNER_TEMP/ws-bridge-green.log" .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ws-bridge-header-retry-linux-amd64
+          path: artifacts/
+          retention-days: 14
