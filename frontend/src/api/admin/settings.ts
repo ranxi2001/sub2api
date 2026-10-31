@@ -1518,6 +1518,7 @@ export async function updateStreamTimeoutSettings(
 export interface OpenAIResponseHeaderTimeoutSettings {
   enabled: boolean;
   seconds: number;
+  max_retries: number;
 }
 
 export async function getOpenAIResponseHeaderTimeoutSettings(): Promise<OpenAIResponseHeaderTimeoutSettings> {

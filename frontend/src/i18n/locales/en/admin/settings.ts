@@ -1207,10 +1207,12 @@ export default {
       openaiResponseHeaderTimeout: {
         title: 'OpenAI response header timeout',
         description:
-          'Limits the wait for OpenAI/Codex HTTP response headers after upload. Ordinary HTTP requests fail over to another account. WS HTTP bridges retry the current turn once on the same account, then return an error on another timeout. The first attempt may already be billed, so a successful request adds one 1:1 surcharge. Body streams after headers and native WebSocket upstreams use their own limits.',
+          'Configure the response-header wait after OpenAI/Codex HTTP upload separately from timeout retries. Ordinary HTTP requests switch accounts within the retry budget; WS HTTP bridges retry the current turn on the same account. Timed-out submissions may be billed upstream, so the final successful request adds one 1:1 surcharge per retry. Body streams after headers and native WebSocket upstreams use their own limits.',
         enabled: 'Enable response header timeout',
         enabledHint: 'Disabled means no OpenAI-specific response header timeout (equivalent to 0)',
         seconds: 'Timeout (seconds)',
+        maxRetries: 'Timeout retries',
+        maxRetriesHint: '0–5; default 1. Additional attempts after the first submission; 0 disables retries. For example, 20s with 2 retries allows up to 3 submissions and about 60s of header waits, plus upload and queue time. Each retry adds one request-cost unit to the final successful request.',
         secondsHint:
           '1–600 seconds; default 20s. Slow nonstream responses and SSE headers can time out before the first token. Body streams after headers and native WebSocket upstreams use their own limits.',
         saved: 'OpenAI response header timeout settings saved',

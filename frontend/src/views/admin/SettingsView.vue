@@ -603,6 +603,13 @@
                   <input data-testid="openai-header-timeout-seconds" v-model.number="openAIResponseHeaderTimeoutForm.seconds" type="number" min="1" max="600" class="input w-32" />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.openaiResponseHeaderTimeout.secondsHint") }}</p>
                 </div>
+                <div v-if="openAIResponseHeaderTimeoutForm.enabled">
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.openaiResponseHeaderTimeout.maxRetries") }}
+                  </label>
+                  <input data-testid="openai-header-timeout-retries" v-model.number="openAIResponseHeaderTimeoutForm.max_retries" type="number" min="0" max="5" class="input w-32" />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.openaiResponseHeaderTimeout.maxRetriesHint") }}</p>
+                </div>
                 <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700">
                   <button data-testid="openai-header-timeout-save" type="button" @click="saveOpenAIResponseHeaderTimeoutSettings" :disabled="openAIResponseHeaderTimeoutSaving" class="btn btn-primary btn-sm">
                     <svg v-if="openAIResponseHeaderTimeoutSaving" class="mr-1 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -9747,6 +9754,7 @@ const openAIResponseHeaderTimeoutSaving = ref(false);
 const openAIResponseHeaderTimeoutForm = reactive({
   enabled: true,
   seconds: 20,
+  max_retries: 1,
 });
 
 // Rectifier 状态
@@ -12982,6 +12990,7 @@ async function saveOpenAIResponseHeaderTimeoutSettings() {
     const updated = await adminAPI.settings.updateOpenAIResponseHeaderTimeoutSettings({
       enabled: openAIResponseHeaderTimeoutForm.enabled,
       seconds: openAIResponseHeaderTimeoutForm.seconds,
+      max_retries: openAIResponseHeaderTimeoutForm.max_retries,
     });
     Object.assign(openAIResponseHeaderTimeoutForm, updated);
     appStore.showSuccess(t("admin.settings.openaiResponseHeaderTimeout.saved"));

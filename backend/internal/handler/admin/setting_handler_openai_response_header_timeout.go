@@ -8,8 +8,9 @@ import (
 )
 
 type updateOpenAIResponseHeaderTimeoutSettingsRequest struct {
-	Enabled *bool `json:"enabled"`
-	Seconds *int  `json:"seconds"`
+	Enabled    *bool `json:"enabled"`
+	Seconds    *int  `json:"seconds"`
+	MaxRetries *int  `json:"max_retries"`
 }
 
 // GetOpenAIResponseHeaderTimeoutSettings returns the admin-configurable
@@ -37,9 +38,23 @@ func (h *SettingHandler) UpdateOpenAIResponseHeaderTimeoutSettings(c *gin.Contex
 		response.BadRequest(c, "enabled and seconds are required")
 		return
 	}
+	maxRetries := 1
+	if req.MaxRetries != nil {
+		maxRetries = *req.MaxRetries
+	} else {
+		// Old admin clients omit this additive field. Preserve an existing
+		// explicit zero or custom budget rather than silently resetting it.
+		current, err := h.settingService.GetOpenAIResponseHeaderTimeoutSettings(c.Request.Context())
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		maxRetries = current.MaxRetries
+	}
 	if err := h.settingService.SetOpenAIResponseHeaderTimeoutSettings(c.Request.Context(), &service.OpenAIResponseHeaderTimeoutSettings{
-		Enabled: *req.Enabled,
-		Seconds: *req.Seconds,
+		Enabled:    *req.Enabled,
+		Seconds:    *req.Seconds,
+		MaxRetries: maxRetries,
 	}); err != nil {
 		response.BadRequest(c, err.Error())
 		return

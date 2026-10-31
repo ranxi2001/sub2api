@@ -939,6 +939,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	headerTimeoutRetries := 0
+	headerTimeoutRetryLimit := h.gatewayService.OpenAIResponseHeaderRetryLimit(c.Request.Context())
 	var forbiddenBudget grokForbiddenFailoverBudget
 	firstOutputTimeoutSwitchCount := 0
 	profitVetoCount := 0
@@ -1230,6 +1231,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					if failoverErr.HeaderTimeoutSubmitted {
+						if headerTimeoutRetries >= headerTimeoutRetryLimit {
+							h.handleFailoverExhausted(c, failoverErr, streamStarted)
+							return
+						}
 						headerTimeoutRetries++
 						reqLog.Warn("openai.header_timeout_failover",
 							zap.Int64("account_id", account.ID),
@@ -1652,6 +1657,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	headerTimeoutRetries := 0
+	headerTimeoutRetryLimit := h.gatewayService.OpenAIResponseHeaderRetryLimit(c.Request.Context())
 	var forbiddenBudget grokForbiddenFailoverBudget
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
@@ -1858,6 +1864,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					if failoverErr.HeaderTimeoutSubmitted {
+						if headerTimeoutRetries >= headerTimeoutRetryLimit {
+							h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
+							return
+						}
 						headerTimeoutRetries++
 						reqLog.Warn("openai.header_timeout_failover",
 							zap.Int64("account_id", account.ID),

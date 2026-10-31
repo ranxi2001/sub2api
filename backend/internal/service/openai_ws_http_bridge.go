@@ -574,6 +574,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	// Retain the current account and rebuilt continuation body. One uncertain
 	// submitted attempt adds one surcharge if this turn eventually succeeds.
 	headerTimeoutRetries := 0
+	headerTimeoutRetryLimit := s.OpenAIResponseHeaderRetryLimit(ctx)
 	rejectedFieldRetryState := newOpenAIResponsesRejectedFieldRetryState(body)
 	var resp *http.Response
 	for {
@@ -609,10 +610,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			var phaseTimeout *openAIHTTPPhaseTimeout
 			if errors.As(err, &phaseTimeout) {
 				retryHeader := account.Platform == PlatformOpenAI && phaseTimeout.phase == "response_header_timeout" &&
-					headerTimeoutRetries == 0 && openAIWSHTTPBridgeCanRetryTurn(ctx, c)
+					headerTimeoutRetries < headerTimeoutRetryLimit && openAIWSHTTPBridgeCanRetryTurn(ctx, c)
 				message := phaseTimeout.Error()
 				if retryHeader {
-					message = "OpenAI upstream response header timeout; retrying current WebSocket turn once on the same account; first attempt may be billed"
+					message = "OpenAI upstream response header timeout; retrying current WebSocket turn on the same account; submitted attempts may be billed"
 				} else if headerTimeoutRetries > 0 && phaseTimeout.phase == "response_header_timeout" {
 					message = "OpenAI upstream response header timeout; current WebSocket turn retry exhausted; upstream attempts may still complete"
 				}
@@ -621,7 +622,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				setOpsUpstreamError(c, http.StatusGatewayTimeout, message, "")
 				if retryHeader {
 					headerTimeoutRetries++
-					logOpenAIWSModeInfo("ingress_ws_http_bridge_header_timeout_retry account_id=%d turn=%d retry=%d", account.ID, turn, headerTimeoutRetries)
+					logOpenAIWSModeInfo("ingress_ws_http_bridge_header_timeout_retry account_id=%d turn=%d retry=%d retry_limit=%d", account.ID, turn, headerTimeoutRetries, headerTimeoutRetryLimit)
 					continue
 				}
 				clientError := buildOpenAIWSHTTPBridgeErrorEvent(http.StatusGatewayTimeout, message)

@@ -1201,10 +1201,12 @@ export default {
       openaiResponseHeaderTimeout: {
         title: 'OpenAI 响应头超时',
         description:
-          '限制 OpenAI/Codex HTTP 上传完成后的响应头等待。普通 HTTP 超时后切换账号；WS HTTP bridge 保持原账号重试当前轮次一次，再次超时则返回错误。第一次尝试可能已在上游计费，成功请求会按 1:1 追加一次费用。已收到响应头的正文流、原生上游 WebSocket 使用各自时限。',
+          '分别设置 OpenAI/Codex HTTP 上传完成后的响应头等待时限和超时重试次数。普通 HTTP 在预算内切换账号；WS HTTP bridge 保持原账号重试当前轮次。每次超时提交可能已在上游计费，最终成功请求会按每次重试 1:1 追加费用。已收到响应头的正文流、原生上游 WebSocket 使用各自时限。',
         enabled: '启用响应头超时',
         enabledHint: '关闭后不设 OpenAI 专用响应头超时（等价于 0）',
         seconds: '超时时间（秒）',
+        maxRetries: '超时重试次数',
+        maxRetriesHint: '范围 0–5，默认 1。表示首次请求之外的额外尝试次数，0 表示不重试；例如 20 秒、重试 2 次，最多提交 3 次，响应头等待最多约 60 秒，另加上传和排队耗时。每次重试成功后额外收取一份请求费用。',
         secondsHint:
           '范围 1–600 秒，默认 20 秒。慢非流式响应及 SSE 响应头可能在首 token 前超时；已收到响应头的正文流、原生上游 WebSocket 使用各自时限。',
         saved: 'OpenAI 响应头超时设置保存成功',

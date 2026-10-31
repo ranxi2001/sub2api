@@ -16,6 +16,8 @@ const (
 	openAIResponseHeaderTimeoutMinSeconds     = 1
 	openAIResponseHeaderTimeoutMaxSeconds     = 600
 	openAIResponseHeaderTimeoutDefaultSeconds = 20
+	openAIResponseHeaderTimeoutDefaultRetries = 1
+	openAIResponseHeaderTimeoutMaxRetries     = 5
 	openAIResponseHeaderTimeoutCacheTTL       = 60 * time.Second
 	openAIResponseHeaderTimeoutErrorTTL       = 5 * time.Second
 	openAIResponseHeaderTimeoutDBTimeout      = 5 * time.Second
@@ -26,8 +28,9 @@ const (
 // The setting is DB-backed so it can be changed from the admin UI; the zero
 // value of Seconds means "use the default".
 type OpenAIResponseHeaderTimeoutSettings struct {
-	Enabled bool `json:"enabled"`
-	Seconds int  `json:"seconds"`
+	Enabled    bool `json:"enabled"`
+	Seconds    int  `json:"seconds"`
+	MaxRetries int  `json:"max_retries"`
 }
 
 type cachedOpenAIResponseHeaderTimeoutSettings struct {
@@ -49,7 +52,7 @@ func DefaultOpenAIResponseHeaderTimeoutSettings(cfg *config.Config) *OpenAIRespo
 			enabled = false
 		}
 	}
-	return &OpenAIResponseHeaderTimeoutSettings{Enabled: enabled, Seconds: seconds}
+	return &OpenAIResponseHeaderTimeoutSettings{Enabled: enabled, Seconds: seconds, MaxRetries: openAIResponseHeaderTimeoutDefaultRetries}
 }
 
 func normalizeOpenAIResponseHeaderTimeoutSettings(settings, fallback *OpenAIResponseHeaderTimeoutSettings) {
@@ -58,6 +61,9 @@ func normalizeOpenAIResponseHeaderTimeoutSettings(settings, fallback *OpenAIResp
 	}
 	if settings.Seconds < openAIResponseHeaderTimeoutMinSeconds || settings.Seconds > openAIResponseHeaderTimeoutMaxSeconds {
 		settings.Seconds = fallback.Seconds
+	}
+	if settings.MaxRetries < 0 || settings.MaxRetries > openAIResponseHeaderTimeoutMaxRetries {
+		settings.MaxRetries = fallback.MaxRetries
 	}
 }
 
@@ -76,11 +82,29 @@ func (s *SettingService) GetOpenAIResponseHeaderTimeoutSettings(ctx context.Cont
 		return fallback, nil
 	}
 
-	settings := &OpenAIResponseHeaderTimeoutSettings{}
-	if err := json.Unmarshal([]byte(value), settings); err != nil {
+	// Decode additive fields as pointers so a pre-max_retries database value
+	// inherits the default retry budget instead of silently disabling retries.
+	stored := struct {
+		Enabled    *bool `json:"enabled"`
+		Seconds    *int  `json:"seconds"`
+		MaxRetries *int  `json:"max_retries"`
+	}{}
+	if err := json.Unmarshal([]byte(value), &stored); err != nil {
 		slog.Warn("failed to unmarshal OpenAI response header timeout settings, falling back to defaults",
 			"error", err, "key", SettingKeyOpenAIResponseHeaderTimeoutSettings)
 		return fallback, nil
+	}
+	settings := &OpenAIResponseHeaderTimeoutSettings{
+		Enabled: fallback.Enabled, Seconds: fallback.Seconds, MaxRetries: fallback.MaxRetries,
+	}
+	if stored.Enabled != nil {
+		settings.Enabled = *stored.Enabled
+	}
+	if stored.Seconds != nil {
+		settings.Seconds = *stored.Seconds
+	}
+	if stored.MaxRetries != nil {
+		settings.MaxRetries = *stored.MaxRetries
 	}
 	normalizeOpenAIResponseHeaderTimeoutSettings(settings, fallback)
 	return settings, nil
@@ -95,6 +119,9 @@ func (s *SettingService) SetOpenAIResponseHeaderTimeoutSettings(ctx context.Cont
 	}
 	if settings.Seconds < openAIResponseHeaderTimeoutMinSeconds || settings.Seconds > openAIResponseHeaderTimeoutMaxSeconds {
 		return fmt.Errorf("seconds must be between %d-%d", openAIResponseHeaderTimeoutMinSeconds, openAIResponseHeaderTimeoutMaxSeconds)
+	}
+	if settings.MaxRetries < 0 || settings.MaxRetries > openAIResponseHeaderTimeoutMaxRetries {
+		return fmt.Errorf("max_retries must be between 0-%d", openAIResponseHeaderTimeoutMaxRetries)
 	}
 
 	data, err := json.Marshal(settings)
@@ -117,17 +144,46 @@ func (s *SettingService) SetOpenAIResponseHeaderTimeoutSettings(ctx context.Cont
 // transport hot path. It never blocks on a DB read when the cache is fresh and
 // preserves the last known value on DB errors.
 func (s *SettingService) GetOpenAIResponseHeaderTimeoutCached(ctx context.Context) (int, bool) {
+	settings := s.getOpenAIResponseHeaderTimeoutCached(ctx)
+	return settings.Seconds, settings.Enabled
+}
+
+func (s *SettingService) GetOpenAIResponseHeaderTimeoutSettingsCached(ctx context.Context) OpenAIResponseHeaderTimeoutSettings {
+	return s.getOpenAIResponseHeaderTimeoutCached(ctx)
+}
+
+// OpenAIResponseHeaderRetryLimit returns additional attempts after the first
+// submission. Zero disables replay. Read from the same atomically published
+// settings snapshot as the response-header timeout.
+func (s *OpenAIGatewayService) OpenAIResponseHeaderRetryLimit(ctx context.Context) int {
+	var settings OpenAIResponseHeaderTimeoutSettings
+	if s != nil && s.settingService != nil {
+		settings = s.settingService.GetOpenAIResponseHeaderTimeoutSettingsCached(ctx)
+	} else {
+		var cfg *config.Config
+		if s != nil {
+			cfg = s.cfg
+		}
+		settings = *DefaultOpenAIResponseHeaderTimeoutSettings(cfg)
+	}
+	if !settings.Enabled {
+		return 0
+	}
+	return settings.MaxRetries
+}
+
+func (s *SettingService) getOpenAIResponseHeaderTimeoutCached(ctx context.Context) OpenAIResponseHeaderTimeoutSettings {
 	if s == nil {
 		fallback := DefaultOpenAIResponseHeaderTimeoutSettings(nil)
-		return fallback.Seconds, fallback.Enabled
+		return *fallback
 	}
 	if s.settingRepo == nil {
 		fallback := DefaultOpenAIResponseHeaderTimeoutSettings(s.cfg)
-		return fallback.Seconds, fallback.Enabled
+		return *fallback
 	}
 	if cached, ok := s.openAIResponseHeaderTimeoutCache.Load().(*cachedOpenAIResponseHeaderTimeoutSettings); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
-			return cached.settings.Seconds, cached.settings.Enabled
+			return cached.settings
 		}
 	}
 
@@ -168,10 +224,10 @@ func (s *SettingService) GetOpenAIResponseHeaderTimeoutCached(ctx context.Contex
 		return *settings, nil
 	})
 	if settings, ok := result.(OpenAIResponseHeaderTimeoutSettings); ok {
-		return settings.Seconds, settings.Enabled
+		return settings
 	}
 	fallback := DefaultOpenAIResponseHeaderTimeoutSettings(s.cfg)
-	return fallback.Seconds, fallback.Enabled
+	return *fallback
 }
 
 func (s *SettingService) storeOpenAIResponseHeaderTimeoutCache(settings OpenAIResponseHeaderTimeoutSettings, ttl time.Duration) {

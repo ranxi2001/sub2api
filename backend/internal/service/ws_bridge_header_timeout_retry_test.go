@@ -33,32 +33,62 @@ func bridgeRetryAccount() *Account {
 		Status: StatusActive, Schedulable: true, Concurrency: 1}
 }
 
+func bridgeRetryService(upstream HTTPUpstream, retries int) *OpenAIGatewayService {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIResponseHeaderTimeout = 1
+	settings := NewSettingService(&panelRateLimitSettingRepo{values: map[string]string{
+		SettingKeyOpenAIResponseHeaderTimeoutSettings: fmt.Sprintf(
+			`{"enabled":true,"seconds":1,"max_retries":%d}`, retries),
+	}}, cfg)
+	return &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, settingService: settings}
+}
+
 func TestWSBridgeHeaderTimeoutRetryPreservesTurnAndBillsOnce(t *testing.T) {
-	for _, turn := range []int{1, 2, 20} {
-		t.Run(fmt.Sprint(turn), func(t *testing.T) {
-			timeout := &openAIHTTPPhaseTimeout{phase: "response_header_timeout"}
-			upstream := &httpUpstreamSequenceRecorder{
-				errs:      []error{timeout, nil, nil},
-				responses: []*http.Response{nil, bridgeRetryResponse("resp_retried"), bridgeRetryResponse("resp_next")},
+	for _, retries := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("budget_%d", retries), func(t *testing.T) {
+			timeoutAttempts := retries
+			if timeoutAttempts == 0 {
+				timeoutAttempts = 1
 			}
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			errs := make([]error, timeoutAttempts+2)
+			responses := make([]*http.Response, timeoutAttempts+2)
+			for i := 0; i < retries; i++ {
+				errs[i] = &openAIHTTPPhaseTimeout{phase: "response_header_timeout"}
+			}
+			if retries == 0 {
+				errs[0] = &openAIHTTPPhaseTimeout{phase: "response_header_timeout"}
+			}
+			for i := retries; i < len(responses); i++ {
+				responses[i] = bridgeRetryResponse(fmt.Sprintf("resp_retry_%d", i))
+			}
+			upstream := &httpUpstreamSequenceRecorder{errs: errs, responses: responses}
+			svc := bridgeRetryService(upstream, retries)
 			c := bridgeRetryContext(t)
 			// Include function-call context and opaque account-owned state. The
 			// bridge's prepared body must be identical across both sends.
 			payload := []byte(`{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_prior","input":[{"type":"function_call","name":"inspect","call_id":"call_one","arguments":"{}"},{"type":"function_call_output","call_id":"call_one","output":"synthetic"}],"prompt_cache_key":"synthetic-cache"}`)
 			var writes [][]byte
 			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(t.Context(), c, bridgeRetryAccount(), "synthetic", payload, len(payload),
-				"gpt-5.1", "", "", "", "", turn, func(b []byte) error {
+				"gpt-5.1", "", "", "", "", 20, func(b []byte) error {
 					writes = append(writes, append([]byte(nil), b...))
 					return nil
 				})
+			if retries == 0 {
+				require.Error(t, err)
+				require.Nil(t, result)
+				require.Equal(t, 1, upstream.callCount, "zero disables same-account retries")
+				require.Len(t, writes, 1)
+				return
+			}
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			require.Equal(t, 1, result.HeaderTimeoutRetries)
-			require.Equal(t, 2, upstream.callCount)
-			require.Equal(t, upstream.bodies[0], upstream.bodies[1])
-			require.Equal(t, upstream.reqs[0].URL, upstream.reqs[1].URL)
-			require.Equal(t, upstream.reqs[0].Header.Get("Authorization"), upstream.reqs[1].Header.Get("Authorization"))
+			require.Equal(t, retries, result.HeaderTimeoutRetries)
+			require.Equal(t, timeoutAttempts+1, upstream.callCount)
+			for i := 1; i < upstream.callCount; i++ {
+				require.Equal(t, upstream.bodies[0], upstream.bodies[i])
+				require.Equal(t, upstream.reqs[0].URL, upstream.reqs[i].URL)
+				require.Equal(t, upstream.reqs[0].Header.Get("Authorization"), upstream.reqs[i].Header.Get("Authorization"))
+			}
 			require.Len(t, writes, 1, "the failed attempt must not send a client error")
 			require.Equal(t, "response.completed", gjson.GetBytes(writes[0], "type").String())
 
@@ -76,14 +106,15 @@ func TestWSBridgeHeaderTimeoutRetryPreservesTurnAndBillsOnce(t *testing.T) {
 			baseline.HeaderTimeoutRetries = 0
 			input.Result = &baseline
 			require.NoError(t, billing.RecordUsage(t.Context(), input))
-			require.InDelta(t, repo.lastLog.ActualCost*2, doubledActual, 1e-9)
-			require.InDelta(t, repo.lastLog.TotalCost*2, doubledTotal, 1e-9)
+			factor := float64(1 + retries)
+			require.InDelta(t, repo.lastLog.ActualCost*factor, doubledActual, 1e-9)
+			require.InDelta(t, repo.lastLog.TotalCost*factor, doubledTotal, 1e-9)
 
 			next, err := svc.proxyOpenAIWSHTTPBridgeTurn(t.Context(), c, bridgeRetryAccount(), "synthetic", payload, len(payload),
-				"gpt-5.1", "", "", "", "", turn+1, func([]byte) error { return nil })
+				"gpt-5.1", "", "", "", "", 21, func([]byte) error { return nil })
 			require.NoError(t, err)
 			require.Equal(t, 0, next.HeaderTimeoutRetries, "surcharge must not leak into another turn")
-			require.Equal(t, 3, upstream.callCount)
+			require.Equal(t, timeoutAttempts+2, upstream.callCount)
 		})
 	}
 }
@@ -96,7 +127,7 @@ func TestWSBridgeHeaderTimeoutRetryIsBoundedAndDoesNotRetryOtherPhases(t *testin
 		t.Run(tc.phase, func(t *testing.T) {
 			err := &openAIHTTPPhaseTimeout{phase: tc.phase}
 			upstream := &httpUpstreamSequenceRecorder{errs: []error{err, err, err}}
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			svc := bridgeRetryService(upstream, 1)
 			payload := []byte(`{"type":"response.create","model":"gpt-5.1","input":"synthetic"}`)
 			writes := 0
 			result, got := svc.proxyOpenAIWSHTTPBridgeTurn(t.Context(), bridgeRetryContext(t), bridgeRetryAccount(), "synthetic",
@@ -141,7 +172,7 @@ func TestWSBridgeHeaderTimeoutRetryDoesNotLoseSurchargeByFailingOverAgain(t *tes
 				responses: []*http.Response{nil, {StatusCode: status, Header: make(http.Header),
 					Body: io.NopCloser(strings.NewReader(`{"error":{"message":"synthetic refusal"}}`))}},
 			}
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			svc := bridgeRetryService(upstream, 1)
 			payload := []byte(`{"type":"response.create","model":"gpt-5.1","input":"synthetic"}`)
 			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(t.Context(), bridgeRetryContext(t), bridgeRetryAccount(), "synthetic", payload, len(payload),
 				"gpt-5.1", "", "", "", "", 1, func([]byte) error { return nil })

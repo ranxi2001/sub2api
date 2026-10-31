@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,15 +25,18 @@ func TestDefaultOpenAIResponseHeaderTimeoutSettings(t *testing.T) {
 	settings := DefaultOpenAIResponseHeaderTimeoutSettings(cfg)
 	require.True(t, settings.Enabled)
 	require.Equal(t, 20, settings.Seconds)
+	require.Equal(t, 1, settings.MaxRetries)
 
 	cfg.Gateway.OpenAIResponseHeaderTimeout = 0
 	settings = DefaultOpenAIResponseHeaderTimeoutSettings(cfg)
 	require.False(t, settings.Enabled)
 	require.Equal(t, openAIResponseHeaderTimeoutDefaultSeconds, settings.Seconds)
+	require.Equal(t, 1, settings.MaxRetries)
 
 	settings = DefaultOpenAIResponseHeaderTimeoutSettings(nil)
 	require.True(t, settings.Enabled)
 	require.Equal(t, openAIResponseHeaderTimeoutDefaultSeconds, settings.Seconds)
+	require.Equal(t, 1, settings.MaxRetries)
 }
 
 func TestOpenAIResponseHeaderTimeoutSettingsGetMissingUsesConfig(t *testing.T) {
@@ -52,8 +56,7 @@ func TestOpenAIResponseHeaderTimeoutSettingsSetAndCache(t *testing.T) {
 	svc := newOpenAIHeaderTimeoutTestService(t, 20)
 
 	require.NoError(t, svc.SetOpenAIResponseHeaderTimeoutSettings(context.Background(), &OpenAIResponseHeaderTimeoutSettings{
-		Enabled: true,
-		Seconds: 30,
+		Enabled: true, Seconds: 30, MaxRetries: 1,
 	}))
 	seconds, enabled := svc.GetOpenAIResponseHeaderTimeoutCached(context.Background())
 	require.True(t, enabled)
@@ -63,14 +66,29 @@ func TestOpenAIResponseHeaderTimeoutSettingsSetAndCache(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, stored.Enabled)
 	require.Equal(t, 30, stored.Seconds)
+	require.Equal(t, 1, stored.MaxRetries)
 
 	require.NoError(t, svc.SetOpenAIResponseHeaderTimeoutSettings(context.Background(), &OpenAIResponseHeaderTimeoutSettings{
-		Enabled: false,
-		Seconds: 30,
+		Enabled: false, Seconds: 30, MaxRetries: 1,
 	}))
 	seconds, enabled = svc.GetOpenAIResponseHeaderTimeoutCached(context.Background())
 	require.False(t, enabled)
 	require.Equal(t, 30, seconds)
+}
+
+func TestOpenAIResponseHeaderRetryLimitUsesAtomicSettingsAndZeroDisables(t *testing.T) {
+	for _, retries := range []int{0, 1, 3, 5} {
+		t.Run(fmt.Sprint(retries), func(t *testing.T) {
+			settings := &panelRateLimitSettingRepo{values: map[string]string{}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(settings, &config.Config{})}
+			require.NoError(t, svc.settingService.SetOpenAIResponseHeaderTimeoutSettings(t.Context(),
+				&OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 20, MaxRetries: retries}))
+			require.Equal(t, retries, svc.OpenAIResponseHeaderRetryLimit(t.Context()))
+			require.NoError(t, svc.settingService.SetOpenAIResponseHeaderTimeoutSettings(t.Context(),
+				&OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 20, MaxRetries: retries}))
+			require.Zero(t, svc.OpenAIResponseHeaderRetryLimit(t.Context()))
+		})
+	}
 }
 
 func TestOpenAIResponseHeaderTimeoutSettingsValidation(t *testing.T) {
@@ -82,8 +100,26 @@ func TestOpenAIResponseHeaderTimeoutSettingsValidation(t *testing.T) {
 		}))
 	}
 	for _, seconds := range []int{1, 600} {
-		require.NoError(t, svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: seconds}))
+		require.NoError(t, svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: seconds, MaxRetries: 1}))
 	}
+	for _, retries := range []int{0, 1, 5} {
+		settings := &OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 20, MaxRetries: retries}
+		require.NoError(t, svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), settings))
+		require.Equal(t, retries, svc.GetOpenAIResponseHeaderTimeoutSettingsCached(t.Context()).MaxRetries)
+	}
+	for _, retries := range []int{-1, 6} {
+		require.Error(t, svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 20, MaxRetries: retries}))
+	}
+}
+
+func TestOpenAIResponseHeaderTimeoutLegacySettingInheritsRetryDefault(t *testing.T) {
+	repo := &panelRateLimitSettingRepo{values: map[string]string{
+		SettingKeyOpenAIResponseHeaderTimeoutSettings: `{"enabled":true,"seconds":37}`,
+	}}
+	svc := NewSettingService(repo, nil)
+	settings, err := svc.GetOpenAIResponseHeaderTimeoutSettings(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, &OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 37, MaxRetries: 1}, settings)
 }
 
 type headerTimeoutBarrierRepo struct {
@@ -118,13 +154,12 @@ func TestOpenAIResponseHeaderTimeoutStaleRefreshCannotUndoDisable(t *testing.T) 
 				started:                   make(chan struct{}), release: make(chan struct{}), readErr: readErr,
 			}
 			svc := NewSettingService(repo, &config.Config{})
-			require.NoError(t, svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 20}))
-			svc.storeOpenAIResponseHeaderTimeoutCache(OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 20}, -time.Second)
+			require.NoError(t, svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 20, MaxRetries: 1}))
+			svc.storeOpenAIResponseHeaderTimeoutCache(OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 20, MaxRetries: 1}, -time.Second)
 			repo.blockNext.Store(true)
 			done := make(chan OpenAIResponseHeaderTimeoutSettings, 1)
 			go func() {
-				seconds, enabled := svc.GetOpenAIResponseHeaderTimeoutCached(t.Context())
-				done <- OpenAIResponseHeaderTimeoutSettings{Enabled: enabled, Seconds: seconds}
+				done <- svc.GetOpenAIResponseHeaderTimeoutSettingsCached(t.Context())
 			}()
 			select {
 			case <-repo.started:
@@ -133,7 +168,7 @@ func TestOpenAIResponseHeaderTimeoutStaleRefreshCannotUndoDisable(t *testing.T) 
 			}
 			save := make(chan error, 1)
 			go func() {
-				save <- svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 20})
+				save <- svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 20, MaxRetries: 0})
 			}()
 			select {
 			case err := <-save:
@@ -169,7 +204,7 @@ func TestOpenAIResponseHeaderTimeoutStaticZeroAndDBErrors(t *testing.T) {
 	svc := NewSettingService(repo, cfg)
 	_, enabled = svc.GetOpenAIResponseHeaderTimeoutCached(t.Context())
 	require.False(t, enabled, "missing DB must keep explicit static 0 disabled")
-	svc.storeOpenAIResponseHeaderTimeoutCache(OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 33}, -time.Second)
+	svc.storeOpenAIResponseHeaderTimeoutCache(OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 33, MaxRetries: 1}, -time.Second)
 	seconds, enabled := svc.GetOpenAIResponseHeaderTimeoutCached(t.Context())
 	require.False(t, enabled)
 	require.Equal(t, 33, seconds, "DB errors preserve last known settings")

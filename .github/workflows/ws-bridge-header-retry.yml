@@ -51,7 +51,7 @@ jobs:
         working-directory: backend
         run: |
           set -euo pipefail
-          go test -race -tags=unit ./internal/service ./internal/handler -run '^(TestWSBridgeHeaderTimeout|TestPR612|TestProxyOpenAIWSHTTPBridge|TestOpenAIWSHTTPBridgeLaterTurn|TestOpenAIGatewayServiceRecordUsage_HeaderTimeoutRetriesAddSurcharge)' -count=1 -v -timeout=12m 2>&1 | tee "$RUNNER_TEMP/ws-bridge-green.log"
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^(TestWSBridgeHeaderTimeout|TestPR612|TestProxyOpenAIWSHTTPBridge|TestOpenAIWSHTTPBridgeLaterTurn|TestOpenAIGatewayServiceRecordUsage_HeaderTimeoutRetriesAddSurcharge|TestOpenAIResponseHeader)' -count=1 -v -timeout=12m 2>&1 | tee "$RUNNER_TEMP/ws-bridge-green.log"
           grep -q -- '--- PASS: TestWSBridgeHeaderTimeoutRetryPreservesTurnAndBillsOnce' "$RUNNER_TEMP/ws-bridge-green.log"
           grep -q -- '--- PASS: TestWSBridgeHeaderTimeoutRealTransportRetryThenNextTurn' "$RUNNER_TEMP/ws-bridge-green.log"
       - name: Compile ordinary production packages

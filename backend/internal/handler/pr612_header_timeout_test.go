@@ -33,11 +33,41 @@ func pr612HTTPConfig() *config.Config {
 	return cfg
 }
 
+type pr612HeaderTimeoutSettingsRepo struct {
+	service.SettingRepository
+	values map[string]string
+}
+
+func (r *pr612HeaderTimeoutSettingsRepo) GetValue(_ context.Context, key string) (string, error) {
+	value, ok := r.values[key]
+	if !ok {
+		return "", service.ErrSettingNotFound
+	}
+	return value, nil
+}
+
+func (r *pr612HeaderTimeoutSettingsRepo) Set(_ context.Context, key, value string) error {
+	r.values[key] = value
+	return nil
+}
+
+func pr612RetrySettings(retries int) *service.SettingService {
+	repo := &pr612HeaderTimeoutSettingsRepo{values: map[string]string{
+		service.SettingKeyOpenAIResponseHeaderTimeoutSettings: fmt.Sprintf(
+			`{"enabled":true,"seconds":1,"max_retries":%d}`, retries),
+	}}
+	return service.NewSettingService(repo, pr612HTTPConfig())
+}
+
 // Both schedulable accounts point at synthetic loopback upstreams. Any automatic
 // account retry or physical resubmission is visible in the server submission count.
 func pr612HTTPHandler(t *testing.T, cfg *config.Config, baseURL, mode string) *OpenAIGatewayHandler {
+	return pr612HTTPHandlerConfigured(t, cfg, baseURL, mode, 2, nil)
+}
+
+func pr612HTTPHandlerConfigured(t *testing.T, cfg *config.Config, baseURL, mode string, accountCount int, timeoutSettings *service.SettingService) *OpenAIGatewayHandler {
 	t.Helper()
-	accounts := make([]service.Account, 2)
+	accounts := make([]service.Account, accountCount)
 	for i := range accounts {
 		accounts[i] = service.Account{ID: int64(i + 1), Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
 			Status: service.StatusActive, Schedulable: true, Priority: i, GroupIDs: []int64{3131},
@@ -48,7 +78,7 @@ func pr612HTTPHandler(t *testing.T, cfg *config.Config, baseURL, mode string) *O
 		}
 	}
 	gateway := service.NewOpenAIGatewayService(openAIImagesFailoverAccountRepo{accounts: accounts}, nil, nil, nil, nil, nil, nil, nil,
-		cfg, nil, nil, nil, nil, nil, repository.NewHTTPUpstream(cfg), nil, nil, nil, nil, nil, nil, nil, nil)
+		cfg, nil, nil, nil, nil, nil, repository.NewHTTPUpstream(cfg), nil, nil, nil, nil, nil, nil, timeoutSettings, nil)
 	t.Cleanup(gateway.CloseOpenAIWSPool)
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billing.Stop)
@@ -104,6 +134,41 @@ func TestPR612DelayedHeadersFailoverToNextAccount(t *testing.T) {
 				require.NoError(t, ctx.Err(), "attempt cancellation must preserve the caller")
 			})
 		}
+	}
+}
+
+func TestPR612HeaderTimeoutFailoverUsesConfiguredRetryCount(t *testing.T) {
+	for _, retries := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("max_retries=%d", retries), func(t *testing.T) {
+			var submissions atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, err := io.Copy(io.Discard, r.Body)
+				if err != nil {
+					t.Errorf("read request: %v", err)
+					return
+				}
+				attempt := submissions.Add(1)
+				if int(attempt) <= max(retries, 1) {
+					<-r.Context().Done()
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"resp_configured_retry","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}`)
+			}))
+			defer upstream.Close()
+			cfg := pr612HTTPConfig()
+			handler := pr612HTTPHandlerConfigured(t, cfg, upstream.URL, "responses", retries+1, pr612RetrySettings(retries))
+			handler.maxAccountSwitches = 5
+			c, rec := newOpenAIResponsesFailoverTestContext(t, t.Context())
+			c.Request.Body = io.NopCloser(strings.NewReader(`{"model":"gpt-5.1","stream":false,"input":"synthetic"}`))
+			handler.Responses(c)
+			require.Equal(t, int32(retries+1), submissions.Load())
+			if retries == 0 {
+				require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+				return
+			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		})
 	}
 }
 
