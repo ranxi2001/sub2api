@@ -171,6 +171,12 @@ type PriorityLifecycleRepository interface {
 	ReadPriorityLifecycleEvents(context.Context, PriorityLifecycleScope, int64) ([]PriorityLifecycleEvent, error)
 }
 
+// Management inventory is deliberately separate from active-only routing reads.
+// A disabled/error account must remain visible with its immutable policy evidence.
+type PriorityLifecycleAccountCatalog interface {
+	ListPriorityLifecycleAccounts(context.Context) ([]Account, error)
+}
+
 type priorityLifecycleRuntime struct {
 	mu        sync.Mutex
 	failure   string
@@ -261,7 +267,11 @@ func (s *OpenAIGatewayService) PriorityLifecycleState(ctx context.Context, scope
 	if err != nil {
 		return nil, err
 	}
-	accounts, err := s.accountRepo.ListByPlatform(ctx, PlatformOpenAI)
+	catalog, ok := s.accountRepo.(PriorityLifecycleAccountCatalog)
+	if !ok {
+		return nil, errors.New("complete lifecycle account catalog unavailable")
+	}
+	accounts, err := catalog.ListPriorityLifecycleAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}

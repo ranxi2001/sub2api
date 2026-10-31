@@ -129,6 +129,8 @@ func TestPriorityLifecycleRealHandlerUsagePolicyAndState(t *testing.T) {
 	require.Len(t, policies, 1)
 	require.Equal(t, 1, stats.Signals[account.ID].Samples)
 	require.NoError(t, accounts.SetSchedulable(ctx, account.ID, false))
+	_, err = db.ExecContext(ctx, "UPDATE accounts SET status='error' WHERE id=$1", account.ID)
+	require.NoError(t, err)
 	ah := adminhandler.NewAccountHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	ah.SetOpenAIGatewayService(gateway)
 	router := gin.New()
