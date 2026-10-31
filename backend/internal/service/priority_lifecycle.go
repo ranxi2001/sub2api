@@ -9,6 +9,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"github.com/google/uuid"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +112,8 @@ type PriorityLifecycleEvent struct {
 }
 
 type PriorityLifecycleDecision struct {
+	Transport            string                    `json:"transport"`
+	PhysicalWrite        string                    `json:"physical_write"`
 	ConsumedSource       string                    `json:"consumed_source"`
 	ConsumedRevision     string                    `json:"consumed_revision"`
 	ConsumedObservedAt   *time.Time                `json:"consumed_observed_at"`
@@ -142,11 +145,74 @@ type priorityLifecycleConsumed struct {
 }
 
 type priorityLifecycleRequestTypeKey struct{}
+type priorityLifecyclePluginBoundaryKey struct{}
+type priorityLifecyclePluginBoundary struct {
+	before func(context.Context) error
+	after  func(error)
+}
+
+func (s *OpenAIGatewayService) priorityLifecyclePluginRequest(req *http.Request, account *Account) *http.Request {
+	boundary := priorityLifecyclePluginBoundary{
+		before: func(ctx context.Context) error {
+			if err := s.fenceAuthConnectionEgress(ctx, req, account); err != nil {
+				return err
+			}
+			if turn, _ := ctx.Value(priorityLatencyTurnKey{}).(*priorityLatencyTurn); turn != nil {
+				turn.mu.Lock()
+				started := turn.started
+				request := turn.request
+				turn.mu.Unlock()
+				if !started {
+					if err := s.priorityLatencyAdmission(request, account); err != nil {
+						return err
+					}
+				}
+			}
+			return s.priorityLatencyBeforeSend(ctx, account)
+		},
+		after: func(err error) { s.priorityLifecycleWriteResult(req.Context(), account, "plugin", err) },
+	}
+	return req.WithContext(context.WithValue(req.Context(), priorityLifecyclePluginBoundaryKey{}, boundary))
+}
 
 func WithPriorityLifecycleRequestType(ctx context.Context, kind RequestType) context.Context {
 	return context.WithValue(ctx, priorityLifecycleRequestTypeKey{}, kind)
 }
 func newPriorityLifecycleDecisionID() string { return uuid.NewString() }
+
+// Nonblocking in-memory publication only. It never inserts DB/network I/O in
+// the last admission -> generation-write interval. Missing records are explicit
+// coverage loss, never silently promoted to a successful physical send.
+func (s *OpenAIGatewayService) priorityLifecycleWriteResult(ctx context.Context, account *Account, transport string, writeErr error) {
+	if s == nil || account == nil {
+		return
+	}
+	turn, _ := ctx.Value(priorityLatencyTurnKey{}).(*priorityLatencyTurn)
+	if turn == nil {
+		return
+	}
+	turn.mu.Lock()
+	req := turn.request
+	turn.mu.Unlock()
+	cfg := s.prioritySchedulingRuntimeConfig()
+	if !cfg.Enabled || cfg.LifecycleMode == "off" {
+		return
+	}
+	measurement, spec, revision := PriorityLifecycleVersions(cfg)
+	event := PriorityLifecycleDecision{ID: uuid.NewString(), ParentID: req.priorityDecisionID, TraceID: requesttiming.From(ctx).Identity(), Scope: PriorityLifecycleScope{GroupID: req.GroupID, Model: priorityHistoryModel(req), Endpoint: PriorityLifecycleEndpoint(req.InboundEndpoint), RequestType: req.LifecycleRequestType, MeasurementSchema: measurement, StatisticsSpec: spec}, PolicyRevision: revision, SelectedAccountID: account.ID, At: time.Now().UTC(), Phase: "SUBMITTED", Allowed: true, Mode: "compatibility_v1/shadow_v2", Transport: transport, PhysicalWrite: "attempted", ConsumedSource: "compatibility_admission"}
+	if writeErr != nil {
+		event.Phase = "SUBMISSION_UNCERTAIN"
+		event.Reason = "write_error_no_replay"
+	}
+	select {
+	case s.priorityLifecycle.audit <- event:
+	default:
+		s.priorityLifecycle.mu.Lock()
+		s.priorityLifecycle.failure = "audit_queue_overflow"
+		s.priorityLifecycle.auditLost++
+		s.priorityLifecycle.mu.Unlock()
+	}
+}
 
 // The compatibility executor remains authoritative. A failed shadow audit is
 // visible as incomplete coverage and cannot create a new enforcing penalty.
@@ -220,6 +286,10 @@ type PriorityLifecycleRepository interface {
 type PriorityLifecycleScopeRegistrar interface {
 	RegisterPriorityLifecycleScope(context.Context, PriorityLifecycleScope) error
 }
+type PriorityLifecycleCoverageRepository interface {
+	RecordPriorityLifecycleCoverage(context.Context, string, string) error
+	ReadPriorityLifecycleCoverage(context.Context) (map[string]string, error)
+}
 
 // Management inventory is deliberately separate from active-only routing reads.
 // A disabled/error account must remain visible with its immutable policy evidence.
@@ -234,6 +304,8 @@ type priorityLifecycleRuntime struct {
 	once      sync.Once
 	cancel    context.CancelFunc
 	done      chan struct{}
+	audit     chan PriorityLifecycleDecision
+	auditLost uint64
 }
 
 func (s *OpenAIGatewayService) startPriorityLifecycle() {
@@ -245,6 +317,7 @@ func (s *OpenAIGatewayService) startPriorityLifecycle() {
 		ctx, cancel := context.WithCancel(context.Background())
 		s.priorityLifecycle.cancel = cancel
 		s.priorityLifecycle.done = make(chan struct{})
+		s.priorityLifecycle.audit = make(chan PriorityLifecycleDecision, 256)
 		go func() {
 			defer close(s.priorityLifecycle.done)
 			timer := time.NewTicker(5 * time.Second)
@@ -253,6 +326,15 @@ func (s *OpenAIGatewayService) startPriorityLifecycle() {
 				select {
 				case <-ctx.Done():
 					return
+				case event := <-s.priorityLifecycle.audit:
+					work, end := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+					err := repo.RecordPriorityLifecycleDecision(work, event)
+					if err != nil {
+						if coverage, ok := repo.(PriorityLifecycleCoverageRepository); ok {
+							_ = coverage.RecordPriorityLifecycleCoverage(work, "audit", "write_failed")
+						}
+					}
+					end()
 				case <-timer.C:
 					cfg := s.prioritySchedulingRuntimeConfig()
 					if cfg.LifecycleMode == "off" || !cfg.Enabled {
@@ -262,10 +344,17 @@ func (s *OpenAIGatewayService) startPriorityLifecycle() {
 					// Transactional outbox retries on the next tick. GETs never
 					// acknowledge events, refresh evidence or evaluate policy.
 					err := repo.AdvancePriorityLifecycle(work, cfg)
+					if coverage, ok := repo.(PriorityLifecycleCoverageRepository); ok {
+						s.priorityLifecycle.mu.Lock()
+						lost := s.priorityLifecycle.auditLost
+						s.priorityLifecycle.mu.Unlock()
+						if lost > 0 {
+							_ = coverage.RecordPriorityLifecycleCoverage(work, "audit", "queue_overflow")
+						}
+					}
 					end()
 					s.priorityLifecycle.mu.Lock()
 					s.priorityLifecycle.attempted = time.Now()
-					s.priorityLifecycle.failure = ""
 					if err != nil {
 						s.priorityLifecycle.failure = "refresh_failed"
 						slog.Warn("priority_lifecycle_refresh_failed", "reason", "query_failed")
@@ -291,6 +380,7 @@ type PriorityLifecycleAccountState struct {
 }
 
 type PriorityLifecycleState struct {
+	Coverage       map[string]string               `json:"coverage"`
 	Scope          PriorityLifecycleScope          `json:"scope"`
 	ServerNow      time.Time                       `json:"server_now"`
 	PolicyRevision string                          `json:"policy_revision"`
@@ -327,6 +417,12 @@ func (s *OpenAIGatewayService) PriorityLifecycleState(ctx context.Context, scope
 	}
 	now := time.Now().UTC()
 	out := &PriorityLifecycleState{Scope: scope, ServerNow: now, PolicyRevision: priorityConfigRevision(cfg), Mode: "shadow", Statistics: stats, Accounts: make([]PriorityLifecycleAccountState, 0, len(accounts))}
+	if coverage, ok := repo.(PriorityLifecycleCoverageRepository); ok {
+		out.Coverage, err = coverage.ReadPriorityLifecycleCoverage(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if cfg.LifecycleMode == "off" {
 		out.Mode = "off"
 	}

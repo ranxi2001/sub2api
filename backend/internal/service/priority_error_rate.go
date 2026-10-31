@@ -257,14 +257,15 @@ func (s *OpenAIGatewayService) doPriorityObservedHTTP(req *http.Request, proxy s
 		}
 	}
 
-	if err := s.priorityLatencyBeforeSend(req.Context(), account); err != nil {
-		return nil, err
-	}
 	observe := s.observePriorityAttempt(req, account)
 	if err := s.fenceAuthConnectionEgress(req.Context(), req, account); err != nil {
 		return nil, err
 	}
+	if err := s.priorityLatencyBeforeSend(req.Context(), account); err != nil {
+		return nil, err
+	}
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
+	s.priorityLifecycleWriteResult(req.Context(), account, "http_adapter", err)
 	observe(resp, err)
 	return resp, err
 }

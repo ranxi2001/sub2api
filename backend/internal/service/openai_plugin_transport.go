@@ -55,14 +55,15 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 		authorization := request.Header.Get("Authorization")
 		applySIWCRequestHeaders(request)
 		request.Host = ""
-		if err := s.priorityLatencyBeforeSend(request.Context(), account); err != nil {
+		if err := s.fenceAuthConnectionEgress(request.Context(), request, account); err != nil {
 			return nil, err
 		}
-		if err := s.fenceAuthConnectionEgress(request.Context(), request, account); err != nil {
+		if err := s.priorityLatencyBeforeSend(request.Context(), account); err != nil {
 			return nil, err
 		}
 		observeAttempt := s.observePriorityAttempt(request, account)
 		resp, err := s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
+		s.priorityLifecycleWriteResult(request.Context(), account, "siwc_http", err)
 		observeAttempt(resp, err)
 		if err == nil && resp != nil && resp.StatusCode == http.StatusUnauthorized && s.excelOAuthReauth != nil {
 			var cache OpenAITokenCache
@@ -150,7 +151,8 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		return gateway.doOpenAIUpstream(request, proxyURL, account)
 	}
 	if s.pluginManager != nil {
-		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
+		pluginRequest := s.priorityLifecyclePluginRequest(request, account)
+		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(pluginRequest.Context(), pluginRequest, proxyURL, account)
 		if handled {
 			return response, err
 		}

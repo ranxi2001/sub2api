@@ -508,10 +508,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if err := controlledSubmission(ctx, "native_ws"); err != nil {
 			return err
 		}
+		if err := checkBeforeWrite(); err != nil {
+			return err
+		}
 		if err := s.priorityLatencyBeforeSend(ctx, account); err != nil {
 			return err
 		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, value, s.openAIWSWriteTimeout()); err != nil {
+			s.priorityLifecycleWriteResult(ctx, account, "native_ws", err)
 			lease.MarkBroken()
 			logOpenAIWSModeInfo(
 				"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",
@@ -522,6 +526,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			)
 			return wrapOpenAIWSFallback("write_request", err)
 		}
+		s.priorityLifecycleWriteResult(ctx, account, "native_ws", nil)
 		return nil
 	}
 	if accelerateHTTPSSE && !preflightBeforePrewarm {

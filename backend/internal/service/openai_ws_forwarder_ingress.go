@@ -1761,6 +1761,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if err := regionalMeterBeforeSend(ctx); err != nil {
 			return nil, err
 		}
+		// Recheck authoritative account/connection after all metering/RPM waits.
+		latest, admissionErr = s.admitOpenAITurn(ctx, c, account, extractOpenAICodexTicketModel(payload), payload)
+		if admissionErr == nil {
+			admissionErr = s.checkOpenAIWSBinding(latest, extractOpenAICodexTicketModel(payload), lease.conn.turnBinding)
+		}
+		if admissionErr != nil {
+			return nil, admissionErr
+		}
 		if latencyGenerationStartedTurn != turn {
 			if err := s.priorityLatencyBeforeSend(priorityLatencyCtx, account); err != nil {
 				return nil, err
@@ -1768,12 +1776,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			latencyGenerationStartedTurn = turn
 		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
+			s.priorityLifecycleWriteResult(priorityLatencyCtx, account, "ingress_ws", err)
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
 				fmt.Errorf("write upstream websocket request: %w", err),
 				false,
 			)
 		}
+		s.priorityLifecycleWriteResult(priorityLatencyCtx, account, "ingress_ws", nil)
 		if debugEnabled {
 			logOpenAIWSModeDebug(
 				"ingress_ws_turn_request_sent account_id=%d turn=%d conn_id=%s payload_bytes=%d",

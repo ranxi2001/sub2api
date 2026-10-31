@@ -73,6 +73,7 @@ type RelayExit struct {
 type RelayOptions struct {
 	BeforeUpstreamWrite             func(msgType coderws.MessageType, payload []byte)
 	BeforeWriteUpstream             func(msgType coderws.MessageType, payload []byte) error
+	AfterWriteUpstream              func(msgType coderws.MessageType, payload []byte, err error)
 	WriteTimeout                    time.Duration
 	IdleTimeout                     time.Duration
 	UpstreamDrainTimeout            time.Duration
@@ -238,6 +239,9 @@ func Relay(
 			}
 		}
 		err := writeUpstream(msgType, payload)
+		if options.AfterWriteUpstream != nil {
+			options.AfterWriteUpstream(msgType, payload, err)
+		}
 		if err != nil && isResponseCreate {
 			// The relay exits on this error, but retain the previous turn's state
 			// for accurate diagnostics while the two relay goroutines settle.

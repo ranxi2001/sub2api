@@ -146,9 +146,6 @@ func (s *OpenAIGatewayService) doOpenAIProxyAttempt(req *http.Request, account *
 	if err := controlledSubmission(req.Context(), "native_http"); err != nil {
 		return nil, err
 	}
-	if err := s.priorityLatencyBeforeSend(req.Context(), account); err != nil {
-		return nil, err
-	}
 	observeAttempt := s.observePriorityAttempt(req, account)
 	defer func() { observeAttempt(resp, err) }()
 	defer func() { s.rateLimitService.observeQualityResponse(req.Context(), account, resp, err) }()
@@ -163,13 +160,20 @@ func (s *OpenAIGatewayService) doOpenAIProxyAttempt(req *http.Request, account *
 	if err = s.fenceAuthConnectionEgress(req.Context(), req, account); err != nil {
 		return nil, err
 	}
+	// Managed auth fencing can wait for a primary read. Recheck latency only
+	// after that wait, immediately before entering the transport.
 	if s.pluginManager != nil && account.AuthConnectionID == "" && !s.codexTicketRequestBound(req, account) {
-		resp, handled, err := s.pluginManager.RoundTripOpenAIOAuth(req.Context(), req, target.url, account)
+		pluginRequest := s.priorityLifecyclePluginRequest(req, account)
+		resp, handled, err := s.pluginManager.RoundTripOpenAIOAuth(pluginRequest.Context(), pluginRequest, target.url, account)
 		if handled {
 			return markOpenAIResponseEgress(resp, req, target.proxyID), err
 		}
 	}
+	if err = s.priorityLatencyBeforeSend(req.Context(), account); err != nil {
+		return nil, err
+	}
 	resp, err = s.httpUpstream.Do(req, target.url, account.ID, account.Concurrency)
+	s.priorityLifecycleWriteResult(req.Context(), account, "http", err)
 	return markOpenAIResponseEgress(resp, req, target.proxyID), err
 }
 

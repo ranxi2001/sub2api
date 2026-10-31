@@ -1360,6 +1360,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		acceptedQueueArrival.Store(&arrival)
 	}
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
+	s.priorityLifecycleWriteResult(ctx, account, "passthrough_ws", firstWriteErr)
 	cancelFirstWrite()
 	if firstWriteErr != nil {
 		return wrapOpenAIWSIngressTurnError(
@@ -1418,6 +1419,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return err
 				}
 				return s.priorityLatencyBeforeSend(pendingLatencyCtx, account)
+			},
+			AfterWriteUpstream: func(kind coderws.MessageType, payload []byte, err error) {
+				if (kind == coderws.MessageText || kind == coderws.MessageBinary) && gjson.GetBytes(payload, "type").String() == "response.create" {
+					s.priorityLifecycleWriteResult(pendingLatencyCtx, account, "passthrough_ws", err)
+				}
 			},
 			FirstTurnStartedAt: firstTurnStartedAt,
 			TakeNextTurnStartedAt: func() time.Time {

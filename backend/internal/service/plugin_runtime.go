@@ -282,6 +282,15 @@ func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, pr
 		return nil, normalizePluginRPCError(ctx, "创建插件转发流", err, false)
 	}
 	requestID := strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.FormatInt(account.ID, 36)
+	boundary, hasBoundary := ctx.Value(priorityLifecyclePluginBoundaryKey{}).(priorityLifecyclePluginBoundary)
+	// Forward() can wait on RPC setup. The final unified guard belongs after
+	// that wait and before the first generation metadata/body is sent.
+	if hasBoundary && boundary.before != nil {
+		if err := boundary.before(ctx); err != nil {
+			cancel()
+			return nil, err
+		}
+	}
 	if err := stream.Send(&pluginv1.ForwardRequest{Frame: &pluginv1.ForwardRequest_Start{Start: &pluginv1.ForwardRequestStart{
 		RequestId:          requestID,
 		Method:             request.Method,
@@ -296,9 +305,15 @@ func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, pr
 		ContentLength:      request.ContentLength,
 		HasBody:            request.Body != nil && request.Body != http.NoBody,
 	}}}); err != nil {
+		if hasBoundary && boundary.after != nil {
+			boundary.after(err)
+		}
 		cancel()
 		// gRPC Send 返回错误时无法证明服务端没有收到元数据，必须禁止自动重放。
 		return nil, normalizePluginRPCError(ctx, "发送插件请求元数据", err, true)
+	}
+	if hasBoundary && boundary.after != nil {
+		boundary.after(nil)
 	}
 	sendErr := make(chan error, 1)
 	go func() {

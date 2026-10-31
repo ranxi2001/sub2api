@@ -18,6 +18,27 @@ const priorityLifecycleEndpointSQL = "CASE rtrim(COALESCE(inbound_endpoint,''),'
 
 var _ service.PriorityLifecycleRepository = (*usageLogRepository)(nil)
 
+func (r *usageLogRepository) RecordPriorityLifecycleCoverage(ctx context.Context, category, reason string) error {
+	_, err := r.sql.ExecContext(ctx, "INSERT INTO priority_lifecycle_coverage(category,last_error) VALUES($1,$2) ON CONFLICT(category) DO UPDATE SET sequence=nextval('priority_lifecycle_coverage_sequence_seq'),occurred_at=clock_timestamp(),last_error=EXCLUDED.last_error", category, reason)
+	return err
+}
+func (r *usageLogRepository) ReadPriorityLifecycleCoverage(ctx context.Context) (map[string]string, error) {
+	rows, err := r.sql.QueryContext(ctx, "SELECT category,last_error FROM priority_lifecycle_coverage ORDER BY category")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]string)
+	for rows.Next() {
+		var category, reason string
+		if err = rows.Scan(&category, &reason); err != nil {
+			return nil, err
+		}
+		out[category] = reason
+	}
+	return out, rows.Err()
+}
+
 // One short primary transaction fences worker ownership, publishes statistics
 // and immutable shadow evidence, and acknowledges the reliable outbox together.
 // The rolling compensation query includes new accounts and ready-empty scopes;
