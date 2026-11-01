@@ -103,7 +103,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 		"Proxy": {}, "ProxyID": {}, "ProxyFallbackOriginID": {}, "ProxyFallbackOriginName": {},
 		"Concurrency": {}, "Priority": {}, "RateMultiplier": {}, "LoadFactor": {},
 		"GroupRateMultiplier": {},
-		"Status":              {}, "ErrorMessage": {}, "LastUsedAt": {}, "ExpiresAt": {},
+		"Status":              {}, "ErrorMessage": {}, "LastUsedAt": {}, "ExpiresAt": {}, "PerformancePaused": {},
 		"AutoPauseOnExpired": {}, "CreatedAt": {}, "UpdatedAt": {}, "Schedulable": {},
 		"RateLimitedAt": {}, "RateLimitResetAt": {}, "OverloadUntil": {},
 		"TempUnschedulableUntil": {}, "TempUnschedulableReason": {},
@@ -128,6 +128,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// The raw Credentials blob must never serialize; Extra and the proxy ARE released.
 	acct := &Account{
 		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		PerformancePaused:  true,
 		InitialQualityPlan: &ScheduledTestPlan{PelicanConfig: &PelicanTestConfig{Prompt: "PRIVATE-INITIAL-QUALITY-PROMPT"}},
 		Credentials:        map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
 		Extra:              map[string]any{"opaque": "extra-released", "codex_turn_ticket:gpt-6-astra": map[string]any{"state": "private-ticket-state"}},
@@ -137,6 +138,7 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	require.NotNil(t, snap)
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(snap, &m))
+	assert.Equal(t, true, m["PerformancePaused"])
 	assert.NotContains(t, string(snap), "LEAK-REFRESH", "raw Credentials must never appear in metadata")
 	assert.NotContains(t, string(snap), "private-ticket-state")
 	assert.NotContains(t, m, "InitialQualityPlan")
