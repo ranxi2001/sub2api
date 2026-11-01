@@ -127,6 +127,7 @@ const DataTableStub = {
         <slot name="cell-billing_mode" :row="row" />
         <slot name="cell-tokens" :row="row" />
         <slot name="cell-latency" :row="row" />
+        <slot name="cell-content_timing" :row="row" />
         <slot name="cell-cost" :row="row" />
         <slot name="cell-request_id" :row="row" />
         <slot name="cell-upstream_request_id" :row="row" />
@@ -1222,3 +1223,43 @@ for (const [language, first, total] of [['en', 'Server TTFT', 'Server total'], [
     locale = 'en'
   })
 }
+
+describe('content timing column', () => {
+  const mountContent = (content_timing: Record<string, unknown> | undefined, enableTimingDetails = false) => mount(UsageTable, {
+    props: { data: [{ ...baseImageRow, image_count: 0, billing_mode: 'token', content_timing }], loading: false, enableTimingDetails, columns: [{ key: 'content_timing', label: 'Content timing' }] },
+    global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true, UsageTimingDialog: true } },
+  })
+
+  it('shows reasoning and visible offsets rounded from float milliseconds', () => {
+    const wrapper = mountContent({ reasoning_first_ms: 120.4, visible_text_first_ms: 1450.6, response_byte_first_ms: 30.2, status: 'observed' })
+    expect(wrapper.get('[data-testid="content-timing-reasoning"]').text()).toBe('120ms')
+    expect(wrapper.get('[data-testid="content-timing-visible"]').text()).toBe('1.45s')
+    expect(wrapper.find('[data-testid="content-timing-missing"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('omits the reasoning row for non-reasoning responses', () => {
+    const wrapper = mountContent({ reasoning_first_ms: null, visible_text_first_ms: 450, response_byte_first_ms: 30, status: 'observed' })
+    expect(wrapper.find('[data-testid="content-timing-reasoning"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="content-timing-visible"]').text()).toBe('450ms')
+    wrapper.unmount()
+  })
+
+  it('renders a placeholder when timing is missing or only the first byte was observed', () => {
+    for (const timing of [undefined, { reasoning_first_ms: null, visible_text_first_ms: null, response_byte_first_ms: 30, status: 'observed' }]) {
+      const wrapper = mountContent(timing)
+      expect(wrapper.find('[data-testid="content-timing"]').exists()).toBe(false)
+      expect(wrapper.get('[data-testid="content-timing-missing"]').text()).toBe('-')
+      wrapper.unmount()
+    }
+  })
+
+  it('opens the timing dialog when details are enabled', async () => {
+    const wrapper = mountContent({ reasoning_first_ms: 100, visible_text_first_ms: 400, response_byte_first_ms: 20, status: 'observed' }, true)
+    const cell = wrapper.get('[data-testid="content-timing"]')
+    expect(cell.element.tagName).toBe('BUTTON')
+    await cell.trigger('click')
+    expect(wrapper.findComponent({ name: 'UsageTimingDialog' }).props('record')).toMatchObject({ request_id: baseImageRow.request_id })
+    wrapper.unmount()
+  })
+})

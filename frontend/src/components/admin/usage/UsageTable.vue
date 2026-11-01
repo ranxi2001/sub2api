@@ -279,6 +279,31 @@
           </component>
         </template>
 
+        <!-- 内容时序列：typed SSE 观测，从应用入口起算、仅最终 HTTP 尝试，与延迟列首字口径不同。 -->
+        <template #cell-content_timing="{ row }">
+          <component
+            :is="enableTimingDetails ? 'button' : 'div'"
+            v-if="hasContentTiming(row)"
+            data-testid="content-timing"
+            :type="enableTimingDetails ? 'button' : undefined"
+            class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-left text-xs"
+            :class="enableTimingDetails ? 'hover:opacity-80 focus-visible:outline focus-visible:outline-primary-500' : ''"
+            :aria-label="enableTimingDetails ? t('requestTiming.title') : undefined"
+            :title="contentTimingTitle(row)"
+            @click="enableTimingDetails && (timingRecord = row)"
+          >
+            <template v-if="row.content_timing?.reasoning_first_ms != null">
+              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.contentTimingReasoning') }}</span>
+              <span data-testid="content-timing-reasoning" class="font-medium tabular-nums text-gray-700 dark:text-gray-300">{{ formatContentMs(row.content_timing.reasoning_first_ms) }}</span>
+            </template>
+            <template v-if="row.content_timing?.visible_text_first_ms != null">
+              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.contentTimingVisible') }}</span>
+              <span data-testid="content-timing-visible" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.content_timing.visible_text_first_ms)]">{{ formatContentMs(row.content_timing.visible_text_first_ms) }}</span>
+            </template>
+          </component>
+          <span v-else data-testid="content-timing-missing" class="text-xs text-gray-400 dark:text-gray-500" :title="t('usage.contentTimingNotCollected')">-</span>
+        </template>
+
         <template #cell-created_at="{ value }">
           <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
         </template>
@@ -776,6 +801,25 @@ const formatDuration = (ms: number | null | undefined): string => {
   const totalSec = Math.round(ms / 1000)
   if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
   return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
+}
+
+// content_timing 为浮点毫秒，取整后复用延迟列的时长格式。
+const formatContentMs = (ms: number | null | undefined): string =>
+  ms == null || !Number.isFinite(ms) ? '-' : formatDuration(Math.round(ms))
+
+// 仅首字节有值时不渲染（单元格会是空按钮），按未采集处理。
+const hasContentTiming = (row: AdminUsageLog): boolean =>
+  row.content_timing?.reasoning_first_ms != null || row.content_timing?.visible_text_first_ms != null
+
+const contentTimingTitle = (row: AdminUsageLog): string => {
+  const timing = row.content_timing
+  const reasoning = timing?.reasoning_first_ms
+  const visible = timing?.visible_text_first_ms
+  const think = reasoning != null && visible != null && visible >= reasoning ? visible - reasoning : null
+  return t('usage.contentTimingHint', {
+    byte: formatContentMs(timing?.response_byte_first_ms),
+    think: formatContentMs(think),
+  })
 }
 
 const cacheRateTitle = (row: AdminUsageLog): string | undefined => {
