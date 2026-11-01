@@ -1,4 +1,5 @@
 export default {
+  "showDetails": "显示延迟详情面板",
   "title": "请求耗时详情",
   "loading": "正在加载耗时详情…",
   "loadError": "耗时详情加载失败",

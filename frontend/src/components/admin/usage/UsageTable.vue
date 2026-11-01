@@ -574,7 +574,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, inject, onUnmounted } from 'vue'
+import { computed, ref, inject, onUnmounted, watch } from 'vue'
 import { useWindowSize } from '@vueuse/core'
 import UsageDetailPopover from './UsageDetailPopover.vue'
 import UsageTimingDialog from './UsageTimingDialog.vue'
@@ -667,6 +667,10 @@ const props = withDefaults(defineProps<Props>(), {
   showUpstreamEndpoint: true,
   flat: false,
   cacheRateAudience: 'admin'
+})
+
+watch(() => props.enableTimingDetails, enabled => {
+  if (!enabled) timingRecord.value = null
 })
 const emit = defineEmits<{
   userClick: [userID: number, email?: string]

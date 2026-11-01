@@ -1,4 +1,5 @@
 export default {
+  "showDetails": "Show latency details panel",
   "title": "Request timing details",
   "loading": "Loading timing details…",
   "loadError": "Unable to load timing details",

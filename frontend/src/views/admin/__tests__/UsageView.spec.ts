@@ -147,7 +147,7 @@ const UsageFiltersStub = defineComponent({
   template: '<div><button data-test="cleanup-open" @click="$emit(\'cleanup\')">cleanup</button><span data-test="user-filter-label">{{ userKeyword }}</span><slot name="after-reset" /></div>',
 })
 const UsageTableStub = {
-  props: ['columns'],
+  props: ['columns', 'enableTimingDetails'],
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
 }
@@ -540,6 +540,26 @@ describe('admin UsageView request ID column visibility', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('defaults latency details off and saves the switch preference', async () => {
+    const wrapper = mount(UsageView, { global: { stubs: {
+      AppLayout: AppLayoutStub, UsageFilters: UsageFiltersStub, UsageTable: UsageTableStub,
+      UsageStatsCards: true, UsageExportProgress: true, UsageCleanupDialog: true,
+      UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+      DateRangePicker: true, Icon: true, TokenUsageTrend: true, ModelDistributionChart: true,
+      GroupDistributionChart: true, EndpointDistributionChart: true, UserTokenRanking: true,
+    } } })
+    expect(wrapper.findComponent(UsageTableStub).props('enableTimingDetails')).toBe(false)
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    await wrapper.get('[data-testid="usage-timing-toggle"]').trigger('click')
+    expect(wrapper.findComponent(UsageTableStub).props('enableTimingDetails')).toBe(true)
+    expect(localStorage.setItem).toHaveBeenCalledWith('usage-timing-details-enabled', 'true')
+    wrapper.unmount()
+    vi.mocked(localStorage.getItem).mockImplementation((key: string) => key === 'usage-timing-details-enabled' ? 'true' : null)
+    const restored = mount(UsageView, { global: { stubs: { AppLayout: AppLayoutStub, UsageFilters: UsageFiltersStub, UsageTable: UsageTableStub, UsageStatsCards: true, UsageExportProgress: true, UsageCleanupDialog: true, UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true, DateRangePicker: true, Icon: true, TokenUsageTrend: true, ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true, UserTokenRanking: true } } })
+    expect(restored.findComponent(UsageTableStub).props('enableTimingDetails')).toBe(true)
+    restored.unmount()
   })
 
   it('keeps request ID hidden by default and allows enabling it from column settings', async () => {

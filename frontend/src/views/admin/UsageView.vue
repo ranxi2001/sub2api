@@ -106,6 +106,18 @@
                 class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
               >
                 <button
+                  v-if="activeTab === 'usage'"
+                  type="button"
+                  data-testid="usage-timing-toggle"
+                  role="switch"
+                  :aria-checked="timingDetailsEnabled"
+                  @click="toggleTimingDetails"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                >
+                  <span>{{ t('requestTiming.showDetails') }}</span>
+                  <Icon v-if="timingDetailsEnabled" name="check" size="sm" class="text-primary-500" :stroke-width="2" />
+                </button>
+                <button
                   v-for="col in currentToggleableColumns"
                   :key="col.key"
                   :data-testid="`usage-column-toggle-${col.key}`"
@@ -128,7 +140,7 @@
 
         <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
           <UsageTable
-            enable-timing-details
+            :enable-timing-details="timingDetailsEnabled"
             flat
             :data="usageLogs"
             :loading="loading"
@@ -700,6 +712,18 @@ const exportToExcel = async () => {
     }
   } catch (error) { console.error('Failed to export:', error); appStore.showError('Export Failed') }
   finally { if(exportAbortController === c) { exportAbortController = null; exporting.value = false; exportProgress.show = false } }
+}
+
+const TIMING_DETAILS_KEY = 'usage-timing-details-enabled'
+const timingDetailsEnabled = ref(false)
+try {
+  timingDetailsEnabled.value = localStorage.getItem(TIMING_DETAILS_KEY) === 'true'
+} catch { /* Storage may be unavailable. */ }
+const toggleTimingDetails = () => {
+  timingDetailsEnabled.value = !timingDetailsEnabled.value
+  try {
+    localStorage.setItem(TIMING_DETAILS_KEY, String(timingDetailsEnabled.value))
+  } catch { /* Keep the preference for this session. */ }
 }
 
 // Column visibility
