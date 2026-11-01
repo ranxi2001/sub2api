@@ -26,7 +26,10 @@ func performanceRow(config service.PerformanceConfig) *sqlmock.Rows {
 func TestAccountPerformanceQueryBoundsAndMissingSamples(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	}()
 	now := time.Date(2026, 11, 2, 1, 0, 0, 0, time.UTC)
 	mock.ExpectQuery("WITH source").WithArgs("{7}", now.Add(-15*time.Minute), now).WillReturnRows(performanceRow(service.PerformanceConfig{}))
 	got, err := readAccountPerformance(context.Background(), db, []int64{7}, now)
@@ -49,7 +52,10 @@ func TestAccountPerformanceEvaluateNoSamplesAndHeldLock(t *testing.T) {
 		t.Run(map[bool]string{false: "missing_samples", true: "peer_holds_row"}[locked], func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() {
+				mock.ExpectClose()
+				require.NoError(t, db.Close())
+			}()
 			repo := &accountPerformanceRepository{db: db}
 			min := float64(10)
 			cfg := service.PerformanceConfig{Enabled: true, TPS: service.PerformanceBounds{Min: &min}}
@@ -71,7 +77,10 @@ func TestAccountPerformanceEvaluateNoSamplesAndHeldLock(t *testing.T) {
 func TestAccountPerformanceEvaluatePauseAuditAtomicAndLatched(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	}()
 	repo := &accountPerformanceRepository{db: db}
 	min := float64(10)
 	cfg := service.PerformanceConfig{Enabled: true, TPS: service.PerformanceBounds{Min: &min}}
@@ -96,7 +105,10 @@ func TestAccountPerformanceReleaseRequiresExactOwnershipAndDisablesEvaluation(t 
 		t.Run(map[int64]string{0: "stale", 1: "current"}[n], func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() {
+				mock.ExpectClose()
+				require.NoError(t, db.Close())
+			}()
 			repo := &accountPerformanceRepository{db: db}
 			mock.ExpectBegin()
 			mock.ExpectExec("UPDATE account_performance_monitors SET paused=false.*config=jsonb_set.*revision=revision\\+1.*WHERE account_id=\\$1 AND revision=\\$2 AND pause_generation=\\$3 AND paused").WithArgs(int64(7), int64(2), int64(3)).WillReturnResult(sqlmock.NewResult(0, n))
