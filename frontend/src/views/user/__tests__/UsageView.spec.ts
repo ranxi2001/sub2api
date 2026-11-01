@@ -233,7 +233,13 @@ describe('user UsageView', () => {
     const wrapper = mountUsageView()
     await flushPromises()
 
-    expect(wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)).toContain('latency')
+    const usageColumnKeys = wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)
+    expect(usageColumnKeys).toContain('latency')
+    expect(usageColumnKeys).not.toEqual(expect.arrayContaining([
+      'content_reasoning_first_ms',
+      'content_visible_text_first_ms',
+      'content_response_byte_first_ms',
+    ]))
     expect(query).toHaveBeenCalled()
     expect(getStats).toHaveBeenCalled()
     expect(getDashboardModels).toHaveBeenCalled()

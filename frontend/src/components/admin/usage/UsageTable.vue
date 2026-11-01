@@ -246,16 +246,16 @@
               :style="cacheRateBarStyle(row)"
               aria-hidden="true"
             ></span>
-            <span class="col-start-2 row-start-1 text-gray-400 dark:text-gray-500">{{ t(row.queue_timing?.status === 'measured' ? 'usage.latencyFirstToken' : 'requestTiming.legacyFirst') }}</span>
-            <span v-if="firstTokenQueueInclusive(row) != null" class="col-start-3 row-start-1 font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(firstTokenQueueInclusive(row) ?? 0)]" :title="row.queue_timing?.status === 'measured' ? firstTokenQueueTitle(row) : undefined">
+            <span class="col-start-2 row-start-1 text-gray-400 dark:text-gray-500">{{ t(enableTimingDetails ? 'usage.latencyFirstTokenShort' : row.queue_timing?.status === 'measured' ? 'usage.latencyFirstToken' : 'requestTiming.legacyFirst') }}</span>
+            <span v-if="firstTokenQueueInclusive(row) != null" class="col-start-3 row-start-1 font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(firstTokenQueueInclusive(row) ?? 0)]" :title="row.queue_timing?.status === 'measured' ? firstTokenQueueTitle(row) : enableTimingDetails ? t('requestTiming.legacyFirst') : undefined">
               {{ formatDuration(firstTokenQueueInclusive(row)) }}
-              <span v-if="row.queue_timing?.status === 'measured' && row.queue_wait_ms" class="ml-1 text-[10px] font-normal text-amber-600 dark:text-amber-400">{{ t('usage.queuePortion') }} {{ row.queue_timing.queue_clamped ? '≥' : '' }}{{ formatDuration(row.queue_wait_ms) }}</span>
+              <span v-if="!enableTimingDetails && row.queue_timing?.status === 'measured' && row.queue_wait_ms" class="ml-1 text-[10px] font-normal text-amber-600 dark:text-amber-400">{{ t('usage.queuePortion') }} {{ row.queue_timing.queue_clamped ? '≥' : '' }}{{ formatDuration(row.queue_wait_ms) }}</span>
             </span>
-            <span v-else class="col-start-3 row-start-1 text-gray-400 dark:text-gray-500">-</span>
-            <span class="col-start-2 row-start-2 text-gray-400 dark:text-gray-500">{{ t(row.queue_timing?.status === 'measured' ? 'usage.latencyDuration' : 'requestTiming.legacyTotal') }}</span>
-            <span class="col-start-3 row-start-2 font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(durationQueueInclusive(row) ?? 0)]" :title="row.queue_timing?.status === 'measured' ? t('usage.latencyDurationHint', { forward: formatDuration(row.queue_timing?.forward_duration_ms), queue: formatDuration(row.queue_wait_ms ?? 0) }) : undefined">
+            <span v-else class="col-start-3 row-start-1 text-gray-400 dark:text-gray-500" :title="enableTimingDetails ? t('requestTiming.legacyFirst') : undefined">-</span>
+            <span class="col-start-2 row-start-2 text-gray-400 dark:text-gray-500">{{ t(enableTimingDetails ? 'usage.latencyDurationShort' : row.queue_timing?.status === 'measured' ? 'usage.latencyDuration' : 'requestTiming.legacyTotal') }}</span>
+            <span class="col-start-3 row-start-2 font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(durationQueueInclusive(row) ?? 0)]" :title="row.queue_timing?.status === 'measured' ? t('usage.latencyDurationHint', { forward: formatDuration(row.queue_timing?.forward_duration_ms), queue: formatDuration(row.queue_wait_ms ?? 0) }) : enableTimingDetails ? t('requestTiming.legacyTotal') : undefined">
               {{ formatDuration(durationQueueInclusive(row)) }}
-              <span v-if="row.queue_timing?.status === 'measured' && row.queue_wait_ms" class="ml-1 text-[10px] font-normal text-amber-600 dark:text-amber-400">{{ t('usage.queuePortion') }} {{ row.queue_timing.queue_clamped ? '≥' : '' }}{{ formatDuration(row.queue_wait_ms) }}</span>
+              <span v-if="!enableTimingDetails && row.queue_timing?.status === 'measured' && row.queue_wait_ms" class="ml-1 text-[10px] font-normal text-amber-600 dark:text-amber-400">{{ t('usage.queuePortion') }} {{ row.queue_timing.queue_clamped ? '≥' : '' }}{{ formatDuration(row.queue_wait_ms) }}</span>
             </span>
             <span class="col-start-2 row-start-3 text-gray-400 dark:text-gray-500">{{ t('usage.latencyTps') }}</span>
             <span
@@ -277,6 +277,33 @@
               <span v-else data-testid="latency-cache-rate" class="col-start-3 row-start-4 text-gray-400 dark:text-gray-500">-</span>
             </template>
           </component>
+        </template>
+
+        <template #cell-content_reasoning_first_ms="{ row }">
+          <span
+            data-testid="content-timing-reasoning-first"
+            class="tabular-nums"
+            :class="row.content_timing?.reasoning_first_ms == null ? 'text-gray-400 dark:text-gray-500' : 'font-medium text-gray-700 dark:text-gray-200'"
+            :title="t('latencyObservability.typedScope')"
+          >{{ formatContentTiming(row, 'reasoning_first_ms') }}</span>
+        </template>
+
+        <template #cell-content_visible_text_first_ms="{ row }">
+          <span
+            data-testid="content-timing-visible-text-first"
+            class="tabular-nums"
+            :class="row.content_timing?.visible_text_first_ms == null ? 'text-gray-400 dark:text-gray-500' : 'font-medium text-gray-700 dark:text-gray-200'"
+            :title="t('latencyObservability.typedScope')"
+          >{{ formatContentTiming(row, 'visible_text_first_ms') }}</span>
+        </template>
+
+        <template #cell-content_response_byte_first_ms="{ row }">
+          <span
+            data-testid="content-timing-response-byte-first"
+            class="tabular-nums"
+            :class="row.content_timing?.response_byte_first_ms == null ? 'text-gray-400 dark:text-gray-500' : 'font-medium text-gray-700 dark:text-gray-200'"
+            :title="t('latencyObservability.typedScope')"
+          >{{ formatContentTiming(row, 'response_byte_first_ms') }}</span>
         </template>
 
         <template #cell-created_at="{ value }">
@@ -776,6 +803,12 @@ const formatDuration = (ms: number | null | undefined): string => {
   const totalSec = Math.round(ms / 1000)
   if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
   return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
+}
+
+type ContentTimingField = 'reasoning_first_ms' | 'visible_text_first_ms' | 'response_byte_first_ms'
+const formatContentTiming = (row: AdminUsageLog, field: ContentTimingField): string => {
+  const value = row.content_timing?.[field]
+  return value == null ? '—' : formatDuration(value)
 }
 
 const cacheRateTitle = (row: AdminUsageLog): string | undefined => {
