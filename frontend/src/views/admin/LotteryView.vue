@@ -32,7 +32,7 @@
         {{ error }}
       </p>
       <nav
-        class="flex gap-6 border-b border-gray-200 dark:border-dark-700"
+        class="flex flex-wrap gap-x-6 border-b border-gray-200 dark:border-dark-700"
         role="tablist"
       >
         <button
@@ -72,14 +72,7 @@
             <div class="min-w-0">
               <h2 class="break-words text-lg font-semibold">{{ pool.name }}</h2>
               <p class="mt-1 text-sm text-gray-500">
-                {{
-                  t(
-                    pool.mode === 'single'
-                      ? 'lottery.singleRule'
-                      : 'lottery.cumulativeRule',
-                    { amount: pool.threshold },
-                  )
-                }}
+                {{ t(lotteryRuleKey(pool), lotteryRuleParams(pool)) }}
               </p>
               <div class="mt-2 flex flex-wrap gap-3 text-xs">
                 <span
@@ -254,7 +247,11 @@
                   ><th class="px-3 py-3 font-medium">
                     {{ t('lottery.reward') }}
                   </th></template
-                ><template v-else
+                ><template v-else-if="tab === 'invitations'">
+                  <th class="px-3 py-3 font-medium">{{ t('lottery.visitOrigin') }}</th>
+                  <th class="px-3 py-3 font-medium">{{ t('lottery.progress') }}</th>
+                  <th class="px-3 py-3 font-medium">{{ t('lottery.inviteStatus') }}</th>
+                </template><template v-else
                   ><th class="px-3 py-3 font-medium">
                     {{ t('lottery.source') }}
                   </th>
@@ -291,7 +288,16 @@
                     </p>
                   </td>
                 </tr></template
-              ><template v-else
+              ><template v-else-if="tab === 'invitations'">
+                <tr v-for="entry in invitations" :key="entry.id">
+                  <td class="whitespace-nowrap px-3 py-3">{{ date(entry.created_at) }}</td>
+                  <td class="px-3 py-3"><p>{{ t('lottery.inviter') }} #{{ entry.inviter_id }}</p><p class="mt-1 text-xs text-gray-500">{{ entry.invitee_id ? `${t('lottery.invitee')} #${entry.invitee_id}` : t('lottery.anonymousVisit') }}</p></td>
+                  <td class="px-3 py-3">{{ poolName(entry.pool_id) }}</td>
+                  <td class="px-3 py-3"><p class="font-mono text-xs">{{ entry.ip_address }}</p><p class="mt-1 text-xs text-gray-500">{{ countryName(entry.country) }}</p></td>
+                  <td class="px-3 py-3 tabular-nums">{{ money(entry.amount) }} USD</td>
+                  <td class="px-3 py-3"><span :class="entry.qualified ? 'text-primary-600' : 'text-gray-500'">{{ t(entry.qualified ? 'lottery.qualified' : 'lottery.pendingQualification') }}</span><p class="mt-1 text-xs text-gray-500">{{ t('lottery.awardStatus', { inviter: t(entry.inviter_awarded ? 'lottery.issued' : 'lottery.notIssued'), invitee: t(entry.invitee_awarded ? 'lottery.issued' : 'lottery.notIssued') }) }}</p></td>
+                </tr>
+              </template><template v-else
                 ><tr v-for="entry in ledger" :key="entry.id">
                   <td class="whitespace-nowrap px-3 py-3">
                     {{ date(entry.created_at) }}
@@ -386,8 +392,11 @@
                 <option value="cumulative">
                   {{ t('lottery.cumulative') }}
                 </option>
+                <option value="invite_visit">{{ t('lottery.invite_visit') }}</option>
+                <option value="invite_signup">{{ t('lottery.invite_signup') }}</option>
+                <option value="invite_recharge">{{ t('lottery.invite_recharge') }}</option>
               </select></label
-            ><label class="block"
+            ><label v-if="!isInvitationPool(poolForm) || poolForm.mode === 'invite_recharge'" class="block"
               ><span class="input-label">{{ t('lottery.threshold') }}</span
               ><input
                 v-model.number="poolForm.threshold"
@@ -399,6 +408,26 @@
                 class="input mt-1"
                 :disabled="locked"
             /></label>
+            <template v-if="isInvitationPool(poolForm)">
+              <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <label><span class="input-label">{{ t('lottery.rewardTo') }}</span><select v-model="inviteForm.reward_to" class="input mt-1" :disabled="locked" data-testid="invite-recipient"><option value="inviter">{{ t('lottery.inviterOnly') }}</option><option value="both">{{ t('lottery.both') }}</option></select></label>
+                <label><span class="input-label">{{ t('lottery.inviteTickets') }}</span><input v-model.number="inviteForm.tickets" type="number" min="1" max="100" step="1" required :disabled="locked" class="input mt-1" /></label>
+              </div>
+              <p class="text-xs leading-5 text-gray-500">{{ t('lottery.inviteOnce') }} <span v-if="poolForm.mode === 'invite_visit' && inviteForm.reward_to === 'both'">{{ t('lottery.visitRecipientNote') }}</span></p>
+              <section class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-700">
+                <h3 class="text-sm font-semibold">{{ t('lottery.visitProtection') }}</h3>
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <label><span class="input-label">{{ t('lottery.ipDailyLimit') }}</span><input v-model.number="inviteForm.ip_daily_limit" type="number" min="1" max="100" step="1" required class="input mt-1" data-testid="invite-ip-limit" /></label>
+                  <label><span class="input-label">{{ t('lottery.inviterDailyLimit') }}</span><input v-model.number="inviteForm.daily_limit" type="number" min="1" max="1000" step="1" required class="input mt-1" /></label>
+                </div>
+                <p class="text-xs leading-5 text-gray-500">{{ t('lottery.visitLimitNote') }}</p>
+                <label class="block"><span class="input-label">{{ t('lottery.blockedIPs') }}</span><textarea v-model="blockedIPs" rows="3" class="input mt-1 font-mono text-xs" placeholder="203.0.113.8&#10;198.51.100.0/24&#10;2001:db8::/32" data-testid="invite-blocked-ips"></textarea></label>
+                <label class="block"><span class="input-label">{{ t('lottery.blockedCountries') }}</span><input v-model="blockedCountries" class="input mt-1" placeholder="CN, US, JP" data-testid="invite-blocked-countries" /></label>
+                <p v-if="countryLabels" class="break-words text-xs text-gray-500">{{ countryLabels }}</p>
+                <label class="flex items-start gap-2 text-sm"><input v-model="inviteForm.deny_unknown_country" type="checkbox" class="mt-1" data-testid="invite-deny-unknown" /><span>{{ t('lottery.denyUnknownCountry') }}</span></label>
+                <p class="text-xs leading-5 text-gray-500">{{ t('lottery.countryNote') }}</p>
+              </section>
+            </template>
             <p v-if="locked" class="text-xs text-amber-700 dark:text-amber-400">
               {{ t('lottery.ruleLocked') }}
             </p>
@@ -609,6 +638,9 @@ import {
   type LotteryPrize,
   type LotteryDraw,
   type LotteryLedger,
+  type LotteryInviteConfig,
+  type LotteryInvitation,
+  isInvitationPool, lotteryRuleKey, lotteryRuleParams,
   type PoolInput,
   type PrizeInput,
 } from '@/api/lottery'
@@ -621,7 +653,7 @@ const lottery = useLotteryStore()
 const enabled = ref(false)
 const settingsLoaded = ref(false)
 const deleteTarget = ref<{ pool: LotteryPool; prize?: LotteryPrize } | null>(null)
-const tabs = ['pools', 'records', 'ledger'] as const
+const tabs = ['pools', 'records', 'ledger', 'invitations'] as const
 const tab = ref<(typeof tabs)[number]>('pools')
 const pools = ref<LotteryPool[]>([]),
   plans = ref<SubscriptionPlan[]>([])
@@ -643,6 +675,16 @@ const poolForm = reactive<PoolInput>({
   draw_enabled: false,
   sort_order: 0,
 })
+const defaultInviteConfig = (): LotteryInviteConfig => ({ reward_to: 'inviter', tickets: 1, daily_limit: 10, ip_daily_limit: 1, blocked_ips: [], blocked_countries: [], deny_unknown_country: true })
+const inviteForm = reactive(defaultInviteConfig())
+const blockedIPs = ref(''), blockedCountries = ref('')
+const splitRules = (value: string) => [...new Set(value.split(/[\s,;，；]+/).filter(Boolean))]
+function countryName(code: string) {
+  if (!code) return t('lottery.unknownCountry')
+  try { return `${new Intl.DisplayNames([locale.value], { type: 'region' }).of(code)} (${code})` }
+  catch { return code }
+}
+const countryLabels = computed(() => splitRules(blockedCountries.value).map(code => countryName(code.toUpperCase())).join(' · '))
 const prizeForm = reactive<PrizeInput>({
   name: '',
   kind: 'balance',
@@ -662,6 +704,7 @@ const unlimited = computed({
 })
 const records = ref<LotteryDraw[]>([]),
   ledger = ref<LotteryLedger[]>([])
+const invitations = ref<LotteryInvitation[]>([])
 const page = ref(1),
   total = ref(0),
   filterPool = ref(0),
@@ -771,6 +814,9 @@ async function loadHistory() {
         ledger.value = r.items
         total.value = r.total
       }
+    } else if (tab.value === 'invitations') {
+      const r = await adminLotteryAPI.invitations(page.value, filterPool.value || undefined, filterUser.value || undefined)
+      if (generation === historyGeneration) { invitations.value = r.items; total.value = r.total }
     }
   } catch (e) {
     if (generation === historyGeneration) showError(e)
@@ -789,6 +835,9 @@ function editPool(pool?: LotteryPool) {
   writeKey = ''
   poolID.value = pool?.id ?? null
   locked.value = !!pool?.rule_locked
+  Object.assign(inviteForm, defaultInviteConfig(), pool?.invite_config)
+  blockedIPs.value = (inviteForm.blocked_ips || []).join('\n')
+  blockedCountries.value = (inviteForm.blocked_countries || []).join(', ')
   Object.assign(poolForm, {
     name: pool?.name ?? '',
     mode: pool?.mode ?? 'single',
@@ -830,10 +879,11 @@ async function savePool() {
   saving.value = true
   error.value = ''
   try {
+    const input: PoolInput = { ...poolForm, invite_config: isInvitationPool(poolForm) ? { ...inviteForm, blocked_ips: splitRules(blockedIPs.value), blocked_countries: splitRules(blockedCountries.value).map(code => code.toUpperCase()) } : undefined }
     await adminLotteryAPI.savePool(
       poolID.value,
-      { ...poolForm },
-      keyFor({ id: poolID.value, ...poolForm }),
+      input,
+      keyFor({ id: poolID.value, ...input }),
     )
     poolDialog.value = false
     await load()

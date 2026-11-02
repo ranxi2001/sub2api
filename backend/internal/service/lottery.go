@@ -28,12 +28,13 @@ func NewLotteryService(client *dbent.Client, users UserRepository, subscriptions
 }
 
 type LotteryPoolInput struct {
-	Name         string  `json:"name"`
-	Mode         string  `json:"mode"`
-	Threshold    float64 `json:"threshold"`
-	GrantEnabled bool    `json:"grant_enabled"`
-	DrawEnabled  bool    `json:"draw_enabled"`
-	SortOrder    int     `json:"sort_order"`
+	Name         string               `json:"name"`
+	Mode         string               `json:"mode"`
+	Threshold    float64              `json:"threshold"`
+	GrantEnabled bool                 `json:"grant_enabled"`
+	DrawEnabled  bool                 `json:"draw_enabled"`
+	SortOrder    int                  `json:"sort_order"`
+	InviteConfig *LotteryInviteConfig `json:"invite_config,omitempty"`
 }
 
 type LotteryPrizeInput struct {
@@ -70,18 +71,19 @@ type LotteryPrizeView struct {
 }
 
 type LotteryPoolView struct {
-	ID           int64              `json:"id"`
-	Name         string             `json:"name"`
-	Mode         string             `json:"mode"`
-	Threshold    float64            `json:"threshold"`
-	GrantEnabled bool               `json:"grant_enabled"`
-	DrawEnabled  bool               `json:"draw_enabled"`
-	RuleLocked   bool               `json:"rule_locked"`
-	SortOrder    int                `json:"sort_order"`
-	Available    int64              `json:"available"`
-	Debt         int64              `json:"debt"`
-	Progress     float64            `json:"progress"`
-	Prizes       []LotteryPrizeView `json:"prizes"`
+	ID           int64                `json:"id"`
+	Name         string               `json:"name"`
+	Mode         string               `json:"mode"`
+	Threshold    float64              `json:"threshold"`
+	GrantEnabled bool                 `json:"grant_enabled"`
+	DrawEnabled  bool                 `json:"draw_enabled"`
+	RuleLocked   bool                 `json:"rule_locked"`
+	SortOrder    int                  `json:"sort_order"`
+	Available    int64                `json:"available"`
+	Debt         int64                `json:"debt"`
+	Progress     float64              `json:"progress"`
+	Prizes       []LotteryPrizeView   `json:"prizes"`
+	InviteConfig *LotteryInviteConfig `json:"invite_config,omitempty"`
 }
 
 type LotteryDrawView struct {
@@ -127,6 +129,10 @@ func lotteryName(name string) (string, error) {
 
 func lotteryPoolView(p *dbent.LotteryPool, a *dbent.LotteryAccount, prizes []LotteryPrizeView) LotteryPoolView {
 	v := LotteryPoolView{ID: p.ID, Name: p.Name, Mode: p.Mode, Threshold: lotteryAmount(p.ThresholdUnits), GrantEnabled: p.GrantEnabled, DrawEnabled: p.DrawEnabled, RuleLocked: p.RuleLocked, SortOrder: p.SortOrder, Prizes: prizes}
+	if lotteryInviteMode(p.Mode) {
+		config := lotteryPoolInviteConfig(p)
+		v.InviteConfig = &config
+	}
 	if a != nil {
 		if a.Earned >= a.Used {
 			v.Available = a.Earned - a.Used

@@ -19,6 +19,7 @@ func (LotteryPool) Annotations() []schema.Annotation {
 func (LotteryPool) Fields() []ent.Field {
 	return []ent.Field{
 		field.String("name").MaxLen(100), field.String("mode").MaxLen(20),
+		field.JSON("invite_config", map[string]any{}).Optional(),
 		field.Int64("threshold_units").Positive(),
 		field.Bool("grant_enabled").Default(false), field.Bool("draw_enabled").Default(false),
 		field.Bool("rule_locked").Default(false), field.Int("sort_order").Default(0),
@@ -108,4 +109,42 @@ func (LotteryDraw) Fields() []ent.Field {
 }
 func (LotteryDraw) Indexes() []ent.Index {
 	return []ent.Index{index.Fields("user_id", "request_key").Unique(), index.Fields("pool_id", "created_at"), index.Fields("user_id", "created_at")}
+}
+
+type LotteryInviteLink struct{ ent.Schema }
+
+func (LotteryInviteLink) Annotations() []schema.Annotation {
+	return []schema.Annotation{entsql.Annotation{Table: "lottery_invite_links"}}
+}
+func (LotteryInviteLink) Fields() []ent.Field {
+	return []ent.Field{
+		field.Int64("pool_id"), field.Int64("user_id"), field.String("code").MaxLen(64).Unique(),
+		field.Time("created_at").Default(time.Now).Immutable(),
+	}
+}
+func (LotteryInviteLink) Indexes() []ent.Index {
+	return []ent.Index{index.Fields("pool_id", "user_id").Unique()}
+}
+
+type LotteryInvitation struct{ ent.Schema }
+
+func (LotteryInvitation) Annotations() []schema.Annotation {
+	return []schema.Annotation{entsql.Annotation{Table: "lottery_invitations"}}
+}
+func (LotteryInvitation) Fields() []ent.Field {
+	return []ent.Field{
+		field.Int64("pool_id"), field.Int64("inviter_id"), field.Int64("invitee_id").Optional().Nillable(),
+		field.String("visitor_key").MaxLen(64), field.String("ip_address").MaxLen(45), field.String("country").MaxLen(2).Default(""),
+		field.Int64("net_units").Default(0), field.Bool("qualified").Default(false),
+		field.Bool("inviter_awarded").Default(false), field.Bool("invitee_awarded").Default(false),
+		field.Time("registered_at").Optional().Nillable(),
+		field.Time("created_at").Default(time.Now).Immutable(), field.Time("updated_at").Default(time.Now).UpdateDefault(time.Now),
+	}
+}
+func (LotteryInvitation) Indexes() []ent.Index {
+	return []ent.Index{
+		index.Fields("pool_id", "visitor_key").Unique(), index.Fields("pool_id", "invitee_id").Unique(),
+		index.Fields("inviter_id", "pool_id"), index.Fields("invitee_id"),
+		index.Fields("pool_id", "ip_address", "created_at"),
+	}
 }

@@ -79,6 +79,14 @@ func (s *LotteryService) RecordRechargeTx(ctx context.Context, uid int64, source
 		return err
 	}
 	for _, p := range pools {
+		if lotteryInviteMode(p.Mode) {
+			if p.Mode == "invite_recharge" {
+				if err = s.recordInvitationRechargeTx(ctx, c, p, uid, source, sourceID, units); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		exists, err := c.LotteryContribution.Query().Where(lotterycontribution.PoolIDEQ(p.ID), lotterycontribution.SourceTypeEQ(source), lotterycontribution.SourceIDEQ(sourceID)).Exist(ctx)
 		if err != nil {
 			return err
@@ -107,6 +115,7 @@ func (s *LotteryService) RecordRechargeTx(ctx context.Context, uid int64, source
 			return err
 		}
 	}
+	s.invitationAfterCommit(dbent.TxFromContext(ctx), uid)
 	return nil
 }
 
@@ -144,6 +153,12 @@ func (s *LotteryService) RefundPaymentTx(ctx context.Context, uid, orderID int64
 		if net >= contribution.NetUnits {
 			continue
 		}
+		if p.Mode == "invite_recharge" {
+			if err = s.refundInvitationTx(ctx, c, p, contribution, net); err != nil {
+				return err
+			}
+			continue
+		}
 		a, err := lotteryAccountForUpdate(ctx, c, p.ID, uid)
 		if err != nil {
 			return err
@@ -163,6 +178,7 @@ func (s *LotteryService) RefundPaymentTx(ctx context.Context, uid, orderID int64
 			return err
 		}
 	}
+	s.invitationAfterCommit(dbent.TxFromContext(ctx), uid)
 	return nil
 }
 
@@ -208,6 +224,9 @@ func (s *LotteryService) Pools(ctx context.Context, uid int64, admin bool) ([]Lo
 		if !enabled {
 			return []LotteryPoolView{}, nil
 		}
+		if err = s.SyncInvitationRewards(ctx, uid); err != nil {
+			return nil, err
+		}
 	}
 	pools, err := s.client.LotteryPool.Query().Where(lotterypool.DeletedAtIsNil()).Order(dbent.Asc(lotterypool.FieldSortOrder), dbent.Asc(lotterypool.FieldID)).All(ctx)
 	if err != nil {
@@ -229,7 +248,11 @@ func (s *LotteryService) Pools(ctx context.Context, uid int64, admin bool) ([]Lo
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, lotteryPoolView(p, account, prizes))
+		v := lotteryPoolView(p, account, prizes)
+		if !admin {
+			lotteryPublicPool(&v)
+		}
+		result = append(result, v)
 	}
 	return result, nil
 }
@@ -280,6 +303,9 @@ func (s *LotteryService) Draw(ctx context.Context, uid, poolID int64, key string
 	}
 	if !p.DrawEnabled {
 		return nil, infraerrors.Conflict("LOTTERY_PAUSED", "drawing is paused")
+	}
+	if err = s.settleInvitationPoolTx(ctx, c, uid, p, true); err != nil {
+		return nil, err
 	}
 	a, err := lotteryAccountForUpdate(ctx, c, poolID, uid)
 	if err != nil {

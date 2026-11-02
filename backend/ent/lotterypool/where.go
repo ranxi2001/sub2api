@@ -239,6 +239,16 @@ func ModeContainsFold(v string) predicate.LotteryPool {
 	return predicate.LotteryPool(sql.FieldContainsFold(FieldMode, v))
 }
 
+// InviteConfigIsNil applies the IsNil predicate on the "invite_config" field.
+func InviteConfigIsNil() predicate.LotteryPool {
+	return predicate.LotteryPool(sql.FieldIsNull(FieldInviteConfig))
+}
+
+// InviteConfigNotNil applies the NotNil predicate on the "invite_config" field.
+func InviteConfigNotNil() predicate.LotteryPool {
+	return predicate.LotteryPool(sql.FieldNotNull(FieldInviteConfig))
+}
+
 // ThresholdUnitsEQ applies the EQ predicate on the "threshold_units" field.
 func ThresholdUnitsEQ(v int64) predicate.LotteryPool {
 	return predicate.LotteryPool(sql.FieldEQ(FieldThresholdUnits, v))

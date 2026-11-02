@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import RedeemView from '../RedeemView.vue'
 const { refreshLottery } = vi.hoisted(() => ({ refreshLottery: vi.fn() }))
-vi.mock('@/stores/lottery', () => ({ useLotteryStore: () => ({ enabled: true, refresh: refreshLottery }) }))
+vi.mock('@/stores/lottery', () => ({ useLotteryStore: () => ({ enabled: true, pools: [], refresh: refreshLottery }) }))
 
 const { redeem, getHistory, refreshUser, fetchActiveSubscriptions, showError, showWarning, showSuccess } = vi.hoisted(() => ({
   redeem: vi.fn(),
@@ -82,7 +82,8 @@ describe('RedeemView refresh after redemption', () => {
       } else {
         expect(fetchActiveSubscriptions).not.toHaveBeenCalled()
       }
-      expect(refreshLottery).toHaveBeenCalledTimes(type === 'balance' ? 1 : 0)
+      expect(refreshLottery).toHaveBeenCalledTimes(type === 'balance' ? 2 : 1)
+      if (type === 'balance') expect(refreshLottery).toHaveBeenLastCalledWith(true)
       wrapper.unmount()
     }
   )

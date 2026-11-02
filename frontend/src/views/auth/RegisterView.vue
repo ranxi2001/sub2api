@@ -12,6 +12,10 @@
       </div>
 
       <!-- Registration Disabled Message -->
+      <div v-if="lotteryInviteNotice" role="status" class="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm leading-6 text-primary-800 dark:border-primary-800 dark:bg-primary-950 dark:text-primary-200">
+        <p v-if="lotteryInviteName" class="font-semibold">{{ lotteryInviteName }}</p>
+        {{ lotteryInviteNotice }}
+      </div>
       <div
         v-if="!registrationEnabled && settingsLoaded"
         class="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-800/50 dark:bg-amber-900/20"
@@ -377,6 +381,7 @@ import LoginAgreementPrompt from '@/components/auth/LoginAgreementPrompt.vue'
 import Icon from '@/components/icons/Icon.vue'
 import TurnstileWidget from '@/components/CaptchaChallenge.vue'
 import { useAuthStore, useAppStore } from '@/stores'
+import { lotteryAPI, lotteryRuleKey, lotteryRuleParams } from '@/api/lottery'
 import {
   buildOAuthLoginStartURL,
   getPublicSettings,
@@ -408,6 +413,8 @@ const LOGIN_AGREEMENT_STORAGE_KEY = 'sub2api_login_agreement_consent'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const lotteryVisitLoading = ref(false)
+const lotteryInviteNotice = ref(''), lotteryInviteName = ref('')
 const appStore = useAppStore()
 
 // ==================== State ====================
@@ -539,7 +546,7 @@ const agreementGateActive = computed(
 )
 
 const registrationActionDisabled = computed(
-  () => isLoading.value || !settingsLoaded.value || agreementGateActive.value
+  () => isLoading.value || !settingsLoaded.value || agreementGateActive.value || lotteryVisitLoading.value
 )
 
 watch(validationToastMessage, (value, previousValue) => {
@@ -560,6 +567,7 @@ function syncAffiliateReferralCode(): string {
 
 onMounted(async () => {
   syncAffiliateReferralCode()
+  await captureLotteryInvitation()
 
   try {
     const settings = await getPublicSettings()
@@ -608,6 +616,21 @@ onMounted(async () => {
     settingsLoaded.value = true
   }
 })
+
+async function captureLotteryInvitation() {
+  const code = route.query.lottery_invite
+  if (typeof code !== 'string' || !/^[a-f0-9]{64}$/i.test(code) || authStore.isAuthenticated) return
+  lotteryVisitLoading.value = true
+  try {
+    try { localStorage.setItem('lottery_invitation_pending', '1') } catch { /* The HttpOnly receipt still binds during registration. */ }
+    const pool = await lotteryAPI.visit(code)
+    lotteryInviteName.value = pool.name
+    lotteryInviteNotice.value = `${t(lotteryRuleKey(pool), lotteryRuleParams(pool))} ${t(pool.invite_config?.reward_to === 'both' ? 'lottery.rewardBoth' : 'lottery.rewardInviter')}${pool.mode === 'invite_visit' && pool.invite_config?.reward_to === 'both' ? ` ${t('lottery.visitRecipientNote')}` : ''}`
+  } catch (e) {
+    const reason = (e as { reason?: string }).reason
+    lotteryInviteNotice.value = `${t(reason && ['LOTTERY_VISIT_BLOCKED', 'LOTTERY_VISIT_LIMIT', 'LOTTERY_INVITE_BOUND', 'LOTTERY_INVITE_STOPPED'].includes(reason) ? `lottery.errors.${reason}` : 'lottery.inviteUnavailable')} ${t('lottery.registrationUnaffected')}`
+  } finally { lotteryVisitLoading.value = false }
+}
 
 watch(
   () => [route.query.aff, route.query.aff_code],

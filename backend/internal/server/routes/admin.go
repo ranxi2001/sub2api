@@ -52,6 +52,7 @@ func RegisterAdminRoutes(
 		lottery.PUT("/pools/:id/prizes/:prize_id", h.Lottery.SavePrize)
 		lottery.GET("/records", h.Lottery.AdminRecords)
 		lottery.GET("/ledger", h.Lottery.AdminLedger)
+		lottery.GET("/invitations", h.Lottery.AdminInvitations)
 	}
 	{
 		// Optional region-to-Pod routing, configured inside Gateway settings.

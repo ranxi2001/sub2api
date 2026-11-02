@@ -72,6 +72,12 @@ type LotteryContribution func(*sql.Selector)
 // LotteryDraw is the predicate function for lotterydraw builders.
 type LotteryDraw func(*sql.Selector)
 
+// LotteryInvitation is the predicate function for lotteryinvitation builders.
+type LotteryInvitation func(*sql.Selector)
+
+// LotteryInviteLink is the predicate function for lotteryinvitelink builders.
+type LotteryInviteLink func(*sql.Selector)
+
 // LotteryLedger is the predicate function for lotteryledger builders.
 type LotteryLedger func(*sql.Selector)
 
