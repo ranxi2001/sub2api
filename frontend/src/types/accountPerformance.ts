@@ -1,4 +1,13 @@
 export interface PerformanceBounds { min: number | null; max: number | null }
+export const DEFAULT_PERFORMANCE_WINDOW_MINUTES = 60
+
+// Display the window used to calculate this response, including data returned
+// before a global setting change, rather than guessing from local settings.
+export function performanceWindowMinutes(metrics?: Partial<AccountPerformance>): number {
+ const minutes = (Date.parse(metrics?.window_end ?? '') - Date.parse(metrics?.window_start ?? '')) / 60_000
+ return Number.isInteger(minutes) && minutes > 0 ? minutes : DEFAULT_PERFORMANCE_WINDOW_MINUTES
+}
+
 export interface PerformanceConfig {
  enabled: boolean
  tps: PerformanceBounds

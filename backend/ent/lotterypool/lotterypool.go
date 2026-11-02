@@ -17,6 +17,8 @@ const (
 	FieldName = "name"
 	// FieldMode holds the string denoting the mode field in the database.
 	FieldMode = "mode"
+	// FieldInviteConfig holds the string denoting the invite_config field in the database.
+	FieldInviteConfig = "invite_config"
 	// FieldThresholdUnits holds the string denoting the threshold_units field in the database.
 	FieldThresholdUnits = "threshold_units"
 	// FieldGrantEnabled holds the string denoting the grant_enabled field in the database.
@@ -44,6 +46,7 @@ var Columns = []string{
 	FieldID,
 	FieldName,
 	FieldMode,
+	FieldInviteConfig,
 	FieldThresholdUnits,
 	FieldGrantEnabled,
 	FieldDrawEnabled,

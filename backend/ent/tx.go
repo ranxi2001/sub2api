@@ -58,6 +58,10 @@ type Tx struct {
 	LotteryContribution *LotteryContributionClient
 	// LotteryDraw is the client for interacting with the LotteryDraw builders.
 	LotteryDraw *LotteryDrawClient
+	// LotteryInvitation is the client for interacting with the LotteryInvitation builders.
+	LotteryInvitation *LotteryInvitationClient
+	// LotteryInviteLink is the client for interacting with the LotteryInviteLink builders.
+	LotteryInviteLink *LotteryInviteLinkClient
 	// LotteryLedger is the client for interacting with the LotteryLedger builders.
 	LotteryLedger *LotteryLedgerClient
 	// LotteryPool is the client for interacting with the LotteryPool builders.
@@ -257,6 +261,8 @@ func (tx *Tx) init() {
 	tx.LotteryAccount = NewLotteryAccountClient(tx.config)
 	tx.LotteryContribution = NewLotteryContributionClient(tx.config)
 	tx.LotteryDraw = NewLotteryDrawClient(tx.config)
+	tx.LotteryInvitation = NewLotteryInvitationClient(tx.config)
+	tx.LotteryInviteLink = NewLotteryInviteLinkClient(tx.config)
 	tx.LotteryLedger = NewLotteryLedgerClient(tx.config)
 	tx.LotteryPool = NewLotteryPoolClient(tx.config)
 	tx.LotteryPrize = NewLotteryPrizeClient(tx.config)

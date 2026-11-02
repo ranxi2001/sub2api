@@ -1201,6 +1201,77 @@ var (
 			},
 		},
 	}
+	// LotteryInvitationsColumns holds the columns for the "lottery_invitations" table.
+	LotteryInvitationsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "pool_id", Type: field.TypeInt64},
+		{Name: "inviter_id", Type: field.TypeInt64},
+		{Name: "invitee_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "visitor_key", Type: field.TypeString, Size: 64},
+		{Name: "ip_address", Type: field.TypeString, Size: 45},
+		{Name: "country", Type: field.TypeString, Size: 2, Default: ""},
+		{Name: "net_units", Type: field.TypeInt64, Default: 0},
+		{Name: "qualified", Type: field.TypeBool, Default: false},
+		{Name: "inviter_awarded", Type: field.TypeBool, Default: false},
+		{Name: "invitee_awarded", Type: field.TypeBool, Default: false},
+		{Name: "registered_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// LotteryInvitationsTable holds the schema information for the "lottery_invitations" table.
+	LotteryInvitationsTable = &schema.Table{
+		Name:       "lottery_invitations",
+		Columns:    LotteryInvitationsColumns,
+		PrimaryKey: []*schema.Column{LotteryInvitationsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "lotteryinvitation_pool_id_visitor_key",
+				Unique:  true,
+				Columns: []*schema.Column{LotteryInvitationsColumns[1], LotteryInvitationsColumns[4]},
+			},
+			{
+				Name:    "lotteryinvitation_pool_id_invitee_id",
+				Unique:  true,
+				Columns: []*schema.Column{LotteryInvitationsColumns[1], LotteryInvitationsColumns[3]},
+			},
+			{
+				Name:    "lotteryinvitation_inviter_id_pool_id",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryInvitationsColumns[2], LotteryInvitationsColumns[1]},
+			},
+			{
+				Name:    "lotteryinvitation_invitee_id",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryInvitationsColumns[3]},
+			},
+			{
+				Name:    "lotteryinvitation_pool_id_ip_address_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{LotteryInvitationsColumns[1], LotteryInvitationsColumns[5], LotteryInvitationsColumns[12]},
+			},
+		},
+	}
+	// LotteryInviteLinksColumns holds the columns for the "lottery_invite_links" table.
+	LotteryInviteLinksColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "pool_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+		{Name: "code", Type: field.TypeString, Unique: true, Size: 64},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// LotteryInviteLinksTable holds the schema information for the "lottery_invite_links" table.
+	LotteryInviteLinksTable = &schema.Table{
+		Name:       "lottery_invite_links",
+		Columns:    LotteryInviteLinksColumns,
+		PrimaryKey: []*schema.Column{LotteryInviteLinksColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "lotteryinvitelink_pool_id_user_id",
+				Unique:  true,
+				Columns: []*schema.Column{LotteryInviteLinksColumns[1], LotteryInviteLinksColumns[2]},
+			},
+		},
+	}
 	// LotteryLedgerColumns holds the columns for the "lottery_ledger" table.
 	LotteryLedgerColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1236,6 +1307,7 @@ var (
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "name", Type: field.TypeString, Size: 100},
 		{Name: "mode", Type: field.TypeString, Size: 20},
+		{Name: "invite_config", Type: field.TypeJSON, Nullable: true},
 		{Name: "threshold_units", Type: field.TypeInt64},
 		{Name: "grant_enabled", Type: field.TypeBool, Default: false},
 		{Name: "draw_enabled", Type: field.TypeBool, Default: false},
@@ -2312,6 +2384,8 @@ var (
 		LotteryAccountsTable,
 		LotteryContributionsTable,
 		LotteryDrawsTable,
+		LotteryInvitationsTable,
+		LotteryInviteLinksTable,
 		LotteryLedgerTable,
 		LotteryPoolsTable,
 		LotteryPrizesTable,
@@ -2420,6 +2494,12 @@ func init() {
 	}
 	LotteryDrawsTable.Annotation = &entsql.Annotation{
 		Table: "lottery_draws",
+	}
+	LotteryInvitationsTable.Annotation = &entsql.Annotation{
+		Table: "lottery_invitations",
+	}
+	LotteryInviteLinksTable.Annotation = &entsql.Annotation{
+		Table: "lottery_invite_links",
 	}
 	LotteryLedgerTable.Annotation = &entsql.Annotation{
 		Table: "lottery_ledger",

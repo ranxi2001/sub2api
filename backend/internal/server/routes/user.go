@@ -26,7 +26,10 @@ func RegisterUserRoutes(
 	authenticated.Use(gin.HandlerFunc(auditLog))
 	if h.Lottery != nil {
 		lottery := authenticated.Group("/lottery")
+		lottery.Use(handler.LotteryVisitorContext)
 		lottery.GET("/pools", h.Lottery.Pools)
+		lottery.GET("/pools/:id/invite", h.Lottery.InviteLink)
+		lottery.POST("/invitations/claim", h.Lottery.ClaimInvitation)
 		lottery.POST("/pools/:id/draw", h.Lottery.Draw)
 		lottery.GET("/records", h.Lottery.Records)
 	}

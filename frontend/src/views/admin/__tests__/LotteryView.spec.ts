@@ -17,7 +17,8 @@ const { pools, savePool, savePrize, records, ledger, getPlans } = vi.hoisted(
     getPlans: vi.fn(),
   }),
 )
-vi.mock('@/api/lottery', () => ({
+vi.mock('@/api/lottery', async () => ({
+  ...(await vi.importActual<typeof import('@/api/lottery')>('@/api/lottery')),
   adminLotteryAPI: { pools, savePool, savePrize, records, ledger, settings, saveSettings, deletePool, deletePrize },
 }))
 vi.mock('@/api/admin/payment', () => ({
@@ -177,6 +178,35 @@ describe('Lottery admin', () => {
       stock: 2,
     })
     expect(savePrize.mock.calls[1][3]).toBe(savePrize.mock.calls[0][3])
+    w.unmount()
+  })
+  it('saves invitation recipients, IP caps and normalized country lists with default closed switches', async () => {
+    const w = render()
+    await flushPromises()
+    await w.findAll('button').find(b => b.text() === 'lottery.addPool')!.trigger('click')
+    await w.get('#lottery-pool-form input').setValue('Invite friends')
+    await w.get('#lottery-pool-form select').setValue('invite_visit')
+    await w.get('[data-testid="invite-recipient"]').setValue('both')
+    await w.get('[data-testid="invite-ip-limit"]').setValue(2)
+    await w.get('[data-testid="invite-blocked-ips"]').setValue('203.0.113.8\n198.51.100.0/24')
+    await w.get('[data-testid="invite-blocked-countries"]').setValue('cn, US')
+    expect((w.get('[data-testid="invite-deny-unknown"]').element as HTMLInputElement).checked).toBe(true)
+    await w.get('#lottery-pool-form').trigger('submit')
+    await flushPromises()
+    expect(savePool).toHaveBeenCalledWith(null, expect.objectContaining({
+      mode: 'invite_visit', grant_enabled: false, draw_enabled: false,
+      invite_config: expect.objectContaining({ reward_to: 'both', ip_daily_limit: 2, blocked_ips: ['203.0.113.8', '198.51.100.0/24'], blocked_countries: ['CN', 'US'], deny_unknown_country: true }),
+    }), expect.any(String))
+    w.unmount()
+  })
+  it('keeps visit restrictions editable after invitation earning rules are locked', async () => {
+    pools.mockResolvedValue([{ ...pool, mode: 'invite_signup', invite_config: { reward_to: 'both', tickets: 3, daily_limit: 10, ip_daily_limit: 1, deny_unknown_country: true } }])
+    const w = render()
+    await flushPromises()
+    await w.get('[aria-label="lottery.editPool"]').trigger('click')
+    expect(w.get('[data-testid="invite-recipient"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-testid="invite-ip-limit"]').attributes('disabled')).toBeUndefined()
+    expect(w.get('[data-testid="invite-blocked-countries"]').attributes('disabled')).toBeUndefined()
     w.unmount()
   })
 })

@@ -22,8 +22,18 @@ func (s *LotteryService) SavePool(ctx context.Context, id int64, input LotteryPo
 	if err != nil {
 		return nil, err
 	}
-	if threshold < lotteryScale/100 || (input.Mode != "single" && input.Mode != "cumulative") {
+	if input.Mode == "invite_visit" || input.Mode == "invite_signup" {
+		threshold = lotteryScale / 100
+	}
+	if threshold < lotteryScale/100 || (input.Mode != "single" && input.Mode != "cumulative" && !lotteryInviteMode(input.Mode)) {
 		return nil, infraerrors.BadRequest("LOTTERY_INVALID_RULE", "select single/cumulative and a threshold of at least 0.01 USD")
+	}
+	var inviteConfig *LotteryInviteConfig
+	if lotteryInviteMode(input.Mode) {
+		inviteConfig, err = normalizeLotteryInviteConfig(input.InviteConfig)
+		if err != nil {
+			return nil, err
+		}
 	}
 	tx, err := s.client.Tx(ctx)
 	if err != nil {
@@ -36,7 +46,7 @@ func (s *LotteryService) SavePool(ctx context.Context, id int64, input LotteryPo
 		if input.GrantEnabled || input.DrawEnabled {
 			return nil, infraerrors.BadRequest("LOTTERY_CONFIGURE_FIRST", "create the pool disabled and configure prizes before enabling it")
 		}
-		pool, err = c.LotteryPool.Create().SetName(name).SetMode(input.Mode).SetThresholdUnits(threshold).SetSortOrder(input.SortOrder).Save(ctx)
+		pool, err = c.LotteryPool.Create().SetName(name).SetMode(input.Mode).SetThresholdUnits(threshold).SetSortOrder(input.SortOrder).SetInviteConfig(lotteryInviteConfigMap(inviteConfig)).Save(ctx)
 	} else {
 		pool, err = c.LotteryPool.Query().Where(lotterypool.IDEQ(id), lotterypool.DeletedAtIsNil()).ForUpdate().Only(ctx)
 		if dbent.IsNotFound(err) {
@@ -47,6 +57,12 @@ func (s *LotteryService) SavePool(ctx context.Context, id int64, input LotteryPo
 		}
 		if pool.RuleLocked && (input.Mode != pool.Mode || threshold != pool.ThresholdUnits) {
 			return nil, infraerrors.Conflict("LOTTERY_RULE_LOCKED", "this pool has recharge history; create a new pool to change the rule")
+		}
+		if pool.RuleLocked && inviteConfig != nil {
+			old := lotteryPoolInviteConfig(pool)
+			if old.RewardTo != inviteConfig.RewardTo || old.Tickets != inviteConfig.Tickets {
+				return nil, infraerrors.Conflict("LOTTERY_RULE_LOCKED", "recipient and ticket count are locked after participation")
+			}
 		}
 		// Exhausted pools can always be paused. Enabling either action requires
 		// a fulfillable prize, but later exhaustion never prevents recording credits.
@@ -64,6 +80,7 @@ func (s *LotteryService) SavePool(ctx context.Context, id int64, input LotteryPo
 			}
 		}
 		update := c.LotteryPool.UpdateOneID(id).SetName(name).SetMode(input.Mode).SetThresholdUnits(threshold).SetSortOrder(input.SortOrder).SetGrantEnabled(input.GrantEnabled).SetDrawEnabled(input.DrawEnabled)
+		update.SetInviteConfig(lotteryInviteConfigMap(inviteConfig))
 		if pool.ActivatedAt == nil && (input.GrantEnabled || input.DrawEnabled) {
 			update.SetActivatedAt(time.Now())
 		}

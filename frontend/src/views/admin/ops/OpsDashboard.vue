@@ -84,7 +84,7 @@
         />
       </div>
 
-      <LatencyObservabilityPanel v-if="opsEnabled && hasLoadedOnce" ops :platform="platform" :start-date="overview?.start_time" :end-date="overview?.end_time" :group-id="groupId ?? undefined" :refresh-token="dashboardRefreshToken" />
+      <LatencyObservabilityPanel v-if="opsEnabled && hasLoadedOnce" ops collapsible :platform="platform" :start-date="overview?.start_time" :end-date="overview?.end_time" :group-id="groupId ?? undefined" :refresh-token="dashboardRefreshToken" />
 
       <OpsNetworkChart v-if="opsEnabled && hasLoadedOnce" :refresh-token="dashboardRefreshToken" />
 
