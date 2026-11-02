@@ -31,8 +31,41 @@ func TestDefaultOpenAIResponseHeaderTimeoutSettings(t *testing.T) {
 	require.Equal(t, openAIResponseHeaderTimeoutDefaultSeconds, settings.Seconds)
 
 	settings = DefaultOpenAIResponseHeaderTimeoutSettings(nil)
-	require.True(t, settings.Enabled)
+	require.False(t, settings.Enabled)
 	require.Equal(t, openAIResponseHeaderTimeoutDefaultSeconds, settings.Seconds)
+}
+
+func TestOpenAIResponseHeaderTimeoutNilFallbackDisabled(t *testing.T) {
+	for name, svc := range map[string]*SettingService{
+		"nil service": nil,
+		"nil config":  NewSettingService(nil, nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			seconds, enabled := svc.GetOpenAIResponseHeaderTimeoutCached(t.Context())
+			require.False(t, enabled)
+			require.Equal(t, 20, seconds, "retain valid seconds for manual enabling")
+		})
+	}
+}
+
+func TestOpenAIResponseHeaderTimeoutSettingsGetMissingDefaultDisabled(t *testing.T) {
+	for name, cfg := range map[string]*config.Config{
+		"nil config": nil,
+		"default":    {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &panelRateLimitSettingRepo{values: map[string]string{}}
+			svc := NewSettingService(repo, cfg)
+			settings, err := svc.GetOpenAIResponseHeaderTimeoutSettings(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, &OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 20}, settings)
+
+			seconds, enabled := svc.GetOpenAIResponseHeaderTimeoutCached(t.Context())
+			require.False(t, enabled)
+			require.Equal(t, 20, seconds)
+			require.Empty(t, repo.values, "reading defaults must not persist an override")
+		})
+	}
 }
 
 func TestOpenAIResponseHeaderTimeoutSettingsGetMissingUsesConfig(t *testing.T) {
@@ -46,6 +79,38 @@ func TestOpenAIResponseHeaderTimeoutSettingsGetMissingUsesConfig(t *testing.T) {
 	seconds, enabled := svc.GetOpenAIResponseHeaderTimeoutCached(context.Background())
 	require.True(t, enabled)
 	require.Equal(t, 45, seconds)
+}
+
+func TestOpenAIResponseHeaderTimeoutPersistedSettingsOverrideDefaults(t *testing.T) {
+	optIn := &config.Config{}
+	optIn.Gateway.OpenAIResponseHeaderTimeout = 45
+	for name, cfg := range map[string]*config.Config{
+		"nil config": nil,
+		"default":    {},
+		"opt in":     optIn,
+	} {
+		for _, saved := range []struct {
+			name  string
+			value string
+			want  OpenAIResponseHeaderTimeoutSettings
+		}{
+			{"enabled", `{"enabled":true,"seconds":30}`, OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 30}},
+			{"disabled", `{"enabled":false,"seconds":33}`, OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 33}},
+		} {
+			t.Run(name+"/"+saved.name, func(t *testing.T) {
+				repo := &panelRateLimitSettingRepo{values: map[string]string{SettingKeyOpenAIResponseHeaderTimeoutSettings: saved.value}}
+				svc := NewSettingService(repo, cfg)
+				settings, err := svc.GetOpenAIResponseHeaderTimeoutSettings(t.Context())
+				require.NoError(t, err)
+				require.Equal(t, &saved.want, settings)
+
+				seconds, enabled := svc.GetOpenAIResponseHeaderTimeoutCached(t.Context())
+				require.Equal(t, saved.want.Enabled, enabled)
+				require.Equal(t, saved.want.Seconds, seconds)
+				require.Equal(t, saved.value, repo.values[SettingKeyOpenAIResponseHeaderTimeoutSettings])
+			})
+		}
+	}
 }
 
 func TestOpenAIResponseHeaderTimeoutSettingsSetAndCache(t *testing.T) {
@@ -71,6 +136,11 @@ func TestOpenAIResponseHeaderTimeoutSettingsSetAndCache(t *testing.T) {
 	seconds, enabled = svc.GetOpenAIResponseHeaderTimeoutCached(context.Background())
 	require.False(t, enabled)
 	require.Equal(t, 30, seconds)
+
+	stored, err = svc.GetOpenAIResponseHeaderTimeoutSettings(context.Background())
+	require.NoError(t, err)
+	require.False(t, stored.Enabled)
+	require.Equal(t, 30, stored.Seconds)
 }
 
 func TestOpenAIResponseHeaderTimeoutSettingsValidation(t *testing.T) {
@@ -84,6 +154,7 @@ func TestOpenAIResponseHeaderTimeoutSettingsValidation(t *testing.T) {
 	for _, seconds := range []int{1, 600} {
 		require.NoError(t, svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: seconds}))
 	}
+	require.Error(t, svc.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 0}))
 }
 
 type headerTimeoutBarrierRepo struct {

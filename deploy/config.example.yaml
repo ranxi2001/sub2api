@@ -284,12 +284,14 @@ gateway:
   # Timeout for waiting upstream response headers (seconds)
   # 等待上游响应头超时时间（秒）
   response_header_timeout: 600
-  # OpenAI/Codex upstream response header timeout (seconds; default 20, 0=disabled)
-  # OpenAI/Codex 等待上游响应头超时时间（秒；默认 20，0=禁用本地响应头超时）
+  # OpenAI/Codex upstream response header timeout (seconds; default 0=disabled; positive values opt in)
+  # OpenAI/Codex 等待上游响应头超时时间（秒；默认 0=禁用，显式配置正数以启用）
+  # Saved admin enabled/disabled settings and seconds override this default.
+  # 后台已保存的启用/禁用状态与秒数优先；默认禁用时保留 20 秒供手动启用。
   # Starts after upload; slow nonstream/SSE headers can time out. Submitted requests are not replayed.
   # 已提交请求超时后终止，不表示上游停止执行或费用为零；已收到响应头的正文流不受此计时器影响。
   # 0 disables this timer without inheriting the generic 600s timeout.
-  openai_response_header_timeout: 20
+  openai_response_header_timeout: 0
   # Grok text Responses first-byte timeout (seconds, 0=disabled; default 120)
   # Grok 文本 Responses 首字节超时时间（秒，0=禁用；默认 120）
   grok_response_header_timeout: 120
