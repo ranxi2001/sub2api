@@ -70,7 +70,13 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	concurrencyService := service.ProvideConcurrencyService(concurrencyCache, accountRepository, configConfig)
+	schedulerOutboxRepository := repository.NewSchedulerOutboxRepository(db)
+	regionalSchedulerAuthority := repository.NewRegionalSchedulerAuthority(db)
+	schedulerSnapshotService, err := service.ProvideSchedulerSnapshotService(schedulerCache, schedulerOutboxRepository, accountRepository, groupRepository, configConfig, regionalSchedulerAuthority)
+	if err != nil {
+		return nil, err
+	}
+	concurrencyService := service.ProvideConcurrencyService(concurrencyCache, accountRepository, configConfig, schedulerSnapshotService)
 	regionalAuthAuthority := repository.NewRegionalAuthAuthority(db)
 	apiKeyService, err := service.ProvideAPIKeyService(apiKeyRepository, userRepository, groupRepository, userSubscriptionRepository, userGroupRateRepository, apiKeyCache, configConfig, billingCacheService, concurrencyService, regionalAuthAuthority)
 	if err != nil {
@@ -121,12 +127,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	opsRepository := repository.NewOpsRepository(db)
 	usageBillingRepository := repository.NewUsageBillingRepository(client, db)
 	gatewayCache := repository.NewGatewayCache(redisClient)
-	schedulerOutboxRepository := repository.NewSchedulerOutboxRepository(db)
-	regionalSchedulerAuthority := repository.NewRegionalSchedulerAuthority(db)
-	schedulerSnapshotService, err := service.ProvideSchedulerSnapshotService(schedulerCache, schedulerOutboxRepository, accountRepository, groupRepository, configConfig, regionalSchedulerAuthority)
-	if err != nil {
-		return nil, err
-	}
 	pricingRemoteClient := repository.ProvidePricingRemoteClient(configConfig)
 	pricingService, err := service.ProvidePricingService(configConfig, pricingRemoteClient)
 	if err != nil {

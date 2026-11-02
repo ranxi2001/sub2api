@@ -83,6 +83,7 @@ WITH source AS (
 SELECT ids.id,u.tps,COALESCE(u.tps_n,0),u.ttft,COALESCE(u.ttft_n,0),q.degraded,COALESCE(q.quality_n,0),
  COALESCE(m.config,'{}'),COALESCE(m.revision,0),COALESCE(m.paused,false),COALESCE(m.pause_generation,0),m.paused_at,COALESCE(m.reason,'')
 FROM unnest($1::bigint[]) ids(id)
+JOIN accounts a ON a.id=ids.id AND a.deleted_at IS NULL
 LEFT JOIN usage u ON u.account_id=ids.id LEFT JOIN quality q ON q.account_id=ids.id
 LEFT JOIN account_performance_monitors m ON m.account_id=ids.id
 `
@@ -175,9 +176,7 @@ func (r *accountPerformanceRepository) Save(ctx context.Context, id int64, c ser
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// Share lock with account deletion; all monitor state changes serialize below.
-	var existing int64
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR KEY SHARE`, id).Scan(&existing); err != nil {
+	if err = lockPerformanceAccount(ctx, tx, id); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO account_performance_monitors(account_id) VALUES($1) ON CONFLICT DO NOTHING`, id)
@@ -201,6 +200,19 @@ func performanceAudit(ctx context.Context, tx *sql.Tx, id int64, action string, 
 	_, err := tx.ExecContext(ctx, `INSERT INTO account_performance_events(account_id,action,actor_id,revision,pause_generation,evidence) VALUES($1,$2,NULLIF($3::bigint,0),$4,$5,$6)`, id, action, actor, revision, gen, string(evidence))
 	return err
 }
+
+// Soft deletion changes a non-key column: KEY SHARE would allow it through.
+// All monitor mutations lock account -> monitor, holding the account active
+// until the state change and audit commit together.
+func lockPerformanceAccount(ctx context.Context, tx *sql.Tx, id int64) error {
+	var existing int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR SHARE`, id).Scan(&existing)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrPerformanceConflict
+	}
+	return err
+}
+
 func (r *accountPerformanceRepository) Release(ctx context.Context, id, revision, generation, actor int64) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -209,6 +221,9 @@ func (r *accountPerformanceRepository) Release(ctx context.Context, id, revision
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = lockPerformanceAccount(ctx, tx, id); err != nil {
+		return err
+	}
 	// Explicit release disables evaluation atomically; no old evaluator can re-pause.
 	res, err := tx.ExecContext(ctx, `UPDATE account_performance_monitors SET paused=false,paused_at=NULL,reason='',config=jsonb_set(config,'{enabled}','false'),revision=revision+1,updated_at=NOW() WHERE account_id=$1 AND revision=$2 AND pause_generation=$3 AND paused`, id, revision, generation)
 	if err != nil {
@@ -234,6 +249,12 @@ func (r *accountPerformanceRepository) Evaluate(ctx context.Context, id int64, n
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = lockPerformanceAccount(ctx, tx, id); err != nil {
+		if errors.Is(err, service.ErrPerformanceConflict) {
+			return nil // Deleted after EnabledIDs was captured.
+		}
+		return err
+	}
 	var raw []byte
 	var revision, gen int64
 	var paused bool

@@ -101,14 +101,14 @@ func (r performanceLocalReader) GetLocalAccounts(context.Context, []int64) (map[
 func (r performanceLocalReader) GetLocalGroup(context.Context, int64) (*Group, error) {
 	return nil, nil
 }
-func TestAccountPerformanceRegionalHydrationChecksAuthorityOnce(t *testing.T) {
+func TestAccountPerformanceRegionalHydrationUsesLocalAuthority(t *testing.T) {
 	repo := &performanceAccountRepoStub{paused: map[int64]bool{1: true}}
-	account := &Account{ID: 1, Status: StatusActive, Schedulable: true}
+	account := &Account{ID: 1, Status: StatusActive, Schedulable: true, PerformancePaused: true}
 	s := NewSchedulerSnapshotService(nil, nil, repo, nil, snapshotReaderConfig())
 	s.SetLocalSnapshotReader(performanceLocalReader{account: account})
 	got, err := s.GetAccount(context.Background(), 1)
 	require.NoError(t, err)
 	require.False(t, got.IsSchedulable())
-	require.Equal(t, 1, repo.calls)
-	require.False(t, account.PerformancePaused, "regional snapshot stays immutable")
+	require.Zero(t, repo.calls, "regional request must never consult a separate database authority")
+	require.True(t, account.PerformancePaused, "regional snapshot stays immutable")
 }

@@ -104,6 +104,9 @@ type AccountPerformanceService struct {
 	Repo   AccountPerformanceRepository
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	// Only the evaluator goroutine owns this cursor. Advance on attempts,
+	// including timeouts, so slow accounts cannot starve the remaining IDs.
+	evaluationCursor int64
 }
 
 func NewAccountPerformanceService(repo AccountPerformanceRepository) *AccountPerformanceService {
@@ -142,10 +145,19 @@ func (s *AccountPerformanceService) evaluate(ctx context.Context) {
 		slog.Error("account performance list", "error", err)
 		return
 	}
-	for _, id := range ids {
+	start := 0
+	for i, id := range ids {
+		if id > s.evaluationCursor {
+			start = i
+			break
+		}
+	}
+	for offset := range ids {
 		if ctx.Err() != nil {
 			return
 		}
+		id := ids[(start+offset)%len(ids)]
+		s.evaluationCursor = id
 		if err := s.Repo.Evaluate(ctx, id, time.Now()); err != nil {
 			slog.Error("account performance evaluate", "account_id", id, "error", err)
 		}
@@ -158,7 +170,31 @@ type PerformancePauseReader interface {
 	PerformancePaused(context.Context, []int64) (map[int64]bool, error)
 }
 
+// A subscriber's permission comes only from its authenticated, expiring local
+// snapshot. Missing accounts are denials, never a lookup in the local database.
+type localPerformancePauseReader struct{ reader LocalSchedulerSnapshotReader }
+
+func (r localPerformancePauseReader) PerformancePaused(ctx context.Context, ids []int64) (map[int64]bool, error) {
+	details, ok := r.reader.(LocalSchedulerDetailReader)
+	if !ok {
+		return nil, ErrLocalSchedulerSnapshotUnavailable
+	}
+	accounts, err := details.GetLocalAccounts(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	paused := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		a := accounts[id]
+		paused[id] = a == nil || !a.IsSchedulable()
+	}
+	return paused, nil
+}
+
 func (s *SchedulerSnapshotService) filterPerformanceAccounts(ctx context.Context, accounts []Account) ([]Account, error) {
+	if s.localSnapshotReader != nil {
+		return accounts, nil
+	}
 	reader, ok := s.accountRepo.(PerformancePauseReader)
 	if !ok || len(accounts) == 0 {
 		return accounts, nil
@@ -173,13 +209,16 @@ func (s *SchedulerSnapshotService) filterPerformanceAccounts(ctx context.Context
 	}
 	out := make([]Account, 0, len(accounts))
 	for _, a := range accounts {
-		if !paused[a.ID] {
+		if !a.PerformancePaused && !paused[a.ID] {
 			out = append(out, a)
 		}
 	}
 	return out, nil
 }
 func (s *SchedulerSnapshotService) markPerformanceAccounts(ctx context.Context, accounts map[int64]*Account) (map[int64]*Account, error) {
+	if s.localSnapshotReader != nil {
+		return accounts, nil
+	}
 	reader, ok := s.accountRepo.(PerformancePauseReader)
 	if !ok || len(accounts) == 0 {
 		return accounts, nil
@@ -196,7 +235,7 @@ func (s *SchedulerSnapshotService) markPerformanceAccounts(ctx context.Context, 
 	for id, a := range accounts {
 		if a != nil {
 			copy := *a
-			copy.PerformancePaused = paused[id]
+			copy.PerformancePaused = copy.PerformancePaused || paused[id]
 			out[id] = &copy
 		}
 	}

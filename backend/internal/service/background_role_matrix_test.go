@@ -35,7 +35,7 @@ func TestRuntimeRoleGatesGlobalMaintenanceAndPreservesRegionalRuntime(t *testing
 			cfg := &config.Config{Runtime: config.RuntimeConfig{Role: role}}
 			cfg.Gateway.Scheduling.SlotCleanupInterval = time.Hour
 			cache := &roleMatrixConcurrencyCache{runtimeStarted: make(chan context.Context, 1)}
-			svc := ProvideConcurrencyService(cache, nil, cfg)
+			svc := ProvideConcurrencyService(cache, nil, cfg, nil)
 			defer svc.StopAPIKeyQueue()
 			select {
 			case ctx := <-cache.runtimeStarted:

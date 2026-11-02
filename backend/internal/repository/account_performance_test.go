@@ -61,6 +61,7 @@ func TestAccountPerformanceEvaluateNoSamplesAndHeldLock(t *testing.T) {
 			cfg := service.PerformanceConfig{Enabled: true, TPS: service.PerformanceBounds{Min: &min}}
 			raw, _ := json.Marshal(cfg)
 			mock.ExpectBegin()
+			mock.ExpectQuery("SELECT id FROM accounts.*FOR SHARE").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 			lock := mock.ExpectQuery("SELECT config,revision,paused,pause_generation.*FOR UPDATE SKIP LOCKED").WithArgs(int64(7))
 			if locked {
 				lock.WillReturnError(sql.ErrNoRows)
@@ -87,6 +88,7 @@ func TestAccountPerformanceEvaluatePauseAuditAtomicAndLatched(t *testing.T) {
 	raw, _ := json.Marshal(cfg)
 	now := time.Now()
 	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id FROM accounts.*FOR SHARE").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectQuery("SELECT config,revision,paused,pause_generation.*FOR UPDATE SKIP LOCKED").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"config", "revision", "paused", "pause_generation"}).AddRow(string(raw), 1, false, 0))
 	mock.ExpectQuery("WITH source").WillReturnRows(sqlmock.NewRows(performanceColumns).AddRow(7, 5, 2, nil, 0, nil, 0, string(raw), 1, false, 0, nil, ""))
 	mock.ExpectExec("UPDATE account_performance_monitors SET paused=true").WithArgs(int64(7), now, "tps").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -95,6 +97,7 @@ func TestAccountPerformanceEvaluatePauseAuditAtomicAndLatched(t *testing.T) {
 	require.Error(t, repo.Evaluate(context.Background(), 7, now))
 	// Already paused skips metrics and any write; no healthy/expired samples can reopen it.
 	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id FROM accounts.*FOR SHARE").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectQuery("SELECT config,revision,paused,pause_generation.*FOR UPDATE SKIP LOCKED").WillReturnRows(sqlmock.NewRows([]string{"config", "revision", "paused", "pause_generation"}).AddRow(string(raw), 1, true, 1))
 	mock.ExpectRollback()
 	require.NoError(t, repo.Evaluate(context.Background(), 7, now.Add(time.Hour)))
@@ -111,6 +114,7 @@ func TestAccountPerformanceReleaseRequiresExactOwnershipAndDisablesEvaluation(t 
 			}()
 			repo := &accountPerformanceRepository{db: db}
 			mock.ExpectBegin()
+			mock.ExpectQuery("SELECT id FROM accounts.*FOR SHARE").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 			mock.ExpectExec("UPDATE account_performance_monitors SET paused=false.*config=jsonb_set.*revision=revision\\+1.*WHERE account_id=\\$1 AND revision=\\$2 AND pause_generation=\\$3 AND paused").WithArgs(int64(7), int64(2), int64(3)).WillReturnResult(sqlmock.NewResult(0, n))
 			if n == 1 {
 				mock.ExpectExec("INSERT INTO account_performance_events").WithArgs(int64(7), "release", int64(9), int64(3), int64(3), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))

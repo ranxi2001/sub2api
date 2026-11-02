@@ -217,6 +217,12 @@ func (s *SchedulerSnapshotService) ExportRegionalScheduler(ctx context.Context, 
 		if err != nil {
 			return nil, err
 		}
+		// Use the same authoritative read scope as the account catalog. A
+		// failed pause lookup must not renew an old regional permission view.
+		accounts, err = s.filterPerformanceAccounts(ctx, accounts)
+		if err != nil {
+			return nil, err
+		}
 		for i := range accounts {
 			a := &accounts[i]
 			if allowed[a.ID] && a.IsSchedulable() {
