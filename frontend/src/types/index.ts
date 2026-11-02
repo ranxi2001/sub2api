@@ -2784,6 +2784,20 @@ export interface PelicanTestConfig {
   question_kind?: 'candy' | 'pelican' | 'state_probe' | 'random_reasoning'
   // Result-only identity of a runtime-generated question.
   random_question?: { id: string; family: 'paths' | 'weighted_xor'; version: string }
+  quality_batch?: {
+    route: string
+    mapped_model: string
+    id: string
+    started_at: string
+    start_deadline: string
+    closes_at: string
+    comparison_key: string
+    decision: string
+    peer_accounts: number
+    peer_passed: number
+    peer_failed: number
+    peer_inconclusive: number
+  }
   test_channel?: 'account' | 'bps'
   prompt: string
   reasoning_effort: string

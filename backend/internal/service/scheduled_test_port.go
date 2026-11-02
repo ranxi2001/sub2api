@@ -15,6 +15,7 @@ type PelicanTestConfig struct {
 	QualityModelActions      map[string]string         `json:"quality_model_actions,omitempty"`
 	TriggerSource            string                    `json:"trigger_source,omitempty"`
 	RandomQuestion           *QualityRandomQuestion    `json:"random_question,omitempty"`
+	QualityBatch             *QualityBatchEvidence     `json:"quality_batch,omitempty"`
 	// BPSRecoveryPending is filled from persisted ownership when the runner
 	// claims a plan. It is never accepted from or written to configuration JSON.
 	BPSRecoveryPending bool           `json:"-"`
@@ -32,6 +33,8 @@ type PelicanTestConfig struct {
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
+	QualityBatchEvaluated bool              `json:"-"`
+	QualityBatchModels    map[string]string `json:"-"`
 	// Request-only: importing configuration preserves this target's ownership.
 	PreserveQualityState     bool                      `json:"-"`
 	QualityRestoreDiagnostic *QualityRestoreDiagnostic `json:"-"`
