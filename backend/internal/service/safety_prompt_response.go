@@ -18,6 +18,7 @@ import (
 const safetyPromptMaxRequestBody = 32 << 20
 const safetyPromptMaxJSONResponse = 16 << 20
 const safetyPromptMaxSSEBuffer = 1 << 20
+const safetyPromptMaxResponsePeek = 512
 
 type safetyPromptRequestInfo struct {
 	Marker        string
@@ -135,7 +136,9 @@ func (s *OpenAIGatewayService) wrapSafetyPromptResponse(resp *http.Response, inf
 		resp.Body = newSafetyPromptSSEBody(resp.Body, s.safetyPromptStore, info)
 		return resp
 	}
-	resp.Body = newSafetyPromptJSONBody(resp.Body, s.safetyPromptStore, info)
+	// Some upstreams omit or mislabel the SSE Content-Type. Detect the body
+	// incrementally instead of sending every such response through ReadAll.
+	resp.Body = newSafetyPromptResponseBody(resp.Body, s.safetyPromptStore, info, true)
 	return resp
 }
 
@@ -190,7 +193,7 @@ func (b *safetyPromptJSONBody) prepare() {
 	b.out = bytes.NewReader(raw)
 }
 
-type safetyPromptSSEBody struct {
+type safetyPromptResponseBody struct {
 	reader *io.PipeReader
 	writer *io.PipeWriter
 	once   sync.Once
@@ -199,16 +202,20 @@ type safetyPromptSSEBody struct {
 	store  *SafetyPromptStore
 }
 
-func newSafetyPromptSSEBody(source io.ReadCloser, store *SafetyPromptStore, info *safetyPromptRequestInfo) *safetyPromptSSEBody {
+func newSafetyPromptSSEBody(source io.ReadCloser, store *SafetyPromptStore, info *safetyPromptRequestInfo) *safetyPromptResponseBody {
+	return newSafetyPromptResponseBody(source, store, info, false)
+}
+
+func newSafetyPromptResponseBody(source io.ReadCloser, store *SafetyPromptStore, info *safetyPromptRequestInfo, detectFormat bool) *safetyPromptResponseBody {
 	pr, pw := io.Pipe()
-	body := &safetyPromptSSEBody{reader: pr, writer: pw, source: source, info: info, store: store}
-	go body.run()
+	body := &safetyPromptResponseBody{reader: pr, writer: pw, source: source, info: info, store: store}
+	go body.run(detectFormat)
 	return body
 }
 
-func (b *safetyPromptSSEBody) Read(data []byte) (int, error) { return b.reader.Read(data) }
+func (b *safetyPromptResponseBody) Read(data []byte) (int, error) { return b.reader.Read(data) }
 
-func (b *safetyPromptSSEBody) Close() error {
+func (b *safetyPromptResponseBody) Close() error {
 	b.once.Do(func() {
 		_ = b.source.Close()
 		_ = b.writer.Close()
@@ -216,9 +223,52 @@ func (b *safetyPromptSSEBody) Close() error {
 	return nil
 }
 
-func (b *safetyPromptSSEBody) run() {
+// safetyPromptLooksLikeSSE only peeks: all bytes, including a BOM or leading
+// blank lines, remain available to the selected response processor. Stop as
+// soon as a field is recognized, without waiting for a fixed-size sample or EOF.
+func safetyPromptLooksLikeSSE(reader *bufio.Reader) bool {
+	for size := 1; size <= safetyPromptMaxResponsePeek; size++ {
+		prefix, err := reader.Peek(size)
+		if err != nil {
+			return false
+		}
+		if prefix[0] == 0xef {
+			if len(prefix) < 3 {
+				continue
+			}
+			if !bytes.HasPrefix(prefix, []byte("\xef\xbb\xbf")) {
+				return false
+			}
+			prefix = prefix[3:]
+		}
+		prefix = bytes.TrimLeft(prefix, " \t\r\n")
+		if len(prefix) == 0 {
+			continue
+		}
+		possible := false
+		for _, field := range []string{":", "data:", "event:", "id:", "retry:"} {
+			if bytes.HasPrefix(prefix, []byte(field)) {
+				return true
+			}
+			possible = possible || bytes.HasPrefix([]byte(field), prefix)
+		}
+		if !possible {
+			return false
+		}
+	}
+	return false
+}
+
+func (b *safetyPromptResponseBody) run(detectFormat bool) {
 	defer func() { _ = b.writer.Close() }()
 	reader := bufio.NewReader(b.source)
+	if detectFormat && !safetyPromptLooksLikeSSE(reader) {
+		body := newSafetyPromptJSONBody(&safetyPromptRestoredBody{reader: reader, closer: b.source}, b.store, b.info)
+		if _, err := io.Copy(b.writer, body); err != nil {
+			_ = b.writer.CloseWithError(err)
+		}
+		return
+	}
 	var frame bytes.Buffer
 	var buffered [][]byte
 	var text strings.Builder
