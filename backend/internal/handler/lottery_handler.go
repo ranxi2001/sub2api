@@ -9,7 +9,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/serverless"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 )
 
 type LotteryHandler struct {
@@ -17,12 +16,8 @@ type LotteryHandler struct {
 	geo     serverless.CountryResolver
 }
 
-func NewLotteryHandler(lottery *service.LotteryService) *LotteryHandler {
-	return &LotteryHandler{lottery: lottery}
-}
-
-func ProvideLotteryHandler(lottery *service.LotteryService, cache *redis.Client) *LotteryHandler {
-	return &LotteryHandler{lottery: lottery, geo: serverless.NewGeoJSResolver(cache)}
+func NewLotteryHandler(lottery *service.LotteryService, geo serverless.CountryResolver) *LotteryHandler {
+	return &LotteryHandler{lottery: lottery, geo: geo}
 }
 
 func lotteryID(c *gin.Context, name string) (int64, bool) {

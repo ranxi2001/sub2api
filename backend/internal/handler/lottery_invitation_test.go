@@ -25,7 +25,7 @@ func TestLotteryVisitorReceiptValidation(t *testing.T) {
 }
 
 func TestLotteryInviteVisitRejectsInvalidAndAuthenticatedRequests(t *testing.T) {
-	h := NewLotteryHandler(nil)
+	h := NewLotteryHandler(nil, nil)
 	router := gin.New()
 	router.POST("/visit", h.InviteVisit)
 	for _, input := range []struct{ body, authorization string }{{`{"code":"bad"}`, ""}, {`{"code":"` + strings.Repeat("a", 64) + `"}`, "Bearer existing-session"}} {
