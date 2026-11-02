@@ -40,14 +40,10 @@ type cachedOpenAIResponseHeaderTimeoutSettings struct {
 // admin saves a DB override.
 func DefaultOpenAIResponseHeaderTimeoutSettings(cfg *config.Config) *OpenAIResponseHeaderTimeoutSettings {
 	seconds := openAIResponseHeaderTimeoutDefaultSeconds
-	enabled := true
-	if cfg != nil {
-		configured := cfg.Gateway.OpenAIResponseHeaderTimeout
-		if configured > 0 {
-			seconds = configured
-		} else {
-			enabled = false
-		}
+	enabled := false
+	if cfg != nil && cfg.Gateway.OpenAIResponseHeaderTimeout > 0 {
+		seconds = cfg.Gateway.OpenAIResponseHeaderTimeout
+		enabled = true
 	}
 	return &OpenAIResponseHeaderTimeoutSettings{Enabled: enabled, Seconds: seconds}
 }
