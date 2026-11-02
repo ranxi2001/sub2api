@@ -226,7 +226,12 @@ func (s *SchedulerSnapshotService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
+func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) (accountsResult []Account, mixedResult bool, resultErr error) {
+	defer func() {
+		if resultErr == nil {
+			accountsResult, resultErr = s.filterPerformanceAccounts(ctx, accountsResult)
+		}
+	}()
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
 	mode := s.resolveMode(platform, hasForcePlatform)
 	bucket := s.bucketFor(groupID, platform, mode)
@@ -307,7 +312,19 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 	return accounts, useMixed, nil
 }
 
-func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (*Account, error) {
+func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (result *Account, resultErr error) {
+	defer func() {
+		// Regional GetAccounts already applied the live pause check once.
+		if s.localSnapshotReader == nil && resultErr == nil && result != nil {
+			var values map[int64]*Account
+			values, resultErr = s.markPerformanceAccounts(ctx, map[int64]*Account{accountID: result})
+			if resultErr == nil {
+				result = values[accountID]
+			} else {
+				result = nil
+			}
+		}
+	}()
 	if s.localSnapshotReader != nil {
 		accounts, err := s.GetAccounts(ctx, []int64{accountID})
 		if err != nil {

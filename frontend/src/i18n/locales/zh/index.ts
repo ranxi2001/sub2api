@@ -1,3 +1,4 @@
+import accountPerformance from './accountPerformance'
 import lottery from './lottery'
 import accountTestTiming from './accountTestTiming'
 import openaiAuth from './openaiAuth'
@@ -35,6 +36,7 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
+ accountPerformance,
 	lottery,
   accountTestTiming,
   openaiAuth,

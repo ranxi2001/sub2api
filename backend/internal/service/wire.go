@@ -530,6 +530,7 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
 func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
+	svc.performancePauses, _ = accountRepo.(PerformancePauseReader)
 	if runtime, ok := cache.(interface{ RunRegionalRuntime(context.Context) }); ok {
 		go runtime.RunRegionalRuntime(svc.apiKeyQueueStopContext())
 	}
@@ -1009,6 +1010,7 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	ProvideAccountPerformanceService,
 	ProvideRequestCaptureManager,
 	// Core services
 	ProvideAuthService,
@@ -1312,5 +1314,14 @@ func ProvideCRSSyncService(accounts AccountRepository, proxies ProxyRepository, 
 func ProvideContentModerationService(settings SettingRepository, repo ContentModerationRepository, hashes ContentModerationHashCache, groups GroupRepository, users UserRepository, proxies ProxyRepository, invalidator APIKeyAuthCacheInvalidator, email *EmailService, db *sql.DB, cipher SecretEncryptor, cfg *config.Config) *ContentModerationService {
 	s := NewContentModerationService(settings, repo, hashes, groups, users, proxies, invalidator, email)
 	s.cyberEvidence = cyberevidence.New(cyberevidence.NewSQLStore(db), cipher, cfg != nil && cfg.Totp.EncryptionKeyConfigured)
+	return s
+}
+
+func ProvideAccountPerformanceService(repo AccountPerformanceRepository, cfg *config.Config) *AccountPerformanceService {
+	s := NewAccountPerformanceService(repo)
+	// Regional read replicas do not run a competing control-plane evaluator.
+	if cfg.RunsBackgroundJobs() && (cfg == nil || cfg.Runtime.RegionalSchedulerFile == "") {
+		s.Start()
+	}
 	return s
 }
