@@ -1,0 +1,93 @@
+name: Account performance release regressions
+
+on:
+  push:
+    branches: [production, fix/account-performance-release-2.19.2]
+  pull_request:
+    paths:
+      - 'backend/internal/service/account_performance*'
+      - 'backend/internal/repository/account_performance*'
+      - 'backend/internal/service/regional_scheduler_sync.go'
+      - 'backend/internal/repository/regional_slot_authority.go'
+      - '.github/workflows/account-performance-regressions.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Record exact source
+        run: git rev-parse HEAD
+      - name: Unit and race regressions
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/service ./internal/repository -run '^TestAccountPerformance' -count=1 -v -timeout=10m
+      - name: Migrated PostgreSQL metrics and soft-delete races
+        working-directory: backend
+        run: go test -tags=integration ./internal/repository -run '^TestAccountPerformance' -count=1 -v -timeout=10m
+
+  regression-red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        defect: [evaluation, export]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Reintroduce one original defect
+        env:
+          DEFECT: ${{ matrix.defect }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          original=f0020cc41ecb5513014c993d20978fc59856807d
+          git fetch --no-tags --depth=1 origin "$original"
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          if os.environ['DEFECT'] == 'evaluation':
+              path = pathlib.Path('backend/internal/service/account_performance.go')
+              old = subprocess.check_output(['git', 'show', 'f0020cc41ecb5513014c993d20978fc59856807d:' + str(path)], text=True)
+              current = path.read_text()
+              start = 'func (s *AccountPerformanceService) evaluate('
+              end = '\n// Live authority check'
+              original_function = old[old.index(start):old.index(end)]
+              path.write_text(current[:current.index(start)] + original_function + current[current.index(end):])
+          else:
+              path = pathlib.Path('backend/internal/service/regional_scheduler_sync.go')
+              path.write_bytes(subprocess.check_output(['git', 'show', 'f0020cc41ecb5513014c993d20978fc59856807d:' + str(path)]))
+          PY
+      - name: Require a behavioral assertion failure
+        env:
+          DEFECT: ${{ matrix.defect }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$DEFECT" = evaluation ]; then
+            regression='^TestAccountPerformanceEvaluationResumesAfterCanceledAttempt$'
+          else
+            regression='^TestAccountPerformanceRegionalExportChecksPauseAndFailsClosed$'
+          fi
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run "$regression" -count=1 -v -timeout=5m) > "$RUNNER_TEMP/performance-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/performance-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|no tests to run|undefined:' "$RUNNER_TEMP/performance-red.log"
+          grep -q -- '--- FAIL: TestAccountPerformance' "$RUNNER_TEMP/performance-red.log"

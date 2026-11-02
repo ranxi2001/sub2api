@@ -17,7 +17,7 @@ func NewRegionalSlotAuthority(db *sql.DB) *slots.Primary {
 		var query string
 		switch r.Kind {
 		case "account":
-			query = `SELECT concurrency FROM accounts WHERE id=$1 AND deleted_at IS NULL AND status='active' AND schedulable=true FOR SHARE`
+			query = `SELECT CASE WHEN EXISTS (SELECT 1 FROM account_performance_monitors m WHERE m.account_id=accounts.id AND m.paused) THEN 0 ELSE concurrency END FROM accounts WHERE id=$1 AND deleted_at IS NULL AND status='active' AND schedulable=true FOR SHARE`
 		case "user":
 			query = `SELECT concurrency FROM users WHERE id=$1 AND deleted_at IS NULL AND status='active' FOR SHARE`
 		case "api_key":

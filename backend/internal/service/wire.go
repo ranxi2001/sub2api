@@ -528,9 +528,12 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 }
 
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
-func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
+func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config, snapshot *SchedulerSnapshotService) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
 	svc.performancePauses, _ = accountRepo.(PerformancePauseReader)
+	if snapshot != nil && snapshot.localSnapshotReader != nil {
+		svc.performancePauses = localPerformancePauseReader{reader: snapshot.localSnapshotReader}
+	}
 	if runtime, ok := cache.(interface{ RunRegionalRuntime(context.Context) }); ok {
 		go runtime.RunRegionalRuntime(svc.apiKeyQueueStopContext())
 	}
@@ -1319,8 +1322,9 @@ func ProvideContentModerationService(settings SettingRepository, repo ContentMod
 
 func ProvideAccountPerformanceService(repo AccountPerformanceRepository, cfg *config.Config) *AccountPerformanceService {
 	s := NewAccountPerformanceService(repo)
-	// Regional read replicas do not run a competing control-plane evaluator.
-	if cfg.RunsBackgroundJobs() && (cfg == nil || cfg.Runtime.RegionalSchedulerFile == "") {
+	// The publisher may also configure a regional file. Runtime role already
+	// excludes subscriber gateways; the control plane must keep evaluating.
+	if cfg.RunsBackgroundJobs() {
 		s.Start()
 	}
 	return s
