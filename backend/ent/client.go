@@ -37,6 +37,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/lotteryaccount"
 	"github.com/Wei-Shaw/sub2api/ent/lotterycontribution"
 	"github.com/Wei-Shaw/sub2api/ent/lotterydraw"
+	"github.com/Wei-Shaw/sub2api/ent/lotteryinvitation"
+	"github.com/Wei-Shaw/sub2api/ent/lotteryinvitelink"
 	"github.com/Wei-Shaw/sub2api/ent/lotteryledger"
 	"github.com/Wei-Shaw/sub2api/ent/lotterypool"
 	"github.com/Wei-Shaw/sub2api/ent/lotteryprize"
@@ -113,6 +115,10 @@ type Client struct {
 	LotteryContribution *LotteryContributionClient
 	// LotteryDraw is the client for interacting with the LotteryDraw builders.
 	LotteryDraw *LotteryDrawClient
+	// LotteryInvitation is the client for interacting with the LotteryInvitation builders.
+	LotteryInvitation *LotteryInvitationClient
+	// LotteryInviteLink is the client for interacting with the LotteryInviteLink builders.
+	LotteryInviteLink *LotteryInviteLinkClient
 	// LotteryLedger is the client for interacting with the LotteryLedger builders.
 	LotteryLedger *LotteryLedgerClient
 	// LotteryPool is the client for interacting with the LotteryPool builders.
@@ -192,6 +198,8 @@ func (c *Client) init() {
 	c.LotteryAccount = NewLotteryAccountClient(c.config)
 	c.LotteryContribution = NewLotteryContributionClient(c.config)
 	c.LotteryDraw = NewLotteryDrawClient(c.config)
+	c.LotteryInvitation = NewLotteryInvitationClient(c.config)
+	c.LotteryInviteLink = NewLotteryInviteLinkClient(c.config)
 	c.LotteryLedger = NewLotteryLedgerClient(c.config)
 	c.LotteryPool = NewLotteryPoolClient(c.config)
 	c.LotteryPrize = NewLotteryPrizeClient(c.config)
@@ -329,6 +337,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		LotteryAccount:                NewLotteryAccountClient(cfg),
 		LotteryContribution:           NewLotteryContributionClient(cfg),
 		LotteryDraw:                   NewLotteryDrawClient(cfg),
+		LotteryInvitation:             NewLotteryInvitationClient(cfg),
+		LotteryInviteLink:             NewLotteryInviteLinkClient(cfg),
 		LotteryLedger:                 NewLotteryLedgerClient(cfg),
 		LotteryPool:                   NewLotteryPoolClient(cfg),
 		LotteryPrize:                  NewLotteryPrizeClient(cfg),
@@ -393,6 +403,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		LotteryAccount:                NewLotteryAccountClient(cfg),
 		LotteryContribution:           NewLotteryContributionClient(cfg),
 		LotteryDraw:                   NewLotteryDrawClient(cfg),
+		LotteryInvitation:             NewLotteryInvitationClient(cfg),
+		LotteryInviteLink:             NewLotteryInviteLinkClient(cfg),
 		LotteryLedger:                 NewLotteryLedgerClient(cfg),
 		LotteryPool:                   NewLotteryPoolClient(cfg),
 		LotteryPrize:                  NewLotteryPrizeClient(cfg),
@@ -451,13 +463,13 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.LotteryAccount, c.LotteryContribution,
-		c.LotteryDraw, c.LotteryLedger, c.LotteryPool, c.LotteryPrize,
-		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
-		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
-		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
-		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
-		c.UserSubscription,
+		c.LotteryDraw, c.LotteryInvitation, c.LotteryInviteLink, c.LotteryLedger,
+		c.LotteryPool, c.LotteryPrize, c.PaymentAuditLog, c.PaymentOrder,
+		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
+		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
+		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
+		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -473,13 +485,13 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
 		c.IdentityAdoptionDecision, c.LotteryAccount, c.LotteryContribution,
-		c.LotteryDraw, c.LotteryLedger, c.LotteryPool, c.LotteryPrize,
-		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
-		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
-		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
-		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
-		c.UserSubscription,
+		c.LotteryDraw, c.LotteryInvitation, c.LotteryInviteLink, c.LotteryLedger,
+		c.LotteryPool, c.LotteryPrize, c.PaymentAuditLog, c.PaymentOrder,
+		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
+		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
+		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
+		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -532,6 +544,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.LotteryContribution.mutate(ctx, m)
 	case *LotteryDrawMutation:
 		return c.LotteryDraw.mutate(ctx, m)
+	case *LotteryInvitationMutation:
+		return c.LotteryInvitation.mutate(ctx, m)
+	case *LotteryInviteLinkMutation:
+		return c.LotteryInviteLink.mutate(ctx, m)
 	case *LotteryLedgerMutation:
 		return c.LotteryLedger.mutate(ctx, m)
 	case *LotteryPoolMutation:
@@ -4025,6 +4041,272 @@ func (c *LotteryDrawClient) mutate(ctx context.Context, m *LotteryDrawMutation) 
 		return (&LotteryDrawDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown LotteryDraw mutation op: %q", m.Op())
+	}
+}
+
+// LotteryInvitationClient is a client for the LotteryInvitation schema.
+type LotteryInvitationClient struct {
+	config
+}
+
+// NewLotteryInvitationClient returns a client for the LotteryInvitation from the given config.
+func NewLotteryInvitationClient(c config) *LotteryInvitationClient {
+	return &LotteryInvitationClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `lotteryinvitation.Hooks(f(g(h())))`.
+func (c *LotteryInvitationClient) Use(hooks ...Hook) {
+	c.hooks.LotteryInvitation = append(c.hooks.LotteryInvitation, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `lotteryinvitation.Intercept(f(g(h())))`.
+func (c *LotteryInvitationClient) Intercept(interceptors ...Interceptor) {
+	c.inters.LotteryInvitation = append(c.inters.LotteryInvitation, interceptors...)
+}
+
+// Create returns a builder for creating a LotteryInvitation entity.
+func (c *LotteryInvitationClient) Create() *LotteryInvitationCreate {
+	mutation := newLotteryInvitationMutation(c.config, OpCreate)
+	return &LotteryInvitationCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of LotteryInvitation entities.
+func (c *LotteryInvitationClient) CreateBulk(builders ...*LotteryInvitationCreate) *LotteryInvitationCreateBulk {
+	return &LotteryInvitationCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *LotteryInvitationClient) MapCreateBulk(slice any, setFunc func(*LotteryInvitationCreate, int)) *LotteryInvitationCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &LotteryInvitationCreateBulk{err: fmt.Errorf("calling to LotteryInvitationClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*LotteryInvitationCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &LotteryInvitationCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for LotteryInvitation.
+func (c *LotteryInvitationClient) Update() *LotteryInvitationUpdate {
+	mutation := newLotteryInvitationMutation(c.config, OpUpdate)
+	return &LotteryInvitationUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *LotteryInvitationClient) UpdateOne(_m *LotteryInvitation) *LotteryInvitationUpdateOne {
+	mutation := newLotteryInvitationMutation(c.config, OpUpdateOne, withLotteryInvitation(_m))
+	return &LotteryInvitationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *LotteryInvitationClient) UpdateOneID(id int64) *LotteryInvitationUpdateOne {
+	mutation := newLotteryInvitationMutation(c.config, OpUpdateOne, withLotteryInvitationID(id))
+	return &LotteryInvitationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for LotteryInvitation.
+func (c *LotteryInvitationClient) Delete() *LotteryInvitationDelete {
+	mutation := newLotteryInvitationMutation(c.config, OpDelete)
+	return &LotteryInvitationDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *LotteryInvitationClient) DeleteOne(_m *LotteryInvitation) *LotteryInvitationDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *LotteryInvitationClient) DeleteOneID(id int64) *LotteryInvitationDeleteOne {
+	builder := c.Delete().Where(lotteryinvitation.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &LotteryInvitationDeleteOne{builder}
+}
+
+// Query returns a query builder for LotteryInvitation.
+func (c *LotteryInvitationClient) Query() *LotteryInvitationQuery {
+	return &LotteryInvitationQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeLotteryInvitation},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a LotteryInvitation entity by its id.
+func (c *LotteryInvitationClient) Get(ctx context.Context, id int64) (*LotteryInvitation, error) {
+	return c.Query().Where(lotteryinvitation.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *LotteryInvitationClient) GetX(ctx context.Context, id int64) *LotteryInvitation {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *LotteryInvitationClient) Hooks() []Hook {
+	return c.hooks.LotteryInvitation
+}
+
+// Interceptors returns the client interceptors.
+func (c *LotteryInvitationClient) Interceptors() []Interceptor {
+	return c.inters.LotteryInvitation
+}
+
+func (c *LotteryInvitationClient) mutate(ctx context.Context, m *LotteryInvitationMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&LotteryInvitationCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&LotteryInvitationUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&LotteryInvitationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&LotteryInvitationDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown LotteryInvitation mutation op: %q", m.Op())
+	}
+}
+
+// LotteryInviteLinkClient is a client for the LotteryInviteLink schema.
+type LotteryInviteLinkClient struct {
+	config
+}
+
+// NewLotteryInviteLinkClient returns a client for the LotteryInviteLink from the given config.
+func NewLotteryInviteLinkClient(c config) *LotteryInviteLinkClient {
+	return &LotteryInviteLinkClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `lotteryinvitelink.Hooks(f(g(h())))`.
+func (c *LotteryInviteLinkClient) Use(hooks ...Hook) {
+	c.hooks.LotteryInviteLink = append(c.hooks.LotteryInviteLink, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `lotteryinvitelink.Intercept(f(g(h())))`.
+func (c *LotteryInviteLinkClient) Intercept(interceptors ...Interceptor) {
+	c.inters.LotteryInviteLink = append(c.inters.LotteryInviteLink, interceptors...)
+}
+
+// Create returns a builder for creating a LotteryInviteLink entity.
+func (c *LotteryInviteLinkClient) Create() *LotteryInviteLinkCreate {
+	mutation := newLotteryInviteLinkMutation(c.config, OpCreate)
+	return &LotteryInviteLinkCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of LotteryInviteLink entities.
+func (c *LotteryInviteLinkClient) CreateBulk(builders ...*LotteryInviteLinkCreate) *LotteryInviteLinkCreateBulk {
+	return &LotteryInviteLinkCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *LotteryInviteLinkClient) MapCreateBulk(slice any, setFunc func(*LotteryInviteLinkCreate, int)) *LotteryInviteLinkCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &LotteryInviteLinkCreateBulk{err: fmt.Errorf("calling to LotteryInviteLinkClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*LotteryInviteLinkCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &LotteryInviteLinkCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for LotteryInviteLink.
+func (c *LotteryInviteLinkClient) Update() *LotteryInviteLinkUpdate {
+	mutation := newLotteryInviteLinkMutation(c.config, OpUpdate)
+	return &LotteryInviteLinkUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *LotteryInviteLinkClient) UpdateOne(_m *LotteryInviteLink) *LotteryInviteLinkUpdateOne {
+	mutation := newLotteryInviteLinkMutation(c.config, OpUpdateOne, withLotteryInviteLink(_m))
+	return &LotteryInviteLinkUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *LotteryInviteLinkClient) UpdateOneID(id int64) *LotteryInviteLinkUpdateOne {
+	mutation := newLotteryInviteLinkMutation(c.config, OpUpdateOne, withLotteryInviteLinkID(id))
+	return &LotteryInviteLinkUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for LotteryInviteLink.
+func (c *LotteryInviteLinkClient) Delete() *LotteryInviteLinkDelete {
+	mutation := newLotteryInviteLinkMutation(c.config, OpDelete)
+	return &LotteryInviteLinkDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *LotteryInviteLinkClient) DeleteOne(_m *LotteryInviteLink) *LotteryInviteLinkDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *LotteryInviteLinkClient) DeleteOneID(id int64) *LotteryInviteLinkDeleteOne {
+	builder := c.Delete().Where(lotteryinvitelink.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &LotteryInviteLinkDeleteOne{builder}
+}
+
+// Query returns a query builder for LotteryInviteLink.
+func (c *LotteryInviteLinkClient) Query() *LotteryInviteLinkQuery {
+	return &LotteryInviteLinkQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeLotteryInviteLink},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a LotteryInviteLink entity by its id.
+func (c *LotteryInviteLinkClient) Get(ctx context.Context, id int64) (*LotteryInviteLink, error) {
+	return c.Query().Where(lotteryinvitelink.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *LotteryInviteLinkClient) GetX(ctx context.Context, id int64) *LotteryInviteLink {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *LotteryInviteLinkClient) Hooks() []Hook {
+	return c.hooks.LotteryInviteLink
+}
+
+// Interceptors returns the client interceptors.
+func (c *LotteryInviteLinkClient) Interceptors() []Interceptor {
+	return c.inters.LotteryInviteLink
+}
+
+func (c *LotteryInviteLinkClient) mutate(ctx context.Context, m *LotteryInviteLinkMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&LotteryInviteLinkCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&LotteryInviteLinkUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&LotteryInviteLinkUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&LotteryInviteLinkDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown LotteryInviteLink mutation op: %q", m.Op())
 	}
 }
 
@@ -7696,12 +7978,12 @@ type (
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, LotteryAccount,
-		LotteryContribution, LotteryDraw, LotteryLedger, LotteryPool, LotteryPrize,
-		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription []ent.Hook
+		LotteryContribution, LotteryDraw, LotteryInvitation, LotteryInviteLink,
+		LotteryLedger, LotteryPool, LotteryPrize, PaymentAuditLog, PaymentOrder,
+		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
+		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -7709,12 +7991,12 @@ type (
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
 		Group, IdempotencyRecord, IdentityAdoptionDecision, LotteryAccount,
-		LotteryContribution, LotteryDraw, LotteryLedger, LotteryPool, LotteryPrize,
-		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription []ent.Interceptor
+		LotteryContribution, LotteryDraw, LotteryInvitation, LotteryInviteLink,
+		LotteryLedger, LotteryPool, LotteryPrize, PaymentAuditLog, PaymentOrder,
+		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
+		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

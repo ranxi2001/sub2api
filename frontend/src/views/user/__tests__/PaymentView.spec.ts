@@ -4,6 +4,7 @@ import PaymentView from '../PaymentView.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
 import AmountInput from '@/components/payment/AmountInput.vue'
+import LotteryRechargeNotice from '@/components/lottery/LotteryRechargeNotice.vue'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
@@ -887,6 +888,29 @@ describe('PaymentView subscription feature flag', () => {
       .map((button) => button.text())
       .filter((text) => text === 'payment.tabTopUp' || text === 'payment.tabSubscribe')
   }
+
+  it('shows the lottery notice only on the top-up tab before checkout', async () => {
+    const wrapper = await mountSubscriptionPlanList(2)
+    expect(wrapper.findComponent(LotteryRechargeNotice).exists()).toBe(false)
+    await wrapper.findAll('button').find(button => button.text() === 'payment.tabTopUp')!.trigger('click')
+    expect(wrapper.getComponent(LotteryRechargeNotice).props('source')).toBe('recharge')
+    await wrapper.findAll('button').find(button => button.text() === 'payment.tabSubscribe')!.trigger('click')
+    expect(wrapper.findComponent(LotteryRechargeNotice).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps the notice visible with no online payment methods without enabling checkout', async () => {
+    routeState.query = {}
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({ methods: {} }))
+    const wrapper = shallowMount(PaymentView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' } } },
+    })
+    await flushPromises()
+    expect(wrapper.getComponent(LotteryRechargeNotice).props('source')).toBe('recharge')
+    expect(wrapper.text()).toContain('payment.notAvailable')
+    expect(wrapper.findComponent(AmountInput).exists()).toBe(false)
+    wrapper.unmount()
+  })
 
   it('keeps the top-up / subscribe switcher when subscription_enabled is absent (opt-out default)', async () => {
     const wrapper = await mountSubscriptionPlanList(2)

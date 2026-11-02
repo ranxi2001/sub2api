@@ -34,6 +34,12 @@ func (_c *LotteryPoolCreate) SetMode(v string) *LotteryPoolCreate {
 	return _c
 }
 
+// SetInviteConfig sets the "invite_config" field.
+func (_c *LotteryPoolCreate) SetInviteConfig(v map[string]interface{}) *LotteryPoolCreate {
+	_c.mutation.SetInviteConfig(v)
+	return _c
+}
+
 // SetThresholdUnits sets the "threshold_units" field.
 func (_c *LotteryPoolCreate) SetThresholdUnits(v int64) *LotteryPoolCreate {
 	_c.mutation.SetThresholdUnits(v)
@@ -292,6 +298,10 @@ func (_c *LotteryPoolCreate) createSpec() (*LotteryPool, *sqlgraph.CreateSpec) {
 		_spec.SetField(lotterypool.FieldMode, field.TypeString, value)
 		_node.Mode = value
 	}
+	if value, ok := _c.mutation.InviteConfig(); ok {
+		_spec.SetField(lotterypool.FieldInviteConfig, field.TypeJSON, value)
+		_node.InviteConfig = value
+	}
 	if value, ok := _c.mutation.ThresholdUnits(); ok {
 		_spec.SetField(lotterypool.FieldThresholdUnits, field.TypeInt64, value)
 		_node.ThresholdUnits = value
@@ -401,6 +411,24 @@ func (u *LotteryPoolUpsert) SetMode(v string) *LotteryPoolUpsert {
 // UpdateMode sets the "mode" field to the value that was provided on create.
 func (u *LotteryPoolUpsert) UpdateMode() *LotteryPoolUpsert {
 	u.SetExcluded(lotterypool.FieldMode)
+	return u
+}
+
+// SetInviteConfig sets the "invite_config" field.
+func (u *LotteryPoolUpsert) SetInviteConfig(v map[string]interface{}) *LotteryPoolUpsert {
+	u.Set(lotterypool.FieldInviteConfig, v)
+	return u
+}
+
+// UpdateInviteConfig sets the "invite_config" field to the value that was provided on create.
+func (u *LotteryPoolUpsert) UpdateInviteConfig() *LotteryPoolUpsert {
+	u.SetExcluded(lotterypool.FieldInviteConfig)
+	return u
+}
+
+// ClearInviteConfig clears the value of the "invite_config" field.
+func (u *LotteryPoolUpsert) ClearInviteConfig() *LotteryPoolUpsert {
+	u.SetNull(lotterypool.FieldInviteConfig)
 	return u
 }
 
@@ -594,6 +622,27 @@ func (u *LotteryPoolUpsertOne) SetMode(v string) *LotteryPoolUpsertOne {
 func (u *LotteryPoolUpsertOne) UpdateMode() *LotteryPoolUpsertOne {
 	return u.Update(func(s *LotteryPoolUpsert) {
 		s.UpdateMode()
+	})
+}
+
+// SetInviteConfig sets the "invite_config" field.
+func (u *LotteryPoolUpsertOne) SetInviteConfig(v map[string]interface{}) *LotteryPoolUpsertOne {
+	return u.Update(func(s *LotteryPoolUpsert) {
+		s.SetInviteConfig(v)
+	})
+}
+
+// UpdateInviteConfig sets the "invite_config" field to the value that was provided on create.
+func (u *LotteryPoolUpsertOne) UpdateInviteConfig() *LotteryPoolUpsertOne {
+	return u.Update(func(s *LotteryPoolUpsert) {
+		s.UpdateInviteConfig()
+	})
+}
+
+// ClearInviteConfig clears the value of the "invite_config" field.
+func (u *LotteryPoolUpsertOne) ClearInviteConfig() *LotteryPoolUpsertOne {
+	return u.Update(func(s *LotteryPoolUpsert) {
+		s.ClearInviteConfig()
 	})
 }
 
@@ -973,6 +1022,27 @@ func (u *LotteryPoolUpsertBulk) SetMode(v string) *LotteryPoolUpsertBulk {
 func (u *LotteryPoolUpsertBulk) UpdateMode() *LotteryPoolUpsertBulk {
 	return u.Update(func(s *LotteryPoolUpsert) {
 		s.UpdateMode()
+	})
+}
+
+// SetInviteConfig sets the "invite_config" field.
+func (u *LotteryPoolUpsertBulk) SetInviteConfig(v map[string]interface{}) *LotteryPoolUpsertBulk {
+	return u.Update(func(s *LotteryPoolUpsert) {
+		s.SetInviteConfig(v)
+	})
+}
+
+// UpdateInviteConfig sets the "invite_config" field to the value that was provided on create.
+func (u *LotteryPoolUpsertBulk) UpdateInviteConfig() *LotteryPoolUpsertBulk {
+	return u.Update(func(s *LotteryPoolUpsert) {
+		s.UpdateInviteConfig()
+	})
+}
+
+// ClearInviteConfig clears the value of the "invite_config" field.
+func (u *LotteryPoolUpsertBulk) ClearInviteConfig() *LotteryPoolUpsertBulk {
+	return u.Update(func(s *LotteryPoolUpsert) {
+		s.ClearInviteConfig()
 	})
 }
 

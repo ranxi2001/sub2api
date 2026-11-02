@@ -19,6 +19,8 @@
         </div>
       </div>
 
+      <LotteryRechargeNotice source="redeem" />
+
       <!-- Redeem Form -->
       <div class="card">
         <div class="p-6">
@@ -375,6 +377,7 @@ import { useLotteryStore } from '@/stores/lottery'
 import { useSubscriptionStore } from '@/stores/subscriptions'
 import { redeemAPI, authAPI, type RedeemHistoryItem } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import LotteryRechargeNotice from '@/components/lottery/LotteryRechargeNotice.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
 

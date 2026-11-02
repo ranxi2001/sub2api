@@ -3,6 +3,7 @@
 package ent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ type LotteryPool struct {
 	Name string `json:"name,omitempty"`
 	// Mode holds the value of the "mode" field.
 	Mode string `json:"mode,omitempty"`
+	// InviteConfig holds the value of the "invite_config" field.
+	InviteConfig map[string]interface{} `json:"invite_config,omitempty"`
 	// ThresholdUnits holds the value of the "threshold_units" field.
 	ThresholdUnits int64 `json:"threshold_units,omitempty"`
 	// GrantEnabled holds the value of the "grant_enabled" field.
@@ -47,6 +50,8 @@ func (*LotteryPool) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case lotterypool.FieldInviteConfig:
+			values[i] = new([]byte)
 		case lotterypool.FieldGrantEnabled, lotterypool.FieldDrawEnabled, lotterypool.FieldRuleLocked:
 			values[i] = new(sql.NullBool)
 		case lotterypool.FieldID, lotterypool.FieldThresholdUnits, lotterypool.FieldSortOrder:
@@ -87,6 +92,14 @@ func (_m *LotteryPool) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field mode", values[i])
 			} else if value.Valid {
 				_m.Mode = value.String
+			}
+		case lotterypool.FieldInviteConfig:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field invite_config", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.InviteConfig); err != nil {
+					return fmt.Errorf("unmarshal field invite_config: %w", err)
+				}
 			}
 		case lotterypool.FieldThresholdUnits:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -185,6 +198,9 @@ func (_m *LotteryPool) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("mode=")
 	builder.WriteString(_m.Mode)
+	builder.WriteString(", ")
+	builder.WriteString("invite_config=")
+	builder.WriteString(fmt.Sprintf("%v", _m.InviteConfig))
 	builder.WriteString(", ")
 	builder.WriteString("threshold_units=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ThresholdUnits))

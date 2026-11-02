@@ -34,6 +34,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/lotteryaccount"
 	"github.com/Wei-Shaw/sub2api/ent/lotterycontribution"
 	"github.com/Wei-Shaw/sub2api/ent/lotterydraw"
+	"github.com/Wei-Shaw/sub2api/ent/lotteryinvitation"
+	"github.com/Wei-Shaw/sub2api/ent/lotteryinvitelink"
 	"github.com/Wei-Shaw/sub2api/ent/lotteryledger"
 	"github.com/Wei-Shaw/sub2api/ent/lotterypool"
 	"github.com/Wei-Shaw/sub2api/ent/lotteryprize"
@@ -139,6 +141,8 @@ func checkColumn(t, c string) error {
 			lotteryaccount.Table:                lotteryaccount.ValidColumn,
 			lotterycontribution.Table:           lotterycontribution.ValidColumn,
 			lotterydraw.Table:                   lotterydraw.ValidColumn,
+			lotteryinvitation.Table:             lotteryinvitation.ValidColumn,
+			lotteryinvitelink.Table:             lotteryinvitelink.ValidColumn,
 			lotteryledger.Table:                 lotteryledger.ValidColumn,
 			lotterypool.Table:                   lotterypool.ValidColumn,
 			lotteryprize.Table:                  lotteryprize.ValidColumn,

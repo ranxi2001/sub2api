@@ -56,6 +56,18 @@ func (_u *LotteryPoolUpdate) SetNillableMode(v *string) *LotteryPoolUpdate {
 	return _u
 }
 
+// SetInviteConfig sets the "invite_config" field.
+func (_u *LotteryPoolUpdate) SetInviteConfig(v map[string]interface{}) *LotteryPoolUpdate {
+	_u.mutation.SetInviteConfig(v)
+	return _u
+}
+
+// ClearInviteConfig clears the value of the "invite_config" field.
+func (_u *LotteryPoolUpdate) ClearInviteConfig() *LotteryPoolUpdate {
+	_u.mutation.ClearInviteConfig()
+	return _u
+}
+
 // SetThresholdUnits sets the "threshold_units" field.
 func (_u *LotteryPoolUpdate) SetThresholdUnits(v int64) *LotteryPoolUpdate {
 	_u.mutation.ResetThresholdUnits()
@@ -265,6 +277,12 @@ func (_u *LotteryPoolUpdate) sqlSave(ctx context.Context) (_node int, err error)
 	if value, ok := _u.mutation.Mode(); ok {
 		_spec.SetField(lotterypool.FieldMode, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.InviteConfig(); ok {
+		_spec.SetField(lotterypool.FieldInviteConfig, field.TypeJSON, value)
+	}
+	if _u.mutation.InviteConfigCleared() {
+		_spec.ClearField(lotterypool.FieldInviteConfig, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.ThresholdUnits(); ok {
 		_spec.SetField(lotterypool.FieldThresholdUnits, field.TypeInt64, value)
 	}
@@ -346,6 +364,18 @@ func (_u *LotteryPoolUpdateOne) SetNillableMode(v *string) *LotteryPoolUpdateOne
 	if v != nil {
 		_u.SetMode(*v)
 	}
+	return _u
+}
+
+// SetInviteConfig sets the "invite_config" field.
+func (_u *LotteryPoolUpdateOne) SetInviteConfig(v map[string]interface{}) *LotteryPoolUpdateOne {
+	_u.mutation.SetInviteConfig(v)
+	return _u
+}
+
+// ClearInviteConfig clears the value of the "invite_config" field.
+func (_u *LotteryPoolUpdateOne) ClearInviteConfig() *LotteryPoolUpdateOne {
+	_u.mutation.ClearInviteConfig()
 	return _u
 }
 
@@ -587,6 +617,12 @@ func (_u *LotteryPoolUpdateOne) sqlSave(ctx context.Context) (_node *LotteryPool
 	}
 	if value, ok := _u.mutation.Mode(); ok {
 		_spec.SetField(lotterypool.FieldMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.InviteConfig(); ok {
+		_spec.SetField(lotterypool.FieldInviteConfig, field.TypeJSON, value)
+	}
+	if _u.mutation.InviteConfigCleared() {
+		_spec.ClearField(lotterypool.FieldInviteConfig, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.ThresholdUnits(); ok {
 		_spec.SetField(lotterypool.FieldThresholdUnits, field.TypeInt64, value)
