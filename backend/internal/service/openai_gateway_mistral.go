@@ -41,7 +41,7 @@ func mistralBlocks(raw json.RawMessage, bridge bool) (string, string, error) {
 			if !ok {
 				return "", "", errMistralContent
 			}
-			text.WriteString(value)
+			_, _ = text.WriteString(value)
 		case "thinking":
 			var parts []mistralObject
 			if len(block["thinking"]) == 0 || json.Unmarshal(block["thinking"], &parts) != nil {
@@ -55,7 +55,7 @@ func mistralBlocks(raw json.RawMessage, bridge bool) (string, string, error) {
 					if !ok {
 						return "", "", errMistralContent
 					}
-					reasoning.WriteString(value)
+					_, _ = reasoning.WriteString(value)
 				case "reference", "tool_reference":
 					if bridge {
 						return "", "", errMistralContent
@@ -365,7 +365,7 @@ func cleanMistralRequestBlocks(raw json.RawMessage) (json.RawMessage, bool, stri
 		if kind != "text" || !valid || len(block) != 2 {
 			textOnly = false
 		} else {
-			text.WriteString(value)
+			_, _ = text.WriteString(value)
 		}
 	}
 	if !changed {
