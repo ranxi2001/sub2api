@@ -44,7 +44,9 @@ func TestPelicanTestUsageStreams(t *testing.T) {
 			want: UsageTokens{InputTokens: 200, OutputTokens: 200, CacheReadTokens: 800},
 		},
 		{
-			name: "chat reads usage-only final chunk", process: svc.processOpenAIChatCompletionsStream,
+			name: "chat reads usage-only final chunk", process: func(c *gin.Context, body io.Reader) error {
+				return svc.processOpenAIChatCompletionsStream(c, body, nil)
+			},
 			events: []string{
 				`{"choices":[{"delta":{"content":"<svg/>"},"finish_reason":"stop"}]}`,
 				`{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":200,"prompt_tokens_details":{"cached_tokens":800}}}`,

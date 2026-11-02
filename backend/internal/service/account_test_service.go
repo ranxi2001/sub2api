@@ -2433,6 +2433,10 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	}
 	applyModelTracePayload(ctx, payload)
 	payloadBytes, _ := json.Marshal(payload)
+	payloadBytes, err := normalizeMistralChatRequest(account, payloadBytes)
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	s.sendEvent(c, TestEvent{Type: "status", Text: "正在通过 /v1/chat/completions 测试连接"})
@@ -2478,7 +2482,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	return s.processOpenAIChatCompletionsStream(accountTestResponseContext(c, resp), resp.Body)
+	return s.processOpenAIChatCompletionsStream(accountTestResponseContext(c, resp), resp.Body, account)
 }
 
 // testOpenAICompactConnection probes native remote compaction v2 (streaming
@@ -3230,7 +3234,7 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 
 // processOpenAIChatCompletionsStream processes SSE chunks from the
 // OpenAI-compatible Chat Completions API.
-func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, body io.Reader) error {
+func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, body io.Reader, account *Account) error {
 	defer accountTestStream(c)()
 	reader := bufio.NewReader(body)
 	usage := startPelicanTestStream(c, "chat")
@@ -3270,8 +3274,12 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 			return nil
 		}
 
+		normalized, normalizeErr := normalizeMistralChatResponse(account, []byte(jsonStr), false)
+		if normalizeErr != nil {
+			return s.sendErrorAndEnd(c, normalizeErr.Error())
+		}
 		var data map[string]any
-		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		if err := json.Unmarshal(normalized, &data); err != nil {
 			return s.sendErrorAndEnd(c, "Invalid Chat Completions response from /v1/chat/completions: expected JSON data")
 		}
 		seenJSON = true

@@ -433,8 +433,8 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		return nil, err
 	}
 	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
-	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
-		return nil, errors.New("typesafe accounts only support apikey credentials")
+	if (input.Platform == PlatformTypeSafe || input.Platform == PlatformMistral) && input.Type != AccountTypeAPIKey {
+		return nil, fmt.Errorf("%s accounts only support apikey credentials", input.Platform)
 	}
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
@@ -651,8 +651,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
-	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
-		return nil, errors.New("typesafe accounts only support apikey credentials")
+	if (account.Platform == PlatformTypeSafe || account.Platform == PlatformMistral) && input.Type != "" && input.Type != AccountTypeAPIKey {
+		return nil, fmt.Errorf("%s accounts only support apikey credentials", account.Platform)
 	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {

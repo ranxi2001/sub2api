@@ -260,7 +260,9 @@
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
               form.platform === spec.id
-                ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400'
+                ? spec.id === 'mistral'
+                  ? 'bg-white text-orange-600 shadow-sm dark:bg-dark-600 dark:text-orange-400'
+                  : 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400'
                 : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
             ]"
           >
@@ -4414,6 +4416,8 @@ const apiKeyValuePlaceholder = computed(() => {
       return 'sk-...'
     case 'typesafe':
       return 'ts-...'
+    case 'mistral':
+      return 'API Key'
     default:
       return isMultiProtocolPlatform.value ? 'sk-...' : 'sk-ant-...'
   }
@@ -4598,6 +4602,8 @@ const cnAccentActiveClass = computed(() => {
       return 'border-rose-500 bg-rose-50 dark:bg-rose-900/20'
     case 'opencode_go':
       return 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+    case 'mistral':
+      return 'border-orange-500 bg-orange-50 dark:bg-orange-900/20'
     default:
       return 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
   }
@@ -4614,6 +4620,8 @@ const cnAccentIconClass = computed(() => {
       return 'bg-rose-500 text-white'
     case 'opencode_go':
       return 'bg-amber-500 text-white'
+    case 'mistral':
+      return 'bg-orange-500 text-white'
     default:
       return 'bg-primary-500 text-white'
   }
