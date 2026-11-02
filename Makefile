@@ -109,6 +109,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/user/__tests__/ChannelStatusView.mode.spec.ts \
 	src/components/user/profile/__tests__/ProfileInfoCard.spec.ts \
 	src/components/settings/ServerlessSettings.spec.ts \
+	src/components/settings/AccountPerformanceSettings.spec.ts \
+	src/components/account/__tests__/AccountPerformanceCell.spec.ts \
+	src/components/account/__tests__/AccountPerformanceDialog.spec.ts \
 	src/components/user/profile/__tests__/ProfileIdentityBindingsSection.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
 	src/views/admin/__tests__/HarvestFlowView.spec.ts \

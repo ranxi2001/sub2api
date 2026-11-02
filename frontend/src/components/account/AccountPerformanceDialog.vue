@@ -11,11 +11,11 @@
         <table class="w-full text-left text-sm">
           <thead><tr><th></th><th>{{ t('accountPerformance.min') }}</th><th>{{ t('accountPerformance.max') }}</th></tr></thead>
           <tbody><tr v-for="metric in metricKeys" :key="metric">
-            <th class="py-2 pr-2">{{ t('accountPerformance.' + metric) }} {{ metric==='ttft' ? '(' + t('accountPerformance.ms') + ')' : metric==='degradation'?'(%)':'' }}</th>
-            <td v-for="bound in bounds" :key="bound" class="p-1"><input v-model="fields[metric][bound]" type="number" min="0" :max="metric==='degradation'?100:1000000000" step="any" :aria-label="t('accountPerformance.'+metric)+' '+t('accountPerformance.'+bound)" :placeholder="t('accountPerformance.noBound')" class="input w-full min-w-0" :data-testid="metric+'-'+bound"></td>
+            <th class="py-2 pr-2">{{ t('accountPerformance.' + metric, { minutes: windowMinutes }) }} {{ metric==='ttft' ? '(' + t('accountPerformance.ms') + ')' : metric==='degradation'?'(%)':'' }}</th>
+            <td v-for="bound in bounds" :key="bound" class="p-1"><input v-model="fields[metric][bound]" type="number" min="0" :max="metric==='degradation'?100:1000000000" step="any" :aria-label="t('accountPerformance.'+metric, { minutes: windowMinutes })+' '+t('accountPerformance.'+bound)" :placeholder="t('accountPerformance.noBound')" class="input w-full min-w-0" :data-testid="metric+'-'+bound"></td>
           </tr></tbody>
         </table>
-        <p class="text-xs text-gray-500">{{ t('accountPerformance.semantics') }}</p>
+        <p class="text-xs text-gray-500">{{ t('accountPerformance.semantics', { minutes: windowMinutes }) }}</p>
         <p class="text-xs text-gray-500">{{ t('accountPerformance.qualityNote') }}</p>
         <p class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{{ t('accountPerformance.latchNote') }}</p>
         <h4 class="text-sm font-semibold">{{ t('accountPerformance.audit') }}</h4>
@@ -32,16 +32,17 @@
   </BaseDialog>
 </template>
 <script setup lang="ts">
-import { onMounted, ref, reactive } from 'vue'
+import { computed, onMounted, ref, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
-import { emptyPerformanceConfig, type AccountPerformance, type PerformanceConfig, type PerformanceEvent } from '@/types/accountPerformance'
+import { emptyPerformanceConfig, performanceWindowMinutes, type AccountPerformance, type PerformanceConfig, type PerformanceEvent } from '@/types/accountPerformance'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import AccountPerformanceCell from './AccountPerformanceCell.vue'
 const props=defineProps<{accountId:number;accountName:string}>()
 const emit=defineEmits<{close:[];updated:[]}>()
 const {t}=useI18n()
 const metrics=ref<AccountPerformance|null>(null),events=ref<PerformanceEvent[]>([])
+const windowMinutes = computed(() => performanceWindowMinutes(metrics.value ?? undefined))
 const config=ref<PerformanceConfig>(emptyPerformanceConfig())
 const loading=ref(false),busy=ref(false),error=ref(''),auditError=ref(false)
 const metricKeys=['tps','degradation','ttft'] as const,bounds=['min','max'] as const

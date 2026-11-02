@@ -27,7 +27,7 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 	empty := mustCreateAccount(t, client, &service.Account{Name: "performance-empty-" + suffix, Platform: service.PlatformOpenAI})
 	usage := newUsageLogRepositoryWithSQL(client, tx)
 	now := time.Now().UTC().Truncate(time.Second)
-	since := now.Add(-15 * time.Minute)
+	since := now.Add(-60 * time.Minute)
 
 	type sample struct {
 		name        string
@@ -112,6 +112,18 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 	require.Nil(t, metrics[empty.ID].AvgTPS)
 	require.Nil(t, metrics[empty.ID].AvgTTFTMs)
 	require.Nil(t, metrics[empty.ID].DegradationPercent)
+
+	// A saved global window immediately changes both latency sample sets.
+	_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES($1,'15') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, service.SettingKeyAccountPerformanceWindowMinutes)
+	require.NoError(t, err)
+	metrics, err = readAccountPerformance(ctx, tx, []int64{account.ID}, now)
+	require.NoError(t, err)
+	got = metrics[account.ID]
+	require.Equal(t, now.Add(-15*time.Minute), got.WindowStart)
+	require.Equal(t, 1, got.TPSSamples)
+	require.Equal(t, 1, got.TTFTSamples)
+	require.InDelta(t, 100, *got.AvgTPS, 0.00001)
+	require.InDelta(t, 1500, *got.AvgTTFTMs, 0.00001)
 }
 
 func TestAccountPerformancePostgresCompletedQualityProbeRounds(t *testing.T) {
@@ -121,7 +133,7 @@ func TestAccountPerformancePostgresCompletedQualityProbeRounds(t *testing.T) {
 	account := mustCreateAccount(t, tx.Client(), &service.Account{Name: "performance-quality-" + suffix, Platform: service.PlatformOpenAI})
 	now := time.Now().UTC().Truncate(time.Second)
 	const config = `{"quality":{},"parallel_count":2,"model_ids":["probe-a","probe-b"]}`
-	rows, err := tx.QueryContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at) VALUES($1,'probe-a','*/30 * * * *',true,$2::jsonb,$3) RETURNING id`, account.ID, config, now.Add(-time.Hour))
+	rows, err := tx.QueryContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at) VALUES($1,'probe-a','*/30 * * * *',true,$2::jsonb,$3) RETURNING id`, account.ID, config, now.Add(-2*time.Hour))
 	require.NoError(t, err)
 	require.True(t, rows.Next())
 	var plan int64
@@ -134,7 +146,7 @@ func TestAccountPerformancePostgresCompletedQualityProbeRounds(t *testing.T) {
 		require.NoError(t, err)
 	}
 	// Two models × two samples. Partial saves must never count as full rounds.
-	for _, round := range []string{"passed", "failed", "transport", "partial", "old", "future", "stale", "malformed"} {
+	for _, round := range []string{"passed", "failed", "transport", "partial", "past15", "old", "future", "stale", "malformed"} {
 		count := 4
 		if round == "partial" {
 			count = 3
@@ -148,8 +160,11 @@ func TestAccountPerformancePostgresCompletedQualityProbeRounds(t *testing.T) {
 			if round == "transport" && i == 0 {
 				status, verdict, message, action = "failed", "unknown", "timeout", "inconclusive"
 			}
-			if round == "old" {
+			if round == "past15" {
 				at = now.Add(-16 * time.Minute)
+			}
+			if round == "old" {
+				at = now.Add(-61 * time.Minute)
 			}
 			if round == "future" {
 				at = now.Add(time.Second)
@@ -166,11 +181,17 @@ func TestAccountPerformancePostgresCompletedQualityProbeRounds(t *testing.T) {
 	metrics, err := readAccountPerformance(ctx, tx, []int64{account.ID}, now)
 	require.NoError(t, err)
 	got := metrics[account.ID]
-	require.Equal(t, 2, got.QualitySamples, "only the complete conclusive passed and failed probe rounds")
+	require.Equal(t, 3, got.QualitySamples, "60-minute default includes the complete conclusive round older than 15 minutes")
 	require.NotNil(t, got.DegradationPercent)
-	require.InDelta(t, 50, *got.DegradationPercent, 0.00001)
+	require.InDelta(t, 100.0/3, *got.DegradationPercent, 0.00001)
 	require.Nil(t, got.AvgTPS)
 	require.Nil(t, got.AvgTTFTMs)
+	_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES($1,'15') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, service.SettingKeyAccountPerformanceWindowMinutes)
+	require.NoError(t, err)
+	metrics, err = readAccountPerformance(ctx, tx, []int64{account.ID}, now)
+	require.NoError(t, err)
+	require.Equal(t, 2, metrics[account.ID].QualitySamples)
+	require.InDelta(t, 50, *metrics[account.ID].DegradationPercent, 0.00001)
 	_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_plans SET enabled=false WHERE id=$1`, plan)
 	require.NoError(t, err)
 	metrics, err = readAccountPerformance(ctx, tx, []int64{account.ID}, now)

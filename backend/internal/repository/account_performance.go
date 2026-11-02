@@ -88,6 +88,24 @@ LEFT JOIN usage u ON u.account_id=ids.id LEFT JOIN quality q ON q.account_id=ids
 LEFT JOIN account_performance_monitors m ON m.account_id=ids.id
 `
 
+func readAccountPerformanceWindowMinutes(ctx context.Context, db sqlExecutor) (int, error) {
+	rows, err := db.QueryContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyAccountPerformanceWindowMinutes)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	var value string
+	if rows.Next() {
+		if err := rows.Scan(&value); err != nil {
+			return 0, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return service.ParseAccountPerformanceWindowMinutes(value)
+}
+
 func readAccountPerformance(ctx context.Context, db sqlExecutor, ids []int64, now time.Time) (map[int64]service.AccountPerformance, error) {
 	out := make(map[int64]service.AccountPerformance, len(ids))
 	if len(ids) == 0 {
@@ -95,7 +113,11 @@ func readAccountPerformance(ctx context.Context, db sqlExecutor, ids []int64, no
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	since := now.Add(-15 * time.Minute)
+	minutes, err := readAccountPerformanceWindowMinutes(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	since := now.Add(-time.Duration(minutes) * time.Minute)
 	rows, err := db.QueryContext(ctx, performanceMetricsSQL, pq.Array(ids), since, now)
 	if err != nil {
 		return nil, err

@@ -51,4 +51,12 @@ describe('Account performance dialog',()=>{
   const w=await open('zh');expect(w.text()).toContain('探针轮次降智率');expect(w.text()).toContain('并非全部业务请求')
   expect(w.findAll('[data-metric]').every(r=>r.text().includes('未采集'))).toBe(true)
  })
+ it.each(['en','zh'])('shows the actual response window in metric labels, bounds and semantics in %s',async(locale)=>{
+  api.getPerformance.mockResolvedValue({7:{...structuredClone(metric),window_start:'2026-11-01T22:00:00Z'}})
+  const w=await open(locale)
+  expect(w.text()).toContain('120m')
+  expect(w.text()).toContain(locale==='zh'?'最近120分钟':'Rolling 120 minutes')
+  expect(w.get('[data-testid="degradation-max"]').attributes('aria-label')).toContain('120m')
+  expect(w.text()).not.toContain('15m')
+ })
 })
