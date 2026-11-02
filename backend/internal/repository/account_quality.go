@@ -108,10 +108,6 @@ func qualityActionRollsBack(action string) bool {
 // Caller commits only complete actions; rejected partial transitions roll back.
 func applyQualityOutcomeTx(ctx context.Context, tx *sql.Tx, plan *service.ScheduledTestPlan, until time.Time, outcome string, commit *bool) (string, error) {
 	plan.QualityRestoreDiagnostic = nil
-	if plan.PelicanConfig.QuestionKind == service.QualityRandomQuestionKind && !plan.QualityBatchEvaluated && outcome != "pending" {
-		outcome = "inconclusive"
-		plan.QualityModelOutcomes = nil
-	}
 	var valid bool
 	var err error
 	err = tx.QueryRowContext(ctx, `SELECT enabled AND updated_at=$2 AND running_until=$3 AND running_until>NOW()
@@ -121,6 +117,15 @@ func applyQualityOutcomeTx(ctx context.Context, tx *sql.Tx, plan *service.Schedu
 	}
 	if err != nil {
 		return "", err
+	}
+	// A stale run needs only its lease/version, not an execution config. Keep
+	// that guard before reading optional snapshots or touching account state.
+	if plan.PelicanConfig == nil || plan.PelicanConfig.Quality == nil {
+		return "inconclusive", nil
+	}
+	if plan.PelicanConfig.QuestionKind == service.QualityRandomQuestionKind && !plan.QualityBatchEvaluated && outcome != "pending" {
+		outcome = "inconclusive"
+		plan.QualityModelOutcomes = nil
 	}
 
 	if plan.PelicanConfig.Quality.Action == service.QualityActionOpenAITwoFAAdmission {

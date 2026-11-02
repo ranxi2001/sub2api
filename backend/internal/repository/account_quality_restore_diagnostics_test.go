@@ -199,6 +199,37 @@ func TestQualityRestoreDiagnosticsStaleRunClearsPreviousEvidence(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet(), "stale runs cannot read ownership or accounts")
 }
 
+func TestQualityOutcomeMissingConfigStopsAfterLeaseValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  *service.PelicanTestConfig
+	}{
+		{name: "missing-config"},
+		{name: "missing-quality-policy", cfg: &service.PelicanTestConfig{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() {
+				mock.ExpectClose()
+				require.NoError(t, db.Close())
+			}()
+			plan := &service.ScheduledTestPlan{ID: 7, UpdatedAt: time.Now(), PelicanConfig: tc.cfg,
+				QualityRestoreDiagnostic: qualityRestoreConflict("group_missing")}
+			until := plan.UpdatedAt.Add(time.Minute)
+			mock.ExpectBegin()
+			mock.ExpectQuery("SELECT enabled AND updated_at").WithArgs(plan.ID, plan.UpdatedAt, until).
+				WillReturnRows(sqlmock.NewRows([]string{"valid"}).AddRow(true))
+			mock.ExpectRollback()
+			action, err := NewScheduledTestPlanRepository(db).ApplyQualityOutcome(context.Background(), plan, until, "passed")
+			require.NoError(t, err)
+			require.Equal(t, "inconclusive", action)
+			require.Nil(t, plan.QualityRestoreDiagnostic)
+			require.NoError(t, mock.ExpectationsWereMet(), "missing configs cannot read ownership or accounts")
+		})
+	}
+}
+
 // Concurrent invocation exercises both guard paths; sqlmock cannot prove actual
 // PostgreSQL row/advisory locking. Neither caller is permitted any write here.
 func TestQualityRestoreDiagnosticsConcurrentRulesCannotTakeOwnership(t *testing.T) {
