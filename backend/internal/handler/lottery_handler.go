@@ -6,14 +6,18 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/serverless"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
-type LotteryHandler struct{ lottery *service.LotteryService }
+type LotteryHandler struct {
+	lottery *service.LotteryService
+	geo     serverless.CountryResolver
+}
 
-func NewLotteryHandler(lottery *service.LotteryService) *LotteryHandler {
-	return &LotteryHandler{lottery: lottery}
+func NewLotteryHandler(lottery *service.LotteryService, geo serverless.CountryResolver) *LotteryHandler {
+	return &LotteryHandler{lottery: lottery, geo: geo}
 }
 
 func lotteryID(c *gin.Context, name string) (int64, bool) {

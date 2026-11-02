@@ -30,6 +30,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/lotteryaccount"
 	"github.com/Wei-Shaw/sub2api/ent/lotterycontribution"
 	"github.com/Wei-Shaw/sub2api/ent/lotterydraw"
+	"github.com/Wei-Shaw/sub2api/ent/lotteryinvitation"
+	"github.com/Wei-Shaw/sub2api/ent/lotteryinvitelink"
 	"github.com/Wei-Shaw/sub2api/ent/lotteryledger"
 	"github.com/Wei-Shaw/sub2api/ent/lotterypool"
 	"github.com/Wei-Shaw/sub2api/ent/lotteryprize"
@@ -706,6 +708,60 @@ func (f TraverseLotteryDraw) Traverse(ctx context.Context, q ent.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *ent.LotteryDrawQuery", q)
 }
 
+// The LotteryInvitationFunc type is an adapter to allow the use of ordinary function as a Querier.
+type LotteryInvitationFunc func(context.Context, *ent.LotteryInvitationQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f LotteryInvitationFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.LotteryInvitationQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.LotteryInvitationQuery", q)
+}
+
+// The TraverseLotteryInvitation type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseLotteryInvitation func(context.Context, *ent.LotteryInvitationQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseLotteryInvitation) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseLotteryInvitation) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.LotteryInvitationQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.LotteryInvitationQuery", q)
+}
+
+// The LotteryInviteLinkFunc type is an adapter to allow the use of ordinary function as a Querier.
+type LotteryInviteLinkFunc func(context.Context, *ent.LotteryInviteLinkQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f LotteryInviteLinkFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.LotteryInviteLinkQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.LotteryInviteLinkQuery", q)
+}
+
+// The TraverseLotteryInviteLink type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseLotteryInviteLink func(context.Context, *ent.LotteryInviteLinkQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseLotteryInviteLink) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseLotteryInviteLink) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.LotteryInviteLinkQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.LotteryInviteLinkQuery", q)
+}
+
 // The LotteryLedgerFunc type is an adapter to allow the use of ordinary function as a Querier.
 type LotteryLedgerFunc func(context.Context, *ent.LotteryLedgerQuery) (ent.Value, error)
 
@@ -1374,6 +1430,10 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.LotteryContributionQuery, predicate.LotteryContribution, lotterycontribution.OrderOption]{typ: ent.TypeLotteryContribution, tq: q}, nil
 	case *ent.LotteryDrawQuery:
 		return &query[*ent.LotteryDrawQuery, predicate.LotteryDraw, lotterydraw.OrderOption]{typ: ent.TypeLotteryDraw, tq: q}, nil
+	case *ent.LotteryInvitationQuery:
+		return &query[*ent.LotteryInvitationQuery, predicate.LotteryInvitation, lotteryinvitation.OrderOption]{typ: ent.TypeLotteryInvitation, tq: q}, nil
+	case *ent.LotteryInviteLinkQuery:
+		return &query[*ent.LotteryInviteLinkQuery, predicate.LotteryInviteLink, lotteryinvitelink.OrderOption]{typ: ent.TypeLotteryInviteLink, tq: q}, nil
 	case *ent.LotteryLedgerQuery:
 		return &query[*ent.LotteryLedgerQuery, predicate.LotteryLedger, lotteryledger.OrderOption]{typ: ent.TypeLotteryLedger, tq: q}, nil
 	case *ent.LotteryPoolQuery:
