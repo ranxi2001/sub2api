@@ -209,6 +209,16 @@ var providerProfiles = map[string]*ProviderProfile{
 			},
 		},
 	},
+	PlatformMistral: {
+		Platform:         PlatformMistral,
+		DefaultMode:      AccountModePayG,
+		DefaultTestModel: DefaultMistralTestModel,
+		Modes: map[string]ProviderEndpoints{
+			AccountModePayG: {
+				BaseURLs: map[string]string{APIProtocolChatCompletions: DefaultMistralBaseURL},
+			},
+		},
+	},
 	PlatformCline: {
 		Platform:         PlatformCline,
 		DefaultMode:      AccountModePayG,
