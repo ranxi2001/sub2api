@@ -32,7 +32,7 @@ func TestWSSemanticFirstTokenNetwork(t *testing.T) {
 				if err != nil {
 					return
 				}
-				defer ws.CloseNow()
+				defer func() { _ = ws.CloseNow() }()
 				for {
 					if _, _, err = ws.Read(ctx); err != nil {
 						return
@@ -68,7 +68,7 @@ func TestWSSemanticFirstTokenNetwork(t *testing.T) {
 			}})
 			defer server.Close()
 			client := dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"synthetic","input":"local"}`)
-			defer client.CloseNow()
+			defer func() { _ = client.CloseNow() }()
 			for turn := 0; turn < 2; turn++ {
 				if turn > 0 {
 					tick.Store(1000)

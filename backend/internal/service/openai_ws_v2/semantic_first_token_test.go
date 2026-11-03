@@ -3,12 +3,13 @@ package openai_ws_v2
 import (
 	"context"
 	"errors"
-	coderws "github.com/coder/websocket"
-	"github.com/stretchr/testify/require"
 	"io"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	coderws "github.com/coder/websocket"
+	"github.com/stretchr/testify/require"
 )
 
 type semanticClockConn struct {
@@ -62,7 +63,10 @@ type semanticTurnsConn struct {
 func (c *semanticTurnsConn) WriteFrame(ctx context.Context, k coderws.MessageType, p []byte) error {
 	c.sent++
 	c.tick.Store(int64((c.sent - 1) * 1000))
-	base := c.FrameConn.(*passthroughTestFrameConn)
+	base, ok := c.FrameConn.(*passthroughTestFrameConn)
+	if !ok {
+		return errors.New("semantic turn fixture requires passthroughTestFrameConn")
+	}
 	for _, e := range []string{`{"type":"response.created","response":{"id":"resp_` + string(rune('0'+c.sent)) + `"}}`, `{"type":"response.output_item.added","item":{"type":"reasoning","summary":[]}}`, `{"type":"response.output_text.delta","delta":"later"}`, `{"type":"response.completed","response":{"id":"resp_` + string(rune('0'+c.sent)) + `"}}`} {
 		base.readCh <- passthroughTestFrame{msgType: k, payload: []byte(e)}
 	}
