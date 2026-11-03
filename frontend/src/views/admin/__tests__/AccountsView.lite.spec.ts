@@ -72,7 +72,8 @@ vi.mock('vue-i18n', async () => {
 })
 
 const DataTableStub = defineComponent({
-  props: { data: { type: Array, default: () => [] } },
+  props: { data: { type: Array, default: () => [] }, columns: { type: Array, default: () => [] } },
+  emits: ['sort'],
   template: `
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
@@ -219,6 +220,91 @@ describe('admin AccountsView lite account list', () => {
       expect.objectContaining({ lite: '1' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
+    wrapper.unmount()
+  })
+
+  it('sorts capacity by current concurrency and resets the page while retaining filters', async () => {
+    localStorage.setItem('account-filter-values', JSON.stringify({ platform: 'openai', status: 'active' }))
+    listAccounts.mockResolvedValue({ items: [listRow], total: 60, page: 1, page_size: 20, pages: 3 })
+    const wrapper = mountView()
+    await flushPromises()
+    const table = wrapper.getComponent(DataTableStub)
+    expect(table.props('columns')).toContainEqual(expect.objectContaining({ key: 'capacity', sortable: true }))
+
+    wrapper.getComponent({ name: 'Pagination' }).vm.$emit('update:page', 2)
+    await flushPromises()
+    expect(listAccounts.mock.lastCall?.[0]).toBe(2)
+    table.vm.$emit('sort', 'capacity', 'desc')
+    await flushPromises()
+    expect(listAccounts).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({
+      sort_by: 'current_concurrency', sort_order: 'desc', platform: 'openai', status: 'active', lite: '1'
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    table.vm.$emit('sort', 'capacity', 'asc')
+    await flushPromises()
+    expect(listAccounts.mock.lastCall?.[2]).toMatchObject({ sort_by: 'current_concurrency', sort_order: 'asc' })
+    wrapper.unmount()
+  })
+
+  it('refreshes concurrency counts together with order after a billing probe', async () => {
+    localStorage.setItem('account-table-sort', JSON.stringify({ key: 'capacity', order: 'desc' }))
+    const leader = { ...listRow, id: 99, current_concurrency: 9, concurrency: 100 }
+    const follower = { ...listRow, current_concurrency: 2 }
+    listAccounts.mockResolvedValue({ items: [leader, follower], total: 2, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    const refreshed = [{ ...follower, current_concurrency: 10 }, { ...leader, current_concurrency: 1 }]
+    listAccounts.mockResolvedValue({ items: refreshed, total: 2, page: 1, page_size: 20, pages: 1 })
+    getUpstreamBillingRatesWithEtag.mockResolvedValue({ notModified: false, data: {
+      items: [{ account_id: 42, snapshot: null }, { account_id: 99, snapshot: null }],
+      total: 2, page: 1, page_size: 20
+    } })
+    probeUpstreamBilling.mockResolvedValue({ account_id: 42, snapshot: { status: 'ok', data: { effective_rate_multiplier: 0.14 } } })
+    wrapper.findAllComponents(UpstreamBillingRateCell)[1].vm.$emit('probe')
+    await flushPromises()
+    expect(listAccounts).toHaveBeenCalledTimes(2)
+    expect(wrapper.getComponent(DataTableStub).props('data')).toEqual(refreshed)
+    wrapper.unmount()
+  })
+
+  it('restores capacity sorting and uses server order on automatic refresh across page boundaries', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-table-sort', JSON.stringify({ key: 'capacity', order: 'desc' }))
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    const refreshed = { ...listRow, id: 99, name: 'refreshed leader', current_concurrency: 9, concurrency: 100 }
+    listWithEtag.mockResolvedValue({ notModified: false, etag: 'fresh-concurrency', data: {
+      items: [refreshed], total: 1, page: 1, page_size: 20, pages: 1
+    } })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(listAccounts.mock.lastCall?.[2]).toMatchObject({ sort_by: 'current_concurrency', sort_order: 'desc' })
+    await vi.advanceTimersByTimeAsync(6000)
+    await flushPromises()
+    expect(listWithEtag).toHaveBeenCalledWith(1, 20, expect.objectContaining({
+      sort_by: 'current_concurrency', sort_order: 'desc', lite: '1'
+    }), expect.objectContaining({ etag: null }))
+    expect(wrapper.getComponent(DataTableStub).props('data')).toEqual([refreshed])
+    wrapper.unmount()
+  })
+
+  it('ignores an older automatic refresh after capacity sort changes', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    let completeRefresh!: (value: unknown) => void
+    listWithEtag.mockImplementation(() => new Promise(resolve => { completeRefresh = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(6000)
+    const sortedRow = { ...listRow, id: 99, name: 'new sort leader' }
+    listAccounts.mockResolvedValue({ items: [sortedRow], total: 1, page: 1, page_size: 20, pages: 1 })
+    wrapper.getComponent(DataTableStub).vm.$emit('sort', 'capacity', 'desc')
+    await flushPromises()
+    completeRefresh({ notModified: false, etag: 'old-sort', data: {
+      items: [listRow], total: 1, page: 1, page_size: 20, pages: 1
+    } })
+    await flushPromises()
+    expect(wrapper.getComponent(DataTableStub).props('data')).toEqual([sortedRow])
     wrapper.unmount()
   })
 
