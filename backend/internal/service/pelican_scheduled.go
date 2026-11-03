@@ -50,8 +50,9 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 	}
 	started := time.Now()
 	ctx = withPelicanTestOptions(ctx, pelicanTestOptions{
-		testChannel: cfg.TestChannel,
-		observeOnly: cfg.Quality != nil && cfg.Quality.Action == QualityActionObserveOnly,
+		qualityBatch: cfg.QualityBatch,
+		testChannel:  cfg.TestChannel,
+		observeOnly:  cfg.Quality != nil && cfg.Quality.Action == QualityActionObserveOnly,
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -165,8 +166,21 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	results := make([]*ScheduledTestResult, len(models)*plan.PelicanConfig.ParallelCount)
 	var randomSamples []*PelicanTestConfig
 	var randomQuestionErr error
+	var sharedBatch *QualitySharedBatch
 	if plan.PelicanConfig.QuestionKind == QualityRandomQuestionKind {
-		randomSamples, randomQuestionErr = newQualityRandomSamples(plan.PelicanConfig)
+		candidate, _ := ctx.Value(qualitySharedBatchContextKey{}).(*QualitySharedBatch)
+		if candidate == nil {
+			candidate, randomQuestionErr = newQualitySharedBatch(now)
+		}
+		repo := s.sharedQualityBatchRepo()
+		if repo == nil {
+			randomQuestionErr = fmt.Errorf("quality shared batch storage unavailable")
+		} else if randomQuestionErr == nil {
+			sharedBatch, randomQuestionErr = repo.StartQualityBatch(runCtx, candidate, plan, until)
+		}
+		if randomQuestionErr == nil {
+			randomSamples, randomQuestionErr = sharedQualitySamples(plan.PelicanConfig, sharedBatch)
+		}
 	}
 	// Samples are interleaved by model so each model can start before repeats.
 	// Bound upstream concurrency while waiting for every result, even failures.
@@ -198,6 +212,10 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 				if randomSamples != nil {
 					cfg = *randomSamples[index/len(models)]
 					cfg.ModelID = samplePlan.ModelID
+					if cfg.QualityBatch != nil {
+						evidence := *cfg.QualityBatch
+						cfg.QualityBatch = &evidence
+					}
 				}
 				samplePlan.PelicanConfig = &cfg
 				if randomQuestionErr != nil {
@@ -238,6 +256,26 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	// Persist timeout failures with a fresh context even after the request deadline.
 	saveCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 	defer stop()
+	if sharedBatch != nil && randomQuestionErr == nil {
+		for _, result := range results {
+			result.PlanID = plan.ID
+			result.QualityRoundID = until.Format(time.RFC3339Nano)
+			result.QualityAction = "comparison_pending"
+		}
+		applyBatch := applyTriggeredQuality
+		if plan.TriggerSource == quality5xxSource && plan.TriggerObservedAt != nil && s.qualityTrigger != nil {
+			applyBatch = applyBatch && s.qualityTrigger.signalIsCurrent(plan.AccountID, *plan.TriggerObservedAt)
+		}
+		run := &QualityBatchRun{Apply: applyBatch, Plan: plan, Until: until, Results: results, Episode: plan.Quality5xxEpisode,
+			Trigger: plan.TriggerSource, ObservedAt: plan.TriggerObservedAt}
+		if err := s.sharedQualityBatchRepo().CollectQualityBatch(saveCtx, run); err != nil {
+			logQualityBatchFailure()
+			return false
+		}
+		// Release worker/concurrency slots before waiting for other accounts.
+		// A later tick finalizes this durable run using the original lease/version.
+		return true
+	}
 	if plan.PelicanConfig.Quality != nil && plan.PelicanConfig.Quality.UsesModelResults() {
 		plan.QualityModelOutcomes = qualityPlanModelOutcomes(plan, results)
 	}
@@ -320,6 +358,9 @@ func (s *ScheduledTestRunnerService) runPelicanSample(ctx context.Context, plan 
 	}()
 	if plan.PelicanConfig.QuestionKind == QualityRandomQuestionKind && (plan.PelicanConfig.RandomQuestion == nil || plan.PelicanConfig.Prompt == "" || plan.PelicanConfig.Quality == nil || plan.PelicanConfig.Quality.ExpectedAnswer == "") {
 		return failure("random_question_not_prepared")
+	}
+	if batch := plan.PelicanConfig.QualityBatch; batch != nil && !time.Now().Before(batch.StartDeadline) {
+		return failure("quality_batch_start_window_closed")
 	}
 	var err error
 	result, err = s.runPelicanAnswer(ctx, plan)

@@ -123,6 +123,7 @@ func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 		cfg.QualityModelOutcomes = nil
 		cfg.QualityModelActions = nil
 		cfg.RandomQuestion = nil
+		cfg.QualityBatch = nil
 		if cfg.QuestionKind == QualityRandomQuestionKind {
 			if cfg.Quality == nil {
 				return time.Time{}, fmt.Errorf("random questions require a quality rule")

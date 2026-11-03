@@ -125,14 +125,18 @@ func (r *usageLogRepository) ReadPrioritySchedulingSignals(ctx context.Context, 
  ), rounds AS (
   SELECT p.account_id, r.quality_round_id, MAX(r.created_at) AS observed_at,
    bool_or(r.quality_judgment->>'verdict'='incorrect' AND r.status='failed'
-    AND r.error_message IN ('answer_mismatch','state_degraded')) AS failed,
-   bool_and(COALESCE(r.quality_judgment->>'verdict'='correct' AND r.status='success',false)) AS passed
+    AND r.error_message IN ('answer_mismatch','state_degraded')
+    AND (COALESCE(r.pelican_config->>'question_kind','')<>'random_reasoning'
+      OR r.pelican_config->'quality_batch'->>'decision'='peer_passed')) AS failed,
+   bool_and(COALESCE(r.quality_judgment->>'verdict'='correct' AND r.status='success'
+    AND (COALESCE(r.pelican_config->>'question_kind','')<>'random_reasoning'
+      OR r.pelican_config->'quality_batch'->>'decision'='passed'),false)) AS passed
   FROM scheduled_test_plans p JOIN scheduled_test_results r ON r.plan_id=p.id
   WHERE p.account_id=ANY($1) AND p.enabled
    AND COALESCE(NULLIF(r.pelican_config->>'model_id',''),p.model_id)=$10
    AND jsonb_typeof(p.pelican_config->'quality')='object' AND r.quality_round_id<>''
    AND r.created_at >= $4 AND r.created_at >= p.updated_at AND r.created_at <= NOW()
-   AND r.quality_action<>'' AND r.quality_action<>'stale_run'
+   AND r.quality_action NOT IN ('','stale_run','comparison_pending')
   GROUP BY p.account_id,p.id,r.quality_round_id
   HAVING bool_and((r.pelican_config->'parallel_count' IS NULL OR jsonb_typeof(r.pelican_config->'parallel_count')='number')
     AND COALESCE(r.pelican_config->>'parallel_count','1') ~ '^[1-8]$')

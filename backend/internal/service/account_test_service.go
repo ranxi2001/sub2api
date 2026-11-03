@@ -400,6 +400,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	bindAccountTestPlatform(c, account)
+	recordQualityBatchRoute(c, account, modelID, account.Platform+":"+account.GetAPIProtocol())
 	if expected, ok := ctx.Value(modelTraceContextKey{}).(modelTraceEnvironment); ok {
 		actual, err := modelTraceEnvironmentForAccount(account, modelID)
 		if err != nil || actual != expected {
@@ -422,6 +423,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	// interactions, but intentionally do not send their placeholder credentials
 	// to an upstream provider.
 	if account.IsSyntheticUITest() {
+		recordQualityBatchRoute(c, account, modelID, "synthetic")
 		testModelID := modelID
 		if testModelID == "" {
 			testModelID = claude.DefaultTestModel
@@ -482,6 +484,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 }
 
 func (s *AccountTestService) testPrismBrowserConnection(c *gin.Context, account *Account, modelID, prompt string) error {
+	recordQualityBatchRoute(c, account, modelID, "openai:prism")
 	if s.openaiGatewayService == nil {
 		return s.sendErrorAndEnd(c, "Prism gateway service is unavailable")
 	}
@@ -911,6 +914,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 
 // testOpenAIAccountConnection tests an OpenAI account's connection
 func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
+	recordQualityBatchRoute(c, account, modelID, "openai:account")
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
 	if account.IsExcelOAuth() {
@@ -924,6 +928,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	if account.IsSIWCEnabled() {
+		recordQualityBatchRoute(c, account, modelID, "openai:siwc")
 		if s.openaiGatewayService == nil {
 			return s.sendErrorAndEnd(c, "SIWC gateway is unavailable")
 		}
@@ -945,6 +950,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// Image models use the image test below, which applies the gateway's BPS
 	// image routing; the text BPS test would send them to /responses.
 	if account.IsExcelBPSEnabled() && s.openaiGatewayService != nil && s.openaiGatewayService.excelBPSGloballyEnabled(ctx) && !isOpenAIImageModel(account.GetMappedModel(strings.TrimSpace(modelID))) {
+		recordQualityBatchRoute(c, account, modelID, "openai:bps")
 		return s.testExcelBPSAccountConnection(c, account, modelID, prompt)
 	}
 

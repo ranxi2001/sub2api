@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,9 @@ func (s *ScheduledTestRunnerService) runPelicanAnswer(ctx context.Context, plan 
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if batch := plan.PelicanConfig.QualityBatch; batch != nil && !time.Now().Before(batch.StartDeadline) {
+			return nil, fmt.Errorf("quality batch start window closed")
 		}
 		// Reuse the prepared question and account: changing either would test a
 		// different sample. Each call releases its own request resources.
