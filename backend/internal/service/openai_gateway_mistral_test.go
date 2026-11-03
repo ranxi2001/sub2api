@@ -52,7 +52,7 @@ func TestMistralRequestCompatibility(t *testing.T) {
 				require.False(t, gjson.GetBytes(out, key).Exists(), key)
 			}
 			require.Equal(t, `{"keep":true}`, gjson.GetBytes(out, "metadata").Raw)
-			require.Equal(t, `{"keep":true}`, gjson.GetBytes(out, "reasoning").Raw)
+			require.False(t, gjson.GetBytes(out, "reasoning").Exists())
 			again, err := normalizeMistralChatRequest(account, out)
 			require.NoError(t, err)
 			require.Equal(t, out, again)
@@ -132,7 +132,7 @@ func TestMistralResponseNormalization(t *testing.T) {
 		prefix := "choices.0." + field + "."
 		require.Equal(t, "Hello world", gjson.GetBytes(normalized, prefix+"content").String())
 		require.Equal(t, "reason two", gjson.GetBytes(normalized, prefix+"reasoning_content").String())
-		require.JSONEq(t, mistralMixed, gjson.GetBytes(normalized, prefix+mistralContentField).Raw)
+		require.JSONEq(t, mistralMixed, strings.TrimSpace(gjson.GetBytes(normalized, prefix+mistralContentField).String()))
 		for _, path := range []string{"extension", "usage", "choices.0.index", "choices.0.finish_reason", prefix + "tool_calls", prefix + "other"} {
 			require.JSONEq(t, gjson.GetBytes(body, path).Raw, gjson.GetBytes(normalized, path).Raw)
 		}
@@ -157,7 +157,7 @@ func TestMistralUnknownAndReferencePolicy(t *testing.T) {
 	body := []byte(`{"choices":[{"message":{"content":[{"type":"thinking","closed":true,"signature":"fake","thinking":[{"type":"text","text":"thought"},{"type":"reference","reference_ids":["fake"]},{"type":"tool_reference","tool":"fake"}]}]}}]}`)
 	out, err := normalizeMistralChatResponse(account, body, false)
 	require.NoError(t, err)
-	require.JSONEq(t, gjson.GetBytes(body, "choices.0.message.content").Raw, gjson.GetBytes(out, "choices.0.message.mistral_content").Raw)
+	require.JSONEq(t, gjson.GetBytes(body, "choices.0.message.content").Raw, strings.TrimSpace(gjson.GetBytes(out, "choices.0.message.mistral_content").String()))
 	_, err = normalizeMistralChatResponse(account, body, true)
 	require.ErrorIs(t, err, errMistralContent)
 }

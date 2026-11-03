@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 )
 
-// Preserve native signatures and references for assistant history replay.
+// JSON Lines of native arrays: SDK string accumulation preserves every field
+// without recursively merging nested arrays, signatures or closed flags.
+// Requests also accept the legacy native-array extension.
 const mistralContentField = "mistral_content"
 
 var errMistralContent = errors.New("invalid or unsupported Mistral chat content")
@@ -119,7 +122,11 @@ func normalizeMistralChatResponse(account *Account, body []byte, bridge bool) ([
 			if _, ok := msg[mistralContentField]; ok {
 				return nil, errMistralContent
 			}
-			msg[mistralContentField] = msg["content"]
+			var frame bytes.Buffer
+			if json.Compact(&frame, content) != nil {
+				return nil, errMistralContent
+			}
+			msg[mistralContentField], _ = json.Marshal(frame.String() + "\n")
 			msg["content"], _ = json.Marshal(text)
 			if reasoning != "" {
 				if existing, ok := msg["reasoning_content"]; ok && !bytes.Equal(bytes.TrimSpace(existing), []byte("null")) {
@@ -172,6 +179,18 @@ func normalizeMistralChatRequest(account *Account, body []byte) ([]byte, error) 
 		return nil, errMistralContent
 	}
 	changed := false
+	// Match the existing nested-before-flat request/usage precedence, then
+	// remove the Responses-style object that native Mistral Chat cannot accept.
+	if raw, exists := root["reasoning"]; exists {
+		var reasoning mistralObject
+		if json.Unmarshal(raw, &reasoning) == nil {
+			if effort, ok := mistralString(reasoning["effort"]); ok && strings.TrimSpace(effort) != "" {
+				root["reasoning_effort"], _ = json.Marshal(strings.ToLower(strings.TrimSpace(effort)))
+			}
+		}
+		delete(root, "reasoning")
+		changed = true
+	}
 	model, _ := mistralString(root["model"])
 	if _, explicit := root["reasoning_effort"]; !explicit {
 		var thinking mistralObject
@@ -213,13 +232,12 @@ func normalizeMistralChatRequest(account *Account, body []byte) ([]byte, error) 
 		content := bytes.TrimSpace(msg["content"])
 		native := len(content) > 0 && content[0] == '['
 		if saved, ok := msg[mistralContentField]; ok {
-			if !native {
-				if _, _, err := mistralBlocks(saved, false); err != nil {
-					return nil, err
-				}
-				msg["content"] = saved
-				native = true
+			restored, err := restoreMistralHistoryContent(content, saved)
+			if err != nil {
+				return nil, err
 			}
+			msg["content"] = restored
+			native = true
 			delete(msg, mistralContentField)
 			changed = true
 		}
@@ -323,6 +341,81 @@ func normalizeMistralChatRequest(account *Account, body []byte) ([]byte, error) 
 	}
 	root["messages"], _ = json.Marshal(messages)
 	return json.Marshal(root)
+}
+
+// Decode whole native frames, preserving their order and opaque fields. They
+// are replayed as separate blocks; generic SDK delta merging is never applied.
+func restoreMistralHistoryContent(content, saved json.RawMessage) (json.RawMessage, error) {
+	var blocks []json.RawMessage
+	appendFrame := func(frame json.RawMessage) error {
+		if _, _, err := mistralBlocks(frame, false); err != nil {
+			return err
+		}
+		var parts []json.RawMessage
+		if json.Unmarshal(frame, &parts) != nil {
+			return errMistralContent
+		}
+		blocks = append(blocks, parts...)
+		return nil
+	}
+	if encoded, ok := mistralString(saved); ok {
+		frames := 0
+		for _, line := range strings.Split(encoded, "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			if err := appendFrame(json.RawMessage(line)); err != nil {
+				return nil, err
+			}
+			frames++
+		}
+		if frames == 0 {
+			return nil, errMistralContent
+		}
+	} else if err := appendFrame(saved); err != nil {
+		return nil, err
+	}
+	if blocks == nil {
+		blocks = []json.RawMessage{}
+	}
+	native, _ := json.Marshal(blocks)
+	nativeText, _, err := mistralBlocks(native, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > 0 && content[0] == '[' {
+		// Two different native histories have no safe implicit precedence.
+		var current, restored any
+		currentDecoder := json.NewDecoder(bytes.NewReader(content))
+		currentDecoder.UseNumber()
+		restoredDecoder := json.NewDecoder(bytes.NewReader(native))
+		restoredDecoder.UseNumber()
+		if currentDecoder.Decode(&current) != nil || restoredDecoder.Decode(&restored) != nil || !reflect.DeepEqual(current, restored) {
+			return nil, errMistralContent
+		}
+		return content, nil
+	}
+	if len(content) == 0 || bytes.Equal(content, []byte("null")) {
+		return native, nil
+	}
+	text, ok := mistralString(content)
+	if !ok {
+		return nil, errMistralContent
+	}
+	if text == "" {
+		return native, nil
+	}
+	if !strings.HasPrefix(text, nativeText) {
+		return nil, errMistralContent
+	}
+	// The official stream switches from arrays to plain strings. Append only
+	// the answer suffix absent from the saved arrays, keeping text references.
+	if suffix := strings.TrimPrefix(text, nativeText); suffix != "" {
+		block, _ := json.Marshal(map[string]string{"type": "text", "text": suffix})
+		blocks = append(blocks, block)
+		return json.Marshal(blocks)
+	}
+	return native, nil
 }
 
 func removeMistralCacheControl(object mistralObject) bool {
