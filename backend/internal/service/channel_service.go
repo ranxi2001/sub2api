@@ -137,11 +137,12 @@ func (r ChannelMappingResult) ToUsageFields(reqModel, upstreamModel string) Chan
 		channelMappedModel = r.MappedModel
 	}
 	return ChannelUsageFields{
-		ChannelID:          r.ChannelID,
-		OriginalModel:      reqModel,
-		ChannelMappedModel: channelMappedModel,
-		BillingModelSource: r.BillingModelSource,
-		ModelMappingChain:  r.BuildModelMappingChain(reqModel, upstreamModel),
+		ChannelID:             r.ChannelID,
+		OriginalModel:         reqModel,
+		ChannelMappedModel:    channelMappedModel,
+		ChannelMappingApplied: r.Mapped,
+		BillingModelSource:    r.BillingModelSource,
+		ModelMappingChain:     r.BuildModelMappingChain(reqModel, upstreamModel),
 	}
 }
 

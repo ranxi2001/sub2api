@@ -785,7 +785,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			return mapErr
 		}
 		if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
-			firstClientMessage = s.ReplaceModelInBody(firstClientMessage, mappedModel)
+			if hooks.APIKeyModelMapping {
+				var err error
+				firstClientMessage, err = setAPIKeyCanonicalJSONField(firstClientMessage, []string{"model"}, mappedModel)
+				if err != nil {
+					return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket model payload", err)
+				}
+			} else {
+				firstClientMessage = s.ReplaceModelInBody(firstClientMessage, mappedModel)
+			}
 		}
 	}
 	ctx = withOpenAITransportRoute(ctx, "websocket", "passthrough", wsDecision.Reason, "")
@@ -1195,7 +1203,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						return payload, nil, err
 					}
 					if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
-						payload = s.ReplaceModelInBody(payload, upstreamModel)
+						if hooks.APIKeyModelMapping {
+							payload, err = setAPIKeyCanonicalJSONField(payload, []string{"model"}, upstreamModel)
+							if err != nil {
+								return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket model payload", err)
+							}
+						} else {
+							payload = s.ReplaceModelInBody(payload, upstreamModel)
+						}
 					}
 				}
 				if hooks != nil && hooks.BeforeTurn != nil {

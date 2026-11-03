@@ -1044,8 +1044,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
-		if modelMissing || upstreamModel != originalModel {
-			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
+		if modelMissing || upstreamModel != originalModel || (hooks != nil && hooks.APIKeyModelMapping) {
+			var next []byte
+			var setErr error
+			if hooks != nil && hooks.APIKeyModelMapping {
+				next, setErr = setAPIKeyCanonicalJSONField(normalized, []string{"model"}, upstreamModel)
+			} else {
+				next, setErr = applyPayloadMutation(normalized, "model", upstreamModel)
+			}
 			if setErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}

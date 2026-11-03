@@ -691,6 +691,13 @@
           />
         </div>
 
+        <div v-if="showEditModal && authStore.isAdmin" class="rounded-xl border border-gray-200 p-4 dark:border-dark-600">
+          <button type="button" class="btn btn-secondary" data-test="edit-key-model-policy" @click="showModelPolicy = true">
+            {{ t('apiKeyModelPolicy.title') }}
+          </button>
+          <p class="mt-2 text-sm text-gray-500 dark:text-dark-300">{{ t('apiKeyModelPolicy.scopeHint') }}</p>
+        </div>
+
         <!-- IP Restriction Section -->
         <div class="space-y-3">
           <div class="flex items-center justify-between">
@@ -1127,6 +1134,14 @@
       @updated="handleBulkUpdated"
     />
 
+    <ApiKeyModelPolicyDialog
+      v-if="authStore.isAdmin"
+      :show="showModelPolicy && showEditModal"
+      :api-key="selectedKey"
+      @close="showModelPolicy = false"
+      @updated="handleModelPolicyUpdated"
+    />
+
     <!-- Delete Confirmation Dialog -->
     <ConfirmDialog
       :show="showDeleteDialog"
@@ -1312,6 +1327,8 @@ import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
+import ApiKeyModelPolicyDialog from '@/components/admin/user/ApiKeyModelPolicyDialog.vue'
+import { useAuthStore } from '@/stores/auth'
 	import DataTable from '@/components/common/DataTable.vue'
 	import Pagination from '@/components/common/Pagination.vue'
 	import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -1362,6 +1379,7 @@ interface GroupOption {
 }
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
@@ -1589,6 +1607,7 @@ const filterGroupId = ref<string | number>('')
 
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
+const showModelPolicy = ref(false)
 const showDeleteDialog = ref(false)
 const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
@@ -1966,6 +1985,13 @@ const editKey = (key: ApiKey) => {
   showEditModal.value = true
 }
 
+const handleModelPolicyUpdated = (key: ApiKey) => {
+  // Preserve unsaved name/group edits in the main key form.
+  if (selectedKey.value?.id === key.id) selectedKey.value = key
+  const index = apiKeys.value.findIndex(item => item.id === key.id)
+  if (index !== -1) apiKeys.value[index] = key
+}
+
 const toggleKeyStatus = async (key: ApiKey) => {
   const newStatus = key.status === 'active' ? 'inactive' : 'active'
   try {
@@ -2179,6 +2205,7 @@ const handleDelete = async () => {
 }
 
 const closeModals = () => {
+  showModelPolicy.value = false
   showCreateModal.value = false
   showEditModal.value = false
   selectedKey.value = null

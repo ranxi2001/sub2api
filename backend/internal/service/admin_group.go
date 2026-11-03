@@ -1422,23 +1422,44 @@ func (s *adminServiceImpl) UpdateGroupSortOrders(ctx context.Context, updates []
 // AdminUpdateAPIKeyGroupID 管理员修改 API Key 分组绑定
 // groupID: nil=不修改, 指向0=解绑, 指向正整数=绑定到目标分组
 func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID int64, groupID *int64) (*AdminUpdateAPIKeyGroupIDResult, error) {
+	return s.AdminUpdateAPIKeySettings(ctx, keyID, AdminUpdateAPIKeySettingsInput{GroupID: groupID})
+}
+
+// AdminUpdateAPIKeySettings writes the selected key's policy and group together.
+// Field masks ensure ordinary user edits and omitted policy fields cannot reset it.
+func (s *adminServiceImpl) AdminUpdateAPIKeySettings(ctx context.Context, keyID int64, input AdminUpdateAPIKeySettingsInput) (*AdminUpdateAPIKeyGroupIDResult, error) {
+	if err := input.Validate(); err != nil {
+		return nil, err
+	}
 	apiKey, err := s.apiKeyRepo.GetByID(ctx, keyID)
 	if err != nil {
 		return nil, err
 	}
 
-	if groupID == nil {
-		// nil 表示不修改，直接返回
+	groupID := input.GroupID
+	fields := APIKeyUpdateFields{GroupID: groupID != nil, ModelMapping: input.ModelMapping != nil, ReasoningEffort: input.ReasoningEffort != nil, RateLimitUsage: input.ResetRateLimitUsage}
+	if fields.IsEmpty() {
 		return &AdminUpdateAPIKeyGroupIDResult{APIKey: apiKey}, nil
 	}
-
-	if *groupID < 0 {
-		return nil, infraerrors.BadRequest("INVALID_GROUP_ID", "group_id must be non-negative")
+	if input.ModelMapping != nil {
+		apiKey.ModelMapping = make(map[string]string, len(*input.ModelMapping))
+		for source, target := range *input.ModelMapping {
+			apiKey.ModelMapping[source] = target
+		}
+	}
+	if input.ReasoningEffort != nil {
+		apiKey.ReasoningEffort = *input.ReasoningEffort
+	}
+	if input.ResetRateLimitUsage {
+		apiKey.Usage5h, apiKey.Usage1d, apiKey.Usage7d = 0, 0, 0
+		apiKey.Window5hStart, apiKey.Window1dStart, apiKey.Window7dStart = nil, nil, nil
 	}
 
 	result := &AdminUpdateAPIKeyGroupIDResult{}
 
-	if *groupID == 0 {
+	if groupID == nil {
+		// Policy-only updates preserve all configured groups.
+	} else if *groupID == 0 {
 		// 0 表示解绑分组（不修改 user_allowed_groups，避免影响用户其他 Key）
 		apiKey.GroupID = nil
 		apiKey.GroupIDs = nil
@@ -1489,7 +1510,7 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 			if addErr := s.userRepo.AddGroupToAllowedGroups(opCtx, apiKey.UserID, gid); addErr != nil {
 				return nil, fmt.Errorf("add group to user allowed groups: %w", addErr)
 			}
-			if err := s.apiKeyRepo.Update(opCtx, apiKey, APIKeyUpdateFields{GroupID: true}); err != nil {
+			if err := s.apiKeyRepo.Update(opCtx, apiKey, fields); err != nil {
 				return nil, fmt.Errorf("update api key: %w", err)
 			}
 			if tx != nil {
@@ -1503,9 +1524,7 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 			result.GrantedGroupName = group.Name
 
 			// 失效认证缓存（在事务提交后执行）
-			if s.authCacheInvalidator != nil {
-				s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
-			}
+			s.invalidateAdminAPIKeySettingsCaches(ctx, apiKey, input.ResetRateLimitUsage)
 
 			result.APIKey = apiKey
 			return result, nil
@@ -1513,14 +1532,12 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 	}
 
 	// 非专属分组 / 解绑：无需事务，单步更新即可
-	if err := s.apiKeyRepo.Update(ctx, apiKey, APIKeyUpdateFields{GroupID: true}); err != nil {
+	if err := s.apiKeyRepo.Update(ctx, apiKey, fields); err != nil {
 		return nil, fmt.Errorf("update api key: %w", err)
 	}
 
 	// 失效认证缓存
-	if s.authCacheInvalidator != nil {
-		s.authCacheInvalidator.InvalidateAuthCacheByKey(ctx, apiKey.Key)
-	}
+	s.invalidateAdminAPIKeySettingsCaches(ctx, apiKey, input.ResetRateLimitUsage)
 
 	result.APIKey = apiKey
 	return result, nil

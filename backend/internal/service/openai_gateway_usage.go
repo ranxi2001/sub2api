@@ -238,23 +238,40 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	var cost *CostBreakdown
-	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
+	// Use the rewrite captured during forwarding, never current key settings:
+	// skipped endpoints and policy changes after admission retain their price.
+	requestedBillingModel := input.OriginalModel
+	if input.APIKeyMappedModel != "" {
+		requestedBillingModel = input.APIKeyMappedModel
+	}
+	channelBillingModel := input.ChannelMappedModel
+	if !input.ChannelMappingApplied && channelBillingModel == input.OriginalModel {
+		// An unchanged channel field is the audit alias, not an explicit price
+		// override. Do not resurrect its price when the key target is unpriced.
+		channelBillingModel = requestedBillingModel
+	}
+	resultBillingModel := result.Model
+	if !input.ChannelMappingApplied && result.Model == input.OriginalModel {
+		resultBillingModel = requestedBillingModel
+	}
+	billingModel := forwardResultBillingModel(resultBillingModel, result.UpstreamModel)
 	if result.BillingModel != "" {
 		billingModel = strings.TrimSpace(result.BillingModel)
 	}
-	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
+	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" &&
+		((input.APIKeyMappedModel != "" && input.ChannelMappingApplied) || input.ChannelMappedModel != input.OriginalModel) {
 		billingModel = input.ChannelMappedModel
 	}
 	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
-		billingModel = input.OriginalModel
+		billingModel = requestedBillingModel
 	}
 	billingModels := usageBillingModelCandidates(
 		billingModel,
 		result.BillingModel,
-		input.ChannelMappedModel,
-		input.OriginalModel,
+		channelBillingModel,
+		requestedBillingModel,
 		result.UpstreamModel,
-		result.Model,
+		resultBillingModel,
 	)
 	billingModels = s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, billingModels)
 	serviceTier := ""

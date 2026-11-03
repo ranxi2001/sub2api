@@ -16,6 +16,9 @@
               <div class="mb-1 flex items-center gap-2"><span class="font-medium text-gray-900 dark:text-white">{{ key.name }}</span><span :class="['badge text-xs', key.status === 'active' ? 'badge-success' : 'badge-danger']">{{ key.status }}</span></div>
               <p class="truncate font-mono text-sm text-gray-500">{{ key.key.substring(0, 20) }}...{{ key.key.substring(key.key.length - 8) }}</p>
             </div>
+            <button type="button" class="btn btn-secondary ml-3 text-xs" :disabled="updatingKeyIds.has(key.id)" data-test="edit-key-model-policy" @click="openModelPolicy(key)">
+              {{ t('apiKeyModelPolicy.title') }}
+            </button>
           </div>
           <div class="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
             <div class="flex items-center gap-1">
@@ -48,6 +51,13 @@
       </div>
     </div>
   </BaseDialog>
+
+  <ApiKeyModelPolicyDialog
+    :show="modelPolicyKey !== null"
+    :api-key="modelPolicyKey"
+    @close="modelPolicyKey = null"
+    @updated="handleModelPolicyUpdated"
+  />
 
   <!-- Group Selector Dropdown -->
   <Teleport to="body">
@@ -115,6 +125,7 @@ import type { AdminUser, AdminGroup, ApiKey } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import ApiKeyModelPolicyDialog from './ApiKeyModelPolicyDialog.vue'
 
 const props = defineProps<{ show: boolean; user: AdminUser | null }>()
 const emit = defineEmits(['close'])
@@ -124,6 +135,7 @@ const appStore = useAppStore()
 const apiKeys = ref<ApiKey[]>([])
 const allGroups = ref<AdminGroup[]>([])
 const loading = ref(false)
+const modelPolicyKey = ref<ApiKey | null>(null)
 let requestVersion = 0
 const updatingKeyIds = ref(new Set<number>())
 const groupSelectorKeyId = ref<number | null>(null)
@@ -148,6 +160,7 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 watch(() => [props.show, props.user?.id] as const, ([show], _, onCleanup) => {
   onCleanup(() => { requestVersion++ })
   closeGroupSelector()
+  modelPolicyKey.value = null
   if (show && props.user) {
     load()
     loadGroups()
@@ -206,6 +219,16 @@ const closeGroupSelector = () => {
   dropdownPosition.value = null
 }
 
+const openModelPolicy = (key: ApiKey) => {
+  closeGroupSelector()
+  modelPolicyKey.value = key
+}
+
+const handleModelPolicyUpdated = (key: ApiKey) => {
+  const index = apiKeys.value.findIndex(item => item.id === key.id)
+  if (index !== -1) apiKeys.value[index] = key
+}
+
 const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
   closeGroupSelector()
   if (key.group_id === newGroupId || (!key.group_id && newGroupId === null)) return
@@ -250,6 +273,7 @@ const handleClickOutside = (event: MouseEvent) => {
 
 const handleClose = () => {
   closeGroupSelector()
+  modelPolicyKey.value = null
   emit('close')
 }
 

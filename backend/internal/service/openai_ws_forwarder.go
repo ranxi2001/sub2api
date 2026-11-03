@@ -262,9 +262,15 @@ type OpenAIWSIngressHooks struct {
 	MaxReasoningEffortOverLimit string
 	// ReasoningEffortMappings rewrites explicit effort values for this WS session.
 	ReasoningEffortMappings []ReasoningEffortMapping
-	TurnStarted             func(turn int, startedAt time.Time)
-	BeforeTurn              func(turn int) error
-	BeforeRequest           func(turn int, payload []byte, originalModel string) error
+	// ForcedReasoningEffort is the administrator's per-key preference. The
+	// group ceiling remains authoritative after applying it to every turn.
+	ForcedReasoningEffort string
+	// APIKeyModelMapping canonicalizes model keys after a per-key mapping so
+	// duplicate/case-variant client fields cannot survive into an upstream parser.
+	APIKeyModelMapping bool
+	TurnStarted        func(turn int, startedAt time.Time)
+	BeforeTurn         func(turn int) error
+	BeforeRequest      func(turn int, payload []byte, originalModel string) error
 	// BeforeRequestWithClientPayload runs at the same admission boundary as
 	// BeforeRequest. clientPayload is the original client frame, before outbound
 	// normalization; use it only for local client identity validation. payload

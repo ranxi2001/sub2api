@@ -56,6 +56,9 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 	if len(models) == 0 && c.Query("model") != "" {
 		models = []string{c.Query("model")}
 	}
+	if service.IsAPIKeyModelPolicyPath(c.Request.URL.Path) {
+		models = service.APIKeyModelCandidates(key, models)
+	}
 	kind := "token"
 	path := c.Request.URL.Path
 	if strings.Contains(path, "/images/") {

@@ -144,6 +144,8 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldGroupID,
 			apikey.FieldName,
 			apikey.FieldStatus,
+			apikey.FieldModelMapping,
+			apikey.FieldReasoningEffort,
 			apikey.FieldIPWhitelist,
 			apikey.FieldIPBlacklist,
 			apikey.FieldQuota,
@@ -283,6 +285,16 @@ func (r *apiKeyRepository) update(ctx context.Context, key *service.APIKey, fiel
 	}
 	if fields.Name {
 		builder.SetName(key.Name)
+	}
+	if fields.ModelMapping {
+		mapping := key.ModelMapping
+		if mapping == nil {
+			mapping = map[string]string{}
+		}
+		builder.SetModelMapping(mapping)
+	}
+	if fields.ReasoningEffort {
+		builder.SetReasoningEffort(key.ReasoningEffort)
 	}
 	if fields.Status {
 		builder.SetStatus(key.Status)
@@ -944,6 +956,8 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		Key:              m.Key,
 		Name:             m.Name,
 		Status:           m.Status,
+		ModelMapping:     m.ModelMapping,
+		ReasoningEffort:  m.ReasoningEffort,
 		IPWhitelist:      m.IPWhitelist,
 		IPBlacklist:      m.IPBlacklist,
 		LastUsedAt:       m.LastUsedAt,

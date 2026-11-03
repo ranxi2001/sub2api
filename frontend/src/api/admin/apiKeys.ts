@@ -13,6 +13,17 @@ export interface UpdateApiKeyGroupResult {
   granted_group_name?: string
 }
 
+export interface ApiKeyModelPolicy {
+  model_mapping: Record<string, string>
+  reasoning_effort: string
+}
+
+/** Update only this key's administrator-managed model policy. */
+export async function updateApiKeyModelPolicy(id: number, policy: ApiKeyModelPolicy): Promise<UpdateApiKeyGroupResult> {
+  const { data } = await apiClient.put<UpdateApiKeyGroupResult>(`/admin/api-keys/${id}`, policy)
+  return data
+}
+
 /**
  * Update an API key's group binding
  * @param id - API Key ID
@@ -27,7 +38,8 @@ export async function updateApiKeyGroup(id: number, groupId: number | null): Pro
 }
 
 export const apiKeysAPI = {
-  updateApiKeyGroup
+  updateApiKeyGroup,
+  updateApiKeyModelPolicy
 }
 
 export default apiKeysAPI

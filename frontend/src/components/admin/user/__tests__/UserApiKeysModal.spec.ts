@@ -27,6 +27,7 @@ async function open() {
     global: { stubs: {
       BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
       GroupBadge: true, GroupOptionItem: true,
+      ApiKeyModelPolicyDialog: true,
     } },
   })
   await wrapper.setProps({ show: true })
@@ -38,6 +39,36 @@ async function switchUser(wrapper: Awaited<ReturnType<typeof open>>) {
 }
 
 describe('user API key loading', () => {
+  it('closes only the nested model dialog on Escape', async () => {
+    getKeys.mockResolvedValueOnce(keys(17, 'selected-key'))
+    const wrapper = mount(UserApiKeysModal, {
+      attachTo: document.body,
+      props: { show: false, user: user(1) },
+      global: { stubs: { GroupBadge: true, GroupOptionItem: true } }
+    })
+    await wrapper.setProps({ show: true }); await flushPromises()
+    const button = document.querySelector<HTMLButtonElement>('[data-test="edit-key-model-policy"]')!
+    button.click(); await flushPromises()
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ApiKeyModelPolicyDialog' }).props('show')).toBe(false)
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+  it('opens model settings for the selected key and replaces its saved settings', async () => {
+    getKeys.mockResolvedValueOnce(keys(17, 'selected-key'))
+    const wrapper = await open(); await flushPromises()
+    await wrapper.get('[data-test="edit-key-model-policy"]').trigger('click')
+    const dialog = wrapper.getComponent({ name: 'ApiKeyModelPolicyDialog' })
+    expect(dialog.props('apiKey').id).toBe(17)
+    dialog.vm.$emit('updated', { ...keys(17, 'selected-key').items[0], reasoning_effort: 'high' })
+    dialog.vm.$emit('close')
+    await flushPromises()
+    await wrapper.get('[data-test="edit-key-model-policy"]').trigger('click')
+    expect(dialog.props('apiKey').reasoning_effort).toBe('high')
+    await wrapper.setProps({ show: false })
+    expect(dialog.props('show')).toBe(false)
+  })
   it('does not display the previous user keys when the next load fails', async () => {
     getKeys.mockResolvedValueOnce(keys(1, 'first-user-key')).mockRejectedValueOnce(new Error('unavailable'))
     const wrapper = await open(); await flushPromises()
