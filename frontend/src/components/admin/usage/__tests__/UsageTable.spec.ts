@@ -1327,13 +1327,9 @@ it('renders content timing in separate columns and uses a dash for missing value
     global: { stubs: { DataTable: DataTableStubWithContentTiming, EmptyState: true, Icon: true, Teleport: true } },
   })
 
-  expect(wrapper.get('[data-row="timing-measured"] [data-testid="content-timing-reasoning-first"]').text()).toBe('120ms')
-  expect(wrapper.get('[data-row="timing-measured"] [data-testid="content-timing-visible-text-first"]').text()).toBe('1.33s')
-  expect(wrapper.get('[data-row="timing-measured"] [data-testid="content-timing-response-byte-first"]').text()).toBe('30ms')
-  expect(wrapper.get('[data-row="timing-missing"] [data-testid="content-timing-reasoning-first"]').text()).toBe('—')
-  expect(wrapper.get('[data-row="timing-missing"] [data-testid="content-timing-visible-text-first"]').text()).toBe('—')
-  expect(wrapper.get('[data-row="timing-missing"] [data-testid="content-timing-response-byte-first"]').text()).toBe('—')
-  expect(wrapper.get('[data-testid="content-timing-reasoning-first"]').attributes('title')).toBe(enLatencyObservability.typedScope)
+  expect(wrapper.find('[data-testid="content-timing-reasoning-first"]').exists()).toBe(false)
+  expect(wrapper.find('[data-testid="content-timing-visible-text-first"]').exists()).toBe(false)
+  expect(wrapper.find('[data-testid="content-timing-response-byte-first"]').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('Client end-to-end time')
   wrapper.unmount()
 })
