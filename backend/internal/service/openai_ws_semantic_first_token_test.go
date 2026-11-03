@@ -17,6 +17,12 @@ func TestWSSemanticFirstTokenForwarders(t *testing.T) {
 		name, event string
 		want        bool
 	}{
+		{"terminal_only", `{"type":"response.completed","response":{"id":"resp_synthetic","usage":{"output_tokens":1}}}`, false},
+		{"created", `{"type":"response.created"}`, false},
+		{"typed_reasoning_done", `{"type":"response.output_item.done","item":{"type":"reasoning"}}`, true},
+		{"reasoning_content_part", `{"type":"response.content_part.added","part":{"type":"reasoning_text"}}`, true},
+		{"summary_content_part", `{"type":"response.content_part.done","part":{"type":"summary_text"}}`, true},
+		{"untyped_item", `{"type":"response.output_item.added","item":{"id":"synthetic"}}`, false},
 		{"typed_reasoning", `{"type":"response.output_item.added","item":{"type":"reasoning","summary":[]}}`, true},
 		{"reasoning_part", `{"type":"response.reasoning_summary_part.added","part":{"type":"summary_text","text":""}}`, true},
 		{"reasoning_delta", `{"type":"response.reasoning_text.delta","delta":"thinking"}`, true},

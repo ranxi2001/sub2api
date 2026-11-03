@@ -944,7 +944,8 @@ readLoop:
 		if reqStream {
 			// 默认缓冲首 token 前的事件，保留既有的早期错误处理窗口。
 			// 显式开启 HTTP SSE 加速时立即刷出，之后不再重放请求。
-			shouldBuffer := !flushEarlyEvents && firstTokenMs == nil && !isTokenEvent && !isTerminalEvent
+			// Preserve the legacy flush boundary independently of semantic timing.
+			shouldBuffer := !flushEarlyEvents && tokenEventCount == 0 && !isTokenEvent && !isTerminalEvent
 			if shouldBuffer {
 				buffered := make([]byte, len(message))
 				copy(buffered, message)
