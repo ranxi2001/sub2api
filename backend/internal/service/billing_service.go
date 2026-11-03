@@ -97,8 +97,6 @@ type BillingCache interface {
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
 type ModelPricing struct {
-	// UltrafastMultiplier is model-owned and independent of operator Fast pricing.
-	UltrafastMultiplier                float64
 	InputPricePerToken                 float64            // 每token输入价格 (USD)
 	InputPricePerTokenPriority         float64            // priority service tier 下每token输入价格 (USD)
 	ImageInputPricePerToken            float64            // 图片输入 token 价格 (USD)，用于多模态 embedding 等图文不同价场景；为 0 时回退到 InputPricePerToken
@@ -145,8 +143,10 @@ func usePriorityServiceTierPricing(serviceTier string, pricing *ModelPricing) bo
 
 func serviceTierCostMultiplier(serviceTier string) float64 {
 	switch normalizeBillingServiceTier(serviceTier) {
-	case "priority", "fast", OpenAIFastTierUltrafast:
+	case "priority", "fast":
 		return 2.0
+	case OpenAIFastTierUltrafast:
+		return 6.0
 	case "flex":
 		return 0.5
 	default:
@@ -156,9 +156,6 @@ func serviceTierCostMultiplier(serviceTier string) float64 {
 
 func configuredServiceTierMultiplier(serviceTier string, pricing *ModelPricing) float64 {
 	if pricing != nil {
-		if normalizeBillingServiceTier(serviceTier) == OpenAIFastTierUltrafast && pricing.UltrafastMultiplier > 0 {
-			return pricing.UltrafastMultiplier
-		}
 		switch normalizeBillingServiceTier(serviceTier) {
 		case "priority", "fast":
 			if pricing.FastMultiplier != nil {
@@ -1954,9 +1951,6 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 		return pricing
 	}
 	cloned := *pricing
-	if isOpenAIGPT6AstraModel(normalized) {
-		cloned.UltrafastMultiplier = 6
-	}
 	if needsOpus55FastMultiplier {
 		multiplier := 2.0
 		cloned.FastMultiplier = &multiplier

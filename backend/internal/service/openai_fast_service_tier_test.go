@@ -771,10 +771,26 @@ func TestUpstreamResponseModelObserver_ObservesServiceTier(t *testing.T) {
 	ccObserver.ObserveOpenAI([]byte(`{"id":"chatcmpl-1","model":"gpt-5.5","service_tier":"priority","choices":[]}`), "")
 	require.Equal(t, "priority", ccObserver.ServiceTier())
 
-	// 无 model 的帧不触发 tier 观察（上游约束：tier 声明必带 model）。
-	modelFree := &upstreamResponseModelObserver{}
-	modelFree.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"service_tier":"default"}}`), "response.completed")
-	require.Empty(t, modelFree.ServiceTier())
+	// 兼容上游的终态帧可能只声明实际档位，不重复 model；两者独立观察。
+	for _, tier := range []string{"default", "priority", "ultrafast"} {
+		t.Run("terminal without model/"+tier, func(t *testing.T) {
+			modelFree := &upstreamResponseModelObserver{}
+			modelFree.ObserveOpenAI([]byte(`{"type":"response.created","response":{"service_tier":"`+tier+`"}}`), "response.created")
+			require.Empty(t, modelFree.ServiceTier(), "non-terminal request echoes must remain ignored")
+			modelFree.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"service_tier":"`+tier+`"}}`), "response.completed")
+			require.Equal(t, tier, modelFree.ServiceTier())
+			require.Empty(t, modelFree.Model(), "observing a tier must not invent a model")
+		})
+	}
+
+	t.Run("terminal without model retains earlier model", func(t *testing.T) {
+		modelFirst := &upstreamResponseModelObserver{}
+		modelFirst.ObserveOpenAI([]byte(`{"type":"response.created","response":{"model":"gpt-5.5","service_tier":"priority"}}`), "response.created")
+		modelFirst.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"service_tier":"ultrafast"}}`), "response.completed")
+		require.Equal(t, "ultrafast", modelFirst.ServiceTier())
+		require.Equal(t, "gpt-5.5", modelFirst.Model())
+		require.False(t, modelFirst.Conflict())
+	})
 }
 
 func TestResolvedOpenAIUpstreamServiceTier(t *testing.T) {

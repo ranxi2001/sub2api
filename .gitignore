@@ -145,6 +145,7 @@ docs/*
 !docs/anonymous-api-guard.md
 !docs/registration-email-alias-block.md
 !docs/openai-ws-sse-acceleration.md
+!docs/openai-ultrafast-billing.md
 !docs/openai-ws-mode.md
 !docs/openai-outbound-identity.md
 !docs/openai-2fa-dual-oauth.md

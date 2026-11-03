@@ -1402,6 +1402,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	keys := []string{
 		"openai_connections_managed", "openai_auth_connections",
+		// Usage settlement can receive an account from this projection. Preserve
+		// the explicit response-tier billing contract through scheduler caches.
+		service.OpenAIResponseTierBillingEnabledKey,
 		// Priority scoring runs on candidate metadata before full hydration.
 		// Dropping saved procurement cost silently substitutes the 0.1 default.
 		service.AccountCostMultiplierExtraKey,

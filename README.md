@@ -82,6 +82,12 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - **管理后台** - Web 界面进行监控和管理
 - **外部系统集成** - 支持通过 iframe 嵌入外部系统（如工单等），扩展管理后台功能
 
+### OpenAI API Key 的 UltraFast 档位计费
+
+账号新增/编辑页提供默认关闭的 **UltraFast 档位计费** 开关。开启后，按该账号所有有价 token 模型的上游响应 `service_tier` 结算；`ultrafast` 使用标准单价×6，包含缓存读写，再应用有效账号/分组倍率。响应未返回档位时按请求档位回退，该开关不强制上游加速。
+
+客户端明确请求 `ultrafast` 且最终仍按该档位结算时，关闭此开关也按6倍收费。开关控制是否采用上游响应升档，不豁免客户端请求的 UltraFast 价格。配置字段、响应降档、长上下文和计费范围见 [UltraFast 账号计费说明](docs/openai-ultrafast-billing.md)。
+
 ### Anthropic API Key 客户端模拟与计费
 
 创建或编辑 Anthropic API Key 账号时, 可开启 "模拟 Claude Code 客户端", 为要求 Claude Code 客户端的上游补齐缺失的请求头, system 身份句和会话信息. 原有 system 指令及缓存断点会保留, count_tokens 仅补请求头. 此选项与 "抹除 Claude Code 身份" 互斥, 同时存储为开启时以抹除身份为准. 身份句可能影响模型自述.
