@@ -779,10 +779,17 @@ const autoRefreshIntervalSeconds = ref<(typeof autoRefreshIntervals)[number]>(30
 const autoRefreshCountdown = ref(0)
 const autoRefreshETag = ref<string | null>(null)
 const autoRefreshFetching = ref(false)
+let autoRefreshAbortController: AbortController | null = null
 let accountListContextVersion = 0
 const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
 const autoRefreshSilentUntil = ref(0)
 const hasPendingListSync = ref(false)
+const cancelAutoRefreshRequest = () => {
+  autoRefreshAbortController?.abort()
+  autoRefreshAbortController = null
+  autoRefreshFetching.value = false
+  autoRefreshETag.value = null
+}
 const todayStatsByAccountId = ref<Record<string, WindowStats>>({})
 const todayStatsLoading = ref(false)
 const todayStatsError = ref<string | null>(null)
@@ -1108,6 +1115,7 @@ const setAutoRefreshEnabled = (enabled: boolean) => {
     autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
     resumeAutoRefresh()
   } else {
+    cancelAutoRefreshRequest()
     pauseAutoRefresh()
     autoRefreshCountdown.value = 0
   }
@@ -1230,7 +1238,7 @@ useSwipeSelect(accountTableRef, {
 
 const resetAutoRefreshCache = () => {
   accountListContextVersion += 1
-  autoRefreshETag.value = null
+  cancelAutoRefreshRequest()
   upstreamBillingRateETag.value = null
   upstreamBillingRateAbortController?.abort()
 }
@@ -1388,6 +1396,8 @@ const refreshUpstreamBillingRates = async (force = false) => {
   )) return
 
   const controller = new AbortController()
+  // A newer compact read must not be overwritten by an older list response.
+  cancelAutoRefreshRequest()
   upstreamBillingRateAbortController = controller
   upstreamBillingRateRefreshing.value = true
   try {
@@ -1519,7 +1529,15 @@ const isAnyModalOpen = computed(() => {
   )
 })
 
+watch(isAnyModalOpen, open => {
+  if (!open) return
+  // A response already in flight must not replace the account backing an edit.
+  cancelAutoRefreshRequest()
+  upstreamBillingRateAbortController?.abort()
+})
+
 const enterAutoRefreshSilentWindow = () => {
+  cancelAutoRefreshRequest()
   autoRefreshSilentUntil.value = Date.now() + AUTO_REFRESH_SILENT_WINDOW_MS
   autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
 }
@@ -1598,6 +1616,10 @@ const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   syncAccountListDerivedParams()
   const requestContextVersion = accountListContextVersion
+  const controller = new AbortController()
+  // Both readers write the same rows; the newer request owns the update.
+  upstreamBillingRateAbortController?.abort()
+  autoRefreshAbortController = controller
   autoRefreshFetching.value = true
   const upgradeStateRefresh = loadConcurrencyUpgradeState()
   try {
@@ -1615,11 +1637,11 @@ const refreshAccountsIncrementally = async () => {
         sort_order?: AccountSortOrder
 
       },
-      { etag: autoRefreshETag.value }
+      { etag: autoRefreshETag.value, signal: controller.signal }
     )
 
     // A sort/filter/page change may finish while this refresh is in flight.
-    if (requestContextVersion !== accountListContextVersion) return
+    if (controller.signal.aborted || !autoRefreshEnabled.value || requestContextVersion !== accountListContextVersion) return
 
     if (result.etag) {
       autoRefreshETag.value = result.etag
@@ -1634,10 +1656,13 @@ const refreshAccountsIncrementally = async () => {
 
     await refreshTodayStatsBatch()
   } catch (error) {
-    console.error('Auto refresh failed:', error)
+    if (!controller.signal.aborted) console.error('Auto refresh failed:', error)
   } finally {
     await upgradeStateRefresh
-    autoRefreshFetching.value = false
+    if (autoRefreshAbortController === controller) {
+      autoRefreshAbortController = null
+      autoRefreshFetching.value = false
+    }
   }
 }
 
@@ -2771,6 +2796,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  accountListContextVersion++
+  cancelAutoRefreshRequest()
   performanceRequest++
   performanceAbort?.abort()
   clearTimeout(timerListRefresh)
