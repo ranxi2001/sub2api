@@ -1,0 +1,69 @@
+name: Serverless IP routing
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/serverless/**'
+      - 'frontend/src/components/settings/ServerlessSettings*'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/views/admin/SettingsView.vue'
+      - 'frontend/src/views/admin/__tests__/SettingsView.spec.ts'
+      - '.github/scripts/serverless-ip-routing-screenshot.mjs'
+      - '.github/workflows/serverless-ip-routing.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  routing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Serverless routing, Redis cache and transport regressions
+        working-directory: backend
+        run: go test -race ./internal/serverless -count=1 -timeout=5m
+
+  settings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Settings regressions
+        working-directory: frontend
+        run: pnpm exec vitest run src/components/settings/ServerlessSettings.spec.ts src/views/admin/__tests__/SettingsView.spec.ts
+      - name: Install isolated screenshot tool
+        run: |
+          npm install --prefix "$RUNNER_TEMP/serverless-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/serverless-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render the actual settings component with fictional fixtures
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/serverless-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/serverless-ui
+          SOURCE_BASE: ${{ github.event.pull_request.base.sha }}
+        run: node .github/scripts/serverless-ip-routing-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: serverless-settings-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/serverless-ui
+          if-no-files-found: warn
