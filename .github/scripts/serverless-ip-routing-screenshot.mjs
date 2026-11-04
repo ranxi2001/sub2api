@@ -19,7 +19,8 @@ const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_ROOT
 const suffix = `.ci-serverless-${process.pid}`
 const baselineName = suffix + '-before.vue'
 const entryNames = [suffix + '-before.js', suffix + '-after.js']
-const files = [baselineName, ...entryNames].map(name => join(root, name))
+const mockFile = join(root, suffix + '-api.js')
+const files = [baselineName, ...entryNames].map(name => join(root, name)).concat(mockFile)
 const baseline = execFileSync('git', ['show', `${process.env.SOURCE_BASE}:frontend/src/components/settings/ServerlessSettings.vue`], { encoding: 'utf8' })
 const snapshot = {
   config: { enabled: false, pods: [{ id: 'cn-gateway', endpoint: 'https://cn.example.com', enabled: true }], regions: [{ country: 'CN', pod_ids: ['cn-gateway'] }] },
@@ -30,6 +31,7 @@ let server, browser
 const errors = []
 try {
   writeFileSync(files[0], baseline, { flag: 'wx' })
+  writeFileSync(mockFile, `let snapshot=${JSON.stringify(snapshot)};export const apiClient={get:async()=>({data:structuredClone(snapshot)}),put:async(_u,c)=>{snapshot.config=structuredClone(c);return{data:structuredClone(c)}},post:async()=>({data:{ready:true}})};`, { flag: 'wx' })
   for (const [i, name] of entryNames.entries()) {
     writeFileSync(join(root, name), `
       import { createApp, h } from 'vue';
@@ -47,19 +49,16 @@ try {
   }
   server = await createServer({
     root, configFile: false, cacheDir: join(output, 'vite-cache'),
-    resolve: { alias: { '@': join(root, 'src') } },
+    resolve: { alias: [
+      { find: '@/api/client', replacement: mockFile },
+      { find: '@', replacement: join(root, 'src') },
+    ] },
     css: { postcss: { plugins: [
       tailwindcss({ ...tailwindConfig, content: [join(root, 'index.html'), join(root, 'src/**/*.{vue,js,ts,jsx,tsx}'), files[0]] }),
       autoprefixer(),
     ] } },
     plugins: [vue(), {
       name: 'serverless-offline-preview',
-      resolveId(id) {
-        if (id === '@/api/client' || id === join(root, 'src/api/client') || id === join(root, 'src/api/client.ts')) return '\0serverless-api'
-      },
-      load(id) {
-        if (id === '\0serverless-api') return `let snapshot=${JSON.stringify(snapshot)};export const apiClient={get:async()=>({data:structuredClone(snapshot)}),put:async(_u,c)=>{snapshot.config=structuredClone(c);return{data:structuredClone(c)}},post:async()=>({data:{ready:true}})};`
-      },
       configureServer(vite) {
         vite.middlewares.use((req, res, next) => {
           if (!['/before', '/after'].includes(req.url)) return next()
@@ -70,7 +69,7 @@ try {
       },
     }],
     server: { host: '127.0.0.1', port: 4191, strictPort: true },
-    optimizeDeps: { entries: [], include: ['vue', 'vue-i18n', 'pinia'] },
+    optimizeDeps: { entries: [], include: ['vue', 'vue-i18n', 'pinia'], noDiscovery: true },
   })
   await server.listen()
   browser = await chromium.launch({ headless: true })
@@ -86,7 +85,10 @@ try {
   for (const name of ['before', 'after']) {
     await page.goto('http://127.0.0.1:4191/' + name)
     await page.locator('summary').first().click()
-    await page.waitForFunction(() => !document.querySelector('[data-testid="serverless-enabled"]').disabled)
+    await page.waitForFunction(() => {
+      const checkbox = document.querySelector('[data-testid="serverless-enabled"]')
+      return checkbox && !checkbox.disabled
+    })
     await page.screenshot({ path: join(output, name + '.png'), fullPage: true })
   }
   await page.locator('[data-testid="serverless-affinity-scope"]').selectOption('api_key_ip')
