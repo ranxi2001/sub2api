@@ -127,6 +127,26 @@ func (_c *APIKeyCreate) SetNillableStatus(v *string) *APIKeyCreate {
 	return _c
 }
 
+// SetModelMapping sets the "model_mapping" field.
+func (_c *APIKeyCreate) SetModelMapping(v map[string]string) *APIKeyCreate {
+	_c.mutation.SetModelMapping(v)
+	return _c
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (_c *APIKeyCreate) SetReasoningEffort(v string) *APIKeyCreate {
+	_c.mutation.SetReasoningEffort(v)
+	return _c
+}
+
+// SetNillableReasoningEffort sets the "reasoning_effort" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableReasoningEffort(v *string) *APIKeyCreate {
+	if v != nil {
+		_c.SetReasoningEffort(*v)
+	}
+	return _c
+}
+
 // SetLastUsedAt sets the "last_used_at" field.
 func (_c *APIKeyCreate) SetLastUsedAt(v time.Time) *APIKeyCreate {
 	_c.mutation.SetLastUsedAt(v)
@@ -405,6 +425,14 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultStatus
 		_c.mutation.SetStatus(v)
 	}
+	if _, ok := _c.mutation.ModelMapping(); !ok {
+		v := apikey.DefaultModelMapping
+		_c.mutation.SetModelMapping(v)
+	}
+	if _, ok := _c.mutation.ReasoningEffort(); !ok {
+		v := apikey.DefaultReasoningEffort
+		_c.mutation.SetReasoningEffort(v)
+	}
 	if _, ok := _c.mutation.Quota(); !ok {
 		v := apikey.DefaultQuota
 		_c.mutation.SetQuota(v)
@@ -481,6 +509,17 @@ func (_c *APIKeyCreate) check() error {
 	if v, ok := _c.mutation.Status(); ok {
 		if err := apikey.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "APIKey.status": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ModelMapping(); !ok {
+		return &ValidationError{Name: "model_mapping", err: errors.New(`ent: missing required field "APIKey.model_mapping"`)}
+	}
+	if _, ok := _c.mutation.ReasoningEffort(); !ok {
+		return &ValidationError{Name: "reasoning_effort", err: errors.New(`ent: missing required field "APIKey.reasoning_effort"`)}
+	}
+	if v, ok := _c.mutation.ReasoningEffort(); ok {
+		if err := apikey.ReasoningEffortValidator(v); err != nil {
+			return &ValidationError{Name: "reasoning_effort", err: fmt.Errorf(`ent: validator failed for field "APIKey.reasoning_effort": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.Quota(); !ok {
@@ -564,6 +603,14 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.ModelMapping(); ok {
+		_spec.SetField(apikey.FieldModelMapping, field.TypeJSON, value)
+		_node.ModelMapping = value
+	}
+	if value, ok := _c.mutation.ReasoningEffort(); ok {
+		_spec.SetField(apikey.FieldReasoningEffort, field.TypeString, value)
+		_node.ReasoningEffort = value
 	}
 	if value, ok := _c.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)
@@ -838,6 +885,30 @@ func (u *APIKeyUpsert) SetStatus(v string) *APIKeyUpsert {
 // UpdateStatus sets the "status" field to the value that was provided on create.
 func (u *APIKeyUpsert) UpdateStatus() *APIKeyUpsert {
 	u.SetExcluded(apikey.FieldStatus)
+	return u
+}
+
+// SetModelMapping sets the "model_mapping" field.
+func (u *APIKeyUpsert) SetModelMapping(v map[string]string) *APIKeyUpsert {
+	u.Set(apikey.FieldModelMapping, v)
+	return u
+}
+
+// UpdateModelMapping sets the "model_mapping" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateModelMapping() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldModelMapping)
+	return u
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *APIKeyUpsert) SetReasoningEffort(v string) *APIKeyUpsert {
+	u.Set(apikey.FieldReasoningEffort, v)
+	return u
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateReasoningEffort() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldReasoningEffort)
 	return u
 }
 
@@ -1286,6 +1357,34 @@ func (u *APIKeyUpsertOne) SetStatus(v string) *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) UpdateStatus() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetModelMapping sets the "model_mapping" field.
+func (u *APIKeyUpsertOne) SetModelMapping(v map[string]string) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetModelMapping(v)
+	})
+}
+
+// UpdateModelMapping sets the "model_mapping" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateModelMapping() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateModelMapping()
+	})
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *APIKeyUpsertOne) SetReasoningEffort(v string) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetReasoningEffort(v)
+	})
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateReasoningEffort() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateReasoningEffort()
 	})
 }
 
@@ -1945,6 +2044,34 @@ func (u *APIKeyUpsertBulk) SetStatus(v string) *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) UpdateStatus() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetModelMapping sets the "model_mapping" field.
+func (u *APIKeyUpsertBulk) SetModelMapping(v map[string]string) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetModelMapping(v)
+	})
+}
+
+// UpdateModelMapping sets the "model_mapping" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateModelMapping() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateModelMapping()
+	})
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *APIKeyUpsertBulk) SetReasoningEffort(v string) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetReasoningEffort(v)
+	})
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateReasoningEffort() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateReasoningEffort()
 	})
 }
 

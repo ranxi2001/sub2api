@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createPinia } from 'pinia'
 
 import type { ApiKey, ApiKeyConcurrencySnapshot, Group } from '@/types'
 import { keysAPI } from '@/api'
@@ -22,6 +23,7 @@ const {
   copyToClipboard,
   isCurrentStep,
   nextStep,
+  auth,
 } = vi.hoisted(() => ({
   listKeys: vi.fn(),
   createKey: vi.fn(),
@@ -36,6 +38,7 @@ const {
   copyToClipboard: vi.fn(),
   isCurrentStep: vi.fn(),
   nextStep: vi.fn(),
+  auth: { isAdmin: false, user: { id: 41 } },
 }))
 
 const messages: Record<string, string> = {
@@ -106,6 +109,8 @@ vi.mock('@/stores/app', () => ({
     showSuccess,
   }),
 }))
+
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
 
 vi.mock('@/stores/onboarding', () => ({
   useOnboardingStore: () => ({
@@ -248,6 +253,7 @@ const IconStub = {
 const mountView = async () => {
   const wrapper = mount(KeysView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,
@@ -265,6 +271,7 @@ const mountView = async () => {
         Icon: IconStub,
         UseKeyModal: true,
         BulkEditKeysModal: true,
+        ApiKeyModelPolicyDialog: true,
         EndpointPopover: true,
         GroupBadge: {
           name: 'GroupBadge',
@@ -318,6 +325,7 @@ describe('user KeysView column settings', () => {
   })
 
   beforeEach(() => {
+    auth.isAdmin = false
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     localStorage.clear()
@@ -351,6 +359,38 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     isCurrentStep.mockReturnValue(false)
+  })
+
+  it('shows model policy editing only to administrators', async () => {
+    const ordinaryView = await mountView()
+    await getButtonByText(ordinaryView, 'common.edit').trigger('click')
+    expect(ordinaryView.find('[data-test="edit-key-model-policy"]').exists()).toBe(false)
+    ordinaryView.unmount()
+
+    auth.isAdmin = true
+    const adminView = await mountView()
+    await getButtonByText(adminView, 'common.edit').trigger('click')
+    await adminView.get('[data-test="edit-key-model-policy"]').trigger('click')
+    expect(adminView.getComponent({ name: 'ApiKeyModelPolicyDialog' }).props('show')).toBe(true)
+    expect(adminView.getComponent({ name: 'ApiKeyModelPolicyDialog' }).props('apiKey').id).toBe(1)
+  })
+
+  it('preserves unsaved key details when administrator model settings are saved', async () => {
+    auth.isAdmin = true
+    listKeys.mockResolvedValueOnce({ items: [{ ...createApiKey(), group_id: 42 }], total: 1 })
+    const wrapper = await mountView()
+    await getButtonByText(wrapper, 'common.edit').trigger('click')
+    await wrapper.get('[data-tour="key-form-name"]').setValue('Unsaved name')
+    wrapper.getComponent({ name: 'ApiKeyModelPolicyDialog' }).vm.$emit('updated', {
+      ...createApiKey(), group_id: 42, model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol' }, reasoning_effort: 'high'
+    })
+    await nextTick()
+    expect((wrapper.get('[data-tour="key-form-name"]').element as HTMLInputElement).value).toBe('Unsaved name')
+    await wrapper.get('#key-form').trigger('submit')
+    await flushPromises()
+    expect(updateKey).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'Unsaved name' }))
+    expect(updateKey.mock.calls[0][1]).not.toHaveProperty('model_mapping')
+    expect(updateKey.mock.calls[0][1]).not.toHaveProperty('reasoning_effort')
   })
 
   it.each([

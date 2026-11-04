@@ -135,6 +135,8 @@ type APIKeyMutation struct {
 	key                  *string
 	name                 *string
 	status               *string
+	model_mapping        *map[string]string
+	reasoning_effort     *string
 	last_used_at         *time.Time
 	ip_whitelist         *[]string
 	appendip_whitelist   []string
@@ -639,6 +641,78 @@ func (m *APIKeyMutation) OldStatus(ctx context.Context) (v string, err error) {
 // ResetStatus resets all changes to the "status" field.
 func (m *APIKeyMutation) ResetStatus() {
 	m.status = nil
+}
+
+// SetModelMapping sets the "model_mapping" field.
+func (m *APIKeyMutation) SetModelMapping(value map[string]string) {
+	m.model_mapping = &value
+}
+
+// ModelMapping returns the value of the "model_mapping" field in the mutation.
+func (m *APIKeyMutation) ModelMapping() (r map[string]string, exists bool) {
+	v := m.model_mapping
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModelMapping returns the old "model_mapping" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldModelMapping(ctx context.Context) (v map[string]string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModelMapping is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModelMapping requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModelMapping: %w", err)
+	}
+	return oldValue.ModelMapping, nil
+}
+
+// ResetModelMapping resets all changes to the "model_mapping" field.
+func (m *APIKeyMutation) ResetModelMapping() {
+	m.model_mapping = nil
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (m *APIKeyMutation) SetReasoningEffort(s string) {
+	m.reasoning_effort = &s
+}
+
+// ReasoningEffort returns the value of the "reasoning_effort" field in the mutation.
+func (m *APIKeyMutation) ReasoningEffort() (r string, exists bool) {
+	v := m.reasoning_effort
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReasoningEffort returns the old "reasoning_effort" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldReasoningEffort(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReasoningEffort is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReasoningEffort requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReasoningEffort: %w", err)
+	}
+	return oldValue.ReasoningEffort, nil
+}
+
+// ResetReasoningEffort resets all changes to the "reasoning_effort" field.
+func (m *APIKeyMutation) ResetReasoningEffort() {
+	m.reasoning_effort = nil
 }
 
 // SetLastUsedAt sets the "last_used_at" field.
@@ -1606,7 +1680,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 24)
+	fields := make([]string, 0, 26)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1633,6 +1707,12 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.status != nil {
 		fields = append(fields, apikey.FieldStatus)
+	}
+	if m.model_mapping != nil {
+		fields = append(fields, apikey.FieldModelMapping)
+	}
+	if m.reasoning_effort != nil {
+		fields = append(fields, apikey.FieldReasoningEffort)
 	}
 	if m.last_used_at != nil {
 		fields = append(fields, apikey.FieldLastUsedAt)
@@ -1705,6 +1785,10 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.GroupID()
 	case apikey.FieldStatus:
 		return m.Status()
+	case apikey.FieldModelMapping:
+		return m.ModelMapping()
+	case apikey.FieldReasoningEffort:
+		return m.ReasoningEffort()
 	case apikey.FieldLastUsedAt:
 		return m.LastUsedAt()
 	case apikey.FieldIPWhitelist:
@@ -1762,6 +1846,10 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldGroupID(ctx)
 	case apikey.FieldStatus:
 		return m.OldStatus(ctx)
+	case apikey.FieldModelMapping:
+		return m.OldModelMapping(ctx)
+	case apikey.FieldReasoningEffort:
+		return m.OldReasoningEffort(ctx)
 	case apikey.FieldLastUsedAt:
 		return m.OldLastUsedAt(ctx)
 	case apikey.FieldIPWhitelist:
@@ -1863,6 +1951,20 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetStatus(v)
+		return nil
+	case apikey.FieldModelMapping:
+		v, ok := value.(map[string]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModelMapping(v)
+		return nil
+	case apikey.FieldReasoningEffort:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReasoningEffort(v)
 		return nil
 	case apikey.FieldLastUsedAt:
 		v, ok := value.(time.Time)
@@ -2212,6 +2314,12 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldStatus:
 		m.ResetStatus()
+		return nil
+	case apikey.FieldModelMapping:
+		m.ResetModelMapping()
+		return nil
+	case apikey.FieldReasoningEffort:
+		m.ResetReasoningEffort()
 		return nil
 	case apikey.FieldLastUsedAt:
 		m.ResetLastUsedAt()

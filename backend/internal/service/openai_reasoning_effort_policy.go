@@ -463,7 +463,17 @@ func ApplyOpenAIReasoningEffortPolicyFromContext(ctx context.Context, body []byt
 	if !ok {
 		return body, false, nil
 	}
-	return ApplyOpenAIReasoningEffortPolicy(body, policy.maxEffort, policy.mappings, policy.overLimit, policy.requestModel)
+	forced, _ := ctx.Value(apiKeyForcedReasoningEffortContextKey{}).(string)
+	return ApplyAPIKeyOpenAIReasoningEffortPolicy(body, forced, policy.maxEffort, policy.mappings, policy.overLimit, policy.requestModel)
+}
+
+type apiKeyForcedReasoningEffortContextKey struct{}
+
+// WithAPIKeyOpenAIReasoningEffortPolicy keeps a fixed key effort through the
+// Messages-to-OpenAI conversion, including requests that omit an effort.
+func WithAPIKeyOpenAIReasoningEffortPolicy(ctx context.Context, forced, maxEffort string, mappings []ReasoningEffortMapping, overLimit string, requestModels ...string) context.Context {
+	ctx = WithOpenAIReasoningEffortPolicy(ctx, maxEffort, mappings, overLimit, requestModels...)
+	return context.WithValue(ctx, apiKeyForcedReasoningEffortContextKey{}, forced)
 }
 
 func mapReasoningEffort(raw string, mappings []ReasoningEffortMapping, requestModel string) (string, bool) {
@@ -563,11 +573,13 @@ func ApplyReasoningEffortPolicy(body []byte, maxEffort string, mappings []Reason
 	return result, changed, nil
 }
 
-func applyOpenAIWSReasoningEffortPolicy(payload []byte, hooks *OpenAIWSIngressHooks) ([]byte, error) {
-	if hooks == nil || (hooks.MaxReasoningEffort == "" && len(hooks.ReasoningEffortMappings) == 0) {
+// The optional key preference extends the original group-only policy call.
+func applyOpenAIWSReasoningEffortPolicy(payload []byte, hooks *OpenAIWSIngressHooks, forcedEfforts ...string) ([]byte, error) {
+	forced := firstNonEmpty(forcedEfforts...)
+	if hooks == nil || (forced == "" && hooks.MaxReasoningEffort == "" && len(hooks.ReasoningEffortMappings) == 0) {
 		return payload, nil
 	}
-	capped, changed, err := ApplyOpenAIReasoningEffortPolicy(payload, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings, hooks.MaxReasoningEffortOverLimit)
+	capped, changed, err := ApplyAPIKeyOpenAIReasoningEffortPolicy(payload, forced, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings, hooks.MaxReasoningEffortOverLimit)
 	if err != nil {
 		return payload, err
 	}

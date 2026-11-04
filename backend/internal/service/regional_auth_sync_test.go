@@ -47,6 +47,8 @@ func TestRegionalAuthLocalReplacementRevocationAndRestore(t *testing.T) {
 	_, err = svc.GetByKey(ctx, "sk-regional-test-secret")
 	require.ErrorIs(t, err, ErrRegionalAuthUnavailable)
 	record := authTestRecord()
+	record.APIKey.ModelMapping = map[string]string{"gpt-6.1-sol": "gpt-5.6-sol"}
+	record.APIKey.ReasoningEffort = "high"
 	payload, err := ExportRegionalAuth(ctx, regionalAuthSourceStub{records: []RegionalAuthRecord{record}}, []int64{2}, lookup)
 	require.NoError(t, err)
 	require.NotContains(t, string(payload), record.APIKey.Key)
@@ -60,11 +62,15 @@ func TestRegionalAuthLocalReplacementRevocationAndRestore(t *testing.T) {
 	require.Equal(t, 7, *key.User.UserGroupRPMOverride)
 	require.True(t, key.Group.ProfitControlEnabled)
 	require.True(t, key.Group.StreamOnly)
+	require.Equal(t, record.APIKey.ModelMapping, key.ModelMapping)
+	require.Equal(t, "high", key.ReasoningEffort)
+	key.ModelMapping["gpt-6.1-sol"] = "changed"
 	key.User.AllowedGroups = nil
 	key.Group.Status = StatusDisabled
 	key, err = svc.GetByKeyUncached(ctx, record.APIKey.Key)
 	require.NoError(t, err)
 	require.Equal(t, []int64{3}, key.User.AllowedGroups)
+	require.Equal(t, "gpt-5.6-sol", key.ModelMapping["gpt-6.1-sol"])
 	persisted, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.NotContains(t, string(persisted), "forbidden-model")
