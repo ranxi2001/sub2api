@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ServerlessSettings from './ServerlessSettings.vue'
 import { apiClient } from '@/api/client'
+import { createPinia, setActivePinia } from 'pinia'
+import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 
 vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn(), post: vi.fn() } }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'zh-CN' } }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'zh-CN' }, t: (key: string) => key }) }))
 const pod = { id: 'us-one', boot: 'boot', endpoint: 'https://pod.example.com', region: 'US', version: 'test', ready: true, at: 100 }
 const config = () => ({ enabled: false, pods: [], regions: [] })
 beforeEach(() => {
@@ -96,5 +99,27 @@ describe('Gateway Serverless settings', () => {
     expect(apiClient.put).toHaveBeenCalledWith('/admin/serverless', expect.objectContaining({ affinity_scope: 'api_key_ip', fallback_to_primary: true }))
     expect((wrapper.get('[data-testid="serverless-primary-fallback"]').element as HTMLInputElement).checked).toBe(true)
     wrapper.unmount()
+  })
+  it('shares and persists the new notice independently of older and later notices', async () => {
+    localStorage.clear()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useNewFeatureNoticeStore()
+    const oldNotice = NEW_FEATURE_NOTICES.protocolFeatureSwitches
+    store.dismiss(41, oldNotice)
+    const wrapper = mount(ServerlessSettings, { props: { userId: 41 }, global: { plugins: [pinia] } })
+    expect(wrapper.findAll('[data-testid="new-feature-badge"]')).toHaveLength(2)
+    await wrapper.get('[data-testid="new-feature-badge"]').trigger('click')
+    expect(wrapper.findAll('[data-testid="new-feature-badge"]')).toHaveLength(0)
+    expect(store.isDismissed(41, oldNotice)).toBe(true)
+    wrapper.unmount()
+    const fresh = createPinia()
+    const reloaded = mount(ServerlessSettings, { props: { userId: 41 }, global: { plugins: [fresh] } })
+    expect(reloaded.findAll('[data-testid="new-feature-badge"]')).toHaveLength(0)
+    setActivePinia(fresh)
+    expect(useNewFeatureNoticeStore().isDismissed(41, 'a-later-feature-announcement')).toBe(false)
+    expect(useNewFeatureNoticeStore().isDismissed(42, NEW_FEATURE_NOTICES.serverlessIPRouting)).toBe(false)
+    reloaded.unmount()
+    localStorage.clear()
   })
 })

@@ -2,6 +2,7 @@
   <details class="card" @toggle="onToggle">
     <summary class="cursor-pointer px-6 py-4 font-semibold">{{ text('Serverless 管理', 'Serverless management') }}
       <span class="ml-2 text-xs font-normal text-gray-500">{{ text('地区 → Pod（可选）', 'Region → Pod (optional)') }}</span>
+      <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting" :user-id="userId" class="ml-2" />
     </summary>
     <div class="space-y-5 border-t border-gray-100 p-6 dark:border-dark-700">
       <p class="text-sm text-gray-500">{{ text('管理已有请求 Pod，不创建或扩缩容。默认关闭；未知地区走主站。IP 国家识别结果在 Redis 缓存 24 小时，命中时不再请求地区服务；识别失败缓存 1 分钟。', 'Manage existing request Pods without creating or scaling them. Disabled by default; unknown regions use the primary. IP country results are cached in Redis for 24 hours without another provider lookup on a cache hit; failed lookups are cached for one minute.') }}</p>
@@ -14,6 +15,7 @@
       </div>
       <div class="space-y-3 rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
         <label class="flex flex-wrap items-center gap-3">{{ text('绑定范围', 'Binding scope') }}
+          <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting" :user-id="userId" />
           <select v-model="draft.affinity_scope" class="input w-auto" :disabled="busy || !loaded" data-testid="serverless-affinity-scope">
             <option value="api_key">{{ text('API Key（默认）', 'API Key (default)') }}</option>
             <option value="api_key_ip">{{ text('API Key ＋ 客户端 IP', 'API Key + client IP') }}</option>
@@ -88,6 +90,10 @@ RUNTIME_SERVERLESS_ENDPOINT=https://pod.example.com</pre>
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiClient } from '@/api/client'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+
+defineProps<{ userId?: number | null }>()
 
 interface Policy { id: string; endpoint: string; enabled: boolean }
 interface Region { country: string; pod_ids: string[] }

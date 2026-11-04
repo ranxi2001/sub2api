@@ -31,13 +31,15 @@ try {
     writeFileSync(join(root, name), `
       import { createApp, h } from 'vue';
       import { createI18n } from 'vue-i18n';
+      import { createPinia } from 'pinia';
+      import zh from '/src/i18n/locales/zh/common.ts';
       import Panel from '${i === 0 ? '/' + baselineName : '/src/components/settings/ServerlessSettings.vue'}';
       import '/src/style.css';
       createApp({render:()=>h('main',{class:'min-h-screen bg-gray-50 p-6 text-gray-900 dark:bg-dark-900 dark:text-gray-100'},[
         h('div',{class:'mx-auto max-w-5xl space-y-4'},[
           h('h1',{class:'text-xl font-semibold'},'设置 / 网关服务'),
-          h('p',{class:'text-sm text-gray-500'},'实际组件 · CI 离线预览 · 全部为虚构数据'),h(Panel)])])
-      }).use(createI18n({legacy:false,locale:'zh-CN',messages:{'zh-CN':{}}})).mount('#app');
+          h('p',{class:'text-sm text-gray-500'},'实际组件 · CI 离线预览 · 全部为虚构数据'),h(Panel,{userId:41})])])
+      }).use(createPinia()).use(createI18n({legacy:false,locale:'zh-CN',messages:{'zh-CN':zh}})).mount('#app');
     `, { flag: 'wx' })
   }
   server = await createServer({
@@ -58,7 +60,7 @@ try {
       },
     }],
     server: { host: '127.0.0.1', port: 4191, strictPort: true },
-    optimizeDeps: { entries: [], include: ['vue', 'vue-i18n'] },
+    optimizeDeps: { entries: [], include: ['vue', 'vue-i18n', 'pinia'] },
   })
   await server.listen()
   browser = await chromium.launch({ headless: true })

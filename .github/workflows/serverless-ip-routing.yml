@@ -6,6 +6,8 @@ on:
     paths:
       - 'backend/internal/serverless/**'
       - 'frontend/src/components/settings/ServerlessSettings*'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/views/admin/SettingsView.vue'
       - '.github/scripts/serverless-ip-routing-screenshot.mjs'
       - '.github/workflows/serverless-ip-routing.yml'
 
