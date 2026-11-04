@@ -12,6 +12,9 @@ mkdirSync(output, { recursive: true })
 const require = createRequire(join(root, 'package.json'))
 const { createServer } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href)
 const vue = (await import(pathToFileURL(require.resolve('@vitejs/plugin-vue')).href)).default
+const tailwindcss = require('tailwindcss')
+const autoprefixer = require('autoprefixer')
+const tailwindConfig = (await import(pathToFileURL(join(root, 'tailwind.config.js')).href)).default
 const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_ROOT, 'index.mjs')).href)
 const suffix = `.ci-serverless-${process.pid}`
 const baselineName = suffix + '-before.vue'
@@ -44,9 +47,16 @@ try {
   }
   server = await createServer({
     root, configFile: false, cacheDir: join(output, 'vite-cache'),
+    resolve: { alias: { '@': join(root, 'src') } },
+    css: { postcss: { plugins: [
+      tailwindcss({ ...tailwindConfig, content: [join(root, 'index.html'), join(root, 'src/**/*.{vue,js,ts,jsx,tsx}'), files[0]] }),
+      autoprefixer(),
+    ] } },
     plugins: [vue(), {
       name: 'serverless-offline-preview',
-      resolveId(id) { if (id === '@/api/client') return '\0serverless-api' },
+      resolveId(id) {
+        if (id === '@/api/client' || id === join(root, 'src/api/client') || id === join(root, 'src/api/client.ts')) return '\0serverless-api'
+      },
       load(id) {
         if (id === '\0serverless-api') return `let snapshot=${JSON.stringify(snapshot)};export const apiClient={get:async()=>({data:structuredClone(snapshot)}),put:async(_u,c)=>{snapshot.config=structuredClone(c);return{data:structuredClone(c)}},post:async()=>({data:{ready:true}})};`
       },

@@ -8,6 +8,7 @@ on:
       - 'frontend/src/components/settings/ServerlessSettings*'
       - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/views/admin/SettingsView.vue'
+      - 'frontend/src/views/admin/__tests__/SettingsView.spec.ts'
       - '.github/scripts/serverless-ip-routing-screenshot.mjs'
       - '.github/workflows/serverless-ip-routing.yml'
 
@@ -49,7 +50,7 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - name: Settings regressions
         working-directory: frontend
-        run: pnpm exec vitest run src/components/settings/ServerlessSettings.spec.ts
+        run: pnpm exec vitest run src/components/settings/ServerlessSettings.spec.ts src/views/admin/__tests__/SettingsView.spec.ts
       - name: Install isolated screenshot tool
         run: |
           npm install --prefix "$RUNNER_TEMP/serverless-browser" --no-save --ignore-scripts playwright@1.56.1
