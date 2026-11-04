@@ -379,7 +379,11 @@ func (b *priorityAttemptBody) observeLine(line []byte) {
 		return
 	}
 	typ := gjson.GetBytes(data, "type").String()
-	if b.firstSemanticMS == nil && openAIStreamDataStartsSemanticTTFT(string(data), typ) {
+	semanticOutput := openAIStreamDataStartsSemanticTTFT(string(data), typ)
+	if b.chat {
+		semanticOutput = openAIStreamDataStartsLegacySemanticTTFT(string(data), typ)
+	}
+	if b.firstSemanticMS == nil && semanticOutput {
 		ms := b.stats.currentTime().Sub(b.started).Seconds() * 1000
 		b.firstSemanticMS = &ms
 	}
