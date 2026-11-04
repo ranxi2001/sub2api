@@ -1531,6 +1531,14 @@ const inAutoRefreshSilentWindow = () => {
 const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
   return (
     current.updated_at !== next.updated_at ||
+    // Bindings have their own revision; do not rely on the account timestamp
+    // to invalidate the displayed upstream identity or declaration snapshot.
+    JSON.stringify(current.upstream_channel_binding ?? null) !== JSON.stringify(next.upstream_channel_binding ?? null) ||
+    current.credentials?.base_url !== next.credentials?.base_url ||
+    JSON.stringify(current.extra?.upstream_billing_probe ?? null) !== JSON.stringify(next.extra?.upstream_billing_probe ?? null) ||
+    current.extra?.upstream_billing_probe_enabled !== next.extra?.upstream_billing_probe_enabled ||
+    current.extra?.upstream_billing_rate_sync_enabled !== next.extra?.upstream_billing_rate_sync_enabled ||
+    current.extra?.upstream_billing_provider !== next.extra?.upstream_billing_provider ||
     current.current_concurrency !== next.current_concurrency ||
     JSON.stringify(current.extra?.auto_config_concurrency) !== JSON.stringify(next.extra?.auto_config_concurrency) ||
     current.current_window_cost !== next.current_window_cost ||
