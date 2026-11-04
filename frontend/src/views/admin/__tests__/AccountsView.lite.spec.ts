@@ -10,6 +10,7 @@ const {
   listAccounts,
   listWithEtag,
   getById,
+  getPerformance,
   getBatchTodayStats,
   getManagementCapabilities,
   getUpstreamBillingProbeSettings,
@@ -24,6 +25,7 @@ const {
   listAccounts: vi.fn(),
   listWithEtag: vi.fn(),
   getById: vi.fn(),
+  getPerformance: vi.fn(),
   getBatchTodayStats: vi.fn(),
   getManagementCapabilities: vi.fn(),
   getUpstreamBillingProbeSettings: vi.fn(),
@@ -42,6 +44,7 @@ vi.mock('@/api/admin', () => ({
       getManagementCapabilities,
       list: listAccounts,
       getById,
+      getPerformance,
       listWithEtag,
       getBatchTodayStats,
       getUpstreamBillingProbeSettings,
@@ -79,6 +82,7 @@ const DataTableStub = defineComponent({
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
         <slot name="cell-capacity" :row="row" />
+        <slot name="cell-performance" :row="row" />
         <slot name="cell-upstream_billing_rate" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
@@ -134,6 +138,7 @@ function mountView(stubActionMenu = true) {
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
         AccountCapacityCell: false,
+        AccountPerformanceCell: true,
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: AccountGroupsCellStub,
@@ -175,6 +180,7 @@ describe('admin AccountsView lite account list', () => {
     listAccounts.mockReset().mockResolvedValue({ items: [listRow], total: 1, page: 1, page_size: 20, pages: 1 })
     listWithEtag.mockReset().mockResolvedValue({ notModified: true, etag: 'compact-etag', data: null })
     getById.mockReset().mockResolvedValue(fullAccount)
+    getPerformance.mockReset().mockResolvedValue({})
     getBatchTodayStats.mockReset().mockResolvedValue({ stats: {} })
     getManagementCapabilities.mockReset().mockResolvedValue({ concurrency_upgrade_enabled: false })
     getUpstreamBillingProbeSettings.mockReset().mockResolvedValue({ enabled: true })
@@ -207,6 +213,19 @@ describe('admin AccountsView lite account list', () => {
     expect(probeUpstreamBilling).toHaveBeenCalledWith(row.id)
     expect(getUpstreamBillingRatesWithEtag).toHaveBeenCalled()
     expect(wrapper.findComponent(UpstreamBillingRateCell).props('account').extra?.cost_multiplier).toBe(0.14)
+    wrapper.unmount()
+  })
+
+  it('refreshes performance evidence every 30 seconds independently of unchanged list ETags', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountView()
+    await flushPromises()
+    expect(getPerformance).toHaveBeenCalledWith([42], expect.any(AbortSignal))
+    getPerformance.mockClear()
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushPromises()
+    expect(getPerformance).toHaveBeenCalledTimes(1)
+    expect(getPerformance).toHaveBeenCalledWith([42], expect.any(AbortSignal))
     wrapper.unmount()
   })
 

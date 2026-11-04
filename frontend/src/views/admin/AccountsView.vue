@@ -310,7 +310,7 @@
             </button>
           </template>
           <template #cell-performance="{ row }">
-            <AccountPerformanceCell :metrics="performanceMetrics[row.id]" :unavailable="performanceUnavailable" :can-configure="authStore.isAdmin" @configure="performanceAccount = row" />
+            <AccountPerformanceCell :metrics="performanceMetrics[row.id]" :unavailable="performanceUnavailable" :can-configure="authStore.isAdmin" :notice-user-id="authStore.isAdmin ? authStore.user?.id : null" @configure="performanceAccount = row" />
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -506,7 +506,7 @@
     <ErrorPassthroughRulesModal v-if="authStore.isAdmin" :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal v-if="authStore.isAdmin" :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
     <TotpStepUpDialog :controller="accountExportStepUp" />
-    <AccountPerformanceDialog v-if="performanceAccount" :key="performanceAccount.id" :account-id="performanceAccount.id" :account-name="performanceAccount.name" @close="performanceAccount = null" @updated="refreshPerformance" />
+    <AccountPerformanceDialog v-if="performanceAccount" :key="performanceAccount.id" :account-id="performanceAccount.id" :account-name="performanceAccount.name" :notice-user-id="authStore.isAdmin ? authStore.user?.id : null" @close="performanceAccount = null" @updated="refreshPerformance" />
     <BulkExport2FADialog v-if="authStore.isAdmin && export2faIds.length" :account-ids="export2faIds" @close="export2faIds = []" />
   </AppLayout>
 </template>
