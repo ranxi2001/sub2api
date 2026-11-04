@@ -573,11 +573,13 @@ func ApplyReasoningEffortPolicy(body []byte, maxEffort string, mappings []Reason
 	return result, changed, nil
 }
 
-func applyOpenAIWSReasoningEffortPolicy(payload []byte, hooks *OpenAIWSIngressHooks) ([]byte, error) {
-	if hooks == nil || (hooks.ForcedReasoningEffort == "" && hooks.MaxReasoningEffort == "" && len(hooks.ReasoningEffortMappings) == 0) {
+// The optional key preference extends the original group-only policy call.
+func applyOpenAIWSReasoningEffortPolicy(payload []byte, hooks *OpenAIWSIngressHooks, forcedEfforts ...string) ([]byte, error) {
+	forced := firstNonEmpty(forcedEfforts...)
+	if hooks == nil || (forced == "" && hooks.MaxReasoningEffort == "" && len(hooks.ReasoningEffortMappings) == 0) {
 		return payload, nil
 	}
-	capped, changed, err := ApplyAPIKeyOpenAIReasoningEffortPolicy(payload, hooks.ForcedReasoningEffort, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings, hooks.MaxReasoningEffortOverLimit)
+	capped, changed, err := ApplyAPIKeyOpenAIReasoningEffortPolicy(payload, forced, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings, hooks.MaxReasoningEffortOverLimit)
 	if err != nil {
 		return payload, err
 	}

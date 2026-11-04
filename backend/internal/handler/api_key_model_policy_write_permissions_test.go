@@ -68,6 +68,8 @@ func TestAPIKeyUserJSONCannotWriteAdministratorModelPolicy(t *testing.T) {
 	require.Equal(t, http.StatusOK, created.Code, created.Body.String())
 	require.Empty(t, repo.key.ModelMapping)
 	require.Empty(t, repo.key.ReasoningEffort)
+	require.Contains(t, created.Body.String(), `"model_mapping":null`)
+	require.Contains(t, created.Body.String(), `"reasoning_effort":""`)
 
 	for _, body := range []string{
 		`{"name":"renamed","model_mapping":{"gpt-6.1-sol":"different"},"reasoning_effort":"ultra"}`,
@@ -85,5 +87,7 @@ func TestAPIKeyUserJSONCannotWriteAdministratorModelPolicy(t *testing.T) {
 		require.Equal(t, map[string]string{"gpt-6.1-sol": "gpt-5.6-sol"}, repo.key.ModelMapping)
 		require.Equal(t, "high", repo.key.ReasoningEffort)
 		require.Equal(t, service.APIKeyUpdateFields{Name: true}, repo.fields)
+		require.Contains(t, updated.Body.String(), `"model_mapping":{"gpt-6.1-sol":"gpt-5.6-sol"}`)
+		require.Contains(t, updated.Body.String(), `"reasoning_effort":"high"`)
 	}
 }

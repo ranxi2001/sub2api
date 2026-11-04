@@ -289,6 +289,13 @@ type OpenAIWSIngressHooks struct {
 	AfterTurn       func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
+func (h *OpenAIWSIngressHooks) forcedReasoningEffort() string {
+	if h == nil {
+		return ""
+	}
+	return h.ForcedReasoningEffort
+}
+
 // beforeRequest preserves both admission callbacks when an embedding installs
 // the original hook alongside the handler's client-aware admission hook.
 func (h *OpenAIWSIngressHooks) beforeRequest(turn int, payload, clientPayload []byte, originalModel string) error {
