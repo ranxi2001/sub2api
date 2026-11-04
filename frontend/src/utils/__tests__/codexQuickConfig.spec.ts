@@ -111,6 +111,15 @@ describe('codexQuickConfig', () => {
     expect(config).not.toContain('model_catalog_json')
   })
 
+  it('requests Fast at the TOML root only for OpenAI quick setup', () => {
+    const config = buildCodexQuickConfigToml(input)
+    expect(config.split('\n[')[0]).toContain('service_tier = "fast"')
+    expect(config.match(/^service_tier = /gm)).toHaveLength(1)
+    for (const platform of ['anthropic', 'grok', 'composite'] as const) {
+      expect(buildCodexQuickConfigToml({ ...input, platform })).not.toContain('service_tier')
+    }
+  })
+
   it('embeds model catalog data only when requested', () => {
     const catalog = '{"models":[{"slug":"gpt-test"}]}'
     const config = buildCodexQuickConfigToml({
@@ -158,6 +167,7 @@ describe('codexQuickConfig', () => {
     const payload = windowsScript.match(/\$configPayload = @\(\s*'([^']+)'/)?.[1]
     expect(payload).toBeDefined()
     expect(decodeBase64Utf8(payload!)).toContain('experimental_bearer_token')
+    expect(decodeBase64Utf8(payload!).split('\n[')[0]).toContain('service_tier = "fast"')
     expect(encodeUtf8Base64('中文')).not.toBe('')
   })
 
@@ -214,6 +224,7 @@ describe('codexQuickConfig', () => {
     const config = readFileSync(join(configDir, 'config.toml'), 'utf8')
     expect(config).toContain(`model_catalog_json = "${realpathSync(configDir)}/codex-models.json"`)
     expect(config).toContain('experimental_bearer_token = "sk-secret-value"')
+    expect(config.split('\n[')[0]).toContain('service_tier = "fast"')
     expect(readFileSync(join(configDir, 'codex-models.json'), 'utf8')).toBe(catalog)
     expect(statSync(join(configDir, 'config.toml')).mode & 0o777).toBe(0o600)
     expect(readdirSync(configDir).sort()).toEqual(['codex-models.json', 'config.toml'])

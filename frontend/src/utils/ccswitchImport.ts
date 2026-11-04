@@ -1,4 +1,5 @@
 import type { GroupPlatform } from '@/types'
+import { encodeUtf8Base64 } from '@/utils/codexQuickConfig'
 
 export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
@@ -109,6 +110,28 @@ export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput):
 
   if (config.model) {
     entries.splice(2, 0, ['model', config.model])
+  }
+
+  if (config.app === 'codex') {
+    // Embed TOML rather than a query parameter: service_tier is a root setting.
+    // CC Switch v4.0.25 still drops this field from imported TOML; its
+    // deeplink/codex_link.rs whitelist uses ROW_TOP_FIELDS + CODEX_EXCLUSIVE_TOP.
+    const toml = `model_provider = "sub2api"
+model = ${JSON.stringify(config.model)}
+model_reasoning_effort = "high"
+disable_response_storage = true
+service_tier = "fast"
+
+[model_providers.sub2api]
+name = ${JSON.stringify(input.providerName)}
+base_url = ${JSON.stringify(config.endpoint)}
+wire_api = "responses"
+requires_openai_auth = true
+`
+    entries.push(['config', encodeUtf8Base64(JSON.stringify({
+      auth: { OPENAI_API_KEY: input.apiKey },
+      config: toml
+    }))])
   }
 
   return `ccswitch://v1/import?${new URLSearchParams(entries).toString()}`
