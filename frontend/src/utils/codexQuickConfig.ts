@@ -104,7 +104,7 @@ export function buildCodexQuickConfigToml(input: CodexQuickConfigInput): string 
 model_provider = "${provider}"
 model = "${escapeTomlBasicString(model)}"
 review_model = "${escapeTomlBasicString(model)}"
-disable_response_storage = true
+${platform === 'openai' ? 'service_tier = "fast"\n' : ''}disable_response_storage = true
 network_access = "enabled"
 windows_wsl_setup_acknowledged = true
 ${catalogLine}

@@ -522,6 +522,7 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('env_key')
     expect(configToml).not.toContain('image_generation')
     expect(configToml).toContain('supports_websockets = true')
+    expect(configToml!.split('\n[')[0]).toContain('service_tier = "fast"')
     const features = configToml?.split('[features]\n')[1]?.split('\n[')[0]
     expect(features).toContain('responses_websockets_v2 = true')
     expect(features).toContain('goals = true')
@@ -1021,7 +1022,7 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('model_reasoning_effort')
   })
 
-  it('offers remote and optional file catalogs for OpenAI in both transport modes and on both platforms', async () => {
+  it.each(['legacy', 'api-key'])('offers Fast and remote/file catalogs across OpenAI transports and platforms in %s mode', async (authMode) => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     const wrapper = mount(UseKeyModal, {
@@ -1043,6 +1044,7 @@ describe('UseKeyModal', () => {
       }
     })
 
+    await wrapper.get(`[data-testid="codex-auth-mode-${authMode}"]`).trigger('click')
     for (const transport of ['keys.useKeyModal.cliTabs.codexCli', 'keys.useKeyModal.cliTabs.codexCliWs']) {
       await wrapper.findAll('button').find((button) => button.text().trim() === transport)!.trigger('click')
       for (const os of ['macOS / Linux', 'Windows']) {
@@ -1051,10 +1053,11 @@ describe('UseKeyModal', () => {
           .map((code) => code.text())
           .find((content) => content.includes('model_provider = "OpenAI"'))
         expect(configToml).toContain('model = "gpt-5.5"')
+        expect(configToml!.split('\n[')[0]).toContain('service_tier = "fast"')
         expect(configToml).toContain('[model_providers.OpenAI]\nname = "OpenAI"\nbase_url = "https://example.com/v1"\nmodel_catalog_url = "https://example.com/v1/models"')
         expect(configToml).not.toContain('model_catalog_json')
         expect(configToml).toContain('[features]\napi_key_model_discovery = true')
-        expect(configToml).toContain('requires_openai_auth = true')
+        expect(configToml).toContain(`requires_openai_auth = ${authMode === 'legacy'}`)
         expect(configToml).not.toContain('client_version')
         expect(wrapper.find('[data-testid="codex-model-catalog"]').exists()).toBe(true)
 
@@ -1063,6 +1066,7 @@ describe('UseKeyModal', () => {
           .map((code) => code.text())
           .find((content) => content.includes('model_provider = "OpenAI"'))!
         expect(fileConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
+        expect(fileConfig.split('\n[')[0]).toContain('service_tier = "fast"')
         expect(fileConfig).not.toContain('model_catalog_url')
         expect(fileConfig).not.toContain('api_key_model_discovery')
         expect(fileConfig.indexOf('model_catalog_json')).toBeLessThan(fileConfig.indexOf('[model_providers.OpenAI]'))
