@@ -128,9 +128,11 @@ func TestSyncBalanceCacheAfterDeduction_QueuesDeductWhenBalanceStillEligible(t *
 }
 
 func TestSyncBalanceCacheAfterAutoCreditInvalidatesInsteadOfDeducting(t *testing.T) {
- cache:=&balanceEligibilityCacheStub{balance:0}
- svc:=NewBillingCacheService(cache,nil,nil,nil,nil,nil,&config.Config{},nil);t.Cleanup(svc.Stop)
- balance:=10.0
- syncBalanceCacheAfterDeduction(context.Background(),&postUsageBillingParams{Cost:&CostBreakdown{ActualCost:0.25},User:&User{ID:1}},&billingDeps{billingCacheService:svc},&UsageBillingApplyResult{NewBalance:&balance,AutoCreditIssued:true})
- require.EqualValues(t,1,cache.invalidateCalls.Load());require.Zero(t,cache.deductCalls.Load())
+	cache := &balanceEligibilityCacheStub{balance: 0}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+	balance := 10.0
+	syncBalanceCacheAfterDeduction(context.Background(), &postUsageBillingParams{Cost: &CostBreakdown{ActualCost: 0.25}, User: &User{ID: 1}}, &billingDeps{billingCacheService: svc}, &UsageBillingApplyResult{NewBalance: &balance, AutoCreditIssued: true})
+	require.EqualValues(t, 1, cache.invalidateCalls.Load())
+	require.Zero(t, cache.deductCalls.Load())
 }

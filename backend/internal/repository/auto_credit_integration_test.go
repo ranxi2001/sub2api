@@ -386,26 +386,56 @@ func TestVipCreditGoogleRecoveryAndRegionalNoAuthority(t *testing.T) {
 	}
 }
 
-func TestVipCreditAdmissionCannotReviveIndependentRestrictions(t *testing.T){
- ctx:=context.Background();db:=creditDB(t)
- for _,kind:=range []string{"disabled_user","deleted_user","disabled_key","expired_key","exhausted_key","missing_subscription"}{
-  t.Run(kind,func(t *testing.T){
-   uid:=creditUser(t,db,"0");configureCredit(t,db,uid,"1","2","4");credential:=fmt.Sprintf("sk-credit-guard-%d",uid)
-   var key int64;require.NoError(t,db.QueryRow(`INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'guard') RETURNING id`,uid,credential).Scan(&key))
-   switch kind{
-   case "disabled_user":_,e:=db.Exec(`UPDATE users SET status='disabled' WHERE id=$1`,uid);require.NoError(t,e)
-   case "deleted_user":_,e:=db.Exec(`UPDATE users SET deleted_at=NOW() WHERE id=$1`,uid);require.NoError(t,e)
-   case "disabled_key":_,e:=db.Exec(`UPDATE api_keys SET status='disabled' WHERE id=$1`,key);require.NoError(t,e)
-   case "expired_key":_,e:=db.Exec(`UPDATE api_keys SET expires_at=NOW()-INTERVAL '1 day' WHERE id=$1`,key);require.NoError(t,e)
-   case "exhausted_key":_,e:=db.Exec(`UPDATE api_keys SET quota=1,quota_used=1 WHERE id=$1`,key);require.NoError(t,e)
-   case "missing_subscription":var gid int64;require.NoError(t,db.QueryRow(`INSERT INTO groups(name,platform,subscription_type) VALUES($1,'openai','subscription') RETURNING id`,fmt.Sprintf("credit-sub-%d",uid)).Scan(&gid));_,e:=db.Exec(`UPDATE api_keys SET group_id=$2 WHERE id=$1`,key,gid);require.NoError(t,e)
-   }
-   client:=dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres,db)));cfg:=&config.Config{};groupRepo:=NewGroupRepository(client,db);subs:=NewUserSubscriptionRepository(client)
-   keys:=service.NewAPIKeyService(NewAPIKeyRepository(client,db),NewUserRepository(client,db),groupRepo,subs,NewUserGroupRateRepository(db),nil,cfg);keys.SetAutoCredit(NewAutoCreditRepository(db),nil)
-   subService:=service.NewSubscriptionService(groupRepo,subs,nil,client,cfg)
-   r:=gin.New();r.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(keys,subService,cfg)));r.POST("/v1/messages",func(c *gin.Context){c.Status(200)})
-   w:=httptest.NewRecorder();req:=httptest.NewRequest("POST","/v1/messages",nil);req.Header.Set("Authorization","Bearer "+credential);r.ServeHTTP(w,req);require.Contains(t,[]int{401,403,429},w.Code,w.Body.String())
-   var count int;require.NoError(t,db.QueryRowContext(ctx,`SELECT count(*) FROM auto_credit_ledger WHERE user_id=$1`,uid).Scan(&count));require.Zero(t,count,"independent rejection must not issue credit")
-  })
- }
+func TestVipCreditAdmissionCannotReviveIndependentRestrictions(t *testing.T) {
+	ctx := context.Background()
+	db := creditDB(t)
+	for _, kind := range []string{"disabled_user", "deleted_user", "disabled_key", "expired_key", "exhausted_key", "missing_subscription"} {
+		t.Run(kind, func(t *testing.T) {
+			uid := creditUser(t, db, "0")
+			configureCredit(t, db, uid, "1", "2", "4")
+			credential := fmt.Sprintf("sk-credit-guard-%d", uid)
+			var key int64
+			require.NoError(t, db.QueryRow(`INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'guard') RETURNING id`, uid, credential).Scan(&key))
+			switch kind {
+			case "disabled_user":
+				_, e := db.Exec(`UPDATE users SET status='disabled' WHERE id=$1`, uid)
+				require.NoError(t, e)
+			case "deleted_user":
+				_, e := db.Exec(`UPDATE users SET deleted_at=NOW() WHERE id=$1`, uid)
+				require.NoError(t, e)
+			case "disabled_key":
+				_, e := db.Exec(`UPDATE api_keys SET status='disabled' WHERE id=$1`, key)
+				require.NoError(t, e)
+			case "expired_key":
+				_, e := db.Exec(`UPDATE api_keys SET expires_at=NOW()-INTERVAL '1 day' WHERE id=$1`, key)
+				require.NoError(t, e)
+			case "exhausted_key":
+				_, e := db.Exec(`UPDATE api_keys SET quota=1,quota_used=1 WHERE id=$1`, key)
+				require.NoError(t, e)
+			case "missing_subscription":
+				var gid int64
+				require.NoError(t, db.QueryRow(`INSERT INTO groups(name,platform,subscription_type) VALUES($1,'openai','subscription') RETURNING id`, fmt.Sprintf("credit-sub-%d", uid)).Scan(&gid))
+				_, e := db.Exec(`UPDATE api_keys SET group_id=$2 WHERE id=$1`, key, gid)
+				require.NoError(t, e)
+			}
+			client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+			cfg := &config.Config{}
+			groupRepo := NewGroupRepository(client, db)
+			subs := NewUserSubscriptionRepository(client)
+			keys := service.NewAPIKeyService(NewAPIKeyRepository(client, db), NewUserRepository(client, db), groupRepo, subs, NewUserGroupRateRepository(db), nil, cfg)
+			keys.SetAutoCredit(NewAutoCreditRepository(db), nil)
+			subService := service.NewSubscriptionService(groupRepo, subs, nil, client, cfg)
+			r := gin.New()
+			r.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(keys, subService, cfg)))
+			r.POST("/v1/messages", func(c *gin.Context) { c.Status(200) })
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/v1/messages", nil)
+			req.Header.Set("Authorization", "Bearer "+credential)
+			r.ServeHTTP(w, req)
+			require.Contains(t, []int{401, 403, 429}, w.Code, w.Body.String())
+			var count int
+			require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM auto_credit_ledger WHERE user_id=$1`, uid).Scan(&count))
+			require.Zero(t, count, "independent rejection must not issue credit")
+		})
+	}
 }

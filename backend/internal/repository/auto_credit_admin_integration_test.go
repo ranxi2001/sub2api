@@ -26,7 +26,7 @@ func adminCreditDB(t *testing.T) *sql.DB {
 	require.NotEmpty(t, dsn)
 	db, e := sql.Open("postgres", dsn)
 	require.NoError(t, e)
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, repository.ApplyMigrations(context.Background(), db))
 	return db
 }

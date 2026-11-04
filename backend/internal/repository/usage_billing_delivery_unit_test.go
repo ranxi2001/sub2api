@@ -35,6 +35,8 @@ func TestUsageBillingDeliveryCommitUnknownChecksReceiptBeforeReplay(t *testing.T
 	mock.ExpectQuery("SELECT request_fingerprint.*FROM usage_billing_dedup_archive").WillReturnRows(sqlmock.NewRows([]string{"request_fingerprint"}))
 	mock.ExpectQuery("SELECT EXISTS.*FROM usage_logs").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery(conditionalBalanceDeductSQL).WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(99))
+	mock.ExpectQuery("SELECT balance::text,status FROM users").WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"balance", "status"}).AddRow("99.00000000", "active"))
+	mock.ExpectQuery("UPDATE auto_credit_config SET debit_epoch").WillReturnRows(sqlmock.NewRows([]string{"debit_epoch"}))
 	mock.ExpectExec("INSERT INTO usage_logs").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("UPDATE usage_billing_events SET state='applied'").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit().WillReturnError(errors.New("lost commit response"))
