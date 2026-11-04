@@ -367,3 +367,18 @@ func (r *autoCreditRepository) CanRecover(ctx context.Context, uid int64, minimu
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u LEFT JOIN auto_credit_config c ON c.user_id=u.id WHERE u.id=$1 AND u.status='active' AND u.deleted_at IS NULL AND ((u.balance>0 AND u.balance >= $2::numeric) OR (c.enabled AND u.balance+c.amount>0 AND u.balance+c.amount >= $2::numeric AND u.balance<c.threshold AND NOT EXISTS(SELECT 1 FROM auto_credit_ledger l WHERE l.user_id=u.id AND l.epoch=c.debit_epoch) AND COALESCE((SELECT SUM(l.amount) FROM auto_credit_ledger l WHERE l.user_id=u.id AND l.status='pending'),0)+c.amount<=c.cap)))`, uid, minimum).Scan(&allowed)
 	return allowed, err
 }
+
+// Once an administrator creates a credit configuration, balance admission uses
+// DB authority even when disabled. Arbitrarily late legacy Redis publications
+// cannot restore an obsolete balance after either invalidation pass.
+func (r *autoCreditRepository) CreditUserBalance(ctx context.Context, uid int64) (*string, error) {
+	var balance string
+	err := r.db.QueryRowContext(ctx, `SELECT u.balance::text FROM users u JOIN auto_credit_config c ON c.user_id=u.id WHERE u.id=$1 AND u.deleted_at IS NULL`, uid).Scan(&balance)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &balance, nil
+}

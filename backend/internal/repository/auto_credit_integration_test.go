@@ -341,3 +341,47 @@ func TestVipCreditRecoveryMustReachMinimumReserve(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, yes, "exact reserve boundary is usable")
 }
+
+func TestVipCreditGoogleRecoveryAndRegionalNoAuthority(t *testing.T) {
+	ctx := context.Background()
+	db := creditDB(t)
+	for _, regional := range []bool{false, true} {
+		uid := creditUser(t, db, "0")
+		configureCredit(t, db, uid, "1", "2", "4")
+		credential := fmt.Sprintf("sk-vip-google-%d", uid)
+		var key int64
+		require.NoError(t, db.QueryRow(`INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'google') RETURNING id`, uid, credential).Scan(&key))
+		client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+		cfg := &config.Config{}
+		if regional {
+			cfg.Runtime.Role = config.RuntimeRoleGateway
+			cfg.Runtime.RegionalAuthFile = "replica-fixture-no-authority"
+		}
+		keys := service.NewAPIKeyService(NewAPIKeyRepository(client, db), NewUserRepository(client, db), NewGroupRepository(client, db), nil, NewUserGroupRateRepository(db), nil, cfg)
+		keys.SetAutoCredit(NewAutoCreditRepository(db), nil)
+		if regional {
+			ok, err := keys.RecoverAutoCreditAdmission(ctx, &service.APIKey{ID: key, UserID: uid, Status: service.StatusActive, User: &service.User{ID: uid, Status: service.StatusActive}})
+			require.NoError(t, err)
+			require.False(t, ok)
+		} else {
+			r := gin.New()
+			r.Use(middleware.APIKeyAuthGoogle(keys, cfg))
+			r.POST("/v1beta/models/gemini:generateContent", func(c *gin.Context) { c.Status(200) })
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/v1beta/models/gemini:generateContent", nil)
+			req.Header.Set("x-goog-api-key", credential)
+			r.ServeHTTP(w, req)
+			require.Equal(t, 200, w.Code, w.Body.String())
+		}
+		state, err := NewAutoCreditRepository(db).Get(ctx, uid, "all")
+		require.NoError(t, err)
+		if regional {
+			require.Empty(t, state.Entries)
+			var balance string
+			require.NoError(t, db.QueryRow(`SELECT balance::text FROM users WHERE id=$1`, uid).Scan(&balance))
+			require.Equal(t, "0.00000000", balance)
+		} else {
+			require.Len(t, state.Entries, 1)
+		}
+	}
+}

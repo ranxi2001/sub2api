@@ -317,6 +317,15 @@ func (s *BillingCacheService) logCacheWriteDrop(task cacheWriteTask, reason stri
 
 // GetUserBalance 获取用户余额（优先从缓存读取）
 func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) (float64, error) {
+	if s.autoCredit != nil {
+		balance, err := s.autoCredit.CreditUserBalance(ctx, userID)
+		if err != nil {
+			return 0, err
+		}
+		if balance != nil {
+			return strconv.ParseFloat(*balance, 64)
+		}
+	}
 	if s.cache == nil {
 		// Redis不可用，直接查询数据库
 		return s.getUserBalanceFromDB(ctx, userID)
@@ -771,7 +780,7 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 			return err
 		}
 	} else {
-		if err := s.checkBalanceEligibility(ctx, user); err != nil {
+		if err := s.checkBalanceEligibility(ctx, user, apiKey); err != nil {
 			return err
 		}
 	}
@@ -1030,7 +1039,7 @@ func (s *BillingCacheService) balanceBelowEligibilityThreshold(balance float64) 
 }
 
 // checkBalanceEligibility 检查余额模式资格
-func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, user *User) error {
+func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, user *User, keys ...*APIKey) error {
 	userID := user.ID
 	balance, err := s.GetUserBalance(ctx, userID)
 	if err != nil {
@@ -1046,7 +1055,13 @@ func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, user 
 
 	if s.balanceBelowEligibilityThreshold(balance) {
 		if s.autoCredit != nil && user.IsActive() {
-			result, recoveryErr := s.autoCredit.Evaluate(ctx, userID)
+			var result *AutoCreditResult
+			var recoveryErr error
+			if len(keys) > 0 && keys[0] != nil {
+				result, recoveryErr = s.autoCredit.EvaluateAdmission(ctx, userID, keys[0].ID)
+			} else {
+				result, recoveryErr = s.autoCredit.Evaluate(ctx, userID)
+			}
 			if recoveryErr != nil {
 				return ErrBillingServiceUnavailable.WithCause(recoveryErr)
 			}
