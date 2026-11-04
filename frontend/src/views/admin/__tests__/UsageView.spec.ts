@@ -569,18 +569,12 @@ describe('admin UsageView request ID column visibility', () => {
     await wrapper.vm.$nextTick()
 
     const usageTable = wrapper.findComponent(UsageTableStub)
-    expect(usageTable.props('columns')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ key: 'content_reasoning_first_ms', label: 'First reasoning event' }),
-      expect.objectContaining({ key: 'content_visible_text_first_ms', label: 'First visible text' }),
-      expect.objectContaining({ key: 'content_response_byte_first_ms', label: 'First response byte' }),
-    ]))
     const usageColumnKeys = usageTable.props('columns').map((column: { key: string }) => column.key)
     const latencyColumnIndex = usageColumnKeys.indexOf('latency')
-    expect(usageColumnKeys.slice(latencyColumnIndex + 1, latencyColumnIndex + 4)).toEqual([
-      'content_reasoning_first_ms',
-      'content_visible_text_first_ms',
-      'content_response_byte_first_ms',
-    ])
+    expect(usageColumnKeys[latencyColumnIndex + 1]).toBe('created_at')
+    expect(usageColumnKeys).not.toEqual(expect.arrayContaining([
+      'content_reasoning_first_ms', 'content_visible_text_first_ms', 'content_response_byte_first_ms',
+    ]))
     expect(usageTable.props('columns')).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'request_id' })]),
     )
@@ -598,16 +592,9 @@ describe('admin UsageView request ID column visibility', () => {
       'upstream-request-id-hidden-by-default',
     )
 
-    const reasoningColumnToggle = wrapper.findAll('button').find((button) => button.text() === 'First reasoning event')
-    expect(reasoningColumnToggle).toBeDefined()
-    await reasoningColumnToggle!.trigger('click')
-    expect(usageTable.props('columns')).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ key: 'content_reasoning_first_ms' })]),
-    )
-    expect(localStorage.setItem).toHaveBeenCalledWith(
-      'usage-hidden-columns',
-      expect.stringContaining('content_reasoning_first_ms'),
-    )
+    expect(wrapper.findAll('button').some(button =>
+      ['First reasoning event', 'First visible text', 'First response byte'].includes(button.text()),
+    )).toBe(false)
   })
 
   it('keeps upstream ID hidden by default and allows enabling it from column settings', async () => {

@@ -202,7 +202,8 @@ async function selectButtonByText(wrapper: ReturnType<typeof mountModal>, text: 
 async function submitApiKeyAccount(
   platform: 'openai' | 'anthropic',
   enableLongContextBilling = false,
-  disableUpstreamBillingProbe = false
+  disableUpstreamBillingProbe = false,
+  enableResponseTierBilling = false
 ) {
   const wrapper = mountModal()
   await selectButtonByText(wrapper, platform === 'openai' ? 'OpenAI' : 'admin.accounts.claudeConsole')
@@ -213,6 +214,9 @@ async function submitApiKeyAccount(
   await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
   if (enableLongContextBilling) {
     await wrapper.get('[data-testid="openai-long-context-billing-toggle"]').trigger('click')
+  }
+  if (enableResponseTierBilling) {
+    await wrapper.get('[data-testid="create-openai-ultrafast-billing-toggle"]').trigger('click')
   }
   if (disableUpstreamBillingProbe) {
     await wrapper.get('[data-testid="upstream-billing-auto-probe"]').trigger('click')
@@ -252,6 +256,25 @@ function expectWSAcceleration(extra: unknown, enabled: boolean) {
 }
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
+  it('leaves upstream response-tier billing disabled by default', async () => {
+    await submitApiKeyAccount('openai')
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty(
+      'openai_response_tier_billing_enabled'
+    )
+  })
+
+  it('enables upstream UltraFast billing for every model on a new API-key account', async () => {
+    await submitApiKeyAccount('openai', false, false, true)
+
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      platform: 'openai',
+      type: 'apikey',
+      extra: expect.objectContaining({ openai_response_tier_billing_enabled: true })
+    }))
+  })
+
   it('saves extra image models only for OpenAI API-key accounts', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
@@ -1032,7 +1055,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const labels = (testid: string) =>
       wrapper.get(`[data-testid="${testid}"]`).findAll('button').map(button => button.text().trim())
     expect(labels('platform-row-cn')).toEqual(['Kimi', 'Zhipu GLM', 'DeepSeek', 'MiniMax'])
-    expect(labels('platform-row-aggregators')).toEqual(['OpenCode', 'Command Code', 'Cline'])
+    expect(labels('platform-row-aggregators')).toEqual(['OpenCode', 'Command Code', 'Cline', 'Mistral'])
   })
 
   it('creates a Cline account without an account type and with only the Chat Completions endpoint', async () => {
@@ -1057,6 +1080,36 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.credentials).not.toHaveProperty('protocol_rules')
     expect(payload?.credentials?.api_base_urls).not.toHaveProperty('responses')
     expect(payload?.credentials?.api_base_urls).not.toHaveProperty('anthropic')
+  })
+
+  it('creates Mistral through the catalog with API key and only its native Chat endpoint', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-mistral"]').trigger('click')
+    expect(wrapper.get('[data-testid="platform-button-mistral"]').classes()).toContain('text-orange-600')
+    expect(wrapper.find('button.border-orange-500').exists()).toBe(true)
+    expect(wrapper.find('button.border-orange-500 .bg-orange-500').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="generic-account-mode"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Mistral')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture-mistral-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'mistral',
+      type: 'apikey',
+      credentials: {
+        api_key: 'fixture-mistral-key',
+        account_mode: 'payg',
+        api_protocol: 'adaptive',
+        base_url: 'https://api.mistral.ai/v1',
+        api_base_urls: { chat_completions: 'https://api.mistral.ai/v1' },
+      },
+    })
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials.api_base_urls).toEqual({
+      chat_completions: 'https://api.mistral.ai/v1',
+    })
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials.model_mapping).toHaveProperty('zai-glm-5-3', 'zai-glm-5-3')
   })
 
   it('submits adaptive Kimi protocol endpoints', async () => {

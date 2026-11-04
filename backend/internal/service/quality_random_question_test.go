@@ -139,7 +139,8 @@ func TestRandomQualityRoundSharesQuestionsAndPreservesUnknownVerdicts(t *testing
 			plan := multiModelQualityPlan(t, `["model-a","model-b"]`)
 			plan.PelicanConfig.QuestionKind = QualityRandomQuestionKind
 			plan.PelicanConfig.ParallelCount = 2
-			plans, saved := &qualityPlanRepo{}, &pelicanResults{}
+			saved := &pelicanResults{}
+			plans := &sharedBatchPlanRepo{qualityPlanRepo: &qualityPlanRepo{}, saved: saved}
 			runner := &ScheduledTestRunnerService{planRepo: plans, scheduledSvc: NewScheduledTestService(plans, saved)}
 			var mu sync.Mutex
 			questions := map[string]map[string]string{}
@@ -150,7 +151,8 @@ func TestRandomQualityRoundSharesQuestionsAndPreservesUnknownVerdicts(t *testing
 					questions[cfg.RandomQuestion.ID] = map[string]string{}
 				}
 				questions[cfg.RandomQuestion.ID][model] = cfg.Quality.ExpectedAnswer
-				return &ScheduledTestResult{Status: "success", ResponseText: cfg.Quality.ExpectedAnswer}, nil
+				cfg.QualityBatch.Route, cfg.QualityBatch.MappedModel = "synthetic", model
+				return &ScheduledTestResult{Status: "success", ResponseText: cfg.Quality.ExpectedAnswer, StartedAt: time.Now(), FinishedAt: time.Now()}, nil
 			}
 			if verdict != "" {
 				runner.judgeQuality = func(context.Context, int64, *PelicanTestConfig, string) *QualityJudgment {
@@ -158,6 +160,8 @@ func TestRandomQualityRoundSharesQuestionsAndPreservesUnknownVerdicts(t *testing
 				}
 			}
 			require.True(t, runner.runOnePlan(context.Background(), plan))
+			require.Empty(t, plans.outcomes, "collection must release workers before applying outcomes")
+			require.NoError(t, plans.FinalizeQualityBatches(context.Background()))
 			require.Len(t, questions, 2)
 			for _, references := range questions {
 				require.Len(t, references, 2)
@@ -168,13 +172,14 @@ func TestRandomQualityRoundSharesQuestionsAndPreservesUnknownVerdicts(t *testing
 			case "correct":
 				expected = "passed"
 			case "incorrect":
-				expected = "failed"
+				expected = "inconclusive" // No other account supplied a passing control.
 			}
 			require.Equal(t, []string{expected}, plans.outcomes)
 			require.Len(t, saved.results, 4)
 			for _, result := range saved.results {
 				require.NotNil(t, result.PelicanConfig.RandomQuestion)
 				require.NotEmpty(t, result.PelicanConfig.Prompt)
+				require.Equal(t, result.PelicanConfig.ModelID, result.PelicanConfig.QualityBatch.MappedModel, "each model owns separate mutable route evidence")
 			}
 			require.Empty(t, plan.PelicanConfig.Prompt)
 			require.Empty(t, plan.PelicanConfig.Quality.ExpectedAnswer)

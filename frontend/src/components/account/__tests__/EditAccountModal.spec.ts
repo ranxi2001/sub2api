@@ -1138,6 +1138,34 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it.each([false, true])('preserves Mistral settings and redacted key when rotating=%s', async (rotate) => {
+    const account = buildAccount()
+    account.platform = 'mistral'
+    account.credentials = {
+      account_mode: 'payg',
+      api_protocol: 'adaptive',
+      base_url: 'https://relay.example.com/v1',
+      api_base_urls: { chat_completions: 'https://relay.example.com/v1' },
+      model_mapping: { 'public-mistral': 'mistral-small-latest', 'codestral-latest': 'codestral-latest' },
+    }
+    account.credentials_status = { has_api_key: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const keyInput = wrapper.get('form#edit-account-form input[type="password"]')
+    expect((keyInput.element as HTMLInputElement).value).toBe('')
+    if (rotate) await keyInput.setValue('fixture-rotated-mistral-key')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials).toMatchObject(account.credentials)
+    expect(credentials.api_base_urls).toEqual({ chat_completions: 'https://relay.example.com/v1' })
+    if (rotate) expect(credentials.api_key).toBe('fixture-rotated-mistral-key')
+    else expect(credentials).not.toHaveProperty('api_key')
+  })
+
   it('preserves OpenCode Zen account type and endpoints on submit', async () => {
     const account = buildAccount()
     account.platform = 'opencode_go'
@@ -1589,6 +1617,43 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+
+  it('loads and submits the per-account all-model UltraFast billing toggle', async () => {
+    const account = buildAccount()
+    account.extra = { openai_response_tier_billing_enabled: true }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="edit-openai-ultrafast-billing-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty(
+      'openai_response_tier_billing_enabled'
+    )
+  })
+
+  it('keeps upstream response-tier billing enabled when saving an existing account', async () => {
+    const account = buildAccount()
+    account.extra = { openai_response_tier_billing_enabled: true }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-testid="edit-openai-ultrafast-billing-toggle"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_response_tier_billing_enabled).toBe(true)
   })
 
   it('loads and clears the OAuth-only Codex namespace flatten toggle', async () => {

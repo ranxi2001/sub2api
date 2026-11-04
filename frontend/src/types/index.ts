@@ -987,7 +987,7 @@ export interface UpdateGroupRequest {
 // ==================== Account & Proxy Types ====================
 
 /** 前端内置专属界面（图标、配色、表单等）的平台。 */
-export type KnownAccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'typesafe' | 'command_code' | 'cline'
+export type KnownAccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'minimax' | 'opencode_go' | 'typesafe' | 'command_code' | 'cline' | 'mistral'
 /**
  * 账号平台：内置平台，或后端平台清单中新登记的平台（任意字符串）。
  * `string & {}` 保留内置平台的字面量补全。
@@ -2784,6 +2784,20 @@ export interface PelicanTestConfig {
   question_kind?: 'candy' | 'pelican' | 'state_probe' | 'random_reasoning'
   // Result-only identity of a runtime-generated question.
   random_question?: { id: string; family: 'paths' | 'weighted_xor'; version: string }
+  quality_batch?: {
+    route: string
+    mapped_model: string
+    id: string
+    started_at: string
+    start_deadline: string
+    closes_at: string
+    comparison_key: string
+    decision: string
+    peer_accounts: number
+    peer_passed: number
+    peer_failed: number
+    peer_inconclusive: number
+  }
   test_channel?: 'account' | 'bps'
   prompt: string
   reasoning_effort: string

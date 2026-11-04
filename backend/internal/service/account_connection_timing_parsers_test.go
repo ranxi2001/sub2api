@@ -21,7 +21,9 @@ func TestAccountConnectionTimingParsers(t *testing.T) {
 		parse                             func(*gin.Context, io.Reader) error
 	}{
 		{"responses", `{"type":"response.created"}`, `{"type":"response.output_text.delta","delta":"hello"}`, `{"type":"response.completed"}`, svc.processOpenAIStream},
-		{"chat", `{"choices":[{"delta":{"role":"assistant"}}]}`, `{"choices":[{"delta":{"content":"hello"}}]}`, `[DONE]`, svc.processOpenAIChatCompletionsStream},
+		{"chat", `{"choices":[{"delta":{"role":"assistant"}}]}`, `{"choices":[{"delta":{"content":"hello"}}]}`, `[DONE]`, func(c *gin.Context, body io.Reader) error {
+			return svc.processOpenAIChatCompletionsStream(c, body, nil)
+		}},
 		{"claude", `{"type":"message_start"}`, `{"type":"content_block_delta","delta":{"text":"hello"}}`, `{"type":"message_stop"}`, svc.processClaudeStream},
 		{"gemini", `{"modelVersion":"synthetic"}`, `{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}`, `[DONE]`, svc.processGeminiStream},
 	} {

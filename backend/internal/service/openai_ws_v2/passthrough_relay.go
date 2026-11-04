@@ -824,16 +824,10 @@ func observeUpstreamMessage(
 		}
 	}
 
-	if state.firstTokenMs == nil && isTokenEvent(eventType) {
+	if state.firstTokenMs == nil && openai.ResponseStartsSemanticOutput(message, eventType) {
 		ms := int(now.Sub(startAt).Milliseconds())
 		if ms >= 0 {
 			state.firstTokenMs = &ms
-		}
-		if state.activeTurn != nil && state.activeTurn.firstTokenMs == nil {
-			tms := int(now.Sub(state.activeTurn.startAt).Milliseconds())
-			if tms >= 0 {
-				state.activeTurn.firstTokenMs = &tms
-			}
 		}
 	}
 	parsedUsage := parseUsageAndAccumulate(state, message, eventType, onUsageParseFailure)
@@ -845,14 +839,15 @@ func observeUpstreamMessage(
 	var turnTiming *relayTurnTiming
 	if responseID != "" {
 		turnTiming = openAIWSRelayGetOrInitTurnTiming(state, responseID, now)
-		if turnTiming != nil && turnTiming.firstTokenMs == nil && isTokenEvent(eventType) {
-			ms := int(now.Sub(turnTiming.startAt).Milliseconds())
-			if ms >= 0 {
-				turnTiming.firstTokenMs = &ms
-			}
-		}
 	} else {
 		turnTiming = state.activeTurn
+	}
+
+	if turnTiming != nil && turnTiming.firstTokenMs == nil && openai.ResponseStartsSemanticOutput(message, eventType) {
+		ms := int(now.Sub(turnTiming.startAt).Milliseconds())
+		if ms >= 0 {
+			turnTiming.firstTokenMs = &ms
+		}
 	}
 	if turnTiming != nil && turnTiming.firstUpstreamEventMs == nil {
 		ms := int(now.Sub(turnTiming.startAt).Milliseconds())

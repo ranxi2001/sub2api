@@ -1553,7 +1553,7 @@ func TestCalculateCost_LargeTokenCount(t *testing.T) {
 func TestServiceTierCostMultiplier(t *testing.T) {
 	require.InDelta(t, 2.0, serviceTierCostMultiplier("priority"), 1e-12)
 	require.InDelta(t, 2.0, serviceTierCostMultiplier(" Priority "), 1e-12)
-	require.InDelta(t, 2.0, serviceTierCostMultiplier("ultrafast"), 1e-12)
+	require.InDelta(t, 6.0, serviceTierCostMultiplier("ultrafast"), 1e-12)
 	require.InDelta(t, 0.5, serviceTierCostMultiplier("flex"), 1e-12)
 	require.InDelta(t, 1.0, serviceTierCostMultiplier(""), 1e-12)
 	require.InDelta(t, 1.0, serviceTierCostMultiplier("default"), 1e-12)
@@ -2221,7 +2221,7 @@ func TestAstraUltrafastPricingUsesSixTimesStandard(t *testing.T) {
 	}
 	p, err := svc.GetModelPricing("gpt-6-sol")
 	require.NoError(t, err)
-	require.Equal(t, 2.0, configuredServiceTierMultiplier("ultrafast", p))
+	require.Equal(t, 6.0, configuredServiceTierMultiplier("ultrafast", p))
 }
 
 func TestGPT61SolExplicitZeroCacheWriteAcrossTiers(t *testing.T) {
@@ -2230,7 +2230,7 @@ func TestGPT61SolExplicitZeroCacheWriteAcrossTiers(t *testing.T) {
 	pricing.pricingData, err = pricing.parsePricingData([]byte(`{"gpt-6.1-sol":{"litellm_provider":"openai","input_cost_per_token":0.000002,"output_cost_per_token":0.00001,"input_cost_per_token_flex":0.000001,"cache_creation_input_token_cost":0,"cache_creation_input_token_cost_priority":0.000005}}`))
 	require.NoError(t, err)
 	svc := NewBillingService(&config.Config{}, pricing)
-	for _, tier := range []string{"", "fast", "priority", "flex"} {
+	for _, tier := range []string{"", "fast", "priority", "flex", "ultrafast"} {
 		cost, err := svc.CalculateCostWithServiceTier("openai/gpt-6.1-sol-max", UsageTokens{CacheCreationTokens: 300000}, 1, tier)
 		require.NoError(t, err)
 		require.Zero(t, cost.CacheCreationCost)

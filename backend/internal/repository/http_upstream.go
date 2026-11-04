@@ -490,7 +490,9 @@ func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	clone.Transport = &grokAccessDeniedFallbackTransport{base: base}
+	// Observe each physical RoundTrip before the compatibility fallback so
+	// a rejected send followed by a successful retry remains two samples.
+	clone.Transport = &grokAccessDeniedFallbackTransport{base: &accountResponseTransport{base: base}}
 	return &clone
 }
 

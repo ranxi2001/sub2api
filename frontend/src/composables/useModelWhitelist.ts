@@ -168,6 +168,7 @@ const deepseekModels = [
 // Mistral
 const mistralModels = [
   'mistral-small-latest', 'mistral-medium-latest', 'mistral-large-latest',
+  'zai-glm-5-3',
   'open-mistral-7b', 'open-mixtral-8x7b', 'open-mixtral-8x22b',
   'codestral-latest', 'codestral-mamba',
   'pixtral-12b-2409', 'pixtral-large-latest'

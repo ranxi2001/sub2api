@@ -18,6 +18,7 @@ const pelicanClaudeMaxTokens = 32000
 type pelicanTestContextKey struct{}
 
 type pelicanTestOptions struct {
+	qualityBatch    *QualityBatchEvidence
 	prompt          string
 	reasoningEffort string
 	testChannel     string
@@ -32,6 +33,15 @@ func withPelicanTestOptions(ctx context.Context, options pelicanTestOptions) con
 func pelicanTestOptionsFromContext(ctx context.Context) (pelicanTestOptions, bool) {
 	options, ok := ctx.Value(pelicanTestContextKey{}).(pelicanTestOptions)
 	return options, ok
+}
+
+// Record the chosen test path and mapped target, never credentials or URLs.
+func recordQualityBatchRoute(c *gin.Context, account *Account, model, route string) {
+	options, ok := pelicanTestOptionsFromContext(c.Request.Context())
+	if ok && options.qualityBatch != nil {
+		options.qualityBatch.Route = route
+		options.qualityBatch.MappedModel = account.GetMappedModel(model)
+	}
 }
 
 func isQualityObservation(ctx context.Context) bool {

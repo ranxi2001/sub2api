@@ -51,8 +51,12 @@ const channelOperationsQualityBase = `WITH scoped AS (
  SELECT account_id,plan_id,COALESCE(NULLIF(quality_round_id,''),'legacy-'||id::text) AS round_key,measured_model,
  max(id) AS id,max(created_at) AS observed_at,count(*) AS probes,
  count(*) FILTER(WHERE status='success' AND quality_judgment->>'verdict'='correct') AS passed_probes,
- bool_or(COALESCE(status='failed' AND quality_judgment->>'verdict'='incorrect' AND error_message IN ('answer_mismatch','state_degraded') AND quality_action NOT IN ('','stale_run') AND quality_round_id<>'',false)) AS degraded,
- bool_and(COALESCE(status='success' AND quality_judgment->>'verdict'='correct' AND quality_action NOT IN ('','stale_run') AND quality_round_id<>'',false)) AS passed,
+ bool_or(COALESCE(status='failed' AND quality_judgment->>'verdict'='incorrect' AND error_message IN ('answer_mismatch','state_degraded')
+ AND (COALESCE(pelican_config->>'question_kind','')<>'random_reasoning' OR pelican_config->'quality_batch'->>'decision'='peer_passed')
+ AND quality_action NOT IN ('','stale_run','comparison_pending') AND quality_round_id<>'',false)) AS degraded,
+ bool_and(COALESCE(status='success' AND quality_judgment->>'verdict'='correct'
+ AND (COALESCE(pelican_config->>'question_kind','')<>'random_reasoning' OR pelican_config->'quality_batch'->>'decision'='passed')
+ AND quality_action NOT IN ('','stale_run','comparison_pending') AND quality_round_id<>'',false)) AS passed,
  bool_and(COALESCE(jsonb_typeof(pelican_config->'parallel_count')='number' AND (pelican_config->>'parallel_count') ~ '^[1-8]$',false)) AS valid_count,
  max(CASE WHEN jsonb_typeof(pelican_config->'parallel_count')='number' AND (pelican_config->>'parallel_count') ~ '^[1-8]$' THEN (pelican_config->>'parallel_count')::int END) AS expected,
  jsonb_agg(DISTINCT NULLIF(quality_action,'')) AS actions,

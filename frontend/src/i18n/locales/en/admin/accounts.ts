@@ -354,6 +354,7 @@ export default {
         expiresAt: 'Expires At',
         actions: 'Actions'
       },
+      capacitySortHint: 'Sorts all filtered accounts by current concurrency (the numerator), independent of limits or utilization. Ties follow account ID order. Each refresh reads and sorts again, so accounts may move between pages. If the read fails, previous results remain; retry or choose another sort order.',
       schedulerScore: {
         baseShort: 'Base',
         stickyShort: 'Sticky',
@@ -881,6 +882,9 @@ export default {
         longContextBilling: 'API long-context pricing',
         longContextBillingDesc:
           'Disabled by default. Enable only when this account\'s upstream charges OpenAI API long-context rates above the model threshold.',
+        ultrafastBilling: 'UltraFast tier billing',
+        ultrafastBillingDesc:
+          'Disabled by default. When enabled, read service_tier from upstream responses; every model on this account uses its standard price ×6 for ultrafast, including cache reads and writes, then applies account/group multipliers. If the response omits the tier, bill the requested tier. Explicit ultrafast requests that settle at that tier are billed at 6× even with this switch off. This does not force UltraFast upstream.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',

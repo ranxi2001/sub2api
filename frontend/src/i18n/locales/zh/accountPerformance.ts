@@ -1,4 +1,9 @@
 export default {
+ upstreamErrorRate: '上游错误率',
+ localSample: '本进程',
+ localWindowComplete: '本进程已保留此窗口历史；通道路由覆盖仍不完整。',
+ partialHistory: '历史不完整：进程启动、容量或保留时限之前的样本未知。',
+ upstreamHTTPNote: '上游 HTTP 错误率 = 上游 HTTP 4xx/5xx 响应数 ÷ 已观测 HTTP 2xx–5xx 响应数 × 100（{failures} / {total}）。按收到响应头时间统计最近{minutes}分钟（含边界）。每次重试独立计数，先失败后成功仍为两次。来源仅此服务进程，最多保留最近65,536条响应及24小时，保留样本起点 {since}。{validity} 统计各平台通过共用 HTTP 传输的推理 POST，包含使用该传输的探针；排除本地认证、余额、调度拒绝、收到响应头前取消及未收到响应的网络／传输失败。未识别 HTTP 200 流内／业务错误、不完整流、原生 WebSocket 或插件／绕过传输；并非用户最终错误率。其他实例及采集前历史未知。每30秒刷新；切换服务实例可能改变样本。无样本显示未采集。',
  column: '性能 · 近{minutes}分钟', title: '账号性能阈值监控',
  tps: '平均 TPS', degradation: '探针轮次降智率 · {minutes}m', ttft: '首字平均值',
  uncollected: '未采集', unavailable: '暂不可用', configure: '配置阈值',
@@ -16,7 +21,7 @@ export default {
  refresh: '重新加载', reason: '触发指标：{reason}', auditUnavailable: '审计记录暂不可用',
  settings: {
   title: '账号性能监控周期',
-  description: '全局配置 TPS、首字耗时和探针轮次降智率的滚动统计周期。',
+  description: '全局配置 TPS、首字耗时、探针轮次降智率及本进程上游 HTTP 错误率的滚动统计周期。',
   windowMinutes: '统计周期（分钟）',
   windowHint: '默认 60 分钟，可设置为 1–1440 的整数；所有账号共用此周期。',
   effectHint: '保存后，后续统计与阈值评估使用新周期，无需重启。仍每 30 秒评估一次；更改周期不会解除已有暂停。',

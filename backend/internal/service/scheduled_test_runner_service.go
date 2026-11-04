@@ -111,6 +111,7 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	defer cancel()
 
 	now := time.Now()
+	s.finalizeQualityBatches(ctx)
 	if err := s.scheduledSvc.resultRepo.PruneExpiredPelican(ctx, now.Add(-7*24*time.Hour)); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "pelican history cleanup failed: %v", err)
 	}
@@ -140,6 +141,15 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	}
 
 	logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] found %d due plans", len(plans))
+	for _, plan := range plans {
+		if plan.PelicanConfig != nil && plan.PelicanConfig.QuestionKind == QualityRandomQuestionKind {
+			batch, batchErr := newQualitySharedBatch(now)
+			if batchErr == nil {
+				ctx = context.WithValue(ctx, qualitySharedBatchContextKey{}, batch)
+			}
+			break
+		}
+	}
 
 	sem := make(chan struct{}, scheduledTestDefaultMaxWorkers)
 	var wg sync.WaitGroup
@@ -155,6 +165,7 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	}
 
 	wg.Wait()
+	s.finalizeQualityBatches(ctx)
 }
 
 func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *ScheduledTestPlan) (completed bool) {

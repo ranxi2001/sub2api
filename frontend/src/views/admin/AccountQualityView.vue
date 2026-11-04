@@ -236,6 +236,16 @@
             <div v-if="answerLoading" class="detail-loading" role="status"><span class="cell-skeleton" /><span class="cell-skeleton" />{{ t('qualityOps.loadingAnswer') }}</div>
             <template v-else-if="selectedResult"><header class="answer-heading"><h4>{{ t(isProbeResult(selectedResult) ? 'qualityOps.probeVerdictTitle' : 'qualityOps.answerAndVerdict') }}</h4><span class="outcome-badge" :class="resultTone(selectedResult)" data-testid="quality-result-badge">{{ resultLabel(selectedResult) }}</span></header>
               <details v-if="selectedResult.pelican_config?.random_question" class="answer-reference" data-testid="quality-random-question-detail"><summary>{{ t('qualityOps.generatedQuestion') }} · {{ selectedResult.pelican_config.random_question.id }}</summary><pre class="whitespace-pre-wrap">{{ selectedResult.pelican_config.prompt }}</pre></details>
+              <div v-if="selectedResult.pelican_config?.question_kind === 'random_reasoning'" class="answer-reference" data-testid="quality-batch-evidence">
+                <template v-if="selectedResult.pelican_config.quality_batch">
+                  <strong>{{ t('qualityOps.sharedBatch') }} · {{ selectedResult.pelican_config.quality_batch.id }}</strong>
+                  <p>{{ batchDecisionLabel(selectedResult.pelican_config.quality_batch.decision) }}</p>
+                  <p>{{ t('qualityOps.batchCondition', { model: selectedResult.pelican_config.model_id || '—', mapped: selectedResult.pelican_config.quality_batch.mapped_model || '—', effort: selectedResult.pelican_config.reasoning_effort || '—', route: selectedResult.pelican_config.quality_batch.route || '—' }) }}</p>
+                  <p>{{ t('qualityOps.batchPeers', { total: selectedResult.pelican_config.quality_batch.peer_accounts, passed: selectedResult.pelican_config.quality_batch.peer_passed, failed: selectedResult.pelican_config.quality_batch.peer_failed, unknown: selectedResult.pelican_config.quality_batch.peer_inconclusive }) }}</p>
+                  <p>{{ t('qualityOps.batchWindow', { from: date(selectedResult.pelican_config.quality_batch.started_at), to: date(selectedResult.pelican_config.quality_batch.start_deadline) }) }}</p>
+                </template>
+                <p v-else>{{ t('qualityOps.batchLegacy') }}</p>
+              </div>
               <div v-if="selectedResult.status !== 'skipped' && !isProbeResult(selectedResult)" class="answer-reference"><span>{{ t('qualityOps.answer') }}</span><p>{{ selectedResult.pelican_config?.quality?.expected_answer || detailOperation?.pelican_config?.quality?.expected_answer || '—' }}</p></div>
               <div class="response-heading">{{ t(selectedResult.status === 'skipped' ? 'qualityOps.skipReason' : isProbeResult(selectedResult) ? 'qualityOps.probeDetail' : 'qualityOps.actualAnswer') }}<span v-if="selectedResult.latency_ms">{{ (selectedResult.latency_ms / 1000).toFixed(1) }}s</span></div>
               <pre class="response-content">{{ resultContent(selectedResult) }}</pre>
@@ -560,12 +570,17 @@ function actionLabel(action?: string) {
   const key = `qualityOps.outcomes.${action}`; return action && te(key) ? t(key) : '—'
 }
 function operationLabel(op: QualityOperation) {
+  if (op.quality_action === 'inconclusive' && op.pelican_config?.quality_batch?.decision === 'no_passing_peer') return t('qualityOps.batchNoControl')
   const policy = op.pelican_config?.quality?.action, bpsKey = `qualityOps.bpsOutcomes.${actionKey(op.quality_action)}`
   const diagnostic = op.pelican_config?.quality_restore_diagnostic
   if (op.quality_action === 'restore_conflict' && diagnostic?.scope === 'remove_groups' && diagnostic.disposition === 'external_membership_present') return t('qualityOps.externalMembershipPresent')
   if (op.quality_action === 'restored' && policy === 'remove_groups') return t('qualityOps.groupsRestored')
   if (policy === 'enable_bps' && op.quality_action && te(bpsKey)) return t(bpsKey)
   return actionLabel(op.quality_action)
+}
+function batchDecisionLabel(decision: string) {
+  const key = `qualityOps.batchDecisions.${decision}`
+  return te(key) ? t(key) : t('qualityOps.batchLegacy')
 }
 function tone(action?: string) {
   const key = actionKey(action)
@@ -874,7 +889,7 @@ function payload() {
   if (nextQuality.action === 'isolate_models' && isProbe.value) throw new Error(t('qualityOps.isolationRequiresCandy'))
   if (isRandom.value) {
     nextQuality.expected_answer = ''
-    return { ...form.value, max_results, pelican_config: { ...form.value.pelican_config, model_ids, prompt: '', random_question: undefined, quality: nextQuality } }
+    return { ...form.value, max_results, pelican_config: { ...form.value.pelican_config, model_ids, prompt: '', random_question: undefined, quality_batch: undefined, quality: nextQuality } }
   }
   if (!isProbe.value) return { ...form.value, max_results, pelican_config: { ...form.value.pelican_config, model_ids, quality: nextQuality } }
   nextQuality.expected_answer = ''
