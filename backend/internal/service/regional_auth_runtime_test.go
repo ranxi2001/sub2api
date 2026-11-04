@@ -65,7 +65,7 @@ func TestRegionalAuthRuntimeMTLSPullRevocationAndRestore(t *testing.T) {
 	c.StateFile = filepath.Join(t.TempDir(), "auth")
 	c.Bootstrap = true
 	cfg := writeAuthRuntimeTestConfig(t, c)
-	svc, err := ProvideAPIKeyService(nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil)
+	svc, err := ProvideAPIKeyService(nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil)
 	require.NoError(t, err)
 	defer svc.StopAuthCacheInvalidationSubscriber()
 	require.Eventually(t, func() bool { _, err := svc.GetByKey(ctx, authTestRecord().APIKey.Key); return err == nil }, 5*time.Second, 10*time.Millisecond)
@@ -82,7 +82,7 @@ func TestRegionalAuthRuntimeMTLSPullRevocationAndRestore(t *testing.T) {
 	pub.stop()
 	server.Close()
 	c.Bootstrap = false
-	restored, err := ProvideAPIKeyService(nil, nil, nil, nil, nil, nil, writeAuthRuntimeTestConfig(t, c), nil, nil, nil)
+	restored, err := ProvideAPIKeyService(nil, nil, nil, nil, nil, nil, writeAuthRuntimeTestConfig(t, c), nil, nil, nil, nil)
 	require.NoError(t, err)
 	defer restored.StopAuthCacheInvalidationSubscriber()
 	_, err = restored.GetByKey(ctx, authTestRecord().APIKey.Key)
