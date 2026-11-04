@@ -780,6 +780,7 @@ const autoRefreshCountdown = ref(0)
 const autoRefreshETag = ref<string | null>(null)
 const autoRefreshFetching = ref(false)
 let autoRefreshAbortController: AbortController | null = null
+let accountViewDisposed = false
 let accountListContextVersion = 0
 const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
 const autoRefreshSilentUntil = ref(0)
@@ -1385,7 +1386,7 @@ const applyUpstreamBillingRateSnapshots = async (
 }
 
 const refreshUpstreamBillingRates = async (force = false) => {
-  if (upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
+  if (accountViewDisposed || upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
   if (!force && (
     probingUpstreamBilling.size > 0 ||
     isAnyModalOpen.value ||
@@ -1613,7 +1614,7 @@ const mergeAccountsIncrementally = (nextRows: Account[]) => {
 }
 
 const refreshAccountsIncrementally = async () => {
-  if (autoRefreshFetching.value) return
+  if (accountViewDisposed || autoRefreshFetching.value) return
   syncAccountListDerivedParams()
   const requestContextVersion = accountListContextVersion
   const controller = new AbortController()
@@ -2773,6 +2774,9 @@ onMounted(async () => {
     adminAPI.proxies.getAll(),
     adminAPI.groups.getAll()
   ])
+  // Catalog requests can finish after scope disposal; never reattach listeners
+  // or resume the refresh interval for a page that has already been left.
+  if (accountViewDisposed) return
   if (proxiesResult.status === 'fulfilled') {
     proxies.value = proxiesResult.value
   } else {
@@ -2796,6 +2800,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  accountViewDisposed = true
   accountListContextVersion++
   cancelAutoRefreshRequest()
   performanceRequest++

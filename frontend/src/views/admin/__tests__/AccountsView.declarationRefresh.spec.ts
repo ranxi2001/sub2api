@@ -441,4 +441,34 @@ describe('AccountsView automatic declaration refresh', () => {
     await flushPromises()
     expect(requests.filter(request => request.url === '/admin/accounts')).toHaveLength(before)
   })
+
+  it('does not restart refresh timers when initial catalogs complete after teardown', async () => {
+    const catalogs = holdNext('/admin/groups/all', [])
+    const view = await mountView()
+    view.unmount()
+    wrapper = undefined
+    const before = requests.length
+    catalogs.complete()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(18_000)
+    await flushPromises()
+    expect(requests).toHaveLength(before)
+  })
+
+  it('cancels a pending compact reader on teardown without fetching a fallback list', async () => {
+    const view = await mountView()
+    overrides.set('/admin/accounts/41/upstream-billing-probe', async config => reply(config, { account_id: 41, snapshot: snapshot(0.8) }))
+    const compact = holdNext('/admin/accounts/upstream-billing-rates', {
+      items: [{ account_id: 99, cost_multiplier: 1, snapshot: snapshot(0.8) }], total: 1, page: 1, page_size: 20
+    })
+    await view.get('[data-row-id="41"] [data-testid="upstream-billing-probe"]').trigger('click')
+    await flushPromises()
+    view.unmount()
+    wrapper = undefined
+    expect(compact.config().signal?.aborted).toBe(true)
+    const before = requests.length
+    compact.complete()
+    await flushPromises()
+    expect(requests).toHaveLength(before)
+  })
 })
