@@ -2,9 +2,10 @@
   <details class="card" @toggle="onToggle">
     <summary class="cursor-pointer px-6 py-4 font-semibold">{{ text('Serverless 管理', 'Serverless management') }}
       <span class="ml-2 text-xs font-normal text-gray-500">{{ text('地区 → Pod（可选）', 'Region → Pod (optional)') }}</span>
+      <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting" :user-id="userId" class="ml-2" />
     </summary>
     <div class="space-y-5 border-t border-gray-100 p-6 dark:border-dark-700">
-      <p class="text-sm text-gray-500">{{ text('管理已有请求 Pod，不创建或扩缩容。默认关闭；未知地区走主站。地区复用现有 IP 地区分析。', 'Manage existing request Pods without creating or scaling them. Disabled by default; unknown regions use the primary. Regions use the existing IP geolocation provider.') }}</p>
+      <p class="text-sm text-gray-500">{{ text('管理已有请求 Pod，不创建或扩缩容。默认关闭；未知地区走主站。IP 国家识别结果在 Redis 缓存 24 小时，命中时不再请求地区服务；识别失败缓存 1 分钟。', 'Manage existing request Pods without creating or scaling them. Disabled by default; unknown regions use the primary. IP country results are cached in Redis for 24 hours without another provider lookup on a cache hit; failed lookups are cached for one minute.') }}</p>
       <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
       <p v-if="notice" role="status" class="text-sm text-green-600">{{ notice }}</p>
       <div class="flex flex-wrap items-center gap-4">
@@ -12,7 +13,19 @@
         <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="refresh(false)">{{ text('刷新状态', 'Refresh status') }}</button>
         <button type="button" class="btn btn-primary btn-sm" :disabled="busy || !loaded" @click="save">{{ text('保存 Serverless 配置', 'Save Serverless configuration') }}</button>
       </div>
-      <p class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">{{ text('同一 API Key 固定到同一 Pod（最后使用后保留 24 小时）。停用分流或 Pod 只阻止新绑定；已有绑定继续使用原 Pod。绑定实例失联或重启时返回错误，不自动迁移会话。首次启用前先结束存量 BPS/WS 会话。', 'Each API Key stays on one Pod for 24 hours after last use. Disabling routing or a Pod stops new bindings; existing bindings remain. A missing or restarted bound instance returns an error without moving the conversation. Finish existing BPS/WS conversations before first enabling routing.') }}</p>
+      <div class="space-y-3 rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+        <label class="flex flex-wrap items-center gap-3">{{ text('绑定范围', 'Binding scope') }}
+          <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting" :user-id="userId" />
+          <select v-model="draft.affinity_scope" class="input w-auto" :disabled="busy || !loaded" data-testid="serverless-affinity-scope">
+            <option value="api_key">{{ text('API Key（默认）', 'API Key (default)') }}</option>
+            <option value="api_key_ip">{{ text('API Key ＋ 客户端 IP', 'API Key + client IP') }}</option>
+          </select>
+        </label>
+        <p class="text-xs text-gray-500">{{ text('同一 Key 需要按使用者地区分流时，选择 Key ＋ IP。每个绑定最后使用后保留 24 小时。切换范围会使用独立绑定；IP 改变可能更换 Pod，不能用于依赖节点内状态的会话。', 'Choose Key + IP when one key is used from multiple regions. Each binding lasts 24 hours after last use. Changing scope uses separate bindings; changing IP may select another Pod, so do not use this for sessions with node-local state.') }}</p>
+        <label class="flex items-center gap-2"><input v-model="draft.fallback_to_primary" type="checkbox" :disabled="busy || !loaded" data-testid="serverless-primary-fallback" />{{ text('已绑定 Pod 不可用时回主站', 'Use primary when a bound Pod is unavailable') }}</label>
+        <p class="text-xs text-gray-500">{{ text('默认关闭，失联时保留绑定并返回错误。开启后仅在转发前探测失败或实例失联时将绑定改为主站；不会重试已发送请求或已开始的流。回主站后保持绑定，不自动切回。', 'Off by default: preserve the binding and return an error. When enabled, move the binding to the primary only if the instance is missing or its probe fails before forwarding. Sent requests and started streams are never retried. A fallback binding stays on the primary without automatic failback.') }}</p>
+      </div>
+      <p class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">{{ text('停用分流或 Pod 只阻止新绑定；已有绑定继续使用原 Pod。首次启用或更改绑定范围前，先结束存量 BPS/WS 会话。', 'Disabling routing or a Pod stops new bindings; existing bindings remain. Finish existing BPS/WS conversations before first enabling routing or changing binding scope.') }}</p>
 
       <section class="space-y-3">
         <h3 class="font-medium">{{ text('自动注册的 Pod', 'Automatically registered Pods') }}</h3>
@@ -77,16 +90,23 @@ RUNTIME_SERVERLESS_ENDPOINT=https://pod.example.com</pre>
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiClient } from '@/api/client'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+
+defineProps<{ userId?: number | null }>()
 
 interface Policy { id: string; endpoint: string; enabled: boolean }
 interface Region { country: string; pod_ids: string[] }
-interface Config { enabled: boolean; pods: Policy[]; regions: Region[] }
+interface Config { enabled: boolean; affinity_scope?: 'api_key' | 'api_key_ip'; fallback_to_primary?: boolean; pods: Policy[]; regions: Region[] }
 interface Pod { id: string; boot: string; endpoint: string; region: string; version: string; ready: boolean; at: number }
 interface Snapshot { config: Config; pods: Pod[]; stats: Record<string, string> }
 const { locale } = useI18n()
 const text = (zh: string, en: string) => locale.value.startsWith('zh') ? zh : en
 const loaded = ref(false), busy = ref(false), error = ref(''), notice = ref('')
-const draft = ref<Config>({ enabled: false, pods: [], regions: [] })
+const draft = ref<Config>({ enabled: false, affinity_scope: 'api_key', fallback_to_primary: false, pods: [], regions: [] })
+function normalizeConfig(config: Config): Config {
+  return { ...config, affinity_scope: config.affinity_scope || 'api_key', fallback_to_primary: config.fallback_to_primary ?? false }
+}
 const pods = ref<Pod[]>([]), stats = ref<Record<string, string>>({}), probes = ref<Record<string, boolean>>({})
 let disposed = false
 onBeforeUnmount(() => { disposed = true })
@@ -108,6 +128,7 @@ function reasonLabel(reason: string) {
     region: text('地区命中', 'Region match'), binding: text('已有绑定', 'Existing binding'),
     default: text('默认主站', 'Default primary'), unhealthy_fallback: text('无健康 Pod，回主站', 'No healthy Pod; primary'),
     binding_unavailable: text('绑定实例不可用', 'Bound instance unavailable'),
+    binding_fallback: text('绑定实例失联，已回主站', 'Bound instance unavailable; moved to primary'),
   }
   return labels[reason] ?? reason
 }
@@ -122,7 +143,7 @@ async function refresh(replace: boolean) {
     const data = (await apiClient.get<Snapshot>('/admin/serverless')).data
     if (disposed) return
     pods.value = data.pods; stats.value = data.stats
-    if (replace || !loaded.value) draft.value = data.config
+    if (replace || !loaded.value) draft.value = normalizeConfig(data.config)
     loaded.value = true
   })
 }
@@ -132,7 +153,7 @@ async function save() {
     const config: Config = JSON.parse(JSON.stringify(draft.value))
     config.regions.forEach(r => { r.country = r.country.trim().toUpperCase() })
     const { data } = await apiClient.put<Config>('/admin/serverless', config)
-    if (!disposed) { draft.value = data; notice.value = text('已保存。新规则在数秒内生效，已有绑定保持不变。', 'Saved. New rules take effect within seconds; existing bindings remain.') }
+    if (!disposed) { draft.value = normalizeConfig(data); notice.value = text('已保存。新规则在数秒内生效；相同绑定范围内继续使用已有绑定。', 'Saved. New rules take effect within seconds; existing bindings remain within the same scope.') }
   })
 }
 function approved(p: Pod) { return draft.value.pods.some(v => v.id === p.id && v.endpoint.replace(/\/$/, '') === p.endpoint) }
@@ -143,7 +164,7 @@ function approve(p: Pod) {
   notice.value = text('已加入草稿，需保存后才能检查连接。确认就绪后再启用新绑定。', 'Added to draft. Save before checking connectivity, then enable new bindings.')
 }
 function removePod(id: string) {
-  if (!window.confirm(text('移除会让已有绑定无法继续请求。确认该 Pod 已排空？', 'Removing the policy breaks existing bindings. Confirm that this Pod is drained?'))) return
+  if (!window.confirm(text('移除后，已有绑定会返回错误，或按已保存的回退设置迁到主站。确认该 Pod 已排空？', 'After removal, existing bindings fail or move to the primary according to the saved fallback policy. Confirm that this Pod is drained?'))) return
   draft.value.pods = draft.value.pods.filter(p => p.id !== id)
   draft.value.regions.forEach(r => { r.pod_ids = r.pod_ids.filter(p => p !== id) })
 }
