@@ -14,7 +14,16 @@ export interface PerformanceConfig {
  degradation: PerformanceBounds
  ttft: PerformanceBounds
 }
+export interface UpstreamHTTPErrorEvidence {
+ percent: number | null
+ failures: number
+ total: number
+ source: 'process_local_http_responses'
+ observed_since: string
+ window_complete: boolean
+}
 export interface AccountPerformance {
+ upstream_error?: UpstreamHTTPErrorEvidence
  account_id: number
  avg_tps: number | null
  degradation_percent: number | null

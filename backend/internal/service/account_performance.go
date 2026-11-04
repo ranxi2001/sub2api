@@ -9,6 +9,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 )
 
 var ErrPerformanceConflict = errors.New("performance monitor changed; reload before saving")
@@ -50,21 +52,22 @@ func (c PerformanceConfig) Validate() error {
 }
 
 type AccountPerformance struct {
-	AccountID          int64             `json:"account_id"`
-	AvgTPS             *float64          `json:"avg_tps"`
-	DegradationPercent *float64          `json:"degradation_percent"`
-	AvgTTFTMs          *float64          `json:"avg_ttft_ms"`
-	TPSSamples         int               `json:"tps_samples"`
-	TTFTSamples        int               `json:"ttft_samples"`
-	QualitySamples     int               `json:"quality_samples"`
-	Config             PerformanceConfig `json:"config"`
-	Revision           int64             `json:"revision"`
-	Paused             bool              `json:"paused"`
-	PauseGeneration    int64             `json:"pause_generation"`
-	PausedAt           *time.Time        `json:"paused_at"`
-	Reason             string            `json:"reason"`
-	WindowStart        time.Time         `json:"window_start"`
-	WindowEnd          time.Time         `json:"window_end"`
+	UpstreamError      upstreamstats.Evidence `json:"upstream_error"`
+	AccountID          int64                  `json:"account_id"`
+	AvgTPS             *float64               `json:"avg_tps"`
+	DegradationPercent *float64               `json:"degradation_percent"`
+	AvgTTFTMs          *float64               `json:"avg_ttft_ms"`
+	TPSSamples         int                    `json:"tps_samples"`
+	TTFTSamples        int                    `json:"ttft_samples"`
+	QualitySamples     int                    `json:"quality_samples"`
+	Config             PerformanceConfig      `json:"config"`
+	Revision           int64                  `json:"revision"`
+	Paused             bool                   `json:"paused"`
+	PauseGeneration    int64                  `json:"pause_generation"`
+	PausedAt           *time.Time             `json:"paused_at"`
+	Reason             string                 `json:"reason"`
+	WindowStart        time.Time              `json:"window_start"`
+	WindowEnd          time.Time              `json:"window_end"`
 }
 
 func (m AccountPerformance) Breaches() []string {
