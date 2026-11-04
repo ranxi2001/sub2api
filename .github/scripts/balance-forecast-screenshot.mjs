@@ -21,7 +21,7 @@ const previewDir = join(output, 'preview-build'), errors = [], screenshots = []
 let browser, server
 try {
   writeFileSync(entry, `
-    import { createApp, ref } from 'vue';
+    import { createApp, h, ref } from 'vue';
     import { createPinia } from 'pinia';
     import { createI18n } from 'vue-i18n';
     import zh from '/src/i18n/locales/zh/index.ts';
@@ -31,9 +31,18 @@ try {
     import { NEW_FEATURE_NOTICES } from '/src/constants/newFeatureNotices.ts';
     import '/src/style.css';
     const locale=new URLSearchParams(location.search).get('lang') || 'zh';
-    createApp({components:{Panel,Badge},setup:()=>({enabled:ref(false),hours:ref(12),cap:ref(3),notice:NEW_FEATURE_NOTICES.balanceForecast}),
-      template:'<main class="min-h-screen bg-gray-50 p-4 text-gray-900 dark:bg-dark-900 dark:text-gray-100"><div class="mx-auto max-w-3xl space-y-4"><h1 class="text-xl font-semibold">Settings / 邮件</h1><p>CI component preview · fictional data · no production/API delivery</p><nav><span>邮件 / Email </span><Badge :notice-id="notice" :user-id="41" /></nav><Panel v-model:enabled="enabled" v-model:threshold-hours="hours" v-model:max-notifications="cap" :user-id="41" /></div></main>'
-    }).use(createPinia()).use(createI18n({legacy:false,locale,messages:{zh,en}})).mount('#app');
+    createApp({setup(){
+      const enabled=ref(false),hours=ref(12),cap=ref(3);
+      return()=>h('main',{class:'min-h-screen bg-gray-50 p-4 text-gray-900 dark:bg-dark-900 dark:text-gray-100'},[
+        h('div',{class:'mx-auto max-w-3xl space-y-4'},[
+          h('h1',{class:'text-xl font-semibold'},'Settings / 邮件'),
+          h('p','CI component preview · fictional data · no production/API delivery'),
+          h('nav',[h('span','邮件 / Email '),h(Badge,{noticeId:NEW_FEATURE_NOTICES.balanceForecast,userId:41})]),
+          h(Panel,{enabled:enabled.value,thresholdHours:hours.value,maxNotifications:cap.value,userId:41,
+            'onUpdate:enabled':v=>enabled.value=v,'onUpdate:thresholdHours':v=>hours.value=v,'onUpdate:maxNotifications':v=>cap.value=v}),
+        ])
+      ]);
+    }}).use(createPinia()).use(createI18n({legacy:false,locale,messages:{zh,en}})).mount('#app');
   `, { flag: 'wx' })
   writeFileSync(html, `<html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="./${suffix}.js"></script></html>`, { flag: 'wx' })
   await build({root,configFile:false,resolve:{alias:{'@':join(root,'src')}},plugins:[vue()],
@@ -75,6 +84,9 @@ try {
   if(await page.locator('[data-testid="new-feature-badge"]').count()!==0)throw Error('notice dismissal did not persist')
   writeFileSync(join(output,'manifest.json'),JSON.stringify({source_commit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),mode:'actual new component and CSS, local fictional preview; no full-page/API/SMTP validation',screenshots,errors},null,2)+'\n')
   if(errors.length)throw Error(errors.join('\n'))
+} catch (error) {
+  writeFileSync(join(output,'failure.json'),JSON.stringify({message:String(error),errors},null,2)+'\n')
+  throw error
 } finally {
   await browser?.close()
   if (server) await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()))
