@@ -439,3 +439,75 @@ func TestVipCreditAdmissionCannotReviveIndependentRestrictions(t *testing.T) {
 		})
 	}
 }
+
+type creditPenaltySettings struct{ service.SettingRepository }
+
+func (creditPenaltySettings) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{service.SettingKeyRiskControlEnabled: "true", service.SettingKeySecurityPenalty: `{"enabled":true,"observe_only":false,"policy":"user_block","threshold":1,"window_hours":24,"duration_hours":24,"all_groups":true,"version":1}`}, nil
+}
+func TestVipCreditCannotBypassSecurityBlock(t *testing.T) {
+	ctx := context.Background()
+	db := creditDB(t)
+	uid := creditUser(t, db, "0")
+	configureCredit(t, db, uid, "1", "2", "4")
+	credential := fmt.Sprintf("sk-credit-blocked-%d", uid)
+	_, err := db.Exec(`INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'blocked')`, uid, credential)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO security_penalty_subjects(user_id,scope,subject_key,policy,strike_count,blocked_until) VALUES($1,'user','user','user_block',1,NOW()+INTERVAL '1 day')`, uid)
+	require.NoError(t, err)
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	cfg := &config.Config{}
+	keys := service.NewAPIKeyService(NewAPIKeyRepository(client, db), NewUserRepository(client, db), NewGroupRepository(client, db), nil, NewUserGroupRateRepository(db), nil, cfg)
+	keys.SetAutoCredit(NewAutoCreditRepository(db), nil)
+	_ = service.NewSecurityPenaltyService(db, creditPenaltySettings{}, keys)
+	r := gin.New()
+	r.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(keys, nil, cfg)))
+	r.POST("/v1/messages", func(c *gin.Context) { c.Status(200) })
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+credential)
+	r.ServeHTTP(w, req)
+	require.Equal(t, 403, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "security_penalty_blocked")
+	var count int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM auto_credit_ledger WHERE user_id=$1`, uid).Scan(&count))
+	require.Zero(t, count)
+}
+
+func TestVipCreditPositiveBalanceBelowReserveRecoversAtBillingBoundary(t *testing.T) {
+	db := creditDB(t)
+	uid := creditUser(t, db, "0.005")
+	configureCredit(t, db, uid, "1", "0.005", "1")
+	credential := fmt.Sprintf("sk-credit-positive-reserve-%d", uid)
+	_, err := db.Exec(`INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'positive-reserve')`, uid, credential)
+	require.NoError(t, err)
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	cfg := &config.Config{}
+	cfg.Billing.MinimumBalanceReserve = 0.01
+	users := NewUserRepository(client, db)
+	keyRepo := NewAPIKeyRepository(client, db)
+	billing := service.NewBillingCacheService(nil, users, nil, keyRepo, nil, nil, cfg, nil)
+	t.Cleanup(billing.Stop)
+	keys := service.NewAPIKeyService(keyRepo, users, NewGroupRepository(client, db), nil, NewUserGroupRateRepository(db), nil, cfg)
+	keys.SetAutoCredit(NewAutoCreditRepository(db), billing)
+	r := gin.New()
+	r.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(keys, nil, cfg)))
+	r.POST("/v1/messages", func(c *gin.Context) {
+		key, ok := middleware.GetAPIKeyFromContext(c)
+		require.True(t, ok)
+		if e := billing.CheckBillingEligibility(c.Request.Context(), key.User, key, nil, nil, ""); e != nil {
+			c.String(403, e.Error())
+			return
+		}
+		c.Status(200)
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+credential)
+	r.ServeHTTP(w, req)
+	require.Equal(t, 200, w.Code, w.Body.String())
+	state, err := NewAutoCreditRepository(db).Get(context.Background(), uid, "all")
+	require.NoError(t, err)
+	require.Len(t, state.Entries, 1)
+	require.Equal(t, "0.01000000", state.Entries[0].BalanceAfter)
+}
