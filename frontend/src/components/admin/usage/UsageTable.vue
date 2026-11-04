@@ -46,7 +46,7 @@
         </template>
 
         <template #cell-api_key="{ row }">
-          <span class="text-sm text-gray-900 dark:text-white">{{ row.api_key?.name || '-' }}</span>
+          <UsageApiKeyName :name="row.api_key?.name" />
         </template>
 
         <template #cell-account="{ row }">
@@ -550,6 +550,7 @@
 import { computed, ref, inject, onUnmounted } from 'vue'
 import { useWindowSize } from '@vueuse/core'
 import UsageDetailPopover from './UsageDetailPopover.vue'
+import UsageApiKeyName from './UsageApiKeyName.vue'
 import UsageTimingDialog from './UsageTimingDialog.vue'
 import { observerUsageContext } from './observerUsageContext'
 import { useI18n } from 'vue-i18n'
