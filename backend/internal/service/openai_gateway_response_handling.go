@@ -277,6 +277,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	var bareErrorPayload []byte
 	bareErrorAccountSideEffectsPending := false
 	pendingSSEEventType := ""
+	var metricEvent openAISSEMetricEvent
 	eventInProgress := false
 	eventStartsClientOutput := false
 	eventStartsTTFTOutput := false
@@ -513,6 +514,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if streamEarlyErr != nil {
 			return
 		}
+		if _, dataLine := extractOpenAISSEDataLine(line); !dataLine {
+			metricEvent.observeLine(line)
+		}
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
 			eventType = strings.TrimSpace(eventType)
@@ -744,6 +748,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
 			startsVisibleOutput := openAIStreamDataStartsVisibleOutput(data, eventType)
 			startsTTFTOutput := openAIStreamDataStartsTTFT(data, eventType, forceFlushFailedEvent, ttftMode)
+			metricPayload, metricType := metricEvent.observeLine("data: " + data)
+			startsSemanticOutput := openAIStreamDataStartsSemanticTTFT(string(metricPayload), metricType)
+			if ttftMode != OpenAITTFTModeVisible {
+				startsTTFTOutput = startsSemanticOutput
+			}
 			startsLegacyTTFTOutput := startsVisibleOutput
 			if ttftMode != OpenAITTFTModeVisible {
 				startsLegacyTTFTOutput = forceFlushFailedEvent || openAIStreamDataStartsLegacySemanticTTFT(data, eventType)
@@ -776,8 +785,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				return
 			}
 
-			requesttiming.Content(ctx, []byte(data), eventType)
-			requesttiming.Output(ctx, openAIStreamDataStartsSemanticTTFT(data, eventType), startsVisibleOutput, timingTerminal(eventType))
+			requesttiming.Content(ctx, metricPayload, metricType)
+			requesttiming.Output(ctx, startsSemanticOutput, startsVisibleOutput, timingTerminal(eventType))
 			// 写入客户端（客户端断开后继续 drain 上游）
 			if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
 				shouldFlush := queueDrained && (clientOutputStarted || startsClientOutput)
