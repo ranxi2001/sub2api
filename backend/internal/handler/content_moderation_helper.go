@@ -42,7 +42,11 @@ func bindOpenAIPriorityObservation(c *gin.Context, group *int64, model string, b
 }
 
 func clientRequestedUsageFields(c *gin.Context, mapping service.ChannelMappingResult, fallbackModel, upstreamModel string) service.ChannelUsageFields {
-	return mapping.ToUsageFields(clientRequestedModel(c, fallbackModel), upstreamModel)
+	fields := mapping.ToUsageFields(clientRequestedModel(c, fallbackModel), upstreamModel)
+	if c != nil && c.Request != nil {
+		fields.APIKeyMappedModel = service.APIKeyMappedModelFromContext(c.Request.Context())
+	}
+	return fields
 }
 
 func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) *service.ContentModerationDecision {

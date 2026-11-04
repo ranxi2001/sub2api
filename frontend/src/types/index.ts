@@ -799,6 +799,8 @@ export interface ApiKey {
   reset_1d_at: string | null
   reset_7d_at: string | null
   group_ids?: number[]
+  model_mapping?: Record<string, string>
+  reasoning_effort?: string
 }
 
 export interface ApiKeyConcurrencySnapshot {

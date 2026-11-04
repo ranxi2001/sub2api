@@ -1,5 +1,6 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 import UserApiKeysModal from '../UserApiKeysModal.vue'
 import type { AdminUser } from '@/types'
 
@@ -8,6 +9,7 @@ vi.mock('@/api/admin', () => ({ adminAPI: {
   users: { getUserApiKeys: getKeys }, groups: { getAll: vi.fn().mockResolvedValue([]) },
 } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: true, user: { id: 41 } }) }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
@@ -24,9 +26,10 @@ const keys = (id: number, name: string) => ({ items: [{ id, name, key: 'sk-examp
 async function open() {
   const wrapper = mount(UserApiKeysModal, {
     props: { show: false, user: user(1) },
-    global: { stubs: {
+    global: { plugins: [createPinia()], stubs: {
       BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
       GroupBadge: true, GroupOptionItem: true,
+      ApiKeyModelPolicyDialog: true,
     } },
   })
   await wrapper.setProps({ show: true })
@@ -38,6 +41,36 @@ async function switchUser(wrapper: Awaited<ReturnType<typeof open>>) {
 }
 
 describe('user API key loading', () => {
+  it('closes only the nested model dialog on Escape', async () => {
+    getKeys.mockResolvedValueOnce(keys(17, 'selected-key'))
+    const wrapper = mount(UserApiKeysModal, {
+      attachTo: document.body,
+      props: { show: false, user: user(1) },
+      global: { plugins: [createPinia()], stubs: { GroupBadge: true, GroupOptionItem: true } }
+    })
+    await wrapper.setProps({ show: true }); await flushPromises()
+    const button = document.querySelector<HTMLButtonElement>('[data-test="edit-key-model-policy"]')!
+    button.click(); await flushPromises()
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ApiKeyModelPolicyDialog' }).props('show')).toBe(false)
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+  it('opens model settings for the selected key and replaces its saved settings', async () => {
+    getKeys.mockResolvedValueOnce(keys(17, 'selected-key'))
+    const wrapper = await open(); await flushPromises()
+    await wrapper.get('[data-test="edit-key-model-policy"]').trigger('click')
+    const dialog = wrapper.getComponent({ name: 'ApiKeyModelPolicyDialog' })
+    expect(dialog.props('apiKey').id).toBe(17)
+    dialog.vm.$emit('updated', { ...keys(17, 'selected-key').items[0], reasoning_effort: 'high' })
+    dialog.vm.$emit('close')
+    await flushPromises()
+    await wrapper.get('[data-test="edit-key-model-policy"]').trigger('click')
+    expect(dialog.props('apiKey').reasoning_effort).toBe('high')
+    await wrapper.setProps({ show: false })
+    expect(dialog.props('show')).toBe(false)
+  })
   it('does not display the previous user keys when the next load fails', async () => {
     getKeys.mockResolvedValueOnce(keys(1, 'first-user-key')).mockRejectedValueOnce(new Error('unavailable'))
     const wrapper = await open(); await flushPromises()

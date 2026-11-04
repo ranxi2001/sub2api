@@ -7,5 +7,6 @@ export const NEW_FEATURE_NOTICES = {
   serverlessIPRouting: 'serverless-ip-affinity-primary-fallback-initial-announcement',
   accountUpstreamHTTPErrorRate: 'account-upstream-http-error-rate-initial-announcement',
   protocolFeatureSwitches: 'protocol-feature-switches-initial-announcement',
+  apiKeyModelPolicy: 'api-key-model-policy-initial-announcement',
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
 } as const
