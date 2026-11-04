@@ -45,10 +45,12 @@ type AutoCreditEntry struct {
 	SettledBy     *int64     `json:"settled_by"`
 }
 type AutoCreditState struct {
-	Config      AutoCreditConfig  `json:"config"`
-	Outstanding string            `json:"outstanding"`
-	CapBlocked  bool              `json:"cap_blocked"`
-	Entries     []AutoCreditEntry `json:"entries"`
+	Config       AutoCreditConfig  `json:"config"`
+	Outstanding  string            `json:"outstanding"`
+	CapBlocked   bool              `json:"cap_blocked"`
+	HasMore      bool              `json:"has_more"`
+	NextBeforeID int64             `json:"next_before_id"`
+	Entries      []AutoCreditEntry `json:"entries"`
 }
 type AutoCreditResult struct {
 	Issued  bool   `json:"issued"`
@@ -56,7 +58,17 @@ type AutoCreditResult struct {
 }
 type AutoCreditRepository interface {
 	Get(context.Context, int64, string) (*AutoCreditState, error)
+	GetPage(context.Context, int64, string, int64) (*AutoCreditState, error)
+	OutstandingByUsers(context.Context, []int64) (map[int64]string, error)
 	Save(context.Context, int64, int64, AutoCreditPatch) (*AutoCreditState, error)
 	Evaluate(context.Context, int64) (*AutoCreditResult, error)
+	EvaluateAdmission(context.Context, int64, int64) (*AutoCreditResult, error)
 	Settle(context.Context, int64, int64, int64) (*AutoCreditState, error)
+	PendingInvalidations(context.Context) ([]AutoCreditInvalidation, error)
+	AcknowledgeInvalidation(context.Context, AutoCreditInvalidation) error
+}
+
+type AutoCreditInvalidation struct {
+	ID, UserID int64
+	Stage      int
 }

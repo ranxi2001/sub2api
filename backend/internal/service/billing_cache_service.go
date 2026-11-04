@@ -106,6 +106,8 @@ type subscriptionCacheInvalidationPubSub interface {
 // BillingCacheService 计费缓存服务
 // 负责余额和订阅数据的缓存管理，提供高性能的计费资格检查
 type BillingCacheService struct {
+	autoCredit               AutoCreditRepository
+	autoCreditStop           chan struct{}
 	balanceRejectionNotifier BalanceRejectionNotifier
 	cache                    BillingCache
 	userRepo                 UserRepository
@@ -161,6 +163,9 @@ func NewBillingCacheService(
 func (s *BillingCacheService) Stop() {
 	s.cacheWriteStopOnce.Do(func() {
 		s.stopped.Store(true)
+		if s.autoCreditStop != nil {
+			close(s.autoCreditStop)
+		}
 
 		s.cacheWriteMu.Lock()
 		ch := s.cacheWriteChan
@@ -1040,6 +1045,26 @@ func (s *BillingCacheService) checkBalanceEligibility(ctx context.Context, user 
 	}
 
 	if s.balanceBelowEligibilityThreshold(balance) {
+		if s.autoCredit != nil && user.IsActive() {
+			result, recoveryErr := s.autoCredit.Evaluate(ctx, userID)
+			if recoveryErr != nil {
+				return ErrBillingServiceUnavailable.WithCause(recoveryErr)
+			}
+			if result.Issued {
+				if recoveryErr = s.InvalidateUserBalance(ctx, userID); recoveryErr != nil {
+					return ErrBillingServiceUnavailable.WithCause(recoveryErr)
+				}
+			}
+			// Re-read the authoritative balance once. Existing in-flight reserve
+			// checks still run after eligibility and cannot be bypassed by credit.
+			fresh, recoveryErr := s.userRepo.GetByID(ctx, userID)
+			if recoveryErr != nil {
+				return ErrBillingServiceUnavailable.WithCause(recoveryErr)
+			}
+			if fresh.IsActive() && !s.balanceBelowEligibilityThreshold(fresh.Balance) {
+				return nil
+			}
+		}
 		if s.balanceRejectionNotifier != nil {
 			s.balanceRejectionNotifier.CheckBalanceOnRejection(user, balance)
 		}

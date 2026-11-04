@@ -179,6 +179,7 @@ type AccountQuotaState struct {
 
 type UsageBillingApplyResult struct {
 	Applied              bool
+	AutoCreditIssued     bool // balance delta includes a receivable; invalidate rather than replay a debit
 	APIKeyQuotaExhausted bool
 	PlatformQuotaApplied bool               // durable SQL effect; do not replay legacy cache/DB increments
 	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)
