@@ -40,7 +40,9 @@ func (r *apiKeyRepository) attachGroupIDs(ctx context.Context, keys []service.AP
 		}
 	}
 	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx,
-		`SELECT api_key_id, group_id FROM api_key_groups WHERE api_key_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY group_id`, ids...)
+		`SELECT b.api_key_id, b.group_id FROM api_key_groups b
+		JOIN groups g ON g.id = b.group_id AND g.deleted_at IS NULL
+		WHERE b.api_key_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY b.group_id`, ids...)
 	if err != nil {
 		return err
 	}

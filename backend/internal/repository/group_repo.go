@@ -972,6 +972,13 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 		return nil, err
 	}
 
+	// Soft deletion does not trigger the join table's ON DELETE CASCADE.
+	// Remove additional key bindings in this transaction so editing a key does
+	// not submit an inaccessible group left behind by the deletion.
+	if _, err := exec.ExecContext(ctx, "DELETE FROM api_key_groups WHERE group_id = $1", id); err != nil {
+		return nil, err
+	}
+
 	// 5. Soft-delete group itself.
 	if _, err := txClient.Group.Delete().Where(group.IDEQ(id)).Exec(ctx); err != nil {
 		return nil, err

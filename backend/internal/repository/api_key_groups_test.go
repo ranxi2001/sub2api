@@ -44,3 +44,32 @@ func TestAPIKeyGroupsPersistenceMembershipAndAtomicRollback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{second.ID}, got.GroupIDs)
 }
+
+func TestAPIKeyGroupsOmitLegacySoftDeletedAdditionalBinding(t *testing.T) {
+	repo, client := newAPIKeyRepoSQLite(t)
+	ctx := context.Background()
+	user := mustCreateAPIKeyRepoUser(t, ctx, client, "deleted-group@test.invalid")
+	primary, err := client.Group.Create().SetName("primary").Save(ctx)
+	require.NoError(t, err)
+	deleted, err := client.Group.Create().SetName("deleted-extra").Save(ctx)
+	require.NoError(t, err)
+	inactive, err := client.Group.Create().SetName("inactive-extra").SetStatus(service.StatusDisabled).Save(ctx)
+	require.NoError(t, err)
+	key := &service.APIKey{UserID: user.ID, Key: "sk-deleted-extra", Name: "original", Status: service.StatusActive, GroupID: &primary.ID, GroupIDs: []int64{primary.ID, deleted.ID, inactive.ID}}
+	require.NoError(t, repo.Create(ctx, key))
+	// Leave the old join row in place, as pre-fix group deletion did.
+	require.NoError(t, client.Group.DeleteOneID(deleted.ID).Exec(ctx))
+	got, err := repo.GetByID(ctx, key.ID)
+	require.NoError(t, err)
+	require.Equal(t, []int64{primary.ID, inactive.ID}, got.GroupIDs)
+	page, _, err := repo.ListByUserID(ctx, user.ID, pagination.PaginationParams{Page: 1, PageSize: 10}, service.APIKeyListFilters{})
+	require.NoError(t, err)
+	require.Len(t, page, 1)
+	require.Equal(t, got.GroupIDs, page[0].GroupIDs)
+	got.Name = "saved-after-deletion"
+	require.NoError(t, repo.Update(ctx, got, service.APIKeyUpdateFields{Name: true, GroupID: true}))
+	got, err = repo.GetByID(ctx, key.ID)
+	require.NoError(t, err)
+	require.Equal(t, "saved-after-deletion", got.Name)
+	require.Equal(t, []int64{primary.ID, inactive.ID}, got.GroupIDs)
+}
