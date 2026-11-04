@@ -23,11 +23,13 @@ import (
 // UserWithConcurrency wraps AdminUser with current concurrency info
 type UserWithConcurrency struct {
 	dto.AdminUser
-	CurrentConcurrency int `json:"current_concurrency"`
+	AutoCreditOutstanding string `json:"auto_credit_outstanding"`
+	CurrentConcurrency    int    `json:"current_concurrency"`
 }
 
 // UserHandler handles admin user management
 type UserHandler struct {
+	autoCredit            service.AutoCreditRepository
 	adminService          service.AdminService
 	concurrencyService    *service.ConcurrencyService
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository // T13 admin quota view
@@ -191,10 +193,23 @@ func (h *UserHandler) List(c *gin.Context) {
 	}
 
 	// Build response with concurrency info
+	debt := map[int64]string{}
+	if h.autoCredit != nil {
+		ids := make([]int64, len(users))
+		for i := range users {
+			ids[i] = users[i].ID
+		}
+		debt, err = h.autoCredit.OutstandingByUsers(c.Request.Context(), ids)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 	out := make([]UserWithConcurrency, len(users))
 	for i := range users {
 		out[i] = UserWithConcurrency{
-			AdminUser: *dto.UserFromServiceAdmin(&users[i]),
+			AdminUser:             *dto.UserFromServiceAdmin(&users[i]),
+			AutoCreditOutstanding: debt[users[i].ID],
 		}
 		if info := loadInfo[users[i].ID]; info != nil {
 			out[i].CurrentConcurrency = info.CurrentConcurrency

@@ -262,6 +262,11 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		}
 		result.PlatformQuotaApplied = true
 	}
+	if cmd.BalanceCost > 0 {
+		if err := advanceAutoCreditAfterDebit(ctx, tx, cmd, result); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

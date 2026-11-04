@@ -78,6 +78,7 @@ func TestUsageBillingRepositoryApply_MissingKeySkipsKeyCounters(t *testing.T) {
 				mock.ExpectExec("UPDATE api_keys").WithArgs(1.25, int64(7)).
 					WillReturnResult(sqlmock.NewResult(0, 0))
 			}
+			expectNoAutoCreditConfig(mock)
 			mock.ExpectCommit()
 			result, err := NewUsageBillingRepository(nil, db).Apply(context.Background(), cmd)
 			require.NoError(t, err)
