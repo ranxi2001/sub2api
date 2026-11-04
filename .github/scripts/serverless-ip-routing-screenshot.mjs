@@ -83,17 +83,18 @@ try {
       const checkbox = document.querySelector('[data-testid="serverless-enabled"]')
       return checkbox && !checkbox.disabled
     })
-    await page.screenshot({ path: join(output, name + '.png'), fullPage: true })
+    await page.screenshot({ path: join(output, name + '.png'), fullPage: true, animations: 'disabled' })
   }
   await page.locator('[data-testid="serverless-affinity-scope"]').selectOption('api_key_ip')
   await page.locator('[data-testid="serverless-primary-fallback"]').check()
   await page.getByRole('button', { name: '保存 Serverless 配置', exact: true }).click()
   await page.getByRole('status').waitFor()
-  await page.screenshot({ path: join(output, 'ip-fallback-saved.png'), fullPage: true })
+  await page.waitForFunction(() => !document.querySelector('[data-testid="serverless-enabled"]').disabled)
+  await page.screenshot({ path: join(output, 'ip-fallback-saved.png'), fullPage: true, animations: 'disabled' })
   await page.evaluate(() => document.documentElement.classList.add('dark'))
-  await page.screenshot({ path: join(output, 'dark.png'), fullPage: true })
+  await page.screenshot({ path: join(output, 'dark.png'), fullPage: true, animations: 'disabled' })
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.screenshot({ path: join(output, 'mobile.png'), fullPage: true })
+  await page.screenshot({ path: join(output, 'mobile.png'), fullPage: true, animations: 'disabled' })
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({
     source_commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     base_commit: process.env.SOURCE_BASE,
