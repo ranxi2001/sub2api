@@ -1,6 +1,8 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
+	src/components/admin/user/__tests__/UserAutoCreditModal.spec.ts \
+	src/components/common/__tests__/VipAutoCreditNotice.spec.ts \
 	src/components/account/__tests__/OpenAIAuthConnections.spec.ts \
 	src/views/admin/__tests__/RiskControlView.spec.ts \
 	src/i18n/__tests__/riskControlLocales.spec.ts \

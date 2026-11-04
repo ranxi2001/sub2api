@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  vipAutoCredit: 'vip-auto-credit-initial-announcement',
   accountUpstreamHTTPErrorRate: 'account-upstream-http-error-rate-initial-announcement',
   protocolFeatureSwitches: 'protocol-feature-switches-initial-announcement',
 } as const
