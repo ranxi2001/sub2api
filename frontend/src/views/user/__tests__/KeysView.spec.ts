@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createPinia } from 'pinia'
 
 import type { ApiKey, ApiKeyConcurrencySnapshot, Group } from '@/types'
 import { keysAPI } from '@/api'
@@ -37,7 +38,7 @@ const {
   copyToClipboard: vi.fn(),
   isCurrentStep: vi.fn(),
   nextStep: vi.fn(),
-  auth: { isAdmin: false },
+  auth: { isAdmin: false, user: { id: 41 } },
 }))
 
 const messages: Record<string, string> = {
@@ -252,6 +253,7 @@ const IconStub = {
 const mountView = async () => {
   const wrapper = mount(KeysView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,

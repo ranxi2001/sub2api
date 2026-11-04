@@ -1,5 +1,6 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 import UserApiKeysModal from '../UserApiKeysModal.vue'
 import type { AdminUser } from '@/types'
 
@@ -8,6 +9,7 @@ vi.mock('@/api/admin', () => ({ adminAPI: {
   users: { getUserApiKeys: getKeys }, groups: { getAll: vi.fn().mockResolvedValue([]) },
 } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: true, user: { id: 41 } }) }))
 vi.mock('@/utils/format', () => ({ formatDateTime: (value: string) => value }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
@@ -24,7 +26,7 @@ const keys = (id: number, name: string) => ({ items: [{ id, name, key: 'sk-examp
 async function open() {
   const wrapper = mount(UserApiKeysModal, {
     props: { show: false, user: user(1) },
-    global: { stubs: {
+    global: { plugins: [createPinia()], stubs: {
       BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
       GroupBadge: true, GroupOptionItem: true,
       ApiKeyModelPolicyDialog: true,
@@ -44,7 +46,7 @@ describe('user API key loading', () => {
     const wrapper = mount(UserApiKeysModal, {
       attachTo: document.body,
       props: { show: false, user: user(1) },
-      global: { stubs: { GroupBadge: true, GroupOptionItem: true } }
+      global: { plugins: [createPinia()], stubs: { GroupBadge: true, GroupOptionItem: true } }
     })
     await wrapper.setProps({ show: true }); await flushPromises()
     const button = document.querySelector<HTMLButtonElement>('[data-test="edit-key-model-policy"]')!

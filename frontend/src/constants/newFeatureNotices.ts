@@ -5,4 +5,5 @@
  */
 export const NEW_FEATURE_NOTICES = {
   protocolFeatureSwitches: 'protocol-feature-switches-initial-announcement',
+  apiKeyModelPolicy: 'api-key-model-policy-initial-announcement',
 } as const

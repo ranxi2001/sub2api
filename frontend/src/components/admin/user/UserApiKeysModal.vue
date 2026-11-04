@@ -16,9 +16,16 @@
               <div class="mb-1 flex items-center gap-2"><span class="font-medium text-gray-900 dark:text-white">{{ key.name }}</span><span :class="['badge text-xs', key.status === 'active' ? 'badge-success' : 'badge-danger']">{{ key.status }}</span></div>
               <p class="truncate font-mono text-sm text-gray-500">{{ key.key.substring(0, 20) }}...{{ key.key.substring(key.key.length - 8) }}</p>
             </div>
-            <button type="button" class="btn btn-secondary ml-3 text-xs" :disabled="updatingKeyIds.has(key.id)" data-test="edit-key-model-policy" @click="openModelPolicy(key)">
-              {{ t('apiKeyModelPolicy.title') }}
-            </button>
+            <div class="ml-3 flex items-center gap-2">
+              <button type="button" class="btn btn-secondary text-xs" :disabled="updatingKeyIds.has(key.id)" data-test="edit-key-model-policy" @click="openModelPolicy(key)">
+                {{ t('apiKeyModelPolicy.title') }}
+              </button>
+              <NewFeatureBadge
+                v-if="authStore.isAdmin"
+                :notice-id="NEW_FEATURE_NOTICES.apiKeyModelPolicy"
+                :user-id="authStore.user?.id"
+              />
+            </div>
           </div>
           <div class="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
             <div class="flex items-center gap-1">
@@ -119,10 +126,13 @@
 import { ref, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
 import type { AdminUser, AdminGroup, ApiKey } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import ApiKeyModelPolicyDialog from './ApiKeyModelPolicyDialog.vue'
@@ -131,6 +141,7 @@ const props = defineProps<{ show: boolean; user: AdminUser | null }>()
 const emit = defineEmits(['close'])
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 
 const apiKeys = ref<ApiKey[]>([])
 const allGroups = ref<AdminGroup[]>([])

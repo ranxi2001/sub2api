@@ -692,9 +692,12 @@
         </div>
 
         <div v-if="showEditModal && authStore.isAdmin" class="rounded-xl border border-gray-200 p-4 dark:border-dark-600">
-          <button type="button" class="btn btn-secondary" data-test="edit-key-model-policy" @click="showModelPolicy = true">
-            {{ t('apiKeyModelPolicy.title') }}
-          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" class="btn btn-secondary" data-test="edit-key-model-policy" @click="showModelPolicy = true">
+              {{ t('apiKeyModelPolicy.title') }}
+            </button>
+            <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.apiKeyModelPolicy" :user-id="authStore.user?.id" />
+          </div>
           <p class="mt-2 text-sm text-gray-500 dark:text-dark-300">{{ t('apiKeyModelPolicy.scopeHint') }}</p>
         </div>
 
@@ -1329,6 +1332,8 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
 import ApiKeyModelPolicyDialog from '@/components/admin/user/ApiKeyModelPolicyDialog.vue'
 import { useAuthStore } from '@/stores/auth'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 	import DataTable from '@/components/common/DataTable.vue'
 	import Pagination from '@/components/common/Pagination.vue'
 	import BaseDialog from '@/components/common/BaseDialog.vue'
