@@ -92,12 +92,10 @@ const row = (name: string, value: string, health: TimingHealth = 'neutral'): Det
 const timed = (name: string, value: number | null | undefined, scale: TimingScale = 'stage') => row(name, ms(value), timingHealth(value, scale))
 const flag = (name: string, value: boolean | null | undefined, goodValue: boolean, negative: TimingHealth = 'warn') => row(name, yes(value ?? null), value == null ? 'neutral' : value === goodValue ? 'good' : negative)
 const statusHealth = (status: number): TimingHealth => status >= 500 ? 'critical' : status >= 400 ? 'warn' : status >= 200 && status < 300 ? 'good' : 'neutral'
-const queueWaitMs = computed(() => props.record?.queue_timing?.status === 'measured' ? props.record.queue_wait_ms ?? null : null)
 const serverFirstMs = computed(() => props.record?.queue_timing?.status === 'measured' ? props.record.queue_timing.server_first_token_ms : null)
 const serverTotalMs = computed(() => props.record?.queue_timing?.status === 'measured' ? props.record.queue_timing.server_duration_ms : null)
 const summaries = computed(() => [
   { label: t('requestTiming.legacyFirst'), value: props.record?.first_token_ms, scale: 'first' as const },
-  { label: t('requestTiming.queueWait'), value: queueWaitMs.value, scale: 'first' as const },
   { label: t('requestTiming.serverFirst'), value: serverFirstMs.value, scale: 'first' as const },
   { label: t('requestTiming.legacyTotal'), value: props.record?.duration_ms, scale: 'total' as const },
   { label: t('requestTiming.serverTotal'), value: serverTotalMs.value, scale: 'total' as const },
