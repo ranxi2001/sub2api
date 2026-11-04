@@ -286,6 +286,7 @@ type priorityAttemptBody struct {
 	scope                                              *priorityAttemptScope
 	observation                                        *priorityAttemptObservation
 	buf                                                []byte
+	metricEvent                                        openAISSEMetricEvent
 	eof, closed, oversized, terminal, failed, excluded bool
 	closeOnce                                          sync.Once
 	closeErr                                           error
@@ -307,6 +308,8 @@ func (b *priorityAttemptBody) Read(p []byte) (int, error) {
 			if len(b.buf)+len(part) > priorityAttemptInspectBytes {
 				b.oversized = true
 				b.buf = nil
+				b.metricEvent.data = nil
+				b.metricEvent.discard = true
 				continue
 			}
 			b.buf = append(b.buf, part...)
@@ -362,6 +365,22 @@ func priorityExcludedError(data []byte) bool {
 	return false
 }
 func (b *priorityAttemptBody) observeLine(line []byte) {
+	if !b.chat {
+		b.metricEvent.limit = priorityAttemptInspectBytes
+		lineText := strings.TrimRight(string(line), "\r\n")
+		if (lineText == "" || lineText == "event" || strings.HasPrefix(lineText, "event:")) && len(b.metricEvent.data) > 0 {
+			b.oversized = true // Unfinished/malformed payload remains unknown.
+		}
+		data, typ := b.metricEvent.observeLine(lineText)
+		if b.metricEvent.discard {
+			b.oversized = true
+		}
+		if data != nil {
+			b.observePayload(data, typ)
+		}
+		return
+	}
+	// Preserve Chat Completions' existing per-line classification.
 	line = bytes.TrimSpace(line)
 	if !bytes.HasPrefix(line, []byte("data:")) {
 		return
@@ -379,6 +398,14 @@ func (b *priorityAttemptBody) observeLine(line []byte) {
 		return
 	}
 	typ := gjson.GetBytes(data, "type").String()
+	b.observePayload(data, typ)
+}
+
+func (b *priorityAttemptBody) observePayload(data []byte, typ string) {
+	if bytes.Equal(data, []byte("[DONE]")) {
+		b.terminal = true
+		return
+	}
 	semanticOutput := openAIStreamDataStartsSemanticTTFT(string(data), typ)
 	if b.chat {
 		semanticOutput = openAIStreamDataStartsLegacySemanticTTFT(string(data), typ)
@@ -413,6 +440,7 @@ func (b *priorityAttemptBody) Close() error {
 	b.closed = true
 	success, include := b.outcome()
 	b.buf = nil
+	b.metricEvent.reset()
 	report := func(disconnected, forced bool) {
 		if (include || forced) && !disconnected && b.ctx.Err() == nil {
 			if b.firstSemanticMS != nil && success && !forced {
