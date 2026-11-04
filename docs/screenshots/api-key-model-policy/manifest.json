@@ -1,0 +1,40 @@
+{
+  "source_commit": "52c17cf5087951a7ccac1ebaac239a6192a61416",
+  "mode": "actual UserApiKeysModal → ApiKeyModelPolicyDialog → BaseDialog and project CSS; fictional identity and in-memory API adapters; no full Users navigation, admin login, backend API or production validation",
+  "fixtures": "fictional customer@example.invalid and two never-issued fixture keys; no real credentials",
+  "screenshots": [
+    "zh-entry.png",
+    "zh-configured.png",
+    "zh-saved.png",
+    "zh-mobile.png",
+    "zh-cleared.png",
+    "zh-save-error.png",
+    "en-entry.png",
+    "en-configured.png",
+    "en-saved.png",
+    "en-mobile.png",
+    "en-cleared.png",
+    "en-save-error.png"
+  ],
+  "interactions": [
+    {
+      "lang": "zh",
+      "real_entry": true,
+      "saved_mapping_and_effort": true,
+      "reopen_readback": true,
+      "explicit_clear": true,
+      "other_key_unchanged": true,
+      "failed_save_retains_edit": true
+    },
+    {
+      "lang": "en",
+      "real_entry": true,
+      "saved_mapping_and_effort": true,
+      "reopen_readback": true,
+      "explicit_clear": true,
+      "other_key_unchanged": true,
+      "failed_save_retains_edit": true
+    }
+  ],
+  "errors": []
+}
