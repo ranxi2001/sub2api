@@ -784,6 +784,11 @@ const (
 	SettingKeyBalanceLowNotifyThreshold   = "balance_low_notify_threshold"    // 默认阈值（USD）
 	SettingKeyBalanceLowNotifyRechargeURL = "balance_low_notify_recharge_url" // 充值页面 URL
 
+	// 余额耗尽预测：独立于金额提醒，默认关闭。
+	SettingKeyBalanceForecastEnabled          = "balance_forecast_enabled"
+	SettingKeyBalanceForecastThresholdHours   = "balance_forecast_threshold_hours"
+	SettingKeyBalanceForecastMaxNotifications = "balance_forecast_max_notifications"
+
 	// 订阅到期提醒
 	SettingKeySubscriptionExpiryNotifyEnabled = "subscription_expiry_notify_enabled" // 订阅到期提醒全局开关，默认开启
 

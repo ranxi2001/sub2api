@@ -1,0 +1,86 @@
+name: Balance forecast acceptance
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/balanceforecast/**'
+      - 'backend/internal/service/*forecast*'
+      - 'backend/internal/service/notification_email_service.go'
+      - 'backend/internal/repository/balance_forecast*'
+      - 'backend/migrations/*balance_forecast*'
+      - 'frontend/src/components/settings/BalanceForecast*'
+      - 'frontend/src/views/admin/SettingsView.vue'
+      - '.github/workflows/balance-forecast.yml'
+      - '.github/scripts/balance-forecast-screenshot.mjs'
+  push:
+    branches: [feat/balance-exhaustion-forecast]
+permissions:
+  contents: read
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: forecast_fixture_only
+          POSTGRES_DB: balance_forecast_task
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d balance_forecast_task"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      FORECAST_TEST_POSTGRES_DSN: postgres://postgres:forecast_fixture_only@127.0.0.1:5432/balance_forecast_task?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Require explicit PostgreSQL fixture
+        run: test -n "$FORECAST_TEST_POSTGRES_DSN"
+      - name: Settled SQL, durable concurrency, restart, jitter and conservative delivery cap
+        working-directory: backend
+        run: go test -race ./internal/balanceforecast -count=1 -v -timeout=5m
+      - name: PostgreSQL to actual SMTP and configuration compatibility
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/service ./internal/handler/admin ./cmd/server -run 'TestBalanceForecast|TestProvideCleanup' -count=1 -v -timeout=10m
+      - name: Full migrations and real durable billing repository
+        working-directory: backend
+        env:
+          SUB2API_TEST_POSTGRES_IMAGE: postgres:16-alpine
+        run: go test -tags=integration ./internal/repository -run '^TestBalanceForecastRealBillingAndMigrations$' -count=1 -v -timeout=10m
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vitest run src/components/settings/BalanceForecastSettings.spec.ts src/views/admin/__tests__/SettingsView.spec.ts
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/forecast-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/forecast-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual forecast panel with project styles and fictional data
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/forecast-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/forecast-ui
+        run: node .github/scripts/balance-forecast-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: balance-forecast-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/forecast-ui

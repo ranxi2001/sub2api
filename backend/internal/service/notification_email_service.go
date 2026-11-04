@@ -26,6 +26,7 @@ const (
 	NotificationEmailEventSubscriptionPurchaseSuccess = "subscription.purchase_success"
 	NotificationEmailEventSubscriptionExpiryReminder  = "subscription.expiry_reminder"
 	NotificationEmailEventBalanceLow                  = "balance.low"
+	NotificationEmailEventBalanceForecast             = "balance.forecast"
 	NotificationEmailEventBalanceRechargeSuccess      = "balance.recharge_success"
 	NotificationEmailEventAccountQuotaAlert           = "account.quota_alert"
 	NotificationEmailEventContentModerationViolation  = "content_moderation.violation_notice"
@@ -915,6 +916,9 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 			"subscription_days":   "30",
 			"expiry_time":         "2026-06-18 12:00",
 			"days_remaining":      "3",
+			"hourly_spend":        "1.2500",
+			"hours_remaining":     "9.9",
+			"observation_hours":   "24.0",
 			"current_balance":     "12.34",
 			"threshold":           "20.00",
 			"recharge_url":        "https://example.com/recharge",
@@ -963,6 +967,9 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 		"subscription_days":   "30",
 		"expiry_time":         "2026-06-18 12:00",
 		"days_remaining":      "3",
+		"hourly_spend":        "1.2500",
+		"hours_remaining":     "9.9",
+		"observation_hours":   "24.0",
 		"current_balance":     "12.34",
 		"threshold":           "20.00",
 		"recharge_url":        "https://example.com/recharge",
@@ -1034,6 +1041,7 @@ var notificationEmailEventOrder = []string{
 	NotificationEmailEventSubscriptionPurchaseSuccess,
 	NotificationEmailEventSubscriptionExpiryReminder,
 	NotificationEmailEventBalanceLow,
+	NotificationEmailEventBalanceForecast,
 	NotificationEmailEventBalanceRechargeSuccess,
 	NotificationEmailEventAccountQuotaAlert,
 	NotificationEmailEventContentModerationViolation,
@@ -1044,6 +1052,10 @@ var notificationEmailEventOrder = []string{
 }
 
 var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
+	NotificationEmailEventBalanceForecast: {
+		Event: NotificationEmailEventBalanceForecast, Label: "Balance exhaustion forecast", Description: "Optional estimate from settled balance consumption; not a guaranteed expiry time.", Category: "billing", Optional: true,
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "current_balance", "hourly_spend", "hours_remaining", "observation_hours", "recharge_url", "unsubscribe_url"),
+	},
 	NotificationEmailEventAuthVerifyCode: {
 		Event:        NotificationEmailEventAuthVerifyCode,
 		Label:        "Email verification code",
@@ -1259,6 +1271,16 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 <p>您的 <strong>{{subscription_group}}</strong> 订阅将在 <strong>{{days_remaining}}</strong> 天后到期。</p>
 <p>到期时间：<strong>{{expiry_time}}</strong></p>
 <p class="muted"><a href="{{unsubscribe_url}}">退订此类订阅提醒</a></p>`),
+		},
+	},
+	NotificationEmailEventBalanceForecast: {
+		notificationEmailDefaultLocale: {
+			Subject: "[{{site_name}}] Balance may run out in about {{hours_remaining}} hours",
+			HTML:    notificationEmailCard("#d97706", "Balance exhaustion forecast", `<p>Hello {{recipient_name}},</p><p>Your balance is <strong>${{current_balance}}</strong>. Based on settled balance consumption over {{observation_hours}} hours (${{hourly_spend}}/hour), it may last about <strong>{{hours_remaining}} hours</strong>.</p><p>This estimate changes with usage; subscription spending is excluded.</p><p><a class="button" href="{{recharge_url}}">Recharge now</a></p><p><a href="{{unsubscribe_url}}">Unsubscribe from forecast alerts</a></p>`),
+		},
+		notificationEmailLocaleChinese: {
+			Subject: "[{{site_name}}] 余额预计约 {{hours_remaining}} 小时后耗尽",
+			HTML:    notificationEmailCard("#d97706", "余额耗尽预测", `<p>{{recipient_name}}，您好：</p><p>当前余额 <strong>${{current_balance}}</strong>。按最近 {{observation_hours}} 小时已结算余额消费（每小时 ${{hourly_spend}}）估算，预计还能使用约 <strong>{{hours_remaining}} 小时</strong>。</p><p>预测会随用量变化，订阅消费不计入。</p><p><a class="button" href="{{recharge_url}}">立即充值</a></p><p><a href="{{unsubscribe_url}}">退订预测提醒</a></p>`),
 		},
 	},
 	NotificationEmailEventBalanceLow: {

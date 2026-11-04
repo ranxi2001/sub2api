@@ -1,6 +1,7 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
+	src/components/settings/BalanceForecastSettings.spec.ts \
 	src/components/admin/user/__tests__/UserAutoCreditModal.spec.ts \
 	src/components/common/__tests__/VipAutoCreditNotice.spec.ts \
 	src/components/admin/user/__tests__/ApiKeyModelPolicyDialog.spec.ts \
