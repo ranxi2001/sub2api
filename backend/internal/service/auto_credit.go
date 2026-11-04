@@ -63,6 +63,7 @@ type AutoCreditRepository interface {
 	Save(context.Context, int64, int64, AutoCreditPatch) (*AutoCreditState, error)
 	Evaluate(context.Context, int64) (*AutoCreditResult, error)
 	EvaluateAdmission(context.Context, int64, int64) (*AutoCreditResult, error)
+	CanRecover(context.Context, int64, string) (bool, error)
 	Settle(context.Context, int64, int64, int64) (*AutoCreditState, error)
 	PendingInvalidations(context.Context) ([]AutoCreditInvalidation, error)
 	AcknowledgeInvalidation(context.Context, AutoCreditInvalidation) error

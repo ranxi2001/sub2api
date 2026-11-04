@@ -69,6 +69,13 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 	if penaltyErr != nil {
 		return nil, infraerrors.ServiceUnavailable("security_penalty_unavailable", "请求权限检查暂时不可用")
 	}
+	canRecoverBalance := false
+	if checkBilling && key.User != nil && groupBalanceNeedsRecovery(key.User.Balance, cfg) {
+		canRecoverBalance, err = keys.CanRecoverAutoCreditAdmission(c.Request.Context(), key)
+		if err != nil {
+			return nil, infraerrors.ServiceUnavailable("AUTO_CREDIT_UNAVAILABLE", "Credit authorization unavailable")
+		}
+	}
 	accepts := func(candidate *service.APIKey) bool {
 		group := candidate.Group
 		// Binding the restricted target must not make the normal cheapest-group
@@ -77,8 +84,9 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 		if penaltyConfig.Applies(key.UserID) && !penaltyConfig.ObserveOnly && penaltyConfig.Policy == "session_route_then_block" && penaltyConfig.TargetGroupID != nil && group.ID == *penaltyConfig.TargetGroupID {
 			return false
 		}
-		// Balance recovery runs once after selecting an otherwise eligible group.
-		// A zero snapshot must not prevent reaching that bounded authority check.
+		if checkBilling && !group.IsSubscriptionType() && groupBalanceNeedsRecovery(candidate.User.Balance, cfg) && !canRecoverBalance {
+			return false
+		}
 		if google && group.Platform != service.PlatformGemini && group.Platform != service.PlatformAntigravity && group.Platform != service.PlatformComposite {
 			return false
 		}
@@ -127,4 +135,10 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 	}
 	SetOpsFallbackAPIKey(c, selected)
 	return selected, nil
+}
+
+// Multi-group choice must use the same spendable floor as billing preflight;
+// authentication's <=0 threshold remains unchanged for ordinary single groups.
+func groupBalanceNeedsRecovery(balance float64, cfg *config.Config) bool {
+	return balance <= 0 || cfg != nil && cfg.Billing.MinimumBalanceReserve > 0 && balance < cfg.Billing.MinimumBalanceReserve
 }

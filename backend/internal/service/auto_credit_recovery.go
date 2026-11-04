@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/shopspring/decimal"
+	"strconv"
 	"time"
 )
 
@@ -81,4 +82,20 @@ func (s *APIKeyService) RecoverAutoCreditAdmission(ctx context.Context, key *API
 		return false, err
 	}
 	return result.Issued || balance.IsPositive(), nil
+}
+
+// Read-only selection predicate: preserve subscription fallback for non-VIPs,
+// spent epochs and cap-blocked users. Mutation only follows full group selection.
+func (s *APIKeyService) CanRecoverAutoCreditAdmission(ctx context.Context, key *APIKey) (bool, error) {
+	if s == nil || s.autoCredit == nil || key == nil || key.User == nil || !key.User.IsActive() || !key.IsActive() || key.IsExpired() || key.IsQuotaExhausted() {
+		return false, nil
+	}
+	if s.localAuth != nil || s.cfg != nil && s.cfg.Runtime.Role == config.RuntimeRoleGateway {
+		return false, nil
+	}
+	minimum := 0.0
+	if s.cfg != nil && s.cfg.Billing.MinimumBalanceReserve > 0 {
+		minimum = s.cfg.Billing.MinimumBalanceReserve
+	}
+	return s.autoCredit.CanRecover(ctx, key.UserID, strconv.FormatFloat(minimum, 'f', -1, 64))
 }

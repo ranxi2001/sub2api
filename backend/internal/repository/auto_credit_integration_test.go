@@ -322,3 +322,22 @@ func TestVipCreditHistoryPagination(t *testing.T) {
 	}
 	require.Len(t, seen, 205)
 }
+
+func TestVipCreditRecoveryMustReachMinimumReserve(t *testing.T) {
+	ctx := context.Background()
+	db := creditDB(t)
+	repo := NewAutoCreditRepository(db)
+	uid := creditUser(t, db, "0.005")
+	yes, err := repo.CanRecover(ctx, uid, "0.01")
+	require.NoError(t, err)
+	require.False(t, yes, "a positive non-VIP balance below reserve is unusable")
+	configureCredit(t, db, uid, "1", "0.00499999", "1")
+	yes, err = repo.CanRecover(ctx, uid, "0.01")
+	require.NoError(t, err)
+	require.False(t, yes, "credit that remains below reserve cannot shadow subscription")
+	_, err = repo.Save(ctx, uid, uid, service.AutoCreditPatch{Version: 1, Amount: creditJSON(`"0.005"`)})
+	require.NoError(t, err)
+	yes, err = repo.CanRecover(ctx, uid, "0.01")
+	require.NoError(t, err)
+	require.True(t, yes, "exact reserve boundary is usable")
+}

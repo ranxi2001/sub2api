@@ -361,3 +361,9 @@ func (r *autoCreditRepository) OutstandingByUsers(ctx context.Context, ids []int
 	}
 	return result, rows.Err()
 }
+
+func (r *autoCreditRepository) CanRecover(ctx context.Context, uid int64, minimum string) (bool, error) {
+	var allowed bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u LEFT JOIN auto_credit_config c ON c.user_id=u.id WHERE u.id=$1 AND u.status='active' AND u.deleted_at IS NULL AND ((u.balance>0 AND u.balance >= $2::numeric) OR (c.enabled AND u.balance+c.amount>0 AND u.balance+c.amount >= $2::numeric AND u.balance<c.threshold AND NOT EXISTS(SELECT 1 FROM auto_credit_ledger l WHERE l.user_id=u.id AND l.epoch=c.debit_epoch) AND COALESCE((SELECT SUM(l.amount) FROM auto_credit_ledger l WHERE l.user_id=u.id AND l.status='pending'),0)+c.amount<=c.cap)))`, uid, minimum).Scan(&allowed)
+	return allowed, err
+}
