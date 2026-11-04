@@ -1,0 +1,11 @@
+CREATE TABLE users(id bigint PRIMARY KEY,balance numeric(20,8),created_at timestamptz,status text DEFAULT 'active',deleted_at timestamptz,balance_notify_enabled boolean DEFAULT true);
+CREATE TABLE usage_billing_events(request_id text,api_key_id bigint,schema_version int DEFAULT 1,payload jsonb,state text,result jsonb,applied_at timestamptz,PRIMARY KEY(request_id,api_key_id));
+CREATE TABLE usage_billing_dedup(request_id text,api_key_id bigint,created_at timestamptz,PRIMARY KEY(request_id,api_key_id));
+CREATE TABLE usage_billing_dedup_archive(LIKE usage_billing_dedup INCLUDING ALL);
+CREATE TABLE batch_image_money_holds(batch_id text,api_key_id bigint,user_id bigint,actual_amount numeric(20,8),state text,PRIMARY KEY(batch_id,api_key_id));
+CREATE TABLE regional_primary_requests(request_id text PRIMARY KEY,user_id bigint,state text,balance_funded boolean,event jsonb);
+CREATE TABLE regional_quota_leases(lease_id text PRIMARY KEY,user_id bigint);
+CREATE TABLE regional_budget_allocations(allocation_id text PRIMARY KEY,subscription_id bigint);
+CREATE TABLE regional_settled_events(event_id text PRIMARY KEY,lease_id text,event jsonb,settled_at timestamptz);
+CREATE TABLE usage_logs(user_id bigint,request_id text,api_key_id bigint,billing_type smallint,actual_cost numeric,created_at timestamptz);
+CREATE TABLE balance_forecast_coverage(id boolean PRIMARY KEY,started_at timestamptz);

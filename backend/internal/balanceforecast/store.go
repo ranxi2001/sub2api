@@ -18,6 +18,10 @@ type Candidate struct {
 	First, Last                                     time.Time
 }
 
+func (c Candidate) Reliable() bool {
+	return c.Covered && c.ObservationHours >= 1 && c.Samples >= 3 && c.Last.Sub(c.First) >= time.Hour && c.Hourly > 0
+}
+
 func (s *Store) Candidates(ctx context.Context, now time.Time, after int64, limit int) ([]Candidate, error) {
 	if limit < 1 || limit > 200 {
 		return nil, errors.New("forecast batch limit must be 1..200")
@@ -26,7 +30,7 @@ func (s *Store) Candidates(ctx context.Context, now time.Time, after int64, limi
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var result []Candidate
 	for rows.Next() {
 		var c Candidate

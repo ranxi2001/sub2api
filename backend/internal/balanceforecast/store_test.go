@@ -35,22 +35,17 @@ func fixture(t *testing.T) (*Store, time.Time) {
 	u.RawQuery = q.Encode()
 	private, err := sql.Open("postgres", u.String())
 	require.NoError(t, err)
-	t.Cleanup(func() { private.Close(); db.Exec("DROP SCHEMA " + schema + " CASCADE"); db.Close() })
+	t.Cleanup(func() {
+		require.NoError(t, private.Close())
+		_, cleanupErr := db.Exec("DROP SCHEMA " + schema + " CASCADE")
+		require.NoError(t, cleanupErr)
+		require.NoError(t, db.Close())
+	})
 	// Projection of the existing migration columns used by this SQL. Full schema
 	// + real billing repository coverage is a separate integration gate.
-	_, err = private.Exec(`
-CREATE TABLE users(id bigint PRIMARY KEY,balance numeric(20,8),created_at timestamptz,status text DEFAULT 'active',deleted_at timestamptz,balance_notify_enabled boolean DEFAULT true);
-CREATE TABLE usage_billing_events(request_id text,api_key_id bigint,schema_version int DEFAULT 1,payload jsonb,state text,result jsonb,applied_at timestamptz,PRIMARY KEY(request_id,api_key_id));
-CREATE TABLE usage_billing_dedup(request_id text,api_key_id bigint,created_at timestamptz,PRIMARY KEY(request_id,api_key_id));
-CREATE TABLE usage_billing_dedup_archive(LIKE usage_billing_dedup INCLUDING ALL);
-CREATE TABLE batch_image_money_holds(batch_id text,api_key_id bigint,user_id bigint,actual_amount numeric(20,8),state text,PRIMARY KEY(batch_id,api_key_id));
-CREATE TABLE regional_primary_requests(request_id text PRIMARY KEY,user_id bigint,state text,balance_funded boolean,event jsonb);
-CREATE TABLE regional_quota_leases(lease_id text PRIMARY KEY,user_id bigint);
-CREATE TABLE regional_budget_allocations(allocation_id text PRIMARY KEY,subscription_id bigint);
-CREATE TABLE regional_settled_events(event_id text PRIMARY KEY,lease_id text,event jsonb,settled_at timestamptz);
-CREATE TABLE usage_logs(user_id bigint,request_id text,api_key_id bigint,billing_type smallint,actual_cost numeric,created_at timestamptz);
-CREATE TABLE balance_forecast_coverage(id boolean PRIMARY KEY,started_at timestamptz);
-`)
+	schemaSQL, err := os.ReadFile("testdata/schema.sql")
+	require.NoError(t, err)
+	_, err = private.Exec(string(schemaSQL))
 	require.NoError(t, err)
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	_, err = private.Exec(`INSERT INTO balance_forecast_coverage VALUES(true,$1)`, now.Add(-48*time.Hour))

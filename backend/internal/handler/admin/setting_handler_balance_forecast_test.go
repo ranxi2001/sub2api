@@ -68,9 +68,9 @@ func TestBalanceForecastSettingsRoundTripAndLegacyOmission(t *testing.T) {
 
 func TestBalanceForecastSettingsRejectInvalidWithoutWrites(t *testing.T) {
 	for _, field := range []string{"balance_forecast_threshold_hours", "balance_forecast_max_notifications"} {
-		values := []any{0, -1, "invalid"}
+		values := []any{0, -1, 169, "invalid"}
 		if field == "balance_forecast_max_notifications" {
-			values = append(values, 1.5)
+			values = append(values, 1.5, 11)
 		}
 		for _, value := range values {
 			t.Run(field+"/"+fmt.Sprint(value), func(t *testing.T) {

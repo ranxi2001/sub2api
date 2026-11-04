@@ -53,6 +53,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 	accountPerformanceSvc := service.NewAccountPerformanceService(nil)
 
 	cleanup := provideCleanup(
+		nil, // balance forecast owner
 		nil, // default/full runtime configuration
 		nil, // request capture manager
 		nil, // entClient
