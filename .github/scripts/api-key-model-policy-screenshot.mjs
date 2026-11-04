@@ -23,7 +23,8 @@ const html = join(root, suffix + '.html')
 const api = join(root, suffix + '-api.js')
 const auth = join(root, suffix + '-auth.js')
 const app = join(root, suffix + '-app.js')
-const files = [entry, html, api, auth, app]
+const localeAdapter = join(root, suffix + '-i18n.js')
+const files = [entry, html, api, auth, app, localeAdapter]
 const previewDir = join(output, 'preview-build')
 const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 const errors = []
@@ -53,12 +54,18 @@ try {
   `, { flag: 'wx' })
   writeFileSync(auth, `export const useAuthStore=()=>({isAdmin:true,user:{id:41,role:'admin'}});`, { flag: 'wx' })
   writeFileSync(app, `export const useAppStore=()=>({showSuccess:message=>window.__keyPolicyFixture.successes.push(message),showError:()=>{}});`, { flag: 'wx' })
-  writeFileSync(entry, `
-    import {createApp,h,onMounted,ref} from 'vue';
-    import {createPinia} from 'pinia';
+  writeFileSync(localeAdapter, `
     import {createI18n} from 'vue-i18n';
     import zh from '/src/i18n/locales/zh/index.ts';
     import en from '/src/i18n/locales/en/index.ts';
+    const locale=new URLSearchParams(location.search).get('lang')||'zh';
+    export const i18n=createI18n({legacy:false,locale,messages:{zh,en}});
+    export const getLocale=()=>locale;
+  `, { flag: 'wx' })
+  writeFileSync(entry, `
+    import {createApp,h,onMounted,ref} from 'vue';
+    import {createPinia} from 'pinia';
+    import {i18n} from '@fixture-i18n';
     import Keys from '/src/components/admin/user/UserApiKeysModal.vue';
     import '/src/style.css';
     const locale=new URLSearchParams(location.search).get('lang')||'zh';
@@ -71,7 +78,7 @@ try {
         h('p','CI offline component preview · fictional identity and API data'),
         h(Keys,{show:show.value,user:{id:99,email:'customer@example.invalid',username:'Fictional customer'},onClose:()=>show.value=false}),
       ]);
-    }}).use(createPinia()).use(createI18n({legacy:false,locale,messages:{zh,en}})).mount('#app');
+    }}).use(createPinia()).use(i18n).mount('#app');
   `, { flag: 'wx' })
   writeFileSync(html, `<html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="./${suffix}.js"></script></html>`, { flag: 'wx' })
   await build({
@@ -80,6 +87,8 @@ try {
       { find: '@/api/admin', replacement: api },
       { find: '@/stores/auth', replacement: auth },
       { find: '@/stores/app', replacement: app },
+      { find: /^@\/i18n$/, replacement: localeAdapter },
+      { find: '@fixture-i18n', replacement: localeAdapter },
       { find: '@', replacement: join(root, 'src') },
     ] },
     css: { postcss: { plugins: [
