@@ -18,6 +18,8 @@
 
 各路径原有 `startTime`、每轮起点、queue 边界、总耗时和 TPS 分母均不变。统一的是事件判定，不是所有传输的 timestamp 赋值边界。
 
+合法的多 `data:` 行 JSON 使用独立、有限大小的指标缓冲，以换行汇合 payload；完整 JSON 就绪时才调用共享判定。单行 JSON 仍在原 data 行处理时观察，不普遍后移到空行。缓冲不会拼接或重写下游交付字节，也不参与 commit、flush、usage 或 retry 判定。Responses priority 观察器同样保留 `event:` 上下文，payload 中非空 `type` 优先于事件头，空行清除上下文；Chat Completions 沿用原处理。
+
 | 实际路径 | semantic 首字的观察与赋值边界 |
 | --- | --- |
 | HTTP ingress → HTTP Responses SSE upstream，native SSE | 保留原边界：guarded 路径在完整 SSE event 结束、执行原有 flush 逻辑后赋值；非 guarded 路径在处理解析出的 data 行时赋值。未启用首输出 timeout 时仍保留原有事件 staging，不因此移动计时。 |
@@ -33,4 +35,4 @@ semantic 指标与原 stream commit/flush/replay eligibility 解耦。原客户�
 
 `requesttiming.Output` 的 semantic 判定和 Responses priority 首语义采样同步使用共享口径；Chat Completions priority 保留旧分类。其它 Anthropic、Gemini、Chat Completions 协议不在此次口径修改范围。
 
-仅后续记录采用新口径，不重算历史 `first_token_ms` 或聚合；混合历史不可视为统一口径的延迟序列。没有 schema、生产设置或 UI 变更。本轮为本地候选提交，未 push、创建 PR、release 或部署，不声称生产延迟改善。
+仅后续记录采用新口径，不重算历史 `first_token_ms` 或聚合；混合历史不可视为统一口径的延迟序列。没有 schema、生产设置或 UI 变更。源码测试和代码审查不代表 release 或生产部署，也不能证明生产延迟改善。

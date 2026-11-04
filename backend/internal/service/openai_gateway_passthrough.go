@@ -2177,6 +2177,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 	// flushPending 表示已写入但未到 SSE 空行边界的脏状态；defer 兜底函数退出前的残留，断连后不再 Flush。
 	flushPending := false
 	pendingSSEEventType := ""
+	var metricEvent openAISSEMetricEvent
 	flushPendingOutput := func() {
 		if clientDisconnected || !flushPending {
 			return
@@ -2276,6 +2277,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 	defer releaseUpstreamReadCtx()
 	for documentScanner.Next(upstreamReadCtx, streamInterval, keepaliveCh, heartbeat) {
 		line := documentScanner.Text()
+		if _, dataLine := extractOpenAISSEDataLine(line); !dataLine {
+			metricEvent.observeLine(line)
+		}
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
 			eventType = strings.TrimSpace(eventType)
@@ -2459,9 +2463,15 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 					requesttiming.Stage(ctx, "sse_visible_first")
 				}
 			}
-			requesttiming.Content(ctx, []byte(trimmedData), eventType)
-			requesttiming.Output(ctx, openAIStreamDataStartsSemanticTTFT(trimmedData, eventType), openAIStreamDataStartsVisibleOutput(trimmedData, eventType), timingTerminal(eventType))
-			if firstTokenMs == nil && openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode) {
+			metricPayload, metricType := metricEvent.observeLine("data: " + trimmedData)
+			startsSemanticOutput := openAIStreamDataStartsSemanticTTFT(string(metricPayload), metricType)
+			startsTTFTOutput := startsSemanticOutput
+			if ttftMode == OpenAITTFTModeVisible {
+				startsTTFTOutput = openAIStreamDataStartsVisibleOutput(trimmedData, eventType)
+			}
+			requesttiming.Content(ctx, metricPayload, metricType)
+			requesttiming.Output(ctx, startsSemanticOutput, openAIStreamDataStartsVisibleOutput(trimmedData, eventType), timingTerminal(eventType))
+			if firstTokenMs == nil && startsTTFTOutput {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
 			}
