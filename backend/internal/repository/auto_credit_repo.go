@@ -1,0 +1,240 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"regexp"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/shopspring/decimal"
+)
+
+type autoCreditRepository struct{ db *sql.DB }
+
+func NewAutoCreditRepository(db *sql.DB) service.AutoCreditRepository {
+	return &autoCreditRepository{db: db}
+}
+
+// The users row is the sole lock ordering root. No process-local mutex.
+func lockAutoCreditUser(ctx context.Context, tx *sql.Tx, uid int64) (string, string, error) {
+	var balance, status string
+	err := tx.QueryRowContext(ctx, `SELECT balance::text,status FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, uid).Scan(&balance, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = service.ErrUserNotFound
+	}
+	return balance, status, err
+}
+
+type creditQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func readAutoCredit(ctx context.Context, q creditQuerier, uid int64, status string) (*service.AutoCreditState, error) {
+	if status != "all" && status != "pending" && status != "settled" {
+		return nil, service.ErrAutoCreditInvalid
+	}
+	s := &service.AutoCreditState{Entries: []service.AutoCreditEntry{}}
+	err := q.QueryRowContext(ctx, `SELECT enabled,threshold::text,amount::text,cap::text,version FROM auto_credit_config WHERE user_id=$1`, uid).Scan(&s.Config.Enabled, &s.Config.Threshold, &s.Config.Amount, &s.Config.Cap, &s.Config.Version)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount),0)::numeric(20,8)::text FROM auto_credit_ledger WHERE user_id=$1 AND status='pending'`, uid).Scan(&s.Outstanding); err != nil {
+		return nil, err
+	}
+	if s.Config.Enabled && s.Config.Amount != nil && s.Config.Cap != nil {
+		s.CapBlocked = decimal.RequireFromString(s.Outstanding).Add(decimal.RequireFromString(*s.Config.Amount)).GreaterThan(decimal.RequireFromString(*s.Config.Cap))
+	}
+	rows, err := q.QueryContext(ctx, `SELECT id,user_id,epoch,source,trigger_identity,amount::text,balance_before::text,balance_after::text,note,status,created_at,settled_at,settled_by FROM auto_credit_ledger WHERE user_id=$1 AND ($2='all' OR status=$2) ORDER BY id DESC LIMIT 200`, uid, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e service.AutoCreditEntry
+		if err = rows.Scan(&e.ID, &e.UserID, &e.Epoch, &e.Source, &e.Trigger, &e.Amount, &e.BalanceBefore, &e.BalanceAfter, &e.Note, &e.Status, &e.CreatedAt, &e.SettledAt, &e.SettledBy); err != nil {
+			return nil, err
+		}
+		s.Entries = append(s.Entries, e)
+	}
+	return s, rows.Err()
+}
+func (r *autoCreditRepository) Get(ctx context.Context, uid int64, status string) (*service.AutoCreditState, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var exists bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND deleted_at IS NULL)`, uid).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, service.ErrUserNotFound
+	}
+	s, err := readAutoCredit(ctx, tx, uid, status)
+	if err != nil {
+		return nil, err
+	}
+	return s, tx.Commit()
+}
+
+var creditMoneyPattern = regexp.MustCompile(`^(0|[1-9][0-9]{0,6})(\.[0-9]{1,8})?$`)
+
+func patchCreditMoney(raw json.RawMessage, current *string, zero bool) (*string, error) {
+	if len(raw) == 0 {
+		return current, nil
+	}
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	var v string
+	if json.Unmarshal(raw, &v) != nil || !creditMoneyPattern.MatchString(v) {
+		return nil, service.ErrAutoCreditInvalid
+	}
+	d, err := decimal.NewFromString(v)
+	if err != nil || d.GreaterThan(decimal.NewFromInt(1000000)) || (!zero && !d.IsPositive()) {
+		return nil, service.ErrAutoCreditInvalid
+	}
+	v = d.StringFixed(8)
+	return &v, nil
+}
+func (r *autoCreditRepository) Save(ctx context.Context, uid, actor int64, p service.AutoCreditPatch) (*service.AutoCreditState, error) {
+	if actor <= 0 || p.Version < 0 {
+		return nil, service.ErrAutoCreditInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, _, err = lockAutoCreditUser(ctx, tx, uid); err != nil {
+		return nil, err
+	}
+	s, err := readAutoCredit(ctx, tx, uid, "all")
+	if err != nil {
+		return nil, err
+	}
+	c := s.Config
+	if p.Version != c.Version {
+		return nil, service.ErrAutoCreditConflict
+	}
+	if p.Enabled != nil {
+		c.Enabled = *p.Enabled
+	}
+	if c.Threshold, err = patchCreditMoney(p.Threshold, c.Threshold, true); err != nil {
+		return nil, err
+	}
+	if c.Amount, err = patchCreditMoney(p.Amount, c.Amount, false); err != nil {
+		return nil, err
+	}
+	if c.Cap, err = patchCreditMoney(p.Cap, c.Cap, false); err != nil {
+		return nil, err
+	}
+	if c.Enabled && (c.Threshold == nil || c.Amount == nil || c.Cap == nil || decimal.RequireFromString(*c.Amount).GreaterThan(decimal.RequireFromString(*c.Cap))) {
+		return nil, service.ErrAutoCreditInvalid
+	}
+	c.Version++
+	_, err = tx.ExecContext(ctx, `INSERT INTO auto_credit_config(user_id,enabled,threshold,amount,cap,version) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id) DO UPDATE SET enabled=$2,threshold=$3,amount=$4,cap=$5,version=$6`, uid, c.Enabled, c.Threshold, c.Amount, c.Cap, c.Version)
+	if err != nil {
+		return nil, err
+	}
+	detail, err := json.Marshal(struct {
+		Before service.AutoCreditConfig `json:"before"`
+		After  service.AutoCreditConfig `json:"after"`
+	}{s.Config, c})
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO auto_credit_audit(user_id,actor_id,action,detail) VALUES($1,$2,'configure',$3::jsonb)`, uid, actor, string(detail))
+	if err != nil {
+		return nil, err
+	}
+	state, err := readAutoCredit(ctx, tx, uid, "all")
+	if err != nil {
+		return nil, err
+	}
+	return state, tx.Commit()
+}
+
+// Caller must hold the users row lock. Shared with atomic usage settlement.
+func evaluateAutoCredit(ctx context.Context, tx *sql.Tx, uid int64, balance, status string) (*service.AutoCreditResult, error) {
+	result := &service.AutoCreditResult{Balance: balance}
+	if status != "active" {
+		return result, nil
+	}
+	var epoch int64
+	var amount, trigger string
+	err := tx.QueryRowContext(ctx, `SELECT c.debit_epoch,c.amount::text,c.trigger_identity FROM auto_credit_config c WHERE c.user_id=$1 AND c.enabled AND $2::numeric<c.threshold AND NOT EXISTS(SELECT 1 FROM auto_credit_ledger l WHERE l.user_id=c.user_id AND l.epoch=c.debit_epoch) AND COALESCE((SELECT SUM(l.amount) FROM auto_credit_ledger l WHERE l.user_id=c.user_id AND l.status='pending'),0)+c.amount<=c.cap`, uid, balance).Scan(&epoch, &amount, &trigger)
+	if errors.Is(err, sql.ErrNoRows) {
+		return result, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var after string
+	if err = tx.QueryRowContext(ctx, `UPDATE users SET balance=balance+$2::numeric,updated_at=NOW() WHERE id=$1 RETURNING balance::text`, uid, amount).Scan(&after); err != nil {
+		return nil, err
+	}
+	var lid int64
+	if err = tx.QueryRowContext(ctx, `INSERT INTO auto_credit_ledger(user_id,epoch,trigger_identity,amount,balance_before,balance_after) VALUES($1,$2,$3,$4::numeric,$5::numeric,$6::numeric) RETURNING id`, uid, epoch, trigger, amount, balance, after).Scan(&lid); err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO auto_credit_audit(user_id,ledger_id,action,detail) VALUES($1,$2,'issue',jsonb_build_object('epoch',$3::bigint,'amount',$4::text,'balance_before',$5::text,'balance_after',$6::text))`, uid, lid, epoch, amount, balance, after); err != nil {
+		return nil, err
+	}
+	result.Issued = true
+	result.Balance = after
+	return result, nil
+}
+func (r *autoCreditRepository) Evaluate(ctx context.Context, uid int64) (*service.AutoCreditResult, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	balance, status, err := lockAutoCreditUser(ctx, tx, uid)
+	if err != nil {
+		return nil, err
+	}
+	result, err := evaluateAutoCredit(ctx, tx, uid, balance, status)
+	if err != nil {
+		return nil, err
+	}
+	return result, tx.Commit()
+}
+func (r *autoCreditRepository) Settle(ctx context.Context, uid, lid, actor int64) (*service.AutoCreditState, error) {
+	if actor <= 0 || lid <= 0 {
+		return nil, service.ErrAutoCreditInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, _, err = lockAutoCreditUser(ctx, tx, uid); err != nil {
+		return nil, err
+	}
+	var state string
+	if err = tx.QueryRowContext(ctx, `SELECT status FROM auto_credit_ledger WHERE id=$1 AND user_id=$2 FOR UPDATE`, lid, uid).Scan(&state); errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrAutoCreditInvalid
+	}
+	if err != nil {
+		return nil, err
+	}
+	if state == "pending" {
+		if _, err = tx.ExecContext(ctx, `UPDATE auto_credit_ledger SET status='settled',settled_at=NOW(),settled_by=$2 WHERE id=$1`, lid, actor); err != nil {
+			return nil, err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO auto_credit_audit(user_id,actor_id,ledger_id,action,detail) VALUES($1,$2,$3,'settle','{"full_settlement":true}')`, uid, actor, lid); err != nil {
+			return nil, err
+		}
+	}
+	s, err := readAutoCredit(ctx, tx, uid, "all")
+	if err != nil {
+		return nil, err
+	}
+	return s, tx.Commit()
+}
