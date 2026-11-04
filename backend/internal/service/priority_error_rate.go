@@ -439,12 +439,11 @@ func (b *priorityAttemptBody) Close() error {
 	}
 	b.closed = true
 	if b.stream && b.status < 400 && !b.chat && !b.failed {
-		// A read error can leave the final data line in buf; EOF already
+		// A read error can leave the final line in buf; EOF already
 		// dispatches it. Classify unfinished JSON before discarding either
 		// buffer, preserving unknown evidence and explicit upstream failures.
 		if len(b.buf) > 0 {
-			b.metricEvent.limit = priorityAttemptInspectBytes
-			b.metricEvent.observeLine(strings.TrimRight(string(b.buf), "\r\n"))
+			b.observeLine(b.buf)
 		}
 		if len(b.metricEvent.data) > 0 || b.metricEvent.discard {
 			b.oversized = true

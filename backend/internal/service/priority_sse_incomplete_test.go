@@ -60,23 +60,28 @@ func readPrioritySSEEvidence(t *testing.T, wire string, ending error, withData b
 }
 
 func TestPriorityResponsesIncompleteSSEExcluded(t *testing.T) {
-	for _, newline := range []bool{false, true} {
-		for _, ending := range []struct {
-			name string
-			err  error
-		}{{"EOF", io.EOF}, {"UnexpectedEOF", io.ErrUnexpectedEOF}} {
-			for _, withData := range []bool{false, true} {
-				t.Run(fmt.Sprintf("newline=%t/%s/with_data=%t", newline, ending.name, withData), func(t *testing.T) {
-					wire := `data: {"type":"response.output_text.delta","delta":`
-					if newline {
-						wire += "\n"
-					}
-					got := readPrioritySSEEvidence(t, wire, ending.err, withData, 200, true, "/v1/responses")
-					require.EqualValues(t, 0, got.Successes)
-					require.EqualValues(t, 0, got.Failures, "unfinished JSON is unknown evidence, never an account failure")
-					require.EqualValues(t, 0, got.LatencySamples)
-					require.Nil(t, got.ErrorRate, "excluded evidence must remain unknown")
-				})
+	for _, payload := range []struct{ name, wire string }{
+		{"partial", `data: {"type":"response.output_text.delta","delta":`},
+		{"partial_then_header", "data: {\"delta\":\nevent: response.created"},
+	} {
+		for _, newline := range []bool{false, true} {
+			for _, ending := range []struct {
+				name string
+				err  error
+			}{{"EOF", io.EOF}, {"UnexpectedEOF", io.ErrUnexpectedEOF}} {
+				for _, withData := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/newline=%t/%s/with_data=%t", payload.name, newline, ending.name, withData), func(t *testing.T) {
+						wire := payload.wire
+						if newline {
+							wire += "\n"
+						}
+						got := readPrioritySSEEvidence(t, wire, ending.err, withData, 200, true, "/v1/responses")
+						require.EqualValues(t, 0, got.Successes)
+						require.EqualValues(t, 0, got.Failures, "unfinished JSON is unknown evidence, never an account failure")
+						require.EqualValues(t, 0, got.LatencySamples)
+						require.Nil(t, got.ErrorRate, "excluded evidence must remain unknown")
+					})
+				}
 			}
 		}
 	}
@@ -169,6 +174,7 @@ func TestOpenAISSEMetricEventStateRecovery(t *testing.T) {
 		event.observeLine("event: response.output_text.delta")
 		data, typ := event.observeLine("data: {")
 		require.Nil(t, data)
+		require.Empty(t, typ, "incomplete JSON must not emit an event type")
 		data, typ = event.observeLine(`data: "delta":"ok"}`)
 		require.JSONEq(t, `{"delta":"ok"}`, string(data))
 		require.Equal(t, "response.output_text.delta", typ)
