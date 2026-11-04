@@ -1,0 +1,43 @@
+name: VIP auto credit PostgreSQL
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  postgres-repository:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: fixture-only
+          POSTGRES_DB: vip_credit_test
+          POSTGRES_INITDB_ARGS: --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vip_credit_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      VIP_CREDIT_TEST_REDIS_ADDR: 127.0.0.1:6379
+      VIP_CREDIT_TEST_DSN: host=127.0.0.1 port=5432 user=postgres password=fixture-only dbname=vip_credit_test sslmode=disable
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Mandatory real PostgreSQL ledger, admission, concurrency and upgrade regressions
+        working-directory: backend
+        run: go test -race -p 1 -tags=vipcreditintegration ./internal/repository -run '^TestVipCredit' -count=1 -v -timeout=10m

@@ -1,0 +1,15 @@
+{
+  "source_commit": "60daddaa90175b81fdd5aeff7089f3c5d84b976d",
+  "mode": "actual new component and CSS, local fictional preview; no full-page/API/SMTP validation",
+  "screenshots": [
+    "zh-default.png",
+    "zh-configured.png",
+    "zh-dark.png",
+    "zh-mobile.png",
+    "en-default.png",
+    "en-configured.png",
+    "en-dark.png",
+    "en-mobile.png"
+  ],
+  "errors": []
+}

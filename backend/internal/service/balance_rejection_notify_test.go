@@ -50,7 +50,7 @@ func TestBalanceRejectionProviderWiresBothBoundaries(t *testing.T) {
 	notify, _, _, _ := balanceRejectionFixture(t)
 	svc := ProvideBillingCacheService(nil, nil, nil, nil, nil, nil, &config.Config{}, nil, notify)
 	defer svc.Stop()
-	api, err := ProvideAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{}, svc, nil, nil)
+	api, err := ProvideAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{}, svc, nil, nil, nil)
 	require.NoError(t, err)
 	require.Same(t, notify, svc.balanceRejectionNotifier)
 	require.Same(t, notify, api.balanceRejectionNotifier)
