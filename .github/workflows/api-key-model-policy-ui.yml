@@ -1,0 +1,50 @@
+name: API key model policy UI
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'frontend/src/components/admin/user/ApiKeyModelPolicyDialog.vue'
+      - 'frontend/src/components/admin/user/UserApiKeysModal.vue'
+      - 'frontend/src/components/admin/user/__tests__/ApiKeyModelPolicy*.spec.ts'
+      - 'frontend/src/views/user/KeysView.vue'
+      - 'frontend/src/i18n/locales/*/apiKeyModelPolicy.ts'
+      - '.github/scripts/api-key-model-policy-screenshot.mjs'
+      - '.github/workflows/api-key-model-policy-ui.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  policy-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Real key policy dialog and both-entry notice regressions
+        run: pnpm --dir frontend exec vitest run src/components/admin/user/__tests__/ApiKeyModelPolicyDialog.spec.ts src/components/admin/user/__tests__/ApiKeyModelPolicyNotices.spec.ts
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/key-policy-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/key-policy-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render real entry and dialog with fictional API fixtures
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/key-policy-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/key-policy-ui
+        run: node .github/scripts/api-key-model-policy-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: api-key-model-policy-ui-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/key-policy-ui
