@@ -162,3 +162,37 @@ func TestBalanceForecastSMTPFailureConsumesConservativeAllowance(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM balance_forecast_outbox`).Scan(&count))
 	require.Equal(t, 1, count)
 }
+
+func TestBalanceForecastRecoverySurvivesLargeBoundedRotation(t *testing.T) {
+	for _, users := range []int{4000, 4001} {
+		t.Run(fmt.Sprint(users), func(t *testing.T) {
+			svc, settings, smtp, db, now := forecastServiceFixture(t)
+			ctx := context.Background()
+			// Only user 1 has reliable receipts and a verified recipient; the
+			// remaining active users still belong to the bounded scanner page.
+			_, err := db.ExecContext(ctx, `INSERT INTO users(id,balance,created_at) SELECT id,30,$2 FROM generate_series(2,$1::bigint) id`, users, now.Add(-48*time.Hour))
+			require.NoError(t, err)
+			require.NoError(t, settings.Set(ctx, SettingKeyBalanceForecastMaxNotifications, "1"))
+			require.NoError(t, svc.RunOnce(ctx))
+			require.EqualValues(t, 1, smtp.messageCount())
+			_, err = db.ExecContext(ctx, `UPDATE users SET balance=100 WHERE id=1`)
+			require.NoError(t, err)
+			// Actual RunOnce pagination needs 15 minutes to revisit the first
+			// user at these boundaries, including the exact-4000 EOF/reset tick.
+			for tick := 0; tick < 15; tick++ {
+				*now = now.Add(5 * time.Minute)
+				require.NoError(t, svc.RunOnce(ctx))
+			}
+			var active bool
+			require.NoError(t, db.QueryRowContext(ctx, `SELECT active FROM balance_forecast_episodes WHERE user_id=1`).Scan(&active))
+			require.False(t, active, "normal full rotation must permit one hour of continuous recovery")
+			_, err = db.ExecContext(ctx, `UPDATE users SET balance=1 WHERE id=1`)
+			require.NoError(t, err)
+			for tick := 0; tick < 3; tick++ {
+				*now = now.Add(5 * time.Minute)
+				require.NoError(t, svc.RunOnce(ctx))
+			}
+			require.EqualValues(t, 2, smtp.messageCount(), "recovered user must receive the later warning despite the previous cap")
+		})
+	}
+}

@@ -2,6 +2,7 @@ package balanceforecast
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -99,4 +100,76 @@ func TestForecastOnlyPreSMTPSuppressionReleasesAllowance(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, id)
 	require.Error(t, s.Finish(ctx, next, "pending", now))
+}
+
+func TestForecastRecoveryGapMatchesBoundedSweepCycles(t *testing.T) {
+	for _, tc := range []struct {
+		users        int
+		gapMinutes   int
+		visitMinutes int
+	}{
+		{1999, 10, 5},
+		{2000, 15, 10}, // An exact full sweep needs its own EOF/reset tick.
+		{2001, 15, 10},
+		{4000, 20, 15},
+		{4001, 20, 15},
+	} {
+		t.Run(fmt.Sprint(tc.users), func(t *testing.T) {
+			s, now := fixture(t)
+			ctx := context.Background()
+			migration, err := os.ReadFile("../../migrations/332_balance_forecast_delivery.sql")
+			require.NoError(t, err)
+			_, err = s.DB.ExecContext(ctx, string(migration))
+			require.NoError(t, err)
+			_, err = s.DB.ExecContext(ctx, `INSERT INTO users(id,balance,created_at) SELECT id,30,$2 FROM generate_series(2,$1::bigint) id`, tc.users, now.Add(-48*time.Hour))
+			require.NoError(t, err)
+			// None of these four rows belongs to the scanner's eligible page.
+			_, err = s.DB.ExecContext(ctx, `INSERT INTO users(id,balance,created_at,status,deleted_at,balance_notify_enabled) VALUES
+			 (100001,30,$1,'inactive',NULL,true),
+			 (100002,30,$1,'active',$1,true),
+			 (100003,30,$1,'active',NULL,false),
+			 (100004,0,$1,'active',NULL,true)`, now)
+			require.NoError(t, err)
+			gap, err := s.RecoveryObservationGap(ctx, 2000, 5*time.Minute)
+			require.NoError(t, err)
+			require.Equal(t, time.Duration(tc.gapMinutes)*time.Minute, gap)
+			_, err = s.RecoveryObservationGap(ctx, 0, 5*time.Minute)
+			require.Error(t, err)
+
+			c := Candidate{ID: 1, ObservationHours: 24, Hourly: 1, Hours: 1, Covered: true, Samples: 3, First: now.Add(-3 * time.Hour), Last: now.Add(-time.Hour)}
+			id, err := s.ClaimWithRecoveryGap(ctx, c, now, 12, 1, gap)
+			require.NoError(t, err)
+			require.Positive(t, id)
+			// A capped episode must recover with the normal scanner cadence,
+			// including the >10-minute revisit interval on large installations.
+			c.Hours = 15
+			healthyStart := now.Add(2 * time.Hour)
+			visit := time.Duration(tc.visitMinutes) * time.Minute
+			for elapsed := time.Duration(0); elapsed <= time.Hour; elapsed += visit {
+				_, err = s.ClaimWithRecoveryGap(ctx, c, healthyStart.Add(elapsed), 12, 1, gap)
+				require.NoError(t, err)
+			}
+			var active bool
+			require.NoError(t, s.DB.QueryRowContext(ctx, `SELECT active FROM balance_forecast_episodes WHERE user_id=1`).Scan(&active))
+			require.False(t, active, "normal bounded rotation must close the recovered episode")
+			c.Hours = 1
+			id, err = s.ClaimWithRecoveryGap(ctx, c, healthyStart.Add(time.Hour+time.Minute), 12, 1, gap)
+			require.NoError(t, err)
+			require.Positive(t, id, "a later warning has a fresh allowance after recovery")
+
+			// A real observation gap still resets recovery rather than treating
+			// elapsed wall time without observations as continuous health.
+			c.Hours = 15
+			secondStart := healthyStart.Add(3 * time.Hour)
+			_, err = s.ClaimWithRecoveryGap(ctx, c, secondStart, 12, 1, gap)
+			require.NoError(t, err)
+			resumed := secondStart.Add(gap + time.Minute)
+			_, err = s.ClaimWithRecoveryGap(ctx, c, resumed, 12, 1, gap)
+			require.NoError(t, err)
+			var healthySince time.Time
+			require.NoError(t, s.DB.QueryRowContext(ctx, `SELECT healthy_since,active FROM balance_forecast_episodes WHERE user_id=1`).Scan(&healthySince, &active))
+			require.True(t, healthySince.Equal(resumed))
+			require.True(t, active, "a disconnected observation must not close the episode")
+		})
+	}
 }

@@ -7,12 +7,48 @@ import (
 	"time"
 )
 
+const minimumRecoveryObservationGap = 10 * time.Minute
+
+// RecoveryObservationGap allows a healthy user to survive one complete bounded
+// sweep of eligible users plus one scheduling tick of slack. An exact multiple
+// of candidatesPerSweep needs an additional tick to observe EOF and reset the
+// persistent cursor, so the cycle is floor(count/budget)+1 rather than ceil.
+func (s *Store) RecoveryObservationGap(ctx context.Context, candidatesPerSweep int, sweepInterval time.Duration) (time.Duration, error) {
+	if candidatesPerSweep < 1 || sweepInterval <= 0 {
+		return 0, errors.New("invalid forecast sweep limits")
+	}
+	countCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var eligible int64
+	if err := s.DB.QueryRowContext(countCtx, `SELECT count(*) FROM users WHERE deleted_at IS NULL AND status='active' AND balance_notify_enabled AND balance>0`).Scan(&eligible); err != nil {
+		return 0, err
+	}
+	ticks := eligible/int64(candidatesPerSweep) + 2
+	if ticks > int64(time.Duration(1<<63-1)/sweepInterval) {
+		return 0, errors.New("forecast recovery observation gap overflow")
+	}
+	gap := time.Duration(ticks) * sweepInterval
+	if gap < minimumRecoveryObservationGap {
+		gap = minimumRecoveryObservationGap
+	}
+	return gap, nil
+}
+
 // Claim reserves one whole notification round before any SMTP side effect.
 // A sending row surviving a crash is deliberately never replayed: SMTP acceptance
 // and a database commit cannot be made atomic. It continues to consume the cap.
 func (s *Store) Claim(ctx context.Context, c Candidate, now time.Time, threshold float64, maxNotifications int) (int64, error) {
+	return s.ClaimWithRecoveryGap(ctx, c, now, threshold, maxNotifications, minimumRecoveryObservationGap)
+}
+
+// ClaimWithRecoveryGap keeps recovery's continuity check aligned with the
+// bounded scanner's actual revisit interval; it never removes the gap check.
+func (s *Store) ClaimWithRecoveryGap(ctx context.Context, c Candidate, now time.Time, threshold float64, maxNotifications int, recoveryGap time.Duration) (int64, error) {
 	if !c.Reliable() || threshold <= 0 || maxNotifications < 1 {
 		return 0, nil
+	}
+	if recoveryGap < minimumRecoveryObservationGap {
+		recoveryGap = minimumRecoveryObservationGap
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -32,7 +68,7 @@ func (s *Store) Claim(ctx context.Context, c Candidate, now time.Time, threshold
 	if c.Hours > threshold*1.2 {
 		// A full hour above the recovery band closes the episode. Short jitter or
 		// toggling the feature never clears the durable notification allowance.
-		if !healthy.Valid || !lastHealthy.Valid || now.Sub(lastHealthy.Time) > 10*time.Minute {
+		if !healthy.Valid || !lastHealthy.Valid || now.Sub(lastHealthy.Time) > recoveryGap {
 			healthy = sql.NullTime{Time: now, Valid: true}
 		}
 		if now.Sub(healthy.Time) >= time.Hour {

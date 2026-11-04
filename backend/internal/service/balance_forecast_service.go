@@ -12,6 +12,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/balanceforecast"
 )
 
+const (
+	forecastSweepInterval   = 5 * time.Minute
+	forecastPageSize        = 100
+	forecastPagesPerSweep   = 20
+	forecastSweepCandidates = forecastPageSize * forecastPagesPerSweep
+)
+
 // BalanceForecastService runs only on full nodes. Claims are durable across
 // instances; no SMTP calls execute inside a transaction or request billing path.
 type BalanceForecastService struct {
@@ -44,7 +51,7 @@ func (s *BalanceForecastService) Start() {
 	go func() {
 		defer close(s.done)
 		// Delayed first sweep keeps enabling/saving settings free of side effects.
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(forecastSweepInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -88,6 +95,10 @@ func (s *BalanceForecastService) RunOnce(ctx context.Context) error {
 	if s.mail == nil || s.users == nil || s.store == nil || s.store.DB == nil {
 		return errors.New("forecast dependencies unavailable")
 	}
+	recoveryGap, err := s.store.RecoveryObservationGap(ctx, forecastSweepCandidates, forecastSweepInterval)
+	if err != nil {
+		return err
+	}
 	now := s.now().UTC()
 	var after int64
 	// At most 2,000 users per sweep. Rotate the cursor persistently so large
@@ -101,8 +112,8 @@ func (s *BalanceForecastService) RunOnce(ctx context.Context) error {
 			return err
 		}
 	}
-	for page := 0; page < 20; page++ {
-		candidates, err := s.store.Candidates(ctx, now, after, 100)
+	for page := 0; page < forecastPagesPerSweep; page++ {
+		candidates, err := s.store.Candidates(ctx, now, after, forecastPageSize)
 		if err != nil {
 			return err
 		}
@@ -110,7 +121,7 @@ func (s *BalanceForecastService) RunOnce(ctx context.Context) error {
 			return s.settings.Set(ctx, "balance_forecast_cursor", "0")
 		}
 		for _, c := range candidates {
-			if err = s.process(ctx, c, now, cfg); err != nil {
+			if err = s.process(ctx, c, now, cfg, recoveryGap); err != nil {
 				return err
 			}
 			after = c.ID
@@ -124,13 +135,13 @@ func (s *BalanceForecastService) RunOnce(ctx context.Context) error {
 
 var errForecastSuppressed = errors.New("forecast suppressed before SMTP")
 
-func (s *BalanceForecastService) process(ctx context.Context, c balanceforecast.Candidate, now time.Time, cfg SystemSettings) error {
+func (s *BalanceForecastService) process(ctx context.Context, c balanceforecast.Candidate, now time.Time, cfg SystemSettings, recoveryGap time.Duration) error {
 	if !c.Reliable() {
 		return nil
 	}
 	// Recovery is observed even for opted-out/unreachable recipients.
 	if c.Hours > cfg.BalanceForecastThresholdHours {
-		_, err := s.store.Claim(ctx, c, now, cfg.BalanceForecastThresholdHours, cfg.BalanceForecastMaxNotifications)
+		_, err := s.store.ClaimWithRecoveryGap(ctx, c, now, cfg.BalanceForecastThresholdHours, cfg.BalanceForecastMaxNotifications, recoveryGap)
 		return err
 	}
 	if err := s.store.InterruptRecovery(ctx, c.ID); err != nil {
@@ -153,7 +164,7 @@ func (s *BalanceForecastService) process(ctx context.Context, c balanceforecast.
 	if _, err := s.mail.emailService.GetSMTPConfig(ctx); err != nil {
 		return err
 	}
-	id, err := s.store.Claim(ctx, c, now, cfg.BalanceForecastThresholdHours, cfg.BalanceForecastMaxNotifications)
+	id, err := s.store.ClaimWithRecoveryGap(ctx, c, now, cfg.BalanceForecastThresholdHours, cfg.BalanceForecastMaxNotifications, recoveryGap)
 	if err != nil || id == 0 {
 		return err
 	}
