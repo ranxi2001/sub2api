@@ -90,7 +90,7 @@ func readAutoCredit(ctx context.Context, q creditQuerier, uid int64, status stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var e service.AutoCreditEntry
 		if err = rows.Scan(&e.ID, &e.UserID, &e.Epoch, &e.Source, &e.Trigger, &e.Amount, &e.BalanceBefore, &e.BalanceAfter, &e.Note, &e.Status, &e.CreatedAt, &e.SettledAt, &e.SettledBy); err != nil {
@@ -113,7 +113,7 @@ func (r *autoCreditRepository) GetPage(ctx context.Context, uid int64, status st
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var exists bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND deleted_at IS NULL)`, uid).Scan(&exists); err != nil {
 		return nil, err
@@ -156,7 +156,7 @@ func (r *autoCreditRepository) Save(ctx context.Context, uid, actor int64, p ser
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, _, err = lockAutoCreditUser(ctx, tx, uid); err != nil {
 		return nil, err
 	}
@@ -258,7 +258,7 @@ func (r *autoCreditRepository) evaluate(ctx context.Context, uid, keyID int64) (
 		return nil, err
 	}
 
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	balance, status, err := lockAutoCreditUser(ctx, tx, uid)
 	if err != nil {
 		return nil, err
@@ -288,7 +288,7 @@ func (r *autoCreditRepository) PendingInvalidations(ctx context.Context) ([]serv
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	events := []service.AutoCreditInvalidation{}
 	for rows.Next() {
 		var e service.AutoCreditInvalidation
@@ -315,7 +315,7 @@ func (r *autoCreditRepository) Settle(ctx context.Context, uid, lid, actor int64
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, _, err = lockAutoCreditUser(ctx, tx, uid); err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func (r *autoCreditRepository) OutstandingByUsers(ctx context.Context, ids []int
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var uid int64
 		var amount string
