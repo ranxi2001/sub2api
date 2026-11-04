@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -28,6 +29,12 @@ func TestServerlessGeoJSUsesExistingProviderAndSharedCache(t *testing.T) {
 	other.client = g.client
 	require.Equal(t, "US", other.Country(context.Background(), "8.8.8.8"))
 	require.Equal(t, int32(1), calls.Load())
+	keys, err := cache.Keys(context.Background(), prefix+"geojs:*").Result()
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	ttl, err := cache.TTL(context.Background(), keys[0]).Result()
+	require.NoError(t, err)
+	require.InDelta(t, (24 * time.Hour).Seconds(), ttl.Seconds(), 2)
 	require.Empty(t, g.Country(context.Background(), "127.0.0.1"))
 	require.Empty(t, g.Country(context.Background(), "10.2.3.4"))
 	require.Empty(t, g.Country(context.Background(), "not-ip"))

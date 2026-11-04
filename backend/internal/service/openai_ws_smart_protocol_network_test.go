@@ -94,7 +94,7 @@ func newSmartProtocolNetwork(t *testing.T, mode string, known bool, fail string)
 				f.wsCalls.Add(1)
 				f.remember(body)
 				for i, event := range f.events(body) {
-					if i == 1 || (fail == "content_prefix" && i == 4) {
+					if i == 1 || ((fail == "content_prefix" || fail == "reasoning_item_only" || fail == "reasoning_part_only") && (i == 4 || i == 5)) {
 						time.Sleep(5 * time.Millisecond)
 					}
 					if err := conn.Write(ctx, coderws.MessageText, []byte(event)); err != nil {
@@ -126,7 +126,7 @@ func newSmartProtocolNetwork(t *testing.T, mode string, known bool, fail string)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		for i, event := range f.events(body) {
-			if i == 1 || (fail == "content_prefix" && i == 4) {
+			if i == 1 || ((fail == "content_prefix" || fail == "reasoning_item_only" || fail == "reasoning_part_only") && (i == 4 || i == 5)) {
 				time.Sleep(5 * time.Millisecond)
 			}
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", event)
@@ -208,9 +208,21 @@ func (f *smartProtocolNetwork) events(body []byte) []string {
 	}
 	id := "resp_" + seed
 	events := []string{fmt.Sprintf(`{"type":"response.created","response":{"id":%q}}`, id)}
-	if f.fail == "content_prefix" {
+	if f.fail == "content_prefix" || f.fail == "no_content" || f.fail == "reasoning_item_only" || f.fail == "reasoning_part_only" {
 		events = append(events, `{"type":"response.output_text.delta","delta":""}`, `{"type":"response.metadata.delta","delta":"working"}`, `{"type":"response.output_item.added","item":{"type":"function_call","name":"lookup","arguments":""}}`)
 	}
+	// Empty deltas/metadata/tool shells establish neither metric. A typed
+	// reasoning structure establishes semantic TTFT, but not actual content.
+	if f.fail == "content_prefix" || f.fail == "reasoning_item_only" {
+		events = append(events, `{"type":"response.output_item.added","item":{"type":"reasoning","summary":[]}}`)
+	}
+	if f.fail == "reasoning_part_only" {
+		events = append(events, `{"type":"response.content_part.added","part":{"type":"reasoning_text","text":""}}`)
+	}
+	if f.fail == "reasoning_item_only" || f.fail == "reasoning_part_only" {
+		return append(events, fmt.Sprintf(`{"type":"response.completed","response":{"id":%q,"status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":7}}}`, id))
+	}
+
 	if f.fail == "no_content" {
 		return append(events, `{"type":"response.output_text.delta","delta":""}`, fmt.Sprintf(`{"type":"response.completed","response":{"id":%q,"status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":0}}}`, id))
 	}
@@ -595,7 +607,7 @@ func TestSmartProtocolLegacyNoReplay(t *testing.T) {
 
 func TestSmartProtocolActualContentNetwork(t *testing.T) {
 	for _, path := range []string{"http", "ws", "passthrough"} {
-		for _, failure := range []string{"content_prefix", "no_content"} {
+		for _, failure := range []string{"content_prefix", "no_content", "reasoning_item_only", "reasoning_part_only"} {
 			t.Run(path+"_"+failure, func(t *testing.T) {
 				mode := path
 				if path == "passthrough" {
@@ -613,14 +625,27 @@ func TestSmartProtocolActualContentNetwork(t *testing.T) {
 				result := f.result()
 				require.NotNil(t, result.FirstUpstreamEventMs)
 				if failure == "no_content" {
-					require.Nil(t, result.FirstActualContentMs)
-					require.Empty(t, result.FirstActualContentKind)
+					require.Nil(t, result.FirstTokenMs, "created, empty delta, metadata and empty tool shell must not establish semantic TTFT")
 				} else {
 					require.NotNil(t, result.FirstTokenMs)
+					require.Less(t, *result.FirstUpstreamEventMs, *result.FirstTokenMs, "metadata precedes the held typed reasoning event")
+				}
+				if failure != "content_prefix" {
+					require.Nil(t, result.FirstActualContentMs, "typed reasoning without a body is not actual content")
+					require.Empty(t, result.FirstActualContentKind)
+				} else {
 					require.NotNil(t, result.FirstActualContentMs)
-					require.Less(t, *result.FirstTokenMs, *result.FirstActualContentMs, "legacy first-token keeps its original empty-delta semantics")
+					// Before semantic timing, this fixture expected an empty delta to
+					// start TTFT. Now the intervening typed reasoning must start it;
+					// the later nonempty tool input remains actual content.
+					require.Less(t, *result.FirstTokenMs, *result.FirstActualContentMs, "typed reasoning precedes the held nonempty tool input")
 					require.Equal(t, "tool_input", result.FirstActualContentKind)
 				}
+				if failure == "reasoning_item_only" || failure == "reasoning_part_only" {
+					require.Less(t, int64(*result.FirstTokenMs), result.Duration.Milliseconds(), "terminal must not overwrite the reasoning endpoint")
+				}
+				require.Equal(t, mode, result.UpstreamProtocol)
+				require.EqualValues(t, 1, f.httpCalls.Load()+f.wsCalls.Load(), "one generation, independent of semantic/content availability")
 				_ = c.CloseNow()
 				select {
 				case <-f.errors:
@@ -631,6 +656,9 @@ func TestSmartProtocolActualContentNetwork(t *testing.T) {
 				require.Len(t, timing.WSTurns, 1)
 				require.Equal(t, result.FirstActualContentMs, timing.WSTurns[0].FirstActualContentMS)
 				require.Equal(t, result.FirstActualContentKind, timing.WSTurns[0].FirstActualContentKind)
+				require.Equal(t, mode, timing.WSTurns[0].Upstream)
+				require.NotNil(t, timing.ProtocolDecision)
+				require.Equal(t, mode, timing.ProtocolDecision.Upstream)
 			})
 		}
 	}

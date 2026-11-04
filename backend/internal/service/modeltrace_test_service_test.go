@@ -111,7 +111,7 @@ func TestModelTraceIncompleteAnswersAndRefusalsAreExcluded(t *testing.T) {
 			case "responses":
 				err = svc.processOpenAIStream(c, strings.NewReader("data: {\"type\":\"response.done\",\"response\":{\"status\":\"incomplete\"}}\n\n"))
 			case "chat_completions":
-				err = svc.processOpenAIChatCompletionsStream(c, strings.NewReader("data: {\"choices\":[{\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n"))
+				err = svc.processOpenAIChatCompletionsStream(c, strings.NewReader("data: {\"choices\":[{\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n"), nil)
 			case "messages":
 				c.Request = c.Request.WithContext(withPelicanTestOptions(c.Request.Context(), pelicanTestOptions{}))
 				err = svc.processClaudeStream(c, strings.NewReader("data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n"))

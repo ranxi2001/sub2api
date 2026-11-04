@@ -36,7 +36,7 @@
                     'settings-tab',
                     activeTab === tab.key && 'settings-tab-active',
                   ]"
-                  :style="tab.key === 'features' ? { paddingRight: '7rem' } : undefined"
+                  :style="['features', 'gateway'].includes(tab.key) ? { paddingRight: '7rem' } : undefined"
                   @click="selectSettingsTab(tab.key)"
                   @keydown="handleSettingsTabKeydown($event, tab.key)"
                 >
@@ -50,6 +50,12 @@
                 <NewFeatureBadge
                   v-if="tab.key === 'features'"
                   :notice-id="NEW_FEATURE_NOTICES.protocolFeatureSwitches"
+                  :user-id="authStore.user?.id"
+                  class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
+                />
+                <NewFeatureBadge
+                  v-if="tab.key === 'gateway'"
+                  :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting"
                   :user-id="authStore.user?.id"
                   class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
                 />
@@ -177,7 +183,7 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
-          <ServerlessSettings v-if="activeTab === 'gateway'" />
+          <ServerlessSettings v-if="activeTab === 'gateway'" :user-id="authStore.user?.id" />
           <div class="card" data-testid="prism-browser-settings">
             <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
               <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Prism 浏览器桥</h2>

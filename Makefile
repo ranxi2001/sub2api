@@ -44,6 +44,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/ChannelMonitorView.modeSwitch.spec.ts \
 	src/views/admin/__tests__/AccountQualityView.spec.ts \
 	src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts \
+	src/views/admin/__tests__/AccountsView.declarationRefresh.spec.ts \
 	src/utils/__tests__/qualityRulePatch.spec.ts \
 	src/components/admin/operations/__tests__/QualityOwnershipReview.spec.ts \
 	src/utils/__tests__/accountAutoBPS.spec.ts \

@@ -354,6 +354,7 @@ export default {
         expiresAt: 'Expires At',
         actions: 'Actions'
       },
+      capacitySortHint: 'Sorts all filtered accounts by current concurrency (the numerator), independent of limits or utilization. Ties follow account ID order. Each refresh reads and sorts again, so accounts may move between pages. If the read fails, previous results remain; retry or choose another sort order.',
       schedulerScore: {
         baseShort: 'Base',
         stickyShort: 'Sticky',

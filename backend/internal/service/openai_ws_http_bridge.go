@@ -867,7 +867,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				requesttiming.Mark(ctx, "ws_first_actual_content")
 			}
 		}
-		if isOpenAIWSTokenEvent(eventType) {
+		if openai.ResponseStartsSemanticOutput(upstreamMessage, eventType) {
 			tokenEventCount++
 			if firstTokenMs == nil {
 				ms := int(requesttiming.Now(ctx).Sub(turnStart).Milliseconds())

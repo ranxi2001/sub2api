@@ -197,6 +197,7 @@ export default {
         expiresAt: '过期时间',
         actions: '操作'
       },
+      capacitySortHint: '按当前筛选结果中所有账号的实时并发使用量（分子）排序，不参考并发上限或占用比例。同值按账号 ID 排序。每次刷新重新读取并排序，账号可能跨页移动；读取失败时保留上次结果，请重试或选择其他排序。',
       schedulerScore: {
         baseShort: '普通',
         stickyShort: '粘性',

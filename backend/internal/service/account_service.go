@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -244,8 +243,8 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 	if err := ValidateModelMappingMode(req.Credentials); err != nil {
 		return nil, err
 	}
-	if req.Platform == PlatformTypeSafe && req.Type != AccountTypeAPIKey {
-		return nil, errors.New("typesafe accounts only support apikey credentials")
+	if (req.Platform == PlatformTypeSafe || req.Platform == PlatformMistral) && req.Type != AccountTypeAPIKey {
+		return nil, fmt.Errorf("%s accounts only support apikey credentials", req.Platform)
 	}
 	// 验证分组是否存在（如果指定了分组）
 	if len(req.GroupIDs) > 0 {

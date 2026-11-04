@@ -10,6 +10,8 @@ import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
 import { apiClient } from "@/api/client";
+import NewFeatureBadge from "@/components/common/NewFeatureBadge.vue";
+import { NEW_FEATURE_NOTICES } from "@/constants/newFeatureNotices";
 
 enableAutoUnmount(afterEach);
 
@@ -777,13 +779,42 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
     await flushPromises();
 
-    const badges = wrapper.findAll('[data-testid="new-feature-badge"]');
+    const badges = wrapper.findAllComponents(NewFeatureBadge)
+      .filter((badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.protocolFeatureSwitches);
     expect(badges).toHaveLength(2);
     await badges[0]!.trigger("click");
     await flushPromises();
-    expect(wrapper.findAll('[data-testid="new-feature-badge"]')).toHaveLength(0);
+    expect(wrapper.findAllComponents(NewFeatureBadge)
+      .filter((badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.protocolFeatureSwitches)
+      .flatMap((badge) => badge.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(0);
+    expect(wrapper.findAllComponents(NewFeatureBadge)
+      .filter((badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.serverlessIPRouting)
+      .flatMap((badge) => badge.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(1);
     expect(wrapper.get("#settings-tab-features").attributes("aria-selected")).toBe("false");
     expect(updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("dismisses the gateway notice across the tab and both routing controls without dismissing protocol settings", async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { config: { enabled: false, pods: [], regions: [] }, pods: [], stats: {} } });
+    try {
+      const wrapper = mountView();
+      await flushPromises();
+      await openGatewayTab(wrapper);
+      const gatewayBadges = () => wrapper.findAllComponents(NewFeatureBadge)
+        .filter((badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.serverlessIPRouting)
+        .flatMap((badge) => badge.findAll('[data-testid="new-feature-badge"]'));
+      expect(gatewayBadges()).toHaveLength(3);
+      await gatewayBadges()[0]!.trigger('click');
+      await flushPromises();
+      expect(gatewayBadges()).toHaveLength(0);
+      expect(wrapper.findAllComponents(NewFeatureBadge)
+        .filter((badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.protocolFeatureSwitches)
+        .flatMap((badge) => badge.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(2);
+      expect(wrapper.get('#settings-tab-gateway').attributes('aria-selected')).toBe('true');
+      expect(updateSettings).not.toHaveBeenCalled();
+    } finally {
+      get.mockRestore();
+    }
   });
 
   it("keeps the IP risk form on IP Audit without loading or saving it from Settings", async () => {

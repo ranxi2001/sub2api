@@ -1,4 +1,9 @@
 export default {
+ upstreamErrorRate: 'Upstream error rate',
+ localSample: 'local',
+ localWindowComplete: 'Local history retained for this window; route coverage remains partial.',
+ partialHistory: 'Partial history: restart, capacity or retention limit; older samples are unknown.',
+ upstreamHTTPNote: 'Upstream HTTP error rate = HTTP 4xx/5xx responses ÷ all observed HTTP 2xx–5xx responses × 100 ({failures} / {total}). Rolling {minutes} minutes, inclusive, by response-header receipt time. Retries count separately, including a failed attempt followed by success. Source: this server process only; bounded to the most recent 65,536 responses and 24 hours; samples retained since {since}. {validity} Shared HTTP transport, all platforms, inference POSTs only; includes probes using this transport. Excludes local auth, balance, scheduling rejections, cancellation before response headers and network/transport failures without a response. HTTP 200 stream/application errors, incomplete streams, native WebSocket and plugin/bypass transports are not detected; this is not the final user error rate. Other instances and history before collection are unknown. Refreshes every 30 seconds; switching servers may change samples. No samples means Not collected.',
  column: 'Performance · {minutes} min', title: 'Account performance monitor',
  tps: 'Avg TPS', degradation: 'Probe degradation · {minutes}m', ttft: 'Avg TTFT',
  uncollected: 'Not collected', unavailable: 'Unavailable', configure: 'Configure thresholds',
@@ -16,7 +21,7 @@ export default {
  refresh: 'Reload', reason: 'Triggered metrics: {reason}', auditUnavailable: 'Audit unavailable',
  settings: {
   title: 'Account performance monitoring window',
-  description: 'Configure the global rolling window for TPS, TTFT and probe degradation.',
+  description: 'Configure the shared rolling window for TPS, TTFT, probe degradation and process-local upstream HTTP errors.',
   windowMinutes: 'Window (minutes)',
   windowHint: 'Defaults to 60 minutes. Enter a whole number from 1 to 1440; shared by all accounts.',
   effectHint: 'Subsequent metrics and threshold evaluations use the saved window without restarting. Evaluation remains every 30 seconds; changing the window does not release existing pauses.',

@@ -53,6 +53,7 @@ func TestForwardAsChatCompletions_StrictDeveloperRole(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, stream := range []bool{false, true} {
 		for _, target := range []struct{ platform, model, base string }{
+			{PlatformMistral, "mistral-small-latest", "https://api.mistral.ai/v1"},
 			{PlatformDeepseek, "deepseek-flash", "https://api.deepseek.com"},
 			{PlatformKimi, "k3", "https://api.kimi.com/coding"},
 			{PlatformZhipu, "glm-5.3", "https://open.bigmodel.cn/api/paas/v4"},
@@ -114,7 +115,7 @@ func TestNormalizeStrictChatDeveloperRoles_PreservesConversation(t *testing.T) {
 	body := []byte(`{"model":"alias","messages":[{"role":"system","content":"first"},{"role":"developer","content":[{"type":"text","text":"developer is just text","cache_control":{"type":"ephemeral"}}],"name":"rules"},{"role":"user","content":"ping"},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"echo","arguments":"{\"role\":\"developer\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"ok"},{"role":"developer","content":"last"}],"metadata":{"large":9007199254740993,"role":"developer"},"stream":true,"reasoning_effort":"high"}`)
 	original := bytes.Clone(body)
 	want := strings.ReplaceAll(string(body), `"role":"developer","content"`, `"role":"system","content"`)
-	for _, platform := range []string{PlatformDeepseek, PlatformKimi, PlatformZhipu} {
+	for _, platform := range []string{PlatformDeepseek, PlatformKimi, PlatformZhipu, PlatformMistral} {
 		t.Run(platform, func(t *testing.T) {
 			account := &Account{Platform: platform, Type: AccountTypeAPIKey}
 			got, err := normalizeStrictChatDeveloperRoles(account, "https://relay.example.test/v1/chat/completions", body)

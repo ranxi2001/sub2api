@@ -215,6 +215,11 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
+	upstreamBody, err = normalizeMistralChatRequest(account, upstreamBody)
+	if err != nil {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
 	SetActualOpenAIUpstreamEndpoint(c, grokChatRawEndpoint)
 	customUA := account.GetOpenAIUserAgent()
 	if customUA == "" && account.IsGrokOAuth() {
@@ -342,6 +347,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
 	var regionalUsagePayload []byte
+	var normalizationErr error
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -377,6 +383,16 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if payload, ok := extractOpenAISSEDataLine(line); ok {
+			if u := extractCCStreamUsage(payload); u != nil {
+				regionalUsagePayload = []byte(payload)
+				usage = *u
+			}
+		}
+		line, normalizationErr = normalizeMistralChatSSELine(account, line)
+		if normalizationErr != nil {
+			break
+		}
 		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
@@ -387,10 +403,6 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			if trimmedPayload != "[DONE]" {
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
-				if u := extractCCStreamUsage(payload); u != nil {
-					regionalUsagePayload = []byte(payload)
-					usage = *u
-				}
 				if firstTokenMs == nil && !usageOnlyChunk {
 					elapsed := int(requesttiming.Now(c.Request.Context()).Sub(startTime).Milliseconds())
 					firstTokenMs = &elapsed
@@ -432,6 +444,13 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 	}
 
+	if normalizationErr != nil {
+		if !clientOutputStarted {
+			return nil, newOpenAIRawStreamTruncatedFailoverError(c, account, requestID, normalizationErr)
+		}
+		recordOpenAIRawStreamTruncation(c, account, requestID, normalizationErr, "http_error")
+		return resultWithUsage(), newOpenAIUpstreamStreamReadError(normalizationErr)
+	}
 	scanErr := scanner.Err()
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 		logger.L().Warn("openai chat_completions raw: stream read error",
@@ -572,6 +591,11 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	if requiresBillableGrokChatUsage(account, billingModel, upstreamModel, responseModel) && !hasBillableGrokChatUsage(usage) {
 		upstreamRequestID := firstNonEmpty(requestID, resp.Header.Get("xai-request-id"))
 		return nil, newGrokMissingUsageFailoverError(c, account, upstreamRequestID)
+	}
+	respBody, err = normalizeMistralChatResponse(account, respBody, false)
+	if err != nil {
+		writeChatCompletionsError(c, http.StatusBadGateway, "api_error", "Failed to parse upstream response")
+		return nil, err
 	}
 	respBody = applyOllamaCloudRawChatCompletionsResponse(account, respBody)
 	respBody = s.replaceModelInResponseBody(respBody, upstreamModel, originalModel)

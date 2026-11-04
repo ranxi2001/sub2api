@@ -289,6 +289,12 @@
               </div>
             </div>
           </template>
+          <template #header-capacity="{ column }">
+            <div class="flex items-center">
+              <span>{{ column.label }}</span>
+              <HelpTooltip :content="t('admin.accounts.capacitySortHint')" width-class="w-80" />
+            </div>
+          </template>
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" :concurrency-upgrade-enabled="concurrencyUpgradeEnabled" />
           </template>
@@ -304,7 +310,7 @@
             </button>
           </template>
           <template #cell-performance="{ row }">
-            <AccountPerformanceCell :metrics="performanceMetrics[row.id]" :unavailable="performanceUnavailable" :can-configure="authStore.isAdmin" @configure="performanceAccount = row" />
+            <AccountPerformanceCell :metrics="performanceMetrics[row.id]" :unavailable="performanceUnavailable" :can-configure="authStore.isAdmin" :notice-user-id="authStore.isAdmin ? authStore.user?.id : null" @configure="performanceAccount = row" />
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -500,7 +506,7 @@
     <ErrorPassthroughRulesModal v-if="authStore.isAdmin" :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal v-if="authStore.isAdmin" :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
     <TotpStepUpDialog :controller="accountExportStepUp" />
-    <AccountPerformanceDialog v-if="performanceAccount" :key="performanceAccount.id" :account-id="performanceAccount.id" :account-name="performanceAccount.name" @close="performanceAccount = null" @updated="refreshPerformance" />
+    <AccountPerformanceDialog v-if="performanceAccount" :key="performanceAccount.id" :account-id="performanceAccount.id" :account-name="performanceAccount.name" :notice-user-id="authStore.isAdmin ? authStore.user?.id : null" @close="performanceAccount = null" @updated="refreshPerformance" />
     <BulkExport2FADialog v-if="authStore.isAdmin && export2faIds.length" :account-ids="export2faIds" @close="export2faIds = []" />
   </AppLayout>
 </template>
@@ -737,6 +743,7 @@ const ACCOUNT_SORTABLE_KEYS = new Set([
   'name',
   'status',
   'schedulable',
+  'capacity',
   'priority',
   'rate_multiplier',
   'upstream_billing_rate',
@@ -753,7 +760,7 @@ const loadInitialAccountSortState = (): AccountSortState => {
     const key = typeof parsed.key === 'string' ? parsed.key : ''
     if (!ACCOUNT_SORTABLE_KEYS.has(key)) return fallback
     return {
-      sort_by: key,
+      sort_by: key === 'capacity' ? 'current_concurrency' : key,
       sort_order: parsed.order === 'desc' ? 'desc' : 'asc'
     }
   } catch {
@@ -772,9 +779,18 @@ const autoRefreshIntervalSeconds = ref<(typeof autoRefreshIntervals)[number]>(30
 const autoRefreshCountdown = ref(0)
 const autoRefreshETag = ref<string | null>(null)
 const autoRefreshFetching = ref(false)
+let autoRefreshAbortController: AbortController | null = null
+let accountViewDisposed = false
+let accountListContextVersion = 0
 const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
 const autoRefreshSilentUntil = ref(0)
 const hasPendingListSync = ref(false)
+const cancelAutoRefreshRequest = () => {
+  autoRefreshAbortController?.abort()
+  autoRefreshAbortController = null
+  autoRefreshFetching.value = false
+  autoRefreshETag.value = null
+}
 const todayStatsByAccountId = ref<Record<string, WindowStats>>({})
 const todayStatsLoading = ref(false)
 const todayStatsError = ref<string | null>(null)
@@ -1100,6 +1116,7 @@ const setAutoRefreshEnabled = (enabled: boolean) => {
     autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
     resumeAutoRefresh()
   } else {
+    cancelAutoRefreshRequest()
     pauseAutoRefresh()
     autoRefreshCountdown.value = 0
   }
@@ -1221,7 +1238,8 @@ useSwipeSelect(accountTableRef, {
 }, swipeVirtualContext)
 
 const resetAutoRefreshCache = () => {
-  autoRefreshETag.value = null
+  accountListContextVersion += 1
+  cancelAutoRefreshRequest()
   upstreamBillingRateETag.value = null
   upstreamBillingRateAbortController?.abort()
 }
@@ -1315,8 +1333,9 @@ const applyUpstreamBillingRateSnapshots = async (
   const currentIDs = accounts.value.map(account => account.id)
   const currentByID = new Map(accounts.value.map(account => [account.id, account]))
 
-  // Fetch missing rows without replacing the table with its loading skeleton.
-  if (result.total !== pagination.total || nextIDs.length !== currentIDs.length || nextIDs.some(id => !currentByID.has(id))) {
+  // Live concurrency order and its displayed numerators must come from one list
+  // response; billing snapshots alone do not carry those counts.
+  if (sortState.sort_by === 'current_concurrency' || result.total !== pagination.total || nextIDs.length !== currentIDs.length || nextIDs.some(id => !currentByID.has(id))) {
     const page = await adminAPI.accounts.list(
       pagination.page,
       pagination.page_size,
@@ -1367,7 +1386,7 @@ const applyUpstreamBillingRateSnapshots = async (
 }
 
 const refreshUpstreamBillingRates = async (force = false) => {
-  if (upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
+  if (accountViewDisposed || upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
   if (!force && (
     probingUpstreamBilling.size > 0 ||
     isAnyModalOpen.value ||
@@ -1378,6 +1397,8 @@ const refreshUpstreamBillingRates = async (force = false) => {
   )) return
 
   const controller = new AbortController()
+  // A newer compact read must not be overwritten by an older list response.
+  cancelAutoRefreshRequest()
   upstreamBillingRateAbortController = controller
   upstreamBillingRateRefreshing.value = true
   try {
@@ -1446,10 +1467,11 @@ const handlePageSizeChange = (size: number) => {
 }
 
 const handleSort = (key: string, order: AccountSortOrder) => {
-  sortState.sort_by = key
+  const sortBy = key === 'capacity' ? 'current_concurrency' : key
+  sortState.sort_by = sortBy
   sortState.sort_order = order
   const requestParams = params as any
-  requestParams.sort_by = key
+  requestParams.sort_by = sortBy
   requestParams.sort_order = order
   syncAccountListDerivedParams()
   pagination.page = 1
@@ -1508,7 +1530,15 @@ const isAnyModalOpen = computed(() => {
   )
 })
 
+watch(isAnyModalOpen, open => {
+  if (!open) return
+  // A response already in flight must not replace the account backing an edit.
+  cancelAutoRefreshRequest()
+  upstreamBillingRateAbortController?.abort()
+})
+
 const enterAutoRefreshSilentWindow = () => {
+  cancelAutoRefreshRequest()
   autoRefreshSilentUntil.value = Date.now() + AUTO_REFRESH_SILENT_WINDOW_MS
   autoRefreshCountdown.value = autoRefreshIntervalSeconds.value
 }
@@ -1520,6 +1550,14 @@ const inAutoRefreshSilentWindow = () => {
 const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
   return (
     current.updated_at !== next.updated_at ||
+    // Bindings have their own revision; do not rely on the account timestamp
+    // to invalidate the displayed upstream identity or declaration snapshot.
+    JSON.stringify(current.upstream_channel_binding ?? null) !== JSON.stringify(next.upstream_channel_binding ?? null) ||
+    current.credentials?.base_url !== next.credentials?.base_url ||
+    JSON.stringify(current.extra?.upstream_billing_probe ?? null) !== JSON.stringify(next.extra?.upstream_billing_probe ?? null) ||
+    current.extra?.upstream_billing_probe_enabled !== next.extra?.upstream_billing_probe_enabled ||
+    current.extra?.upstream_billing_rate_sync_enabled !== next.extra?.upstream_billing_rate_sync_enabled ||
+    current.extra?.upstream_billing_provider !== next.extra?.upstream_billing_provider ||
     current.current_concurrency !== next.current_concurrency ||
     JSON.stringify(current.extra?.auto_config_concurrency) !== JSON.stringify(next.extra?.auto_config_concurrency) ||
     current.current_window_cost !== next.current_window_cost ||
@@ -1576,8 +1614,13 @@ const mergeAccountsIncrementally = (nextRows: Account[]) => {
 }
 
 const refreshAccountsIncrementally = async () => {
-  if (autoRefreshFetching.value) return
+  if (accountViewDisposed || autoRefreshFetching.value) return
   syncAccountListDerivedParams()
+  const requestContextVersion = accountListContextVersion
+  const controller = new AbortController()
+  // Both readers write the same rows; the newer request owns the update.
+  upstreamBillingRateAbortController?.abort()
+  autoRefreshAbortController = controller
   autoRefreshFetching.value = true
   const upgradeStateRefresh = loadConcurrencyUpgradeState()
   try {
@@ -1595,8 +1638,11 @@ const refreshAccountsIncrementally = async () => {
         sort_order?: AccountSortOrder
 
       },
-      { etag: autoRefreshETag.value }
+      { etag: autoRefreshETag.value, signal: controller.signal }
     )
+
+    // A sort/filter/page change may finish while this refresh is in flight.
+    if (controller.signal.aborted || !autoRefreshEnabled.value || requestContextVersion !== accountListContextVersion) return
 
     if (result.etag) {
       autoRefreshETag.value = result.etag
@@ -1611,10 +1657,13 @@ const refreshAccountsIncrementally = async () => {
 
     await refreshTodayStatsBatch()
   } catch (error) {
-    console.error('Auto refresh failed:', error)
+    if (!controller.signal.aborted) console.error('Auto refresh failed:', error)
   } finally {
     await upgradeStateRefresh
-    autoRefreshFetching.value = false
+    if (autoRefreshAbortController === controller) {
+      autoRefreshAbortController = null
+      autoRefreshFetching.value = false
+    }
   }
 }
 
@@ -1926,7 +1975,7 @@ const allColumns = computed(() => {
     { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
-    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
+    { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: true },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'performance', label: t('accountPerformance.column', { minutes: performanceMinutes.value }), sortable: false },
@@ -2725,6 +2774,9 @@ onMounted(async () => {
     adminAPI.proxies.getAll(),
     adminAPI.groups.getAll()
   ])
+  // Catalog requests can finish after scope disposal; never reattach listeners
+  // or resume the refresh interval for a page that has already been left.
+  if (accountViewDisposed) return
   if (proxiesResult.status === 'fulfilled') {
     proxies.value = proxiesResult.value
   } else {
@@ -2748,6 +2800,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  accountViewDisposed = true
+  accountListContextVersion++
+  cancelAutoRefreshRequest()
   performanceRequest++
   performanceAbort?.abort()
   clearTimeout(timerListRefresh)

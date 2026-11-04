@@ -12,6 +12,11 @@ import (
 
 const SettingKey = "serverless_routing_v1"
 
+const (
+	AffinityAPIKey = "api_key"
+	AffinityKeyIP  = "api_key_ip"
+)
+
 var identifier = regexp.MustCompile("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$")
 var countryCode = regexp.MustCompile("^[A-Z]{2}$")
 
@@ -25,10 +30,12 @@ type Region struct {
 	PodIDs  []string `json:"pod_ids"`
 }
 type Config struct {
-	Established bool        `json:"established"`
-	Enabled     bool        `json:"enabled"`
-	Pods        []PodPolicy `json:"pods"`
-	Regions     []Region    `json:"regions"`
+	Established       bool        `json:"established"`
+	Enabled           bool        `json:"enabled"`
+	AffinityScope     string      `json:"affinity_scope,omitempty"`
+	FallbackToPrimary bool        `json:"fallback_to_primary,omitempty"`
+	Pods              []PodPolicy `json:"pods"`
+	Regions           []Region    `json:"regions"`
 }
 type Store interface {
 	Load(context.Context) (Config, error)
@@ -60,6 +67,9 @@ func ValidateEndpoint(raw string) error {
 	return nil
 }
 func Validate(c Config) error {
+	if c.AffinityScope != "" && c.AffinityScope != AffinityAPIKey && c.AffinityScope != AffinityKeyIP {
+		return errors.New("affinity_scope must be api_key or api_key_ip")
+	}
 	if len(c.Pods) > 128 || len(c.Regions) > 64 {
 		return errors.New("maximum 128 Pods and 64 regions")
 	}

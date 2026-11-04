@@ -165,6 +165,26 @@ git switch -c fix/describe-the-change project/production
 
 引入上游/其他 fork 的代码时附来源链接与原 SHA，先确认是否已有等价补丁；按提交引入时优先使用 `git cherry-pick -x` 保留来源。不要用上游 tag 覆盖本项目生产分支，也不要把来源 merge commit 和其实际功能提交重复引入。
 
+### 新功能提示登记与接入
+
+本节是管理员新功能提示的完整贡献规范；开发指南和 PR 模板提供审查摘要，以本节为准。这是规范和审查清单，沿用 [PR #622](https://github.com/ranxi2001/sub2api/pull/622) 的现有机制，不新增运行时功能。
+
+新增管理员可见的功能、菜单、页签或设置项时，必须在同一个 PR 中完成以下事项，不能留到 Release 发布后补录：
+
+- 在[提示 ID 登记文件](frontend/src/constants/newFeatureNotices.ts)登记新的稳定且唯一的提示 ID，并在对应功能的所有展示位置接入 `NewFeatureBadge`；组件用法见[接入说明](frontend/src/components/common/README.md#newfeaturebadgevue)。
+- 同一功能有多个入口时共用同一个 ID，点击任一标签后相关入口的提示同步隐藏；不同新功能使用不同 ID，避免关闭旧提示时连带隐藏新功能提示。
+- 普通修复、文案调整和重复发版不更换已有 ID。同一功能确需重新通知管理员时，明确作为一次新公告登记新 ID，并在 PR 中说明重新公告的原因。
+- PR 说明必须列出提示 ID、所有展示位置和关闭行为，并在同一个 PR 中补充必要的回归验证，记录操作或命令、实际结果及未覆盖的情况。不涉及管理员可见新功能时，相关字段和清单逐项填写“不适用 + 原因”。
+
+审查时按以下顺序验收，不把填写清单当成已经执行运行时测试：
+
+1. 管理员已关闭功能 A 的提示；升级到包含功能 B 的版本后，B 使用新 ID，在对应位置仍可见，A 保持隐藏。
+2. B 有多个入口时，点击任一入口的标签，所有相关入口的提示同步隐藏。
+3. 在同一浏览器中刷新页面或重新登录同一管理员账号，B 仍保持隐藏；前提是 `localStorage` 可用且未被清除。
+4. 后续功能 C 登记新 ID 后正常显示；普通升级不会让 A/B 已关闭的提示重新出现。
+
+隐藏记录的边界是当前浏览器、当前管理员的 `localStorage`；不自动解析 Release 版本或发布说明，不承诺跨浏览器或服务端同步。新功能 PR 应提供上述验收的回归证据；纯规范文档 PR 应说明未执行运行时测试及原因。
+
 ### 环境与依赖
 
 工具链以当前 checkout 的 [backend/go.mod](backend/go.mod)、[CI](.github/workflows/backend-ci.yml)、[frontend/package.json](frontend/package.json) 和锁文件为准。本指南编写时，后端 CI 使用 Go 1.27.3 与 golangci-lint v2.14.0；前端要求 Node.js >=22，CI 使用 Node.js 22 和 pnpm 9，与锁定的 vue-i18n / @intlify/message-compiler 11.4.16（Node.js >=22）一致，frontend/package.json 的 engines 与所有前端工作流保持一致；Docker 前端构建阶段使用 Node.js 24。版本要求变化时一并更新说明，不沿用旧教程中的最低版本。
