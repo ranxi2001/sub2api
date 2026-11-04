@@ -10,7 +10,7 @@ const output = process.env.SCREENSHOT_DIR
 if (!output || !process.env.PLAYWRIGHT_ROOT || !process.env.SOURCE_BASE) throw Error('Missing CI screenshot paths or base SHA')
 mkdirSync(output, { recursive: true })
 const require = createRequire(join(root, 'package.json'))
-const { createServer } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href)
+const { build, preview } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href)
 const vue = (await import(pathToFileURL(require.resolve('@vitejs/plugin-vue')).href)).default
 const tailwindcss = require('tailwindcss')
 const autoprefixer = require('autoprefixer')
@@ -19,8 +19,10 @@ const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_ROOT
 const suffix = `.ci-serverless-${process.pid}`
 const baselineName = suffix + '-before.vue'
 const entryNames = [suffix + '-before.js', suffix + '-after.js']
+const htmlNames = [suffix + '-before.html', suffix + '-after.html']
 const mockFile = join(root, suffix + '-api.js')
-const files = [baselineName, ...entryNames].map(name => join(root, name)).concat(mockFile)
+const files = [baselineName, ...entryNames, ...htmlNames].map(name => join(root, name)).concat(mockFile)
+const previewDir = join(output, 'preview-build')
 const baseline = execFileSync('git', ['show', `${process.env.SOURCE_BASE}:frontend/src/components/settings/ServerlessSettings.vue`], { encoding: 'utf8' })
 const snapshot = {
   config: { enabled: false, pods: [{ id: 'cn-gateway', endpoint: 'https://cn.example.com', enabled: true }], regions: [{ country: 'CN', pod_ids: ['cn-gateway'] }] },
@@ -46,8 +48,11 @@ try {
           h('p',{class:'text-sm text-gray-500'},'实际组件 · CI 离线预览 · 全部为虚构数据'),h(Panel,{userId:41})])])
       }).use(createPinia()).use(createI18n({legacy:false,locale:'zh-CN',messages:{'zh-CN':zh}})).mount('#app');
     `, { flag: 'wx' })
+    writeFileSync(join(root, htmlNames[i]), `<html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="./${name}"></script></html>`, { flag: 'wx' })
   }
-  server = await createServer({
+  // Build the small preview once. A static server has no dependency-optimizer
+  // reloads that can interrupt navigation between the baseline and candidate.
+  await build({
     root, configFile: false, cacheDir: join(output, 'vite-cache'),
     resolve: { alias: [
       { find: '@/api/client', replacement: mockFile },
@@ -57,22 +62,11 @@ try {
       tailwindcss({ ...tailwindConfig, content: [join(root, 'index.html'), join(root, 'src/**/*.{vue,js,ts,jsx,tsx}'), files[0]] }),
       autoprefixer(),
     ] } },
-    plugins: [vue(), {
-      name: 'serverless-offline-preview',
-      configureServer(vite) {
-        vite.middlewares.use((req, res, next) => {
-          if (!['/before', '/after'].includes(req.url)) return next()
-          const entry = entryNames[req.url === '/before' ? 0 : 1]
-          res.setHeader('Content-Type', 'text/html; charset=utf-8')
-          res.end(`<html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/${entry}"></script></html>`)
-        })
-      },
-    }],
-    server: { host: '127.0.0.1', port: 4191, strictPort: true },
-    optimizeDeps: { entries: [], include: ['vue', 'vue-i18n', 'pinia'], noDiscovery: true },
+    plugins: [vue()],
+    build: { outDir: previewDir, emptyOutDir: true, minify: false, rollupOptions: { input: htmlNames.map(name => join(root, name)) } },
   })
-  await server.listen()
-  browser = await chromium.launch({ headless: true })
+  server = await preview({ root, configFile: false, build: { outDir: previewDir }, preview: { host: '127.0.0.1', port: 4191, strictPort: true } })
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) })
   const page = await browser.newPage({ viewport: { width: 1280, height: 1100 }, locale: 'zh-CN', timezoneId: 'UTC' })
   await page.route('**/*', route => {
     const url = new URL(route.request().url())
@@ -82,8 +76,8 @@ try {
   })
   page.on('pageerror', error => errors.push(error.message))
   page.on('response', response => { if (response.status() >= 400) errors.push(`HTTP ${response.status()} ${new URL(response.url()).pathname}`) })
-  for (const name of ['before', 'after']) {
-    await page.goto('http://127.0.0.1:4191/' + name)
+  for (const [index, name] of ['before', 'after'].entries()) {
+    await page.goto('http://127.0.0.1:4191/' + htmlNames[index])
     await page.locator('summary').first().click()
     await page.waitForFunction(() => {
       const checkbox = document.querySelector('[data-testid="serverless-enabled"]')
@@ -110,7 +104,8 @@ try {
   if (errors.length) throw Error('Offline rendering errors: ' + errors.join('; '))
 } finally {
   if (browser) await browser.close()
-  if (server) await server.close()
+  if (server) await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()))
   for (const file of files) rmSync(file, { force: true })
   rmSync(join(output, 'vite-cache'), { recursive: true, force: true })
+  rmSync(previewDir, { recursive: true, force: true })
 }
