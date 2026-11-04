@@ -19,6 +19,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -1381,9 +1382,22 @@ func openAIStreamDataStartsVisibleOutput(data, eventType string) bool {
 	return false
 }
 
-// openAIStreamDataStartsSemanticTTFT 保留 900194fab 之前的 first_token_ms
-// 口径：跳过 Responses preamble 后，首个语义 SSE 事件即视为首 token。
+// openAIStreamDataStartsSemanticTTFT follows the shared Responses semantic endpoint.
 func openAIStreamDataStartsSemanticTTFT(data, eventType string) bool {
+	trimmed := strings.TrimSpace(data)
+	if trimmed == "" || trimmed == "[DONE]" || !gjson.Valid(trimmed) {
+		return false
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		eventType = strings.TrimSpace(gjson.Get(trimmed, "type").String())
+	}
+	return openai.ResponseStartsSemanticOutput([]byte(trimmed), eventType)
+}
+
+// Keep the historical event classification for non-Responses observers such
+// as Chat Completions priority sampling.
+func openAIStreamDataStartsLegacySemanticTTFT(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" || trimmed == "[DONE]" {
 		return false
@@ -1415,11 +1429,11 @@ func (s *OpenAIGatewayService) openAITTFTMode(ctx context.Context) string {
 	return normalizeOpenAITTFTMode(mode)
 }
 
-func openAIStreamDataStartsTTFT(data, eventType string, forceOutput bool, mode string) bool {
+func openAIStreamDataStartsTTFT(data, eventType string, _ bool, mode string) bool {
 	if mode == OpenAITTFTModeVisible {
 		return openAIStreamDataStartsVisibleOutput(data, eventType)
 	}
-	return forceOutput || openAIStreamDataStartsSemanticTTFT(data, eventType)
+	return openAIStreamDataStartsSemanticTTFT(data, eventType)
 }
 
 // openAIStreamFailedEventErrorCode 提取流内 failed 事件的错误码（小写），
