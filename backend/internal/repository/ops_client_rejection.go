@@ -20,10 +20,17 @@ func opsExplicitRequestRejectionSQL(alias, statuses string, phrases []string) st
 
 func opsContextLimitRejectionSQL(alias string) string {
 	p := alias + "."
-	original := opsExplicitRequestRejectionSQL(alias, "400, 413, 422", service.OpsContextLimitRejectionNeedles)
-	// A normalized client 400 keeps the original upstream envelope (502 or
-	// HTTP200 SSE). Match the canonical code without reclassifying old 5xx rows.
-	return "(" + original + " OR (" + p + "status_code = 400 AND lower(CONCAT_WS(' ', " + p + "error_message, " + p + "upstream_error_message)) LIKE '%context_length_exceeded%'))"
+	standard := opsExplicitRequestRejectionSQL(alias, "400, 413, 422", service.OpsContextLimitRejectionNeedles)
+	// Match the literal code (LIKE would treat underscores as wildcards).
+	// Do not inspect earlier attempts: a later provider failure must stay visible.
+	wrapped := `(COALESCE(` + p + `status_code, 0) >= 400
+ AND COALESCE(` + p + `error_phase, '') <> 'account_auth'
+ AND COALESCE(NULLIF(` + p + `upstream_status_code, 0), ` + p + `status_code, 0) = 502
+ AND strpos(lower(CONCAT_WS(' ', ` + p + `error_message, ` + p + `upstream_error_message, ` + p + `upstream_error_detail)), 'context_length_exceeded') > 0)`
+	// New normalized 400s retain raw HTTP200 SSE or 5xx evidence.
+	normalized := `(` + p + `status_code = 400
+ AND strpos(lower(CONCAT_WS(' ', ` + p + `error_message, ` + p + `upstream_error_message)), 'context_length_exceeded') > 0)`
+	return `(` + standard + ` OR ` + wrapped + ` OR ` + normalized + `)`
 }
 
 func opsClientRejectionSQL(alias string) string {

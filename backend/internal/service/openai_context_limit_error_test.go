@@ -106,7 +106,7 @@ func TestNormalizeOpsNormalizedContextLimitKeepsRawStatus(t *testing.T) {
 		require.Equal(t, "context_limit", entry.ErrorType)
 		require.Equal(t, rawStatus, *entry.UpstreamStatusCode)
 	}
-	require.False(t, IsOpsContextLimitRejection(502, 502, "context_length_exceeded"), "do not rewrite historical provider failures broadly")
+	require.True(t, IsOpsContextLimitRejection(502, 502, "context_length_exceeded"), "explicit wrapped rejections also use the historical classification from PR666")
 }
 
 func TestOpenAIContextLimitCommittedCompactKeepsSSE(t *testing.T) {

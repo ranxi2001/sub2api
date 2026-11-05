@@ -81,6 +81,14 @@ func TestOpsContextLimitRejection(t *testing.T) {
 		{502, 413, "REQUEST PAYLOAD IS TOO LARGE", true},
 		{422, 422, "Request payload is too large", true},
 		{503, 503, "Request payload is too large", false},
+		{502, 502, `response.failed: {"error":{"code":"context_length_exceeded"}}`, true},
+		{502, 0, "CONTEXT_LENGTH_EXCEEDED", true},
+		{503, 502, "context_length_exceeded", true},
+		{502, 503, "context_length_exceeded", false},
+		{503, 0, "context_length_exceeded", false},
+		{502, 502, "contextXlengthYexceeded", false},
+		{502, 502, "prompt is too long", false},
+		{502, 502, "Bad Gateway", false},
 		{502, 0, "Request payload is too large", false},
 		{400, 400, "Upstream request failed", false},
 		{503, 503, "prompt is too long; upstream service unavailable", false},
@@ -139,4 +147,45 @@ func TestOpsServicePersistsRequestResponsibility(t *testing.T) {
 	require.Equal(t, "context_limit", captured.ErrorType)
 	require.Equal(t, "upstream_http", captured.ErrorSource)
 	require.Equal(t, status, *captured.UpstreamStatusCode)
+}
+
+func TestNormalizeOpsWrappedContextLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name, phase      string
+		status, upstream int
+		message, detail  string
+		want             bool
+	}{
+		{"message code", "upstream", 502, 502, "response.failed: context_length_exceeded", "", true},
+		{"detail code", "upstream", 502, 502, "Upstream request failed", `{"type":"response.failed","response":{"error":{"code":"context_length_exceeded"}}}`, true},
+		{"wrapped final status", "upstream", 503, 502, "", "CONTEXT_LENGTH_EXCEEDED", true},
+		{"generic gateway", "upstream", 502, 502, "Bad Gateway", "", false},
+		{"vague payload", "upstream", 502, 502, "Request payload is too large", "", false},
+		{"capacity status", "upstream", 502, 503, "", "context_length_exceeded", false},
+		{"auth attribution", "account_auth", 502, 502, "context_length_exceeded", "", false},
+		{"recovered attempt", "upstream", 200, 502, "context_length_exceeded", "", false},
+		{"other detail only", "upstream", 400, 400, "Upstream request failed", "context_length_exceeded", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := &OpsInsertErrorLogInput{StatusCode: tc.status, UpstreamStatusCode: &tc.upstream,
+				ErrorOwner: "provider", ErrorPhase: tc.phase, ErrorSource: "upstream_http", ErrorType: "upstream_error",
+				UpstreamErrorMessage: &tc.message, UpstreamErrorDetail: &tc.detail}
+			NormalizeOpsClientRejection(entry)
+			require.Equal(t, tc.want, entry.IsBusinessLimited)
+			if tc.want {
+				require.Equal(t, "client", entry.ErrorOwner)
+				require.Equal(t, "request", entry.ErrorPhase)
+				require.Equal(t, "context_limit", entry.ErrorType)
+			} else {
+				require.Equal(t, "provider", entry.ErrorOwner)
+				require.Equal(t, tc.phase, entry.ErrorPhase)
+				require.Equal(t, "upstream_error", entry.ErrorType)
+			}
+			require.Equal(t, tc.status, entry.StatusCode)
+			require.Equal(t, tc.upstream, *entry.UpstreamStatusCode)
+			require.Equal(t, tc.message, *entry.UpstreamErrorMessage)
+			require.Equal(t, tc.detail, *entry.UpstreamErrorDetail)
+			require.Equal(t, "upstream_http", entry.ErrorSource)
+		})
+	}
 }
