@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd backend && go mod download)
+          (cd backend && go mod download all)
           cat > "$RUNNER_TEMP/issue-578-offline" <<'SH'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -69,8 +69,9 @@ jobs:
           cp backend/internal/service/issue_578_review2_regression_test.go "$red_tree/backend/internal/service/"
           echo "$REVIEW2_BASELINE" > evidence/review2-baseline-head.txt
           # The pinned source can require older module versions than HEAD.
-          # Populate its own dependency graph before the offline assertion.
-          (cd "$red_tree/backend" && go mod download)
+          # Download the full selected graph, including transitive modules,
+          # before the offline assertion can run on a cold module cache.
+          (cd "$red_tree/backend" && go mod download all)
           set +e
           (cd "$red_tree/backend" && "$RUNNER_TEMP/issue-578-offline" go test -tags=unit ./internal/service -run '^TestIssue578Review2' -count=1 -v) > evidence/review2-red.log 2>&1
           result=$?
@@ -98,7 +99,7 @@ jobs:
           git archive "$BASELINE" | tar -x -C "$red_tree"
           echo "$BASELINE" > evidence/baseline-head.txt
           cp backend/internal/service/issue_578_regression_test.go "$red_tree/backend/internal/service/"
-          (cd "$red_tree/backend" && go mod download)
+          (cd "$red_tree/backend" && go mod download all)
           set +e
           (cd "$red_tree/backend" && "$RUNNER_TEMP/issue-578-offline" go test -tags=unit ./internal/service -run '^TestIssue578(HeaderLatestValue|HeaderSerialAndRetry|QueryUsageSynchronizesNonzero|BPSTTLRefreshAndThrottle)$' -count=1 -v) > evidence/baseline-red.log 2>&1
           result=$?
@@ -139,7 +140,7 @@ jobs:
           mkdir -p "$red_tree"
           git archive "$REVIEW_BASELINE" | tar -x -C "$red_tree"
           cp backend/internal/service/issue_578_review_regression_test.go "$red_tree/backend/internal/service/"
-          (cd "$red_tree/backend" && go mod download)
+          (cd "$red_tree/backend" && go mod download all)
           set +e
           (cd "$red_tree/backend" && "$RUNNER_TEMP/issue-578-offline" go test -tags=unit ./internal/service -run '^TestIssue578Review' -count=1 -v) > evidence/review-red.log 2>&1
           result=$?
@@ -186,7 +187,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends postgresql redis-server
           for attempt in 1 2 3 4 5; do
-            if (cd backend && go mod download); then break; fi
+            if (cd backend && go mod download all); then break; fi
             if [ "$attempt" -eq 5 ]; then exit 1; fi
             sleep "$attempt"
           done
@@ -213,7 +214,7 @@ jobs:
           # graph. Prewarm both before entering the loopback-only namespace.
           for tree in "$red_tree" "$review2_tree"; do
             for attempt in 1 2 3 4 5; do
-              if (cd "$tree/backend" && go mod download); then break; fi
+              if (cd "$tree/backend" && go mod download all); then break; fi
               if [ "$attempt" -eq 5 ]; then exit 1; fi
               sleep "$attempt"
             done
