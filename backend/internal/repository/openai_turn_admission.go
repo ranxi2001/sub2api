@@ -54,6 +54,13 @@ func (r *accountRepository) getOpenAITurnAdmissionAccount(ctx context.Context, i
 	if account == nil {
 		return nil, service.ErrAccountNotFound
 	}
+	// Keep independent pauses in repeatable-read exports; the service performs
+	// another uncached authority read immediately before each actual send.
+	paused, err := performancePaused(ctx, r.client, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	account.PerformancePaused = paused[id]
 
 	if m.ProxyID != nil {
 		proxies, err := r.client.Proxy.Query().Where(dbproxy.IDEQ(*m.ProxyID)).All(ctx)

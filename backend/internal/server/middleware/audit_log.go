@@ -111,6 +111,9 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
+	"GET /api/v1/admin/ops/ai/actions":                                        "admin.ops.ai.actions.read",
+	"GET /api/v1/admin/ops/ai/runs":                                           "admin.ops.ai.runs.read",
+	"GET /api/v1/admin/ops/ai/runs/:id":                                       "admin.ops.ai.run.read",
 	"GET /api/v1/admin/risk-control/logs/:id/evidence":                        "admin.cyber_evidence.read",
 	"GET /api/v1/admin/risk-control/logs/:id/evidence/export":                 "admin.cyber_evidence.export",
 	"GET /api/v1/admin/risk-control/evidence/config":                          "admin.cyber_evidence.config.read",
@@ -137,6 +140,12 @@ var auditSensitiveReads = map[string]string{
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
 var auditActionOverrides = map[string]string{
+	"PUT /api/v1/admin/ops/ai/policy":                         "admin.ops.ai.policy.update",
+	"POST /api/v1/admin/ops/ai/halt":                          "admin.ops.ai.halt",
+	"POST /api/v1/admin/ops/ai/proposals/preview":             "admin.ops.ai.proposal.freeze",
+	"POST /api/v1/admin/ops/ai/proposals/:id/apply":           "admin.ops.ai.proposal.apply",
+	"POST /api/v1/admin/ops/ai/actions/:id/rollback":          "admin.ops.ai.action.rollback",
+	"POST /api/v1/admin/ops/ai/runs":                          "admin.ops.ai.run.create",
 	"PUT /api/v1/admin/risk-control/evidence/config":          "admin.cyber_evidence.config.update",
 	"DELETE /api/v1/admin/risk-control/logs/:id/evidence":     "admin.cyber_evidence.delete",
 	"POST /api/v1/auth/login":                                 service.AuditActionLogin,

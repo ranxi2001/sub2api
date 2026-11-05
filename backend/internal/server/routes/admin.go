@@ -255,6 +255,22 @@ func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	ops := admin.Group("/ops")
 	{
+		// AI observe mode uses a separate bounded companion service. These routes
+		// deliberately grant no production account/scheduling mutation capability.
+		ops.GET("/ai/status", h.Admin.Ops.GetAIOpsStatus)
+		ops.GET("/ai/runs", h.Admin.Ops.ListAIOpsRuns)
+		ops.GET("/ai/runs/:id", h.Admin.Ops.GetAIOpsRun)
+		ops.POST("/ai/runs", h.Admin.Ops.CreateAIOpsRun)
+		ops.GET("/ai/policy", h.Admin.Ops.GetAIOpsPolicy)
+		ops.PUT("/ai/policy", h.Admin.Ops.SaveAIOpsPolicy)
+		ops.POST("/ai/halt", h.Admin.Ops.HaltAIOps)
+		ops.POST("/ai/proposals/preview", h.Admin.Ops.PreviewAIOpsProposal)
+		ops.POST("/ai/proposals/:id/apply", h.Admin.Ops.ApplyAIOpsProposal)
+		ops.GET("/ai/actions", h.Admin.Ops.ListAIOpsActions)
+		ops.POST("/ai/actions/:id/rollback", h.Admin.Ops.RollbackAIOpsAction)
+		ops.GET("/ai/probes", h.Admin.Ops.ListAIOpsProbes)
+		ops.POST("/ai/probes", h.Admin.Ops.CreateAIOpsProbe)
+
 		// Realtime ops signals
 		ops.GET("/concurrency", h.Admin.Ops.GetConcurrencyStats)
 		ops.GET("/user-concurrency", h.Admin.Ops.GetUserConcurrencyStats)

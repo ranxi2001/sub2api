@@ -183,7 +183,8 @@ func performancePaused(ctx context.Context, db sqlExecutor, ids []int64) (map[in
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := db.QueryContext(ctx, `SELECT account_id FROM account_performance_monitors WHERE paused AND account_id=ANY($1)`, pq.Array(ids))
+	rows, err := db.QueryContext(ctx, `SELECT account_id FROM account_performance_monitors WHERE paused AND account_id=ANY($1)
+UNION SELECT account_id FROM ai_ops_controls WHERE ai_paused AND account_id=ANY($1)`, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}

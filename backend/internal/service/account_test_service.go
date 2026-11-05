@@ -1058,6 +1058,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if options, ok := pelicanTestOptionsFromContext(ctx); ok {
 		payload = createPelicanOpenAIPayload(upstreamTestModelID, isOAuth, options.prompt, options.reasoningEffort)
 	}
+	if probe, _ := ctx.Value(aiOpsRecoveryProbeKey{}).(bool); probe {
+		payload["max_output_tokens"] = 128
+		payload["instructions"] = "Answer the fixed health probe with exactly OK."
+		payload["tools"] = []any{}
+	}
 	applyModelTracePayload(ctx, payload)
 	payloadBytes, _ := json.Marshal(payload)
 
@@ -1144,11 +1149,12 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			c.Request = c.Request.WithContext(markAgentIdentityTaskRecoveryTried(ctx))
 			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
 		}
-		if resp.StatusCode == http.StatusTooManyRequests {
+		aiRecoveryProbe, _ := ctx.Value(aiOpsRecoveryProbeKey{}).(bool)
+		if resp.StatusCode == http.StatusTooManyRequests && !aiRecoveryProbe {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
 		// 401 Unauthorized: 标记账号为永久错误
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) && !aiRecoveryProbe {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
