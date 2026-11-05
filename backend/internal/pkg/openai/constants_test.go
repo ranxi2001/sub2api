@@ -66,7 +66,7 @@ func TestDefaultModelsIncludeGPTImage26(t *testing.T) {
 	for _, model := range []string{"gpt-image-2.6-flare", "gpt-image-2.6-sunburst"} {
 		require.Contains(t, DefaultModelIDs(), model)
 	}
-	for _, model := range []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-image-1"} {
+	for _, model := range []string{"gpt-5.2", "gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-image-1", "gpt-image-1.5"} {
 		require.NotContains(t, DefaultModelIDs(), model)
 	}
 }

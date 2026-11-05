@@ -6,15 +6,12 @@ import { getProviderProfile } from '@/constants/platformCatalog'
 
 // OpenAI
 const openaiModels = [
-  // GPT-5.2 系列
-  'gpt-5.2', 'gpt-5.2-2025-12-11', 'gpt-5.2-chat-latest',
-  'gpt-5.2-pro', 'gpt-5.2-pro-2025-12-11',
 	// GPT-5.6 系列
   'gpt-5.6', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
   // GPT-6 系列
   'gpt-6', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna',
   // GPT-5.3 / Codex 系列
-  'gpt-5.3-codex-spark', 'codex-auto-review',
+  'codex-auto-review',
   'gpt-4o-audio-preview', 'gpt-4o-realtime-preview',
   // GPT Image 系列
   'gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'
