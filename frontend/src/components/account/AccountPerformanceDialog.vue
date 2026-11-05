@@ -10,13 +10,18 @@
         <label class="flex items-center gap-2 text-sm"><input v-model="config.enabled" type="checkbox" data-testid="monitor-enabled">{{ t('accountPerformance.enabled') }}</label>
         <table class="w-full text-left text-sm">
           <thead><tr><th></th><th>{{ t('accountPerformance.min') }}</th><th>{{ t('accountPerformance.max') }}</th></tr></thead>
-          <tbody><tr v-for="metric in metricKeys" :key="metric">
-            <th class="py-2 pr-2">{{ t('accountPerformance.' + metric, { minutes: windowMinutes }) }} {{ metric==='ttft' ? '(' + t('accountPerformance.ms') + ')' : metric==='degradation'?'(%)':'' }}</th>
-            <td v-for="bound in bounds" :key="bound" class="p-1"><input v-model="fields[metric][bound]" type="number" min="0" :max="metric==='degradation'?100:1000000000" step="any" :aria-label="t('accountPerformance.'+metric, { minutes: windowMinutes })+' '+t('accountPerformance.'+bound)" :placeholder="t('accountPerformance.noBound')" class="input w-full min-w-0" :data-testid="metric+'-'+bound"></td>
+          <tbody><tr v-for="metric in metricKeys" :key="metric" :data-threshold="metric">
+            <th class="py-2 pr-2"><span class="inline-flex items-center gap-1">
+              {{ t('accountPerformance.' + metric, { minutes: windowMinutes }) }} {{ metric==='ttft' ? '(' + t('accountPerformance.ms') + ')' : isPercentageMetric(metric)?'(%)':'' }}
+              <NewFeatureBadge v-if="metric==='upstream_error' && noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.accountUpstreamHTTPErrorThreshold" :user-id="noticeUserId" compact />
+            </span></th>
+            <td v-for="bound in bounds" :key="bound" class="p-1"><input v-model="fields[metric][bound]" type="number" min="0" :max="isPercentageMetric(metric)?100:1000000000" step="any" :aria-label="t('accountPerformance.'+metric, { minutes: windowMinutes })+' '+t('accountPerformance.'+bound)" :placeholder="t('accountPerformance.noBound')" class="input w-full min-w-0" :data-testid="metric+'-'+bound"></td>
           </tr></tbody>
         </table>
         <p class="text-xs text-gray-500">{{ t('accountPerformance.semantics', { minutes: windowMinutes }) }}</p>
         <p class="text-xs text-gray-500">{{ t('accountPerformance.qualityNote') }}</p>
+        <p class="text-xs text-gray-500" data-testid="upstream-threshold-samples">{{ t('accountPerformance.upstreamThresholdSamples', { failures: metrics.upstream_error?.failures ?? '—', total: metrics.upstream_error?.total ?? '—' }) }}</p>
+        <p class="text-xs text-gray-500" data-testid="upstream-threshold-note">{{ t('accountPerformance.upstreamThresholdNote', { minutes: windowMinutes }) }}</p>
         <p class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{{ t('accountPerformance.latchNote') }}</p>
         <h4 class="text-sm font-semibold">{{ t('accountPerformance.audit') }}</h4>
         <p v-if="auditError" class="text-xs text-red-600">{{ t('accountPerformance.auditUnavailable') }}</p>
@@ -37,6 +42,8 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import { emptyPerformanceConfig, performanceWindowMinutes, type AccountPerformance, type PerformanceConfig, type PerformanceEvent } from '@/types/accountPerformance'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import AccountPerformanceCell from './AccountPerformanceCell.vue'
 const props=defineProps<{accountId:number;accountName:string;noticeUserId?:number|null}>()
 const emit=defineEmits<{close:[];updated:[]}>()
@@ -45,8 +52,9 @@ const metrics=ref<AccountPerformance|null>(null),events=ref<PerformanceEvent[]>(
 const windowMinutes = computed(() => performanceWindowMinutes(metrics.value ?? undefined))
 const config=ref<PerformanceConfig>(emptyPerformanceConfig())
 const loading=ref(false),busy=ref(false),error=ref(''),auditError=ref(false)
-const metricKeys=['tps','degradation','ttft'] as const,bounds=['min','max'] as const
-const fields=reactive<Record<typeof metricKeys[number],Record<typeof bounds[number],string|number>>>({tps:{min:'',max:''},degradation:{min:'',max:''},ttft:{min:'',max:''}})
+const metricKeys=['tps','degradation','ttft','upstream_error'] as const,bounds=['min','max'] as const
+const fields=reactive<Record<typeof metricKeys[number],Record<typeof bounds[number],string|number>>>({tps:{min:'',max:''},degradation:{min:'',max:''},ttft:{min:'',max:''},upstream_error:{min:'',max:''}})
+const isPercentageMetric=(metric:typeof metricKeys[number])=>metric==='degradation'||metric==='upstream_error'
 async function reload(){
  loading.value=true;error.value=''
  try{
@@ -63,7 +71,7 @@ async function save(){
  for(const key of metricKeys){
   for(const bound of bounds){const raw=fields[key][bound];next[key][bound]=raw===''?null:Number(raw)}
   const {min,max}=next[key]
-  if([min,max].some(n=>n!==null&&(!Number.isFinite(n)||n<0||n>(key==='degradation'?100:1e9)))||(min!==null&&max!==null&&min>max)){error.value=t('accountPerformance.invalid');return}
+  if([min,max].some(n=>n!==null&&(!Number.isFinite(n)||n<0||n>(isPercentageMetric(key)?100:1e9)))||(min!==null&&max!==null&&min>max)){error.value=t('accountPerformance.invalid');return}
  }
  if(!metrics.value)return
  busy.value=true;error.value=''

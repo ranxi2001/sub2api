@@ -10,6 +10,7 @@ export const NEW_FEATURE_NOTICES = {
   balanceForecast: 'balance-exhaustion-forecast-initial-announcement',
   serverlessIPRouting: 'serverless-ip-affinity-primary-fallback-initial-announcement',
   accountUpstreamHTTPErrorRate: 'account-upstream-http-error-rate-initial-announcement',
+  accountUpstreamHTTPErrorThreshold: 'account-upstream-http-error-threshold-initial-announcement',
   protocolFeatureSwitches: 'protocol-feature-switches-initial-announcement',
   apiKeyModelPolicy: 'api-key-model-policy-initial-announcement',
   apiKeyLongContext: 'api-key-long-context-control-initial-announcement',
