@@ -381,7 +381,10 @@ func TestParseUsageAndAccumulateAcceptsChatUsageAliases(t *testing.T) {
 	require.Equal(t, 6, got.OutputTokens)
 	require.Equal(t, 4, got.CacheReadInputTokens)
 	require.Equal(t, 2, got.ImageOutputTokens)
-	require.Equal(t, got, state.usage)
+	require.False(t, got.CacheReadKnown, "image usage must remain outside text protection")
+	require.True(t, got.ProtectionMediaObserved)
+	// Session aggregates contain billing counters, not per-turn protection state.
+	require.Equal(t, Usage{InputTokens: 12, OutputTokens: 6, CacheReadInputTokens: 4, ImageOutputTokens: 2}, state.usage)
 }
 
 func TestRelayUsageTerminalWithoutUsageKeepsFallback(t *testing.T) {
