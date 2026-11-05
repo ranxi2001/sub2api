@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -130,4 +131,55 @@ func TestAPIKeyLongContextForwardPreservesBodyAndRevalidatedKey(t *testing.T) {
 	var policyErr *APIKeyLongContextError
 	require.ErrorAs(t, checkAPIKeyLongContextBeforeForward(context.Background(), c, nil, opaque), &policyErr)
 	require.Equal(t, "context_unverifiable", policyErr.Code)
+}
+
+func TestAPIKeyLongContextForwardErrorAfterQueuePing(t *testing.T) {
+	for _, path := range []string{"/v1/messages", "/v1/chat/completions", "/v1/responses", "/v1/responses/compact", "/v1beta/models/public-alias:streamGenerateContent"} {
+		t.Run(path, func(t *testing.T) {
+			billing := longContextTestBilling(100, false)
+			body := []byte(`{"model":"context-policy-test","messages":[{"role":"user","content":"` + strings.Repeat("context ", 150) + `"}]}`)
+			// The public alias admits the request, but the account's final model
+			// has a lower boundary. The queue has already flushed a keepalive.
+			publicBody := []byte(strings.ReplaceAll(string(body), "context-policy-test", "public-alias"))
+			require.NoError(t, checkAPIKeyLongContext(context.Background(), billing, &APIKey{}, publicBody, "public-alias"))
+			c, rec := longContextForwardTestContext(path, body, billing)
+			c.Params = gin.Params{{Key: "modelAction", Value: "public-alias:streamGenerateContent"}}
+			c.Header("Content-Type", "text/event-stream")
+			_, err := c.Writer.WriteString(": ping\n\n")
+			require.NoError(t, err)
+			c.Writer.Flush()
+			var policyErr *APIKeyLongContextError
+			require.ErrorAs(t, checkAPIKeyLongContextBeforeForward(context.Background(), c, billing, body, "context-policy-test"), &policyErr)
+			require.Equal(t, "context_length_exceeded", policyErr.Code)
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+			require.True(t, IsResponseCommitted(c), "outer handler must not append its fallback error")
+			require.True(t, c.IsAborted())
+			wire := rec.Body.String()
+			require.True(t, strings.HasPrefix(wire, ": ping\n\n"))
+			require.Equal(t, 1, strings.Count(wire, "data: "))
+			data := strings.SplitN(wire, "data: ", 2)
+			require.Len(t, data, 2)
+			var event map[string]any
+			require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(data[1])), &event))
+			switch {
+			case strings.Contains(path, "/responses"):
+				require.Contains(t, wire, "event: response.failed\n")
+				require.Equal(t, "response.failed", event["type"])
+				response := event["response"].(map[string]any)
+				require.Equal(t, "failed", response["status"])
+				require.NotEmpty(t, response["id"])
+				require.NotNil(t, response["created_at"])
+				require.Equal(t, "context_length_exceeded", response["error"].(map[string]any)["code"])
+			case strings.HasSuffix(path, "/messages"):
+				require.Contains(t, wire, "event: error\n")
+				require.Equal(t, "error", event["type"])
+				require.Equal(t, "context_length_exceeded", event["error"].(map[string]any)["code"])
+			case strings.HasPrefix(path, "/v1beta/"):
+				require.Equal(t, "INVALID_ARGUMENT", event["error"].(map[string]any)["status"])
+			default:
+				require.Equal(t, "context_length_exceeded", event["error"].(map[string]any)["code"])
+			}
+		})
+	}
 }

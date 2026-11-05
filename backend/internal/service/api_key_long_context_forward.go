@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -112,12 +113,34 @@ func writeAPIKeyLongContextForwardError(c *gin.Context, err error) {
 		code = policyErr.Code
 	}
 	path := c.Request.URL.Path
+	var payload gin.H
+	event := ""
 	if strings.HasPrefix(path, "/v1beta/") || strings.HasPrefix(path, "/antigravity/v1beta/") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": http.StatusBadRequest, "message": err.Error(), "status": "INVALID_ARGUMENT"}})
+		payload = gin.H{"error": gin.H{"code": http.StatusBadRequest, "message": err.Error(), "status": "INVALID_ARGUMENT"}}
 	} else if strings.HasSuffix(path, "/messages") {
-		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "code": code, "message": err.Error()}})
+		event = "event: error\n"
+		payload = gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "code": code, "message": err.Error()}}
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": err.Error()}})
+		payload = gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": err.Error()}}
 	}
+	if c.Writer.Written() {
+		// Queue keepalives may already have committed HTTP 200. Preserve SSE
+		// framing and prevent the handler from appending its generic fallback.
+		MarkOpsStreamError(c, "invalid_request_error", err.Error(), http.StatusBadRequest)
+		if strings.HasSuffix(path, "/responses") || strings.HasSuffix(path, "/responses/compact") {
+			writeOpenAICompactSSEFailureMessage(c, http.StatusBadRequest, code, err.Error())
+		} else {
+			data, _ := json.Marshal(payload)
+			if _, writeErr := io.WriteString(c.Writer, event+"data: "+string(data)+"\n\n"); writeErr != nil {
+				_ = c.Error(writeErr)
+			}
+			if flushErr := FlushGatewayResponse(c.Writer); flushErr != nil {
+				_ = c.Error(flushErr)
+			}
+		}
+	} else {
+		c.JSON(http.StatusBadRequest, payload)
+	}
+	MarkResponseCommitted(c)
 	c.Abort()
 }

@@ -69,6 +69,43 @@ func TestAPIKeyLongContextBusinessMetadataKeepsTextCounting(t *testing.T) {
 	}
 }
 
+func TestAPIKeyLongContextToolDataKeepsTextCounting(t *testing.T) {
+	gateway := &GatewayService{billingService: longContextTestBilling(300, false)}
+	key := &APIKey{AllowLongContext: false}
+	data := `{"id":"msg_business","file_id":"local-report","conversation_id":"business-id","type":"input_file","nested":{"encrypted_content":"business-value"},"text":%q}`
+	for name, template := range map[string]string{
+		"Anthropic tool arguments":  `{"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_fixture","name":"lookup","input":` + data + `}]}]}`,
+		"Gemini function arguments": `{"contents":[{"role":"model","parts":[{"functionCall":{"name":"lookup","args":` + data + `}}]}]}`,
+		"Gemini function results":   `{"contents":[{"role":"user","parts":[{"functionResponse":{"name":"lookup","response":` + data + `}}]}]}`,
+		"Gemini snake case results": `{"contents":[{"parts":[{"function_response":{"name":"lookup","response":` + data + `}}]}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, gateway.CheckAPIKeyLongContext(context.Background(), key, []byte(fmt.Sprintf(template, "hello")), "context-policy-test"))
+			var policyErr *APIKeyLongContextError
+			require.ErrorAs(t, gateway.CheckAPIKeyLongContext(context.Background(), key, []byte(fmt.Sprintf(template, strings.Repeat("context ", 500))), "context-policy-test"), &policyErr)
+			require.Equal(t, "context_length_exceeded", policyErr.Code)
+		})
+	}
+	// Real attachments in tool-result protocol blocks remain unmeasurable.
+	for _, body := range []string{
+		`{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_fixture","content":[{"type":"document","source":{"type":"file","file_id":"file_fixture"}}]}]}]}`,
+		`{"contents":[{"parts":[{"functionResponse":{"name":"lookup","response":{"file_id":"business"}},"fileData":{"fileUri":"gs://fixture/file"}}]}]}`,
+	} {
+		var policyErr *APIKeyLongContextError
+		require.ErrorAs(t, gateway.CheckAPIKeyLongContext(context.Background(), key, []byte(body)), &policyErr)
+		require.Equal(t, "context_unverifiable", policyErr.Code)
+	}
+}
+
+func TestAPIKeyLongContextRejectsRedactedThinking(t *testing.T) {
+	gateway := &GatewayService{}
+	body := []byte(`{"model":"claude-opus-5-5","messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"opaque-fixture"},{"type":"text","text":"hello"}]},{"role":"user","content":"continue"}]}`)
+	var policyErr *APIKeyLongContextError
+	require.ErrorAs(t, gateway.CheckAPIKeyLongContext(context.Background(), &APIKey{}, body), &policyErr)
+	require.Equal(t, "context_unverifiable", policyErr.Code)
+	require.NoError(t, gateway.CheckAPIKeyLongContext(context.Background(), &APIKey{AllowLongContext: true}, body))
+}
+
 func TestAPIKeyLongContextFinalUnknownTargetKeepsDefaultLimit(t *testing.T) {
 	billing := NewBillingService(&config.Config{}, &PricingService{pricingData: map[string]*LiteLLMModelPricing{
 		"gpt-5.4": {InputCostPerToken: 1e-6, OutputCostPerToken: 2e-6, LongContextInputTokenThreshold: 272_000, LongContextInputCostMultiplier: 2},

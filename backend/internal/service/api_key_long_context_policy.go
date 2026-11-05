@@ -115,7 +115,7 @@ func checkAPIKeyLongContext(ctx context.Context, billing *BillingService, key *A
 		return &APIKeyLongContextError{Code: "context_unverifiable", Limit: limit, Reason: "local token counter unavailable"}
 	}
 	counter := apiKeyContextCounter{ctx: ctx, codec: codec, limit: limit}
-	if err := counter.visit(root, 0, false, false); err != nil {
+	if err := counter.visit(root, 0, false, false, ""); err != nil {
 		return err
 	}
 	return nil
@@ -156,7 +156,7 @@ type apiKeyContextCounter struct {
 	total int
 }
 
-func (c *apiKeyContextCounter) visit(value gjson.Result, depth int, schema, inputItem bool) error {
+func (c *apiKeyContextCounter) visit(value gjson.Result, depth int, literal, inputItem bool, parentField string) error {
 	if err := c.ctx.Err(); err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (c *apiKeyContextCounter) visit(value gjson.Result, depth int, schema, inpu
 	if err := c.add(1); err != nil {
 		return err
 	}
-	if inputItem && !schema && value.IsObject() && apiKeyStoredContextItemReference(value) {
+	if inputItem && !literal && value.IsObject() && apiKeyStoredContextItemReference(value) {
 		return c.unverifiable("stored input item reference")
 	}
 	if value.IsObject() || value.IsArray() {
@@ -174,15 +174,15 @@ func (c *apiKeyContextCounter) visit(value gjson.Result, depth int, schema, inpu
 		value.ForEach(func(k, v gjson.Result) bool {
 			if value.IsObject() {
 				field := strings.ToLower(k.String())
-				if !schema && isAPIKeyOpaqueContextField(field) && hasAPIKeyContextValue(v) {
+				if !literal && isAPIKeyOpaqueContextField(field) && hasAPIKeyContextValue(v) {
 					visitErr = c.unverifiable("unmeasurable context field " + k.String())
 					return false
 				}
-				if !schema && field == "type" && isAPIKeyOpaqueContextType(v.String()) {
+				if !literal && field == "type" && isAPIKeyOpaqueContextType(v.String()) {
 					visitErr = c.unverifiable("unmeasurable context type " + v.String())
 					return false
 				}
-				if !schema && field == "prompt" && v.IsObject() && apiKeyJSONHasContextField(v, "id") {
+				if !literal && field == "prompt" && v.IsObject() && apiKeyJSONHasContextField(v, "id") {
 					visitErr = c.unverifiable("stored prompt reference")
 					return false
 				}
@@ -190,12 +190,12 @@ func (c *apiKeyContextCounter) visit(value gjson.Result, depth int, schema, inpu
 					return false
 				}
 			}
-			// Standard request metadata is a label dictionary, not an input item
-			// or a history/file reference. Still count every key and value below.
+			// Schemas, metadata and tool arguments/results are literal data.
+			// Their field names do not load context, but still count in full.
 			metadata := depth == 0 && value.IsObject() && strings.EqualFold(k.String(), "metadata")
-			nestedSchema := schema || metadata || (value.IsObject() && (strings.EqualFold(k.String(), "parameters") || strings.EqualFold(k.String(), "input_schema")))
+			nestedLiteral := literal || metadata || (value.IsObject() && (strings.EqualFold(k.String(), "parameters") || strings.EqualFold(k.String(), "input_schema") || apiKeyToolDataField(value, parentField, k.String())))
 			nestedItem := (value.IsArray() && inputItem) || (value.IsObject() && (strings.EqualFold(k.String(), "input") || strings.EqualFold(k.String(), "messages")))
-			visitErr = c.visit(v, depth+1, nestedSchema, nestedItem)
+			visitErr = c.visit(v, depth+1, nestedLiteral, nestedItem, k.String())
 			return visitErr == nil
 		})
 		return visitErr
@@ -204,6 +204,20 @@ func (c *apiKeyContextCounter) visit(value gjson.Result, depth int, schema, inpu
 		return nil
 	}
 	return c.count(value.String())
+}
+
+func apiKeyToolDataField(value gjson.Result, parentField, field string) bool {
+	// Anthropic tool input is arbitrary JSON. Tool-result content remains a
+	// protocol block array so real images/documents there are still rejected.
+	if field == "input" {
+		switch value.Get("type").String() {
+		case "tool_use", "server_tool_use", "custom_tool_call":
+			return true
+		}
+	}
+	// Gemini uses structured JSON for both function arguments and results.
+	return (parentField == "functionCall" || parentField == "function_call") && field == "args" ||
+		(parentField == "functionResponse" || parentField == "function_response") && field == "response"
 }
 
 func (c *apiKeyContextCounter) count(text string) error {
@@ -331,7 +345,7 @@ func isAPIKeyOpaqueContextType(kind string) bool {
 	}
 	switch kind {
 	case "item_reference", "input_file", "input_image", "input_audio", "input_video", "image", "document", "audio", "file", "video", "video_url",
-		"file_search", "web_search", "web_search_preview", "web_fetch", "code_interpreter", "mcp", "compaction", "response.append":
+		"file_search", "web_search", "web_search_preview", "web_fetch", "code_interpreter", "mcp", "compaction", "response.append", "redacted_thinking":
 		return true
 	default:
 		return false
