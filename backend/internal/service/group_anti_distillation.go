@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +12,6 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -22,7 +19,6 @@ const (
 	groupAntiDistillationSettingPrefix = "group_anti_distillation:"
 	groupAntiDistillationConfigTTL     = 10 * time.Second
 	groupAntiDistillationCacheLimit    = 512
-	groupAntiDistillationStateTTL      = 24 * time.Hour
 )
 
 // GroupAntiDistillationConfig belongs to a group, never to an upstream account.
@@ -41,10 +37,17 @@ type groupAntiDistillationCachedConfig struct {
 	expiresAt time.Time
 }
 
+// GroupAntiDistillationCache owns atomic per-user evidence and pause state.
+// Adapters must deduplicate logical request IDs and never extend active pauses.
+type GroupAntiDistillationCache interface {
+	PauseRemaining(ctx context.Context, userID int64) (time.Duration, error)
+	Observe(ctx context.Context, userID int64, requestID string, zero bool, pause time.Duration, startedAt time.Time) (bool, time.Time, error)
+}
+
 type GroupAntiDistillationService struct {
 	settings SettingRepository
 	groups   GroupRepository
-	redis    *redis.Client
+	cache    GroupAntiDistillationCache
 	users    UserRepository
 	email    *EmailService
 
@@ -55,9 +58,9 @@ type GroupAntiDistillationService struct {
 	notifications chan struct{}
 }
 
-func NewGroupAntiDistillationService(settings SettingRepository, groups GroupRepository, rdb *redis.Client, users UserRepository, email *EmailService) *GroupAntiDistillationService {
+func NewGroupAntiDistillationService(settings SettingRepository, groups GroupRepository, cache GroupAntiDistillationCache, users UserRepository, email *EmailService) *GroupAntiDistillationService {
 	return &GroupAntiDistillationService{
-		settings: settings, groups: groups, redis: rdb, users: users, email: email,
+		settings: settings, groups: groups, cache: cache, users: users, email: email,
 		configs: make(map[int64]groupAntiDistillationCachedConfig), notifications: make(chan struct{}, 8),
 	}
 }
@@ -121,7 +124,10 @@ func (s *GroupAntiDistillationService) GetConfig(ctx context.Context, groupID in
 		if result.Err != nil {
 			return nil, result.Err
 		}
-		cfg := result.Val.(GroupAntiDistillationConfig)
+		cfg, ok := result.Val.(GroupAntiDistillationConfig)
+		if !ok {
+			return nil, errors.New("invalid group protection config result")
+		}
 		return &cfg, nil
 	}
 }
@@ -216,12 +222,6 @@ func (s *GroupAntiDistillationService) cacheConfigLocked(groupID int64, cfg Grou
 	s.configs[groupID] = groupAntiDistillationCachedConfig{config: cfg, expiresAt: now.Add(groupAntiDistillationConfigTTL)}
 }
 
-func groupAntiDistillationRedisKeys(userID int64) []string {
-	// All keys share a Redis hash slot; no API key, email or request body is kept.
-	base := "group-anti-distillation:{" + strconv.FormatInt(userID, 10) + "}:"
-	return []string{base + "samples", base + "seen", base + "pause", base + "last-pause-until"}
-}
-
 // Check returns the remaining pause for enabled groups only. Errors must be
 // treated as fail-open by admission; storage failures never establish a pause.
 func (s *GroupAntiDistillationService) Check(ctx context.Context, userID, groupID int64) (time.Duration, error) {
@@ -235,52 +235,11 @@ func (s *GroupAntiDistillationService) Check(ctx context.Context, userID, groupI
 	if !cfg.Enabled {
 		return 0, nil
 	}
-	if s.redis == nil {
-		return 0, errors.New("group protection Redis unavailable")
+	if s.cache == nil {
+		return 0, errors.New("group protection cache unavailable")
 	}
-	remaining, err := s.redis.PTTL(ctx, groupAntiDistillationRedisKeys(userID)[2]).Result()
-	if err != nil {
-		return 0, err
-	}
-	if remaining < 0 {
-		return 0, nil
-	}
-	return remaining, nil
+	return s.cache.PauseRemaining(ctx, userID)
 }
-
-// A single Lua operation owns deduplication, sample insertion and pause creation.
-// Completion order defines the last 20 valid requests. A pause clears the old
-// window, never extends an existing pause, and ignores all in-flight completions
-// started before that pause ended. Idle sample/seen state expires after 24h.
-var groupAntiDistillationObserveScript = redis.NewScript(`
-local remaining = redis.call('PTTL', KEYS[3])
-if remaining > 0 then return {0, remaining, 0} end
-local started = tonumber(ARGV[5])
-local last_until = tonumber(redis.call('GET', KEYS[4]) or '0')
-if started > 0 and started <= last_until then return {0, 0, 0} end
-if redis.call('ZSCORE', KEYS[2], ARGV[1]) then return {0, 0, 0} end
-local clock = redis.call('TIME')
-local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
-redis.call('ZADD', KEYS[2], now, ARGV[1])
-redis.call('ZREMRANGEBYRANK', KEYS[2], 0, -257)
-redis.call('PEXPIRE', KEYS[2], ARGV[4])
-redis.call('LPUSH', KEYS[1], ARGV[2])
-redis.call('LTRIM', KEYS[1], 0, 19)
-redis.call('PEXPIRE', KEYS[1], ARGV[4])
-if redis.call('LLEN', KEYS[1]) < 20 then return {0, 0, 0} end
-local zeros = 0
-for _, sample in ipairs(redis.call('LRANGE', KEYS[1], 0, 19)) do
-  zeros = zeros + tonumber(sample)
-end
-if zeros < 18 then return {0, 0, 0} end
-local pause = tonumber(ARGV[3])
-local until_ms = now + pause
-local established = redis.call('SET', KEYS[3], ARGV[1], 'PX', pause, 'NX')
-if not established then return {0, 0, 0} end
-redis.call('SET', KEYS[4], until_ms, 'PX', pause + tonumber(ARGV[4]))
-redis.call('DEL', KEYS[1])
-return {1, pause, until_ms}
-`)
 
 // Observe is intentionally separate from billing's lossy usage queue. Callers
 // supply only final, successful text-generation results with an explicit valid
@@ -297,7 +256,7 @@ func (s *GroupAntiDistillationService) Observe(ctx context.Context, key *APIKey,
 		slog.Warn("group zero-cache protection config unavailable", "group_id", key.Group.ID)
 		return
 	}
-	if !cfg.Enabled || s.redis == nil {
+	if !cfg.Enabled || s.cache == nil {
 		return
 	}
 	triggered, until, err := s.observe(ctx, key.UserID, requestID, cacheReadTokens, time.Duration(cfg.PauseMinutes)*time.Minute)
@@ -312,24 +271,8 @@ func (s *GroupAntiDistillationService) Observe(ctx context.Context, key *APIKey,
 }
 
 func (s *GroupAntiDistillationService) observe(ctx context.Context, userID int64, requestID string, cacheReadTokens int, pause time.Duration) (bool, time.Time, error) {
-	digest := sha256.Sum256([]byte(requestID))
-	zero := 0
-	if cacheReadTokens == 0 {
-		zero = 1
-	}
-	var startedMS int64
-	if started, ok := ctx.Value(groupAntiDistillationRequestStartKey{}).(time.Time); ok {
-		startedMS = started.UnixMilli()
-	}
-	values, err := groupAntiDistillationObserveScript.Run(ctx, s.redis, groupAntiDistillationRedisKeys(userID),
-		hex.EncodeToString(digest[:]), zero, pause.Milliseconds(), groupAntiDistillationStateTTL.Milliseconds(), startedMS).Int64Slice()
-	if err != nil {
-		return false, time.Time{}, err
-	}
-	if len(values) != 3 {
-		return false, time.Time{}, errors.New("invalid group protection result")
-	}
-	return values[0] == 1, time.UnixMilli(values[2]), nil
+	startedAt, _ := ctx.Value(groupAntiDistillationRequestStartKey{}).(time.Time)
+	return s.cache.Observe(ctx, userID, requestID, cacheReadTokens == 0, pause, startedAt)
 }
 
 func (s *GroupAntiDistillationService) notify(userID int64, until time.Time) {

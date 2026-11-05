@@ -75,7 +75,7 @@ func TestOpenAIUsageProtectionStillSamplesTextWithMediaNamesInStringsOrTools(t *
 		`{"previous_response_id":null,"conversation":null,"session_id":"session_example","prompt_cache_key":"cache_example","input":"hello"}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			protection, _ := antiDistillationTestService(t)
+			protection, cache := antiDistillationTestService(t)
 			ctx := context.Background()
 			require.NoError(t, protection.SaveConfig(ctx, 1, GroupAntiDistillationConfig{Enabled: true, PauseMinutes: 5}))
 			svc := &OpenAIGatewayService{groupAntiDistillation: protection}
@@ -84,9 +84,7 @@ func TestOpenAIUsageProtectionStillSamplesTextWithMediaNamesInStringsOrTools(t *
 				result := &OpenAIForwardResult{Usage: OpenAIUsage{InputTokens: 2000, CacheReadKnown: true}}
 				svc.ObserveGroupAntiDistillationUsage(ctx, key, &Account{Platform: PlatformOpenAI}, result, time.Now(), []byte(body))
 			}
-			remaining, err := protection.Check(ctx, key.UserID, key.Group.ID)
-			require.NoError(t, err)
-			require.Positive(t, remaining, "text requests still reach the shared 20/18 protection window")
+			require.Len(t, cache.Observations(), 20, "text requests still reach the protection cache; atomic 20/18 enforcement is covered by repository adapter tests")
 		})
 	}
 }
