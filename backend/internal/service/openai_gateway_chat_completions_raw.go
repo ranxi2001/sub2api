@@ -386,6 +386,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			if u := extractCCStreamUsage(payload); u != nil {
 				regionalUsagePayload = []byte(payload)
+				mergeOpenAIProtectionUsageEvidence(usage, u)
 				usage = *u
 			}
 		}

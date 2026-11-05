@@ -228,14 +228,16 @@ func (s *OpenAICodexUsageSnapshot) Normalize() *NormalizedCodexLimits {
 type OpenAIUsage struct {
 	// CacheReadKnown records an explicit, valid cache read counter from the
 	// upstream. Missing counters must never become zero-cache protection samples.
-	CacheReadKnown           bool `json:"-"`
-	InputTokens              int  `json:"input_tokens"`
-	ImageInputTokens         int  `json:"image_input_tokens,omitempty"`
-	ImageCacheReadTokens     int  `json:"image_cache_read_tokens,omitempty"`
-	OutputTokens             int  `json:"output_tokens"`
-	CacheCreationInputTokens int  `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int  `json:"cache_read_input_tokens,omitempty"`
-	ImageOutputTokens        int  `json:"image_output_tokens,omitempty"`
+	CacheReadKnown bool `json:"-"`
+	// Preserve request modality when a terminal usage omits earlier media details.
+	cacheReadMediaObserved   bool
+	InputTokens              int `json:"input_tokens"`
+	ImageInputTokens         int `json:"image_input_tokens,omitempty"`
+	ImageCacheReadTokens     int `json:"image_cache_read_tokens,omitempty"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
 }
 
 // OpenAIForwardResult represents the result of forwarding

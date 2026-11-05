@@ -27,6 +27,7 @@ type FrameConn interface {
 }
 
 type Usage struct {
+	ProtectionMediaObserved  bool
 	CacheReadKnown           bool
 	InputTokens              int
 	ImageInputTokens         int
@@ -1284,6 +1285,12 @@ func parseUsageAndAccumulate(
 		ImageOutputTokens:        int(imageTokens),
 	}
 
+	parsedUsage.ProtectionMediaObserved = state.turnUsage.ProtectionMediaObserved ||
+		state.turnUsage.ImageInputTokens > 0 || state.turnUsage.ImageOutputTokens > 0 ||
+		parsedUsage.ImageInputTokens > 0 || parsedUsage.ImageOutputTokens > 0
+	if parsedUsage.ProtectionMediaObserved {
+		parsedUsage.CacheReadKnown = false
+	}
 	if status := gjson.GetBytes(message, "response.status").String(); status != "" && status != "completed" {
 		parsedUsage.CacheReadKnown = false
 	}
@@ -1329,6 +1336,7 @@ func mergeRelayUsageNonZero(dst *Usage, src Usage) {
 	if dst == nil {
 		return
 	}
+	dst.ProtectionMediaObserved = dst.ProtectionMediaObserved || src.ProtectionMediaObserved
 	if src.InputTokens > 0 {
 		dst.InputTokens = src.InputTokens
 	}

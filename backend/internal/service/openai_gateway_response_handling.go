@@ -264,6 +264,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	sawResponseFailed := false
 	terminalEventType := ""
 	terminalSuccessful := false
+	protectionTerminalSuccessful := false
 	responsesSemanticOutputSeen := false
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
@@ -375,7 +376,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// both list the same call_id — counting both would ~2× the surcharge).
 	streamSearchSeen := make(map[string]struct{})
 	resultWithUsage := func() *openaiStreamingResult {
-		if usage != nil && (!terminalSuccessful || clientDisconnected) {
+		if usage != nil && (!protectionTerminalSuccessful || clientDisconnected) {
 			usage.CacheReadKnown = false
 		}
 		if clientDisconnected {
@@ -551,6 +552,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if openAIStreamEventIsTerminalWithType(data, eventType) {
 				sawTerminalEvent = true
 				terminalSuccessful = IsSuccessfulStreamTerminal(dataBytes)
+				protectionTerminalSuccessful = openAIProtectionSuccessfulTerminal(dataBytes, eventType)
 				terminalEventType = eventType
 				if strings.TrimSpace(data) == "[DONE]" {
 					terminalEventType = "[DONE]"
@@ -1336,6 +1338,7 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	if !ok {
 		return
 	}
+	mergeOpenAIProtectionUsageEvidence(*usage, &parsedUsage)
 	if openAIStreamEventTypeIsTerminal(terminalType) {
 		if terminalType != "response.completed" && terminalType != "response.done" {
 			parsedUsage.CacheReadKnown = false
@@ -1349,6 +1352,33 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	mergeOpenAIUsageNonZero(usage, parsedUsage)
 }
 
+func openAIProtectionSuccessfulTerminal(data []byte, eventType string) bool {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		return true
+	}
+	if eventType != "response.completed" && eventType != "response.done" {
+		return false
+	}
+	for _, path := range []string{"status", "response.status"} {
+		if status := gjson.GetBytes(data, path).String(); status != "" && status != "completed" {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeOpenAIProtectionUsageEvidence(previous OpenAIUsage, next *OpenAIUsage) {
+	if next == nil {
+		return
+	}
+	next.cacheReadMediaObserved = previous.cacheReadMediaObserved || next.cacheReadMediaObserved ||
+		previous.ImageInputTokens > 0 || previous.ImageOutputTokens > 0 || previous.ImageCacheReadTokens > 0 ||
+		next.ImageInputTokens > 0 || next.ImageOutputTokens > 0 || next.ImageCacheReadTokens > 0
+	if next.cacheReadMediaObserved {
+		next.CacheReadKnown = false
+	}
+}
+
 // Compatible Responses upstreams may report usage before the terminal event.
 // Retain those non-zero fields as a fallback. A terminal usage with any billed
 // tokens is authoritative as a whole; an all-zero terminal does not erase a
@@ -1357,6 +1387,7 @@ func mergeOpenAIUsageNonZero(dst *OpenAIUsage, src OpenAIUsage) {
 	if dst == nil {
 		return
 	}
+	dst.cacheReadMediaObserved = dst.cacheReadMediaObserved || src.cacheReadMediaObserved
 	if src.InputTokens > 0 {
 		dst.InputTokens = src.InputTokens
 	}
@@ -1895,6 +1926,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	usage := s.parseSSEUsageFromBody(bodyText)
 	if ok {
 		if parsedUsage, parsed := extractOpenAIUsageFromJSONBytes(finalResponse); parsed {
+			mergeOpenAIProtectionUsageEvidence(*usage, &parsedUsage)
 			*usage = parsedUsage
 		}
 		// When the terminal event has an empty output array, reconstruct

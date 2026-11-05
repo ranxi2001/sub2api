@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"errors"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"

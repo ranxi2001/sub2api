@@ -324,6 +324,7 @@ func (s *OpenAIGatewayService) beginRegionalMeter(ctx context.Context, c *gin.Co
 		measuredTokens := *measured
 		// Cache presence is protection metadata, not a billable token counter.
 		measuredTokens.CacheReadKnown = result.Usage.CacheReadKnown
+		measuredTokens.cacheReadMediaObserved = result.Usage.cacheReadMediaObserved
 		if result.Usage != measuredTokens {
 			return errors.New("regional usage differs from terminal evidence")
 		}

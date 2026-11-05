@@ -414,7 +414,7 @@ func TestRelayUsageTerminalNonZeroReplacesFallbackAsWhole(t *testing.T) {
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"input_tokens":9,"output_tokens":4,"input_tokens_details":{"cached_tokens":2}}}`), "response.in_progress", nil)
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","usage":{"input_tokens":3,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}`), "response.completed", nil)
 
-	require.Equal(t, Usage{InputTokens: 3}, finalizeRelayTurnUsage(state))
+	require.Equal(t, Usage{InputTokens: 3, CacheReadKnown: true}, finalizeRelayTurnUsage(state))
 	require.Equal(t, Usage{InputTokens: 3}, state.usage)
 }
 
@@ -836,4 +836,19 @@ func TestRelayUsageProtectionRequiresSuccessfulTerminalCacheEvidence(t *testing.
 			require.Equal(t, tc.known, finalizeRelayTurnUsage(state).CacheReadKnown)
 		})
 	}
+}
+
+func TestRelayUsageProtectionRetainsProgressiveMediaEvidenceUntilTurnEnds(t *testing.T) {
+	t.Parallel()
+	state := &relayState{}
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"image_tokens":100}}}`), "response.in_progress", nil)
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", nil)
+	turn := finalizeRelayTurnUsage(state)
+	require.False(t, turn.CacheReadKnown)
+	require.True(t, turn.ProtectionMediaObserved)
+	require.Zero(t, turn.ImageInputTokens, "protection metadata must not change terminal billing counters")
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", nil)
+	next := finalizeRelayTurnUsage(state)
+	require.True(t, next.CacheReadKnown, "the next text turn must not inherit media from the prior turn")
+	require.False(t, next.ProtectionMediaObserved)
 }

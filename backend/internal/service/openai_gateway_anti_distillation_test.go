@@ -152,3 +152,61 @@ func TestOpenAIUsageProtectionCCFallbackRequiresCompletedGeneration(t *testing.T
 		}
 	}
 }
+
+func TestOpenAIUsageProtectionNativeSSETerminalCompatibility(t *testing.T) {
+	for _, tc := range []struct{ name, eventLine, terminal string }{
+		{"legacy done payload", "", `{"type":"response.done","response":{"status":"completed","usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`},
+		{"completed event field", "event: response.completed\n", `{"response":{"status":"completed","usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`},
+		{"done event field", "event: response.done\n", `{"response":{"status":"completed","usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			body := "data: " + `{"type":"response.output_text.delta","delta":"ok"}` + "\n\n" + tc.eventLine + "data: " + tc.terminal + "\n\n"
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+			result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, time.Now(), "gpt-5.4", "gpt-5.4")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, result.usage)
+			require.True(t, result.usage.CacheReadKnown, "a successful terminal must retain explicit cache statistics without needing a DONE sentinel")
+			require.True(t, openAIGroupAntiDistillationUsageEligible(&OpenAIForwardResult{Usage: *result.usage}))
+		})
+	}
+}
+
+func TestOpenAIUsageProtectionNativeSSERetainsProgressiveMediaEvidence(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	terminal := `{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`
+	body := "data: " + `{"type":"response.in_progress","usage":{"input_tokens":2000,"input_tokens_details":{"cached_tokens":0,"image_tokens":100}}}` + "\n\n" +
+		"data: " + `{"type":"response.output_text.delta","delta":"ok"}` + "\n\n" + "data: " + terminal + "\n\n"
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(body))}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+	result, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, time.Now(), "gpt-5.4", "gpt-5.4")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.usage.cacheReadMediaObserved)
+	require.False(t, result.usage.CacheReadKnown)
+	require.Zero(t, result.usage.ImageInputTokens, "protection must not alter terminal billing token counters")
+	require.False(t, openAIGroupAntiDistillationUsageEligible(&OpenAIForwardResult{Usage: *result.usage}))
+	// Buffered conversion may read repeated terminal frames. They must not erase
+	// media evidence retained from an earlier progressive frame either.
+	buffered := svc.parseSSEUsageFromBody(body + "data: " + terminal + "\n\n")
+	require.True(t, buffered.cacheReadMediaObserved)
+	require.False(t, buffered.CacheReadKnown)
+	var typed apicompat.ResponsesStreamEvent
+	require.NoError(t, json.Unmarshal([]byte(terminal), &typed))
+	converted := copyOpenAIUsageFromResponsesUsage(typed.Response.Usage, *buffered)
+	require.True(t, converted.cacheReadMediaObserved)
+	require.False(t, openAIGroupAntiDistillationUsageEligible(&OpenAIForwardResult{Usage: converted}))
+}
+
+func TestOpenAIUsageProtectionWSPoolRetainsProgressiveMediaEvidence(t *testing.T) {
+	usage := &OpenAIUsage{}
+	parseOpenAIWSResponseUsageFromCompletedEvent([]byte(`{"type":"response.in_progress","usage":{"input_tokens":2000,"input_tokens_details":{"cached_tokens":0,"image_tokens":100}}}`), usage)
+	parseOpenAIWSResponseUsageFromCompletedEvent([]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`), usage)
+	require.True(t, usage.cacheReadMediaObserved)
+	require.False(t, usage.CacheReadKnown)
+	require.Zero(t, usage.ImageInputTokens)
+}

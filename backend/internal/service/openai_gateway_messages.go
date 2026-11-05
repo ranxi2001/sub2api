@@ -1488,11 +1488,14 @@ func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage, observed
 		OutputTokens:             usage.OutputTokens,
 		CacheCreationInputTokens: usage.CacheCreationInputTokens,
 	}
+	if len(observed) > 0 {
+		result.cacheReadMediaObserved = observed[0].cacheReadMediaObserved
+	}
 	if usage.InputTokensDetails != nil {
 		result.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens
 		// Typed compatibility usage does not retain the image breakdown. Keep
 		// those requests outside text protection even after that conversion.
-		result.CacheReadKnown = len(observed) > 0 && observed[0].CacheReadKnown &&
+		result.CacheReadKnown = len(observed) > 0 && !result.cacheReadMediaObserved && observed[0].CacheReadKnown &&
 			observed[0].CacheReadInputTokens == result.CacheReadInputTokens &&
 			observed[0].ImageInputTokens == 0 && observed[0].ImageOutputTokens == 0 && observed[0].ImageCacheReadTokens == 0
 	}

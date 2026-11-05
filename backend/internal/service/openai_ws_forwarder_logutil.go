@@ -212,6 +212,7 @@ func parseOpenAIWSResponseUsageFromCompletedEvent(message []byte, usage *OpenAIU
 		return
 	}
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(message); ok {
+		mergeOpenAIProtectionUsageEvidence(*usage, &parsedUsage)
 		if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(message, "")) {
 			if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
 				return
