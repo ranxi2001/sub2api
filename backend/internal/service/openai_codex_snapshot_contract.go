@@ -86,6 +86,14 @@ func (c *codexOrderedSchedulerCache) withFreshUsage(ctx context.Context, account
 			if !exists {
 				continue
 			}
+			if isOutboxRetryPublication(ctx) {
+				// A delayed retry may publish after a newer main-stream event. Use
+				// every field read under the shared publication lock, including hard
+				// eligibility and credentials, instead of restoring the old object.
+				// Ordinary request feedback retains its existing merge semantics.
+				out = append(out, current)
+				continue
+			}
 			// Preserve other request-triggered runtime feedback; replace only usage
 			// fields with committed values read inside the publication lock.
 			extra := make(map[string]any, len(a.Extra)+len(current.Extra))
@@ -118,7 +126,12 @@ func (c *codexOrderedSchedulerCache) SetAccount(ctx context.Context, a *Account)
 	})
 }
 func (c *codexOrderedSchedulerCache) SetSnapshot(ctx context.Context, b SchedulerBucket, t SchedulerBucketWriteToken, accounts []Account) error {
-	return c.withFreshUsage(ctx, accounts, func(fresh []Account) error { return c.SchedulerCache.SetSnapshot(ctx, b, t, fresh) })
+	return c.withFreshUsage(ctx, accounts, func(fresh []Account) error {
+		if isOutboxRetryPublication(ctx) {
+			fresh = filterOutboxRetryBucketAccounts(ctx, b, fresh)
+		}
+		return c.SchedulerCache.SetSnapshot(ctx, b, t, fresh)
+	})
 }
 func (c *codexOrderedSchedulerCache) SetSnapshotAndReturnAccountIDs(ctx context.Context, b SchedulerBucket, t SchedulerBucketWriteToken, accounts []Account) ([]int64, error) {
 	var ids []int64

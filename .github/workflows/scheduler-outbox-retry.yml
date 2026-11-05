@@ -1,0 +1,38 @@
+name: Scheduler outbox retry regression
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/scheduler_snapshot*'
+      - 'backend/internal/service/scheduler_outbox.go'
+      - 'backend/internal/service/openai_codex_snapshot_contract.go'
+      - 'backend/internal/repository/scheduler_outbox*'
+      - 'backend/migrations/*scheduler_outbox_retries.sql'
+      - '.github/workflows/scheduler-outbox-retry.yml'
+permissions:
+  contents: read
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Event preservation, retry failure and existing lifecycle boundaries
+        working-directory: backend
+        run: >-
+          go test -race -tags=unit ./internal/service
+          -run '^(TestSchedulerOutboxRetry|TestSchedulerSnapshotServicePollOutbox|TestSchedulerSnapshotServiceCheckOutboxLag|TestSchedulerFullRebuild|TestSchedulerGroupLifecycle|TestSchedulerPrepareGroupLifecycle)'
+          -count=1 -timeout=5m
+      - name: Durable PostgreSQL retry copying, cleanup, lease and restart
+        working-directory: backend
+        env:
+          CI: 'true'
+        run: >-
+          go test -race -tags=integration ./internal/repository
+          -run '^TestSchedulerOutboxRetryPostgres' -count=1 -timeout=10m
