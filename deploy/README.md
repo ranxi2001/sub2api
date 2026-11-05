@@ -4,6 +4,21 @@ This directory contains files for deploying Sub2API on Linux servers and Apple-s
 
 网页注册额度、登录失败封禁及可信代理升级要求见 [网页认证 IP 防护](AUTH_IP_GUARD.md)。
 
+## API Key 并发槽位 TTL 与升级切换
+
+`gateway.api_key_slot_ttl_seconds` 只调整共享 Redis 实现的普通 API Key active slots。默认 `0` 继承 `gateway.concurrency_slot_ttl_minutes`；保持默认值升级不会缩短原租约。显式值至少为 30 秒，120 秒可作为运维评估起点；30 秒下限是配置策略，未经过负载测量，不构成安全 SLA。account/user 槽位、Live 自身租约、WS ingress 租约及 regional concurrency authority 继续沿用各自期限。
+
+运行中的请求复用既有续租、watchdog 和精确释放流程。进程硬退出后，槽位在最后一次成功 Redis 更新时间加有效 TTL 后，由相关准入或统计访问清理，或随 Redis key 到期释放；重启不会立即清零。单独设置短 TTL 不能代替请求取消与退出确认。
+
+**共享同一 Redis 槽位命名空间的进程必须使用相同的有效 API Key TTL。首次启用短 TTL、修改有效 TTL、回退配置或回滚到不识别该字段的旧二进制时，都必须统一 drain，禁止长短 TTL 实例混跑。** 准入和统计读取会按调用进程的 TTL 裁剪成员；短 TTL 进程可能把仍按长周期续租的活跃请求误判为到期，提前重新授予容量。
+
+1. 保存当前二进制与配置，记录旧、新有效 TTL，以及共享该槽位命名空间的全部实例。配置为 `0` 时，也要计入继承的分钟值；regional authority 不应用这个独立 TTL。
+2. 从负载均衡和其他入口撤下全部旧 TTL 实例，停止接收新请求，等待已有 HTTP/SSE、WebSocket turn 和相关 Live 会话正常结束。确认实际转发及槽位所有权已结束后再停止旧实例；达到 drain 超时或进程退出，本身不能证明上游请求已停止。
+3. 确认旧 TTL 进程及其相关统计读取已全部停止，再以统一的新有效 TTL 启动实例并恢复流量。不得逐个滚动切换不同 TTL 的实例，也不得通过清 Redis、删除其他进程成员或启动清理扫描替代 drain。
+4. 核对实际加载的配置、服务日志、并发统计及请求路径。回滚执行同一套 drain；旧二进制忽略专用字段后会恢复共享 TTL，不能直接与短 TTL 实例并行运行。
+
+新增回归覆盖默认继承、独立 TTL、失效回收、双客户端活跃成员、队列和 Live handoff，以及 account/user 与 regional 隔离。实际负载、多 Pod drain 和生产切换仍需在各自环境验收；测试通过不代表这些操作已验证。
+
 ## Deployment Methods
 
 | Method | Best For | Setup Wizard |
