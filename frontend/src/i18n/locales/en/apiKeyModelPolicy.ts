@@ -1,5 +1,5 @@
 export default {
-  title: 'Key model settings',
+  title: 'Key model and context settings',
   scopeHint: 'Administrator settings for this API key only. Saved separately from other key details.',
   modelMapping: 'Model mapping',
   mappingHint: 'For text requests, match the exact model ID and use the target model for routing and billing. Both model IDs must be allowed by the group. Other model IDs remain unchanged. Up to 100 mappings.',
@@ -11,9 +11,12 @@ export default {
   reasoningEffort: 'Fixed reasoning effort',
   followClient: 'Follow client',
   effortHint: 'For OpenAI requests, replace the client’s reasoning effort, including when omitted. Group limits still apply: an excessive level is downgraded or rejected according to the group policy. Choose a level supported by the target model.',
+  allowLongContext: 'Allow long context',
+  longContextHint: 'Enabled by default for this API key only. When disabled, requests entering the model’s long-context range are rejected before forwarding, based on local token estimates and model thresholds. The full text of cached input also counts. Estimates may differ from actual upstream usage.',
+  longContextRestrictions: 'While disabled, history references, remote files, and other requests without the full visible text are also rejected. Send the full text or ask an administrator to enable long context.',
   invalidModel: 'Enter model IDs of 1–200 UTF-8 bytes without whitespace or control characters.',
   duplicateModel: 'The requested model “{model}” has more than one mapping.',
   tooManyMappings: 'Use at most 100 model mappings.',
-  saved: 'Key model settings saved',
-  saveFailed: 'Failed to save key model settings'
+  saved: 'Key model and context settings saved',
+  saveFailed: 'Failed to save key model and context settings'
 }

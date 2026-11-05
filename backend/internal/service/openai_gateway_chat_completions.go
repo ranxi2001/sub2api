@@ -367,6 +367,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	responsesBody = updatedBody
 	responsesReq.ServiceTier = normalizedOpenAIServiceTierValue(gjson.GetBytes(responsesBody, "service_tier").String())
+	if err := s.checkAPIKeyLongContextBeforeSend(ctx, c, responsesBody, upstreamModel); err != nil {
+		return nil, err
+	}
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)

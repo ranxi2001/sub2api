@@ -233,7 +233,7 @@ func TestForwardGrokChatViaResponsesNonStreamingCachesAndReturnsChat(t *testing.
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 7101})
+	c.Set("api_key", &APIKey{ID: 7101, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(71)
 	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
@@ -283,7 +283,7 @@ func TestForwardGrokChatViaResponsesNonStreamingRejectsCompletedResponseWithoutU
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 7102})
+	c.Set("api_key", &APIKey{ID: 7102, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(72)
 	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
@@ -350,7 +350,7 @@ func TestForwardGrokChatViaResponsesCodeBuddyUsesStableConversationHeader(t *tes
 			c.Request.Header.Set("X-Conversation-Request-ID", tt.requestID)
 			c.Request.Header.Set("X-Conversation-Message-ID", tt.messageID)
 			c.Request.Header.Set("X-Request-ID", "generic-"+tt.requestID)
-			c.Set("api_key", &APIKey{ID: 7111})
+			c.Set("api_key", &APIKey{ID: 7111, AllowLongContext: true})
 
 			identity := resolveGrokCacheIdentity(c, tt.body, "", "grok-4.6")
 			require.NotEmpty(t, identity)
@@ -392,7 +392,7 @@ func TestForwardGrokChatViaResponsesTraeToolHistoryKeepsCacheRoute(t *testing.T)
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
 	c.Request.Header.Set(grokClientToolCacheOptInHeader, "prefer-cache")
-	c.Set("api_key", &APIKey{ID: 7151})
+	c.Set("api_key", &APIKey{ID: 7151, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(715)
 	account.Credentials["subscription_tier"] = "free"
@@ -449,7 +449,7 @@ func TestForwardGrokChatViaResponsesTraeCompatibilityFieldsKeepCacheRoute(t *tes
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 7161})
+	c.Set("api_key", &APIKey{ID: 7161, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(716)
 	account.Credentials["subscription_tier"] = "free"
@@ -500,7 +500,7 @@ func TestForwardGrokChatViaResponsesStreamingPropagatesCachedUsage(t *testing.T)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 7201})
+	c.Set("api_key", &APIKey{ID: 7201, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(72)
 	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
@@ -545,7 +545,7 @@ func TestForwardGrokChatRuntimeGateFallsBackToRaw(t *testing.T) {
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
 			if tt.setAPIKey {
-				c.Set("api_key", &APIKey{ID: int64(7301 + index)})
+				c.Set("api_key", &APIKey{ID: int64(7301 + index), AllowLongContext: true})
 			}
 
 			account := grokChatBridgeTestAccount(int64(73 + index))
@@ -587,7 +587,7 @@ func TestForwardGrokChatViaResponses429UsesGrokRateLimitPolicy(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 7501})
+	c.Set("api_key", &APIKey{ID: 7501, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(75)
 	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
@@ -630,7 +630,7 @@ func TestForwardGrokRawChat429PreservesRetryAfter(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 7551})
+	c.Set("api_key", &APIKey{ID: 7551, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(755)
 	account.Credentials["expires_at"] = time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
@@ -669,7 +669,7 @@ func TestForwardGrokRawChatErrorRecordsActualEndpoint(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 7601})
+	c.Set("api_key", &APIKey{ID: 7601, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(76)
 	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{

@@ -14,6 +14,7 @@ type AdminUpdateAPIKeySettingsInput struct {
 	GroupID             *int64
 	ModelMapping        *map[string]string
 	ReasoningEffort     *string
+	AllowLongContext    *bool
 	ResetRateLimitUsage bool
 }
 

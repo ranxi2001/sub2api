@@ -382,7 +382,7 @@ describe('user KeysView column settings', () => {
     await getButtonByText(wrapper, 'common.edit').trigger('click')
     await wrapper.get('[data-tour="key-form-name"]').setValue('Unsaved name')
     wrapper.getComponent({ name: 'ApiKeyModelPolicyDialog' }).vm.$emit('updated', {
-      ...createApiKey(), group_id: 42, model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol' }, reasoning_effort: 'high'
+      ...createApiKey(), group_id: 42, model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol' }, reasoning_effort: 'high', allow_long_context: false
     })
     await nextTick()
     expect((wrapper.get('[data-tour="key-form-name"]').element as HTMLInputElement).value).toBe('Unsaved name')
@@ -391,6 +391,7 @@ describe('user KeysView column settings', () => {
     expect(updateKey).toHaveBeenCalledWith(1, expect.objectContaining({ name: 'Unsaved name' }))
     expect(updateKey.mock.calls[0][1]).not.toHaveProperty('model_mapping')
     expect(updateKey.mock.calls[0][1]).not.toHaveProperty('reasoning_effort')
+    expect(updateKey.mock.calls[0][1]).not.toHaveProperty('allow_long_context')
   })
 
   it.each([

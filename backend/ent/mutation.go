@@ -137,6 +137,7 @@ type APIKeyMutation struct {
 	status               *string
 	model_mapping        *map[string]string
 	reasoning_effort     *string
+	allow_long_context   *bool
 	last_used_at         *time.Time
 	ip_whitelist         *[]string
 	appendip_whitelist   []string
@@ -713,6 +714,42 @@ func (m *APIKeyMutation) OldReasoningEffort(ctx context.Context) (v string, err 
 // ResetReasoningEffort resets all changes to the "reasoning_effort" field.
 func (m *APIKeyMutation) ResetReasoningEffort() {
 	m.reasoning_effort = nil
+}
+
+// SetAllowLongContext sets the "allow_long_context" field.
+func (m *APIKeyMutation) SetAllowLongContext(b bool) {
+	m.allow_long_context = &b
+}
+
+// AllowLongContext returns the value of the "allow_long_context" field in the mutation.
+func (m *APIKeyMutation) AllowLongContext() (r bool, exists bool) {
+	v := m.allow_long_context
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAllowLongContext returns the old "allow_long_context" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldAllowLongContext(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAllowLongContext is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAllowLongContext requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAllowLongContext: %w", err)
+	}
+	return oldValue.AllowLongContext, nil
+}
+
+// ResetAllowLongContext resets all changes to the "allow_long_context" field.
+func (m *APIKeyMutation) ResetAllowLongContext() {
+	m.allow_long_context = nil
 }
 
 // SetLastUsedAt sets the "last_used_at" field.
@@ -1680,7 +1717,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 26)
+	fields := make([]string, 0, 27)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1713,6 +1750,9 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.reasoning_effort != nil {
 		fields = append(fields, apikey.FieldReasoningEffort)
+	}
+	if m.allow_long_context != nil {
+		fields = append(fields, apikey.FieldAllowLongContext)
 	}
 	if m.last_used_at != nil {
 		fields = append(fields, apikey.FieldLastUsedAt)
@@ -1789,6 +1829,8 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.ModelMapping()
 	case apikey.FieldReasoningEffort:
 		return m.ReasoningEffort()
+	case apikey.FieldAllowLongContext:
+		return m.AllowLongContext()
 	case apikey.FieldLastUsedAt:
 		return m.LastUsedAt()
 	case apikey.FieldIPWhitelist:
@@ -1850,6 +1892,8 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldModelMapping(ctx)
 	case apikey.FieldReasoningEffort:
 		return m.OldReasoningEffort(ctx)
+	case apikey.FieldAllowLongContext:
+		return m.OldAllowLongContext(ctx)
 	case apikey.FieldLastUsedAt:
 		return m.OldLastUsedAt(ctx)
 	case apikey.FieldIPWhitelist:
@@ -1965,6 +2009,13 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetReasoningEffort(v)
+		return nil
+	case apikey.FieldAllowLongContext:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAllowLongContext(v)
 		return nil
 	case apikey.FieldLastUsedAt:
 		v, ok := value.(time.Time)
@@ -2320,6 +2371,9 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldReasoningEffort:
 		m.ResetReasoningEffort()
+		return nil
+	case apikey.FieldAllowLongContext:
+		m.ResetAllowLongContext()
 		return nil
 	case apikey.FieldLastUsedAt:
 		m.ResetLastUsedAt()

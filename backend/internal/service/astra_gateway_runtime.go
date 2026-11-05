@@ -309,7 +309,8 @@ func (s *AccountTestService) testAstraWS(ctx context.Context, id, adminID int64,
 		c.Request.Header.Set("session_id", session)
 		// Admin tests explicitly select this account; use one of its actual
 		// groups so the unchanged primary-database admission check can verify it.
-		testKey := &APIKey{ID: adminID}
+		// This admin probe uses its own two-turn continuation, not a customer key.
+		testKey := &APIKey{ID: adminID, AllowLongContext: true}
 		if len(a.GroupIDs) > 0 {
 			groupID := a.GroupIDs[0]
 			testKey.GroupID = &groupID

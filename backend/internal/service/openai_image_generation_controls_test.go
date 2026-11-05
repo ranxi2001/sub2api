@@ -831,8 +831,9 @@ func newOpenAIImageGenerationControlTestContext(allowImages bool, userAgent stri
 	c.Request.Header.Set("User-Agent", userAgent)
 	groupID := int64(4242)
 	c.Set("api_key", &APIKey{
-		ID:      2424,
-		GroupID: &groupID,
+		ID:               2424,
+		GroupID:          &groupID,
+		AllowLongContext: true,
 		Group: &Group{
 			ID:                   groupID,
 			AllowImageGeneration: allowImages,

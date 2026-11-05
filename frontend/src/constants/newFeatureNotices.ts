@@ -10,5 +10,6 @@ export const NEW_FEATURE_NOTICES = {
   accountUpstreamHTTPErrorRate: 'account-upstream-http-error-rate-initial-announcement',
   protocolFeatureSwitches: 'protocol-feature-switches-initial-announcement',
   apiKeyModelPolicy: 'api-key-model-policy-initial-announcement',
+  apiKeyLongContext: 'api-key-long-context-control-initial-announcement',
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
 } as const

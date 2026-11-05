@@ -349,6 +349,9 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 // an admission point, not an atomic transaction spanning SQL and network I/O.
 func (s *OpenAIGatewayService) admitOpenAITurn(ctx context.Context, c *gin.Context, selected *Account, outboundModel string, payload ...[]byte) (*Account, error) {
 	if len(payload) > 0 {
+		if err := s.checkAPIKeyLongContextBeforeSend(ctx, c, payload[0], outboundModel); err != nil {
+			return nil, err
+		}
 		ctx = WithOpenAIImageGenerationRequest(ctx, outboundModel, payload[0])
 	}
 	groupID, enforceGroup := openAITurnAdmissionGroupFromContext(c)

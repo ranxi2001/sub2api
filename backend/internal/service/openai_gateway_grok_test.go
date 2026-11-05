@@ -628,7 +628,7 @@ func TestForwardGrokResponsesCodexAdditionalToolsUsesMixedCacheIntent(t *testing
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set(grokClientToolCacheOptInHeader, "prefer-cache")
-	c.Set("api_key", &APIKey{ID: 4501})
+	c.Set("api_key", &APIKey{ID: 4501, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(4501, "access-token")
 	account.Credentials["subscription_tier"] = "free"
@@ -741,7 +741,7 @@ func TestForwardGrokResponsesClaudeDesktopClientToolsUseCacheRoute(t *testing.T)
 		c.Request.Header.Set("X-App", "cli")
 		c.Request.Header.Set("anthropic-client-platform", "desktop_app")
 		c.Request.Header.Set("X-Claude-Code-Session-Id", "claude-desktop-session")
-		c.Set("api_key", &APIKey{ID: 4504})
+		c.Set("api_key", &APIKey{ID: 4504, AllowLongContext: true})
 		return c
 	}
 
@@ -2008,7 +2008,7 @@ func TestForwardAsChatCompletionsForGrokStopFallsBackToXAIChatCompletions(t *tes
 	c, _ := gin.CreateTestContext(recorder)
 	body := []byte(`{"model":"grok","messages":[{"role":"user","content":"hi"}],"stream":false,"stop":"done","prompt_cache_key":"raw-client-cache-key"}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 5101})
+	c.Set("api_key", &APIKey{ID: 5101, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(51, "access-token")
 	repo := &grokQuotaAccountRepo{
@@ -2060,7 +2060,7 @@ func TestForwardGrokResponsesStreamingDefaultsEmptyModelTo45AndSnapshots(t *test
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("OpenAI-Beta", "responses=experimental")
-	c.Set("api_key", &APIKey{ID: 5201})
+	c.Set("api_key", &APIKey{ID: 5201, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(52, "access-token")
 	repo := &grokQuotaAccountRepo{
@@ -2197,7 +2197,7 @@ func TestForwardGrokResponsesUsesMetadataSessionForCacheIdentityWithoutForwardin
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-		c.Set("api_key", &APIKey{ID: 5401})
+		c.Set("api_key", &APIKey{ID: 5401, AllowLongContext: true})
 		return c
 	}
 
@@ -2231,7 +2231,7 @@ func TestForwardGrokResponsesRetriesInvalidEncryptedContentOnce(t *testing.T) {
 		"stream":false
 	}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 4535})
+	c.Set("api_key", &APIKey{ID: 4535, AllowLongContext: true})
 
 	account := &Account{
 		ID:          4535,
@@ -2689,7 +2689,7 @@ func TestForwardGrokResponsesNonStreamingUsesCacheIdentityAndCachedUsage(t *test
 	body := []byte(`{"model":"grok","input":"hi","stream":false,"tools":[{"type":"namespace","name":"client_tools"}],"tool_choice":{"type":"namespace","name":"client_tools"}}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("api_key", &APIKey{ID: 5202})
+	c.Set("api_key", &APIKey{ID: 5202, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(56, "access-token")
 	observedResetAt := time.Now().Add(-time.Second).UTC().Truncate(time.Second)
@@ -2745,7 +2745,7 @@ func TestForwardGrokResponsesFailoverKeepsCacheIdentityAcrossAccounts(t *testing
 	c, _ := gin.CreateTestContext(recorder)
 	body := []byte(`{"model":"grok","input":[{"role":"user","content":"stable prefix"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 5203})
+	c.Set("api_key", &APIKey{ID: 5203, AllowLongContext: true})
 
 	newAccount := func(id int64, token string) *Account {
 		account := healthyGrokOAuthGatewayTestAccount(id, token)
@@ -2805,7 +2805,7 @@ func TestForwardAsChatCompletionsForGrokStreamingStopFallsBackToRawXAIChatComple
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set(grokConversationIDHeader, "native-client-conversation")
-	c.Set("api_key", &APIKey{ID: 5301})
+	c.Set("api_key", &APIKey{ID: 5301, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(53, "access-token")
 	repo := &grokQuotaAccountRepo{
@@ -2865,7 +2865,7 @@ func TestForwardAsChatCompletionsForGrokComposerBridgesImageInput(t *testing.T) 
 	body := []byte(`{"model":"grok-composer-2.5-fast","messages":[{"role":"system","content":"You are concise."},{"role":"user","content":[{"type":"text","text":"What is shown?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,QUJD"}}]}],"metadata":{"large_id":9007199254740993},"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("api_key", &APIKey{ID: 5501})
+	c.Set("api_key", &APIKey{ID: 5501, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(55, "access-token")
 	repo := &grokQuotaAccountRepo{
@@ -2927,7 +2927,7 @@ func TestForwardAsAnthropicForGrokUsesXAIResponses(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	body := []byte(`{"model":"grok","max_tokens":32,"stream":false,"messages":[{"role":"user","content":"hi"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 5401})
+	c.Set("api_key", &APIKey{ID: 5401, AllowLongContext: true})
 	c.Request.Header.Set("OpenAI-Beta", "grok-experimental")
 	c.Request.Header.Set("originator", "opencode")
 
@@ -2984,7 +2984,7 @@ func TestForwardAsAnthropicForGrokFunctionToolUsesCacheCapableMixedRoute(t *test
 		"tool_choice":{"type":"auto"}
 	}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 5403})
+	c.Set("api_key", &APIKey{ID: 5403, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(58, "access-token")
 	account.Extra = map[string]any{grokBillingExtraKey: map[string]any{
@@ -3050,7 +3050,7 @@ func TestForwardAsAnthropicForGrokStreamingPreservesCacheUsage(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	body := []byte(`{"model":"grok","max_tokens":32,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 5402})
+	c.Set("api_key", &APIKey{ID: 5402, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(57, "access-token")
 	repo := &grokQuotaAccountRepo{

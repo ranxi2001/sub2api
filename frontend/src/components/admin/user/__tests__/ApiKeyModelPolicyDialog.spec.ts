@@ -6,6 +6,7 @@ import ApiKeyModelPolicyDialog from '../ApiKeyModelPolicyDialog.vue'
 const { updatePolicy, showSuccess } = vi.hoisted(() => ({ updatePolicy: vi.fn(), showSuccess: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { apiKeys: { updateApiKeyModelPolicy: updatePolicy } } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: true, user: { id: 41 } }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 enableAutoUnmount(afterEach)
@@ -18,7 +19,7 @@ const key = (id = 17, overrides: Partial<ApiKey> = {}): ApiKey => ({
 function open(apiKey = key()) {
   return mount(ApiKeyModelPolicyDialog, {
     props: { show: true, apiKey },
-    global: { stubs: { BaseDialog: {
+    global: { stubs: { NewFeatureBadge: true, BaseDialog: {
       props: ['show'],
       template: '<div v-if="show"><slot /><slot name="footer" /></div>'
     } } }
@@ -38,7 +39,7 @@ describe('API key model policy', () => {
     await flushPromises()
     expect(updatePolicy).toHaveBeenCalledTimes(1)
     expect(updatePolicy).toHaveBeenCalledWith(17, {
-      model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol-fast' }, reasoning_effort: 'xhigh'
+      model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol-fast' }, reasoning_effort: 'xhigh', allow_long_context: true
     })
     expect(wrapper.emitted('updated')).toEqual([[updated]])
     expect(wrapper.emitted('close')).toHaveLength(1)
@@ -51,7 +52,52 @@ describe('API key model policy', () => {
     updatePolicy.mockResolvedValue({ api_key: key(17, { model_mapping: {}, reasoning_effort: '' }) })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(updatePolicy).toHaveBeenCalledWith(17, { model_mapping: {}, reasoning_effort: '' })
+    expect(updatePolicy).toHaveBeenCalledWith(17, { model_mapping: {}, reasoning_effort: '', allow_long_context: true })
+  })
+
+  it.each([
+    [undefined, 'true'],
+    [true, 'true'],
+    [false, 'false']
+  ] as const)('loads long-context permission %s without changing legacy defaults', (saved, expected) => {
+    const wrapper = open(key(17, { allow_long_context: saved }))
+    expect(wrapper.get('[data-test="allow-long-context"]').attributes('aria-checked')).toBe(expected)
+    expect(wrapper.find('[data-test="long-context-restrictions"]').exists()).toBe(saved === false)
+  })
+
+  it('saves an explicit false and restores it when the saved key is reopened', async () => {
+    const wrapper = open()
+    await wrapper.get('[data-test="allow-long-context"]').trigger('click')
+    const updated = key(17, { allow_long_context: false })
+    updatePolicy.mockResolvedValue({ api_key: updated })
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(updatePolicy).toHaveBeenCalledWith(17, {
+      model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol' }, reasoning_effort: 'high', allow_long_context: false
+    })
+    await wrapper.setProps({ show: false, apiKey: updated })
+    await wrapper.setProps({ show: true })
+    expect(wrapper.get('[data-test="allow-long-context"]').attributes('aria-checked')).toBe('false')
+  })
+
+  it('keeps long-context permission isolated when switching keys', async () => {
+    const wrapper = open(key(17, { allow_long_context: false }))
+    expect(wrapper.get('[data-test="allow-long-context"]').attributes('aria-checked')).toBe('false')
+    await wrapper.setProps({ apiKey: key(18, { allow_long_context: true }) })
+    expect(wrapper.get('[data-test="allow-long-context"]').attributes('aria-checked')).toBe('true')
+    await wrapper.setProps({ apiKey: key(17, { allow_long_context: false }) })
+    expect(wrapper.get('[data-test="allow-long-context"]').attributes('aria-checked')).toBe('false')
+  })
+
+  it('disables the long-context switch while saving', async () => {
+    let finish!: (value: unknown) => void
+    updatePolicy.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    const wrapper = open(key(17, { allow_long_context: false }))
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.get('[data-test="allow-long-context"]').attributes()).toHaveProperty('disabled')
+    finish({ api_key: key(17, { allow_long_context: false }) })
+    await flushPromises()
+    expect(wrapper.get('[data-test="allow-long-context"]').attributes()).not.toHaveProperty('disabled')
   })
 
   it('rejects duplicate source models instead of silently overwriting a mapping', async () => {
@@ -76,10 +122,12 @@ describe('API key model policy', () => {
     updatePolicy.mockRejectedValue(new Error('request failed'))
     const wrapper = open()
     await wrapper.get('[data-test="reasoning-effort"]').setValue('low')
+    await wrapper.get('[data-test="allow-long-context"]').trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toBe('request failed')
     expect((wrapper.get('[data-test="reasoning-effort"]').element as HTMLSelectElement).value).toBe('low')
+    expect(wrapper.get('[data-test="allow-long-context"]').attributes('aria-checked')).toBe('false')
     expect(wrapper.emitted('close')).toBeUndefined()
   })
 

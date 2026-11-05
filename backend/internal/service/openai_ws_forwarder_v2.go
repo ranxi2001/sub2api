@@ -443,7 +443,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	checkBeforeWrite := func() error {
-		latest, err := s.admitOpenAITurn(ctx, c, account, mappedModel)
+		latest, err := s.admitOpenAITurn(ctx, c, account, mappedModel, payloadAsJSONBytes(payload))
 		if err == nil {
 			err = s.checkOpenAIWSBinding(latest, mappedModel, lease.conn.turnBinding)
 		}

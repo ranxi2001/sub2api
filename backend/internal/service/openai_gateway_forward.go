@@ -1339,7 +1339,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return true, nil
 	}
 	for {
-		latest, admissionErr := s.admitOpenAITurn(ctx, c, account, extractOpenAICodexTicketModel(body))
+		latest, admissionErr := s.admitOpenAITurn(ctx, c, account, extractOpenAICodexTicketModel(body), body)
 		if admissionErr != nil {
 			return nil, admissionErr
 		}

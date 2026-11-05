@@ -801,6 +801,7 @@ export interface ApiKey {
   group_ids?: number[]
   model_mapping?: Record<string, string>
   reasoning_effort?: string
+  allow_long_context?: boolean
 }
 
 export interface ApiKeyConcurrencySnapshot {

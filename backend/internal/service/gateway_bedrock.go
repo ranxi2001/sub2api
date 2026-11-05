@@ -188,6 +188,9 @@ func (s *GatewayService) executeBedrockUpstream(
 	apiKey string,
 	proxyURL string,
 ) (*http.Response, error) {
+	if err := checkAPIKeyLongContextBeforeForward(ctx, c, s.billingService, body, modelID); err != nil {
+		return nil, err
+	}
 	var resp *http.Response
 	var err error
 	retryStart := time.Now()
