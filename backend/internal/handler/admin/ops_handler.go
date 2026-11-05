@@ -15,6 +15,7 @@ import (
 
 type OpsHandler struct {
 	opsService *service.OpsService
+	aiOps      *aiOpsProxy
 }
 
 // GetErrorLogByID returns ops error log detail.
@@ -69,7 +70,7 @@ func parseOpsViewParam(c *gin.Context) string {
 }
 
 func NewOpsHandler(opsService *service.OpsService) *OpsHandler {
-	return &OpsHandler{opsService: opsService}
+	return &OpsHandler{opsService: opsService, aiOps: newAIOpsProxyFromEnv()}
 }
 
 // GetErrorLogs lists ops error logs.
