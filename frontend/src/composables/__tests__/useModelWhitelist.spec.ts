@@ -43,6 +43,8 @@ describe('useModelWhitelist', () => {
     expect(models).not.toContain('gpt-5.4-mini')
     expect(models).not.toContain('gpt-5.4-2026-03-05')
     expect(models).not.toContain('gpt-5.5')
+    expect(models).not.toContain('gpt-5.2')
+    expect(models).not.toContain('gpt-5.3-codex-spark')
     expect(models).not.toContain('gpt-image-1.5')
     expect(models).toContain('gpt-image-2.6-flare')
     expect(models).toContain('gpt-image-2.6-sunburst')

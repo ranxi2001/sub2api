@@ -70,3 +70,10 @@ func TestDefaultModelsIncludeGPTImage26(t *testing.T) {
 		require.NotContains(t, DefaultModelIDs(), model)
 	}
 }
+
+func TestDefaultModelMetadata(t *testing.T) {
+	for _, model := range DefaultModels {
+		require.Positive(t, model.Created, model.ID)
+		require.NotEmpty(t, model.DisplayName, model.ID)
+	}
+}
