@@ -120,6 +120,20 @@ describe('AI operations controlled execution', () => {
     expect(api.apply).not.toHaveBeenCalled()
   })
 
+  it('labels unavailable inflight as unknown and shows the frozen model scope', async () => {
+    const candidate = frozen()
+    candidate.evidence = { ...candidate.evidence, inflight: -1, model: 'synthetic-model', effort: 'high', protocol: 'native_http' }
+    api.preview.mockResolvedValue(candidate)
+    wrapper = mountControls(); await flushPromises()
+    await wrapper.get('[data-testid="ai-control-preview-0"]').trigger('click'); await flushPromises()
+    const detail = wrapper.get('[data-testid="ai-control-frozen"]').text()
+    expect(detail).toContain(en.unknown)
+    expect(detail).not.toContain('In flight：-1')
+    expect(detail).toContain('synthetic-model')
+    expect(detail).toContain('native_http')
+    expect(detail).toContain('high')
+  })
+
   it('invalidates an approval on conflict and requires a refresh without retrying the write', async () => {
     api.apply.mockRejectedValue({ status: 409, reason: 'AI_OPS_CONFLICT', message: 'internal endpoint must stay private' })
     wrapper = mountControls(); await flushPromises()

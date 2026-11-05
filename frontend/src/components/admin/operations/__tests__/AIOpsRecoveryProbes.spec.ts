@@ -110,9 +110,22 @@ describe('AI account recovery probes', () => {
     wrapper = mountProbes(); await flushPromises(); await fill()
     await wrapper.setProps({ policy: { ...policy(), control_enabled: false } })
     expect(wrapper.get('[data-testid="ai-probe-start"]').attributes('disabled')).toBeDefined()
-    await wrapper.setProps({ policy: { ...policy(), halted: true } })
+    await wrapper.setProps({ policy: { ...policy(), mode: 'disabled' } })
     expect(wrapper.get('[data-testid="ai-probe-start"]').attributes('disabled')).toBeDefined()
     expect(api.probe).not.toHaveBeenCalled()
+  })
+
+  it('allows an explicitly authorized probe during an emergency stop without releasing the stop', async () => {
+    api.probe.mockResolvedValue({ ...probe('passed'), effort: 'high', protocol: 'native_http' })
+    wrapper = mountProbes(); await flushPromises()
+    await wrapper.setProps({ policy: { ...policy(), halted: true } })
+    await fill()
+    expect(wrapper.get('[data-testid="ai-probe-start"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="ai-probe-start"]').trigger('click'); await flushPromises()
+    expect(api.probe).toHaveBeenCalledOnce()
+    expect(wrapper.props('policy').halted).toBe(true)
+    expect(wrapper.get('[data-testid="ai-probe-record"]').text()).toContain('native_http')
+    expect(wrapper.get('[data-testid="ai-probe-record"]').text()).toContain('high')
   })
 
   it('aborts a pending history read when the component unmounts', async () => {

@@ -74,7 +74,7 @@ func TestAIOpsApplyAccountAuditAndOutboxAreAtomic(t *testing.T) {
 		t.Run(map[bool]string{false: "commit", true: "outbox_failure_rolls_back"}[failOutbox], func(t *testing.T) {
 			db, m, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			r := &accountRepository{sql: db}
 			now := time.Now().UTC()
 			p := aiOpsTestPolicy()
@@ -91,7 +91,7 @@ func TestAIOpsApplyAccountAuditAndOutboxAreAtomic(t *testing.T) {
 				m.ExpectQuery("SELECT COALESCE.*allowed_models").WillReturnRows(sqlmock.NewRows([]string{"models", "group_models"}).AddRow(`[]`, `{}`))
 				m.ExpectQuery("SELECT EXISTS.*usage_logs peer").WillReturnRows(sqlmock.NewRows([]string{"compatible"}).AddRow(true))
 			}
-			m.ExpectQuery("SELECT COUNT.*FILTER").WillReturnRows(sqlmock.NewRows([]string{"active", "daily", "last"}).AddRow(0, 0, nil))
+			m.ExpectQuery("SELECT COUNT.*FILTER.*account_id=ANY\\(\\$2\\)").WithArgs(sqlmock.AnyArg(), "{11}").WillReturnRows(sqlmock.NewRows([]string{"active", "daily", "last"}).AddRow(0, 0, nil))
 			m.ExpectExec("INSERT INTO ai_ops_actions").WillReturnResult(sqlmock.NewResult(0, 1))
 			m.ExpectQuery("UPDATE accounts SET concurrency").WithArgs(int64(11), 18, int64(5)).WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(6))
 			m.ExpectExec("INSERT INTO ai_ops_controls").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -121,7 +121,7 @@ func TestAIOpsApplyAccountAuditAndOutboxAreAtomic(t *testing.T) {
 func TestAIOpsRetryReturnsExistingActionWithoutAnotherBudgetOrWrite(t *testing.T) {
 	db, m, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	r := &accountRepository{sql: db}
 	p := service.AIOpsProposal{ID: "4447dc20-c3eb-4f5a-87ba-adfc91509b8c", Digest: "fixed", Status: "applied"}
 	a := service.AIOpsAction{ID: "8a3845fb-6ffa-4b21-8a73-4f73b95e04cb", ProposalID: p.ID, Status: "observing"}
@@ -138,7 +138,7 @@ func TestAIOpsRetryReturnsExistingActionWithoutAnotherBudgetOrWrite(t *testing.T
 func TestAIOpsRollbackNeverOverwritesManualRevision(t *testing.T) {
 	db, m, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	r := &accountRepository{sql: db}
 	a := service.AIOpsAction{ID: "8a3845fb-6ffa-4b21-8a73-4f73b95e04cb", AccountID: 11, Action: "set_concurrency", BeforeValue: aiOpsFloat(20), AfterValue: aiOpsFloat(18), OwnerRevision: 1, TargetRevision: 4, Status: "observing"}
 	p := aiOpsTestPolicy()
@@ -159,7 +159,7 @@ func TestAIOpsRollbackNeverOverwritesManualRevision(t *testing.T) {
 func TestAIOpsEvidenceForEmptyTargetDoesNotPoisonLaterTargets(t *testing.T) {
 	db, m, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	m.ExpectBegin()
 	tx, err := db.Begin()
 	require.NoError(t, err)
@@ -179,7 +179,7 @@ func TestAIOpsEvidenceForEmptyTargetDoesNotPoisonLaterTargets(t *testing.T) {
 func TestAIOpsInversePauseRollbackKeepsRecoverableOwner(t *testing.T) {
 	db, m, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	r := &accountRepository{sql: db}
 	now := time.Now().UTC()
 	p := aiOpsTestPolicy()
@@ -211,7 +211,7 @@ func TestAIOpsInversePauseRollbackKeepsRecoverableOwner(t *testing.T) {
 func TestAIOpsFreshProbeCannotRecoverAnotherModelOrTransport(t *testing.T) {
 	db, m, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	m.ExpectBegin()
 	tx, err := db.Begin()
 	require.NoError(t, err)
@@ -228,4 +228,31 @@ func TestAIOpsFreshProbeCannotRecoverAnotherModelOrTransport(t *testing.T) {
 	require.NoError(t, tx.Rollback())
 	require.NoError(t, m.ExpectationsWereMet())
 	require.False(t, aiOpsRecoveryScope(service.AIOpsEvidenceSnapshot{Model: "model-a", Effort: "high", Protocol: "ws"}))
+}
+
+func TestAIOpsDomainCooldownIncludesEveryAccountInTheDomain(t *testing.T) {
+	p := aiOpsTestPolicy()
+	p.Accounts = append(p.Accounts, service.AIOpsAccountScope{AccountID: 13, CapacityDomain: "upstream-a"})
+	require.Equal(t, []int64{11, 13}, aiOpsDomainIDs(p, 11))
+	require.Equal(t, []int64{11, 13}, aiOpsDomainIDs(p, 13), "switching the target within one domain must not start a new cooldown")
+	require.Equal(t, []int64{12}, aiOpsDomainIDs(p, 12))
+	require.Empty(t, aiOpsDomainIDs(p, 999))
+}
+
+func TestAIOpsEligibilityRejectsTransportsRecoveryCannotProbe(t *testing.T) {
+	for _, extra := range []string{`{"openai_excel_bps":true}`, `{"openai_connections_managed":true}`} {
+		db, m, err := sqlmock.New()
+		require.NoError(t, err)
+		m.ExpectBegin()
+		tx, err := db.Begin()
+		require.NoError(t, err)
+		m.ExpectQuery("SELECT platform,type").WithArgs(int64(11)).WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "credentials", "extra"}).AddRow("openai", "oauth", `{}`, extra))
+		supported, err := aiOpsModelSupported(context.Background(), tx, 11, 7, "gpt-test")
+		require.NoError(t, err)
+		require.False(t, supported)
+		m.ExpectRollback()
+		require.NoError(t, tx.Rollback())
+		require.NoError(t, m.ExpectationsWereMet())
+		require.NoError(t, db.Close())
+	}
 }

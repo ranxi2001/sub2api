@@ -78,7 +78,8 @@
           <p>{{ t('aiOpsControl.revision', { revision: frozen.policy_revision }) }}</p><p>{{ t('aiOpsControl.expires') }}：{{ time(frozen.expires_at) }}</p>
           <p class="sm:col-span-2">{{ t('aiOpsControl.observedAt') }}：{{ time(frozen.evidence.observed_at) }}</p><p class="sm:col-span-2">{{ t('aiOpsControl.window') }}：{{ time(frozen.evidence.window_start) }} → {{ time(frozen.evidence.window_end) }}</p>
           <p>{{ t('aiOpsControl.samples') }}：{{ frozen.evidence.samples }}</p><p>{{ t('aiOpsControl.errorRate') }}：{{ percent(frozen.evidence.error_rate) }}</p>
-          <p>{{ t('aiOpsControl.inflight') }}：{{ frozen.evidence.inflight }}</p><p>{{ t('aiOpsControl.eligible') }}：{{ frozen.evidence.eligible_accounts }}</p>
+          <p>{{ t('aiOpsControl.inflight') }}：{{ frozen.evidence.inflight >= 0 ? frozen.evidence.inflight : t('aiOpsControl.unknown') }}</p><p>{{ t('aiOpsControl.eligible') }}：{{ frozen.evidence.eligible_accounts }}</p>
+          <p v-if="frozen.evidence.model" class="break-words">{{ t('aiOpsControl.probes.model') }}：{{ frozen.evidence.model }}</p><p v-if="frozen.evidence.effort">{{ t('aiOpsControl.effort') }}：{{ frozen.evidence.effort }}</p><p v-if="frozen.evidence.protocol">{{ t('aiOpsControl.protocol') }}：{{ frozen.evidence.protocol }}</p>
           <p>{{ t('aiOpsControl.totalConcurrency') }}：{{ frozen.evidence.total_concurrency }}</p><p>{{ t('aiOpsControl.coverage') }}：{{ t(frozen.evidence.model_coverage_complete ? 'aiOpsControl.complete' : 'aiOpsControl.incomplete') }}</p>
           <p v-if="frozen.action === 'resume_account'">{{ t('aiOpsControl.probes.title') }}：{{ t(frozen.evidence.probe_passed ? 'aiOpsControl.probes.status.passed' : 'aiOpsControl.probes.status.unknown') }}</p>
         </div>
@@ -92,7 +93,7 @@
       </article>
     </section>
 
-    <AIOpsRecoveryProbes v-if="policy" :policy="policy" :disabled="dirty || busy || halting || needsRefresh || haltRequested" />
+    <AIOpsRecoveryProbes v-if="policy" :policy="policy" :disabled="dirty || busy || halting || needsRefresh" />
 
     <section class="card space-y-4 p-5">
       <h3 class="font-semibold">{{ t('aiOpsControl.history') }}</h3>

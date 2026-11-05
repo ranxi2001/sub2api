@@ -19,6 +19,7 @@
     <article v-for="probe in probes" :key="probe.id" class="space-y-2 rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700" data-testid="ai-probe-record">
       <div class="flex flex-wrap justify-between gap-2"><strong>#{{ probe.account_id }} · {{ probe.model }}</strong><span>{{ t(`aiOpsControl.probes.status.${probe.status}`) }}</span></div>
       <p class="text-xs text-gray-500">{{ t('aiOpsControl.created') }}：{{ time(probe.created_at) }} · {{ t('aiOpsControl.expires') }}：{{ time(probe.expires_at) }}</p>
+      <p v-if="probe.effort || probe.protocol" class="text-xs text-gray-500">{{ t('aiOpsControl.effort') }}：{{ probe.effort || t('aiOpsControl.unknown') }} · {{ t('aiOpsControl.protocol') }}：{{ probe.protocol || t('aiOpsControl.unknown') }}</p>
       <p v-if="probe.reason_code" class="break-words text-xs text-gray-500">{{ reasonLabel(probe.reason_code) }}</p>
       <p v-if="probe.status === 'passed'" class="text-xs text-gray-500">{{ t('aiOpsControl.probes.passedHint') }}</p>
       <p class="break-all font-mono text-xs text-gray-400">{{ probe.id }}</p>
@@ -40,7 +41,7 @@ const accountId = ref(0), model = ref(''), consent = ref(false)
 const submitting = ref(false), loading = ref(false), polling = ref(false), needsRefresh = ref(false)
 const error = ref(''), pollMessage = ref('')
 const hasPending = computed(() => probes.value.some(item => item.status === 'reserved'))
-const canProbe = computed(() => auth.isAdmin && props.policy.control_enabled && props.policy.mode !== 'disabled' && !props.policy.halted && !props.disabled && !submitting.value && !loading.value && !needsRefresh.value && !hasPending.value && consent.value && props.policy.accounts.some(item => item.account_id === accountId.value) && model.value.length > 0 && model.value.length <= 100 && !/[\r\n\u0000]/.test(model.value))
+const canProbe = computed(() => auth.isAdmin && props.policy.control_enabled && props.policy.mode !== 'disabled' && !props.disabled && !submitting.value && !loading.value && !needsRefresh.value && !hasPending.value && consent.value && props.policy.accounts.some(item => item.account_id === accountId.value) && /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,99}$/.test(model.value))
 let alive = true, readGeneration = 0, pollGeneration = 0
 let readController: AbortController | undefined, submitController: AbortController | undefined
 let timer: ReturnType<typeof setTimeout> | undefined

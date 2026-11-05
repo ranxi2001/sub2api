@@ -51,6 +51,9 @@ export interface AIOpsFrozenProposal {
     total_concurrency: number
     model_coverage_complete: boolean
     probe_passed: boolean
+    model?: string
+    effort?: string
+    protocol?: string
   }
   impact_group_ids: number[]
 }
@@ -77,6 +80,8 @@ export interface AIOpsRecoveryProbe {
   id: string
   account_id: number
   model: string
+  effort?: string
+  protocol?: string
   status: 'reserved' | 'passed' | 'failed' | 'unknown'
   created_at: string
   finished_at?: string

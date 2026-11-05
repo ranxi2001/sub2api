@@ -73,6 +73,9 @@ export default {
   samples: 'Samples',
   errorRate: 'Error rate',
   inflight: 'In flight',
+  unknown: 'Unknown',
+  effort: 'Reasoning effort',
+  protocol: 'Protocol',
   eligible: 'Eligible accounts',
   totalConcurrency: 'Total concurrency',
   coverage: 'Model coverage',
@@ -108,7 +111,7 @@ export default {
   },
   probes: {
     title: 'Paused account recovery probe',
-    hint: 'Sends one fixed, small synthetic request to the selected account. A passed probe records recovery evidence; it does not restore scheduling. A resume recommendation must still pass the policy and approval checks.',
+    hint: 'Sends one fixed, small synthetic request for the original paused model. The server preserves its reasoning effort and protocol; currently only native HTTP recovery is supported. A passed probe records evidence and does not restore scheduling or release an emergency stop. Recovery still requires the policy checks and authorization.',
     account: 'Authorized account', model: 'Model', choose: 'Select an account',
     consent: 'I authorize this one billable model probe using a synthetic input.',
     start: 'Send one recovery probe', refresh: 'Refresh probe history', empty: 'No recovery probes recorded.',

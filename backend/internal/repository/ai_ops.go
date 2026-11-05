@@ -179,7 +179,7 @@ func readAIOpsAccounts(ctx context.Context, tx *sql.Tx, ids []int64) (map[int64]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[int64]aiOpsAccount{}
 	for rows.Next() {
 		var a aiOpsAccount
@@ -294,6 +294,11 @@ func aiOpsModelSupported(ctx context.Context, tx *sql.Tx, id, groupID int64, mod
 	if json.Unmarshal(credentials, &a.Credentials) != nil || json.Unmarshal(extra, &a.Extra) != nil {
 		return false, service.ErrAIOpsUnavailable
 	}
+	// The recovery runner supports native primary OAuth only. Never pause an
+	// otherwise healthy transport that our explicit recovery probe cannot use.
+	if !a.IsOpenAIOAuth() || a.IsShadow() || a.IsExcelBPSEnabled() || a.IsSIWCEnabled() || a.IsExcelOAuth() || a.HasManagedOpenAIConnections() {
+		return false, nil
+	}
 	var allowed []byte
 	var groupAllowlist []byte
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(ag.allowed_models,'[]'),COALESCE(g.model_allowlist,'{}') FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=$1 AND ag.group_id=$2 AND g.deleted_at IS NULL AND g.status='active'`, id, groupID).Scan(&allowed, &groupAllowlist); err != nil {
@@ -329,6 +334,20 @@ func aiOpsDomain(p service.AIOpsPolicy, id int64) string {
 		}
 	}
 	return ""
+}
+func aiOpsDomainIDs(p service.AIOpsPolicy, id int64) []int64 {
+	domain := aiOpsDomain(p, id)
+	ids := []int64{}
+	if domain == "" {
+		return ids
+	}
+	for _, a := range p.Accounts {
+		if a.CapacityDomain == domain {
+			ids = append(ids, a.AccountID)
+		}
+	}
+	slices.Sort(ids)
+	return ids
 }
 func aiOpsFloat(v float64) *float64 { return &v }
 
@@ -640,7 +659,7 @@ func applyAIOps(ctx context.Context, tx *sql.Tx, id, digest string, actorID int6
 	}
 	var active, daily int
 	var last sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER(WHERE status IN ('propagation_pending','observing')),COUNT(*) FILTER(WHERE created_at>=date_trunc('day',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),MAX(created_at) FILTER(WHERE account_id=$2) FROM ai_ops_actions`, now, target.id).Scan(&active, &daily, &last)
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER(WHERE status IN ('propagation_pending','observing')),COUNT(*) FILTER(WHERE created_at>=date_trunc('day',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),MAX(created_at) FILTER(WHERE account_id=ANY($2)) FROM ai_ops_actions`, now, pq.Array(aiOpsDomainIDs(p, target.id))).Scan(&active, &daily, &last)
 	if err != nil {
 		return service.AIOpsAction{}, err
 	}
@@ -859,7 +878,7 @@ func (r *accountRepository) ListAIOpsActions(ctx context.Context) ([]service.AIO
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.AIOpsAction{}
 	for rows.Next() {
 		var raw []byte
@@ -886,7 +905,7 @@ func (r *accountRepository) AIOpsRuntime(ctx context.Context, ids []int64) (map[
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var id int64
 		var v service.AIOpsRuntime
@@ -912,7 +931,8 @@ func (r *accountRepository) ReconcileAIOps(ctx context.Context) error {
 		return err
 	}
 	for _, item := range items {
-		if item.Status != "propagation_pending" && item.Status != "observing" && !(item.Action == "pause_account" && item.Status == "inconclusive" && item.ReasonCode != "pause_expired_requires_fresh_probe") {
+		eligible := item.Status == "propagation_pending" || item.Status == "observing" || (item.Action == "pause_account" && item.Status == "inconclusive" && item.ReasonCode != "pause_expired_requires_fresh_probe")
+		if !eligible {
 			continue
 		}
 		if err = r.reconcileAIOpsAction(ctx, item.ID); err != nil && !errors.Is(err, service.ErrAIOpsBlocked) {
@@ -934,7 +954,8 @@ func (r *accountRepository) reconcileAIOpsAction(ctx context.Context, id string)
 	if err != nil {
 		return err
 	}
-	if a.Status != "propagation_pending" && a.Status != "observing" && !(a.Action == "pause_account" && a.Status == "inconclusive") {
+	eligible := a.Status == "propagation_pending" || a.Status == "observing" || (a.Action == "pause_account" && a.Status == "inconclusive")
+	if !eligible {
 		return nil
 	}
 	now := time.Now().UTC()
@@ -1187,7 +1208,7 @@ func (r *accountRepository) ReserveAIOpsProbe(ctx context.Context, accountID int
 	now := time.Now().UTC()
 	var daily int
 	var last sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER(WHERE created_at>=date_trunc('day',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),MAX(created_at) FILTER(WHERE account_id=$2) FROM ai_ops_probes`, now, accountID).Scan(&daily, &last)
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER(WHERE created_at>=date_trunc('day',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),MAX(created_at) FILTER(WHERE account_id=ANY($2)) FROM ai_ops_probes`, now, pq.Array(aiOpsDomainIDs(p, accountID))).Scan(&daily, &last)
 	if err != nil {
 		return probe, err
 	}
@@ -1262,7 +1283,7 @@ func (r *accountRepository) ListAIOpsProbes(ctx context.Context) ([]service.AIOp
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []service.AIOpsProbe{}
 	for rows.Next() {
 		var raw []byte

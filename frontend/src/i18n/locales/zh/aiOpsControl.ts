@@ -73,6 +73,9 @@ export default {
   samples: '样本数',
   errorRate: '错误率',
   inflight: '在飞请求',
+  unknown: '未知',
+  effort: '推理强度',
+  protocol: '协议',
   eligible: '可用账号数',
   totalConcurrency: '总并发',
   coverage: '模型覆盖',
@@ -108,7 +111,7 @@ export default {
   },
   probes: {
     title: '暂停账号恢复探针',
-    hint: '向选定账号发送一次固定的小型合成请求。探针通过只记录恢复证据，不直接恢复调度；恢复建议仍须通过策略与审批检查。',
+    hint: '针对原暂停模型发送一次固定的小型合成请求，推理强度和协议由服务端沿用暂停时的范围；当前仅支持原生 HTTP 恢复。探针通过只记录证据，不恢复调度或解除急停；恢复仍须通过策略检查并获得授权。',
     account: '授权账号', model: '模型', choose: '选择账号',
     consent: '我授权使用合成输入执行这一次可能计费的模型探针。',
     start: '发送一次恢复探针', refresh: '刷新探针历史', empty: '暂无恢复探针记录。',
