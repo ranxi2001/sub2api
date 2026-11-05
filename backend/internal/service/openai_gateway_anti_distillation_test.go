@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,6 +16,72 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAIUsageProtectionExcludesRequestMediaWithoutTokenBreakdown(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		ws         bool
+		converted  bool
+	}{
+		{"responses image", `{"input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.invalid/image.png"}]}]}`, false, false},
+		{"responses tool output image", `{"input":[{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_image","file_id":"file_example"}]}]}`, false, false},
+		{"chat image conversion", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/image.png"}}]},{"role":"user","content":"describe it"}]}`, false, true},
+		{"messages image conversion", `{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}}]}]}`, false, true},
+		{"chat audio input", `{"messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AA==","format":"wav"}}]}]}`, false, false},
+		{"audio output", `{"messages":[{"role":"user","content":"hello"}],"modalities":["text","audio"],"audio":{"voice":"alloy","format":"wav"}}`, false, false},
+		{"video input", `{"messages":[{"role":"user","content":[{"type":"video_url","video_url":{"url":"https://example.invalid/video.mp4"}}]}]}`, false, false},
+		{"websocket flat image", `{"type":"response.create","input":[{"role":"user","content":[{"type":"input_image","file_id":"file_example"}]}]}`, true, false},
+		{"websocket wrapped image", `{"type":"response.create","response":{"input":[{"role":"user","content":[{"type":"input_image","file_id":"file_example"}]}]}}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			protection, redis := antiDistillationTestService(t)
+			ctx := context.Background()
+			require.NoError(t, protection.SaveConfig(ctx, 1, GroupAntiDistillationConfig{Enabled: true, PauseMinutes: 5}))
+			svc := &OpenAIGatewayService{groupAntiDistillation: protection}
+			key := &APIKey{UserID: 7, Group: &Group{ID: 1, Platform: PlatformOpenAI}}
+			account := &Account{Platform: PlatformOpenAI}
+			// A valid upstream counter may omit image/audio breakdowns entirely.
+			usageJSON := []byte(`{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}`)
+			usage, ok := extractOpenAIUsageFromJSONBytes(append(append([]byte(`{"usage":`), usageJSON...), '}'))
+			require.True(t, ok)
+			require.True(t, usage.CacheReadKnown)
+			if tc.converted {
+				var typed apicompat.ResponsesUsage
+				require.NoError(t, json.Unmarshal(usageJSON, &typed))
+				usage = copyOpenAIUsageFromResponsesUsage(&typed, usage)
+			}
+			for i := 0; i < 20; i++ {
+				result := &OpenAIForwardResult{Usage: usage, OpenAIWSMode: tc.ws, UpstreamTerminalEvent: "response.completed"}
+				require.True(t, openAIGroupAntiDistillationUsageEligible(result), "usage alone cannot identify the media request")
+				svc.ObserveGroupAntiDistillationUsage(ctx, key, account, result, time.Now(), []byte(tc.body))
+			}
+			require.Empty(t, redis.Keys(), "media must not create protection samples or pause the user")
+		})
+	}
+}
+
+func TestOpenAIUsageProtectionStillSamplesTextWithMediaNamesInStringsOrTools(t *testing.T) {
+	for _, body := range []string{
+		`{"input":"explain the input_image and audio fields"}`,
+		`{"messages":[{"role":"user","content":[{"type":"text","text":"input_image"}]}],"tools":[{"type":"function","function":{"name":"example","parameters":{"type":"object","properties":{"image_url":{"type":"string"}}}}}]}`,
+		`{"type":"response.create","response":{"input":[{"type":"function_call_output","call_id":"call_1","output":"{\"type\":\"input_image\"}"}]}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			protection, _ := antiDistillationTestService(t)
+			ctx := context.Background()
+			require.NoError(t, protection.SaveConfig(ctx, 1, GroupAntiDistillationConfig{Enabled: true, PauseMinutes: 5}))
+			svc := &OpenAIGatewayService{groupAntiDistillation: protection}
+			key := &APIKey{UserID: 7, Group: &Group{ID: 1, Platform: PlatformOpenAI}}
+			for i := 0; i < 20; i++ {
+				result := &OpenAIForwardResult{Usage: OpenAIUsage{InputTokens: 2000, CacheReadKnown: true}}
+				svc.ObserveGroupAntiDistillationUsage(ctx, key, &Account{Platform: PlatformOpenAI}, result, time.Now(), []byte(body))
+			}
+			remaining, err := protection.Check(ctx, key.UserID, key.Group.ID)
+			require.NoError(t, err)
+			require.Positive(t, remaining, "text requests still reach the shared 20/18 protection window")
+		})
+	}
+}
 
 func TestOpenAIUsageProtectionRequiresExplicitValidCacheCounter(t *testing.T) {
 	t.Parallel()
