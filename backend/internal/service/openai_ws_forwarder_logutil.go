@@ -202,10 +202,17 @@ func openAIWSMessageLikelyContainsToolCalls(message []byte) bool {
 }
 
 func parseOpenAIWSResponseUsageFromCompletedEvent(message []byte, usage *OpenAIUsage) {
-	if usage == nil || len(message) == 0 || !bytes.Contains(message, []byte(`"usage"`)) {
+	if usage == nil || len(message) == 0 {
+		return
+	}
+	if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(message, "")) {
+		usage.CacheReadKnown = false
+	}
+	if !bytes.Contains(message, []byte(`"usage"`)) {
 		return
 	}
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(message); ok {
+		mergeOpenAIProtectionUsageEvidence(*usage, &parsedUsage)
 		if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(message, "")) {
 			if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
 				return

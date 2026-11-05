@@ -2,6 +2,7 @@
 
 FRONTEND_CRITICAL_VITEST := \
 	src/components/common/__tests__/NewFeatureBadge.spec.ts \
+	src/components/admin/group/__tests__/GroupAntiDistillationSettings.spec.ts \
 	src/views/admin/__tests__/ChannelsView.modelSync.spec.ts \
 	src/views/admin/__tests__/ChannelsView.webSearchEmulation.spec.ts \
 	src/views/admin/__tests__/channelPricingTransfer.spec.ts \

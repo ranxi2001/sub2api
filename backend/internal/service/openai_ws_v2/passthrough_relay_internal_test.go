@@ -381,7 +381,10 @@ func TestParseUsageAndAccumulateAcceptsChatUsageAliases(t *testing.T) {
 	require.Equal(t, 6, got.OutputTokens)
 	require.Equal(t, 4, got.CacheReadInputTokens)
 	require.Equal(t, 2, got.ImageOutputTokens)
-	require.Equal(t, got, state.usage)
+	require.False(t, got.CacheReadKnown, "image usage must remain outside text protection")
+	require.True(t, got.ProtectionMediaObserved)
+	// Session aggregates contain billing counters, not per-turn protection state.
+	require.Equal(t, Usage{InputTokens: 12, OutputTokens: 6, CacheReadInputTokens: 4, ImageOutputTokens: 2}, state.usage)
 }
 
 func TestRelayUsageTerminalWithoutUsageKeepsFallback(t *testing.T) {
@@ -414,7 +417,7 @@ func TestRelayUsageTerminalNonZeroReplacesFallbackAsWhole(t *testing.T) {
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"input_tokens":9,"output_tokens":4,"input_tokens_details":{"cached_tokens":2}}}`), "response.in_progress", nil)
 	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","usage":{"input_tokens":3,"output_tokens":0,"input_tokens_details":{"cached_tokens":0}}}`), "response.completed", nil)
 
-	require.Equal(t, Usage{InputTokens: 3}, finalizeRelayTurnUsage(state))
+	require.Equal(t, Usage{InputTokens: 3, CacheReadKnown: true}, finalizeRelayTurnUsage(state))
 	require.Equal(t, Usage{InputTokens: 3}, state.usage)
 }
 
@@ -812,4 +815,43 @@ func TestObserveUpstreamMessage_ResponseServiceTierOnlyFromTerminalEvents(t *tes
 		nil,
 	)
 	require.Equal(t, "", second.responseServiceTier)
+}
+
+func TestRelayUsageProtectionRequiresSuccessfulTerminalCacheEvidence(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, event, payload string
+		known                bool
+	}{
+		{"zero", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}`, true},
+		{"positive", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":1280}}}}`, true},
+		{"missing", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1}}}`, false},
+		{"no terminal usage", "response.completed", `{"response":{"id":"resp_1"}}`, false},
+		{"negative", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":-1}}}}`, false},
+		{"fractional", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0.5}}}}`, false},
+		{"failed", "response.failed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}`, false},
+		{"incomplete", "response.incomplete", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &relayState{}
+			parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`), "response.in_progress", nil)
+			parseUsageAndAccumulate(state, []byte(tc.payload), tc.event, nil)
+			require.Equal(t, tc.known, finalizeRelayTurnUsage(state).CacheReadKnown)
+		})
+	}
+}
+
+func TestRelayUsageProtectionRetainsProgressiveMediaEvidenceUntilTurnEnds(t *testing.T) {
+	t.Parallel()
+	state := &relayState{}
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0,"image_tokens":100}}}`), "response.in_progress", nil)
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", nil)
+	turn := finalizeRelayTurnUsage(state)
+	require.False(t, turn.CacheReadKnown)
+	require.True(t, turn.ProtectionMediaObserved)
+	require.Zero(t, turn.ImageInputTokens, "protection metadata must not change terminal billing counters")
+	parseUsageAndAccumulate(state, []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":2000,"output_tokens":20,"input_tokens_details":{"cached_tokens":0}}}}`), "response.completed", nil)
+	next := finalizeRelayTurnUsage(state)
+	require.True(t, next.CacheReadKnown, "the next text turn must not inherit media from the prior turn")
+	require.False(t, next.ProtectionMediaObserved)
 }

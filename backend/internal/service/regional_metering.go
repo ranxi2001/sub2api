@@ -321,7 +321,11 @@ func (s *OpenAIGatewayService) beginRegionalMeter(ctx context.Context, c *gin.Co
 		if forwardErr != nil || result == nil || result.UsageUnavailable || measured == nil {
 			return errors.New("regional final usage unavailable; hold retained")
 		}
-		if result.Usage != *measured {
+		measuredTokens := *measured
+		// Cache presence is protection metadata, not a billable token counter.
+		measuredTokens.CacheReadKnown = result.Usage.CacheReadKnown
+		measuredTokens.cacheReadMediaObserved = result.Usage.cacheReadMediaObserved
+		if result.Usage != measuredTokens {
 			return errors.New("regional usage differs from terminal evidence")
 		}
 		if result.ImageCount != 0 || result.VideoCount != 0 || result.Usage.ImageInputTokens != 0 || result.Usage.ImageOutputTokens != 0 || result.Usage.OutputTokens > int(output) {

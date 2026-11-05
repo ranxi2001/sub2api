@@ -21,6 +21,22 @@ export interface LiveCapability {
   reason?: string
 }
 
+export interface GroupAntiDistillationConfig {
+  enabled: boolean
+  pause_minutes: number
+}
+
+/** Group protection is saved independently from billing and other group settings. */
+export async function getAntiDistillation(id: number): Promise<GroupAntiDistillationConfig> {
+  const { data } = await apiClient.get<GroupAntiDistillationConfig>(`/admin/groups/${id}/anti-distillation`)
+  return data
+}
+
+export async function saveAntiDistillation(id: number, config: GroupAntiDistillationConfig): Promise<GroupAntiDistillationConfig> {
+  const { data } = await apiClient.put<GroupAntiDistillationConfig>(`/admin/groups/${id}/anti-distillation`, config)
+  return data
+}
+
 /**
  * List all groups with pagination
  * @param page - Page number (default: 1)
@@ -522,6 +538,8 @@ export async function getCapacitySummary(): Promise<
 }
 
 export const groupsAPI = {
+  getAntiDistillation,
+  saveAntiDistillation,
   list,
   getAll,
   getByPlatform,
