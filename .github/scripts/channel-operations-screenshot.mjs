@@ -86,6 +86,7 @@ try {
   await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), synthetic: true, actualComponent: 'ChannelOperationsView.vue', confirmedMutations: mutations, liveApiCalls: 0, paidRequests: 0, browserErrors: failures, mobileWidth: width }, null, 2))
 } catch (error) {
   await fs.writeFile(path.join(output, 'browser-failures.json'), JSON.stringify({ browserErrors: failures, consoleErrors, unexpectedApiRequests: apiRequests }, null, 2))
+  await fs.writeFile(path.join(output, 'failure.json'), JSON.stringify({ error: String(error), browserErrors: failures, apiRequests }, null, 2))
   for (const page of browser.contexts().flatMap(context => context.pages())) {
     await page.screenshot({ path: path.join(output, 'failure-synthetic.png'), fullPage: true })
     await fs.writeFile(path.join(output, 'failure.txt'), String(error) + '\n' + await page.locator('body').innerText())
