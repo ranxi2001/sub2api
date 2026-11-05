@@ -4,6 +4,7 @@ package bepusdt
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,12 @@ func TestBEpusdtEmbeddedBEP20AllocationNormalizesWalletAddress(t *testing.T) {
 	req := CreateRequest{OrderID: "mixed-case-first", Amount: "28.80", TradeType: "usdt.bep20", Currency: "USD", ExpiresAt: time.Now().Add(5 * time.Minute)}
 	first, err := Create(ctx, req)
 	require.NoError(t, err)
+	require.Equal(t, strings.ToLower(address), first.Address, "new EVM payment addresses are normalized")
+	// Reproduce a historical order whose display address kept its original
+	// casing while the scanner matched the normalized address.
+	require.NoError(t, model.Db.Model(&model.Order{}).Where("id = ?", first.ID).Update("address", address).Error)
+	first, err = Order(ctx, first.TradeId)
+	require.NoError(t, err)
 	require.Equal(t, address, first.Address)
 	require.NotEqual(t, first.Address, first.MatchAddress)
 	req.OrderID = "mixed-case-second"
@@ -60,6 +67,10 @@ func TestBEpusdtEmbeddedBEP20AllocationNormalizesWalletAddress(t *testing.T) {
 	require.NotEqual(t, first.Amount, second.Amount, "normalized wallet address must reserve the first payment amount")
 	// Existing records without a normalized matching address remain reserved.
 	require.NoError(t, model.Db.Model(&model.Order{}).Where("id = ?", first.ID).Update("match_address", "").Error)
+	legacy, err := Order(ctx, first.TradeId)
+	require.NoError(t, err)
+	require.Equal(t, address, legacy.Address)
+	require.Empty(t, legacy.MatchAddress)
 	req.OrderID = "mixed-case-legacy"
 	third, err := Create(ctx, req)
 	require.NoError(t, err)
