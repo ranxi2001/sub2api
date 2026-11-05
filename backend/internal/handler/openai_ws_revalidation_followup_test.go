@@ -80,6 +80,7 @@ func wsRevalidationKey(limit int, allowlistEnabled bool, models []string, allowI
 	}
 	user := &service.User{ID: 1701, Status: service.StatusActive, Concurrency: 3}
 	key := &service.APIKey{
+		AllowLongContext: true,
 		ID:               1801,
 		UserID:           user.ID,
 		Key:              "sk-ws-revalidation-followup",

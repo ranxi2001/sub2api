@@ -211,6 +211,7 @@ issues/
 
 !docs/astra-candy-beta.md
 !docs/api-key-model-policy.md
+!docs/api-key-long-context-control.md
 
 # PR screenshots belong in PR attachments; retain text evidence in docs/screenshots.
 !docs/screenshots/

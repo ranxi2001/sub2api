@@ -25,6 +25,12 @@
                 :notice-id="NEW_FEATURE_NOTICES.apiKeyModelPolicy"
                 :user-id="authStore.user?.id"
               />
+              <NewFeatureBadge
+                v-if="authStore.isAdmin"
+                :notice-id="NEW_FEATURE_NOTICES.apiKeyLongContext"
+                :user-id="authStore.user?.id"
+                compact
+              />
             </div>
           </div>
           <div class="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">

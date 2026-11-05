@@ -175,6 +175,20 @@ func (_u *APIKeyUpdate) SetNillableReasoningEffort(v *string) *APIKeyUpdate {
 	return _u
 }
 
+// SetAllowLongContext sets the "allow_long_context" field.
+func (_u *APIKeyUpdate) SetAllowLongContext(v bool) *APIKeyUpdate {
+	_u.mutation.SetAllowLongContext(v)
+	return _u
+}
+
+// SetNillableAllowLongContext sets the "allow_long_context" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableAllowLongContext(v *bool) *APIKeyUpdate {
+	if v != nil {
+		_u.SetAllowLongContext(*v)
+	}
+	return _u
+}
+
 // SetLastUsedAt sets the "last_used_at" field.
 func (_u *APIKeyUpdate) SetLastUsedAt(v time.Time) *APIKeyUpdate {
 	_u.mutation.SetLastUsedAt(v)
@@ -659,6 +673,9 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.ReasoningEffort(); ok {
 		_spec.SetField(apikey.FieldReasoningEffort, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.AllowLongContext(); ok {
+		_spec.SetField(apikey.FieldAllowLongContext, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)
 	}
@@ -1021,6 +1038,20 @@ func (_u *APIKeyUpdateOne) SetReasoningEffort(v string) *APIKeyUpdateOne {
 func (_u *APIKeyUpdateOne) SetNillableReasoningEffort(v *string) *APIKeyUpdateOne {
 	if v != nil {
 		_u.SetReasoningEffort(*v)
+	}
+	return _u
+}
+
+// SetAllowLongContext sets the "allow_long_context" field.
+func (_u *APIKeyUpdateOne) SetAllowLongContext(v bool) *APIKeyUpdateOne {
+	_u.mutation.SetAllowLongContext(v)
+	return _u
+}
+
+// SetNillableAllowLongContext sets the "allow_long_context" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableAllowLongContext(v *bool) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetAllowLongContext(*v)
 	}
 	return _u
 }
@@ -1538,6 +1569,9 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.ReasoningEffort(); ok {
 		_spec.SetField(apikey.FieldReasoningEffort, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AllowLongContext(); ok {
+		_spec.SetField(apikey.FieldAllowLongContext, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)
