@@ -36,10 +36,11 @@ func (b PerformanceBounds) Breached(v *float64) bool {
 }
 
 type PerformanceConfig struct {
-	Enabled     bool              `json:"enabled"`
-	TPS         PerformanceBounds `json:"tps"`
-	Degradation PerformanceBounds `json:"degradation"`
-	TTFT        PerformanceBounds `json:"ttft"`
+	Enabled       bool              `json:"enabled"`
+	TPS           PerformanceBounds `json:"tps"`
+	Degradation   PerformanceBounds `json:"degradation"`
+	TTFT          PerformanceBounds `json:"ttft"`
+	UpstreamError PerformanceBounds `json:"upstream_error"`
 }
 
 func (c PerformanceConfig) Validate() error {
@@ -47,6 +48,9 @@ func (c PerformanceConfig) Validate() error {
 		if err := b.Validate(i == 1); err != nil {
 			return err
 		}
+	}
+	if err := c.UpstreamError.Validate(true); err != nil {
+		return err
 	}
 	return nil
 }
@@ -80,6 +84,14 @@ func (m AccountPerformance) Breaches() []string {
 	}
 	if m.Config.TTFT.Breached(m.AvgTTFTMs) {
 		reasons = append(reasons, "ttft")
+	}
+	// This is process-local HTTP response evidence, not a final-request error
+	// rate. A partial process window can contain usable samples; no response
+	// samples is unknown, while zero failures among real samples is valid 0%.
+	if p := m.UpstreamError.Percent; m.UpstreamError.Total > 0 && p != nil &&
+		!math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 100 &&
+		m.Config.UpstreamError.Breached(p) {
+		reasons = append(reasons, "upstream_error")
 	}
 	return reasons
 }
