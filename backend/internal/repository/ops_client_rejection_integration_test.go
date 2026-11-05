@@ -97,10 +97,56 @@ func TestChannelMonitorClientRejectionRequiresLocalEvidence(t *testing.T) {
      $2::text AS error_source, NULLIF($3::int,0) AS upstream_status_code,
      $4::jsonb AS upstream_errors, 'request' AS error_phase,
      'api_error' AS error_type, NULL::bigint AS account_id,
-     403 AS status_code, NULL::text AS error_message, NULL::text AS upstream_error_message
+     403 AS status_code, NULL::text AS error_message, NULL::text AS upstream_error_message,
+     NULL::text AS upstream_error_detail
    ) current_error`, tc.owner, tc.source, tc.upstreamStatus, tc.events).Scan(&excluded)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, excluded)
+		})
+	}
+}
+
+func TestOpsWrappedContextLimitReadTimeCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name, phase      string
+		status, upstream int
+		message, detail  string
+		want             bool
+	}{
+		{"explicit message", "upstream", 502, 502, "response.failed: context_length_exceeded", "", true},
+		{"detail only", "upstream", 502, 502, "Upstream request failed", `{"response":{"error":{"code":"context_length_exceeded"}}}`, true},
+		{"case insensitive fallback", "upstream", 502, 0, "CONTEXT_LENGTH_EXCEEDED", "", true},
+		{"final wrapper", "upstream", 503, 502, "", "context_length_exceeded", true},
+		{"generic 502", "upstream", 502, 502, "Bad Gateway", "", false},
+		{"vague length", "upstream", 502, 502, "prompt is too long", "", false},
+		{"literal underscores", "upstream", 502, 502, "contextXlengthYexceeded", "", false},
+		{"capacity", "upstream", 502, 503, "context_length_exceeded", "", false},
+		{"account auth", "account_auth", 502, 502, "context_length_exceeded", "", false},
+		{"recovered", "upstream", 200, 502, "context_length_exceeded", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var excluded bool
+			var owner, phase, errorType string
+			err := integrationDB.QueryRowContext(context.Background(), `SELECT `+
+				opsBusinessLimitedSQL("e")+`, `+opsEffectiveOwnerSQL("e")+`, `+
+				opsEffectivePhaseSQL("e")+`, `+opsEffectiveTypeSQL("e")+` FROM (
+				 SELECT $1::int AS status_code, NULLIF($2::int,0) AS upstream_status_code,
+				 $3::text AS error_message, NULL::text AS upstream_error_message, $4::text AS upstream_error_detail,
+				 $5::text AS error_phase, 'provider'::text AS error_owner, 'upstream_error'::text AS error_type,
+				 FALSE AS is_business_limited, 'upstream_http'::text AS error_source,
+				 '[]'::jsonb AS upstream_errors, NULL::bigint AS account_id
+				) e`, tc.status, tc.upstream, tc.message, tc.detail, tc.phase).Scan(&excluded, &owner, &phase, &errorType)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, excluded)
+			if tc.want {
+				require.Equal(t, "client", owner)
+				require.Equal(t, "request", phase)
+				require.Equal(t, "context_limit", errorType)
+			} else {
+				require.Equal(t, "provider", owner)
+				require.Equal(t, tc.phase, phase)
+				require.Equal(t, "upstream_error", errorType)
+			}
 		})
 	}
 }
