@@ -1,0 +1,29 @@
+{
+  "commit": "08bde856042167cfbb5251cafc303a60493d5b6c",
+  "synthetic": true,
+  "actualComponents": [
+    "AIOpsView.vue",
+    "AIOpsControls.vue",
+    "AIOpsRecoveryProbes.vue",
+    "SmartOpsNav.vue"
+  ],
+  "disabledSideEffects": 0,
+  "unapprovedWrites": 0,
+  "confirmedSyntheticMutations": [
+    {
+      "kind": "apply",
+      "id": "synthetic-proposal-a",
+      "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "paidRequests": 0,
+  "productionApiCalls": 0,
+  "browserErrors": [],
+  "blockedRequests": [],
+  "mobileWidths": [
+    {
+      "body": 390,
+      "viewport": 390
+    }
+  ]
+}
