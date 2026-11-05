@@ -55,6 +55,40 @@ func TestAIOpsPostgresRevisionSeparatesConfigurationFromObservation(t *testing.T
 	require.Equal(t, before+4, read())
 }
 
+func TestAIOpsPostgresRevisionPreservesLegacyExtraShapes(t *testing.T) {
+	for _, value := range []string{`null`, `[]`, `[1]`, `"legacy scalar"`, `42`, `true`, `{}`} {
+		t.Run(value, func(t *testing.T) {
+			id := aiOpsIntegrationAccount(t)
+			// OpenAI has a separate object-only long-context billing trigger;
+			// legacy quota accounts on other platforms allow all JSON shapes.
+			_, err := integrationDB.Exec(`UPDATE accounts SET platform='anthropic' WHERE id=$1`, id)
+			require.NoError(t, err)
+			read := func() (int64, string) {
+				var revision int64
+				var extra string
+				require.NoError(t, integrationDB.QueryRow(`SELECT ai_ops_revision,extra::text FROM accounts WHERE id=$1`, id).Scan(&revision, &extra))
+				return revision, extra
+			}
+			_, err = integrationDB.Exec(`UPDATE accounts SET extra='{"fixture":true}' WHERE id=$1`, id)
+			require.NoError(t, err)
+			before, _ := read()
+			_, err = integrationDB.Exec(`UPDATE accounts SET extra=$2::jsonb WHERE id=$1`, id, value)
+			require.NoError(t, err)
+			after, extra := read()
+			require.Equal(t, before+1, after, "legacy shape changes must invalidate proposals")
+			require.JSONEq(t, value, extra, "revision checks must not rewrite legacy data")
+			_, err = integrationDB.Exec(`UPDATE accounts SET extra=$2::jsonb,last_used_at=NOW() WHERE id=$1`, id, value)
+			require.NoError(t, err)
+			unchanged, _ := read()
+			require.Equal(t, after, unchanged, "identical legacy values are not configuration changes")
+			_, err = integrationDB.Exec(`UPDATE accounts SET extra='{"fixture":true}' WHERE id=$1`, id)
+			require.NoError(t, err)
+			restored, _ := read()
+			require.Equal(t, after+1, restored, "legacy-to-object transitions must invalidate proposals")
+		})
+	}
+}
+
 func TestAIOpsPostgresRuntimePauseDoesNotOverwriteManualSchedulable(t *testing.T) {
 	id := aiOpsIntegrationAccount(t)
 	repo := &accountRepository{sql: integrationDB}

@@ -5,11 +5,15 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS ai_ops_revision BIGINT NOT NULL DE
 -- revision. All unrecognised extra keys remain configuration (fail closed).
 CREATE OR REPLACE FUNCTION ai_ops_configuration_extra(input JSONB) RETURNS JSONB
 LANGUAGE sql IMMUTABLE AS $$
+ -- Legacy extra values may be arrays, scalars or JSON null. Preserve their
+ -- identity for revision checks without passing them to jsonb_each.
+ SELECT CASE WHEN jsonb_typeof(input) = 'object' THEN (
  SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb)
- FROM jsonb_each(COALESCE(input,'{}'::jsonb))
+ FROM jsonb_each(CASE WHEN jsonb_typeof(input) = 'object' THEN input ELSE '{}'::jsonb END)
  WHERE key NOT IN ('codex_usage_updated_at','codex_credits_snapshot','codex_referral_snapshot',
    'grok_billing_snapshot','session_window_utilization')
  AND key !~ '^(codex_primary_|codex_secondary_|codex_5h_|codex_7d_|codex_reset_credit_|codex_turn_ticket:|passive_usage_|upstream_billing_probe|upstream_billing_rate_sync|ollama_cloud_usage)'
+ ) ELSE COALESCE(input,'{}'::jsonb) END
 $$;
 
 CREATE OR REPLACE FUNCTION ai_ops_account_revision() RETURNS TRIGGER LANGUAGE plpgsql AS $$
