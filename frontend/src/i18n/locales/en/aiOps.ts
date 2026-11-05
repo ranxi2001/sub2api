@@ -2,7 +2,7 @@ export default {
   title: 'AI operations',
   description: 'Read-only diagnostics from operational monitoring data, with evidence and tuning recommendations.',
   observeOnly: 'Read-only diagnostics',
-  noChanges: 'Recommendations have not been executed. This page does not enable or disable accounts, change concurrency, or adjust load factors.',
+  noChanges: 'Diagnostic recommendations do not execute account changes. Production changes require the separate execution controls and an authorized policy below.',
   disabled: 'AI operations is not enabled in this deployment.',
   notConfigured: 'The diagnostic service is not ready. Contact the deployment administrator.',
   refresh: 'Refresh records',

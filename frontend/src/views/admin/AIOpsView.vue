@@ -37,6 +37,8 @@
         </template>
       </section>
 
+      <AIOpsControls :run="selected" />
+
       <div class="grid items-start gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
         <aside class="card p-4">
           <h2 class="font-semibold">{{ t('aiOps.history') }}</h2>
@@ -123,6 +125,7 @@ import { useI18n } from 'vue-i18n'
 import { aiOpsAPI, type AIOpsRun, type AIOpsStatus } from '@/api/admin/aiOps'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
+import AIOpsControls from '@/components/admin/operations/AIOpsControls.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { useAuthStore } from '@/stores/auth'

@@ -26,7 +26,7 @@ function run(id = 'run-a', status: AIOpsRun['status'] = 'completed'): AIOpsRun {
 function mountView(locale: 'en' | 'zh' = 'en') {
   return mount(AIOpsView, { global: {
     plugins: [createI18n({ legacy: false, locale, messages: { en: { aiOps: en }, zh: { aiOps: zh } } })],
-    stubs: { AppLayout: { template: '<main><slot /></main>' }, SmartOpsNav: true, NewFeatureBadge: true },
+    stubs: { AppLayout: { template: '<main><slot /></main>' }, SmartOpsNav: true, NewFeatureBadge: true, AIOpsControls: true },
   } })
 }
 let wrapper: ReturnType<typeof mountView> | undefined

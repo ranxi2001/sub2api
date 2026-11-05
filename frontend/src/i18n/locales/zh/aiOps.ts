@@ -2,7 +2,7 @@ export default {
   title: 'AI 运维',
   description: '根据运维监控数据进行只读诊断，生成带证据的分析与调优建议。',
   observeOnly: '只读诊断',
-  noChanges: '所有建议均未执行。本页不会开关账号、修改并发或调整负载因子。',
+  noChanges: '诊断建议不会执行账号变更。生产变更须通过下方独立执行控制和已授权策略。',
   disabled: '部署配置尚未启用 AI 运维。',
   notConfigured: '诊断服务尚未就绪，请联系部署管理员。',
   refresh: '刷新记录',

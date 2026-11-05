@@ -1058,6 +1058,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if options, ok := pelicanTestOptionsFromContext(ctx); ok {
 		payload = createPelicanOpenAIPayload(upstreamTestModelID, isOAuth, options.prompt, options.reasoningEffort)
 	}
+	if probe, _ := ctx.Value(aiOpsRecoveryProbeKey{}).(bool); probe {
+		payload["max_output_tokens"] = 128
+		payload["instructions"] = "Answer the fixed health probe with exactly OK."
+		payload["tools"] = []any{}
+	}
 	applyModelTracePayload(ctx, payload)
 	payloadBytes, _ := json.Marshal(payload)
 

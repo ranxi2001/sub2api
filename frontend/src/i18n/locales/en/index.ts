@@ -18,6 +18,7 @@ import qualityOps from './qualityOps'
 import controlledExperiments from './controlledExperiments'
 import accountOps from './accountOps'
 import aiOps from './aiOps'
+import aiOpsControl from './aiOpsControl'
 import tokenGuard from './tokenGuard'
 import pelicanTests from './pelicanTests'
 import modelTrace from './modelTrace'
@@ -60,6 +61,7 @@ export default {
   controlledExperiments,
   accountOps,
   aiOps,
+  aiOpsControl,
   tokenGuard,
   pelicanTests,
   modelTrace,
