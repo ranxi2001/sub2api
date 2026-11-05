@@ -826,6 +826,9 @@ func (s *stubAdminService) AdminUpdateAPIKeySettings(ctx context.Context, keyID 
 	if input.ReasoningEffort != nil {
 		result.APIKey.ReasoningEffort = *input.ReasoningEffort
 	}
+	if input.AllowLongContext != nil {
+		result.APIKey.AllowLongContext = *input.AllowLongContext
+	}
 	if input.ResetRateLimitUsage {
 		result.APIKey.Usage5h, result.APIKey.Usage1d, result.APIKey.Usage7d = 0, 0, 0
 		result.APIKey.Window5hStart, result.APIKey.Window1dStart, result.APIKey.Window7dStart = nil, nil, nil

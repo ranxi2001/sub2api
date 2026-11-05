@@ -45,6 +45,28 @@
         </select>
         <p class="mt-2 text-sm text-gray-500 dark:text-dark-300">{{ t('apiKeyModelPolicy.effortHint') }}</p>
       </div>
+      <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-600">
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-2">
+            <label for="api-key-allow-long-context" class="input-label mb-0">{{ t('apiKeyModelPolicy.allowLongContext') }}</label>
+            <NewFeatureBadge
+              v-if="authStore.isAdmin"
+              :notice-id="NEW_FEATURE_NOTICES.apiKeyLongContext"
+              :user-id="authStore.user?.id"
+            />
+          </div>
+          <Toggle
+            id="api-key-allow-long-context"
+            v-model="allowLongContext"
+            :disabled="saving"
+            :aria-label="t('apiKeyModelPolicy.allowLongContext')"
+            aria-describedby="api-key-long-context-hint"
+            data-test="allow-long-context"
+          />
+        </div>
+        <p id="api-key-long-context-hint" class="mt-2 text-sm text-gray-500 dark:text-dark-300">{{ t('apiKeyModelPolicy.longContextHint') }}</p>
+        <p v-if="!allowLongContext" class="mt-2 text-sm text-amber-700 dark:text-amber-300" data-test="long-context-restrictions">{{ t('apiKeyModelPolicy.longContextRestrictions') }}</p>
+      </div>
       <p v-if="error" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
     </form>
     <template #footer>
@@ -63,16 +85,22 @@ import { onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import type { ApiKey } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Toggle from '@/components/common/Toggle.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 
 const props = defineProps<{ show: boolean; apiKey: ApiKey | null }>()
 const emit = defineEmits<{ close: []; updated: [key: ApiKey] }>()
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const efforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 const rows = ref<Array<{ id: number; source: string; target: string }>>([])
 const reasoningEffort = ref('')
+const allowLongContext = ref(true)
 const saving = ref(false)
 const error = ref('')
 let nextRowID = 0
@@ -84,6 +112,7 @@ watch(() => [props.show, props.apiKey?.id] as const, () => {
   error.value = ''
   rows.value = Object.entries(props.apiKey?.model_mapping ?? {}).map(([source, target]) => ({ id: nextRowID++, source, target }))
   reasoningEffort.value = props.apiKey?.reasoning_effort ?? ''
+  allowLongContext.value = props.apiKey?.allow_long_context ?? true
 }, { immediate: true })
 
 onUnmounted(() => { generation++ })
@@ -139,7 +168,8 @@ async function save() {
   try {
     const result = await adminAPI.apiKeys.updateApiKeyModelPolicy(keyID, {
       model_mapping: Object.fromEntries(mappings),
-      reasoning_effort: reasoningEffort.value
+      reasoning_effort: reasoningEffort.value,
+      allow_long_context: allowLongContext.value
     })
     if (generation !== currentGeneration) return
     appStore.showSuccess(t('apiKeyModelPolicy.saved'))

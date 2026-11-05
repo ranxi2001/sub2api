@@ -93,6 +93,7 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 		Status:             k.Status,
 		ModelMapping:       k.ModelMapping,
 		ReasoningEffort:    k.ReasoningEffort,
+		AllowLongContext:   k.AllowLongContext,
 		IPWhitelist:        k.IPWhitelist,
 		IPBlacklist:        k.IPBlacklist,
 		LastUsedAt:         k.LastUsedAt,

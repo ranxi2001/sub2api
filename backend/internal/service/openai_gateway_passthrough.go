@@ -381,7 +381,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		// The returned snapshot is also the source for the token, proxy and
 		// ticket header so a token refresh or group change cannot leave this
 		// attempt using the stale scheduler snapshot.
-		latest, admissionErr := s.admitOpenAITurn(ctx, c, account, actualModel)
+		latest, admissionErr := s.admitOpenAITurn(ctx, c, account, actualModel, body)
 		if admissionErr != nil {
 			return nil, admissionErr
 		}

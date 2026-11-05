@@ -1,5 +1,5 @@
 export default {
-  title: '密钥模型设置',
+  title: '密钥模型与上下文设置',
   scopeHint: '仅管理员可设置，只对当前 API Key 生效；与密钥的其他信息分别保存。',
   modelMapping: '模型映射',
   mappingHint: '对文本请求精确匹配模型 ID，使用目标模型路由和计费；请求模型和目标模型都需在分组允许范围内。未匹配的模型保持原样，最多添加 100 条。',
@@ -11,9 +11,12 @@ export default {
   reasoningEffort: '固定推理强度',
   followClient: '跟随客户端',
   effortHint: '覆盖 OpenAI 请求中的推理强度，客户端未传时也生效。超过分组上限时，按分组策略降级或拒绝请求；请选择目标模型支持的档位。',
+  allowLongContext: '允许长上下文',
+  longContextHint: '默认开启，仅影响当前 API Key。关闭后，按模型阈值和本地 Token 估算，在转发前拒绝进入长上下文范围的请求；缓存命中的完整输入文本同样计入。估算值与上游实际用量可能有差异。',
+  longContextRestrictions: '关闭时，历史响应引用、远程文件等未包含完整可见文本的请求也会被拒绝。请发送完整文本，或联系管理员开启长上下文。',
   invalidModel: '模型 ID 长度需为 1–200 个 UTF-8 字节，且不含空白或控制字符。',
   duplicateModel: '请求模型“{model}”存在重复映射。',
   tooManyMappings: '最多设置 100 条模型映射。',
-  saved: '密钥模型设置已保存',
-  saveFailed: '密钥模型设置保存失败'
+  saved: '密钥模型与上下文设置已保存',
+  saveFailed: '密钥模型与上下文设置保存失败'
 }

@@ -105,6 +105,11 @@ func ReasoningEffort(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldReasoningEffort, v))
 }
 
+// AllowLongContext applies equality check predicate on the "allow_long_context" field. It's identical to AllowLongContextEQ.
+func AllowLongContext(v bool) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldAllowLongContext, v))
+}
+
 // LastUsedAt applies equality check predicate on the "last_used_at" field. It's identical to LastUsedAtEQ.
 func LastUsedAt(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldLastUsedAt, v))
@@ -648,6 +653,16 @@ func ReasoningEffortEqualFold(v string) predicate.APIKey {
 // ReasoningEffortContainsFold applies the ContainsFold predicate on the "reasoning_effort" field.
 func ReasoningEffortContainsFold(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldContainsFold(FieldReasoningEffort, v))
+}
+
+// AllowLongContextEQ applies the EQ predicate on the "allow_long_context" field.
+func AllowLongContextEQ(v bool) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldAllowLongContext, v))
+}
+
+// AllowLongContextNEQ applies the NEQ predicate on the "allow_long_context" field.
+func AllowLongContextNEQ(v bool) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldAllowLongContext, v))
 }
 
 // LastUsedAtEQ applies the EQ predicate on the "last_used_at" field.
