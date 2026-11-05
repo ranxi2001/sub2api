@@ -67,6 +67,18 @@ describe('SmartOpsNav', () => {
     expect(hrefs(wrapper)).not.toContain('/admin/ai-ops')
   })
 
+  it('keeps the AI notice in the normal nav flow so dismissing it reserves no space', async () => {
+    const wrapper = await mountAt('/admin/ai-ops')
+    const entry = wrapper.get('a[href="/admin/ai-ops"]')
+    const badge = wrapper.get('[data-testid="new-feature-badge"]')
+    expect(entry.classes()).not.toContain('pr-16')
+    expect(badge.classes()).not.toContain('absolute')
+    await badge.trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+    expect(entry.classes()).not.toContain('pr-16')
+  })
+
   it('shares the AI notice dismissal across entries and retains it after reloading preferences', async () => {
     useNewFeatureNoticeStore().dismiss(41, NEW_FEATURE_NOTICES.protocolFeatureSwitches)
     const first = await mountAt('/admin/ai-ops')

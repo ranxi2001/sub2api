@@ -18,14 +18,7 @@
             :aria-label="t('admin.settings.title')"
           >
             <div class="settings-tabs">
-              <div
-                v-for="tab in settingsTabs"
-                :key="tab.key"
-                role="presentation"
-                class="settings-tab-wrapper relative flex min-w-0 flex-1 basis-0"
-                :class="tab.key === 'features' && 'settings-tab-wrapper-new-feature'"
-                :style="tab.key === 'features' ? { flex: '2.2 1 0%', minWidth: '11rem' } : undefined"
-              >
+              <template v-for="tab in settingsTabs" :key="tab.key">
                 <button
                   :id="`settings-tab-${tab.key}`"
                   type="button"
@@ -36,7 +29,6 @@
                     'settings-tab',
                     activeTab === tab.key && 'settings-tab-active',
                   ]"
-                  :style="['features', 'gateway', 'email', 'payment'].includes(tab.key) ? { paddingRight: '7rem' } : undefined"
                   @click="selectSettingsTab(tab.key)"
                   @keydown="handleSettingsTabKeydown($event, tab.key)"
                 >
@@ -51,27 +43,27 @@
                   v-if="tab.key === 'features'"
                   :notice-id="NEW_FEATURE_NOTICES.protocolFeatureSwitches"
                   :user-id="authStore.user?.id"
-                  class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
+                  class="settings-tab-badge"
                 />
                 <NewFeatureBadge
                   v-if="tab.key === 'email'"
                   :notice-id="NEW_FEATURE_NOTICES.balanceForecast"
                   :user-id="authStore.user?.id"
-                  class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
+                  class="settings-tab-badge"
                 />
                 <NewFeatureBadge
                   v-if="tab.key === 'gateway'"
                   :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting"
                   :user-id="authStore.user?.id"
-                  class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
+                  class="settings-tab-badge"
                 />
                 <NewFeatureBadge
                   v-if="tab.key === 'payment'"
                   :notice-id="NEW_FEATURE_NOTICES.bepusdtPayment"
                   :user-id="authStore.user?.id"
-                  class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
+                  class="settings-tab-badge"
                 />
-              </div>
+              </template>
             </div>
           </nav>
         </div>
@@ -14133,11 +14125,7 @@ h2[id^="settings-section-"]:target {
   }
 
   .settings-tab {
-    @apply min-w-0 flex-1 basis-0 overflow-hidden px-2 text-[13px];
-  }
-
-  .settings-tab-icon {
-    @apply h-6 w-6;
+    @apply min-w-0 flex-1 basis-0 overflow-hidden px-1.5 text-[13px];
   }
 }
 
@@ -14179,7 +14167,7 @@ h2[id^="settings-section-"]:target {
 }
 
 .settings-tab-icon {
-  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors duration-200 dark:text-gray-400;
+  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors duration-200 dark:text-gray-400 md:h-6 md:w-6;
 }
 
 .settings-tab:hover .settings-tab-icon,
@@ -14193,6 +14181,12 @@ h2[id^="settings-section-"]:target {
 
 .settings-tab-label {
   @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-none;
+}
+
+/* The badge is a normal flex item: its width follows the locale's text, and
+   dismissing it hands the space back to the tabs. */
+.settings-tab-badge {
+  @apply -ml-0.5 mr-0.5;
 }
 </style>
 

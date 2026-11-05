@@ -863,6 +863,24 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).not.toHaveBeenCalled();
   });
 
+  it("keeps tab badges in the normal tab flow so dismissing one reserves no space", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const tabBadge = (tab: string) => wrapper.find(`#settings-tab-${tab} + [data-testid="new-feature-badge"]`);
+    const tabBar = wrapper.get(".settings-tabs").element;
+
+    expect(["features", "gateway", "payment", "email"].filter((tab) => tabBadge(tab).exists())).toHaveLength(4);
+    expect(tabBar.querySelector("[style]")).toBeNull();
+    expect(tabBar.querySelector(".absolute")).toBeNull();
+
+    await tabBadge("gateway").trigger("click");
+    await flushPromises();
+
+    expect(tabBadge("gateway").exists()).toBe(false);
+    expect(tabBadge("email").exists()).toBe(true);
+    expect(tabBar.querySelector("[style]")).toBeNull();
+  });
+
   it("dismisses the gateway notice across the tab and both routing controls without dismissing protocol settings", async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { config: { enabled: false, pods: [], regions: [] }, pods: [], stats: {} } });
     try {
