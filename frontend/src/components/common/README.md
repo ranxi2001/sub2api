@@ -259,6 +259,8 @@ A dismissible "New feature" badge for admin navigation, settings tabs, and featu
 
 Add a new ID to `frontend/src/constants/newFeatureNotices.ts` for each release announcement, then reuse it at all related UI locations. Dismissal is stored per admin in the current browser. ID 登记、复用和重新公告以及必要回归要求，以[贡献指南](../../../../CONTRIBUTING.md#新功能提示登记与接入)为准。
 
+Keep the badge in the normal layout, as a sibling of the tab or link it belongs to. Do not position it absolutely over padding reserved for it: a fixed reservation stays after the badge is dismissed and cannot follow the text width of each locale.
+
 ## Import
 
 You can import components individually:

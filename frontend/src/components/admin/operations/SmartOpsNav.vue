@@ -1,8 +1,8 @@
 <template>
   <nav :aria-label="t('accountOps.smartTitle')" class="mb-5 flex w-fit flex-wrap gap-1 rounded-xl border border-gray-200/70 bg-white/80 p-1 shadow-sm dark:border-dark-700 dark:bg-dark-900">
-    <div v-for="item in items" :key="item.path" class="relative flex items-center">
-      <RouterLink :to="item.path" v-slot="{ isActive }" class="rounded-lg px-4 py-2 text-sm transition-colors" :class="[route.path === item.path ? 'bg-gray-900 font-medium text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-800', item.noticeId ? 'pr-16' : '']"><span :aria-current="isActive ? 'page' : undefined">{{ t(item.label) }}</span></RouterLink>
-      <NewFeatureBadge v-if="item.noticeId" :notice-id="item.noticeId" :user-id="authStore.user?.id" class="absolute right-2" />
+    <div v-for="item in items" :key="item.path" class="flex items-center">
+      <RouterLink :to="item.path" v-slot="{ isActive }" class="rounded-lg px-4 py-2 text-sm transition-colors" :class="[route.path === item.path ? 'bg-gray-900 font-medium text-white dark:bg-gray-100 dark:text-gray-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-800']"><span :aria-current="isActive ? 'page' : undefined">{{ t(item.label) }}</span></RouterLink>
+      <NewFeatureBadge v-if="item.noticeId" :notice-id="item.noticeId" :user-id="authStore.user?.id" class="mx-1" />
     </div>
   </nav>
 </template>
