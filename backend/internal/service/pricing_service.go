@@ -1589,7 +1589,7 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 // 3. gpt-5.2-20251222 -> gpt-5.2（去掉日期版本号）
 // 4. gpt-5.3-codex -> gpt-5.2-codex
 // 5. gpt-5.4* -> 业务静态兜底价
-// 6. 最终回退到 DefaultTestModel (gpt-5.1-codex)
+// 6. 最终回退到原有 gpt-5.4 计费价，与账号测试模型独立
 func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 	if strings.HasPrefix(model, "gpt-5.3-codex-spark") {
 		if pricing, ok := s.pricingData["gpt-5.1-codex"]; ok {
@@ -1620,6 +1620,11 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 			return openAIGPT6SolFallbackPricing
 		}
 		return openAIGPT6LunaFallbackPricing
+	}
+
+	// Do not fall back to older image-model rates if the remote catalog lags.
+	if model == "gpt-image-2.6-flare" || model == "gpt-image-2.6-sunburst" {
+		return openAIGPTImage25FallbackPricing
 	}
 
 	// 尝试的回退变体
@@ -1690,8 +1695,8 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 
 	// Remote price mirrors can lag new releases. Never bill GPT Image 2.5
 	// using the older image model's rates when its entry is absent.
-	for _, imageModel := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
-		if model == imageModel || model == imageModel+"-2026-09-08" {
+	for _, imageModel := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"} {
+		if model == imageModel || (strings.HasPrefix(imageModel, "gpt-image-2.5-") && model == imageModel+"-2026-09-08") {
 			return openAIGPTImage25FallbackPricing
 		}
 	}
@@ -1705,10 +1710,10 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		return nil
 	}
 
-	// 最终回退到 DefaultTestModel
-	defaultModel := strings.ToLower(openai.DefaultTestModel)
-	if pricing, ok := s.pricingData[defaultModel]; ok {
-		logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI fallback to default model %s -> %s", model, defaultModel)
+	// Preserve the existing billing fallback independently of account probes.
+	const fallbackModel = "gpt-5.4"
+	if pricing, ok := s.pricingData[fallbackModel]; ok {
+		logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI fallback to default model %s -> %s", model, fallbackModel)
 		return pricing
 	}
 

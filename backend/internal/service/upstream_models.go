@@ -260,6 +260,15 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 	} else if saveErr := s.saveGrokCatalogObservation(ctx, account, grokObservation); saveErr != nil {
 		return nil, newUpstreamModelSyncInternalError("Failed to save upstream model catalog", saveErr)
 	}
+	if account != nil {
+		filtered := make([]string, 0, len(models))
+		for _, model := range models {
+			if !isHiddenOpenAISubscriptionModel(account, model) {
+				filtered = append(filtered, model)
+			}
+		}
+		models = filtered
+	}
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
 	if account != nil && account.IsGrok() {
 		if grokObservation != nil && grokObservation.Attempt.Status == grokCatalogStatusConfiguredFallback {

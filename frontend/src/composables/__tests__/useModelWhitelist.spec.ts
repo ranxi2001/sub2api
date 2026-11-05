@@ -36,12 +36,18 @@ describe('useModelWhitelist', () => {
     }
   })
 
-  it('openai 模型列表包含 GPT-5.4 官方快照', () => {
+  it('openai 模型列表移除旧型号并包含 GPT Image 2.6', () => {
     const models = getModelsByPlatform('openai')
 
-    expect(models).toContain('gpt-5.4')
-    expect(models).toContain('gpt-5.4-mini')
-    expect(models).toContain('gpt-5.4-2026-03-05')
+    expect(models).not.toContain('gpt-5.4')
+    expect(models).not.toContain('gpt-5.4-mini')
+    expect(models).not.toContain('gpt-5.4-2026-03-05')
+    expect(models).not.toContain('gpt-5.5')
+    expect(models).not.toContain('gpt-5.2')
+    expect(models).not.toContain('gpt-5.3-codex-spark')
+    expect(models).not.toContain('gpt-image-1.5')
+    expect(models).toContain('gpt-image-2.6-flare')
+    expect(models).toContain('gpt-image-2.6-sunburst')
     expect(models).toContain('codex-auto-review')
     expect(models).toContain('gpt-5.6')
     expect(models).toContain('gpt-6')
