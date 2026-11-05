@@ -25,6 +25,7 @@ func scopedAdminAccountDTO(a *service.Account, p adminaccess.Policy) gin.H {
 		}
 	}
 	result := gin.H{"id": a.ID, "name": a.Name, "notes": a.Notes, "platform": a.Platform, "type": a.Type, "status": a.Status, "schedulable": a.Schedulable, "concurrency": a.Concurrency, "priority": a.Priority, "group_ids": groups}
+	result["load_factor"] = a.LoadFactor
 	// 兼容原账户读取结构，仅返回模型映射，凭证及扩展字段继续脱敏。
 	if p.AllowsAccount("accounts.read", resource) {
 		mapping := map[string]string{}

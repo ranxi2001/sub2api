@@ -1,0 +1,59 @@
+name: AI operations UI acceptance
+on:
+  pull_request:
+    paths:
+      - 'frontend/src/**/AIOps*'
+      - 'frontend/src/api/admin/aiOps*'
+      - 'frontend/src/api/admin/__tests__/aiOps*'
+      - 'frontend/src/components/admin/operations/SmartOpsNav.vue'
+      - 'frontend/src/i18n/locales/*/aiOps*'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/router/index.ts'
+      - 'backend/internal/**/ai_ops*'
+      - 'backend/internal/**/ops_ai*'
+      - 'backend/migrations/*ai_ops*'
+      - '.github/scripts/ai-ops-screenshot.mjs'
+      - '.github/workflows/ai-ops.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ai-ops-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: AI operations component and API boundaries
+        working-directory: frontend
+        run: pnpm exec vitest run src/views/admin/__tests__/AIOpsView.spec.ts src/components/admin/operations/__tests__/AIOpsControls.spec.ts src/components/admin/operations/__tests__/AIOpsRecoveryProbes.spec.ts src/api/admin/__tests__/aiOps.spec.ts src/api/admin/__tests__/aiOpsControl.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: Frontend typecheck
+        run: pnpm --dir frontend run typecheck
+      - name: Install isolated synthetic browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/ai-ops-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/ai-ops-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Actual AI operations pages with synthetic data
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/ai-ops-browser/node_modules/playwright
+          AI_OPS_SCREENSHOT_DIR: ${{ runner.temp }}/ai-ops-screenshots
+        run: node .github/scripts/ai-ops-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ai-ops-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/ai-ops-screenshots
+          if-no-files-found: warn

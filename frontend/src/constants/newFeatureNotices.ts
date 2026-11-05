@@ -14,4 +14,5 @@ export const NEW_FEATURE_NOTICES = {
   apiKeyLongContext: 'api-key-long-context-control-initial-announcement',
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
+  aiOpsCodex: 'ai-ops-codex-observe-initial-announcement',
 } as const
