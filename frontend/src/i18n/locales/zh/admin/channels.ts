@@ -45,6 +45,15 @@ export default {
 
     // Channel Management
     channels: {
+      pricingTransfer: {
+        export: '导出定价',
+        import: '导入定价',
+        hint: 'JSON 文件仅包含当前平台的模型定价（Token 价格单位：美元 / 百万 Token），不含分组、映射和账号统计规则。导入替换当前平台定价，保存渠道后生效。',
+        confirm: '将用文件中的 {count} 条定价替换 {platform} 当前全部模型定价（包括未保存修改）。是否继续？',
+        imported: '定价已导入，请检查并保存渠道',
+        invalidFile: '定价文件无效：请使用本页导出的 JSON（版本 1），最多 2 MiB、1000 条规则、5000 个模型，价格须非负且倍率须大于 0。',
+        platformMismatch: '文件属于 {platform} 平台，请切换到对应平台后导入',
+      },
       title: '渠道管理',
       description: '管理渠道和自定义模型定价',
       searchChannels: '搜索渠道...',
