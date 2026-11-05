@@ -1,3 +1,5 @@
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 41 } }) }))
+vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template: '<span />' } }))
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
