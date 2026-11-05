@@ -1267,6 +1267,12 @@ type GatewayConfig struct {
 	// ConcurrencySlotTTLMinutes: 并发槽位过期时间（分钟）
 	// 应大于最长 LLM 请求时间，防止请求完成前槽位过期
 	ConcurrencySlotTTLMinutes int `mapstructure:"concurrency_slot_ttl_minutes"`
+	// APIKeySlotTTLSeconds: 普通 API Key 并发槽位的独立过期时间（秒）。
+	// 0 表示继承 concurrency_slot_ttl_minutes 的有效值，升级默认不改变行为；
+	// 显式正值需不低于 30 秒（配置策略下限，非实测安全 SLA，见部署文档）。
+	// 仅作用于普通共享 Redis 实现的 API Key 槽位；account/user 槽位、Live
+	// 租约及 regional concurrency authority 不受影响。
+	APIKeySlotTTLSeconds int `mapstructure:"api_key_slot_ttl_seconds"`
 	// SessionIdleTimeoutMinutes: 会话空闲超时时间（分钟），默认 5 分钟
 	// 用于 Anthropic OAuth/SetupToken 账号的会话数量限制功能
 	// 空闲超过此时间的会话将被自动释放
@@ -2842,6 +2848,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.max_upstream_clients", 5000)
 	viper.SetDefault("gateway.client_idle_ttl_seconds", 900)
 	viper.SetDefault("gateway.concurrency_slot_ttl_minutes", 30) // 并发槽位过期时间（支持超长请求）
+	viper.SetDefault("gateway.api_key_slot_ttl_seconds", 0)      // 普通 API Key 槽位独立 TTL；0=继承 concurrency_slot_ttl_minutes
 	viper.SetDefault("gateway.stream_data_interval_timeout", 180)
 	viper.SetDefault("gateway.excel_bps_stream_data_interval_timeout", 120)
 	viper.SetDefault("gateway.excel_bps_state_redis_enabled", false)
@@ -3753,6 +3760,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ConcurrencySlotTTLMinutes <= 0 {
 		return fmt.Errorf("gateway.concurrency_slot_ttl_minutes must be positive")
+	}
+	if c.Gateway.APIKeySlotTTLSeconds < 0 {
+		return fmt.Errorf("gateway.api_key_slot_ttl_seconds must be non-negative")
+	}
+	// 30 秒下限是配置策略：更短的租约会压缩既有 watchdog/续租超时公式的余量，
+	// 不是实测安全 SLA。
+	if c.Gateway.APIKeySlotTTLSeconds != 0 && c.Gateway.APIKeySlotTTLSeconds < 30 {
+		return fmt.Errorf("gateway.api_key_slot_ttl_seconds must be 0 (inherit concurrency_slot_ttl_minutes) or at least 30 seconds")
 	}
 	if c.Gateway.StreamDataIntervalTimeout < 0 {
 		return fmt.Errorf("gateway.stream_data_interval_timeout must be non-negative")
