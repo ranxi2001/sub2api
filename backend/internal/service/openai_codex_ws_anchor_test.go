@@ -20,7 +20,7 @@ func anchorTestContext(key int64, session string) *gin.Context {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	c.Request.Header.Set("session_id", session)
 	group := int64(11)
-	c.Set("api_key", &APIKey{ID: key, GroupID: &group})
+	c.Set("api_key", &APIKey{ID: key, GroupID: &group, AllowLongContext: true})
 	return c
 }
 func anchorTestService() (*OpenAIGatewayService, *Account) {

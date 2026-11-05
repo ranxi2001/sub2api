@@ -96,13 +96,13 @@ func TestIssue494LineageDoesNotPoisonOtherAccount(t *testing.T) {
 	body := []byte(`{"model":"gpt-6-luna","stream":true,"input":[` + locatorInput(locatorA) + `,` + locatorInput(locatorB) + `]}`)
 	for i := 0; i < 4; i++ {
 		c, _ := newStreamLineageTestContext("same-lineage-session")
-		c.Set("api_key", &APIKey{ID: 10})
+		c.Set("api_key", &APIKey{ID: 10, AllowLongContext: true})
 		account := newStreamLineageHTTPAccount()
 		if i == 1 {
 			account.ID++
 		}
 		if i == 2 {
-			c.Set("api_key", &APIKey{ID: 11})
+			c.Set("api_key", &APIKey{ID: 11, AllowLongContext: true})
 		}
 		_, err := svc.Forward(context.Background(), c, account, body)
 		if i == 0 {

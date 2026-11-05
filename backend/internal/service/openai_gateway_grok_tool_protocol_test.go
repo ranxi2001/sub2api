@@ -262,7 +262,7 @@ func TestForwardGrokResponsesOAuthRestoresClientToolsNonStreaming(t *testing.T) 
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("api_key", &APIKey{ID: 7102})
+	c.Set("api_key", &APIKey{ID: 7102, AllowLongContext: true})
 
 	account := grokProtocolOAuthAccount(7102)
 	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
