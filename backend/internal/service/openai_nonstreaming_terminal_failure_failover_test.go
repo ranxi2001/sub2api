@@ -106,7 +106,7 @@ func TestNonStreamingSSEToJSON_UnclassifiedFailedEventFailsOver(t *testing.T) {
 	require.Empty(t, rec.Body.String())
 }
 
-// 「response.failed 必须回写协议错误」这一契约没有丢：明确不可重试的错误仍写 502。
+// Non-retryable failures remain errors; context limits use an actionable 400.
 func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -142,7 +142,11 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 			require.Error(t, err)
 			var failoverErr *UpstreamFailoverError
 			require.False(t, errors.As(err, &failoverErr), "不可重试的上游错误不得换号")
-			require.Equal(t, http.StatusBadGateway, rec.Code)
+			wantStatus := http.StatusBadGateway
+			if tc.name == "context_window" {
+				wantStatus = http.StatusBadRequest
+			}
+			require.Equal(t, wantStatus, rec.Code)
 			require.Contains(t, rec.Body.String(), tc.wantMsg)
 			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 		})

@@ -18,10 +18,18 @@ func opsExplicitRequestRejectionSQL(alias, statuses string, phrases []string) st
  AND lower(CONCAT_WS(' ', ` + p + `error_message, ` + p + `upstream_error_message)) LIKE ANY(ARRAY[` + strings.Join(needles, ",") + `]))`
 }
 
+func opsContextLimitRejectionSQL(alias string) string {
+	p := alias + "."
+	original := opsExplicitRequestRejectionSQL(alias, "400, 413, 422", service.OpsContextLimitRejectionNeedles)
+	// A normalized client 400 keeps the original upstream envelope (502 or
+	// HTTP200 SSE). Match the canonical code without reclassifying old 5xx rows.
+	return "(" + original + " OR (" + p + "status_code = 400 AND lower(CONCAT_WS(' ', " + p + "error_message, " + p + "upstream_error_message)) LIKE '%context_length_exceeded%'))"
+}
+
 func opsClientRejectionSQL(alias string) string {
 	p := alias + "."
 	model := opsExplicitRequestRejectionSQL(alias, "400, 404", service.OpsModelCapabilityRejectionNeedles)
-	contextLimit := opsExplicitRequestRejectionSQL(alias, "400, 413, 422", service.OpsContextLimitRejectionNeedles)
+	contextLimit := opsContextLimitRejectionSQL(alias)
 	return `COALESCE((` + model + ` OR ` + contextLimit + ` OR (
  ((COALESCE(` + p + `is_business_limited, FALSE)
    AND (COALESCE(` + p + `error_owner, '') = 'client'
@@ -59,7 +67,7 @@ func opsEffectivePhaseSQL(alias string) string {
 
 func opsEffectiveTypeSQL(alias string) string {
 	model := opsExplicitRequestRejectionSQL(alias, "400, 404", service.OpsModelCapabilityRejectionNeedles)
-	contextLimit := opsExplicitRequestRejectionSQL(alias, "400, 413, 422", service.OpsContextLimitRejectionNeedles)
+	contextLimit := opsContextLimitRejectionSQL(alias)
 	return `(CASE WHEN ` + model + ` THEN 'model_not_found' WHEN ` + contextLimit + ` THEN 'context_limit' ELSE ` + alias + `.error_type END)`
 }
 

@@ -11,6 +11,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOpsNormalizedContextLimitRetainsRawStatusInSQL(t *testing.T) {
+	for _, tc := range []struct {
+		status, upstream int
+		message          string
+		want             bool
+	}{
+		{400, 502, "context_length_exceeded: Too many tokens", true},
+		{400, 200, "context_length_exceeded: Too many tokens", true},
+		{502, 502, "context_length_exceeded", false},
+		{400, 502, "temporary upstream outage", false},
+		{400, 502, "request payload is too large", false},
+	} {
+		var got bool
+		query := "SELECT " + opsClientRejectionSQL("e") + ` FROM (
+ SELECT $1::int AS status_code,$2::int AS upstream_status_code,$3::text AS error_message,
+ ''::text AS upstream_error_message,false AS is_business_limited,'provider'::text AS error_owner,
+ 'upstream'::text AS error_phase,'upstream_error'::text AS error_type,1::bigint AS account_id,
+ 'upstream_http'::text AS error_source,'[]'::jsonb AS upstream_errors) e`
+		require.NoError(t, integrationDB.QueryRowContext(context.Background(), query, tc.status, tc.upstream, tc.message).Scan(&got))
+		require.Equal(t, tc.want, got)
+		require.Equal(t, tc.want, service.IsOpsContextLimitRejection(tc.status, tc.upstream, tc.message))
+	}
+}
+
 func TestChannelMonitorExcludesClientRejections(t *testing.T) {
 	ctx := context.Background()
 	ops := NewOpsRepository(integrationDB).(*opsRepository)
