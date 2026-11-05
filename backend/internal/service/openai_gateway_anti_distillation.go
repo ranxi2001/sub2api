@@ -22,7 +22,8 @@ func (s *OpenAIGatewayService) ObserveGroupAntiDistillationUsage(ctx context.Con
 	if s == nil || s.groupAntiDistillation == nil || key == nil || account == nil || account.Platform != PlatformOpenAI || result == nil {
 		return
 	}
-	if !openAIGroupAntiDistillationUsageEligible(result) || !gjson.ValidBytes(requestBody) || openAIGroupAntiDistillationRequestHasMedia(requestBody) {
+	if !openAIGroupAntiDistillationUsageEligible(result) || !gjson.ValidBytes(requestBody) ||
+		openAIGroupAntiDistillationRequestHasOpaqueHistory(requestBody) || openAIGroupAntiDistillationRequestHasMedia(requestBody) {
 		return
 	}
 	if ctx == nil {
@@ -43,6 +44,21 @@ func (s *OpenAIGatewayService) ObserveGroupAntiDistillationUsage(ctx context.Con
 		result.antiDistillationRequestID = uuid.NewString()
 	}
 	s.groupAntiDistillation.Observe(sampleCtx, key, result.antiDistillationRequestID, result.Usage.CacheReadInputTokens)
+}
+
+// A reference can hide prior media even when the current turn only sends text.
+// Do not fetch or persist conversation contents to classify protection samples.
+// Session/cache identity fields alone do not imply an upstream history reference.
+func openAIGroupAntiDistillationRequestHasOpaqueHistory(body []byte) bool {
+	view := openAIRequestPayloadView(body)
+	for _, field := range []string{"previous_response_id", "conversation", "conversation_id", "thread_id"} {
+		reference := view.Get(field)
+		if reference.Exists() && reference.Type != gjson.Null &&
+			(reference.Type != gjson.String || strings.TrimSpace(reference.String()) != "") {
+			return true
+		}
+	}
+	return false
 }
 
 // Upstreams may count image/audio input only in the total input tokens. Inspect

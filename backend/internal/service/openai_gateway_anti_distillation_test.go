@@ -32,6 +32,13 @@ func TestOpenAIUsageProtectionExcludesRequestMediaWithoutTokenBreakdown(t *testi
 		{"video input", `{"messages":[{"role":"user","content":[{"type":"video_url","video_url":{"url":"https://example.invalid/video.mp4"}}]}]}`, false, false},
 		{"websocket flat image", `{"type":"response.create","input":[{"role":"user","content":[{"type":"input_image","file_id":"file_example"}]}]}`, true, false},
 		{"websocket wrapped image", `{"type":"response.create","response":{"input":[{"role":"user","content":[{"type":"input_image","file_id":"file_example"}]}]}}`, true, false},
+		{"responses opaque previous turn", `{"previous_response_id":"resp_example","input":"describe the previous picture"}`, false, false},
+		{"responses opaque conversation", `{"conversation":"conv_example","input":"continue"}`, false, false},
+		{"responses opaque conversation object", `{"conversation":{"id":"conv_example"},"input":"continue"}`, false, false},
+		{"chat opaque conversation", `{"conversation_id":"conv_example","messages":[{"role":"user","content":"continue"}]}`, false, true},
+		{"opaque thread", `{"thread_id":"thread_example","input":"continue"}`, false, false},
+		{"websocket flat opaque previous turn", `{"type":"response.create","previous_response_id":"resp_example","input":"continue"}`, true, false},
+		{"websocket wrapped opaque previous turn", `{"type":"response.create","response":{"previous_response_id":"resp_example","input":"continue"}}`, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			protection, redis := antiDistillationTestService(t)
@@ -55,7 +62,7 @@ func TestOpenAIUsageProtectionExcludesRequestMediaWithoutTokenBreakdown(t *testi
 				require.True(t, openAIGroupAntiDistillationUsageEligible(result), "usage alone cannot identify the media request")
 				svc.ObserveGroupAntiDistillationUsage(ctx, key, account, result, time.Now(), []byte(tc.body))
 			}
-			require.Empty(t, redis.Keys(), "media must not create protection samples or pause the user")
+			require.Empty(t, redis.Keys(), "media or unknown history must not create protection samples or pause the user")
 		})
 	}
 }
@@ -65,6 +72,7 @@ func TestOpenAIUsageProtectionStillSamplesTextWithMediaNamesInStringsOrTools(t *
 		`{"input":"explain the input_image and audio fields"}`,
 		`{"messages":[{"role":"user","content":[{"type":"text","text":"input_image"}]}],"tools":[{"type":"function","function":{"name":"example","parameters":{"type":"object","properties":{"image_url":{"type":"string"}}}}}]}`,
 		`{"type":"response.create","response":{"input":[{"type":"function_call_output","call_id":"call_1","output":"{\"type\":\"input_image\"}"}]}}`,
+		`{"previous_response_id":null,"conversation":null,"session_id":"session_example","prompt_cache_key":"cache_example","input":"hello"}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			protection, _ := antiDistillationTestService(t)
