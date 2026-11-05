@@ -175,6 +175,13 @@ func (s *PaymentConfigService) countPendingOrders(ctx context.Context, providerI
 			paymentorder.ProviderInstanceIDEQ(strconv.FormatInt(providerInstanceID, 10)),
 			paymentorder.Or(
 				paymentorder.StatusIn(pendingOrderStatuses...),
+				// Keep the original EasyPay instance while confirmation is
+				// recoverable; deleting it would strand a paid expired order.
+				paymentorder.And(
+					paymentorder.ProviderKeyEQ(payment.TypeEasyPay),
+					paymentorder.StatusEQ(OrderStatusExpired),
+					paymentorder.ExpiresAtGTE(time.Now().Add(-easyPayOrderRecoveryWindow)),
+				),
 				// An expired embedded order can still discover a transfer during
 				// historical scanning. Keep its original provider available for
 				// callback verification and active reconciliation in that window.
