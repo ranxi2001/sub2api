@@ -64,3 +64,19 @@ describe('request capture setting', () => {
     resolve({ request_capture_enabled: true }); await Promise.all([first, second]); expect(store.requestCaptureEnabled).toBe(true); expect(mocks.getSettings).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('smart operations menu preferences', () => {
+  it('defaults to showing all entries and loads persisted choices on refresh', async () => {
+    const store = useAdminSettingsStore()
+    expect(store.smartOpsHiddenMenuItems).toEqual([])
+    mocks.getSettings.mockResolvedValueOnce({ smart_ops_hidden_menu_items: ['/admin/token-guard'] })
+    await store.fetch()
+    expect(store.smartOpsHiddenMenuItems).toEqual(['/admin/token-guard'])
+    mocks.getSettings.mockRejectedValueOnce(new Error('Offline'))
+    await store.fetch(true)
+    expect(store.smartOpsHiddenMenuItems).toEqual(['/admin/token-guard'])
+    mocks.getSettings.mockResolvedValueOnce({ smart_ops_hidden_menu_items: [] })
+    await store.fetch(true)
+    expect(store.smartOpsHiddenMenuItems).toEqual([])
+  })
+})

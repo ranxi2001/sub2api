@@ -33,6 +33,9 @@ func (h *SettingHandler) auditSettingsUpdate(c *gin.Context, before *service.Sys
 
 func diffSettings(before *service.SystemSettings, after *service.SystemSettings, beforeAuthSourceDefaults *service.AuthSourceDefaultSettings, afterAuthSourceDefaults *service.AuthSourceDefaultSettings, req UpdateSettingsRequest) []string {
 	changed := make([]string, 0, 20)
+	if !reflect.DeepEqual(before.SmartOpsHiddenMenuItems, after.SmartOpsHiddenMenuItems) {
+		changed = append(changed, "smart_ops_hidden_menu_items")
+	}
 	if before.RequestCaptureEnabled != after.RequestCaptureEnabled {
 		changed = append(changed, "request_capture_enabled")
 	}

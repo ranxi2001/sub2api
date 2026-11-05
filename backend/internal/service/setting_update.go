@@ -711,6 +711,11 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyUsageShowCacheRate] = strconv.FormatBool(settings.UsageShowCacheRate)
 	updates[SettingKeyUsageShowCacheRateToUsers] = strconv.FormatBool(settings.UsageShowCacheRateToUsers)
 	updates[SettingKeyUsageShowUpstreamResponseModelToUsers] = strconv.FormatBool(settings.UsageShowUpstreamResponseModelToUsers)
+	hiddenMenuItems, err := json.Marshal(normalizeSmartOpsHiddenMenuItems(settings.SmartOpsHiddenMenuItems))
+	if err != nil {
+		return nil, fmt.Errorf("marshal smart ops hidden menu items: %w", err)
+	}
+	updates[SettingKeySmartOpsHiddenMenuItems] = string(hiddenMenuItems)
 	updates[SettingKeyRequestCaptureEnabled] = strconv.FormatBool(captureConfig.Enabled)
 	updates[SettingKeyRequestCaptureQuotaMiB] = strconv.FormatInt(captureConfig.QuotaMiB, 10)
 	updates[SettingKeyRequestCaptureRetentionDays] = strconv.Itoa(captureConfig.RetentionDays)

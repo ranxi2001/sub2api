@@ -794,6 +794,7 @@ export interface SystemSettings {
   usage_show_cache_rate: boolean;
   usage_show_cache_rate_to_users: boolean;
   usage_show_upstream_response_model_to_users: boolean;
+  smart_ops_hidden_menu_items: string[];
   request_capture_enabled: boolean;
   request_capture_quota_mib: number;
   request_capture_retention_days: number;
@@ -1155,6 +1156,7 @@ export interface UpdateSettingsRequest {
   usage_show_cache_rate?: boolean;
   usage_show_cache_rate_to_users?: boolean;
   usage_show_upstream_response_model_to_users?: boolean;
+  smart_ops_hidden_menu_items?: string[];
   request_capture_enabled?: boolean;
   request_capture_quota_mib?: number;
   request_capture_retention_days?: number;

@@ -7409,6 +7409,7 @@
 
         <!-- Tab: Features (功能开关) -->
         <div v-show="activeTab === 'features'" class="space-y-6">
+        <SmartOpsSidebarSettings v-model="form.smart_ops_hidden_menu_items" />
         <div class="card" data-testid="protocol-feature-switches">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <h2 class="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
@@ -9612,6 +9613,7 @@ import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiErro
 import { useAppStore, useAuthStore } from "@/stores";
 import { useAdminSettingsStore } from "@/stores/adminSettings";
 import BalanceForecastSettings from "@/components/settings/BalanceForecastSettings.vue";
+import SmartOpsSidebarSettings from "@/components/settings/SmartOpsSidebarSettings.vue";
 import NewFeatureBadge from "@/components/common/NewFeatureBadge.vue";
 import { NEW_FEATURE_NOTICES } from "@/constants/newFeatureNotices";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
@@ -10656,6 +10658,7 @@ const form = reactive<SettingsForm>({
   usage_show_cache_rate: true,
   usage_show_cache_rate_to_users: false,
   usage_show_upstream_response_model_to_users: false,
+  smart_ops_hidden_menu_items: [] as string[],
   request_capture_enabled: false,
   request_capture_quota_mib: 1024,
   request_capture_retention_days: 7,
@@ -12494,6 +12497,7 @@ async function saveSettings() {
       usage_show_cache_rate: form.usage_show_cache_rate,
       usage_show_cache_rate_to_users: form.usage_show_cache_rate_to_users,
       usage_show_upstream_response_model_to_users: form.usage_show_upstream_response_model_to_users,
+      smart_ops_hidden_menu_items: form.smart_ops_hidden_menu_items,
       request_capture_enabled: form.request_capture_enabled,
       request_capture_quota_mib: form.request_capture_quota_mib,
       request_capture_retention_days: form.request_capture_retention_days,
@@ -12556,6 +12560,7 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    adminSettingsStore.smartOpsHiddenMenuItems = updated.smart_ops_hidden_menu_items ?? [];
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {
