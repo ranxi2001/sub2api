@@ -319,6 +319,17 @@ func aiOpsRegionalUnsupported(ctx context.Context, tx *sql.Tx) (bool, error) {
 	return unsupported, err
 }
 
+func aiOpsLoadFactorConsumed(ctx context.Context, tx *sql.Tx, action string) (bool, error) {
+	if action != "set_load_factor" {
+		return true, nil
+	}
+	var priorityEnabled bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM settings WHERE key='priority_scheduling_v1' AND value::jsonb->>'enabled'='true')`).Scan(&priorityEnabled)
+	// Priority scheduling uses actual inflight/C rather than load_factor for
+	// capacity ranking. Do not approve a parameter the active path may ignore.
+	return !priorityEnabled, err
+}
+
 func aiOpsScopeIDs(p service.AIOpsPolicy) []int64 {
 	ids := make([]int64, 0, len(p.Accounts))
 	for _, a := range p.Accounts {
@@ -415,6 +426,9 @@ func aiOpsReasons(p service.AIOpsPolicy, in service.AIOpsPreviewInput, a aiOpsAc
 	if in.Action == "resume_account" && !a.paused {
 		reasons = append(reasons, "not_ai_paused")
 	}
+	if in.Action == "resume_account" && !e.ProbePassed {
+		reasons = append(reasons, "recovery_probe_required")
+	}
 	// Budget the whole configured capacity domain as unavailable while deciding
 	// pause/shrink, so a correlated upstream is never counted as its own fallback.
 	if in.Action == "pause_account" || in.Action == "set_concurrency" {
@@ -461,6 +475,11 @@ func (r *accountRepository) PreviewAIOps(ctx context.Context, in service.AIOpsPr
 
 func previewAIOps(ctx context.Context, tx *sql.Tx, in service.AIOpsPreviewInput, actorID int64, now time.Time) (service.AIOpsProposal, error) {
 	if in.RunID == "" || len(in.RunID) > 100 || in.ProposalIndex < 0 || in.ProposalIndex > 20 || in.AccountID <= 0 {
+		return service.AIOpsProposal{}, service.ErrAIOpsBlocked
+	}
+	if consumed, err := aiOpsLoadFactorConsumed(ctx, tx, in.Action); err != nil {
+		return service.AIOpsProposal{}, err
+	} else if !consumed {
 		return service.AIOpsProposal{}, service.ErrAIOpsBlocked
 	}
 	var existing []byte
@@ -621,6 +640,11 @@ func applyAIOps(ctx context.Context, tx *sql.Tx, id, digest string, actorID int6
 	}
 	if proposal.Status != "ready" || !now.Before(proposal.ExpiresAt) || p.Revision != proposal.PolicyRevision {
 		return service.AIOpsAction{}, service.ErrAIOpsConflict
+	}
+	if consumed, err := aiOpsLoadFactorConsumed(ctx, tx, proposal.Action); err != nil {
+		return service.AIOpsAction{}, err
+	} else if !consumed {
+		return service.AIOpsAction{}, service.ErrAIOpsBlocked
 	}
 	if automatic && (p.Mode != "bounded_auto" || !slices.Contains(p.AutoActions, proposal.Action) || proposal.Action == "set_load_factor") {
 		return service.AIOpsAction{}, service.ErrAIOpsBlocked
