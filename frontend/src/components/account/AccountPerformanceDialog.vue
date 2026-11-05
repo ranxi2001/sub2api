@@ -4,7 +4,7 @@
       <p v-if="loading">{{ t('accountPerformance.loading') }}</p>
       <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
       <template v-if="metrics">
-        <AccountPerformanceCell :metrics="metrics" :can-configure="false" :notice-user-id="noticeUserId" />
+        <AccountPerformanceCell :metrics="metrics" :can-configure="false" :notice-user-id="noticeUserId" :upstream-error-threshold="upstreamErrorThreshold" />
         <p class="text-xs text-gray-500">{{ t('accountPerformance.samples',{tps:metrics.tps_samples,ttft:metrics.ttft_samples,quality:metrics.quality_samples}) }}</p>
         <p v-if="metrics.paused" class="text-sm text-amber-600">{{ t('accountPerformance.reason',{reason:metrics.reason}) }}</p>
         <label class="flex items-center gap-2 text-sm"><input v-model="config.enabled" type="checkbox" data-testid="monitor-enabled">{{ t('accountPerformance.enabled') }}</label>
@@ -45,7 +45,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import AccountPerformanceCell from './AccountPerformanceCell.vue'
-const props=defineProps<{accountId:number;accountName:string;noticeUserId?:number|null}>()
+const props=defineProps<{accountId:number;accountName:string;noticeUserId?:number|null;upstreamErrorThreshold?:number|null}>()
 const emit=defineEmits<{close:[];updated:[]}>()
 const {t}=useI18n()
 const metrics=ref<AccountPerformance|null>(null),events=ref<PerformanceEvent[]>([])
