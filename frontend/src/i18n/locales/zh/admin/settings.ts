@@ -17,6 +17,14 @@ export default {
         payment: '支付设置',
       },
       features: {
+        smartOpsSidebar: {
+          title: '智能运维侧边栏',
+          description: '选择侧边栏中展示的智能运维入口。保存后对所有管理员生效；仅隐藏菜单，不会停止后台任务、修改功能配置或禁止直接访问页面。',
+          showAll: '全部显示',
+          hideAll: '全部隐藏',
+          count: '已选择 {visible} / {total} 个入口',
+          hint: '全部隐藏后，侧边栏将收起智能运维分组。请求采集等入口仍受原有功能启用条件控制。'
+        },
         excelBpsImages: {
           mode: '图片传输方式',
           modeRelay: '临时 HTTPS 中转（默认）',

@@ -17,6 +17,14 @@ export default {
         payment: 'Payment',
       },
       features: {
+        smartOpsSidebar: {
+          title: 'Smart operations sidebar',
+          description: 'Choose which smart operations entries appear in the sidebar. Saving applies to all administrators. Hiding a menu does not stop background jobs, change feature settings, or block direct page access.',
+          showAll: 'Show all',
+          hideAll: 'Hide all',
+          count: '{visible} / {total} entries selected',
+          hint: 'The sidebar group disappears when all entries are hidden. Existing feature requirements, such as request capture being enabled, still apply.'
+        },
         excelBpsImages: {
           mode: 'Image transport',
           modeRelay: 'Temporary HTTPS relay (default)',

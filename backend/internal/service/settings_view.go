@@ -352,6 +352,7 @@ type SystemSettings struct {
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests  bool
+	SmartOpsHiddenMenuItems     []string // Sidebar presentation only; does not disable jobs or routes.
 	RequestCaptureEnabled       bool
 	RequestCaptureQuotaMiB      int64
 	RequestCaptureRetentionDays int
