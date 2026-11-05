@@ -252,7 +252,8 @@ func TestAIOpsEligibilityRejectsTransportsRecoveryCannotProbe(t *testing.T) {
 		require.False(t, supported)
 		m.ExpectRollback()
 		require.NoError(t, tx.Rollback())
-		require.NoError(t, m.ExpectationsWereMet())
+		m.ExpectClose()
 		require.NoError(t, db.Close())
+		require.NoError(t, m.ExpectationsWereMet())
 	}
 }
