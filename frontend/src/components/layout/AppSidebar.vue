@@ -238,6 +238,7 @@ import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 import { getCustomMenuLabel } from '@/utils/customMenu'
+import { filterSmartOpsSidebar } from '@/utils/smartOpsSidebar'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 
 interface NavItem {
@@ -941,7 +942,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
   ]
 
-  const visible = applyFeatureFlags(baseItems)
+  const visible = filterSmartOpsSidebar(applyFeatureFlags(baseItems), adminSettingsStore.smartOpsHiddenMenuItems)
 
   // 简单模式下，在系统设置前插入 API密钥
   if (authStore.isSimpleMode) {
