@@ -10,15 +10,15 @@ import (
 // This fixture contains no real messages or network access.
 func syntheticOAuthMessageHistory() []byte {
 	var body bytes.Buffer
-	body.WriteString(`{"model":"gpt-5.4","input":[`)
+	_, _ = body.WriteString(`{"model":"gpt-5.4","input":[`)
 	content := strings.Repeat("synthetic ", 128)
 	for i := 0; i < 2000; i++ {
 		if i != 0 {
-			body.WriteByte(',')
+			_ = body.WriteByte(',')
 		}
 		_, _ = fmt.Fprintf(&body, `{"type":"message","id":"msg_%06d","role":"user","content":[{"type":"input_text","text":%q}]}`, i, content)
 	}
-	body.WriteString(`]}`)
+	_, _ = body.WriteString(`]}`)
 	return body.Bytes()
 }
 
