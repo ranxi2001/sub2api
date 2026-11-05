@@ -177,6 +177,9 @@ func (s *PaymentService) checkPaidWithOptions(ctx context.Context, o *dbent.Paym
 	if err != nil {
 		return ""
 	}
+	if payment.GetBasePaymentType(prov.ProviderKey()) == payment.TypeEasyPay && o.ExpiresAt.Before(time.Now().Add(-easyPayOrderRecoveryWindow)) {
+		return ""
+	}
 	queryRef := paymentOrderQueryReference(o, prov)
 	if queryRef == "" {
 		return ""
@@ -184,7 +187,7 @@ func (s *PaymentService) checkPaidWithOptions(ctx context.Context, o *dbent.Paym
 	finishProviderCall := servertiming.ObserveDependency(ctx, "payment")
 	resp, err := prov.QueryOrder(ctx, queryRef)
 	finishProviderCall()
-	if err != nil {
+	if err != nil || resp == nil {
 		slog.Warn("query upstream failed", "orderID", o.ID, "error", err)
 		return ""
 	}
@@ -204,20 +207,36 @@ func (s *PaymentService) checkPaidWithOptions(ctx context.Context, o *dbent.Paym
 			resp = retriedResp
 		}
 		notificationTradeNo := o.PaymentTradeNo
+		isEasyPay := payment.GetBasePaymentType(prov.ProviderKey()) == payment.TypeEasyPay
 		if upstreamTradeNo := strings.TrimSpace(resp.TradeNo); paymentOrderShouldPersistUpstreamTradeNo(queryRef, upstreamTradeNo, notificationTradeNo) {
-			if _, updateErr := s.entClient.PaymentOrder.Update().
-				Where(paymentorder.IDEQ(o.ID)).
-				SetPaymentTradeNo(upstreamTradeNo).
-				Save(ctx); updateErr != nil {
-				slog.Error("persist upstream trade no during checkPaid failed", "orderID", o.ID, "tradeNo", upstreamTradeNo, "error", updateErr)
-			} else {
-				o.PaymentTradeNo = upstreamTradeNo
+			if !isEasyPay {
+				if _, updateErr := s.entClient.PaymentOrder.Update().
+					Where(paymentorder.IDEQ(o.ID)).
+					SetPaymentTradeNo(upstreamTradeNo).
+					Save(ctx); updateErr != nil {
+					slog.Error("persist upstream trade no during checkPaid failed", "orderID", o.ID, "tradeNo", upstreamTradeNo, "error", updateErr)
+				} else {
+					o.PaymentTradeNo = upstreamTradeNo
+				}
 			}
+			// EasyPay persists it atomically in toPaid only after amount and
+			// merchant checks; an unconfirmed query cannot change the order.
 			notificationTradeNo = upstreamTradeNo
 		}
 		if err := s.HandlePaymentNotification(ctx, &payment.PaymentNotification{TradeNo: notificationTradeNo, OrderID: o.OutTradeNo, Amount: resp.Amount, Status: payment.ProviderStatusSuccess, Metadata: resp.Metadata}, prov.ProviderKey()); err != nil {
 			slog.Error("fulfillment failed during checkPaid", "orderID", o.ID, "error", err)
+			if isEasyPay {
+				// Invalid identity/amount and failed local persistence must remain
+				// eligible for reconciliation, never count as a recovered payment.
+				return ""
+			}
 			// Still return already_paid — order was paid, fulfillment can be retried
+		}
+		if isEasyPay {
+			current, loadErr := s.entClient.PaymentOrder.Get(ctx, o.ID)
+			if loadErr != nil || current.PaidAt == nil || (current.Status != OrderStatusPaid && current.Status != OrderStatusRecharging && current.Status != OrderStatusCompleted) {
+				return ""
+			}
 		}
 		return checkPaidResultAlreadyPaid
 	}
@@ -326,15 +345,17 @@ func (s *PaymentService) VerifyOrderByOutTradeNo(ctx context.Context, outTradeNo
 	return o, nil
 }
 
-// ReconcilePendingPaymentOrders actively checks recent pending Alipay and WeChat
-// orders so missed provider notifications do not wait until order expiry to fulfill.
+// ReconcilePendingPaymentOrders checks pending Alipay/WeChat/EasyPay orders.
+// Recently expired EasyPay orders have a separate worker budget.
 func (s *PaymentService) ReconcilePendingPaymentOrders(ctx context.Context) (int, error) {
 	now := time.Now()
+	ctx = context.WithValue(ctx, easyPayBackgroundRecoveryKey{}, true)
 	orders, err := s.entClient.PaymentOrder.Query().
 		Where(
 			paymentorder.StatusEQ(OrderStatusPending),
 			paymentorder.ExpiresAtGT(now),
 			paymentorder.Or(
+				easyPayRecoveryProviderPredicate(),
 				paymentorder.PaymentTypeEQ(payment.TypeWxpay),
 				paymentorder.PaymentTypeHasPrefix(payment.TypeWxpay+"_"),
 				paymentorder.ProviderKeyEQ(payment.TypeWxpay),
@@ -354,6 +375,9 @@ func (s *PaymentService) ReconcilePendingPaymentOrders(ctx context.Context) (int
 
 	recovered := 0
 	for _, order := range orders {
+		if ctx.Err() != nil {
+			break
+		}
 		if s.reconcilePaid(ctx, order) == checkPaidResultAlreadyPaid {
 			recovered++
 		}
@@ -409,7 +433,7 @@ func (s *PaymentService) ExpireTimedOutOrders(ctx context.Context) (int, error) 
 	for _, o := range orders {
 		// Check upstream payment status before expiring — the user may have
 		// paid just before timeout and the webhook hasn't arrived yet.
-		outcome, _ := s.cancelCore(ctx, o, OrderStatusExpired, "system", "order expired")
+		outcome, _ := s.cancelCore(context.WithValue(ctx, easyPayBackgroundRecoveryKey{}, true), o, OrderStatusExpired, "system", "order expired")
 		if outcome == checkPaidResultAlreadyPaid {
 			slog.Info("order was paid during expiry", "orderID", o.ID)
 			continue

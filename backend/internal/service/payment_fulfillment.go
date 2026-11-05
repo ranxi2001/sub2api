@@ -194,16 +194,22 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 		// Chain confirmations and callback retries can exceed the fiat grace.
 		grace = now.Add(-bepusdtOrderRecoveryWindow)
 	}
+	expired := paymentorder.And(paymentorder.StatusEQ(OrderStatusExpired), paymentorder.UpdatedAtGTE(grace))
+	if payment.GetBasePaymentType(pk) == payment.TypeEasyPay {
+		expired = paymentorder.And(paymentorder.StatusEQ(OrderStatusExpired), paymentorder.ExpiresAtGTE(now.Add(-easyPayOrderRecoveryWindow)))
+	}
+	eligible := paymentorder.Or(paymentorder.StatusEQ(OrderStatusPending), paymentorder.StatusEQ(OrderStatusCancelled), expired)
+	if payment.GetBasePaymentType(pk) == payment.TypeEasyPay {
+		eligible = paymentorder.And(eligible, paymentorder.ExpiresAtGTE(now.Add(-easyPayOrderRecoveryWindow)))
+		if background, _ := ctx.Value(easyPayBackgroundRecoveryKey{}).(bool); background {
+			// Recheck at the atomic update boundary: a manual cancellation or
+			// refund racing a scan must not be reversed by the worker.
+			eligible = paymentorder.And(eligible, paymentorder.StatusIn(OrderStatusPending, OrderStatusExpired))
+		}
+	}
 	c, err := s.entClient.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
-		paymentorder.Or(
-			paymentorder.StatusEQ(OrderStatusPending),
-			paymentorder.StatusEQ(OrderStatusCancelled),
-			paymentorder.And(
-				paymentorder.StatusEQ(OrderStatusExpired),
-				paymentorder.UpdatedAtGTE(grace),
-			),
-		),
+		eligible,
 	).SetStatus(OrderStatusPaid).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
 	if err != nil {
 		return fmt.Errorf("update to PAID: %w", err)
@@ -245,11 +251,16 @@ func (s *PaymentService) alreadyProcessed(ctx context.Context, o *dbent.PaymentO
 			"status", cur.Status,
 			"updatedAt", cur.UpdatedAt,
 		)
-		s.writeAuditLog(ctx, o.ID, "PAYMENT_AFTER_EXPIRY", "system", map[string]any{
+		detail := map[string]any{
 			"status":    cur.Status,
 			"updatedAt": cur.UpdatedAt,
 			"reason":    "payment arrived after expiry grace period",
-		})
+		}
+		if payment.GetBasePaymentType(expectedNotificationProviderKeyForOrder(s.registry, cur, "")) == payment.TypeEasyPay {
+			detail["reason"] = "EasyPay recovery deadline elapsed; manual reconciliation required"
+			detail["recovery_until"] = cur.ExpiresAt.Add(easyPayOrderRecoveryWindow)
+		}
+		s.writeAuditLog(ctx, o.ID, "PAYMENT_AFTER_EXPIRY", "system", detail)
 		return nil
 	default:
 		return nil
