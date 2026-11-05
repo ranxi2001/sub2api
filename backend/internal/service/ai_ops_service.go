@@ -110,7 +110,7 @@ func (s *OpsService) SetAIOpsProbeRunner(tests *AccountTestService) {
 	}
 	s.aiOpsMu.Lock()
 	defer s.aiOpsMu.Unlock()
-	s.aiOpsProbeRunner = func(ctx context.Context, id int64, model string) (bool, error) {
+	s.aiOpsProbeRunner = func(ctx context.Context, id int64, model, effort string) (bool, error) {
 		ctx, stop := context.WithCancel(ctx)
 		defer stop()
 		account, err := tests.accountRepo.GetByID(ctx, id)
@@ -121,7 +121,7 @@ func (s *OpsService) SetAIOpsProbeRunner(tests *AccountTestService) {
 		w := &pelicanRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: stop}
 		c, _ := gin.CreateTestContext(w)
 		c.Request = (&http.Request{Header: make(http.Header)}).WithContext(ctx)
-		err = tests.TestPelicanAccountConnection(c, id, model, "Reply with exactly OK. Do not use tools or add any other text.", "low")
+		err = tests.TestPelicanAccountConnection(c, id, model, "Reply with exactly OK. Do not use tools or add any other text.", effort)
 		answer, message := parsePelicanOutput(w.Body.String())
 		if w.overflow || message != "" {
 			return false, ErrAIOpsBlocked
@@ -157,7 +157,7 @@ func (s *OpsService) StartAIOpsProbe(ctx context.Context, accountID int64, model
 		defer s.aiOpsProbeWG.Done()
 		probeCtx, cancel := context.WithTimeout(parent, time.Minute)
 		defer cancel()
-		passed, err := run(probeCtx, accountID, model)
+		passed, err := run(probeCtx, accountID, probe.Model, probe.Effort)
 		if err != nil || probeCtx.Err() != nil {
 			passed = false
 		}

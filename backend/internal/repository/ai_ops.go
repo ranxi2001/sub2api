@@ -230,14 +230,14 @@ var aiOpsEvidenceSQL = `WITH successes AS (
  (SELECT COUNT(*) FROM successes WHERE model<>'' AND effort<>'' AND protocol IN ('http','ws')),
  (SELECT COUNT(DISTINCT model||'|'||effort||'|'||protocol||'|'||input_bucket||'|'||cache_bucket) FROM successes),
  (SELECT COUNT(*) FROM failures WHERE model IS NULL OR model='' OR model NOT IN (SELECT model FROM successes)),
- (SELECT MIN(model) FROM successes) `
+ (SELECT MIN(model) FROM successes),(SELECT MIN(effort) FROM successes),(SELECT MIN(protocol) FROM successes) `
 
 func captureAIOpsEvidence(ctx context.Context, tx *sql.Tx, id int64, p service.AIOpsPolicy, now time.Time, accounts map[int64]aiOpsAccount) (service.AIOpsEvidenceSnapshot, error) {
 	window := time.Duration(p.ObservationSeconds) * time.Second
 	e := service.AIOpsEvidenceSnapshot{ObservedAt: now, WindowStart: now.Add(-window), WindowEnd: now, Inflight: -1}
 	var successes, failures, known, cohorts, unknownFailures int
-	var model sql.NullString
-	if err := tx.QueryRowContext(ctx, aiOpsEvidenceSQL, id, e.WindowStart, e.WindowEnd).Scan(&successes, &failures, &known, &cohorts, &unknownFailures, &model); err != nil {
+	var model, effort, protocol sql.NullString
+	if err := tx.QueryRowContext(ctx, aiOpsEvidenceSQL, id, e.WindowStart, e.WindowEnd).Scan(&successes, &failures, &known, &cohorts, &unknownFailures, &model, &effort, &protocol); err != nil {
 		return e, err
 	}
 	e.Samples = successes + failures
@@ -247,6 +247,11 @@ func captureAIOpsEvidence(ctx context.Context, tx *sql.Tx, id int64, p service.A
 	// Changes require a single observed model/effort cohort. Errors without
 	// successes cannot establish cohort coverage; latency alone never drives it.
 	e.ModelCoverageComplete = successes > 0 && known == successes && cohorts == 1 && unknownFailures == 0
+	if e.ModelCoverageComplete {
+		e.Model = model.String
+		e.Effort = effort.String
+		e.Protocol = protocol.String
+	}
 	if !accounts[id].quotaKnown {
 		e.ModelCoverageComplete = false
 	}
@@ -257,8 +262,6 @@ func captureAIOpsEvidence(ctx context.Context, tx *sql.Tx, id int64, p service.A
 				return e, supportErr
 			}
 			if !supported {
-				a.healthy = false
-				accounts[peerID] = a
 				if peerID == id {
 					e.ModelCoverageComplete = false
 				}
@@ -272,9 +275,7 @@ func captureAIOpsEvidence(ctx context.Context, tx *sql.Tx, id int64, p service.A
 			if compatible {
 				e.EligibleAccounts++
 				e.TotalConcurrency += a.concurrency
-			} else {
-				a.healthy = false
-				accounts[peerID] = a
+				e.EligibleAccountIDs = append(e.EligibleAccountIDs, peerID)
 			}
 		}
 	}
@@ -389,6 +390,9 @@ func aiOpsReasons(p service.AIOpsPolicy, in service.AIOpsPreviewInput, a aiOpsAc
 	if in.Action == "pause_account" && a.paused {
 		reasons = append(reasons, "already_paused")
 	}
+	if in.Action == "pause_account" && e.Protocol != "http" {
+		reasons = append(reasons, "recovery_protocol_unsupported")
+	}
 	if in.Action == "resume_account" && !a.paused {
 		reasons = append(reasons, "not_ai_paused")
 	}
@@ -397,7 +401,7 @@ func aiOpsReasons(p service.AIOpsPolicy, in service.AIOpsPreviewInput, a aiOpsAc
 	if in.Action == "pause_account" || in.Action == "set_concurrency" {
 		healthy, total := 0, 0
 		for id, peer := range accounts {
-			if peer.healthy && peer.quotaKnown && !peer.managed && !peer.paused && peer.concurrency > 0 && slices.Equal(peer.groups, []int64{p.GroupID}) {
+			if slices.Contains(e.EligibleAccountIDs, id) && peer.healthy && peer.quotaKnown && !peer.managed && !peer.paused && peer.concurrency > 0 && slices.Equal(peer.groups, []int64{p.GroupID}) {
 				capacity := peer.concurrency
 				if id == a.id {
 					if in.Action == "pause_account" {
@@ -474,6 +478,13 @@ func previewAIOps(ctx context.Context, tx *sql.Tx, in service.AIOpsPreviewInput,
 		}
 	}
 	if in.Action == "resume_account" {
+		owned, scopeErr := aiOpsOwnedScope(ctx, tx, a)
+		if scopeErr != nil {
+			return service.AIOpsProposal{}, scopeErr
+		}
+		e.Model = owned.Model
+		e.Effort = owned.Effort
+		e.Protocol = owned.Protocol
 		e.ProbePassed, err = freshAIOpsProbe(ctx, tx, a, p, now)
 		if err != nil {
 			return service.AIOpsProposal{}, err
@@ -612,6 +623,8 @@ func applyAIOps(ctx context.Context, tx *sql.Tx, id, digest string, actorID int6
 		if err != nil {
 			return service.AIOpsAction{}, err
 		}
+	} else if proposal.Evidence.Model != e.Model || proposal.Evidence.Effort != e.Effort || proposal.Evidence.Protocol != e.Protocol {
+		return service.AIOpsAction{}, service.ErrAIOpsConflict
 	}
 	in := service.AIOpsPreviewInput{Action: proposal.Action, AccountID: target.id, ProposedValue: proposal.ProposedValue, EvidenceObservedAt: proposal.CreatedAt}
 	if len(aiOpsReasons(p, in, target, e, accounts, now)) > 0 {
@@ -804,7 +817,7 @@ func rollbackAIOps(ctx context.Context, tx *sql.Tx, a service.AIOpsAction, now t
 	if a.Action == "pause_account" || a.Action == "resume_account" {
 		paused = a.BeforeValue != nil && *a.BeforeValue == 1
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE ai_ops_controls SET ai_paused=$2,revision=revision+1,owner_action_id=NULL,updated_at=$3 WHERE account_id=$1 AND revision=$4 AND owner_action_id=$5`, target.id, paused, now, a.OwnerRevision, a.ID)
+	res, err := tx.ExecContext(ctx, `UPDATE ai_ops_controls SET ai_paused=$2,revision=revision+1,owner_action_id=CASE WHEN $2 THEN $5::uuid ELSE NULL END,updated_at=$3 WHERE account_id=$1 AND revision=$4 AND owner_action_id=$5`, target.id, paused, now, a.OwnerRevision, a.ID)
 	if err != nil {
 		return a, err
 	}
@@ -816,6 +829,9 @@ func rollbackAIOps(ctx context.Context, tx *sql.Tx, a service.AIOpsAction, now t
 	a.ReasonCode = reason
 	a.UpdatedAt = now
 	a.TargetRevision = revision
+	if paused {
+		a.OwnerRevision = target.controlRevision + 1
+	}
 	if err = saveAIOpsAction(ctx, tx, a); err != nil {
 		return a, err
 	}
@@ -1093,9 +1109,38 @@ func (r *accountRepository) expireAIOpsProbes(ctx context.Context) error {
 }
 
 func freshAIOpsProbe(ctx context.Context, tx *sql.Tx, a aiOpsAccount, p service.AIOpsPolicy, now time.Time) (bool, error) {
+	scope, err := aiOpsOwnedScope(ctx, tx, a)
+	if err != nil {
+		return false, err
+	}
+	if !aiOpsRecoveryScope(scope) {
+		return false, nil
+	}
 	var passed bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_ops_probes WHERE account_id=$1 AND status='passed' AND created_at>=$2 AND expires_at>$3 AND (data->>'target_revision')::bigint=$4 AND (data->>'owner_revision')::bigint=$5)`, a.id, now.Add(-time.Duration(max(30, p.EvidenceMaxAgeSeconds))*time.Second), now, a.revision, a.controlRevision).Scan(&passed)
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_ops_probes WHERE account_id=$1 AND status='passed' AND created_at>=$2 AND expires_at>$3 AND (data->>'target_revision')::bigint=$4 AND (data->>'owner_revision')::bigint=$5 AND data->>'model'=$6 AND data->>'effort'=$7 AND data->>'protocol'=$8)`, a.id, now.Add(-time.Duration(max(30, p.EvidenceMaxAgeSeconds))*time.Second), now, a.revision, a.controlRevision, scope.Model, scope.Effort, scope.Protocol).Scan(&passed)
 	return passed, err
+}
+
+func aiOpsRecoveryScope(e service.AIOpsEvidenceSnapshot) bool {
+	return e.Model != "" && len(e.Model) <= 100 && e.Protocol == "http" && slices.Contains([]string{"minimal", "low", "medium", "high", "xhigh", "max"}, e.Effort)
+}
+
+func aiOpsOwnedScope(ctx context.Context, tx *sql.Tx, a aiOpsAccount) (service.AIOpsEvidenceSnapshot, error) {
+	if a.owner == "" {
+		return service.AIOpsEvidenceSnapshot{}, nil
+	}
+	owner, err := readAIOpsAction(ctx, tx, a.owner)
+	if err != nil {
+		return service.AIOpsEvidenceSnapshot{}, err
+	}
+	if owner.AccountID != a.id || owner.OwnerRevision != a.controlRevision || owner.TargetRevision != a.revision {
+		return service.AIOpsEvidenceSnapshot{}, service.ErrAIOpsConflict
+	}
+	proposal, err := readAIOpsProposal(ctx, tx, owner.ProposalID)
+	if err != nil {
+		return service.AIOpsEvidenceSnapshot{}, err
+	}
+	return proposal.Evidence, nil
 }
 
 func (r *accountRepository) ReserveAIOpsProbe(ctx context.Context, accountID int64, model string, actorID int64) (service.AIOpsProbe, error) {
@@ -1127,14 +1172,11 @@ func (r *accountRepository) ReserveAIOpsProbe(ctx context.Context, accountID int
 	if a.id == 0 || !a.paused || a.owner == "" || a.managed || !a.healthy || !a.quotaKnown || !slices.Equal(a.groups, []int64{p.GroupID}) {
 		return probe, service.ErrAIOpsBlocked
 	}
-	var allowed bool
-	// Authoritative model allowlist consists of a recently completed model for
-	// this exact account, not a model name invented by the diagnostic provider.
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM usage_logs WHERE account_id=$1 AND model=$2 AND created_at>=NOW()-interval '24 hours' AND output_tokens>0)`, accountID, model).Scan(&allowed)
+	scope, err := aiOpsOwnedScope(ctx, tx, a)
 	if err != nil {
 		return probe, err
 	}
-	if !allowed {
+	if !aiOpsRecoveryScope(scope) || scope.Model != model {
 		return probe, service.ErrAIOpsBlocked
 	}
 	if supported, e := aiOpsModelSupported(ctx, tx, accountID, p.GroupID, model); e != nil {
@@ -1152,7 +1194,7 @@ func (r *accountRepository) ReserveAIOpsProbe(ctx context.Context, accountID int
 	if daily >= min(3, p.DailyActionLimit) || (last.Valid && now.Sub(last.Time) < time.Duration(p.CooldownSeconds)*time.Second) {
 		return probe, service.ErrAIOpsBlocked
 	}
-	probe = service.AIOpsProbe{ID: uuid.NewString(), AccountID: accountID, Model: model, Status: "reserved", CreatedAt: now, ExpiresAt: now.Add(time.Duration(p.EvidenceMaxAgeSeconds) * time.Second), OwnerRevision: a.controlRevision, TargetRevision: a.revision}
+	probe = service.AIOpsProbe{ID: uuid.NewString(), AccountID: accountID, Model: model, Effort: scope.Effort, Protocol: scope.Protocol, Status: "reserved", CreatedAt: now, ExpiresAt: now.Add(time.Duration(p.EvidenceMaxAgeSeconds) * time.Second), OwnerRevision: a.controlRevision, TargetRevision: a.revision}
 	raw, _ := json.Marshal(probe)
 	_, err = tx.ExecContext(ctx, `INSERT INTO ai_ops_probes(id,account_id,status,data,created_at,expires_at,actor_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, probe.ID, accountID, probe.Status, string(raw), now, probe.ExpiresAt, actorID)
 	if err != nil {
@@ -1190,11 +1232,15 @@ func (r *accountRepository) CompleteAIOpsProbe(ctx context.Context, id string, p
 		return probe, err
 	}
 	a := accounts[probe.AccountID]
+	scope, scopeErr := aiOpsOwnedScope(ctx, tx, a)
+	if scopeErr != nil {
+		return probe, scopeErr
+	}
 	now := time.Now().UTC()
 	probe.FinishedAt = &now
 	probe.Status = "failed"
 	probe.ReasonCode = "probe_failed"
-	if a.id == 0 || a.revision != probe.TargetRevision || a.controlRevision != probe.OwnerRevision || !a.paused || a.managed || !a.healthy || !a.quotaKnown || !now.Before(probe.ExpiresAt) {
+	if a.id == 0 || a.revision != probe.TargetRevision || a.controlRevision != probe.OwnerRevision || !a.paused || a.managed || !a.healthy || !a.quotaKnown || !now.Before(probe.ExpiresAt) || !aiOpsRecoveryScope(scope) || scope.Model != probe.Model || scope.Effort != probe.Effort || scope.Protocol != probe.Protocol {
 		probe.Status = "unknown"
 		probe.ReasonCode = "stale_probe_ownership"
 	} else if passed {

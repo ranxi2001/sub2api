@@ -50,6 +50,10 @@ type AIOpsEvidenceSnapshot struct {
 	TotalConcurrency      int       `json:"total_concurrency"`
 	ModelCoverageComplete bool      `json:"model_coverage_complete"`
 	ProbePassed           bool      `json:"probe_passed"`
+	Model                 string    `json:"model"`
+	Effort                string    `json:"effort"`
+	Protocol              string    `json:"protocol"`
+	EligibleAccountIDs    []int64   `json:"-"`
 }
 
 type AIOpsPreviewInput struct {
@@ -109,6 +113,8 @@ type AIOpsProbe struct {
 	ID             string     `json:"id"`
 	AccountID      int64      `json:"account_id"`
 	Model          string     `json:"model"`
+	Effort         string     `json:"effort"`
+	Protocol       string     `json:"protocol"`
 	Status         string     `json:"status"`
 	CreatedAt      time.Time  `json:"created_at"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`

@@ -46,7 +46,7 @@ type OpsService struct {
 	aiOpsMu            sync.Mutex
 	aiOpsCancel        context.CancelFunc
 	aiOpsDone          chan struct{}
-	aiOpsProbeRunner   func(context.Context, int64, string) (bool, error)
+	aiOpsProbeRunner   func(context.Context, int64, string, string) (bool, error)
 	aiOpsProbeWG       sync.WaitGroup
 	aiOpsContext       context.Context
 	aiOpsStopping      bool
