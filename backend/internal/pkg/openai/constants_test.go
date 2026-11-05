@@ -61,3 +61,12 @@ func TestGPT61SolIdentityAndEffort(t *testing.T) {
 	}
 	require.Contains(t, CodexBaseInstructionsForModel("gpt-6.1-sol"), "based on GPT-6")
 }
+
+func TestDefaultModelsIncludeGPTImage26(t *testing.T) {
+	for _, model := range []string{"gpt-image-2.6-flare", "gpt-image-2.6-sunburst"} {
+		require.Contains(t, DefaultModelIDs(), model)
+	}
+	for _, model := range []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-image-1"} {
+		require.NotContains(t, DefaultModelIDs(), model)
+	}
+}

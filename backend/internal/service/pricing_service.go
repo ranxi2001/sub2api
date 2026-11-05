@@ -1622,6 +1622,11 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		return openAIGPT6LunaFallbackPricing
 	}
 
+	// Do not fall back to older image-model rates if the remote catalog lags.
+	if model == "gpt-image-2.6-flare" || model == "gpt-image-2.6-sunburst" {
+		return openAIGPTImage25FallbackPricing
+	}
+
 	// 尝试的回退变体
 	variants := s.generateOpenAIModelVariants(model, openAIModelDatePattern)
 
@@ -1690,8 +1695,8 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 
 	// Remote price mirrors can lag new releases. Never bill GPT Image 2.5
 	// using the older image model's rates when its entry is absent.
-	for _, imageModel := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"} {
-		if model == imageModel || model == imageModel+"-2026-09-08" {
+	for _, imageModel := range []string{"gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"} {
+		if model == imageModel || (strings.HasPrefix(imageModel, "gpt-image-2.5-") && model == imageModel+"-2026-09-08") {
 			return openAIGPTImage25FallbackPricing
 		}
 	}

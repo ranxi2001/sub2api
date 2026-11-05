@@ -264,3 +264,15 @@ func TestGPT55RetirementEmptyListingSource(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, containsManifestModel(body, "gpt-5.5"))
 }
+
+func TestSubscriptionRetiredModelFamilies(t *testing.T) {
+	oauth := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	api := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	for _, model := range []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.4-2026-03-05", "gpt-image-1.5", "gpt-image-1.5-2025-12-16"} {
+		require.True(t, isRetiredOpenAISubscriptionModel(oauth, model), model)
+		require.False(t, isRetiredOpenAISubscriptionModel(api, model), model)
+	}
+	for _, model := range []string{"gpt-5.40", "gpt-image-1.50", "gpt-image-2.6-sunburst"} {
+		require.False(t, isRetiredOpenAISubscriptionModel(oauth, model), model)
+	}
+}
