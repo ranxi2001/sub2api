@@ -677,6 +677,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
+	if s.writeOpenAIContextLimitError(resp, c, account, body, false) {
+		return nil, fmt.Errorf("upstream context limit: %d", resp.StatusCode)
+	}
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {

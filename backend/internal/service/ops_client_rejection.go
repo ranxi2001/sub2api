@@ -27,6 +27,11 @@ var OpsContextLimitRejectionNeedles = []string{
 }
 
 func IsOpsContextLimitRejection(status, upstreamStatus int, message string) bool {
+	// A gateway-normalized 400 may retain the relay's original 5xx status.
+	// Require the canonical context code, not generic payload/length wording.
+	if status == 400 && strings.Contains(strings.ToLower(message), "context_length_exceeded") {
+		return true
+	}
 	if upstreamStatus > 0 {
 		status = upstreamStatus
 	}

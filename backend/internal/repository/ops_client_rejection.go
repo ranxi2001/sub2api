@@ -27,7 +27,10 @@ func opsContextLimitRejectionSQL(alias string) string {
  AND COALESCE(` + p + `error_phase, '') <> 'account_auth'
  AND COALESCE(NULLIF(` + p + `upstream_status_code, 0), ` + p + `status_code, 0) = 502
  AND strpos(lower(CONCAT_WS(' ', ` + p + `error_message, ` + p + `upstream_error_message, ` + p + `upstream_error_detail)), 'context_length_exceeded') > 0)`
-	return `(` + standard + ` OR ` + wrapped + `)`
+	// New normalized 400s retain raw HTTP200 SSE or 5xx evidence.
+	normalized := `(` + p + `status_code = 400
+ AND strpos(lower(CONCAT_WS(' ', ` + p + `error_message, ` + p + `upstream_error_message)), 'context_length_exceeded') > 0)`
+	return `(` + standard + ` OR ` + wrapped + ` OR ` + normalized + `)`
 }
 
 func opsClientRejectionSQL(alias string) string {
