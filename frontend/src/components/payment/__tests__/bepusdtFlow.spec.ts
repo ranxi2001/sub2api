@@ -18,7 +18,7 @@ describe('BEpusdt checkout', () => {
   })
 
   it('offers named networks, defaults to TRC20, and uses native credentials', () => {
-    expect(getDefaultSupportedTypes('bepusdt')).toEqual(['usdt.trc20'])
+    expect(getDefaultSupportedTypes('bepusdt')).toEqual(['usdt.bep20'])
     expect(getAvailableTypes('bepusdt', [], '')).toEqual(BEPUSDT_TRADE_TYPES)
     expect(PROVIDER_CONFIG_FIELDS.bepusdt.find(field => field.key === 'apiToken')?.sensitive).toBe(true)
     expect(PROVIDER_CONFIG_FIELDS.bepusdt.find(field => field.key === 'currency')?.options?.map(option => option.value)).toEqual(['CNY', 'USD', 'EUR', 'GBP', 'JPY'])

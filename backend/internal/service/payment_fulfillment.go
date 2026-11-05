@@ -192,7 +192,7 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	if pk == payment.TypeBEpusdt && psSnapshotStringValue(o.ProviderSnapshot["collection_mode"]) == "embedded" {
 		// Match the collection engine's three-hour historical scan window.
 		// Chain confirmations and callback retries can exceed the fiat grace.
-		grace = now.Add(-3 * time.Hour)
+		grace = now.Add(-bepusdtOrderRecoveryWindow)
 	}
 	c, err := s.entClient.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),

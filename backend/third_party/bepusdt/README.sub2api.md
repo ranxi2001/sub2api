@@ -27,6 +27,11 @@ address, and exposed to the administrator and checkout status APIs.
 
 Order transitions are conditional so expiration, replay and duplicate detections
 cannot overwrite a confirmed payment or dispatch its initial callback twice.
+Embedded orders retain the merchant's absolute expiry time, including two-minute
+and greater-than-one-hour deadlines, without changing external gateway timeout
+defaults. Payment amount reservations use the normalized matching address so
+mixed-case EVM receiving addresses cannot allocate the same amount to concurrent
+orders; older records without a matching address are normalized on lookup.
 The existing signed callback retry worker handles delivery failures. These tests
 are explicitly included by `make test-collection` and the collection CI workflow,
 because a parent module's `go test ./...` does not traverse nested modules.

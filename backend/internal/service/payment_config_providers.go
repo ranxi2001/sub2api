@@ -8,6 +8,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/sqljson"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
@@ -103,6 +107,8 @@ var pendingOrderStatuses = []string{
 	payment.OrderStatusRecharging,
 }
 
+const bepusdtOrderRecoveryWindow = 3 * time.Hour
+
 // providerSensitiveConfigFields is the authoritative list of config keys that
 // are treated as secrets per provider. Must stay in sync with the frontend
 // definition at frontend/src/components/payment/providerConfig.ts
@@ -167,7 +173,20 @@ func (s *PaymentConfigService) countPendingOrders(ctx context.Context, providerI
 	return s.entClient.PaymentOrder.Query().
 		Where(
 			paymentorder.ProviderInstanceIDEQ(strconv.FormatInt(providerInstanceID, 10)),
-			paymentorder.StatusIn(pendingOrderStatuses...),
+			paymentorder.Or(
+				paymentorder.StatusIn(pendingOrderStatuses...),
+				// An expired embedded order can still discover a transfer during
+				// historical scanning. Keep its original provider available for
+				// callback verification and active reconciliation in that window.
+				paymentorder.And(
+					paymentorder.ProviderKeyEQ(payment.TypeBEpusdt),
+					paymentorder.StatusEQ(payment.OrderStatusExpired),
+					paymentorder.UpdatedAtGTE(time.Now().Add(-bepusdtOrderRecoveryWindow)),
+					func(selector *sql.Selector) {
+						selector.Where(sqljson.ValueEQ(selector.C(paymentorder.FieldProviderSnapshot), "embedded", sqljson.Path("collection_mode")))
+					},
+				),
+			),
 		).Count(ctx)
 }
 

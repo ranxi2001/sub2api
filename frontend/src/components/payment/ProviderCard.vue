@@ -24,6 +24,12 @@
         </div>
         <span class="text-sm font-medium text-gray-900 dark:text-white">{{ provider.name }}</span>
         <span class="text-xs text-gray-400 dark:text-gray-500">{{ keyLabel }}</span>
+        <NewFeatureBadge
+          v-if="provider.provider_key === 'bepusdt' && userId != null"
+          :notice-id="NEW_FEATURE_NOTICES.bepusdtPayment"
+          :user-id="userId"
+          class="pointer-events-auto"
+        />
         <span v-if="provider.payment_mode" class="text-xs text-gray-400 dark:text-gray-500">· {{ modeLabel }}</span>
         <span v-if="enabled && availableTypes.length" class="text-xs text-gray-300 dark:text-gray-600">|</span>
         <div v-if="enabled" class="flex flex-wrap items-center gap-1" :class="{ 'basis-full': provider.provider_key === 'bepusdt' }">
@@ -66,6 +72,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import ToggleSwitch from './ToggleSwitch.vue'
 import type { ProviderInstance } from '@/types/payment'
 import type { TypeOption } from './providerConfig'
@@ -84,6 +92,7 @@ const props = defineProps<{
   provider: ProviderInstance
   enabled: boolean
   availableTypes: TypeOption[]
+  userId?: number | null
 }>()
 
 const emit = defineEmits<{

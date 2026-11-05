@@ -407,7 +407,14 @@ func CalcTradeAmount(wallets []Wallet, rate decimal.Decimal, p OrderParams) (Wal
 	status := []int{OrderStatusConfirming, OrderStatusWaiting}
 	Db.Where("status in (?) and trade_type = ?", status, p.TradeType).Find(&orders)
 	for _, order := range orders {
-		lock[order.Address+order.Amount] = true
+		address := order.MatchAddress
+		if address == "" {
+			address = order.Address
+			if !AddrCaseSens(order.TradeType) {
+				address = strings.ToLower(address)
+			}
+		}
+		lock[address+order.Amount] = true
 	}
 
 	atom, precision := GetAtomicity(p.TradeType)

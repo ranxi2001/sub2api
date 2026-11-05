@@ -79,7 +79,7 @@ export const EASYPAY_PAYMENT_MODES = ['qrcode', 'popup'] as const
 export const METHOD_ORDER = ['alipay', 'alipay_direct', 'wxpay', 'wxpay_direct', 'stripe', 'airwallex', ...BEPUSDT_TRADE_TYPES.map(method => method.value)] as const
 
 export function getDefaultSupportedTypes(providerKey: string): string[] {
-  return providerKey === 'bepusdt' ? ['usdt.trc20'] : [...(PROVIDER_SUPPORTED_TYPES[providerKey] || [])]
+  return providerKey === 'bepusdt' ? ['usdt.bep20'] : [...(PROVIDER_SUPPORTED_TYPES[providerKey] || [])]
 }
 
 export function isBuiltInAlipayMethod(type: string): boolean {

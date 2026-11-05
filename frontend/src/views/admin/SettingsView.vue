@@ -36,7 +36,7 @@
                     'settings-tab',
                     activeTab === tab.key && 'settings-tab-active',
                   ]"
-                  :style="['features', 'gateway', 'email'].includes(tab.key) ? { paddingRight: '7rem' } : undefined"
+                  :style="['features', 'gateway', 'email', 'payment'].includes(tab.key) ? { paddingRight: '7rem' } : undefined"
                   @click="selectSettingsTab(tab.key)"
                   @keydown="handleSettingsTabKeydown($event, tab.key)"
                 >
@@ -62,6 +62,12 @@
                 <NewFeatureBadge
                   v-if="tab.key === 'gateway'"
                   :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting"
+                  :user-id="authStore.user?.id"
+                  class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
+                />
+                <NewFeatureBadge
+                  v-if="tab.key === 'payment'"
+                  :notice-id="NEW_FEATURE_NOTICES.bepusdtPayment"
                   :user-id="authStore.user?.id"
                   class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
                 />
@@ -8914,20 +8920,30 @@
                     t("admin.settings.payment.enabledPaymentTypes")
                   }}</label>
                   <div class="mt-1.5 flex flex-wrap gap-2">
-                    <button
+                    <div
                       v-for="pt in allPaymentTypes"
                       :key="pt.value"
-                      type="button"
-                      @click="togglePaymentType(pt.value)"
-                      :class="[
-                        'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
-                        isPaymentTypeEnabled(pt.value)
-                          ? 'border-primary-500 bg-primary-500 text-white shadow-sm'
-                          : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-dark-500',
-                      ]"
+                      class="inline-flex items-center gap-2"
                     >
-                      {{ pt.label }}
-                    </button>
+                      <button
+                        type="button"
+                        :data-testid="pt.value === 'bepusdt' ? 'bepusdt-payment-type' : undefined"
+                        @click="togglePaymentType(pt.value)"
+                        :class="[
+                          'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+                          isPaymentTypeEnabled(pt.value)
+                            ? 'border-primary-500 bg-primary-500 text-white shadow-sm'
+                            : 'border-gray-300 bg-white text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:border-dark-500',
+                        ]"
+                      >
+                        {{ pt.label }}
+                      </button>
+                      <NewFeatureBadge
+                        v-if="pt.value === 'bepusdt'"
+                        :notice-id="NEW_FEATURE_NOTICES.bepusdtPayment"
+                        :user-id="authStore.user?.id"
+                      />
+                    </div>
                   </div>
                   <p class="mt-2 text-xs text-gray-400 dark:text-gray-500">
                     {{ t("admin.settings.payment.enabledPaymentTypesHint") }}
@@ -8996,7 +9012,10 @@
           />
 
           <!-- Provider Management -->
-          <BEpusdtManager v-if="form.payment_enabled && form.payment_enabled_types.includes('bepusdt')" />
+          <BEpusdtManager
+            v-if="form.payment_enabled && form.payment_enabled_types.includes('bepusdt')"
+            :user-id="authStore.user?.id"
+          />
           <PaymentProviderList
             v-if="form.payment_enabled"
             :providers="providers"
@@ -9005,6 +9024,7 @@
             :enabled-payment-types="form.payment_enabled_types"
             :all-payment-types="allPaymentTypes"
             :redirect-label="t('admin.settings.payment.easypayRedirect')"
+            :user-id="authStore.user?.id"
             @refresh="loadProviders"
             @create="openCreateProvider"
             @edit="openEditProvider"
@@ -9494,6 +9514,7 @@
         :enabled-key-options="enabledProviderKeyOptions"
         :all-payment-types="allPaymentTypes"
         :redirect-label="t('admin.settings.payment.easypayRedirect')"
+        :user-id="authStore.user?.id"
         @close="showProviderDialog = false"
         @save="handleSaveProvider"
       />

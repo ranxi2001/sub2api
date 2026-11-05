@@ -959,7 +959,7 @@ export default {
         coin: '加密货币',
         fiat: '计价法币',
         manualRate: '手动汇率',
-        bepusdtHint: '先在 BEpusdt 后台配置对应网络的收款钱包，再勾选本站开放的币种和网络。默认仅启用 USDT (TRC20)。付款时打开 BEpusdt 收银台查看转账地址和精确金额；订单超时至少 2 分钟，暂不支持在线退款。',
+        bepusdtHint: '先在 BEpusdt 后台配置对应网络的收款钱包，再勾选本站开放的币种和网络。新建实例默认选择 USDT (BEP20)。付款时打开 BEpusdt 收银台查看转账地址和精确金额；订单超时至少 2 分钟，暂不支持在线退款。',
         bepusdtApiBaseHint: '填写 BEpusdt 服务根地址，例如 https://pay.example.com，不要包含 /api/v1/order/create-transaction。API Token 在 BEpusdt 后台「系统管理 → 基本设置 → API 设置 → 对接令牌」获取。',
         bepusdtCurrencyHint: '订单计价法币，BEpusdt 按其汇率换算为所选网络的加密货币金额。CNY 通道的订阅沿用本站订阅汇率配置；实际转账金额以 BEpusdt 收银台为准。',
         typeDisabled: '类型已禁用',

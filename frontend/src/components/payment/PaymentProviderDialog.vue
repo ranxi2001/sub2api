@@ -71,7 +71,14 @@
       </div>
 
       <div v-if="form.provider_key === 'bepusdt'" class="space-y-2">
-        <label class="input-label">{{ t('admin.settings.payment.field_mode') }}</label>
+        <div class="flex items-center gap-2">
+          <label class="input-label mb-0">{{ t('admin.settings.payment.field_mode') }}</label>
+          <NewFeatureBadge
+            v-if="userId != null"
+            :notice-id="NEW_FEATURE_NOTICES.bepusdtPayment"
+            :user-id="userId"
+          />
+        </div>
         <select v-model="config.mode" class="input" data-testid="bepusdt-mode">
           <option value="embedded">{{ t('admin.settings.payment.bepusdtEmbedded') }}</option>
           <option value="external">{{ t('admin.settings.payment.bepusdtExternal') }}</option>
@@ -319,6 +326,8 @@
 import { reactive, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Select from '@/components/common/Select.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
@@ -375,6 +384,7 @@ const props = defineProps<{
   enabledKeyOptions: TypeOption[]
   allPaymentTypes: TypeOption[]
   redirectLabel: string
+  userId?: number | null
 }>()
 
 const emit = defineEmits<{

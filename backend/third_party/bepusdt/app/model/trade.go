@@ -27,6 +27,9 @@ type OrderParams struct {
 	CurrencyLimit     string          `json:"currency_limit"`     // 限定币种
 	AddressLocked     bool            `json:"address_locked"`     // 地址独占锁定
 	ClientFingerprint string          `json:"client_fingerprint"` //  客户端指纹
+	// Embedded callers pin the merchant deadline without changing the external
+	// gateway's timeout validation or applying its default to long orders.
+	ExpiresAt time.Time `json:"-"`
 }
 
 type Addr struct {
@@ -42,6 +45,13 @@ type Trade struct {
 }
 
 var buildMutex sync.Mutex
+
+func (p OrderParams) expiredAt() time.Time {
+	if !p.ExpiresAt.IsZero() {
+		return p.ExpiresAt
+	}
+	return CalcTradeExpiredAt(p.Timeout)
+}
 
 func StartBuildOrder(p OrderParams) (Order, error) {
 	var order Order
@@ -117,7 +127,7 @@ func BuildOrder(p OrderParams, trade Trade) (Order, error) {
 		NotifyUrl:     p.NotifyUrl,
 		NotifyNum:     0,
 		NotifyState:   OrderNotifyStateFail,
-		ExpiredAt:     CalcTradeExpiredAt(p.Timeout),
+		ExpiredAt:     p.expiredAt(),
 		Fiat:          p.Fiat,
 		Crypto:        trade.Crypto,
 		CurrencyLimit: p.CurrencyLimit,
@@ -202,7 +212,7 @@ func RebuildOrder(t Order, p OrderParams) (Order, error) {
 	t.Money = p.Money.String()
 	t.TradeType = p.TradeType
 	t.Rate = fmt.Sprintf("%v", data.Rate)
-	t.ExpiredAt = CalcTradeExpiredAt(p.Timeout)
+	t.ExpiredAt = p.expiredAt()
 
 	query := Db.Model(&Order{}).Where("id = ?", t.ID)
 	if p.ClientFingerprint != "" {

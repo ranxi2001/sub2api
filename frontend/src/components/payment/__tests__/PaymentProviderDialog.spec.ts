@@ -104,9 +104,10 @@ describe('PaymentProviderDialog callback URLs', () => {
     expect(wrapper.text()).not.toContain('API Token')
     await wrapper.findAll('input')[0].setValue('Built-in Crypto')
     await wrapper.get('#provider-form').trigger('submit')
-    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string> }
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string>; supported_types: string[] }
     expect(payload.config.mode).toBe('embedded')
     expect(payload.config.currency).toBe('CNY')
+    expect(payload.supported_types).toEqual(['usdt.bep20'])
     expect(payload.config).not.toHaveProperty('apiToken')
     expect(payload.config).not.toHaveProperty('apiBase')
   })
@@ -132,11 +133,11 @@ describe('PaymentProviderDialog callback URLs', () => {
     await fields[0].setValue('Crypto')
     await fields[1].setValue('https://gateway.example')
     await fields[2].setValue('test-token')
-    await wrapper.findAll('button').find(button => button.text() === 'USDT (BEP20)')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'USDT (TRC20)')!.trigger('click')
     await wrapper.get('#provider-form').trigger('submit')
     const payload = wrapper.emitted('save')?.[0]?.[0] as Record<string, unknown>
     expect(payload.provider_key).toBe('bepusdt')
-    expect(payload.supported_types).toEqual(['usdt.trc20', 'usdt.bep20'])
+    expect(payload.supported_types).toEqual(['usdt.bep20', 'usdt.trc20'])
     expect(payload.refund_enabled).toBe(false)
     expect(payload.config).toMatchObject({ apiBase: 'https://gateway.example', apiToken: 'test-token', currency: 'CNY' })
     expect((payload.config as Record<string, string>).notifyUrl).toContain('/api/v1/payment/webhook/bepusdt')

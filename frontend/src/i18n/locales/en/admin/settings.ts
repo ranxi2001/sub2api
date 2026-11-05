@@ -964,7 +964,7 @@ export default {
         coin: 'Cryptocurrency',
         fiat: 'Fiat currency',
         manualRate: 'Manual exchange rate',
-        bepusdtHint: 'Configure receiving wallets for each network in BEpusdt before enabling those methods here. Only USDT (TRC20) is selected by default. The BEpusdt checkout shows the address and exact transfer amount. Orders require at least two minutes; online refunds are unavailable.',
+        bepusdtHint: 'Configure receiving wallets for each network in BEpusdt before enabling those methods here. New instances select USDT (BEP20) by default. The BEpusdt checkout shows the address and exact transfer amount. Orders require at least two minutes; online refunds are unavailable.',
         bepusdtApiBaseHint: 'Enter the BEpusdt service root URL, e.g. https://pay.example.com, without /api/v1/order/create-transaction. Get the API Token from BEpusdt under System management → Basic settings → API settings → Integration token.',
         bepusdtCurrencyHint: 'Fiat currency used to price the order. BEpusdt converts it to crypto using its exchange rate. CNY subscription orders use this site’s subscription conversion setting. Transfer the exact amount shown by the BEpusdt checkout.',
         typeDisabled: 'type disabled',

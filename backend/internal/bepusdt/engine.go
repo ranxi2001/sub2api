@@ -220,6 +220,9 @@ func Create(ctx context.Context, req CreateRequest) (model.Order, error) {
 	if err != nil || !amount.IsPositive() {
 		return model.Order{}, fmt.Errorf("invalid payment amount")
 	}
+	if !req.ExpiresAt.IsZero() && !req.ExpiresAt.After(time.Now()) {
+		return model.Order{}, fmt.Errorf("payment order has expired")
+	}
 	timeout := int64(time.Until(req.ExpiresAt).Seconds())
 	if timeout < 120 {
 		timeout = 120
@@ -227,7 +230,7 @@ func Create(ctx context.Context, req CreateRequest) (model.Order, error) {
 	return model.StartBuildOrder(model.OrderParams{Money: amount, OrderId: req.OrderID,
 		TradeType: model.TradeType(req.TradeType), Fiat: model.Fiat(req.Currency),
 		ApiType: model.OrderApiTypeEpusdt, Name: req.Subject, NotifyUrl: req.NotifyURL,
-		RedirectUrl: req.ReturnURL, Timeout: timeout})
+		RedirectUrl: req.ReturnURL, Timeout: timeout, ExpiresAt: req.ExpiresAt})
 }
 
 func Order(ctx context.Context, tradeID string) (model.Order, error) {

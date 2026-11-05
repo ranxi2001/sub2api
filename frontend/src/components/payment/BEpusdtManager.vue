@@ -2,6 +2,12 @@
   <details class="card" @toggle="onToggle">
     <summary class="cursor-pointer px-6 py-4 font-medium text-gray-900 dark:text-white">
       {{ t(`${prefix}.collectionTitle`) }}
+      <NewFeatureBadge
+        v-if="userId != null"
+        :notice-id="NEW_FEATURE_NOTICES.bepusdtPayment"
+        :user-id="userId"
+        class="ml-2 align-middle"
+      />
     </summary>
     <div class="space-y-6 border-t border-gray-100 p-6 dark:border-dark-700">
       <p class="text-sm text-gray-500 dark:text-gray-400">{{ t(`${prefix}.collectionHint`) }}</p>
@@ -98,7 +104,10 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { bepusdtAPI, type CollectionConfig, type CryptoWallet, type CryptoRate } from '@/api/admin/bepusdt'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { BEPUSDT_TRADE_TYPES } from './providerConfig'
+defineProps<{ userId?: number | null }>()
 const { t } = useI18n()
 const prefix = 'admin.settings.payment'
 const loaded = ref(false)
@@ -111,7 +120,7 @@ const rates = ref<CryptoRate[]>([])
 const stats = ref<CollectionConfig['stats']>({})
 const nodeChecks = ref<NonNullable<CollectionConfig['node_checks']>>({})
 const deleteTarget = ref<number | null>(null)
-const emptyWallet = (): CryptoWallet => ({ id: 0, name: '', address: '', trade_type: 'usdt.trc20', status: 1, remark: '' })
+const emptyWallet = (): CryptoWallet => ({ id: 0, name: '', address: '', trade_type: 'usdt.bep20', status: 1, remark: '' })
 const walletForm = reactive(emptyWallet())
 const walletEnabled = computed({ get: () => walletForm.status === 1, set: (value: boolean) => { walletForm.status = value ? 1 : 0 } })
 const rateForm = reactive({ fiat: 'CNY', crypto: 'USDT', rate: '' })
