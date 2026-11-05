@@ -2,6 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, expect, it, vi } from 'vitest'
 import ProfitOperationsView from '../ProfitOperationsView.vue'
 import { readProfitOperations, type OperationsSnapshot } from '@/api/admin/profitOperations'
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: null }) }))
+vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template: '<span />' } }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))

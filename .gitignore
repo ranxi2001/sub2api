@@ -136,6 +136,7 @@ vite.config.js
 user-traffic-pending/
 docs/*
 !docs/ai-ops-codex.md
+!docs/openai-context-limit-errors.md
 !docs/stream-timing.md
 !docs/user-traffic.md
 !docs/typesafe-content-audit.md
@@ -211,6 +212,7 @@ issues/
 
 !docs/astra-candy-beta.md
 !docs/api-key-model-policy.md
+!docs/api-key-long-context-control.md
 
 # PR screenshots belong in PR attachments; retain text evidence in docs/screenshots.
 !docs/screenshots/

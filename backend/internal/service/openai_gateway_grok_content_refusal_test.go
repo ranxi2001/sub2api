@@ -193,7 +193,7 @@ func TestForwardGrokChatCompletionsRefusalAppliesPassthroughRule(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 			c.Request.Header.Set("Content-Type", "application/json")
-			c.Set("api_key", &APIKey{ID: 7701})
+			c.Set("api_key", &APIKey{ID: 7701, AllowLongContext: true})
 			ruleSvc := &ErrorPassthroughService{}
 			ruleSvc.setLocalCache([]*model.ErrorPassthroughRule{grokRefusalPassthroughRule()})
 			BindErrorPassthroughService(c, ruleSvc)

@@ -543,7 +543,7 @@ func grokAuditContext(path string) (*gin.Context, *httptest.ResponseRecorder) {
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, path, nil)
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("api_key", &APIKey{ID: 88000})
+	c.Set("api_key", &APIKey{ID: 88000, AllowLongContext: true})
 	return c, rec
 }
 

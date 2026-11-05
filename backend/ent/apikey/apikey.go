@@ -37,6 +37,8 @@ const (
 	FieldModelMapping = "model_mapping"
 	// FieldReasoningEffort holds the string denoting the reasoning_effort field in the database.
 	FieldReasoningEffort = "reasoning_effort"
+	// FieldAllowLongContext holds the string denoting the allow_long_context field in the database.
+	FieldAllowLongContext = "allow_long_context"
 	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
 	FieldLastUsedAt = "last_used_at"
 	// FieldIPWhitelist holds the string denoting the ip_whitelist field in the database.
@@ -112,6 +114,7 @@ var Columns = []string{
 	FieldStatus,
 	FieldModelMapping,
 	FieldReasoningEffort,
+	FieldAllowLongContext,
 	FieldLastUsedAt,
 	FieldIPWhitelist,
 	FieldIPBlacklist,
@@ -171,6 +174,8 @@ var (
 	DefaultReasoningEffort string
 	// ReasoningEffortValidator is a validator for the "reasoning_effort" field. It is called by the builders before save.
 	ReasoningEffortValidator func(string) error
+	// DefaultAllowLongContext holds the default value on creation for the "allow_long_context" field.
+	DefaultAllowLongContext bool
 	// DefaultQuota holds the default value on creation for the "quota" field.
 	DefaultQuota float64
 	// DefaultQuotaUsed holds the default value on creation for the "quota_used" field.
@@ -245,6 +250,11 @@ func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 // ByReasoningEffort orders the results by the reasoning_effort field.
 func ByReasoningEffort(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldReasoningEffort, opts...).ToFunc()
+}
+
+// ByAllowLongContext orders the results by the allow_long_context field.
+func ByAllowLongContext(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAllowLongContext, opts...).ToFunc()
 }
 
 // ByLastUsedAt orders the results by the last_used_at field.

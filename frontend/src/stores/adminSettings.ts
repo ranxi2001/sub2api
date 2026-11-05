@@ -4,6 +4,7 @@ import { adminAPI } from '@/api'
 import type { CustomMenuItem } from '@/types'
 
 export const useAdminSettingsStore = defineStore('adminSettings', () => {
+  const smartOpsHiddenMenuItems = ref<string[]>([])
   const requestCaptureEnabled = ref(false)
   const loaded = ref(false)
   const loading = ref(false)
@@ -69,6 +70,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
         adminAPI.settings.getSettings(),
         adminAPI.payment.getConfig()
       ])
+      smartOpsHiddenMenuItems.value = settings.smart_ops_hidden_menu_items ?? []
       requestCaptureEnabled.value = settings.request_capture_enabled === true
       opsMonitoringEnabled.value = settings.ops_monitoring_enabled ?? true
       writeCachedBool('ops_monitoring_enabled_cached', opsMonitoringEnabled.value)
@@ -144,6 +146,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   function setRequestCaptureEnabledLocal(value: boolean) { requestCaptureEnabled.value = value }
 
   return {
+    smartOpsHiddenMenuItems,
     requestCaptureEnabled,
     setRequestCaptureEnabledLocal,
     loaded,

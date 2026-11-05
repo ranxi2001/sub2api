@@ -160,6 +160,7 @@ type apiKeyQueueInitialIdentity struct {
 	reasoningMappings  []service.ReasoningEffortMapping
 	modelMapping       map[string]string
 	forcedReasoning    string
+	allowLongContext   bool
 }
 
 func captureAPIKeyQueueIdentity(initial *service.APIKey) apiKeyQueueInitialIdentity {
@@ -171,6 +172,7 @@ func captureAPIKeyQueueIdentity(initial *service.APIKey) apiKeyQueueInitialIdent
 	identity.userID = initial.UserID
 	identity.modelMapping = maps.Clone(initial.ModelMapping)
 	identity.forcedReasoning = initial.ReasoningEffort
+	identity.allowLongContext = initial.AllowLongContext
 	if initial.GroupID != nil {
 		groupID := *initial.GroupID
 		identity.groupID = &groupID
@@ -196,9 +198,9 @@ func apiKeyQueueCoreIdentityChanged(initial apiKeyQueueInitialIdentity, latest *
 		return true
 	}
 	// A queued request or persistent socket has already resolved its route
-	// and fixed effort. Re-enter authentication after an administrator changes
-	// either setting rather than forwarding an old policy under a fresh key.
-	if initial.forcedReasoning != latest.ReasoningEffort || !maps.Equal(initial.modelMapping, latest.ModelMapping) {
+	// and request policy. Re-enter authentication after an administrator changes
+	// any setting rather than forwarding an old policy under a fresh key.
+	if initial.forcedReasoning != latest.ReasoningEffort || initial.allowLongContext != latest.AllowLongContext || !maps.Equal(initial.modelMapping, latest.ModelMapping) {
 		return true
 	}
 	if initial.userID != 0 && latest.UserID != initial.userID {

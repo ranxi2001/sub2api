@@ -1,14 +1,20 @@
 vi.mock('@/api/admin/upstreamChannels', () => ({ listUpstreamChannels: vi.fn(), getUpstreamChannel: vi.fn(), saveUpstreamChannel: vi.fn(), deleteUpstreamChannel: vi.fn(), getChannelMembers: vi.fn(), bindChannelAccounts: vi.fn(), readChannelBindings: vi.fn() }))
 import { mount, flushPromises } from '@vue/test-utils'
-import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import ProfitOperationsView from '../ProfitOperationsView.vue'
 import { readProfitOperations, type OperationsSnapshot } from '@/api/admin/profitOperations'
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 41 } }) }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/admin/profitOperations', () => ({ readProfitOperations: vi.fn() }))
 const fixture = () => ({ scope: { from: '2026-10-27T00:00:00Z', until: '2026-10-28T00:00:00Z', dimension: 'upstream' }, queried_at: '2026-10-28T00:00:00Z', attribution: 'current_config_estimate', currency: 'USD', usage: { summary: { requests: 3, standard_charge: 12, request_income: 4, estimated_cost: 3, estimated_profit: 1, margin: .25, unknown_cost_requests: 0, cost_covered_requests: 3, unknown_upstream_requests: 1, default_multiplier_requests: 1 }, rows: [{ key: 'https://relay.example:8443/tenant/v1', name: 'https://relay.example:8443/tenant/v1', requests: 3, request_income: 4, estimated_cost: 3, estimated_profit: 1, margin: .25 }], total: 21, accounts: [] }, quality: { status: 'ready', data: { summary: { rounds: 0 }, rows: [], total: 0 } }, errors: { status: 'ready', data: { records: 0, upstream_5xx: 0, rows: [] } } }) as unknown as OperationsSnapshot
-beforeEach(() => { vi.resetAllMocks(); vi.mocked(readProfitOperations).mockResolvedValue(fixture()) })
+beforeEach(() => { setActivePinia(createPinia()); localStorage.clear(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(2026, 10, 5, 17, 18, 42)); vi.resetAllMocks(); vi.mocked(readProfitOperations).mockResolvedValue(fixture()) })
+afterEach(() => vi.useRealTimers())
 describe('independent profit operations', () => {
  it('shows the persisted request accounting formula and current configuration estimate boundary', async () => {
   const w = mount(ProfitOperationsView); await flushPromises()
@@ -17,7 +23,9 @@ describe('independent profit operations', () => {
   expect(w.get('[data-testid="profit-summary"]').text()).toContain('25.00%')
   expect(readProfitOperations).toHaveBeenCalledWith(expect.objectContaining({ dimension: 'upstream', page: 1 }), expect.anything())
   const q = vi.mocked(readProfitOperations).mock.calls[0]![0]
-  expect(Date.parse(q.until) - Date.parse(q.from)).toBe(86400000)
+  expect(q.from).toBe(new Date(2026, 10, 5, 0, 0, 0).toISOString())
+  expect(q.until).toBe(new Date(2026, 10, 5, 17, 18, 42).toISOString())
+  expect(w.get('input[type="datetime-local"]').element).toHaveProperty('value', '2026-11-05T00:00')
   w.unmount()
  })
  it('drills from URL to account to model and keeps a frozen half-open range when paging', async () => {
@@ -60,4 +68,57 @@ it('does not overwrite the latest filters with an earlier request response', asy
  const stale=fixture();stale.usage.summary.requests=999;resolveOld!(stale);await flushPromises()
  expect(w.get('[data-testid="profit-summary"]').text()).toContain('77');expect(w.get('[data-testid="profit-summary"]').text()).not.toContain('999')
  w.unmount()
+})
+
+
+it('applies today at click time after crossing midnight, retaining filters and resetting pagination', async () => {
+ const w = mount(ProfitOperationsView); await flushPromises()
+ await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
+ await w.get('[data-testid="model-filter"]').setValue('fixture-model')
+ vi.setSystemTime(new Date(2026, 10, 6, 0, 18, 42))
+ await w.get('[data-testid="today-filter"]').trigger('click'); await flushPromises()
+ const range = vi.mocked(readProfitOperations).mock.lastCall![0]
+ expect(range).toMatchObject({ from: new Date(2026, 10, 6).toISOString(), until: new Date(2026, 10, 6, 0, 18, 42).toISOString(), model: 'fixture-model', page: 1 })
+ const inputs = w.findAll('input[type="datetime-local"]')
+ expect(inputs[0]!.element).toHaveProperty('value', '2026-11-06T00:00')
+ expect(inputs[1]!.element).toHaveProperty('value', '2026-11-06T00:18')
+ vi.setSystemTime(new Date(2026, 10, 6, 1))
+ await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything())
+ w.unmount()
+})
+
+it('keeps the last 24 hours shortcut as a rolling window', async () => {
+ const w = mount(ProfitOperationsView); await flushPromises()
+ await w.get('[data-testid="last24h-filter"]').trigger('click'); await flushPromises()
+ const range = vi.mocked(readProfitOperations).mock.lastCall![0]
+ expect(Date.parse(range.until) - Date.parse(range.from)).toBe(86400000)
+ expect(range.until).toBe(new Date().toISOString())
+ expect(range.page).toBe(1)
+ w.unmount()
+})
+
+it('announces today independently and persists dismissal without applying filters', async () => {
+ const notices = useNewFeatureNoticeStore()
+ const previous = NEW_FEATURE_NOTICES.protocolFeatureSwitches
+ const current = NEW_FEATURE_NOTICES.profitOperationsToday
+ notices.dismiss(41, previous)
+ const w = mount(ProfitOperationsView); await flushPromises()
+ const badge = w.findAllComponents(NewFeatureBadge).find(b => b.props('noticeId') === current)!
+ expect(badge.find('button').exists()).toBe(true)
+ const requests = vi.mocked(readProfitOperations).mock.calls.length
+ await badge.get('button').trigger('click')
+ expect(readProfitOperations).toHaveBeenCalledTimes(requests)
+ expect(notices.isDismissed(41, current)).toBe(true)
+ w.unmount()
+ // A fresh store simulates refreshing or signing in again in the same browser.
+ setActivePinia(createPinia())
+ const refreshed = useNewFeatureNoticeStore()
+ expect(refreshed.isDismissed(41, previous)).toBe(true)
+ expect(refreshed.isDismissed(41, current)).toBe(true)
+ expect(refreshed.isDismissed(41, 'future-profit-feature-fixture')).toBe(false)
+ const reopened = mount(ProfitOperationsView); await flushPromises()
+ expect(reopened.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+ expect(reopened.find('[data-testid="today-filter"]').exists()).toBe(true)
+ reopened.unmount()
 })

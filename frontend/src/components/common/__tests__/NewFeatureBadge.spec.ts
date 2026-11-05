@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import NewFeatureBadge from '../NewFeatureBadge.vue'
 import zhCommon from '@/i18n/locales/zh/common'
 import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
@@ -19,6 +20,32 @@ describe('NewFeatureBadge', () => {
       global: { plugins: [i18n, createPinia()] },
     })
   }
+
+
+  it('keeps pricing transfer dismissal shared and persistent across feature announcements', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useNewFeatureNoticeStore()
+    const oldId = NEW_FEATURE_NOTICES.vipAutoCredit
+    const pricingId = NEW_FEATURE_NOTICES.channelPricingTransfer
+    store.dismiss(41, oldId)
+    const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: zhCommon } })
+    const badge = () => mount(NewFeatureBadge, {
+      props: { noticeId: pricingId, userId: 41 }, global: { plugins: [pinia, i18n] },
+    })
+    const first = badge()
+    const second = badge()
+    expect(first.find('button').exists()).toBe(true)
+    await first.get('button').trigger('click')
+    expect(second.find('button').exists()).toBe(false)
+    first.unmount()
+    second.unmount()
+    setActivePinia(createPinia())
+    const reloaded = useNewFeatureNoticeStore()
+    expect(reloaded.isDismissed(41, pricingId)).toBe(true)
+    expect(reloaded.isDismissed(41, oldId)).toBe(true)
+    expect(reloaded.isDismissed(41, 'future-feature-C')).toBe(false)
+  })
 
   it('hides a shared notice for the current admin when clicked', async () => {
     const wrapper = mountBadge()

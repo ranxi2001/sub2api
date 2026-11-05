@@ -42,7 +42,7 @@ func TestAdminAPIKeyModelPolicyRequiresAdminAuthentication(t *testing.T) {
 			router := gin.New()
 			admin := router.Group("/api/v1/admin", gin.HandlerFunc(middleware.NewAdminAuthMiddleware(auth, users, nil, nil)))
 			admin.PUT("/api-keys/:id", h.UpdateGroup)
-			req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10", bytes.NewBufferString(`{"model_mapping":{"gpt-6.1-sol":"gpt-5.6-sol"},"reasoning_effort":"high"}`))
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/api-keys/10", bytes.NewBufferString(`{"model_mapping":{"gpt-6.1-sol":"gpt-5.6-sol"},"reasoning_effort":"high","allow_long_context":true}`))
 			req.Header.Set("Content-Type", "application/json")
 			if role != "" {
 				token, err := auth.GenerateToken(context.Background(), user)
@@ -57,6 +57,7 @@ func TestAdminAPIKeyModelPolicyRequiresAdminAuthentication(t *testing.T) {
 			case service.RoleAdmin:
 				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 				require.Contains(t, rec.Body.String(), `"reasoning_effort":"high"`)
+				require.Contains(t, rec.Body.String(), `"allow_long_context":true`)
 			default:
 				require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 			}

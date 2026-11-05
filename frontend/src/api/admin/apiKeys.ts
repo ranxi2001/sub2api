@@ -16,6 +16,7 @@ export interface UpdateApiKeyGroupResult {
 export interface ApiKeyModelPolicy {
   model_mapping: Record<string, string>
   reasoning_effort: string
+  allow_long_context?: boolean
 }
 
 /** Update only this key's administrator-managed model policy. */
