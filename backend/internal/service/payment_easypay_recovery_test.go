@@ -152,13 +152,18 @@ func TestEasyPayRecoveryRejectsUnconfirmedAndMismatchedOrders(t *testing.T) {
 			ctx := context.Background()
 			f := newEasyPayRecoveryFixture(t, OrderStatusExpired, time.Now().Add(-10*time.Minute))
 			f.mode.Store(tc.mode)
+			// Compare persisted snapshots: a DB round trip deliberately drops
+			// time.Time's process-local monotonic clock reading.
+			before, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
+			require.NoError(t, err)
 			recovered, err := f.svc.ReconcileRecoverableEasyPayOrders(ctx)
 			require.NoError(t, err)
 			require.Zero(t, recovered)
 			order, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
 			require.NoError(t, err)
 			require.Equal(t, OrderStatusExpired, order.Status)
-			require.Equal(t, f.order.UpdatedAt, order.UpdatedAt, "retries must not slide the deadline or mutate lifecycle timestamps")
+			require.True(t, before.UpdatedAt.Equal(order.UpdatedAt), "retries must not mutate the persisted lifecycle timestamp: before=%s after=%s", before.UpdatedAt, order.UpdatedAt)
+			require.True(t, before.ExpiresAt.Equal(order.ExpiresAt), "retries must not slide the persisted recovery deadline: before=%s after=%s", before.ExpiresAt, order.ExpiresAt)
 			require.Empty(t, order.PaymentTradeNo, "failed confirmation must not replace the transaction reference")
 			require.Zero(t, f.userRepo.getByIDUser.Balance)
 			require.Empty(t, f.redeems.useCalls)
@@ -221,20 +226,41 @@ func TestEasyPayRecoveryRejectsChangedMerchant(t *testing.T) {
 }
 
 func TestEasyPayRecoveryKeepsOtherProviderGrace(t *testing.T) {
-	ctx := context.Background()
-	f := newEasyPayRecoveryFixture(t, OrderStatusExpired, time.Now().Add(-10*time.Minute))
-	_, err := f.client.PaymentOrder.UpdateOneID(f.order.ID).SetProviderKey(payment.TypeAlipay).
-		ClearProviderInstanceID().SetProviderSnapshot(map[string]any{}).Save(ctx)
-	require.NoError(t, err)
-	recovered, err := f.svc.ReconcileRecoverableEasyPayOrders(ctx)
-	require.NoError(t, err)
-	require.Zero(t, recovered)
-	require.Zero(t, f.queries.Load(), "official Alipay must not enter the EasyPay scan")
-	require.NoError(t, f.svc.toPaid(ctx, f.order, "official-alipay-trade", 50, payment.TypeAlipay))
-	order, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
-	require.NoError(t, err)
-	require.Equal(t, OrderStatusExpired, order.Status, "official Alipay retains its existing five-minute grace")
-	require.Zero(t, f.userRepo.getByIDUser.Balance)
+	for _, tc := range []struct {
+		name    string
+		age     time.Duration
+		status  string
+		balance float64
+	}{
+		{"outside_grace", 10 * time.Minute, OrderStatusExpired, 0},
+		{"within_grace", time.Minute, OrderStatusCompleted, 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newEasyPayRecoveryFixture(t, OrderStatusExpired, time.Now().Add(-10*time.Minute))
+			// Ent's UpdateDefault refreshes updated_at on any order update.
+			// Preserve the intended age while switching the fixture provider.
+			var err error
+			f.order, err = f.client.PaymentOrder.UpdateOneID(f.order.ID).SetProviderKey(payment.TypeAlipay).
+				ClearProviderInstanceID().SetProviderSnapshot(map[string]any{}).
+				SetUpdatedAt(time.Now().Add(-tc.age)).Save(ctx)
+			require.NoError(t, err)
+			recovered, err := f.svc.ReconcileRecoverableEasyPayOrders(ctx)
+			require.NoError(t, err)
+			require.Zero(t, recovered)
+			require.Zero(t, f.queries.Load(), "official Alipay must not enter the EasyPay scan")
+			require.NoError(t, f.svc.toPaid(ctx, f.order, "official-alipay-trade", 50, payment.TypeAlipay))
+			order, err := f.client.PaymentOrder.Get(ctx, f.order.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.status, order.Status, "official Alipay retains its existing five-minute grace")
+			require.Equal(t, tc.balance, f.userRepo.getByIDUser.Balance)
+			if tc.balance == 0 {
+				require.Empty(t, f.redeems.useCalls)
+			} else {
+				require.Len(t, f.redeems.useCalls, 1)
+			}
+		})
+	}
 }
 
 func TestEasyPayRecoveryRetainsOriginalProviderInstance(t *testing.T) {
