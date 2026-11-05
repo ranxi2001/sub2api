@@ -25,7 +25,9 @@ func newDedicatedAPIKeyTTLCache(t *testing.T, apiKeyTTLSeconds int) (*concurrenc
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	server.SetTime(time.Unix(1_800_000_000, 0))
-	return NewConcurrencyCacheWithAPIKeyTTL(client, 15, 900, apiKeyTTLSeconds).(*concurrencyCache), server
+	cache, ok := NewConcurrencyCacheWithAPIKeyTTL(client, 15, 900, apiKeyTTLSeconds).(*concurrencyCache)
+	require.True(t, ok, "expected Redis concurrency cache")
+	return cache, server
 }
 
 func TestConcurrencyCacheAPIKeyTTLOverrideAndInherit(t *testing.T) {
@@ -110,8 +112,10 @@ func TestAPIKeySlotDedicatedTTLSharedClientsKeepLivePeer(t *testing.T) {
 	})
 	now := time.Unix(1_800_000_000, 0)
 	server.SetTime(now)
-	cacheA := NewConcurrencyCacheWithAPIKeyTTL(clientA, 15, 900, 30).(*concurrencyCache)
-	cacheB := NewConcurrencyCacheWithAPIKeyTTL(clientB, 15, 900, 30).(*concurrencyCache)
+	cacheA, ok := NewConcurrencyCacheWithAPIKeyTTL(clientA, 15, 900, 30).(*concurrencyCache)
+	require.True(t, ok, "expected Redis concurrency cache")
+	cacheB, ok := NewConcurrencyCacheWithAPIKeyTTL(clientB, 15, 900, 30).(*concurrencyCache)
+	require.True(t, ok, "expected Redis concurrency cache")
 	ctx := context.Background()
 
 	require.NoError(t, cacheA.TrackAPIKeySlot(ctx, 9, "live"))
