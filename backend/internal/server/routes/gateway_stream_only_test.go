@@ -30,10 +30,14 @@ func TestGatewayRoutesGroupStreamOnlyMountedOnEveryGatewayChain(t *testing.T) {
 		if chain.group == "gateway" || chain.group == "antigravityV1" {
 			allowlistChain = chain.group + ".Use(groupModelAllowlist, apiKeyModelPolicy)"
 		}
+		streamOnlyChain := chain.group + ".Use(groupStreamOnly)"
+		if chain.group == "gateway" {
+			streamOnlyChain = "gateway.Use(groupAntiDistillation, groupStreamOnly)"
+		}
 		re := regexp.MustCompile(
 			regexp.QuoteMeta(allowlistChain) +
 				`\s*` + regexp.QuoteMeta(chain.group+".Use(groupCodexCLIOnly, groupBlockSubagents)") +
-				`\s*` + regexp.QuoteMeta(chain.group+".Use(groupStreamOnly)"))
+				`\s*` + regexp.QuoteMeta(streamOnlyChain))
 		mounts := re.FindAllStringIndex(source, -1)
 		require.Len(t, mounts, 1, "%s chain must mount groupStreamOnly right after the allowlist", chain.group)
 		next := strings.Index(source, chain.next)
