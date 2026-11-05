@@ -17,7 +17,12 @@
         <label>{{ t('profitOps.dimension') }}<select v-model="draft.dimension" class="input w-full"><option value="upstream">{{ t('profitOps.upstream') }}</option><option value="account">{{ t('profitOps.account') }}</option><option value="model">{{ t('profitOps.model') }}</option></select></label>
         <label>{{ t('profitOps.sort') }}<select v-model="draft.sort" data-testid="sort-filter" class="input w-full"><option v-for="key in sortKeys" :key="key" :value="key">{{ t(`profitOps.${key}`) }}</option></select></label>
         <label>{{ t('profitOps.direction') }}<select v-model="draft.direction" class="input w-full"><option value="desc">{{ t('profitOps.desc') }}</option><option value="asc">{{ t('profitOps.asc') }}</option></select></label>
-        <button class="btn btn-primary self-end" :disabled="loading">{{ t('profitOps.apply') }}</button><button type="button" class="btn btn-secondary self-end" :disabled="loading" @click="last24h">{{ t('profitOps.last24h') }}</button>
+        <div class="flex flex-wrap items-center gap-2 self-end sm:col-span-2">
+          <button class="btn btn-primary" :disabled="loading">{{ t('profitOps.apply') }}</button>
+          <button type="button" class="btn btn-secondary" data-testid="today-filter" :disabled="loading" @click="today">{{ t('profitOps.today') }}</button>
+          <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.profitOperationsToday" :user-id="auth.user?.id" />
+          <button type="button" class="btn btn-secondary" data-testid="last24h-filter" :disabled="loading" @click="last24h">{{ t('profitOps.last24h') }}</button>
+        </div>
       </form>
       <p v-if="error" role="alert" class="text-red-600">{{ error }}</p><p v-if="loading" role="status">{{ t('profitOps.loading') }}</p>
       <template v-if="snapshot && !error">
@@ -50,13 +55,18 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useAuthStore } from '@/stores/auth'
 import SmartOpsNav from './SmartOpsNav.vue'
 import UpstreamChannelManager from './UpstreamChannelManager.vue'
 import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
 const { t } = useI18n()
+const auth = useAuthStore()
 const amountKeys = ['requests','standard_charge','request_income','estimated_cost','estimated_profit','margin'] as const
 const sortKeys = [...amountKeys, 'name']
-const at = new Date(), start = new Date(at.getTime()-86400000)
+const at = new Date(), start = new Date(at)
+start.setHours(0,0,0,0)
 const local = (d: Date) => new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)
 const from=ref(local(start)), until=ref(local(at))
 const initial: OperationsQuery = { from:start.toISOString(),until:at.toISOString(),upstream:'',channel_id:0,account_id:0,group_id:0,model:'',model_scope:'public',dimension:'upstream',sort:'requests',direction:'desc',page:1,page_size:20 }
@@ -72,6 +82,7 @@ async function load() {
  finally { if(alive && request===id) loading.value=false }
 }
 function apply() { const a=new Date(from.value), b=new Date(until.value); if(!Number.isFinite(a.getTime())||!Number.isFinite(b.getTime())||b<=a||b.getTime()-a.getTime()>31*86400000){error.value=t('profitOps.invalidRange');return} applied.value={...draft.value,from:a.toISOString(),until:b.toISOString(),page:1};void load() }
+function today(){const end=new Date(), start=new Date(end);start.setHours(0,0,0,0);applied.value={...draft.value,from:start.toISOString(),until:end.toISOString(),page:1};from.value=local(start);until.value=local(end);void load()}
 function last24h(){const end=new Date();applied.value={...draft.value,from:new Date(end.getTime()-86400000).toISOString(),until:end.toISOString(),page:1};from.value=local(new Date(applied.value.from));until.value=local(end);void load()}
 function page(delta:number){applied.value={...applied.value,page:applied.value.page+delta};void load()}
 function drill(row:OperationsRow){if(applied.value.dimension==='upstream'){const id=row.channel_id||0;applied.value={...applied.value,upstream:id?'':row.key,channel_id:id,account_id:0,dimension:'account',page:1}}else if(applied.value.dimension==='account'){applied.value={...applied.value,account_id:Number(row.key),dimension:'model',page:1}}draft.value={...applied.value};void load()}

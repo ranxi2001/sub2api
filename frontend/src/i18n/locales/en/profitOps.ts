@@ -30,6 +30,7 @@ export default {
   "desc": "Descending",
   "asc": "Ascending",
   "apply": "Apply filters",
+  "today": "Today",
   "last24h": "Last 24 hours",
   "loading": "Reading…",
   "queried": "Read at",

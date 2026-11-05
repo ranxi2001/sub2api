@@ -30,6 +30,7 @@ export default {
   "desc": "降序",
   "asc": "升序",
   "apply": "应用筛选",
+  "today": "今天",
   "last24h": "近24小时",
   "loading": "读取中…",
   "queried": "读取时间",
