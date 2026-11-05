@@ -88,7 +88,7 @@ func TestAIOpsApplyAccountAuditAndOutboxAreAtomic(t *testing.T) {
 			m.ExpectQuery("WITH successes").WillReturnRows(sqlmock.NewRows([]string{"successes", "failures", "known", "cohorts", "unknown_failures", "model"}).AddRow(30, 0, 30, 1, 0, "gpt-test"))
 			for i := 0; i < 2; i++ {
 				m.ExpectQuery("SELECT platform,type").WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "credentials", "extra"}).AddRow("openai", "oauth", `{"model_mapping":{"gpt-test":"gpt-test"}}`, `{}`))
-			m.ExpectQuery("SELECT COALESCE.*allowed_models").WillReturnRows(sqlmock.NewRows([]string{"models","group_models"}).AddRow(`[]`,`{}`))
+				m.ExpectQuery("SELECT COALESCE.*allowed_models").WillReturnRows(sqlmock.NewRows([]string{"models", "group_models"}).AddRow(`[]`, `{}`))
 				m.ExpectQuery("SELECT EXISTS.*usage_logs peer").WillReturnRows(sqlmock.NewRows([]string{"compatible"}).AddRow(true))
 			}
 			m.ExpectQuery("SELECT COUNT.*FILTER").WillReturnRows(sqlmock.NewRows([]string{"active", "daily", "last"}).AddRow(0, 0, nil))

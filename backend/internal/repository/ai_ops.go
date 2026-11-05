@@ -295,12 +295,12 @@ func aiOpsModelSupported(ctx context.Context, tx *sql.Tx, id, groupID int64, mod
 	}
 	var allowed []byte
 	var groupAllowlist []byte
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(ag.allowed_models,'[]'),COALESCE(g.model_allowlist,'{}') FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=$1 AND ag.group_id=$2 AND g.deleted_at IS NULL AND g.status='active'`, id, groupID).Scan(&allowed,&groupAllowlist); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(ag.allowed_models,'[]'),COALESCE(g.model_allowlist,'{}') FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=$1 AND ag.group_id=$2 AND g.deleted_at IS NULL AND g.status='active'`, id, groupID).Scan(&allowed, &groupAllowlist); err != nil {
 		return false, err
 	}
 	var models []string
 	var groupModels service.GroupModelAllowlist
-	if json.Unmarshal(allowed, &models) != nil || json.Unmarshal(groupAllowlist,&groupModels)!=nil {
+	if json.Unmarshal(allowed, &models) != nil || json.Unmarshal(groupAllowlist, &groupModels) != nil {
 		return false, service.ErrAIOpsUnavailable
 	}
 	a.AccountGroups = []service.AccountGroup{{AccountID: id, GroupID: groupID, AllowedModels: models}}
