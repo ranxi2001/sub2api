@@ -863,6 +863,23 @@ export default {
 
     // Groups
     groups: {
+      antiDistillation: {
+        title: 'OpenAI anti-distillation protection (zero-cache rule)',
+        enable: 'Enable protection for this OpenAI group',
+        rule: 'Across a customer’s API keys and protected OpenAI groups, pause new requests to protected groups when at least 18 of the latest 20 fully completed text requests with explicit cache statistics report zero cache reads. An email notification is sent asynchronously to the customer’s account email. Unknown cache statistics are excluded.',
+        signalHint: 'Zero cache is a protection signal, not a finding of distillation. Normal new conversations and uncached workloads can also trigger it.',
+        pauseMinutes: 'Pause duration (minutes)',
+        minutesHint: 'Set an integer from 1 to 1440; default: 5 minutes. The triggering group determines the duration. An active pause is never extended.',
+        invalidMinutes: 'Enter an integer between 1 and 1440.',
+        scopeHint: 'Only new requests to protected groups are affected; existing streams finish normally. Unprotected groups remain available. Requests are not automatically moved to a more expensive group.',
+        saveHint: 'Save this setting separately; it takes effect within 10 seconds. The group save button below is not required. Disabling protection releases this group once the setting takes effect.',
+        createHint: 'Disabled by default. Create the group first, then edit it to configure and save protection separately.',
+        save: 'Save protection settings',
+        saved: 'Protection settings saved; effective within 10 seconds',
+        loadFailed: 'Could not load protection settings. Reload successfully before saving to avoid overwriting the existing configuration.',
+        saveFailed: 'Could not save protection settings. Please try again.',
+        retry: 'Reload',
+      },
       title: 'Group Management',
       description: 'Manage API key groups and rate multipliers',
       searchGroups: 'Search groups...',

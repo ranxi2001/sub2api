@@ -813,3 +813,27 @@ func TestObserveUpstreamMessage_ResponseServiceTierOnlyFromTerminalEvents(t *tes
 	)
 	require.Equal(t, "", second.responseServiceTier)
 }
+
+func TestRelayUsageProtectionRequiresSuccessfulTerminalCacheEvidence(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, event, payload string
+		known                bool
+	}{
+		{"zero", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}`, true},
+		{"positive", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":1280}}}}`, true},
+		{"missing", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1}}}`, false},
+		{"no terminal usage", "response.completed", `{"response":{"id":"resp_1"}}`, false},
+		{"negative", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":-1}}}}`, false},
+		{"fractional", "response.completed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0.5}}}}`, false},
+		{"failed", "response.failed", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}`, false},
+		{"incomplete", "response.incomplete", `{"response":{"usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := &relayState{}
+			parseUsageAndAccumulate(state, []byte(`{"type":"response.in_progress","usage":{"input_tokens":2000,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`), "response.in_progress", nil)
+			parseUsageAndAccumulate(state, []byte(tc.payload), tc.event, nil)
+			require.Equal(t, tc.known, finalizeRelayTurnUsage(state).CacheReadKnown)
+		})
+	}
+}

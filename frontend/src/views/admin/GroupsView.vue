@@ -661,6 +661,17 @@
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
         </div>
+        <div v-if="createForm.platform === 'openai'" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+          <div class="flex flex-wrap items-center gap-2">
+            <h4 class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t("admin.groups.antiDistillation.title") }}</h4>
+            <NewFeatureBadge
+              v-if="authStore.user?.id != null"
+              :notice-id="NEW_FEATURE_NOTICES.groupAntiDistillation"
+              :user-id="authStore.user?.id"
+            />
+          </div>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.groups.antiDistillation.createHint") }}</p>
+        </div>
         <div class="flex items-start justify-between gap-4">
           <div>
             <label class="input-label">{{ t("admin.groups.form.codexCLIOnly") }}</label>
@@ -2351,6 +2362,12 @@
           />
           <p class="input-hint">{{ t("admin.groups.form.rpmLimitHint") }}</p>
         </div>
+        <GroupAntiDistillationSettings
+          v-if="editForm.platform === 'openai'"
+          :group-id="editingGroup.id"
+          :user-id="authStore.user?.id"
+          :active="showEditModal"
+        />
         <div class="flex items-start justify-between gap-4">
           <div>
             <label class="input-label">{{ t("admin.groups.form.codexCLIOnly") }}</label>
@@ -4439,6 +4456,9 @@ import Icon from "@/components/icons/Icon.vue";
 import GroupI18nField from "@/components/admin/group/GroupI18nField.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import GroupAntiDistillationSettings from "@/components/admin/group/GroupAntiDistillationSettings.vue";
+import NewFeatureBadge from "@/components/common/NewFeatureBadge.vue";
+import { NEW_FEATURE_NOTICES } from "@/constants/newFeatureNotices";
 import GroupUserDeniedModelsModal from "@/components/admin/group/GroupUserDeniedModelsModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";

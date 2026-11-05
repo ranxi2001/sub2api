@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -374,6 +375,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// both list the same call_id — counting both would ~2× the surcharge).
 	streamSearchSeen := make(map[string]struct{})
 	resultWithUsage := func() *openaiStreamingResult {
+		if usage != nil && (!terminalSuccessful || clientDisconnected) {
+			usage.CacheReadKnown = false
+		}
 		if clientDisconnected {
 			markPriorityDownstreamDisconnect(ctx)
 		}
@@ -1320,6 +1324,8 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	if usage == nil || len(data) == 0 || bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
 		return
 	}
+	terminalType := effectiveOpenAISSEEventType(data, eventType)
+	usage.CacheReadKnown = false
 	// Usage is absent from nearly every delta event. Avoid full JSON validation
 	// and four gjson path scans on that hot path while retaining progressive
 	// usage from compatible upstreams on any event type.
@@ -1330,7 +1336,10 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	if !ok {
 		return
 	}
-	if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(data, eventType)) {
+	if openAIStreamEventTypeIsTerminal(terminalType) {
+		if terminalType != "response.completed" && terminalType != "response.done" {
+			parsedUsage.CacheReadKnown = false
+		}
 		if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
 			return
 		}
@@ -1458,6 +1467,14 @@ func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 	for _, candidate := range candidates {
 		if usage, ok := openAIUsageFromGJSON(gjson.GetBytes(body, candidate.usagePath)); ok {
 			mergeHostedImageGenToolUsage(gjson.GetBytes(body, candidate.imageUsagePath), &usage)
+			if eventType := effectiveOpenAISSEEventType(body, ""); eventType != "" && eventType != "response.completed" && eventType != "response.done" {
+				usage.CacheReadKnown = false
+			}
+			for _, path := range []string{"status", "response.status", "data.status", "data.response.status"} {
+				if status := gjson.GetBytes(body, path).String(); status != "" && status != "completed" {
+					usage.CacheReadKnown = false
+				}
+			}
 			return usage, true
 		}
 	}
@@ -1652,8 +1669,41 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		OutputTokens:             int(outputTokens),
 		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     cacheReadTokens,
+		CacheReadKnown:           openAICacheReadKnownFromUsage(value),
 		ImageOutputTokens:        int(imageOutputTokens),
 	}, true
+}
+
+// Keep protection evidence separate from billing compatibility parsing: null,
+// strings, negative and fractional counters are unknown, never confirmed zeros.
+func openAICacheReadKnownFromUsage(value gjson.Result) bool {
+	valid := func(field gjson.Result) bool {
+		return field.Type == gjson.Number && field.Num >= 0 &&
+			field.Num < float64(int(^uint(0)>>1)) && !math.IsNaN(field.Num) &&
+			!math.IsInf(field.Num, 0) && math.Trunc(field.Num) == field.Num
+	}
+	// Match billing's canonical-field priority, including explicit zero.
+	for _, path := range []string{"input_tokens_details.cached_tokens", "prompt_tokens_details.cached_tokens"} {
+		if field := value.Get(path); field.Exists() {
+			return valid(field)
+		}
+	}
+	// Billing accepts positive legacy aliases. Conflicting aliases are too
+	// ambiguous to use as protection evidence, even if billing can recover one.
+	known := false
+	var tokens int64
+	for _, path := range []string{"cache_read_input_tokens", "cache_read_tokens", "cached_tokens", "prompt_cache_hit_tokens"} {
+		field := value.Get(path)
+		if !field.Exists() {
+			continue
+		}
+		if !valid(field) || known && field.Int() != tokens {
+			return false
+		}
+		known = true
+		tokens = field.Int()
+	}
+	return known
 }
 
 func openAICacheReadTokensFromUsage(value gjson.Result) int {
