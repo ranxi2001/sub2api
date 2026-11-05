@@ -53,7 +53,20 @@ type AIOpsEvidenceSnapshot struct {
 	Model                 string    `json:"model"`
 	Effort                string    `json:"effort"`
 	Protocol              string    `json:"protocol"`
+	InputBucket           string    `json:"input_bucket,omitempty"`
+	CacheBucket           string    `json:"cache_bucket,omitempty"`
+	OutputBucket          string    `json:"output_bucket,omitempty"`
 	EligibleAccountIDs    []int64   `json:"-"`
+}
+
+// ComparableAIOpsEvidence requires a complete, identical request cohort. Legacy
+// snapshots without bucket metadata cannot prove an effect or authorize a write.
+func ComparableAIOpsEvidence(before, after AIOpsEvidenceSnapshot) bool {
+	return before.ModelCoverageComplete && after.ModelCoverageComplete &&
+		before.Model != "" && before.Effort != "" && before.Protocol != "" &&
+		before.InputBucket != "" && before.CacheBucket != "" && before.OutputBucket != "" &&
+		before.Model == after.Model && before.Effort == after.Effort && before.Protocol == after.Protocol &&
+		before.InputBucket == after.InputBucket && before.CacheBucket == after.CacheBucket && before.OutputBucket == after.OutputBucket
 }
 
 type AIOpsPreviewInput struct {
@@ -85,21 +98,22 @@ type AIOpsProposal struct {
 }
 
 type AIOpsAction struct {
-	ID             string    `json:"id"`
-	ProposalID     string    `json:"proposal_id"`
-	RunID          string    `json:"run_id"`
-	Action         string    `json:"action"`
-	AccountID      int64     `json:"account_id"`
-	BeforeValue    *float64  `json:"before_value"`
-	AfterValue     *float64  `json:"after_value"`
-	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	ObserveUntil   time.Time `json:"observe_until"`
-	OwnerRevision  int64     `json:"owner_revision"`
-	TargetRevision int64     `json:"target_revision"`
-	ReasonCode     string    `json:"reason_code"`
-	Auto           bool      `json:"auto"`
+	ID                   string    `json:"id"`
+	ProposalID           string    `json:"proposal_id"`
+	RunID                string    `json:"run_id"`
+	Action               string    `json:"action"`
+	AccountID            int64     `json:"account_id"`
+	BeforeValue          *float64  `json:"before_value"`
+	AfterValue           *float64  `json:"after_value"`
+	Status               string    `json:"status"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	ObserveUntil         time.Time `json:"observe_until"`
+	ObservationStartedAt time.Time `json:"observation_started_at"`
+	OwnerRevision        int64     `json:"owner_revision"`
+	TargetRevision       int64     `json:"target_revision"`
+	ReasonCode           string    `json:"reason_code"`
+	Auto                 bool      `json:"auto"`
 }
 
 type AIOpsRuntime struct {

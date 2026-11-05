@@ -287,3 +287,192 @@ func TestAIOpsPostgresFailedRecoveryProbeCannotResumePausedAccount(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, runtime[f.target].Paused)
 }
+
+// Only GetAccount is used for propagation confirmation; embedding the interface
+// makes any unexpected cache operation fail instead of silently succeeding.
+type aiOpsPropagationCache struct {
+	service.SchedulerCache
+	account *service.Account
+}
+
+func (c *aiOpsPropagationCache) GetAccount(context.Context, int64) (*service.Account, error) {
+	return c.account, nil
+}
+
+func TestAIOpsPostgresPropagationTimeoutKeepsReservationUntilConfirmed(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			f := aiOpsFullPGFixture(t)
+			ctx := context.Background()
+			proposal, err := f.repo.PreviewAIOps(ctx, service.AIOpsPreviewInput{RunID: uuid.NewString(), Action: "set_concurrency", AccountID: f.target, ProposedValue: aiOpsFloat(18), EvidenceObservedAt: time.Now().UTC()}, f.actor)
+			require.NoError(t, err)
+			require.Equal(t, "ready", proposal.Status)
+			action, err := f.repo.ApplyAIOps(ctx, proposal.ID, proposal.Digest, f.actor, false)
+			require.NoError(t, err)
+			action.ObserveUntil = time.Now().UTC().Add(-time.Minute)
+			if legacy {
+				action.Status = "inconclusive"
+				action.ReasonCode = "propagation_unconfirmed"
+			}
+			_, err = integrationDB.Exec(`UPDATE ai_ops_actions SET status=$2,data=$3 WHERE id=$1`, action.ID, action.Status, aiOpsJSON(action))
+			require.NoError(t, err)
+			require.NoError(t, f.repo.ReconcileAIOps(ctx))
+			read := func() service.AIOpsAction {
+				var raw []byte
+				require.NoError(t, integrationDB.QueryRow(`SELECT data FROM ai_ops_actions WHERE id=$1`, action.ID).Scan(&raw))
+				var got service.AIOpsAction
+				require.NoError(t, json.Unmarshal(raw, &got))
+				return got
+			}
+			got := read()
+			require.Equal(t, "propagation_pending", got.Status)
+			require.Equal(t, "propagation_unconfirmed", got.ReasonCode)
+			policy, err := f.repo.AIOpsPolicy(ctx)
+			require.NoError(t, err)
+			require.True(t, policy.Halted)
+			require.Equal(t, f.policy.Revision+1, policy.Revision)
+			require.NoError(t, f.repo.ReconcileAIOps(ctx))
+			again, err := f.repo.AIOpsPolicy(ctx)
+			require.NoError(t, err)
+			require.Equal(t, policy.Revision, again.Revision, "repeated timeout checks must not churn policy revisions")
+
+			// Re-enabling the policy cannot release the unresolved action's capacity
+			// reservation, including records produced by the old controller.
+			policy.Halted = false
+			_, err = f.repo.SaveAIOpsPolicy(ctx, policy, policy.Revision, f.actor)
+			require.NoError(t, err)
+			if legacy {
+				_, err = integrationDB.Exec(`UPDATE ai_ops_actions SET status='inconclusive',data=jsonb_set(data,'{status}','"inconclusive"') WHERE id=$1`, action.ID)
+				require.NoError(t, err)
+			}
+			peer, err := f.repo.PreviewAIOps(ctx, service.AIOpsPreviewInput{RunID: uuid.NewString(), Action: "set_concurrency", AccountID: f.peer, ProposedValue: aiOpsFloat(18), EvidenceObservedAt: time.Now().UTC()}, f.actor)
+			require.NoError(t, err)
+			require.Equal(t, "ready", peer.Status)
+			_, err = f.repo.ApplyAIOps(ctx, peer.ID, peer.Digest, f.actor, false)
+			require.ErrorIs(t, err, service.ErrAIOpsBlocked, "another capacity domain must not bypass the unresolved reservation")
+
+			f.repo.schedulerCache = &aiOpsPropagationCache{account: &service.Account{ID: f.target, Concurrency: 18}}
+			confirmedAt := time.Now().UTC()
+			require.NoError(t, f.repo.ReconcileAIOps(ctx))
+			got = read()
+			require.Equal(t, "observing", got.Status)
+			require.Empty(t, got.ReasonCode)
+			require.False(t, got.ObservationStartedAt.Before(confirmedAt))
+			require.Equal(t, time.Duration(f.policy.ObservationSeconds)*time.Second, got.ObserveUntil.Sub(got.ObservationStartedAt))
+		})
+	}
+}
+
+func TestAIOpsPostgresObservationRequiresSameCompleteCohort(t *testing.T) {
+	for _, kind := range []string{"matching", "matching_regression", "model", "effort", "protocol", "input", "cache", "output", "legacy_buckets", "before_propagation", "legacy_observation"} {
+		t.Run(kind, func(t *testing.T) {
+			f := aiOpsFullPGFixture(t)
+			ctx := context.Background()
+			proposal, err := f.repo.PreviewAIOps(ctx, service.AIOpsPreviewInput{RunID: uuid.NewString(), Action: "set_concurrency", AccountID: f.target, ProposedValue: aiOpsFloat(18), EvidenceObservedAt: time.Now().UTC()}, f.actor)
+			require.NoError(t, err)
+			require.Equal(t, "ready", proposal.Status)
+			require.Equal(t, "small", proposal.Evidence.InputBucket)
+			require.Equal(t, "uncached", proposal.Evidence.CacheBucket)
+			require.Equal(t, "small", proposal.Evidence.OutputBucket)
+			action, err := f.repo.ApplyAIOps(ctx, proposal.ID, proposal.Digest, f.actor, false)
+			require.NoError(t, err)
+			// Simulate a persisted baseline from a prior request cohort. Today's
+			// complete PG trace population remains unchanged, isolating comparison
+			// from eligibility and ownership checks.
+			switch kind {
+			case "model":
+				proposal.Evidence.Model = "prior-model"
+			case "effort":
+				proposal.Evidence.Effort = "low"
+			case "protocol":
+				proposal.Evidence.Protocol = "ws"
+			case "input":
+				proposal.Evidence.InputBucket = "large"
+			case "cache":
+				proposal.Evidence.CacheBucket = "cached"
+			case "output":
+				proposal.Evidence.OutputBucket = "large"
+			case "legacy_buckets":
+				proposal.Evidence.InputBucket = ""
+				proposal.Evidence.CacheBucket = ""
+				proposal.Evidence.OutputBucket = ""
+			}
+			_, err = integrationDB.Exec(`UPDATE ai_ops_proposals SET data=$2 WHERE id=$1`, proposal.ID, aiOpsJSON(proposal))
+			require.NoError(t, err)
+			if kind != "matching" {
+				// Large enough to cross the rollback threshold: a cohort
+				// mismatch must suppress rollback even when error rate rises.
+				t.Cleanup(func() { _, _ = integrationDB.Exec(`DELETE FROM ops_error_logs WHERE account_id=$1`, f.target) })
+				for range 12 {
+					_, err = integrationDB.Exec(`INSERT INTO ops_error_logs(account_id,group_id,request_id,model,error_phase,error_type,error_owner,error_source,severity,status_code,upstream_status_code,is_count_tokens,created_at) VALUES($1,$2,$3,$4,'upstream','upstream_error','provider','upstream_http','error',503,503,false,NOW()-interval '10 seconds')`, f.target, f.policy.GroupID, uuid.NewString(), f.model)
+					require.NoError(t, err)
+				}
+			}
+			action.Status = "observing"
+			action.CreatedAt = time.Now().UTC().Add(-3 * time.Minute)
+			action.ObservationStartedAt = time.Now().UTC().Add(-2 * time.Minute)
+			action.ObserveUntil = time.Now().UTC().Add(-time.Second)
+			if kind == "before_propagation" {
+				action.ObservationStartedAt = time.Now().UTC().Add(-10 * time.Second)
+			} else if kind == "legacy_observation" {
+				action.ObservationStartedAt = time.Time{}
+			}
+			_, err = integrationDB.Exec(`UPDATE ai_ops_actions SET status=$2,data=$3 WHERE id=$1`, action.ID, action.Status, aiOpsJSON(action))
+			require.NoError(t, err)
+			require.NoError(t, f.repo.ReconcileAIOps(ctx))
+			var raw []byte
+			require.NoError(t, integrationDB.QueryRow(`SELECT data FROM ai_ops_actions WHERE id=$1`, action.ID).Scan(&raw))
+			var got service.AIOpsAction
+			require.NoError(t, json.Unmarshal(raw, &got))
+			if kind == "matching" {
+				require.Equal(t, "succeeded", got.Status)
+				require.Equal(t, "post_change_verified", got.ReasonCode)
+			} else if kind == "matching_regression" {
+				require.Equal(t, "rolled_back", got.Status)
+				require.Equal(t, "error_rate_regressed", got.ReasonCode)
+			} else {
+				require.Equal(t, "inconclusive", got.Status, "non-comparable evidence must not prove success or trigger rollback")
+				reason := "post_change_cohort_changed"
+				if kind == "before_propagation" || kind == "legacy_observation" {
+					reason = "insufficient_post_change_evidence"
+				}
+				require.Equal(t, reason, got.ReasonCode)
+			}
+			var concurrency int
+			require.NoError(t, integrationDB.QueryRow(`SELECT concurrency FROM accounts WHERE id=$1`, f.target).Scan(&concurrency))
+			expected := 18
+			if kind == "matching_regression" {
+				expected = 20
+			}
+			require.Equal(t, expected, concurrency, "only a comparable regression can restore old configuration")
+		})
+	}
+}
+
+func TestAIOpsPostgresApprovalRejectsChangedRequestBuckets(t *testing.T) {
+	for _, kind := range []string{"input", "cache", "output"} {
+		t.Run(kind, func(t *testing.T) {
+			f := aiOpsFullPGFixture(t)
+			ctx := context.Background()
+			proposal, err := f.repo.PreviewAIOps(ctx, service.AIOpsPreviewInput{RunID: uuid.NewString(), Action: "set_concurrency", AccountID: f.target, ProposedValue: aiOpsFloat(18), EvidenceObservedAt: time.Now().UTC()}, f.actor)
+			require.NoError(t, err)
+			require.Equal(t, "ready", proposal.Status)
+			switch kind {
+			case "input":
+				_, err = integrationDB.Exec(`UPDATE usage_logs SET input_tokens=50000 WHERE account_id=$1`, f.target)
+			case "cache":
+				_, err = integrationDB.Exec(`UPDATE usage_logs SET cache_read_tokens=100 WHERE account_id=$1`, f.target)
+			case "output":
+				_, err = integrationDB.Exec(`UPDATE usage_logs SET output_tokens=9000 WHERE account_id=$1`, f.target)
+			}
+			require.NoError(t, err)
+			_, err = f.repo.ApplyAIOps(ctx, proposal.ID, proposal.Digest, f.actor, false)
+			require.ErrorIs(t, err, service.ErrAIOpsConflict)
+			var actions, concurrency int
+			require.NoError(t, integrationDB.QueryRow(`SELECT count(*) FROM ai_ops_actions WHERE proposal_id=$1`, proposal.ID).Scan(&actions))
+			require.Zero(t, actions)
+			require.NoError(t, integrationDB.QueryRow(`SELECT concurrency FROM accounts WHERE id=$1`, f.target).Scan(&concurrency))
+			require.Equal(t, 20, concurrency)
+		})
+	}
+}

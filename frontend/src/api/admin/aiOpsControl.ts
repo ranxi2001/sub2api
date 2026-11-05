@@ -54,6 +54,9 @@ export interface AIOpsFrozenProposal {
     model?: string
     effort?: string
     protocol?: string
+    input_bucket?: string
+    cache_bucket?: string
+    output_bucket?: string
   }
   impact_group_ids: number[]
 }
@@ -70,6 +73,7 @@ export interface AIOpsActionRecord {
   created_at: string
   updated_at: string
   observe_until: string
+  observation_started_at?: string
   owner_revision: number
   target_revision: number
   reason_code: string

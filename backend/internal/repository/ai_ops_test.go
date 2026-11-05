@@ -78,14 +78,14 @@ func TestAIOpsApplyAccountAuditAndOutboxAreAtomic(t *testing.T) {
 			r := &accountRepository{sql: db}
 			now := time.Now().UTC()
 			p := aiOpsTestPolicy()
-			proposal := service.AIOpsProposal{ID: "4447dc20-c3eb-4f5a-87ba-adfc91509b8c", RunID: "run-fixed", Action: "set_concurrency", AccountID: 11, ProposedValue: aiOpsFloat(18), BeforeValue: aiOpsFloat(20), PolicyRevision: 3, TargetRevision: 5, Digest: "frozen", CreatedAt: now, ExpiresAt: now.Add(time.Minute), Status: "ready", Evidence: service.AIOpsEvidenceSnapshot{Model: "gpt-test", Effort: "high", Protocol: "http"}}
+			proposal := service.AIOpsProposal{ID: "4447dc20-c3eb-4f5a-87ba-adfc91509b8c", RunID: "run-fixed", Action: "set_concurrency", AccountID: 11, ProposedValue: aiOpsFloat(18), BeforeValue: aiOpsFloat(20), PolicyRevision: 3, TargetRevision: 5, Digest: "frozen", CreatedAt: now, ExpiresAt: now.Add(time.Minute), Status: "ready", Evidence: service.AIOpsEvidenceSnapshot{ModelCoverageComplete: true, Model: "gpt-test", Effort: "high", Protocol: "http", InputBucket: "small", CacheBucket: "uncached", OutputBucket: "small"}}
 			aiOpsExpectTx(m)
 			m.ExpectQuery("SELECT data FROM ai_ops_proposals.*FOR UPDATE").WithArgs(proposal.ID).WillReturnRows(sqlmock.NewRows([]string{"data"}).AddRow(aiOpsJSON(proposal)))
 			m.ExpectQuery("SELECT data FROM ai_ops_actions WHERE proposal_id").WithArgs(proposal.ID).WillReturnError(sql.ErrNoRows)
 			m.ExpectQuery("SELECT revision,config FROM ai_ops_policy").WillReturnRows(sqlmock.NewRows([]string{"revision", "config"}).AddRow(p.Revision, aiOpsJSON(p)))
 			m.ExpectQuery("SELECT EXISTS.*serverless_routing_v1").WillReturnRows(sqlmock.NewRows([]string{"unsupported"}).AddRow(false))
 			m.ExpectQuery("SELECT a.id,a.ai_ops_revision").WithArgs("{11,12}").WillReturnRows(aiOpsAccountRows())
-			m.ExpectQuery("WITH successes").WillReturnRows(sqlmock.NewRows([]string{"successes", "failures", "known", "cohorts", "unknown_failures", "model", "effort", "protocol"}).AddRow(30, 0, 30, 1, 0, "gpt-test", "high", "http"))
+			m.ExpectQuery("WITH successes").WillReturnRows(sqlmock.NewRows([]string{"successes", "failures", "known", "cohorts", "unknown_failures", "model", "effort", "protocol", "input_bucket", "cache_bucket", "output_bucket"}).AddRow(30, 0, 30, 1, 0, "gpt-test", "high", "http", "small", "uncached", "small"))
 			for i := 0; i < 2; i++ {
 				m.ExpectQuery("SELECT platform,type").WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "credentials", "extra"}).AddRow("openai", "oauth", `{"model_mapping":{"gpt-test":"gpt-test"}}`, `{}`))
 				m.ExpectQuery("SELECT COALESCE.*allowed_models").WillReturnRows(sqlmock.NewRows([]string{"models", "group_models"}).AddRow(`[]`, `{}`))
@@ -165,7 +165,7 @@ func TestAIOpsEvidenceForEmptyTargetDoesNotPoisonLaterTargets(t *testing.T) {
 	require.NoError(t, err)
 	accounts := map[int64]aiOpsAccount{11: {id: 11, concurrency: 20, healthy: true, quotaKnown: true}, 12: {id: 12, concurrency: 20, healthy: true, quotaKnown: true}}
 	original := map[int64]aiOpsAccount{11: accounts[11], 12: accounts[12]}
-	m.ExpectQuery("WITH successes").WillReturnRows(sqlmock.NewRows([]string{"successes", "failures", "known", "cohorts", "unknown_failures", "model", "effort", "protocol"}).AddRow(0, 0, 0, 0, 0, nil, nil, nil))
+	m.ExpectQuery("WITH successes").WillReturnRows(sqlmock.NewRows([]string{"successes", "failures", "known", "cohorts", "unknown_failures", "model", "effort", "protocol", "input_bucket", "cache_bucket", "output_bucket"}).AddRow(0, 0, 0, 0, 0, nil, nil, nil, nil, nil, nil))
 	e, err := captureAIOpsEvidence(context.Background(), tx, 11, aiOpsTestPolicy(), time.Now(), accounts)
 	require.NoError(t, err)
 	require.False(t, e.ModelCoverageComplete)
@@ -188,7 +188,7 @@ func TestAIOpsInversePauseRollbackKeepsRecoverableOwner(t *testing.T) {
 	m.ExpectQuery("SELECT data FROM ai_ops_actions WHERE id").WillReturnRows(sqlmock.NewRows([]string{"data"}).AddRow(aiOpsJSON(a)))
 	m.ExpectQuery("SELECT revision,config FROM ai_ops_policy").WillReturnRows(sqlmock.NewRows([]string{"revision", "config"}).AddRow(p.Revision, aiOpsJSON(p)))
 	m.ExpectQuery("SELECT a.id,a.ai_ops_revision").WillReturnRows(sqlmock.NewRows([]string{"id", "revision", "concurrency", "load_factor", "healthy", "managed", "paused", "control_revision", "owner", "groups", "fingerprint", "quota"}).AddRow(11, 5, 20, 10, true, false, false, 2, a.ID, "{7}", "a", true).AddRow(12, 6, 20, 10, true, false, false, 0, "", "{7}", "b", true))
-	m.ExpectQuery("WITH successes").WillReturnRows(sqlmock.NewRows([]string{"successes", "failures", "known", "cohorts", "unknown_failures", "model", "effort", "protocol"}).AddRow(30, 0, 30, 1, 0, "gpt-test", "high", "http"))
+	m.ExpectQuery("WITH successes").WillReturnRows(sqlmock.NewRows([]string{"successes", "failures", "known", "cohorts", "unknown_failures", "model", "effort", "protocol", "input_bucket", "cache_bucket", "output_bucket"}).AddRow(30, 0, 30, 1, 0, "gpt-test", "high", "http", "small", "uncached", "small"))
 	for i := 0; i < 2; i++ {
 		m.ExpectQuery("SELECT platform,type").WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "credentials", "extra"}).AddRow("openai", "oauth", `{"model_mapping":{"gpt-test":"gpt-test"}}`, `{}`))
 		m.ExpectQuery("SELECT COALESCE.*allowed_models").WillReturnRows(sqlmock.NewRows([]string{"models", "group_models"}).AddRow(`[]`, `{}`))

@@ -204,7 +204,8 @@ var aiOpsEvidenceSQL = `WITH successes AS (
  SELECT u.request_id,u.model,COALESCE(u.reasoning_effort,'') AS effort,
  t.detail->'protocol_decision'->>'upstream' AS protocol,
  CASE WHEN u.input_tokens+u.cache_read_tokens<4000 THEN 'small' WHEN u.input_tokens+u.cache_read_tokens<32000 THEN 'medium' ELSE 'large' END AS input_bucket,
- CASE WHEN u.cache_read_tokens>0 THEN 'cached' ELSE 'uncached' END AS cache_bucket
+ CASE WHEN u.cache_read_tokens>0 THEN 'cached' ELSE 'uncached' END AS cache_bucket,
+ CASE WHEN u.output_tokens<1000 THEN 'small' WHEN u.output_tokens<8000 THEN 'medium' ELSE 'large' END AS output_bucket
  FROM usage_logs u JOIN LATERAL (
  SELECT (array_agg(detail))[1] AS detail FROM (SELECT detail FROM request_timing_details WHERE usage_log_id=u.id LIMIT 2) bounded HAVING COUNT(*)=1
  ) t ON true
@@ -228,16 +229,17 @@ var aiOpsEvidenceSQL = `WITH successes AS (
 )
  SELECT (SELECT COUNT(*) FROM successes),(SELECT COUNT(*) FROM failures),
  (SELECT COUNT(*) FROM successes WHERE model<>'' AND effort<>'' AND protocol IN ('http','ws')),
- (SELECT COUNT(DISTINCT model||'|'||effort||'|'||protocol||'|'||input_bucket||'|'||cache_bucket) FROM successes),
+ (SELECT COUNT(DISTINCT model||'|'||effort||'|'||protocol||'|'||input_bucket||'|'||cache_bucket||'|'||output_bucket) FROM successes),
  (SELECT COUNT(*) FROM failures WHERE model IS NULL OR model='' OR model NOT IN (SELECT model FROM successes)),
- (SELECT MIN(model) FROM successes),(SELECT MIN(effort) FROM successes),(SELECT MIN(protocol) FROM successes) `
+ (SELECT MIN(model) FROM successes),(SELECT MIN(effort) FROM successes),(SELECT MIN(protocol) FROM successes),
+ (SELECT MIN(input_bucket) FROM successes),(SELECT MIN(cache_bucket) FROM successes),(SELECT MIN(output_bucket) FROM successes) `
 
 func captureAIOpsEvidence(ctx context.Context, tx *sql.Tx, id int64, p service.AIOpsPolicy, now time.Time, accounts map[int64]aiOpsAccount) (service.AIOpsEvidenceSnapshot, error) {
 	window := time.Duration(p.ObservationSeconds) * time.Second
 	e := service.AIOpsEvidenceSnapshot{ObservedAt: now, WindowStart: now.Add(-window), WindowEnd: now, Inflight: -1}
 	var successes, failures, known, cohorts, unknownFailures int
-	var model, effort, protocol sql.NullString
-	if err := tx.QueryRowContext(ctx, aiOpsEvidenceSQL, id, e.WindowStart, e.WindowEnd).Scan(&successes, &failures, &known, &cohorts, &unknownFailures, &model, &effort, &protocol); err != nil {
+	var model, effort, protocol, inputBucket, cacheBucket, outputBucket sql.NullString
+	if err := tx.QueryRowContext(ctx, aiOpsEvidenceSQL, id, e.WindowStart, e.WindowEnd).Scan(&successes, &failures, &known, &cohorts, &unknownFailures, &model, &effort, &protocol, &inputBucket, &cacheBucket, &outputBucket); err != nil {
 		return e, err
 	}
 	e.Samples = successes + failures
@@ -251,6 +253,9 @@ func captureAIOpsEvidence(ctx context.Context, tx *sql.Tx, id int64, p service.A
 		e.Model = model.String
 		e.Effort = effort.String
 		e.Protocol = protocol.String
+		e.InputBucket = inputBucket.String
+		e.CacheBucket = cacheBucket.String
+		e.OutputBucket = outputBucket.String
 	}
 	if !accounts[id].quotaKnown {
 		e.ModelCoverageComplete = false
@@ -666,7 +671,7 @@ func applyAIOps(ctx context.Context, tx *sql.Tx, id, digest string, actorID int6
 		if err != nil {
 			return service.AIOpsAction{}, err
 		}
-	} else if proposal.Evidence.Model != e.Model || proposal.Evidence.Effort != e.Effort || proposal.Evidence.Protocol != e.Protocol {
+	} else if !service.ComparableAIOpsEvidence(proposal.Evidence, e) {
 		return service.AIOpsAction{}, service.ErrAIOpsConflict
 	}
 	in := service.AIOpsPreviewInput{Action: proposal.Action, AccountID: target.id, ProposedValue: proposal.ProposedValue, EvidenceObservedAt: proposal.CreatedAt}
@@ -683,7 +688,7 @@ func applyAIOps(ctx context.Context, tx *sql.Tx, id, digest string, actorID int6
 	}
 	var active, daily int
 	var last sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER(WHERE status IN ('propagation_pending','observing')),COUNT(*) FILTER(WHERE created_at>=date_trunc('day',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),MAX(created_at) FILTER(WHERE account_id=ANY($2)) FROM ai_ops_actions`, now, pq.Array(aiOpsDomainIDs(p, target.id))).Scan(&active, &daily, &last)
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER(WHERE status IN ('propagation_pending','observing') OR (status='inconclusive' AND data->>'reason_code'='propagation_unconfirmed')),COUNT(*) FILTER(WHERE created_at>=date_trunc('day',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'),MAX(created_at) FILTER(WHERE account_id=ANY($2)) FROM ai_ops_actions`, now, pq.Array(aiOpsDomainIDs(p, target.id))).Scan(&active, &daily, &last)
 	if err != nil {
 		return service.AIOpsAction{}, err
 	}
@@ -946,6 +951,12 @@ func (r *accountRepository) AIOpsRuntime(ctx context.Context, ids []int64) (map[
 	return out, rows.Err()
 }
 
+// Include legacy timed-out records so an upgrade cannot silently release an
+// unresolved reservation created by an earlier controller version.
+func aiOpsPropagationUnresolved(a service.AIOpsAction) bool {
+	return a.Status == "propagation_pending" || (a.Status == "inconclusive" && a.ReasonCode == "propagation_unconfirmed")
+}
+
 func (r *accountRepository) ReconcileAIOps(ctx context.Context) error {
 	if err := r.expireAIOpsProbes(ctx); err != nil {
 		return err
@@ -955,7 +966,7 @@ func (r *accountRepository) ReconcileAIOps(ctx context.Context) error {
 		return err
 	}
 	for _, item := range items {
-		eligible := item.Status == "propagation_pending" || item.Status == "observing" || (item.Action == "pause_account" && item.Status == "inconclusive" && item.ReasonCode != "pause_expired_requires_fresh_probe")
+		eligible := aiOpsPropagationUnresolved(item) || item.Status == "observing" || (item.Action == "pause_account" && item.Status == "inconclusive" && item.ReasonCode != "pause_expired_requires_fresh_probe")
 		if !eligible {
 			continue
 		}
@@ -978,7 +989,7 @@ func (r *accountRepository) reconcileAIOpsAction(ctx context.Context, id string)
 	if err != nil {
 		return err
 	}
-	eligible := a.Status == "propagation_pending" || a.Status == "observing" || (a.Action == "pause_account" && a.Status == "inconclusive")
+	eligible := aiOpsPropagationUnresolved(a) || a.Status == "observing" || (a.Action == "pause_account" && a.Status == "inconclusive")
 	if !eligible {
 		return nil
 	}
@@ -1005,7 +1016,7 @@ func (r *accountRepository) reconcileAIOpsAction(ctx context.Context, id string)
 		if _, err = tx.ExecContext(ctx, `UPDATE ai_ops_policy SET revision=$1,config=$2,updated_at=NOW() WHERE id=1`, p.Revision, string(raw)); err != nil {
 			return err
 		}
-	} else if a.Status == "propagation_pending" {
+	} else if aiOpsPropagationUnresolved(a) {
 		propagated := a.Action == "pause_account" || a.Action == "resume_account"
 		if !propagated && r.schedulerCache != nil {
 			cacheCtx, done := context.WithTimeout(ctx, time.Second)
@@ -1021,10 +1032,23 @@ func (r *accountRepository) reconcileAIOpsAction(ctx context.Context, id string)
 		}
 		if propagated {
 			a.Status = "observing"
+			a.ReasonCode = ""
+			a.ObservationStartedAt = now
 			a.ObserveUntil = now.Add(time.Duration(p.ObservationSeconds) * time.Second)
 		} else if !now.Before(a.ObserveUntil) {
-			a.Status = "inconclusive"
+			// Keep reserving capacity until propagation is confirmed or an
+			// explicit rollback/ownership change resolves this action. Clearing
+			// the policy halt alone must not release this reservation.
+			a.Status = "propagation_pending"
 			a.ReasonCode = "propagation_unconfirmed"
+			if !p.Halted {
+				p.Halted = true
+				p.Revision++
+				raw, _ := json.Marshal(p)
+				if _, err = tx.ExecContext(ctx, `UPDATE ai_ops_policy SET revision=$1,config=$2,updated_at=NOW() WHERE id=1`, p.Revision, string(raw)); err != nil {
+					return err
+				}
+			}
 		}
 	} else if !now.Before(a.ObserveUntil) {
 		e, eErr := captureAIOpsEvidence(ctx, tx, a.AccountID, p, now, accounts)
@@ -1038,9 +1062,12 @@ func (r *accountRepository) reconcileAIOpsAction(ctx context.Context, id string)
 		if a.Action == "pause_account" {
 			a.Status = "inconclusive"
 			a.ReasonCode = "paused_requires_fresh_probe"
-		} else if e.WindowStart.Before(a.CreatedAt) || e.Samples < p.MinSamples || !e.ModelCoverageComplete {
+		} else if a.ObservationStartedAt.IsZero() || e.WindowStart.Before(a.ObservationStartedAt) || e.Samples < p.MinSamples || !e.ModelCoverageComplete {
 			a.Status = "inconclusive"
 			a.ReasonCode = "insufficient_post_change_evidence"
+		} else if !service.ComparableAIOpsEvidence(proposal.Evidence, e) {
+			a.Status = "inconclusive"
+			a.ReasonCode = "post_change_cohort_changed"
 		} else if e.ErrorRate > proposal.Evidence.ErrorRate+p.RollbackErrorRateDelta {
 			a, eErr = rollbackAIOps(ctx, tx, a, now, "error_rate_regressed")
 			if eErr != nil {
