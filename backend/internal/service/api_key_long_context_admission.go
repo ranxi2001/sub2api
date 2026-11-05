@@ -13,11 +13,18 @@ func (s *OpenAIGatewayService) checkAPIKeyLongContextBeforeSend(ctx context.Cont
 	if c == nil || c.Request == nil {
 		return nil
 	}
-	ws := GetOpenAIClientTransport(c) == OpenAIClientTransportWS
-	if !ws && !IsAPIKeyModelPolicyPath(c.Request.URL.Path) {
+	key := getAPIKeyFromContext(c)
+	// Background account probes have no API key and may omit the request URL.
+	// They do not inherit a customer's per-key policy.
+	if key == nil || key.AllowLongContext {
 		return nil
 	}
-	if err := s.CheckAPIKeyLongContext(ctx, getAPIKeyFromContext(c), body, model); err != nil {
+	ws := GetOpenAIClientTransport(c) == OpenAIClientTransportWS
+	// A restricted key with no URL still needs its final payload checked.
+	if !ws && c.Request.URL != nil && !IsAPIKeyModelPolicyPath(c.Request.URL.Path) {
+		return nil
+	}
+	if err := s.CheckAPIKeyLongContext(ctx, key, body, model); err != nil {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		if ws {
 			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "long context is disabled for this API key; send complete visible text", err)

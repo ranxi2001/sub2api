@@ -232,6 +232,7 @@ func TestAPIContracts(t *testing.T) {
 					"name": "Key One",
 					"model_mapping": null,
 					"reasoning_effort": "",
+					"allow_long_context": true,
 					"group_id": null,
 					"group_ids": [],
 					"status": "active",
@@ -263,13 +264,14 @@ func TestAPIContracts(t *testing.T) {
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
 				deps.apiKeyRepo.MustSeed(&service.APIKey{
-					ID:        100,
-					UserID:    1,
-					Key:       "sk_custom_1234567890",
-					Name:      "Key One",
-					Status:    service.StatusActive,
-					CreatedAt: deps.now,
-					UpdatedAt: deps.now,
+					ID:               100,
+					UserID:           1,
+					Key:              "sk_custom_1234567890",
+					Name:             "Key One",
+					Status:           service.StatusActive,
+					CreatedAt:        deps.now,
+					UpdatedAt:        deps.now,
+					AllowLongContext: true,
 				})
 			},
 			method:     http.MethodGet,
@@ -287,6 +289,7 @@ func TestAPIContracts(t *testing.T) {
 							"name": "Key One",
 							"model_mapping": null,
 							"reasoning_effort": "",
+							"allow_long_context": true,
 							"group_id": null,
 							"group_ids": [],
 							"status": "active",

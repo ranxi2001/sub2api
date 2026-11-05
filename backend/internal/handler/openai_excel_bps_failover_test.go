@@ -141,10 +141,11 @@ func newExcelBPSFailoverTestContext(ctx context.Context, stream bool) (*gin.Cont
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = req
 	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
-		ID:      99,
-		GroupID: &groupID,
-		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
-		User:    &service.User{ID: 100},
+		ID:               99,
+		GroupID:          &groupID,
+		Group:            &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
+		User:             &service.User{ID: 100},
+		AllowLongContext: true,
 	})
 	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100, Concurrency: 0})
 	return c, rec

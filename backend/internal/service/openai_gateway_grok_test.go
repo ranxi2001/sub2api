@@ -628,7 +628,7 @@ func TestForwardGrokResponsesCodexAdditionalToolsUsesMixedCacheIntent(t *testing
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set(grokClientToolCacheOptInHeader, "prefer-cache")
-	c.Set("api_key", &APIKey{ID: 4501})
+	c.Set("api_key", &APIKey{ID: 4501, AllowLongContext: true})
 
 	account := healthyGrokOAuthGatewayTestAccount(4501, "access-token")
 	account.Credentials["subscription_tier"] = "free"
