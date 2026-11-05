@@ -9,6 +9,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/settings/BalanceForecastSettings.spec.ts \
 	src/components/admin/user/__tests__/UserAutoCreditModal.spec.ts \
 	src/components/common/__tests__/VipAutoCreditNotice.spec.ts \
+	src/components/common/__tests__/NewFeatureBadge.spec.ts \
+	src/components/admin/group/__tests__/GroupAntiDistillationSettings.spec.ts \
 	src/components/admin/user/__tests__/ApiKeyModelPolicyDialog.spec.ts \
 	src/components/admin/user/__tests__/ApiKeyModelPolicyNotices.spec.ts \
 	src/components/account/__tests__/OpenAIAuthConnections.spec.ts \
