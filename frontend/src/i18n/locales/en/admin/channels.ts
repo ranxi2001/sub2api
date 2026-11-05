@@ -45,6 +45,15 @@ export default {
 
     // Channel Management
     channels: {
+      pricingTransfer: {
+        export: 'Export pricing',
+        import: 'Import pricing',
+        hint: 'JSON contains model pricing for this platform only (token prices in USD per million tokens), excluding groups, mappings and account statistics rules. Import replaces this platform pricing; save the channel to apply.',
+        confirm: 'Replace all current model pricing for {platform}, including unsaved changes, with {count} rules from the file?',
+        imported: 'Pricing imported. Review and save the channel to apply.',
+        invalidFile: 'Invalid pricing file. Use JSON exported here (version 1), up to 2 MiB, 1000 rules and 5000 models. Prices must be non-negative and multipliers positive.',
+        platformMismatch: 'This file belongs to {platform}. Switch to that platform before importing.',
+      },
       title: 'Channel Management',
       description: 'Manage channels and custom model pricing',
       searchChannels: 'Search channels...',

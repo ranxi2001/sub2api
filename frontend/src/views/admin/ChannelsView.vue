@@ -419,9 +419,17 @@
 
             <!-- Model Pricing -->
             <div>
-              <div class="mb-1 flex items-center justify-between">
+              <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
                 <label class="input-label text-xs mb-0">{{ t('admin.channels.form.modelPricing', 'Model Pricing') }}</label>
-                <div class="flex items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.channelPricingTransfer" :user-id="authStore.user?.id" />
+                  <button type="button" class="text-xs text-primary-600 hover:text-primary-700" @click="exportPricing(sIdx)">
+                    {{ t('admin.channels.pricingTransfer.export') }}
+                  </button>
+                  <label class="cursor-pointer text-xs text-primary-600 hover:text-primary-700">
+                    {{ t('admin.channels.pricingTransfer.import') }}
+                    <input type="file" accept=".json,application/json" class="sr-only" :aria-label="t('admin.channels.pricingTransfer.import')" :disabled="readingPricing" @change="importPricing(sIdx, $event)" />
+                  </label>
                   <button
                     v-if="supportsPricingModelSync(section.platform)"
                     type="button"
@@ -436,6 +444,7 @@
                   </button>
                 </div>
               </div>
+              <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.channels.pricingTransfer.hint') }}</p>
               <div
                 v-if="section.model_pricing.length === 0"
                 class="rounded border border-dashed border-gray-300 p-2 text-center text-xs text-gray-400 dark:border-dark-500"
@@ -613,6 +622,16 @@
       </template>
     </BaseDialog>
 
+    <ConfirmDialog
+      :show="!!pendingPricingImport"
+      :title="t('admin.channels.pricingTransfer.import')"
+      :message="t('admin.channels.pricingTransfer.confirm', { count: pendingPricingImport?.entries.length ?? 0, platform: pendingPricingImport?.section.platform ?? '' })"
+      :confirm-text="t('common.confirm')"
+      :cancel-text="t('common.cancel')"
+      @confirm="confirmPricingImport"
+      @cancel="pendingPricingImport = null"
+    />
+
     <!-- Delete Confirmation -->
     <ConfirmDialog
       :show="showDeleteDialog"
@@ -628,7 +647,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { MAX_PRICING_FILE_BYTES, parseChannelPricing, serializeChannelPricing } from './channelPricingTransfer'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -868,6 +891,67 @@ function toggleGroupInSection(sectionIdx: number, groupId: number) {
   } else {
     section.group_ids.push(groupId)
   }
+}
+
+const authStore = useAuthStore()
+const readingPricing = ref(false)
+const pendingPricingImport = ref<{ section: typeof form.platforms[number], entries: PricingFormEntry[] } | null>(null)
+let pricingImportGeneration = 0
+watch(showDialog, () => {
+  pricingImportGeneration++
+  pendingPricingImport.value = null
+}, { flush: 'sync' })
+onUnmounted(() => { pricingImportGeneration++ })
+
+function pricingTransferError(error: unknown) {
+  const message = error instanceof Error ? error.message : 'admin.channels.pricingTransfer.invalidFile'
+  appStore.showError(message.startsWith('admin.channels.') ? t(message) : message)
+}
+
+function exportPricing(sectionIdx: number) {
+  const section = form.platforms[sectionIdx]
+  try {
+    const text = serializeChannelPricing(section.platform, section.model_pricing, t)
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `channel-pricing-${section.platform}.json`
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (error) {
+    pricingTransferError(error)
+  }
+}
+
+async function importPricing(sectionIdx: number, event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || readingPricing.value) return
+  const section = form.platforms[sectionIdx]
+  const generation = pricingImportGeneration
+  readingPricing.value = true
+  pendingPricingImport.value = null
+  try {
+    if (file.size > MAX_PRICING_FILE_BYTES) throw new Error('admin.channels.pricingTransfer.invalidFile')
+    const entries = parseChannelPricing(await file.text(), section.platform, t)
+    if (generation === pricingImportGeneration && form.platforms.includes(section)) {
+      pendingPricingImport.value = { section, entries }
+    }
+  } catch (error) {
+    if (generation === pricingImportGeneration) pricingTransferError(error)
+  } finally {
+    readingPricing.value = false
+  }
+}
+
+function confirmPricingImport() {
+  const pending = pendingPricingImport.value
+  if (pending && form.platforms.includes(pending.section)) {
+    pending.section.model_pricing = pending.entries
+    appStore.showSuccess(t('admin.channels.pricingTransfer.imported'))
+  }
+  pendingPricingImport.value = null
 }
 
 // ── Pricing helpers ──
