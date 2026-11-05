@@ -23,7 +23,26 @@ export interface PublicOrderVerifyResult {
   expires_at: string
 }
 
+export interface CryptoCheckout {
+  network_status?: 'healthy' | 'delayed' | 'checking'
+  order_id: number
+  out_trade_no: string
+  status: string
+  network: string
+  crypto: string
+  address: string
+  crypto_amount: string
+  fiat_amount: string
+  currency: string
+  expires_at: string
+  confirming: boolean
+  transaction_hash?: string
+}
+
 export const paymentAPI = {
+  getCryptoCheckout(outTradeNo: string) {
+    return apiClient.get<CryptoCheckout>(`/payment/crypto/${encodeURIComponent(outTradeNo)}`)
+  },
   /** Get payment configuration (enabled types, limits, etc.) */
   getConfig() {
     return apiClient.get<PaymentConfig>('/payment/config')

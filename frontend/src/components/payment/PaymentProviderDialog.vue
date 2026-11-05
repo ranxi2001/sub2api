@@ -32,7 +32,7 @@
       <!-- Toggles + Payment mode + Supported types (single row) -->
       <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
         <ToggleSwitch :label="t('common.enabled')" :checked="form.enabled" @toggle="form.enabled = !form.enabled" />
-        <ToggleSwitch :label="t('admin.settings.payment.refundEnabled')" :checked="form.refund_enabled" @toggle="form.refund_enabled = !form.refund_enabled; if (!form.refund_enabled) form.allow_user_refund = false" />
+        <ToggleSwitch v-if="form.provider_key !== 'bepusdt'" :label="t('admin.settings.payment.refundEnabled')" :checked="form.refund_enabled" @toggle="form.refund_enabled = !form.refund_enabled; if (!form.refund_enabled) form.allow_user_refund = false" />
         <ToggleSwitch v-if="form.refund_enabled" :label="t('admin.settings.payment.allowUserRefund')" :checked="form.allow_user_refund" @toggle="form.allow_user_refund = !form.allow_user_refund" />
         <div v-if="supportsPaymentMode" class="flex items-center gap-2">
           <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.settings.payment.paymentMode') }}</span>
@@ -68,6 +68,24 @@
             >{{ pt.label }}</button>
           </div>
         </div>
+      </div>
+
+      <div v-if="form.provider_key === 'bepusdt'" class="space-y-2">
+        <div class="flex items-center gap-2">
+          <label class="input-label mb-0">{{ t('admin.settings.payment.field_mode') }}</label>
+          <NewFeatureBadge
+            v-if="userId != null"
+            :notice-id="NEW_FEATURE_NOTICES.bepusdtPayment"
+            :user-id="userId"
+          />
+        </div>
+        <select v-model="config.mode" class="input" data-testid="bepusdt-mode">
+          <option value="embedded">{{ t('admin.settings.payment.bepusdtEmbedded') }}</option>
+          <option value="external">{{ t('admin.settings.payment.bepusdtExternal') }}</option>
+        </select>
+        <p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+          {{ t(config.mode === 'embedded' ? 'admin.settings.payment.bepusdtEmbeddedHint' : 'admin.settings.payment.bepusdtHint') }}
+        </p>
       </div>
 
       <div v-if="form.provider_key === 'easypay'" class="space-y-3 rounded-lg border border-gray-100 p-3 dark:border-dark-700">
@@ -308,6 +326,8 @@
 import { reactive, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Select from '@/components/common/Select.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
@@ -324,6 +344,8 @@ import {
   PAYMENT_MODE_REDIRECT,
   STRIPE_SDK_API_VERSION,
   getAvailableTypes,
+  getDefaultSupportedTypes,
+  getProviderConfigFields,
   extractBaseUrl,
   parseEasyPayCustomMethods,
   serializeEasyPayCustomMethods,
@@ -362,6 +384,7 @@ const props = defineProps<{
   enabledKeyOptions: TypeOption[]
   allPaymentTypes: TypeOption[]
   redirectLabel: string
+  userId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -469,7 +492,7 @@ const availableTypes = computed(() => {
 })
 
 const resolvedFields = computed(() => {
-  const fields = PROVIDER_CONFIG_FIELDS[form.provider_key] || []
+  const fields = getProviderConfigFields(form.provider_key, config).filter(field => field.key !== 'mode')
   return fields.map(f => ({
     ...f,
     label: f.label || t(`admin.settings.payment.field_${f.key}`),
@@ -548,7 +571,7 @@ const limitableTypes = computed(() => {
   }
   const selected = form.supported_types.filter(t => t !== 'easypay')
   return selected.map(v => {
-    const found = props.allPaymentTypes.find(pt => pt.value === v)
+    const found = props.allPaymentTypes.find(pt => pt.value === v) || availableTypes.value.find(pt => pt.value === v)
     return found || { value: v, label: v }
   })
 })
@@ -589,7 +612,11 @@ function removeEasyPayCustomMethod(index: number) {
 }
 
 function onKeyChange() {
-  form.supported_types = [...(PROVIDER_SUPPORTED_TYPES[form.provider_key] || [])]
+  if (form.provider_key === 'bepusdt') {
+    form.refund_enabled = false
+    form.allow_user_refund = false
+  }
+  form.supported_types = getDefaultSupportedTypes(form.provider_key)
   form.payment_mode = defaultPaymentMode(form.provider_key)
   clearConfig()
   applyDefaults()
@@ -671,7 +698,7 @@ function handleSave() {
   // Validate required config fields — all non-optional fields must be filled.
   // In edit mode, sensitive fields may be left blank to preserve the stored
   // value (backend merges blanks by preserving the existing secret).
-  for (const f of PROVIDER_CONFIG_FIELDS[form.provider_key] || []) {
+  for (const f of getProviderConfigFields(form.provider_key, config)) {
     if (f.optional) continue
     if (props.editing && f.sensitive) continue
     const val = (config[f.key] || '').trim()
@@ -689,6 +716,7 @@ function handleSave() {
   )
   const filteredConfig: Record<string, string> = {}
   for (const [k, v] of Object.entries(config)) {
+    if (form.provider_key === 'bepusdt' && config.mode === 'embedded' && ['apiBase', 'apiToken'].includes(k)) continue
     if (!v || !v.trim()) {
       if (clearableConfigKeys.has(k)) {
         filteredConfig[k] = ''
@@ -786,7 +814,7 @@ function emitValidationError(msg: string) {
 function reset(defaultKey: string) {
   form.name = ''
   form.provider_key = defaultKey
-  form.supported_types = [...(PROVIDER_SUPPORTED_TYPES[defaultKey] || [])]
+  form.supported_types = getDefaultSupportedTypes(defaultKey)
   form.enabled = true
   form.payment_mode = defaultPaymentMode(defaultKey)
   form.refund_enabled = false
@@ -832,6 +860,7 @@ function loadProvider(provider: ProviderInstance) {
       returnBaseUrl.value = extractBaseUrl(provider.config['returnUrl'], paths.returnUrl)
     }
   }
+  if (provider.provider_key === 'bepusdt' && !config.mode) config.mode = 'external'
   applyDefaults()
   // Parse existing limits
   if (provider.limits) {

@@ -138,6 +138,10 @@ func (lb *DefaultLoadBalancer) queryEnabledInstances(
 	var matched []*dbent.PaymentProviderInstance
 	expectedWxpayJSAPIAppID := wxpayJSAPIAppIDFromContext(ctx)
 	for _, inst := range instances {
+		// BEpusdt networks require explicit opt-in, including when none are selected.
+		if inst.ProviderKey == TypeBEpusdt && (strings.TrimSpace(inst.SupportedTypes) == "" || !IsBEpusdtTradeType(paymentType)) {
+			continue
+		}
 		// Stripe: match by provider_key because supported_types lists sub-types (card,link,alipay,wxpay),
 		// not "stripe" itself. The checkout page aggregates all sub-types under "stripe".
 		if paymentType == TypeStripe {

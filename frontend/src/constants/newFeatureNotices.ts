@@ -16,4 +16,5 @@ export const NEW_FEATURE_NOTICES = {
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
   aiOpsCodex: 'ai-ops-codex-observe-initial-announcement',
+  bepusdtPayment: 'bepusdt-embedded-payment-initial-announcement',
 } as const
