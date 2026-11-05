@@ -1999,6 +1999,16 @@ func TestValidateConfigErrors(t *testing.T) {
 			wantErr: "gateway.concurrency_slot_ttl_minutes",
 		},
 		{
+			name:    "gateway api key slot ttl negative",
+			mutate:  func(c *Config) { c.Gateway.APIKeySlotTTLSeconds = -1 },
+			wantErr: "gateway.api_key_slot_ttl_seconds",
+		},
+		{
+			name:    "gateway api key slot ttl below minimum",
+			mutate:  func(c *Config) { c.Gateway.APIKeySlotTTLSeconds = 29 },
+			wantErr: "gateway.api_key_slot_ttl_seconds",
+		},
+		{
 			name:    "gateway max conns per host",
 			mutate:  func(c *Config) { c.Gateway.MaxConnsPerHost = -1 },
 			wantErr: "gateway.max_conns_per_host",

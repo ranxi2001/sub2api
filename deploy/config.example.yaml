@@ -600,6 +600,16 @@ gateway:
   # Concurrency slot expiration time (minutes)
   # 并发槽位过期时间（分钟）
   concurrency_slot_ttl_minutes: 30
+  # Dedicated expiration for regular API key concurrency slots (seconds).
+  # 0 = inherit concurrency_slot_ttl_minutes (default; upgrading alone changes
+  # nothing). Explicit values must be at least 30 seconds. Applies only to the
+  # shared Redis implementation; account/user slots, Live leases and the
+  # regional concurrency authority are unaffected.
+  # 普通 API Key 并发槽位的独立过期时间（秒）。0 表示继承
+  # concurrency_slot_ttl_minutes（默认，仅升级不改变行为）；显式设置时不低于
+  # 30 秒。仅作用于普通共享 Redis 实现；account/user 槽位、Live 租约及
+  # regional authority 不受影响。
+  api_key_slot_ttl_seconds: 0
   # Stream data interval timeout (seconds), 0=disable
   # 流数据间隔超时（秒），0=禁用
   stream_data_interval_timeout: 180
