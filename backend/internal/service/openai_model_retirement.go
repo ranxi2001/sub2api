@@ -5,19 +5,27 @@ import (
 	"strings"
 )
 
-// GPT-5.4 and GPT-5.5 retired from Codex with ChatGPT sign-in;
-// GPT Image 1.5 is excluded for subscription accounts based on reported availability.
-// GPT-5.5 retired on 2026-10-14 at
-// 19:00 UTC. API-key upstreams remain supported. Do not infer upstream
-// eligibility from the API key a client uses to authenticate to this gateway.
+// GPT-5.5 retirement is an existing request-admission policy.
 // https://learn.chatgpt.com/docs/models#gpt-55-retirement
 func isRetiredOpenAISubscriptionModel(account *Account, upstreamModel string) bool {
 	if account == nil || !account.IsOpenAI() || (!account.IsOpenAIOAuthLike() && !account.IsShadow()) {
 		return false
 	}
 	model := canonicalizeOpenAIModelAliasSpelling(upstreamModel)
-	return model == "gpt-5.5" || strings.HasPrefix(model, "gpt-5.5-") ||
-		model == "gpt-5.4" || model == "gpt-5.4-mini" || strings.HasPrefix(model, "gpt-5.4-mini-") || model == "gpt-5.4-2026-03-05" ||
+	return model == "gpt-5.5" || strings.HasPrefix(model, "gpt-5.5-")
+}
+
+// Hide legacy subscription choices from discovery while allowing explicitly
+// configured requests to use the account's actual upstream capabilities.
+func isHiddenOpenAISubscriptionModel(account *Account, upstreamModel string) bool {
+	if account == nil || !account.IsOpenAI() || (!account.IsOpenAIOAuthLike() && !account.IsShadow()) {
+		return false
+	}
+	if isRetiredOpenAISubscriptionModel(account, upstreamModel) {
+		return true
+	}
+	model := canonicalizeOpenAIModelAliasSpelling(upstreamModel)
+	return model == "gpt-5.4" || model == "gpt-5.4-mini" || strings.HasPrefix(model, "gpt-5.4-mini-") || model == "gpt-5.4-2026-03-05" ||
 		model == "gpt-image-1.5" || strings.HasPrefix(model, "gpt-image-1.5-")
 }
 
@@ -32,7 +40,7 @@ func openAIModelRetiredForAccounts(accounts []Account, modelID string) bool {
 			continue
 		}
 		target := resolveOpenAIAccountUpstreamModelForRequest(account, modelID, false)
-		if isRetiredOpenAISubscriptionModel(account, target) {
+		if isHiddenOpenAISubscriptionModel(account, target) {
 			retired = true
 		} else if account.IsModelSupported(modelID) {
 			return false
