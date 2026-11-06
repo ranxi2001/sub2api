@@ -22,16 +22,20 @@ type Task struct {
 	Attempts    int        `json:"attempts"`
 	ActualAt    *time.Time `json:"actual_at"`
 	Reason      string     `json:"reason"`
+	Recurrence  string     `json:"recurrence"`
+	DailyTime   string     `json:"daily_time"`
 }
 type Audit struct {
-	Action    string    `json:"action"`
-	Version   int64     `json:"version"`
-	ActorID   int64     `json:"actor_id"`
-	ExecuteAt time.Time `json:"execute_at"`
-	Timezone  string    `json:"timezone"`
-	ActualAt  time.Time `json:"actual_at"`
-	Result    string    `json:"result"`
-	Reason    string    `json:"reason"`
+	Action     string    `json:"action"`
+	Version    int64     `json:"version"`
+	ActorID    int64     `json:"actor_id"`
+	ExecuteAt  time.Time `json:"execute_at"`
+	Timezone   string    `json:"timezone"`
+	ActualAt   time.Time `json:"actual_at"`
+	Result     string    `json:"result"`
+	Reason     string    `json:"reason"`
+	Recurrence string    `json:"recurrence"`
+	DailyTime  string    `json:"daily_time"`
 }
 type Snapshot struct {
 	Tasks            []Task    `json:"tasks"`
@@ -47,6 +51,20 @@ type SaveRequest struct {
 	ExpectedVersion int64  `json:"expected_version"`
 	// Required for fixed times: prove that the caller confirmed the server preview.
 	ConfirmedAt *time.Time `json:"confirmed_at"`
+}
+
+type DailyWindowRequest struct {
+	OpenTime             string `json:"open_time"`
+	CloseTime            string `json:"close_time"`
+	Timezone             string `json:"timezone"`
+	ExpectedOpenVersion  int64  `json:"expected_open_version"`
+	ExpectedCloseVersion int64  `json:"expected_close_version"`
+}
+
+// DailyWindowRepository is optional so existing one-shot consumers and mocks
+// remain source compatible with Repository.
+type DailyWindowRepository interface {
+	SaveDailyWindow(context.Context, int64, int64, DailyWindowRequest) (Snapshot, error)
 }
 type Repository interface {
 	Preview(Input) (Preview, error)
@@ -77,7 +95,7 @@ func (s *Store) policy() Policy {
 }
 func (s *Store) Preview(in Input) (Preview, error) { return Resolve(in, s.now(), s.policy()) }
 
-const taskColumns = "account_id, action, version, execute_at, timezone, requested_by, status, attempts, actual_at, reason"
+const taskColumns = "account_id, action, version, execute_at, timezone, requested_by, status, attempts, actual_at, reason, recurrence, daily_time"
 
 func fillLocalTime(t *Task) {
 	if loc, err := time.LoadLocation(t.Timezone); err == nil {
@@ -93,7 +111,7 @@ type scanner interface{ Scan(...any) error }
 
 func scanTask(row scanner) (Task, error) {
 	var t Task
-	err := row.Scan(&t.AccountID, &t.Action, &t.Version, &t.ExecuteAt, &t.Timezone, &t.RequestedBy, &t.Status, &t.Attempts, &t.ActualAt, &t.Reason)
+	err := row.Scan(&t.AccountID, &t.Action, &t.Version, &t.ExecuteAt, &t.Timezone, &t.RequestedBy, &t.Status, &t.Attempts, &t.ActualAt, &t.Reason, &t.Recurrence, &t.DailyTime)
 	if err == nil {
 		t.ExecuteAt = t.ExecuteAt.UTC()
 		fillLocalTime(&t)
@@ -122,8 +140,15 @@ func lockAccount(ctx context.Context, tx *sql.Tx, id int64, skip bool) (accountS
 }
 func audit(ctx context.Context, tx *sql.Tx, t Task, actor int64, now time.Time, result, reason string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO account_schedulable_timer_audit
- (account_id,action,version,actor_id,execute_at,timezone,actual_at,result,reason) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, t.AccountID, t.Action, t.Version, actor, t.ExecuteAt, t.Timezone, now, result, reason)
+ (account_id,action,version,actor_id,execute_at,timezone,actual_at,result,reason,recurrence,daily_time) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, t.AccountID, t.Action, t.Version, actor, t.ExecuteAt, t.Timezone, now, result, reason, recurrenceOf(t), t.DailyTime)
 	return err
+}
+
+func recurrenceOf(t Task) string {
+	if t.Recurrence == "daily" {
+		return "daily"
+	}
+	return "once"
 }
 func (s *Store) Save(ctx context.Context, id, actor int64, req SaveRequest) (Task, error) {
 	var zero Task
@@ -142,7 +167,19 @@ func (s *Store) Save(ctx context.Context, id, actor int64, req SaveRequest) (Tas
 	if err != nil {
 		return zero, err
 	}
-	now := s.now()
+	t, err := s.saveLocked(ctx, tx, id, actor, req, s.now(), false)
+	if err != nil {
+		return zero, err
+	}
+	if err = tx.Commit(); err != nil {
+		return zero, err
+	}
+	return t, nil
+}
+
+// saveLocked requires the account lock and leaves commit/rollback to its caller.
+func (s *Store) saveLocked(ctx context.Context, tx *sql.Tx, id, actor int64, req SaveRequest, now time.Time, window bool) (Task, error) {
+	var zero Task
 	preview, err := Resolve(req.Input, now, s.policy())
 	if err != nil {
 		return zero, err
@@ -158,20 +195,37 @@ func (s *Store) Save(ctx context.Context, id, actor int64, req SaveRequest) (Tas
 	if version != req.ExpectedVersion {
 		return zero, invalid("version")
 	}
+	recurrence, dailyTime := "once", ""
+	if req.Mode == "daily" {
+		recurrence, dailyTime = "daily", req.Time
+	}
 	var conflict bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_schedulable_timers WHERE account_id=$1 AND action<>$2 AND status='pending' AND execute_at=$3)`, id, req.Action, preview.ExecuteAt).Scan(&conflict)
-	if err != nil {
-		return zero, err
+	// A recurring pair must share one timezone. This avoids a seasonal overlap
+	// when zones change UTC offsets on different dates. Check future one-shot
+	// conflicts too, rather than checking only the next daily occurrence.
+	if !window {
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_schedulable_timers
+ WHERE account_id=$1 AND action<>$2 AND status='pending' AND (
+ execute_at=$3 OR
+ ($4='daily' AND recurrence='daily' AND (timezone<>$5 OR daily_time=$6)) OR
+ ($4='daily' AND recurrence='once' AND execute_at>$7
+   AND date_trunc('minute',execute_at)=execute_at AND to_char(execute_at AT TIME ZONE $5,'HH24:MI')=$6) OR
+ ($4='once' AND recurrence='daily' AND date_trunc('minute',$3::timestamptz)=$3
+   AND to_char($3::timestamptz AT TIME ZONE timezone,'HH24:MI')=daily_time)))`, id, req.Action, preview.ExecuteAt, recurrence, req.Timezone, dailyTime, now).Scan(&conflict)
+		if err != nil {
+			return zero, err
+		}
 	}
 	if conflict {
 		return zero, invalid("conflict")
 	}
-	t := Task{AccountID: id, Action: req.Action, Version: version + 1, ExecuteAt: preview.ExecuteAt, Timezone: req.Timezone, RequestedBy: actor, Status: "pending"}
+	t := Task{AccountID: id, Action: req.Action, Version: version + 1, ExecuteAt: preview.ExecuteAt, Timezone: req.Timezone, RequestedBy: actor, Status: "pending", Recurrence: recurrence, DailyTime: dailyTime}
 	_, err = tx.ExecContext(ctx, `INSERT INTO account_schedulable_timers
- (account_id,action,version,execute_at,timezone,requested_by,status,attempts,next_attempt_at,actual_at,reason)
- VALUES ($1,$2,$3,$4,$5,$6,'pending',0,$4,NULL,'')
+ (account_id,action,version,execute_at,timezone,requested_by,status,attempts,next_attempt_at,actual_at,reason,recurrence,daily_time)
+ VALUES ($1,$2,$3,$4,$5,$6,'pending',0,$4,NULL,'',$7,$8)
  ON CONFLICT (account_id,action) DO UPDATE SET version=EXCLUDED.version,execute_at=EXCLUDED.execute_at,
- timezone=EXCLUDED.timezone,requested_by=EXCLUDED.requested_by,status='pending',attempts=0,next_attempt_at=EXCLUDED.execute_at,actual_at=NULL,reason=''`, id, t.Action, t.Version, t.ExecuteAt, t.Timezone, actor)
+ timezone=EXCLUDED.timezone,requested_by=EXCLUDED.requested_by,status='pending',attempts=0,next_attempt_at=EXCLUDED.execute_at,actual_at=NULL,reason='',
+ recurrence=EXCLUDED.recurrence,daily_time=EXCLUDED.daily_time`, id, t.Action, t.Version, t.ExecuteAt, t.Timezone, actor, recurrence, dailyTime)
 	if err != nil {
 		return zero, err
 	}
@@ -183,10 +237,72 @@ func (s *Store) Save(ctx context.Context, id, actor int64, req SaveRequest) (Tas
 	if err = audit(ctx, tx, t, actor, now, result, ""); err != nil {
 		return zero, err
 	}
+	return t, nil
+}
+
+// SaveDailyWindow changes both actions atomically. Replacing a window does not
+// immediately change schedulable; the first effect occurs at its next event.
+func (s *Store) SaveDailyWindow(ctx context.Context, id, actor int64, req DailyWindowRequest) (Snapshot, error) {
+	var zero Snapshot
+	if id <= 0 || actor <= 0 || req.ExpectedOpenVersion < 0 || req.ExpectedCloseVersion < 0 {
+		return zero, invalid("request")
+	}
+	now := s.now()
+	openReq := SaveRequest{Input: Input{Mode: "daily", Time: req.OpenTime, Timezone: req.Timezone}, Action: "open", ExpectedVersion: req.ExpectedOpenVersion}
+	closeReq := SaveRequest{Input: Input{Mode: "daily", Time: req.CloseTime, Timezone: req.Timezone}, Action: "close", ExpectedVersion: req.ExpectedCloseVersion}
+	for _, input := range []Input{openReq.Input, closeReq.Input} {
+		if _, err := Resolve(input, now, s.policy()); err != nil {
+			return zero, err
+		}
+	}
+	if req.OpenTime == req.CloseTime {
+		return zero, invalid("conflict")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	a, err := lockAccount(ctx, tx, id, false)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && a.deleted != nil) {
+		return zero, invalid("account_deleted")
+	}
+	if err != nil {
+		return zero, err
+	}
+	// Check both optimistic versions before touching either action. All writers
+	// hold this same account lock, so neither version can change during the pair.
+	for _, action := range []SaveRequest{openReq, closeReq} {
+		var version int64
+		err = tx.QueryRowContext(ctx, "SELECT version FROM account_schedulable_timers WHERE account_id=$1 AND action=$2 FOR UPDATE", id, action.Action).Scan(&version)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return zero, err
+		}
+		if version != action.ExpectedVersion {
+			return zero, invalid("version")
+		}
+	}
+	// The account lock may have waited across a wall-clock boundary. Resolve the
+	// actual persisted occurrences from receipt under that lock, not preflight.
+	now = s.now()
+	// Release the old pending uniqueness slots together. This intermediate state
+	// is never visible outside the transaction, including when the times swap.
+	if _, err = tx.ExecContext(ctx, "UPDATE account_schedulable_timers SET status='cancelled' WHERE account_id=$1 AND status='pending'", id); err != nil {
+		return zero, err
+	}
+	for _, action := range []SaveRequest{openReq, closeReq} {
+		if _, err = s.saveLocked(ctx, tx, id, actor, action, now, true); err != nil {
+			return zero, err
+		}
+	}
+	snapshot, err := s.list(ctx, tx, id)
+	if err != nil {
+		return zero, err
+	}
 	if err = tx.Commit(); err != nil {
 		return zero, err
 	}
-	return t, nil
+	return snapshot, nil
 }
 func (s *Store) Cancel(ctx context.Context, id, actor int64, action string, version int64) error {
 	if id <= 0 || actor <= 0 || !actionValid(action) || version <= 0 {
@@ -222,9 +338,17 @@ func (s *Store) Cancel(ctx context.Context, id, actor int64, action string, vers
 	return tx.Commit()
 }
 func (s *Store) List(ctx context.Context, id int64) (Snapshot, error) {
+	return s.list(ctx, s.DB, id)
+}
+
+type taskQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func (s *Store) list(ctx context.Context, q taskQuerier, id int64) (Snapshot, error) {
 	p := s.policy()
 	out := Snapshot{Tasks: []Task{}, History: []Audit{}, ServerNow: s.now(), PollSeconds: int(PollInterval / time.Second), OpenGraceSeconds: int(p.OpenGrace / time.Second), MaxDelayMinutes: int64(p.MaxDelay / time.Minute)}
-	rows, err := s.DB.QueryContext(ctx, "SELECT "+taskColumns+" FROM account_schedulable_timers WHERE account_id=$1 ORDER BY action", id)
+	rows, err := q.QueryContext(ctx, "SELECT "+taskColumns+" FROM account_schedulable_timers WHERE account_id=$1 ORDER BY action", id)
 	if err != nil {
 		return out, err
 	}
@@ -241,14 +365,14 @@ func (s *Store) List(ctx context.Context, id int64) (Snapshot, error) {
 	if err != nil {
 		return out, err
 	}
-	rows, err = s.DB.QueryContext(ctx, `SELECT action,version,actor_id,execute_at,timezone,actual_at,result,reason FROM account_schedulable_timer_audit WHERE account_id=$1 ORDER BY id DESC LIMIT 20`, id)
+	rows, err = q.QueryContext(ctx, `SELECT action,version,actor_id,execute_at,timezone,actual_at,result,reason,recurrence,daily_time FROM account_schedulable_timer_audit WHERE account_id=$1 ORDER BY id DESC LIMIT 20`, id)
 	if err != nil {
 		return out, err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var a Audit
-		if err = rows.Scan(&a.Action, &a.Version, &a.ActorID, &a.ExecuteAt, &a.Timezone, &a.ActualAt, &a.Result, &a.Reason); err != nil {
+		if err = rows.Scan(&a.Action, &a.Version, &a.ActorID, &a.ExecuteAt, &a.Timezone, &a.ActualAt, &a.Result, &a.Reason, &a.Recurrence, &a.DailyTime); err != nil {
 			return out, err
 		}
 		a.ExecuteAt = a.ExecuteAt.UTC()
@@ -323,8 +447,22 @@ func (s *Store) execute(ctx context.Context, candidate Task) error {
 	}
 	reason := Decision(t.Action == "open", t.ExecuteAt, now, a.status, a.expires, a.deleted != nil, s.policy())
 	result := "executed"
+	var next time.Time
+	if t.Recurrence == "daily" && reason != "account_deleted" {
+		loc, zoneErr := time.LoadLocation(t.Timezone)
+		if zoneErr == nil {
+			next, zoneErr = nextDaily(t.DailyTime, loc, now)
+		}
+		if zoneErr != nil {
+			// Malformed persisted state cannot enable an account or spin forever.
+			reason = "recurrence_invalid"
+			result = "failed"
+		}
+	}
 	if reason != "" {
-		result = "skipped"
+		if result != "failed" {
+			result = "skipped"
+		}
 	} else {
 		// Do not touch status, expiry, credentials, quotas, cooldown or quality fields.
 		_, err = tx.ExecContext(ctx, "UPDATE accounts SET schedulable=$1, updated_at=$2 WHERE id=$3 AND deleted_at IS NULL", t.Action == "open", now, t.AccountID)
@@ -336,7 +474,15 @@ func (s *Store) execute(ctx context.Context, candidate Task) error {
 			return s.retry(ctx, t)
 		}
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE account_schedulable_timers SET status=$3,actual_at=$4,reason=$5 WHERE account_id=$1 AND action=$2 AND version=$6`, t.AccountID, t.Action, result, now, reason, t.Version)
+	if !next.IsZero() {
+		// Audit this occurrence using its original version, while atomically
+		// fencing old workers and making the next local date durable.
+		_, err = tx.ExecContext(ctx, `UPDATE account_schedulable_timers
+ SET status='pending',version=version+1,execute_at=$3,next_attempt_at=$3,attempts=0,actual_at=$4,reason=$5
+ WHERE account_id=$1 AND action=$2 AND version=$6`, t.AccountID, t.Action, next, now, reason, t.Version)
+	} else {
+		_, err = tx.ExecContext(ctx, `UPDATE account_schedulable_timers SET status=$3,actual_at=$4,reason=$5 WHERE account_id=$1 AND action=$2 AND version=$6`, t.AccountID, t.Action, result, now, reason, t.Version)
+	}
 	if err == nil {
 		err = audit(ctx, tx, t, t.RequestedBy, now, result, reason)
 	}
@@ -410,8 +556,8 @@ func CancelPending(ctx context.Context, exec Executor, id int64, now time.Time) 
 	_, err := exec.ExecContext(ctx, `WITH cancelled AS (
  UPDATE account_schedulable_timers SET status='cancelled',version=version+1,actual_at=$3,reason='manual_override'
  WHERE account_id=$1 AND status='pending' RETURNING *)
- INSERT INTO account_schedulable_timer_audit (account_id,action,version,actor_id,execute_at,timezone,actual_at,result,reason)
- SELECT account_id,action,version-1,$2,execute_at,timezone,$3,'cancelled','manual_override' FROM cancelled`, id, actor, now)
+ INSERT INTO account_schedulable_timer_audit (account_id,action,version,actor_id,execute_at,timezone,actual_at,result,reason,recurrence,daily_time)
+ SELECT account_id,action,version-1,$2,execute_at,timezone,$3,'cancelled','manual_override',recurrence,daily_time FROM cancelled`, id, actor, now)
 	return err
 }
 

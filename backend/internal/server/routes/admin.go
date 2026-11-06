@@ -541,6 +541,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/schedulable-timers", h.Admin.Account.ListSchedulableTimers)
 		accounts.POST("/:id/schedulable-timers/preview", h.Admin.Account.PreviewSchedulableTimer)
 		accounts.POST("/:id/schedulable-timers", h.Admin.Account.SaveSchedulableTimer)
+		accounts.POST("/:id/schedulable-timers/daily-window", h.Admin.Account.SaveDailySchedulableWindow)
 		accounts.DELETE("/:id/schedulable-timers/:action", h.Admin.Account.CancelSchedulableTimer)
 		accounts.POST("/models/sync-upstream-preview", h.Admin.Account.SyncUpstreamModelsPreview)
 		accounts.GET("/:id/models", h.Admin.Account.GetAvailableModels)

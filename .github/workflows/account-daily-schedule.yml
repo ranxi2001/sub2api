@@ -1,0 +1,64 @@
+name: Account daily schedule regressions
+on:
+  push:
+    branches: ['feat/account-daily-schedule*']
+  pull_request:
+    paths:
+      - '.github/workflows/account-daily-schedule.yml'
+      - 'backend/internal/accounttimer/**'
+      - 'backend/internal/handler/admin/accounttimerapi/**'
+      - 'backend/internal/handler/admin/account_schedulable_timer*'
+      - 'backend/migrations/335_account_daily_schedulable_timers.sql'
+      - 'frontend/src/components/account/SchedulableTimerControl.vue'
+      - 'frontend/src/components/account/__tests__/SchedulableTimerControl*'
+      - 'frontend/src/views/admin/__tests__/AccountsView.schedulableTimer.spec.ts'
+      - 'frontend/src/api/admin/schedulableTimers.ts'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: account-daily-schedule-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regressions:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: timer_fixture
+          POSTGRES_PASSWORD: timer_fixture
+          POSTGRES_DB: schedulable_timer_fixture
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U timer_fixture -d schedulable_timer_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - name: Timer time, persistence contract and administrator API regressions
+        working-directory: backend
+        run: go test -race ./internal/accounttimer ./internal/handler/admin/accounttimerapi -count=1
+      - name: Daily schedule PostgreSQL regressions
+        working-directory: backend
+        env:
+          ACCOUNT_TIMER_TEST_DSN: postgres://timer_fixture:timer_fixture@127.0.0.1:5432/schedulable_timer_fixture?sslmode=disable
+        run: go test -race -tags=integration ./internal/accounttimer -count=1 -v
+      - name: Account timer UI and feature notice regressions
+        working-directory: frontend
+        run: pnpm test:run src/components/account/__tests__/SchedulableTimerControl.spec.ts src/components/account/__tests__/SchedulableTimerControl.daily.spec.ts src/views/admin/__tests__/AccountsView.schedulableTimer.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts src/stores/__tests__/newFeatureNotices.spec.ts
