@@ -15,9 +15,11 @@ import {
   setPlatformCatalog
 } from '@/constants/platformCatalog'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode, showErrorMock } = vi.hoisted(() => ({
+const { updateAccountMock, syncUpstreamModelsMock, checkMixedChannelRiskMock, authIsSimpleMode, showErrorMock, showWarningMock } = vi.hoisted(() => ({
   showErrorMock: vi.fn(),
+  showWarningMock: vi.fn(),
   updateAccountMock: vi.fn(),
+  syncUpstreamModelsMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
@@ -25,6 +27,7 @@ const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode, showErro
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: showErrorMock,
+    showWarning: showWarningMock,
     showSuccess: vi.fn(),
     showInfo: vi.fn()
   })
@@ -43,6 +46,7 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
       update: updateAccountMock,
+      syncUpstreamModels: syncUpstreamModelsMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
     },
     settings: {
@@ -91,7 +95,7 @@ const ModelWhitelistSelectorStub = defineComponent({
       default: () => []
     }
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'update:modelMappings'],
   template: `
     <div>
       <button
@@ -415,6 +419,8 @@ describe('EditAccountModal', () => {
 
   beforeEach(() => {
     showErrorMock.mockReset()
+    showWarningMock.mockReset()
+    syncUpstreamModelsMock.mockReset()
     authIsSimpleMode.value = true
   })
 
@@ -1021,6 +1027,32 @@ describe('EditAccountModal', () => {
     expect(wrapper.getComponent(ModelWhitelistSelectorStub).props('modelMappings')).toEqual([
       { from: 'gpt-latest', to: 'deepseek-chat' }
     ])
+  })
+
+  it('saves reconciled whitelist and mapping events without restoring stale aliases', async () => {
+    const account = buildAccount()
+    account.credentials.model_mapping = {
+      old: 'old',
+      'public-old': 'old',
+      'public-live': 'live'
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const selector = wrapper.getComponent(ModelWhitelistSelectorStub)
+
+    selector.vm.$emit('update:modelValue', ['live', 'new'])
+    selector.vm.$emit('update:modelMappings', [{ from: 'public-live', to: 'live' }])
+    await flushPromises()
+    expect(updateAccountMock).not.toHaveBeenCalled()
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
+      live: 'live',
+      new: 'new',
+      'public-live': 'live'
+    })
   })
 
   it('sets expiry presets from now instead of extending the saved expiry', async () => {
@@ -2621,6 +2653,174 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty(
       'antigravity_project_id'
     )
+  })
+
+  describe('Antigravity upstream model synchronization', () => {
+    function buildSyncAccount() {
+      const account = buildAntigravityAccount()
+      account.credentials.model_mapping = {
+        old: 'old',
+        live: 'live',
+        'public-old': 'old',
+        'public-live': 'live',
+        'family-*': 'live'
+      }
+      return account
+    }
+
+    function mountSyncModal(account = buildSyncAccount()) {
+      updateAccountMock.mockReset().mockResolvedValue(account)
+      checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+      return mountModal(account)
+    }
+
+    function syncModels(wrapper: ReturnType<typeof mountModal>) {
+      const button = wrapper.findAll('button').find(candidate => candidate.text() === 'admin.accounts.syncUpstreamModels')
+      if (!button) throw new Error('Antigravity upstream model sync button not found')
+      return button.trigger('click')
+    }
+
+    it('replaces stale models in the draft and preserves redirects to live targets on save', async () => {
+      const account = buildSyncAccount()
+      syncUpstreamModelsMock.mockResolvedValue({
+        discovery_source: 'upstream',
+        models: [' live ', 'new', 'live', '*', ' ']
+      })
+      const wrapper = mountSyncModal(account)
+
+      await syncModels(wrapper)
+      await flushPromises()
+      expect(syncUpstreamModelsMock).toHaveBeenCalledWith(account.id)
+      expect(updateAccountMock).not.toHaveBeenCalled()
+      expect(account.credentials.model_mapping).toHaveProperty('old', 'old')
+
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(updateAccountMock).toHaveBeenCalledTimes(1)
+      expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
+        live: 'live',
+        new: 'new',
+        'public-live': 'live',
+        'family-*': 'live'
+      })
+    })
+
+    it.each([
+      { name: 'configured fallback', result: { discovery_source: 'configured_fallback', models: ['new'] } },
+      { name: 'unknown discovery source', result: { discovery_source: undefined, models: ['new'] } },
+      { name: 'empty upstream catalog', result: { discovery_source: 'upstream', models: [] } },
+      { name: 'wildcard-only upstream catalog', result: { discovery_source: 'upstream', models: ['*', 'family-*', ' '] } }
+    ])('preserves the declaration for $name', async ({ result }) => {
+      const account = buildSyncAccount()
+      syncUpstreamModelsMock.mockResolvedValue(result)
+      const wrapper = mountSyncModal(account)
+
+      await syncModels(wrapper)
+      await flushPromises()
+      expect(updateAccountMock).not.toHaveBeenCalled()
+      if (result.discovery_source !== 'upstream') {
+        expect(showWarningMock).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsUnverified')
+      }
+
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual(account.credentials.model_mapping)
+    })
+
+    it('keeps the existing declaration after upstream synchronization fails', async () => {
+      const account = buildSyncAccount()
+      syncUpstreamModelsMock.mockRejectedValue({ message: 'Synthetic upstream unavailable' })
+      const wrapper = mountSyncModal(account)
+
+      await syncModels(wrapper)
+      await flushPromises()
+      expect(showErrorMock).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsError')
+      expect(updateAccountMock).not.toHaveBeenCalled()
+
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual(account.credentials.model_mapping)
+    })
+
+    it('does not overwrite a replacement account draft with a late sync response', async () => {
+      let finishSync!: (result: { discovery_source: string; models: string[] }) => void
+      syncUpstreamModelsMock.mockReturnValue(new Promise(resolve => { finishSync = resolve }))
+      const account = buildSyncAccount()
+      const wrapper = mountSyncModal(account)
+      await syncModels(wrapper)
+
+      const replacement = {
+        ...account,
+        credentials: { ...account.credentials, model_mapping: { replacement: 'replacement' } }
+      }
+      await wrapper.setProps({ account: replacement })
+      finishSync({ discovery_source: 'upstream', models: ['late-upstream'] })
+      await flushPromises()
+      expect(updateAccountMock).not.toHaveBeenCalled()
+
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({ replacement: 'replacement' })
+    })
+
+    it('ignores a sync response after the dialog closes', async () => {
+      let finishSync!: (result: { discovery_source: string; models: string[] }) => void
+      syncUpstreamModelsMock.mockReturnValue(new Promise(resolve => { finishSync = resolve }))
+      const wrapper = mountSyncModal()
+      await syncModels(wrapper)
+
+      await wrapper.setProps({ show: false })
+      finishSync({ discovery_source: 'configured_fallback', models: ['late-upstream'] })
+      await flushPromises()
+      expect(showWarningMock).not.toHaveBeenCalled()
+      expect(updateAccountMock).not.toHaveBeenCalled()
+    })
+
+    it('keeps a reopened dialog draft and its new request busy when an earlier response arrives', async () => {
+      type SyncResult = { discovery_source: string; models: string[] }
+      let finishPrevious!: (result: SyncResult) => void
+      let finishCurrent!: (result: SyncResult) => void
+      syncUpstreamModelsMock
+        .mockReturnValueOnce(new Promise(resolve => { finishPrevious = resolve }))
+        .mockReturnValueOnce(new Promise(resolve => { finishCurrent = resolve }))
+      const account = buildSyncAccount()
+      const wrapper = mountSyncModal(account)
+      const originalAccountProp = wrapper.props('account')
+      await syncModels(wrapper)
+
+      await wrapper.setProps({ show: false })
+      await wrapper.setProps({ show: true })
+      expect(wrapper.props('account')).toBe(originalAccountProp)
+      await syncModels(wrapper)
+      expect(syncUpstreamModelsMock).toHaveBeenCalledTimes(2)
+
+      finishPrevious({ discovery_source: 'upstream', models: ['previous-response'] })
+      await flushPromises()
+      expect(wrapper.findAll<HTMLInputElement>('input[placeholder="admin.accounts.requestModel"]')
+        .map(input => input.element.value)).toEqual(Object.keys(account.credentials.model_mapping))
+      const busyButton = wrapper.findAll('button')
+        .find(button => button.text() === 'admin.accounts.syncUpstreamModelsLoading')
+      expect(busyButton).toBeDefined()
+      expect(busyButton?.attributes('disabled')).toBeDefined()
+      expect(updateAccountMock).not.toHaveBeenCalled()
+
+      finishCurrent({ discovery_source: 'upstream', models: ['live', 'latest'] })
+      await flushPromises()
+      const readyButton = wrapper.findAll('button')
+        .find(button => button.text() === 'admin.accounts.syncUpstreamModels')
+      expect(readyButton).toBeDefined()
+      expect(readyButton?.attributes('disabled')).toBeUndefined()
+      expect(updateAccountMock).not.toHaveBeenCalled()
+
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+      expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
+        live: 'live',
+        latest: 'latest',
+        'public-live': 'live',
+        'family-*': 'live'
+      })
+    })
   })
 })
 

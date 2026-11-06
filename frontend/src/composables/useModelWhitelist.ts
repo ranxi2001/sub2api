@@ -567,6 +567,23 @@ export interface ModelMappingEntry {
   to: string
 }
 
+/** Rebuild a declaration from concrete upstream IDs, retaining redirects to live targets. */
+export function reconcileUpstreamModelMapping(
+  upstreamModels: string[],
+  existingMappings: ModelMappingEntry[]
+): { allowedModels: string[]; modelMappings: ModelMappingEntry[] } {
+  const live = new Set(upstreamModels.map(model => model.trim()).filter(model => model && !model.includes('*')))
+  const mapping: Record<string, string> = Object.fromEntries([...live].map(model => [model, model]))
+  for (const entry of existingMappings) {
+    const from = entry.from.trim()
+    const to = entry.to.trim()
+    if (from && from !== to && isValidWildcardPattern(from) && live.has(to)) {
+      mapping[from] = to
+    }
+  }
+  return splitModelMappingObject(mapping)
+}
+
 export function splitModelMappingObject(
   modelMapping?: Record<string, unknown> | null
 ): { allowedModels: string[]; modelMappings: ModelMappingEntry[] } {
