@@ -5,6 +5,18 @@
         <div class="flex flex-wrap justify-between gap-2"><strong>{{ record.model }}</strong><span>{{ formatDateTime(record.created_at) }}</span></div>
         <div class="mt-2 break-all font-mono text-xs text-gray-500">{{ record.request_id }}</div>
       </div>
+      <section v-if="record.stream" data-testid="final-content-timing" class="rounded-xl border border-gray-200 p-4 dark:border-dark-600">
+        <div class="flex items-center gap-2">
+          <h4 class="font-semibold">{{ t('requestTiming.contentTitle') }}</h4>
+          <NewFeatureBadge v-if="noticeUserId != null && !observerMode" :notice-id="NEW_FEATURE_NOTICES.streamFirstEventTiming" :user-id="noticeUserId" />
+        </div>
+        <p class="mt-2 text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('requestTiming.contentOrigin') }} {{ t('requestTiming.contentTraceScope') }}</p>
+        <dl class="mt-3 grid gap-3 sm:grid-cols-2">
+          <div v-for="item in finalContentTimings" :key="item.key" :data-testid="`final-content-${item.key}`" class="flex justify-between gap-4 text-sm">
+            <dt class="text-gray-500">{{ item.label }}</dt><dd class="font-medium tabular-nums">{{ contentMs(item.value) }}</dd>
+          </div>
+        </dl>
+      </section>
       <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
         <div v-for="item in summaries" :key="item.label" class="rounded-xl border p-4" :class="TIMING_SURFACE[item.health]">
           <div class="text-sm text-gray-600 dark:text-gray-400">{{ item.label }}</div>
@@ -64,6 +76,8 @@ import { inject, computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWindowSize } from '@vueuse/core'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import type { AdminUsageLog } from '@/types'
 import { formatDateTime } from '@/utils/format'
 import { formatUsageOutputTps } from '@/utils/usageTps'
@@ -72,7 +86,7 @@ import { getUsageTiming, type RequestTiming, type TimingAttempt, type TimingSpan
 import { observerUsageAPI } from '@/api/observerUsage'
 import { observerUsageContext } from './observerUsageContext'
 const observerMode = inject(observerUsageContext, false)
-const props = defineProps<{ record: AdminUsageLog | null }>()
+const props = defineProps<{ record: AdminUsageLog | null; noticeUserId?: number | null }>()
 defineEmits<{ close: [] }>()
 const { t } = useI18n()
 const { width: viewportWidth } = useWindowSize()
@@ -80,7 +94,8 @@ const traces = ref<RequestTiming[]>([]), selected = ref(0), loading = ref(false)
 let controller: AbortController | undefined
 const trace = computed(() => traces.value[selected.value])
 const label = (name: string) => t(`requestTiming.fields.${name}`)
-const ms = (value: number | null | undefined) => value == null ? t('requestTiming.missing') : value < 1 ? '<1ms' : value < 1000 ? `${value.toFixed(0)}ms` : `${(value / 1000).toFixed(2)}s`
+const ms = (value: number | null | undefined) => value == null || !Number.isFinite(value) || value < 0 ? t('requestTiming.missing') : value < 1 ? '<1ms' : value < 1000 ? `${value.toFixed(0)}ms` : `${(value / 1000).toFixed(2)}s`
+const contentMs = (value: number | null | undefined) => value == null || !Number.isFinite(value) || value < 0 ? '—' : ms(value)
 const bytes = (value: number) => value < 0 ? t('requestTiming.missing') : `${(value / 1048576).toFixed(3)} MiB`
 const yes = (value: boolean | null) => value == null ? t('requestTiming.missing') : t(value ? 'requestTiming.yes' : 'requestTiming.no')
 const delta = (events: Record<string, number>, start: string, end: string) => events[start] == null || events[end] == null || events[end] < events[start] ? undefined : events[end] - events[start]
@@ -94,6 +109,12 @@ const flag = (name: string, value: boolean | null | undefined, goodValue: boolea
 const statusHealth = (status: number): TimingHealth => status >= 500 ? 'critical' : status >= 400 ? 'warn' : status >= 200 && status < 300 ? 'good' : 'neutral'
 const serverFirstMs = computed(() => props.record?.queue_timing?.status === 'measured' ? props.record.queue_timing.server_first_token_ms : null)
 const serverTotalMs = computed(() => props.record?.queue_timing?.status === 'measured' ? props.record.queue_timing.server_duration_ms : null)
+const finalContentTimings = computed(() => [
+  { key: 'event', label: t('requestTiming.eventShort'), value: props.record?.content_timing?.sse_event_first_ms },
+  { key: 'semantic', label: t('requestTiming.semanticShort'), value: props.record?.content_timing?.semantic_first_ms },
+  { key: 'reasoning', label: t('requestTiming.reasoningShort'), value: props.record?.content_timing?.reasoning_first_ms },
+  { key: 'text', label: t('requestTiming.textShort'), value: props.record?.content_timing?.visible_text_first_ms },
+])
 const summaries = computed(() => [
   { label: t('requestTiming.legacyFirst'), value: props.record?.first_token_ms, scale: 'first' as const },
   { label: t('requestTiming.serverFirst'), value: serverFirstMs.value, scale: 'first' as const },
@@ -164,7 +185,7 @@ function attemptRows(a: TimingAttempt): DetailRow[] {
     timed('decode_wait', delta(e, 'raw_body_first', 'decoded_body_first'), 'neutral'),
     timed('sse_wait', delta(e, 'decoded_body_first', 'sse_parsed_first'), 'neutral'),
     timed('tool_wait', delta(e, 'sse_visible_first', 'tool_visible_first'), 'neutral'),
-    timed('first_semantic', e.first_semantic, 'neutral'), timed('first_visible', e.first_visible, 'neutral'),
+    ...['first_sse_event_flush', 'first_semantic', 'first_reasoning', 'first_visible_text', 'first_visible'].map(name => timed(name, e[name], 'neutral')),
     timed('response_headers', e.response_headers == null ? undefined : e.response_headers - a.start_ms, 'first'),
     timed('stream_transfer', a.end_ms == null || e.response_headers == null ? undefined : a.end_ms - e.response_headers, 'neutral'),
     row('request_bytes', bytes(a.request_bytes)), row('response_bytes', bytes(a.response_bytes)), row('body_eof', yes(a.body_eof))

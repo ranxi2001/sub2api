@@ -1,5 +1,12 @@
 export default {
   "title": "Request timing details",
+  "contentTitle": "Stream event and content timing",
+  "eventShort": "Event",
+  "semanticShort": "Semantic",
+  "reasoningShort": "Reasoning",
+  "textShort": "Text",
+  "contentOrigin": "Usage-record observations from application entry, for its final egress attempt. Event means a complete SSE data event flushed by the host, not client receipt. Semantic includes meaningful reasoning or content; text means visible body text. Missing values show —.",
+  "contentTraceScope": "These usage-record values stay the same when selecting a different detailed trace below.",
   "loading": "Loading timing details…",
   "loadError": "Unable to load timing details",
   "retry": "Retry",
@@ -45,6 +52,9 @@ export default {
     "tool_wait": "First-visible-event conversion interval",
 
     "first_semantic": "First semantic event from request start",
+    "first_sse_event_flush": "First SSE data event flushed from request start",
+    "first_reasoning": "First reasoning event from request start",
+    "first_visible_text": "First visible text from request start",
     "first_visible": "First visible output from request start",
     "first_output_flush": "First output flush (application)",
     "body_read_start": "First read offset",

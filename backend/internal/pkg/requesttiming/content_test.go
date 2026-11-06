@@ -2,10 +2,12 @@ package requesttiming
 
 import (
 	"context"
+	"math"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/util/transportdiag"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,6 +48,31 @@ func TestIssue605TypedContentDoesNotInferReasoning(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestPluginContentProjectionKeepsFinalAttemptScope(t *testing.T) {
+	end := 1000.0
+	plugin := Attempt{Kind: "egress", StartMS: 50, EndMS: &end, Route: transportdiag.Route{Mode: "plugin", Upstream: "plugin"}, Events: map[string]float64{"first_sse_event_flush": 100, "first_semantic": 300, "first_reasoning": 300, "first_visible_text": 800, "first_byte": 80}}
+	s := Snapshot{TotalMS: 1000, Attempts: []Attempt{plugin}}
+	v := DeriveContentObservation(s)
+	require.Equal(t, "observed", v.Status)
+	require.Equal(t, "host_plugin_body_parser", v.Source)
+	require.Equal(t, "plugin_transport_not_observed", v.UpstreamSocket.Status)
+	require.Equal(t, 100.0, *v.SSEEventFirstMS)
+	require.Equal(t, 300.0, *v.SemanticFirstMS)
+	require.Equal(t, 800.0, *v.VisibleTextFirstMS)
+	require.Nil(t, v.ResponseByteFirstMS, "gRPC headers are not upstream socket evidence")
+	for _, bad := range []float64{-1, 49, 1001, math.NaN(), math.Inf(1)} {
+		plugin.Events["first_sse_event_flush"] = bad
+		require.Nil(t, DeriveContentObservation(s).SSEEventFirstMS)
+	}
+	s.Events = map[string]float64{"first_sse_event_flush": 10, "first_semantic": 10}
+	s.Attempts = append(s.Attempts, Attempt{Kind: "egress", StartMS: 900, EndMS: &end, Route: plugin.Route})
+	v = DeriveContentObservation(s)
+	require.Nil(t, v.SSEEventFirstMS, "do not borrow evidence from an earlier attempt or global events")
+	require.Nil(t, v.SemanticFirstMS)
+	s.Truncated = true
+	require.Equal(t, "not_collected", DeriveContentObservation(s).Status)
 }
 
 func TestIssue605HistoricalAndProxySocketEvidenceStaysUnknown(t *testing.T) {

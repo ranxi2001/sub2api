@@ -77,6 +77,9 @@ func OutputFlushed(ctx context.Context) {
 		return
 	}
 	if tr, ok := ctx.Value(attemptKey{}).(*Trace); ok && tr.c == c {
+		if tr.logicalResponse && c.data.Attempts[tr.index].EndMS != nil {
+			return
+		}
 		if _, seen := c.data.Attempts[tr.index].Events["first_semantic"]; !seen {
 			return
 		}
@@ -84,6 +87,34 @@ func OutputFlushed(ctx context.Context) {
 		return
 	}
 	c.event("first_output_flush", c.now())
+}
+
+// SSEEventFlushed observes a complete non-heartbeat data event successfully
+// flushed by the host. It establishes neither model output nor client receipt.
+func SSEEventFlushed(ctx context.Context) {
+	c := From(ctx)
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.finished || c.data.DownstreamError {
+		return
+	}
+	if tr, ok := ctx.Value(attemptKey{}).(*Trace); ok && tr.c == c && tr.logicalResponse && c.data.Attempts[tr.index].EndMS != nil {
+		return
+	}
+	now := c.now()
+	c.event("first_sse_event_flush", now)
+	if tr, ok := ctx.Value(attemptKey{}).(*Trace); ok && tr.c == c {
+		for index := tr.index; index >= 0; {
+			a := &c.data.Attempts[index]
+			if _, exists := a.Events["first_sse_event_flush"]; !exists {
+				a.Events["first_sse_event_flush"] = c.offset(now)
+			}
+			index = a.Parent - 1
+		}
+	}
 }
 
 // TerminalFlushed records successful local write/flush completion, not receipt
