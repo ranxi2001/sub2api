@@ -19,4 +19,5 @@ export const NEW_FEATURE_NOTICES = {
   aiOpsCodex: 'ai-ops-codex-observe-initial-announcement',
   bepusdtPayment: 'bepusdt-embedded-payment-initial-announcement',
   accountDailyScheduling: 'account-daily-schedulable-timers-initial-announcement',
+  streamFirstEventTiming: 'stream-first-event-timing-initial-announcement',
 } as const

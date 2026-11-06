@@ -5,6 +5,8 @@ import { defineComponent } from 'vue'
 import UserUsageView from '@/views/user/UsageView.vue'
 import AdminUsageView from '@/views/admin/UsageView.vue'
 
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 41 } }) }))
+
 const {
   userQuery,
   userGetStats,

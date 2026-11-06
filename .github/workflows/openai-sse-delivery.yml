@@ -1,0 +1,86 @@
+name: OpenAI SSE delivery and timing
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/workflows/openai-sse-delivery.yml'
+      - 'backend/internal/config/**'
+      - 'backend/internal/pkg/requesttiming/**'
+      - 'backend/internal/service/openai_*'
+      - 'backend/internal/service/plugin_*'
+      - 'frontend/src/components/admin/usage/**'
+      - 'frontend/src/components/common/**'
+      - 'frontend/src/stores/newFeatureNotices.ts'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/views/admin/UsageView.vue'
+      - 'frontend/src/views/admin/__tests__/UsageView.spec.ts'
+      - 'frontend/src/__tests__/integration/usage-reasoning-effort.spec.ts'
+      - 'frontend/src/i18n/locales/*/requestTiming.ts'
+      - 'frontend/src/types/index.ts'
+      - 'deploy/config.example.yaml'
+      - 'deploy/docker-compose*.yml'
+      - 'deploy/.env.example'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openai-sse-delivery-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Collector and content projection regressions
+        working-directory: backend
+        run: go test -race ./internal/pkg/requesttiming -count=1
+      - name: Plugin delivery startup configuration
+        working-directory: backend
+        run: go test ./internal/config -run '^TestPluginSSEEarlyEventsConfiguration$' -count=1
+      - name: Host SSE parsers, trust boundary and native WS regressions
+        working-directory: backend
+        run: >-
+          go test -race -tags=unit ./internal/service
+          -run 'Test(PluginSSE|OpenAISSE|OpenAIWS.*Timing|OpenAIWSSSEAcceleration|OpenAIResponsesTTFT|WSSemanticFirstToken|PriorityResponsesSemanticEventContext|OpenAINativeFirstOutput|Issue605)'
+          -count=1 -timeout=8m
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - name: Usage timing and new feature notice regressions
+        working-directory: frontend
+        run: >-
+          pnpm test:run
+          src/components/admin/usage/__tests__/UsageTable.spec.ts
+          src/components/admin/usage/__tests__/UsageTimingDialog.spec.ts
+          src/components/common/__tests__/NewFeatureBadge.spec.ts
+          src/views/admin/__tests__/UsageView.spec.ts
+          src/__tests__/integration/usage-reasoning-effort.spec.ts
+      - name: Locale completeness, typecheck and production build
+        working-directory: frontend
+        run: pnpm build

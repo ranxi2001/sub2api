@@ -4,6 +4,8 @@
 request_timing_details JSON，不改变 first_token_ms 或计费，不需要数据库迁移。
 旧记录及未覆盖路径显示未采集。
 
+首完整 SSE 写出、首语义、推理和正文的独立指标，以及原生 WS 和可信插件的采集边界，见 [OpenAI 流式首事件与内容计时](openai-sse-delivery.md)。下文的物理 HTTP 正文阶段仍保留其原有含义，不将 WS 握手或 gRPC 响应头映射为 HTTP 正文字节。
+
 - raw_body_first：HTTP 响应体在手动解压之前，第一次 Read 返回非空数据。
   这是应用读取边界，不是网卡到包时间；不包含 HTTP 响应头。
 - decoded_body_first：手动解压之后第一次非空读取。无压缩时同样记录。

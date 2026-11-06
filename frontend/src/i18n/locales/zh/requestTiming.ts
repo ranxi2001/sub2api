@@ -1,5 +1,12 @@
 export default {
   "title": "请求耗时详情",
+  "contentTitle": "流式首事件与内容时序",
+  "eventShort": "首事件",
+  "semanticShort": "首语义",
+  "reasoningShort": "首推理",
+  "textShort": "首文字",
+  "contentOrigin": "使用记录的最终出口观测，均从应用收到请求起计时。首事件指宿主写出完整 SSE 数据事件，不代表客户端收到；首语义含有效推理或内容；首文字仅计正文。缺失项显示 —。",
+  "contentTraceScope": "此处展示使用记录的观测值，不随下方选择的详细请求切换。",
   "loading": "正在加载耗时详情…",
   "loadError": "耗时详情加载失败",
   "retry": "重试",
@@ -45,6 +52,9 @@ export default {
     "tool_wait": "转换前后首个可见事件间隔",
 
     "first_semantic": "请求级首个语义事件",
+    "first_sse_event_flush": "首个 SSE 数据事件写出（请求起点）",
+    "first_reasoning": "首个推理事件（请求起点）",
+    "first_visible_text": "首个正文文字（请求起点）",
     "first_visible": "请求级首个可见输出",
     "first_output_flush": "首次输出 Flush（应用侧）",
     "body_read_start": "首次读取起点",

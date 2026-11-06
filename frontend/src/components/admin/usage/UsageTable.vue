@@ -1,5 +1,9 @@
 <template>
   <div :class="flat ? '' : 'card overflow-hidden'">
+    <div v-if="enableTimingDetails && noticeUserId != null && !observerMode" class="flex items-center gap-2 border-b border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400">
+      <span>{{ t('requestTiming.contentTitle') }}</span>
+      <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.streamFirstEventTiming" :user-id="noticeUserId" />
+    </div>
     <div
       v-if="showIpGeoToolbar"
       class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
@@ -274,6 +278,11 @@
               >{{ formatUsageCacheRate(row) }}</span>
               <span v-else data-testid="latency-cache-rate" class="col-start-3 row-start-4 text-gray-400 dark:text-gray-500">-</span>
             </template>
+            <span v-if="enableTimingDetails && row.stream" data-testid="latency-content-timing" class="col-span-2 col-start-2 mt-1 border-t border-gray-200 pt-1 text-[10px] text-gray-500 dark:border-dark-600" :title="t('requestTiming.contentOrigin')">
+              {{ t('requestTiming.eventShort') }} {{ contentMs(row.content_timing?.sse_event_first_ms) }} ·
+              {{ t('requestTiming.semanticShort') }} {{ contentMs(row.content_timing?.semantic_first_ms) }} ·
+              {{ t('requestTiming.textShort') }} {{ contentMs(row.content_timing?.visible_text_first_ms) }}
+            </span>
           </component>
         </template>
 
@@ -541,7 +550,7 @@
         </div>
       </div>
   </UsageDetailPopover>
-  <UsageTimingDialog :record="timingRecord" @close="timingRecord = null" />
+  <UsageTimingDialog :record="timingRecord" :notice-user-id="noticeUserId" @close="timingRecord = null" />
 </template>
 
 <script setup lang="ts">
@@ -550,6 +559,8 @@ import { useWindowSize } from '@vueuse/core'
 import UsageDetailPopover from './UsageDetailPopover.vue'
 import UsageApiKeyName from './UsageApiKeyName.vue'
 import UsageTimingDialog from './UsageTimingDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { observerUsageContext } from './observerUsageContext'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -618,6 +629,8 @@ interface Props {
   defaultSortOrder?: 'asc' | 'desc'
   showAccountBilling?: boolean
   enableTimingDetails?: boolean
+  /** Current admin ID for the shared feature notice; omitted on user/observer pages. */
+  noticeUserId?: number | null
   showUpstreamEndpoint?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
@@ -768,6 +781,7 @@ const formatUserAgent = (ua: string): string => {
 }
 
 // 超过 1 分钟简化为 "Xm Ys"，免去人工换算（超过 1 小时再进位为 "Xh Ym"）
+const contentMs = (ms: number | null | undefined): string => ms == null || !Number.isFinite(ms) || ms < 0 ? '—' : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
 const formatDuration = (ms: number | null | undefined): string => {
   if (ms == null) return '-'
   if (ms < 1000) return `${ms}ms`

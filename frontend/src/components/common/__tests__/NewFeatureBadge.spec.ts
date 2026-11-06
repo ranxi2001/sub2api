@@ -22,16 +22,18 @@ describe('NewFeatureBadge', () => {
   }
 
 
-  it('keeps pricing transfer dismissal shared and persistent across feature announcements', async () => {
+  it.each([
+    ['pricing transfer', NEW_FEATURE_NOTICES.channelPricingTransfer],
+    ['stream event timing', NEW_FEATURE_NOTICES.streamFirstEventTiming],
+  ])('keeps %s dismissal shared and persistent across feature announcements', async (_feature, noticeId) => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useNewFeatureNoticeStore()
     const oldId = NEW_FEATURE_NOTICES.vipAutoCredit
-    const pricingId = NEW_FEATURE_NOTICES.channelPricingTransfer
     store.dismiss(41, oldId)
     const i18n = createI18n({ legacy: false, locale: 'zh', messages: { zh: zhCommon } })
     const badge = () => mount(NewFeatureBadge, {
-      props: { noticeId: pricingId, userId: 41 }, global: { plugins: [pinia, i18n] },
+      props: { noticeId, userId: 41 }, global: { plugins: [pinia, i18n] },
     })
     const first = badge()
     const second = badge()
@@ -42,7 +44,7 @@ describe('NewFeatureBadge', () => {
     second.unmount()
     setActivePinia(createPinia())
     const reloaded = useNewFeatureNoticeStore()
-    expect(reloaded.isDismissed(41, pricingId)).toBe(true)
+    expect(reloaded.isDismissed(41, noticeId)).toBe(true)
     expect(reloaded.isDismissed(41, oldId)).toBe(true)
     expect(reloaded.isDismissed(41, 'future-feature-C')).toBe(false)
   })
