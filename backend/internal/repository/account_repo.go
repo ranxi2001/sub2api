@@ -1033,7 +1033,7 @@ func lockAndMergeAccountProbeExtra(
 	// The fork already reads the complete extra object under this row lock for
 	// ticket, quality and admission ownership. Use that same snapshot for Grok
 	// managed state, preserving the other owners and the query contract.
-	for _, key := range []string{"grok_observed_models", service.UpstreamModelMetadataExtraKey} {
+	for _, key := range []string{"grok_observed_models", service.UpstreamModelMetadataExtraKey, service.UpstreamModelSyncExtraKey} {
 		delete(extra, key)
 		if value, ok := currentExtra[key]; ok && value != nil {
 			if extra == nil {
