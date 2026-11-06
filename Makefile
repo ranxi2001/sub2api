@@ -6,7 +6,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/ChannelsView.modelSync.spec.ts \
 	src/views/admin/__tests__/ChannelsView.webSearchEmulation.spec.ts \
 	src/views/admin/__tests__/channelPricingTransfer.spec.ts \
+	src/views/admin/__tests__/channelPricingBundle.spec.ts \
 	src/views/admin/__tests__/ChannelsView.pricingTransfer.spec.ts \
+	src/components/admin/channel/__tests__/BulkEditChannelDialog.spec.ts \
 	src/components/keys/__tests__/UseKeyModal.spec.ts \
 	src/utils/__tests__/codexQuickConfig.spec.ts \
 	src/utils/__tests__/ccswitchImport.spec.ts \

@@ -6,6 +6,7 @@
 export const NEW_FEATURE_NOTICES = {
   groupAntiDistillation: 'group-openai-anti-distillation-initial-announcement',
   channelPricingTransfer: 'channel-pricing-import-export-initial-announcement',
+  channelPricingListActions: 'channel-pricing-list-actions-initial-announcement',
   smartOpsSidebar: 'smart-ops-sidebar-visibility-initial-announcement',
   balanceForecast: 'balance-exhaustion-forecast-initial-announcement',
   serverlessIPRouting: 'serverless-ip-affinity-primary-fallback-initial-announcement',
