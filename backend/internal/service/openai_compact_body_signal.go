@@ -1,6 +1,8 @@
 package service
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -26,6 +28,13 @@ func MarkOpenAINativeCompactionV2(c *gin.Context) {
 // the final Responses input item, as required by the upstream v2 wire format.
 func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
 	if len(body) == 0 {
+		return body, false, nil
+	}
+	// Escaped trigger names and invalid input retain the full decoder path.
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '{' &&
+		!bytes.Contains(body, []byte("compaction_trigger")) &&
+		!bytes.Contains(body, []byte(`\u`)) && json.Valid(body) {
 		return body, false, nil
 	}
 	var payload map[string]any
