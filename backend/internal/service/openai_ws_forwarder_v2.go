@@ -55,7 +55,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	} else {
 		route.ResponseFormat = "json"
 	}
-	ctx, responseTrace := requesttiming.StartResponseAttempt(ctx, account.ID, opsUpstreamProxyID(account), route)
+	var timingProxyID int64
+	if proxyID := opsUpstreamProxyID(account); proxyID != nil {
+		timingProxyID = *proxyID
+	}
+	ctx, responseTrace := requesttiming.StartResponseAttempt(ctx, account.ID, timingProxyID, route)
 	responseTerminal := ""
 	defer func() { responseTrace.FinishResponseAttempt(resultErr, responseTerminal) }()
 	responseModelObserver := &upstreamResponseModelObserver{}
