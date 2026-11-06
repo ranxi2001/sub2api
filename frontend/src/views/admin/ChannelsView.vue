@@ -31,6 +31,16 @@
 
           <!-- Right: Actions -->
           <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
+            <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.channelPricingListActions" :user-id="authStore.user?.id" />
+            <label class="btn btn-secondary cursor-pointer">
+              <Icon name="upload" size="md" class="mr-2" />
+              {{ t('admin.channels.pricingTransfer.import') }}
+              <input data-testid="list-pricing-import" type="file" accept=".json,application/json" class="sr-only" :aria-label="t('admin.channels.pricingTransfer.import')" :disabled="readingPricing || listActionBusy" @change="importListPricing($event)" />
+            </label>
+            <button data-testid="export-channel-selection" class="btn btn-secondary" :disabled="listActionBusy || (!selectedChannelIds.length && !channels.length)" @click="exportSelectedPricing">
+              <Icon name="download" size="md" class="mr-2" />
+              {{ t(selectedChannelIds.length ? 'admin.channels.pricingTransfer.exportSelected' : 'admin.channels.pricingTransfer.exportPage') }}
+            </button>
             <button
               @click="loadChannels"
               :disabled="loading"
@@ -48,7 +58,24 @@
       </template>
 
       <template #table>
+        <div v-if="selectedChannelIds.length" data-testid="channel-bulk-actions" class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-primary-50 p-3 dark:bg-primary-900/20">
+          <div class="flex flex-wrap items-center gap-3 text-sm">
+            <span>{{ t('admin.channels.pricingTransfer.selectedCount', { count: selectedChannelIds.length }) }}</span>
+            <button class="text-primary-600 hover:underline" @click="selectCurrentPage">{{ t('admin.channels.pricingTransfer.selectPage') }}</button>
+            <button class="text-gray-500 hover:underline" @click="selectedChannelKeys = []">{{ t('admin.channels.pricingTransfer.clearSelection') }}</button>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button data-testid="bulk-edit-channel-pricing" class="btn btn-secondary btn-sm" :disabled="listActionBusy" @click="openBulkEdit">{{ t('admin.channels.pricingTransfer.bulkEdit') }}</button>
+            <label class="btn btn-secondary btn-sm cursor-pointer">
+              {{ t('admin.channels.pricingTransfer.importSelected') }}
+              <input data-testid="selected-pricing-import" type="file" accept=".json,application/json" class="sr-only" :aria-label="t('admin.channels.pricingTransfer.importSelected')" :disabled="readingPricing || listActionBusy" @change="importListPricing($event, true)" />
+            </label>
+          </div>
+        </div>
         <DataTable
+          v-model:selected-keys="selectedChannelKeys"
+          selectable
+          row-key="id"
           :columns="columns"
           :data="channels"
           :loading="loading"
@@ -97,7 +124,7 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="flex flex-wrap items-center gap-1">
               <button
                 @click="openEditDialog(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
@@ -105,6 +132,25 @@
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit', 'Edit') }}</span>
               </button>
+              <button
+                data-testid="copy-channel-pricing"
+                @click="copyChannelPricing(row)"
+                :disabled="listActionBusy"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+              >
+                <Icon name="copy" size="sm" />
+                <span class="text-xs">{{ t('admin.channels.pricingTransfer.copy') }}</span>
+              </button>
+              <button
+                data-testid="export-channel-pricing"
+                @click="exportChannelPricing(row)"
+                :disabled="listActionBusy"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+              >
+                <Icon name="download" size="sm" />
+                <span class="text-xs">{{ t('admin.channels.pricingTransfer.export') }}</span>
+              </button>
+              <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.channelPricingListActions" :user-id="authStore.user?.id" />
               <button
                 @click="handleDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
@@ -143,9 +189,15 @@
       :show="showDialog"
       :title="editingChannel ? t('admin.channels.editChannel', 'Edit Channel') : t('admin.channels.createChannel', 'Create Channel')"
       width="extra-wide"
+      :close-on-escape="!submitting"
+      :show-close-button="!submitting"
       @close="closeDialog"
     >
       <div class="channel-dialog-body">
+        <p v-if="pricingDraft" class="mb-4 rounded-lg bg-primary-50 p-3 text-sm text-primary-800 dark:bg-primary-900/20 dark:text-primary-200">
+          {{ t('admin.channels.pricingTransfer.draftHint') }}
+          <span v-if="pricingImportQueue.length">{{ t('admin.channels.pricingTransfer.remainingImports', { count: pricingImportQueue.length }) }}</span>
+        </p>
         <!-- Tab Bar -->
         <div class="flex items-center border-b border-gray-200 dark:border-dark-700 flex-shrink-0 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-3 sm:-mt-4">
           <!-- Basic Settings Tab -->
@@ -602,7 +654,7 @@
 
       <template #footer>
         <div class="flex justify-end gap-3">
-          <button @click="closeDialog" type="button" class="btn btn-secondary">
+          <button @click="closeDialog" type="button" :disabled="submitting" class="btn btn-secondary">
             {{ t('common.cancel', 'Cancel') }}
           </button>
           <button
@@ -621,6 +673,15 @@
         </div>
       </template>
     </BaseDialog>
+
+    <BulkEditChannelDialog
+      :show="showBulkEdit"
+      :channels="bulkEditChannels"
+      :initial-pricing="bulkInitialPricing"
+      :initial-pricing-by-id="bulkInitialPricingById"
+      @close="showBulkEdit = false"
+      @updated="handleBulkUpdated"
+    />
 
     <ConfirmDialog
       :show="!!pendingPricingImport"
@@ -652,6 +713,7 @@ import { useAuthStore } from '@/stores/auth'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { MAX_PRICING_FILE_BYTES, parseChannelPricing, serializeChannelPricing } from './channelPricingTransfer'
+import { channelPricingToPlatforms, parsePricingCollection, parsePricingImport, serializePricingBundle, serializePricingCollection, type PricingBundle } from './channelPricingBundle'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -676,6 +738,7 @@ import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
+import BulkEditChannelDialog from '@/components/admin/channel/BulkEditChannelDialog.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
 
@@ -760,6 +823,15 @@ const billingModelSourceOptions = computed(() => [
 
 // ── State ──
 const channels = ref<Channel[]>([])
+const selectedChannelKeys = ref<(string | number)[]>([])
+const selectedChannelIds = computed(() => selectedChannelKeys.value.map(Number).filter(Number.isSafeInteger))
+const listActionBusy = ref(false)
+const showBulkEdit = ref(false)
+const bulkEditChannels = ref<Channel[]>([])
+const bulkInitialPricing = ref<PricingBundle>()
+const bulkInitialPricingById = ref<Record<number, PricingBundle>>()
+const pricingDraft = ref(false)
+const pricingImportQueue = ref<PricingBundle[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({ status: '' })
@@ -772,6 +844,7 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+watch(() => [searchQuery.value, filters.status], () => { selectedChannelKeys.value = [] })
 
 // Dialog state
 const showDialog = ref(false)
@@ -901,6 +974,7 @@ watch(showDialog, () => {
   pricingImportGeneration++
   pendingPricingImport.value = null
 }, { flush: 'sync' })
+watch(showBulkEdit, () => { pricingImportGeneration++ }, { flush: 'sync' })
 onUnmounted(() => { pricingImportGeneration++ })
 
 function pricingTransferError(error: unknown) {
@@ -912,15 +986,127 @@ function exportPricing(sectionIdx: number) {
   const section = form.platforms[sectionIdx]
   try {
     const text = serializeChannelPricing(section.platform, section.model_pricing, t)
-    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `channel-pricing-${section.platform}.json`
-    link.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    downloadPricing(text, `channel-pricing-${section.platform}.json`)
   } catch (error) {
     pricingTransferError(error)
   }
+}
+
+function downloadPricing(text: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function channelPricingDraft(channel: Channel): PricingBundle {
+  return { name: channel.name, platforms: channelPricingToPlatforms(channel.model_pricing || []) }
+}
+
+async function copyChannelPricing(channel: Channel) {
+  pricingImportQueue.value = []
+  // Validate and clone before changing the editor; no source bindings are copied.
+  try {
+    const draft = channelPricingDraft(channel)
+    const [copy] = parsePricingCollection(serializePricingBundle(draft.name, draft.platforms, t), t)
+    copy.name = t('admin.channels.pricingTransfer.copyName', { name: channel.name })
+    await prepareCreateDialog(copy)
+  } catch (error) { pricingTransferError(error) }
+}
+
+function exportChannelPricing(channel: Channel) {
+  try {
+    const draft = channelPricingDraft(channel)
+    downloadPricing(serializePricingBundle(draft.name, draft.platforms, t), `channel-pricing-${channel.id}.json`)
+  } catch (error) { pricingTransferError(error) }
+}
+
+function selectCurrentPage() {
+  selectedChannelKeys.value = [...new Set([...selectedChannelIds.value, ...channels.value.map(channel => channel.id)])]
+}
+
+async function fetchSelectedChannels(ids: number[]): Promise<Channel[]> {
+  const result: Channel[] = []
+  for (let offset = 0; offset < ids.length; offset += 5) {
+    result.push(...await Promise.all(ids.slice(offset, offset + 5).map(id => adminAPI.channels.getById(id))))
+  }
+  return result
+}
+
+async function exportSelectedPricing() {
+  if (listActionBusy.value) return
+  const ids = [...selectedChannelIds.value]
+  const page = [...channels.value]
+  listActionBusy.value = true
+  try {
+    const rows = ids.length ? await fetchSelectedChannels(ids) : page
+    if (!rows.length) return
+    downloadPricing(serializePricingCollection(rows.map(channelPricingDraft), t), 'channel-pricing-collection.json')
+  } catch (error) { pricingTransferError(error) }
+  finally { listActionBusy.value = false }
+}
+
+async function openBulkEdit() {
+  if (listActionBusy.value || !selectedChannelIds.value.length) return
+  const generation = ++pricingImportGeneration
+  const ids = [...selectedChannelIds.value]
+  listActionBusy.value = true
+  try {
+    const targets = await fetchSelectedChannels(ids)
+    if (generation !== pricingImportGeneration) return
+    bulkEditChannels.value = targets
+    bulkInitialPricing.value = undefined
+    bulkInitialPricingById.value = undefined
+    showBulkEdit.value = true
+  } catch (error) { pricingTransferError(error) }
+  finally { listActionBusy.value = false }
+}
+
+function handleBulkUpdated(ids: number[]) {
+  const updated = new Set(ids)
+  selectedChannelKeys.value = selectedChannelKeys.value.filter(id => !updated.has(Number(id)))
+  loadChannels()
+}
+
+async function importListPricing(event: Event, intoSelection = false) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || readingPricing.value || listActionBusy.value) return
+  const generation = pricingImportGeneration
+  const ids = intoSelection ? [...selectedChannelIds.value] : []
+  if (intoSelection && !ids.length) return
+  readingPricing.value = true
+  try {
+    if (file.size > MAX_PRICING_FILE_BYTES) throw new Error('admin.channels.pricingTransfer.invalidFile')
+    const { bundles: drafts, isCollection } = parsePricingImport(await file.text(), t)
+    if (generation !== pricingImportGeneration) return
+    if (intoSelection) {
+      const targets = await fetchSelectedChannels(ids)
+      if (generation !== pricingImportGeneration) return
+      let byId: Record<number, PricingBundle> | undefined
+      if (isCollection) {
+        // Never infer targets by array position: collections must match names exactly.
+        const names = new Set(drafts.map(draft => draft.name))
+        const targetNames = new Set(targets.map(channel => channel.name))
+        if (names.size !== drafts.length || targetNames.size !== targets.length || drafts.length !== targets.length || targets.some(channel => !names.has(channel.name))) {
+          throw new Error('admin.channels.pricingTransfer.selectionMismatch')
+        }
+        byId = Object.fromEntries(targets.map(channel => [channel.id, drafts.find(draft => draft.name === channel.name)!]))
+      }
+      bulkEditChannels.value = targets
+      bulkInitialPricing.value = isCollection ? undefined : drafts[0]
+      bulkInitialPricingById.value = byId
+      showBulkEdit.value = true
+    } else {
+      pricingImportQueue.value = drafts.slice(1)
+      await prepareCreateDialog(drafts[0])
+    }
+  } catch (error) {
+    if (generation === pricingImportGeneration) pricingTransferError(error)
+  } finally { readingPricing.value = false }
 }
 
 async function importPricing(sectionIdx: number, event: Event) {
@@ -1451,6 +1637,7 @@ function handleSort(key: string, order: 'asc' | 'desc') {
 
 // ── Dialog ──
 function resetForm() {
+  pricingDraft.value = false
   form.name = ''
   form.description = ''
   form.status = 'active'
@@ -1465,13 +1652,30 @@ function resetForm() {
 }
 
 async function openCreateDialog() {
+  pricingImportQueue.value = []
+  await prepareCreateDialog()
+}
+
+async function prepareCreateDialog(draft?: PricingBundle) {
+  const generation = ++pricingImportGeneration
   editingChannel.value = null
   resetForm()
+  if (draft) {
+    form.name = draft.name || t('admin.channels.pricingTransfer.importedName')
+    for (const platform of draft.platforms) {
+      addPlatformSection(platform.platform)
+      form.platforms[form.platforms.length - 1].model_pricing = platform.entries
+    }
+    pricingDraft.value = true
+  }
   await Promise.all([loadGroups(), loadAllChannelsForConflict()])
-  showDialog.value = true
+  if (generation === pricingImportGeneration) showDialog.value = true
 }
 
 async function openEditDialog(channel: Channel) {
+  const generation = ++pricingImportGeneration
+  pricingImportQueue.value = []
+  pricingDraft.value = false
   editingChannel.value = channel
   form.name = channel.name
   form.description = channel.description || ''
@@ -1481,6 +1685,7 @@ async function openEditDialog(channel: Channel) {
   form.apply_pricing_to_account_stats = channel.apply_pricing_to_account_stats || false
   // Must load groups first so apiToForm can map groupID → platform
   await Promise.all([loadGroups(), loadAllChannelsForConflict()])
+  if (generation !== pricingImportGeneration) return
   form.platforms = apiToForm(channel)
 
   // Distribute channel-level rules into per-platform sections
@@ -1489,7 +1694,7 @@ async function openEditDialog(channel: Channel) {
   // Populate ruleAccountNameCache for existing rule accounts
   await populateRuleAccountNameCache()
 
-  showDialog.value = true
+  if (generation === pricingImportGeneration) showDialog.value = true
 }
 
 /** Distribute flat channel-level rules into the matching platform section based on group_ids */
@@ -1569,6 +1774,9 @@ async function populateRuleAccountNameCache() {
 }
 
 function closeDialog() {
+  if (submitting.value) return
+  pricingImportGeneration++
+  pricingImportQueue.value = []
   showDialog.value = false
   editingChannel.value = null
   resetForm()
@@ -1698,10 +1906,13 @@ async function handleSubmit() {
   }
 
   const { group_ids, model_pricing, model_mapping, features_config } = formToAPI()
+  const submissionGeneration = pricingImportGeneration
+  const submittedChannel = editingChannel.value
+  const remainingImports = [...pricingImportQueue.value]
 
   submitting.value = true
   try {
-    if (editingChannel.value) {
+    if (submittedChannel) {
       const req: UpdateChannelRequest = {
         name: form.name.trim(),
         description: form.description.trim() || undefined,
@@ -1715,7 +1926,7 @@ async function handleSubmit() {
         apply_pricing_to_account_stats: form.apply_pricing_to_account_stats,
         account_stats_pricing_rules: accountStatsRulesToAPI()
       }
-      await adminAPI.channels.update(editingChannel.value.id, req)
+      await adminAPI.channels.update(submittedChannel.id, req)
       appStore.showSuccess(t('admin.channels.updateSuccess', 'Channel updated'))
     } else {
       const req: CreateChannelRequest = {
@@ -1733,10 +1944,16 @@ async function handleSubmit() {
       await adminAPI.channels.create(req)
       appStore.showSuccess(t('admin.channels.createSuccess', 'Channel created'))
     }
+    if (submissionGeneration !== pricingImportGeneration) return
+    submitting.value = false
     closeDialog()
     loadChannels()
+    if (remainingImports.length) {
+      pricingImportQueue.value = remainingImports.slice(1)
+      await prepareCreateDialog(remainingImports[0])
+    }
   } catch (error: unknown) {
-    appStore.showError(extractApiErrorMessage(error, editingChannel.value
+    appStore.showError(extractApiErrorMessage(error, submittedChannel
       ? t('admin.channels.updateError', 'Failed to update channel')
       : t('admin.channels.createError', 'Failed to create channel')))
   } finally {
@@ -1772,6 +1989,7 @@ async function confirmDelete() {
 
   try {
     await adminAPI.channels.remove(deletingChannel.value.id)
+    selectedChannelKeys.value = selectedChannelKeys.value.filter(id => Number(id) !== deletingChannel.value?.id)
     appStore.showSuccess(t('admin.channels.deleteSuccess', 'Channel deleted'))
     showDeleteDialog.value = false
     deletingChannel.value = null
