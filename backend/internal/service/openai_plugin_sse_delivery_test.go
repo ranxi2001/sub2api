@@ -102,7 +102,7 @@ func TestPluginSSEMetadataBoundaries(t *testing.T) {
 					defer func() { _ = reader.Close(); <-writerDone }()
 					go func() {
 						defer close(writerDone)
-						defer writer.Close()
+						defer func() { _ = writer.Close() }()
 						time.Sleep(100 * time.Millisecond)
 						created := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_boundary\"}}\n"
 						switch scenario {
@@ -138,13 +138,14 @@ func TestPluginSSEMetadataBoundaries(t *testing.T) {
 							if _, err := io.WriteString(writer, "event: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"unfinished\":"); err != nil {
 								return
 							}
-							if scenario == "after_created_limit" {
+							switch scenario {
+							case "after_created_limit":
 								// Many bounded lines exceed the aggregate event limit,
 								// rather than testing the scanner's separate line limit.
 								_, _ = io.WriteString(writer, "\n"+strings.Repeat(":"+strings.Repeat("x", 32*1024)+"\n", openAIFirstOutputStageMaxBytes/(32*1024)+1))
-							} else if scenario == "after_created_read_error" || scenario == "after_text_read_error" {
+							case "after_created_read_error", "after_text_read_error":
 								_ = writer.CloseWithError(errors.New("fixture partial-event read failure"))
-							} else if scenario == "after_created_timeout" {
+							case "after_created_timeout":
 								time.Sleep(2 * time.Second)
 							}
 						}
@@ -221,7 +222,7 @@ func TestPluginSSEEarlyDelivery(t *testing.T) {
 					defer func() { _ = reader.Close(); <-writerDone }()
 					go func() {
 						defer close(writerDone)
-						defer writer.Close()
+						defer func() { _ = writer.Close() }()
 						time.Sleep(100 * time.Millisecond)
 						created := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_fixture\"}}\n\n"
 						if scenario == "multiline" {

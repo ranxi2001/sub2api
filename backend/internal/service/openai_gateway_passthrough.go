@@ -2542,7 +2542,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 				pluginPendingBytes += lineBytes
 				continue
 			}
-			if !clientOutputStarted && !lineStartsClientOutput && !(line == "" && earlyMetadataPending) {
+			if !clientOutputStarted && !lineStartsClientOutput && (line != "" || !earlyMetadataPending) {
 				if earlyPluginEvents {
 					lineBytes := int64(len(line)) + 1
 					if lineBytes > openAIFirstOutputStageMaxBytes-pluginPendingBytes {

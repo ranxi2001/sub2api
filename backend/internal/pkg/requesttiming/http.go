@@ -73,7 +73,7 @@ func (t *Trace) update(fn func(*Attempt)) {
 	}
 	t.c.mu.Lock()
 	defer t.c.mu.Unlock()
-	if !t.c.finished && !(t.logicalResponse && t.c.data.Attempts[t.index].EndMS != nil) {
+	if !t.c.finished && (!t.logicalResponse || t.c.data.Attempts[t.index].EndMS == nil) {
 		fn(&t.c.data.Attempts[t.index])
 	}
 }
