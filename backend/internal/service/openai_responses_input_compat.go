@@ -1,10 +1,30 @@
 package service
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 )
 
 const openAIResponsesInputTextMaxChars = 10000000
+
+// Only reject the expensive decode when all recognized output types contain
+// the common marker. If a future type does not, preserve the full path.
+func openAIResponsesMayNeedOrphanCleanup(body []byte) bool {
+	return openAIResponsesMayNeedOrphanCleanupWithTypes(body, codexToolCallOutputItemTypes[:])
+}
+
+func openAIResponsesMayNeedOrphanCleanupWithTypes(body []byte, outputTypes []string) bool {
+	if bytes.Contains(body, []byte("_output")) || bytes.Contains(body, []byte(`\u`)) {
+		return true
+	}
+	for _, outputType := range outputTypes {
+		if !strings.Contains(outputType, "_output") {
+			return true
+		}
+	}
+	return !json.Valid(body)
+}
 
 // sanitizeOpenAIResponsesOrphanToolOutputs removes tool-output items that have
 // no matching call or item reference anywhere in the current input. Named
