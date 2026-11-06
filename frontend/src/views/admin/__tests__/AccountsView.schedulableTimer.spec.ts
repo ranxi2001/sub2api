@@ -121,13 +121,12 @@ function mountView() {
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
         AccountCapacityCell: true,
-        // The component tests cover its dialog/entry. This stub exercises the
-        // existing parent handler reached from the dialog's immediate action.
+        // Keep timer actions separate so scheduling tests click the real list switch.
         SchedulableTimerControl: {
           name: 'SchedulableTimerControl',
           props: ['accountId', 'accountName', 'schedulable', 'switching', 'canManageTimers', 'refreshKey'],
           emits: ['toggle', 'executed'],
-          template: `<div data-test="unified-scheduling-control"><button :disabled="switching" :title="'admin.accounts.schedulable' + (schedulable ? 'Enabled' : 'Disabled')" @click="$emit('toggle')">dialog-immediate-action</button></div>`
+          template: '<div data-test="timer-control"><button @click="$emit(\'toggle\')">dialog-immediate-action</button></div>'
         },
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
@@ -191,20 +190,22 @@ async function mountWithSelection() {
 }
 
 function schedulingButton(id: number) {
-  return wrapper.get(`[data-test="scheduling-${id}"] button`)
+  return wrapper.get(`[data-test="scheduling-${id}"] button[role="switch"]`)
 }
 
 function selectedIds() {
   return wrapper.findComponent({ name: 'AccountBulkActionsBar' }).props('selectedIds')
 }
 
-describe('account immediate scheduling delegated by the unified task dialog', () => {
-  it('passes current state and administrator timer capability to the unified control', async () => {
+describe('account immediate scheduling switch and timer control', () => {
+  it('keeps the timer control above an independent scheduling switch', async () => {
     wrapper = mountView()
     await flushPromises()
     const control = wrapper.findComponent({ name: 'SchedulableTimerControl' })
     expect(control.props()).toMatchObject({ accountId: 7, schedulable: true, canManageTimers: true, switching: false })
-    expect(wrapper.find('[data-test="scheduling-7"] > button').exists()).toBe(false)
+    const toggle = schedulingButton(7)
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(toggle.element.previousElementSibling).toBe(control.element)
   })
   it.each([true, false])('directly switches schedulable=%s through the original API and refreshes plans', async (schedulable) => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
