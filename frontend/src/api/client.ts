@@ -40,6 +40,8 @@ const getUserTimezone = (): string => {
 
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    const requestURL = String(config.url || '')
+
     // Attach token from localStorage
     const token = localStorage.getItem('auth_token')
     if (token && config.headers) {
@@ -51,8 +53,11 @@ apiClient.interceptors.request.use(
       config.headers['Accept-Language'] = getLocale()
     }
 
-    // Attach timezone for all GET requests (backend may use it for default date ranges)
-    if (config.method === 'get') {
+    // AI operations rejects query parameters; other GET APIs may use timezone
+    // for default date ranges. Preserve explicitly supplied parameters so the
+    // backend can still reject unsupported input.
+    const isAIOpsRequest = /^\/admin\/ops\/ai(?:\/|$)/.test(requestURL)
+    if (config.method === 'get' && !isAIOpsRequest) {
       if (!config.params) {
         config.params = {}
       }
@@ -60,7 +65,6 @@ apiClient.interceptors.request.use(
     }
 
     if (config.headers) {
-      const requestURL = String(config.url || '')
       if (shouldMarkAdminUIRequest(requestURL)) {
         config.headers[ADMIN_UI_REQUEST_HEADER] = '1'
       }
