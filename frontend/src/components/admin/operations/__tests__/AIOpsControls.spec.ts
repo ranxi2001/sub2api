@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AIOpsControls from '../AIOpsControls.vue'
+import AIOpsRecoveryProbes from '../AIOpsRecoveryProbes.vue'
 import type { AIOpsRun } from '@/api/admin/aiOps'
 import type { AIOpsActionRecord, AIOpsFrozenProposal, AIOpsPolicy } from '@/api/admin/aiOpsControl'
 import en from '@/i18n/locales/en/aiOpsControl'
@@ -37,7 +38,7 @@ const action = (): AIOpsActionRecord => ({
   id: 'action-1', proposal_id: 'proposal-1', run_id: 'run-a', action: 'set_concurrency', account_id: 3, before_value: 10, after_value: 9,
   status: 'propagation_pending', created_at: '2026-11-05T00:00:00Z', updated_at: '2026-11-05T00:00:00Z', observe_until: '2026-11-05T00:05:00Z', owner_revision: 9, target_revision: 8, reason_code: '', auto: false,
 })
-const mountControls = (locale: 'en' | 'zh' = 'en') => mount(AIOpsControls, { props: { run: run() }, global: {
+const mountControls = (locale: 'en' | 'zh' = 'en', compact = false) => mount(AIOpsControls, { props: { run: run(), compact }, global: {
   plugins: [createI18n({ legacy: false, locale, messages: { en: { aiOpsControl: en, aiOps: enOps }, zh: { aiOpsControl: zh, aiOps: zhOps } } })],
   stubs: { NewFeatureBadge: true, AIOpsRecoveryProbes: true, BaseDialog: { props: ['show'], template: '<div v-if="show" role="dialog"><slot /><slot name="footer" /></div>' } },
 } })
@@ -60,6 +61,7 @@ describe('AI operations controlled execution', () => {
   it.each(['en', 'zh'] as const)('renders %s controls with no writes until an explicit action', async locale => {
     wrapper = mountControls(locale); await flushPromises()
     expect(wrapper.get('h2').text()).toBe((locale === 'zh' ? zh : en).title)
+    expect(wrapper.get('[data-testid="ai-control-advanced"]').element.tagName).toBe('DIV')
     expect(api.policy).toHaveBeenCalledOnce(); expect(api.actions).toHaveBeenCalledOnce()
     for (const name of ['savePolicy', 'halt', 'preview', 'apply', 'rollback'] as const) expect(api[name]).not.toHaveBeenCalled()
   })
@@ -78,6 +80,63 @@ describe('AI operations controlled execution', () => {
     expect(wrapper.get('[data-testid="ai-control-preview-0"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-testid="ai-policy-save"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-testid="ai-control-halt"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it.each(['en', 'zh'] as const)('keeps a compact read-only deployment separate from diagnostic readiness in %s', async locale => {
+    api.policy.mockResolvedValue({ ...policy(), control_enabled: false, mode: 'disabled', halted: true })
+    wrapper = mountControls(locale, true); await flushPromises()
+    const messages = locale === 'zh' ? zh : en
+    expect(wrapper.get('[data-testid="ai-control-disabled"]').text()).toBe(messages.readOnly)
+    expect(wrapper.find('[data-testid="ai-control-halt"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ai-control-halted"]').exists()).toBe(false)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    const advanced = wrapper.get('[data-testid="ai-control-advanced"]')
+    expect(advanced.element.tagName).toBe('DETAILS')
+    expect((advanced.element as HTMLDetailsElement).open).toBe(false)
+    expect(advanced.get('summary').text()).toBe(messages.advancedDetails)
+    expect(advanced.get('[data-testid="ai-policy-save"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.findComponent(AIOpsRecoveryProbes).exists()).toBe(true)
+    for (const name of ['savePolicy', 'halt', 'preview', 'apply', 'rollback'] as const) expect(api[name]).not.toHaveBeenCalled()
+  })
+
+  it('preserves the frozen approval and mounted recovery controls when advanced controls are folded', async () => {
+    wrapper = mountControls('en', true); await flushPromises()
+    const advanced = wrapper.get('[data-testid="ai-control-advanced"]')
+    const details = advanced.element as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(advanced.find('[data-testid="ai-control-halt"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="ai-control-halt"]').attributes('disabled')).toBeUndefined()
+    const recovery = wrapper.getComponent(AIOpsRecoveryProbes).element
+    details.open = true
+    await advanced.trigger('toggle')
+    await wrapper.get('[data-testid="ai-control-preview-0"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="ai-control-apply-consent"]').setValue(true)
+    const preview = wrapper.get('[data-testid="ai-control-frozen"]').element
+    details.open = false
+    await advanced.trigger('toggle')
+    expect(wrapper.getComponent(AIOpsRecoveryProbes).element).toBe(recovery)
+    expect(wrapper.get('[data-testid="ai-control-frozen"]').element).toBe(preview)
+    expect((wrapper.get('[data-testid="ai-control-apply-consent"]').element as HTMLInputElement).checked).toBe(true)
+    details.open = true
+    await advanced.trigger('toggle')
+    expect(wrapper.get('[data-testid="ai-control-apply"]').attributes('disabled')).toBeUndefined()
+    expect(api.policy).toHaveBeenCalledOnce(); expect(api.actions).toHaveBeenCalledOnce()
+    expect(api.preview).toHaveBeenCalledOnce()
+    for (const name of ['savePolicy', 'halt', 'apply', 'rollback'] as const) expect(api[name]).not.toHaveBeenCalled()
+  })
+
+  it('keeps compact errors and emergency stop outside the disclosure when execution state is unknown', async () => {
+    api.policy.mockRejectedValue(new Error('private service address'))
+    wrapper = mountControls('en', true); await flushPromises()
+    const advanced = wrapper.get('[data-testid="ai-control-advanced"]')
+    expect(advanced.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('[role="alert"]').text()).toBe(en.loadFailed)
+    expect(wrapper.text()).not.toContain('private service address')
+    expect(advanced.find('[data-testid="ai-control-halt"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="ai-control-halt"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="ai-control-halt"]').trigger('click'); await flushPromises()
+    expect(api.halt).toHaveBeenCalledOnce()
+    expect(wrapper.get('[data-testid="ai-control-halted"]').text()).toBe(en.halted)
   })
 
   it('requires a frozen preview and separate approval before executing its digest', async () => {
@@ -186,10 +245,10 @@ describe('AI operations controlled execution', () => {
     expect(api.savePolicy).not.toHaveBeenCalled()
   })
 
-  it('keeps emergency stop usable during an outstanding write and invalidates local approval', async () => {
+  it.each([false, true])('keeps emergency stop usable during an outstanding write and invalidates local approval (compact=%s)', async compact => {
     let resolveApply!: (value: AIOpsActionRecord) => void
     api.apply.mockImplementation(() => new Promise<AIOpsActionRecord>(resolve => { resolveApply = resolve }))
-    wrapper = mountControls(); await flushPromises()
+    wrapper = mountControls('en', compact); await flushPromises()
     await wrapper.get('[data-testid="ai-control-preview-0"]').trigger('click'); await flushPromises()
     await wrapper.get('[data-testid="ai-control-apply-consent"]').setValue(true)
     await wrapper.get('[data-testid="ai-control-apply"]').trigger('click')
