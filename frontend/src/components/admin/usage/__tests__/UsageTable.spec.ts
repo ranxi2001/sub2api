@@ -1350,7 +1350,7 @@ it('renders content timing in separate columns and uses a dash for missing value
 })
 
 for (const language of ['en', 'zh'] as const) {
-  it(`distinguishes final-attempt event, semantic and body text timings in ${language}`, async () => {
+  it(`omits the streaming content timing summary from the latency cell in ${language}`, async () => {
     locale = language
     const timing = language === 'en' ? enTiming : zhTiming
     const wrapper = mount(UsageTable, {
@@ -1359,14 +1359,15 @@ for (const language of ['en', 'zh'] as const) {
         loading: false, enableTimingDetails: true, columns: [{ key: 'latency', label: 'Latency' }] },
       global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
     })
-    const detail = () => wrapper.get('[data-testid="latency-content-timing"]')
-    expect(detail().text()).toBe(`${timing.eventShort} 100ms · ${timing.semanticShort} 300ms · ${timing.textShort} 800ms`)
-    expect(detail().attributes('title')).toBe(timing.contentOrigin)
-    await wrapper.setProps({ data: [{ ...baseImageRow, stream: true, first_token_ms: 300,
-      content_timing: { sse_event_first_ms: -1, semantic_first_ms: Number.NaN, visible_text_first_ms: Number.POSITIVE_INFINITY } }] })
-    expect(detail().text()).toBe(`${timing.eventShort} — · ${timing.semanticShort} — · ${timing.textShort} —`)
+    expect(wrapper.find('[data-testid="latency-content-timing"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain(`${timing.eventShort} 100ms`)
+    expect(wrapper.text()).not.toContain(`${timing.semanticShort} 300ms`)
+    expect(wrapper.text()).not.toContain(`${timing.textShort} 800ms`)
     await wrapper.setProps({ data: [{ ...baseImageRow, stream: true, first_token_ms: 300 }] })
-    expect(detail().text()).toBe(`${timing.eventShort} — · ${timing.semanticShort} — · ${timing.textShort} —`)
+    expect(wrapper.find('[data-testid="latency-content-timing"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain(`${timing.eventShort} —`)
+    expect(wrapper.text()).not.toContain(`${timing.semanticShort} —`)
+    expect(wrapper.text()).not.toContain(`${timing.textShort} —`)
     await wrapper.setProps({ data: [{ ...baseImageRow, stream: false, first_token_ms: 300 }] })
     expect(wrapper.find('[data-testid="latency-content-timing"]').exists()).toBe(false)
     await wrapper.setProps({ data: [{ ...baseImageRow, stream: true, first_token_ms: 300 }] })
