@@ -160,10 +160,14 @@ const ModelWhitelistSelectorStub = defineComponent({
       type: Array,
       default: () => [],
     },
+    modelMappings: {
+      type: Array,
+      default: () => [],
+    },
     platform: String,
     syncCredentials: Object,
   },
-  emits: ['update:modelValue', 'upstream-synced'],
+  emits: ['update:modelValue', 'update:modelMappings', 'upstream-synced'],
   template: `<button
     type="button"
     data-testid="model-whitelist-selector"
@@ -777,6 +781,41 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       'public-glm': 'glm-5.3'
     })
     expect(syncUpstreamModelsMock).toHaveBeenCalledWith(42)
+  })
+
+  it.each(['whitelist', 'mapping'] as const)('keeps reconciled creation models when inspecting %s mode', async (mode) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Synced account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await selectButtonByText(wrapper, 'admin.accounts.modelMapping')
+    await selectButtonByText(wrapper, 'admin.accounts.addMapping')
+    await wrapper.get('input[placeholder="admin.accounts.requestModel"]').setValue('public-model')
+    await wrapper.get('input[placeholder="admin.accounts.actualModel"]').setValue('target')
+    await selectButtonByText(wrapper, 'admin.accounts.modelWhitelist')
+
+    const selector = wrapper.getComponent(ModelWhitelistSelectorStub)
+    expect(selector.props('modelMappings')).toEqual([])
+    // Exercise the parent's draft and save contract; discovery is covered by the selector tests.
+    selector.vm.$emit('update:modelValue', ['public-model', 'target'])
+    selector.vm.$emit('update:modelMappings', [])
+    selector.vm.$emit('upstream-synced')
+    await flushPromises()
+
+    if (mode === 'mapping') {
+      await selectButtonByText(wrapper, 'admin.accounts.modelMapping')
+      expect(wrapper.find('input[placeholder="admin.accounts.requestModel"]').exists()).toBe(false)
+      return
+    }
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledOnce()
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials?.model_mapping).toEqual({
+      'public-model': 'public-model',
+      target: 'target'
+    })
   })
 
   it('warns when post-create capability metadata remains incomplete', async () => {

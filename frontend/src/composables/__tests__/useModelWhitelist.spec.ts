@@ -4,7 +4,7 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
-import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
+import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, reconcileUpstreamModelMapping, splitModelMappingObject } from '../useModelWhitelist'
 import { BUILTIN_PLATFORM_CATALOG, resetPlatformCatalog, setPlatformCatalog } from '@/constants/platformCatalog'
 
 describe('useModelWhitelist', () => {
@@ -248,6 +248,57 @@ describe('useModelWhitelist', () => {
   it('combined mode retains a mapping when a whitelist entry has the same source', () => {
     expect(buildModelMappingObject('combined', ['gpt-latest'], [{ from: 'gpt-latest', to: 'deepseek-chat' }])).toEqual({
       'gpt-latest': 'deepseek-chat'
+    })
+  })
+
+  it('reconciles only concrete upstream models and preserves live alias targets', () => {
+    const existingMappings = [
+      { from: 'public-alias', to: 'target' },
+      { from: 'retired-alias', to: 'retired-target' },
+      { from: 'legacy-*', to: 'target' },
+      { from: 'tar*get', to: 'target' },
+      { from: 'wildcard-target', to: 'tar*' },
+      { from: 'target', to: 'target' },
+      { from: ' ', to: 'target' }
+    ]
+    const models = [' target ', 'target', '', ' ', '*', 'retired-*']
+    const before = structuredClone({ models, existingMappings })
+
+    const reconciled = reconcileUpstreamModelMapping(models, existingMappings)
+
+    expect(reconciled.allowedModels).toEqual(['target'])
+    expect(reconciled.modelMappings).toEqual([
+      { from: 'public-alias', to: 'target' },
+      { from: 'legacy-*', to: 'target' }
+    ])
+    expect({ models, existingMappings }).toEqual(before)
+  })
+
+  it('does not replace a live redirect with an upstream identity of the same name', () => {
+    const reconciled = reconcileUpstreamModelMapping(
+      ['public-model', 'target'],
+      [{ from: 'public-model', to: 'target' }]
+    )
+
+    expect(reconciled).toEqual({
+      allowedModels: ['target'],
+      modelMappings: [{ from: 'public-model', to: 'target' }]
+    })
+    expect(buildModelMappingObject('combined', reconciled.allowedModels, reconciled.modelMappings)).toEqual({
+      target: 'target',
+      'public-model': 'target'
+    })
+  })
+
+  it('drops alias chains when the immediate target is absent from the live catalog', () => {
+    const reconciled = reconcileUpstreamModelMapping(
+      ['target'],
+      [{ from: 'alias', to: 'target' }, { from: 'chained-alias', to: 'alias' }]
+    )
+
+    expect(reconciled).toEqual({
+      allowedModels: ['target'],
+      modelMappings: [{ from: 'alias', to: 'target' }]
     })
   })
 
