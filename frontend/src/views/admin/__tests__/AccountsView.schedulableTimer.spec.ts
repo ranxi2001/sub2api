@@ -253,6 +253,76 @@ describe('account immediate scheduling switch and timer control', () => {
     expect(wrapper.findComponent({ name: 'SchedulableTimerControl' }).props('refreshKey')).toBe(0)
   })
 
+  it.each([7, 9])('keeps both accounts guarded until their own request finishes when account %s resolves first', async (firstId) => {
+    const resolvers = new Map<number, (value: { id: number; schedulable: boolean }) => void>()
+    setSchedulable.mockImplementation((id: number) => new Promise(resolve => { resolvers.set(id, resolve) }))
+    listAccounts.mockResolvedValue({
+      items: [
+        { ...baseAccount, id: 7, name: 'first-account' },
+        { ...baseAccount, id: 9, name: 'second-account' }
+      ],
+      total: 2, page: 1, page_size: 20, pages: 1
+    })
+    wrapper = mountView()
+    await flushPromises()
+    const timerControl = (id: number) => wrapper.get(`[data-test="scheduling-${id}"]`).findComponent({ name: 'SchedulableTimerControl' })
+
+    await schedulingButton(7).trigger('click')
+    await schedulingButton(9).trigger('click')
+
+    expect(setSchedulable.mock.calls).toEqual([[7, false], [9, false]])
+    for (const id of [7, 9]) {
+      expect(schedulingButton(id).attributes('disabled')).toBeDefined()
+      expect(timerControl(id).props('switching')).toBe(true)
+    }
+
+    resolvers.get(firstId)!({ id: firstId, schedulable: false })
+    await flushPromises()
+    const pendingId = firstId === 7 ? 9 : 7
+    expect(schedulingButton(firstId).attributes('disabled')).toBeUndefined()
+    expect(schedulingButton(firstId).attributes('aria-checked')).toBe('false')
+    expect(timerControl(firstId).props('switching')).toBe(false)
+    expect(schedulingButton(pendingId).attributes('disabled')).toBeDefined()
+    expect(schedulingButton(pendingId).attributes('aria-checked')).toBe('true')
+    expect(timerControl(pendingId).props('switching')).toBe(true)
+    timerControl(pendingId).vm.$emit('toggle')
+    await flushPromises()
+    expect(setSchedulable).toHaveBeenCalledTimes(2)
+
+    resolvers.get(pendingId)!({ id: pendingId, schedulable: false })
+    await flushPromises()
+    for (const id of [7, 9]) {
+      expect(schedulingButton(id).attributes('disabled')).toBeUndefined()
+      expect(schedulingButton(id).attributes('aria-checked')).toBe('false')
+      expect(timerControl(id).props('switching')).toBe(false)
+    }
+    expect(timerControl(7).props('refreshKey')).toBe(2)
+    expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('ignores repeated actions for an account until its pending request finishes', async () => {
+    let resolveRequest!: (value: { schedulable: boolean }) => void
+    setSchedulable.mockImplementationOnce(() => new Promise(resolve => { resolveRequest = resolve }))
+    wrapper = mountView()
+    await flushPromises()
+    const timerControl = wrapper.findComponent({ name: 'SchedulableTimerControl' })
+
+    // Two events before Vue updates the disabled controls must still issue one request.
+    timerControl.vm.$emit('toggle')
+    timerControl.vm.$emit('toggle')
+    await flushPromises()
+    await schedulingButton(7).trigger('click')
+    expect(setSchedulable).toHaveBeenCalledTimes(1)
+    expect(setSchedulable).toHaveBeenCalledWith(7, false)
+
+    resolveRequest({ schedulable: false })
+    await flushPromises()
+    expect(schedulingButton(7).attributes('disabled')).toBeUndefined()
+    await schedulingButton(7).trigger('click')
+    await flushPromises()
+    expect(setSchedulable.mock.calls).toEqual([[7, false], [7, true]])
+  })
+
   it.each([true, false])('directly applies batch schedulable=%s to every selected account, including unchanged values', async (schedulable) => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     bulkUpdate.mockResolvedValue({ success: 2, failed: 0, success_ids: [7, 11], failed_ids: [] })
