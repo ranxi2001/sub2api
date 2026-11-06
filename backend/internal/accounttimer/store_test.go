@@ -39,7 +39,7 @@ func TestSaveRejectsConflictingOppositeAction(t *testing.T) {
 	m.ExpectBegin()
 	expectAccount(m, "active", false)
 	m.ExpectQuery("SELECT version FROM account_schedulable_timers").WithArgs(int64(7), "open").WillReturnRows(sqlmock.NewRows([]string{"version"}))
-	m.ExpectQuery("SELECT EXISTS").WithArgs(int64(7), "open", s.now().Add(8*time.Hour)).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	m.ExpectQuery("SELECT EXISTS").WithArgs(int64(7), "open", s.now().Add(8*time.Hour), "once", "Asia/Shanghai", "", s.now()).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	m.ExpectRollback()
 	_, err := s.Save(context.Background(), 7, 9, SaveRequest{Input: Input{Mode: "relative", Hours: 8, Timezone: "Asia/Shanghai"}, Action: "open"})
 	if ErrorCode(err) != "conflict" {
@@ -71,14 +71,14 @@ func TestCancelVersionChecked(t *testing.T) {
 	s, m := testStore(t)
 	m.ExpectBegin()
 	expectAccount(m, "active", false)
-	m.ExpectQuery("SELECT "+regexp.QuoteMeta(taskColumns)).WithArgs(int64(7), "open").WillReturnRows(taskRows().AddRow(7, "open", 4, s.now().Add(time.Hour), "UTC", 9, "pending", 0, nil, ""))
+	m.ExpectQuery("SELECT "+regexp.QuoteMeta(taskColumns)).WithArgs(int64(7), "open").WillReturnRows(taskRows().AddRow(7, "open", 4, s.now().Add(time.Hour), "UTC", 9, "pending", 0, nil, "", "once", ""))
 	m.ExpectRollback()
 	if err := s.Cancel(context.Background(), 7, 9, "open", 3); ErrorCode(err) != "version" {
 		t.Fatalf("want version, got %v", err)
 	}
 }
 func taskRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"account_id", "action", "version", "execute_at", "timezone", "requested_by", "status", "attempts", "actual_at", "reason"})
+	return sqlmock.NewRows([]string{"account_id", "action", "version", "execute_at", "timezone", "requested_by", "status", "attempts", "actual_at", "reason", "recurrence", "daily_time"})
 }
 
 // The outbox is a transactional dependency; a failure must roll back schedulable
@@ -90,7 +90,7 @@ func TestExecuteOutboxFailureRollsBackAndRecordsRetry(t *testing.T) {
 	task := Task{AccountID: 7, Action: "open", Version: 1, ExecuteAt: now, Timezone: "UTC", RequestedBy: 9, Status: "pending"}
 	m.ExpectBegin()
 	expectAccount(m, "active", false)
-	m.ExpectQuery("SELECT "+regexp.QuoteMeta(taskColumns)).WithArgs(int64(7), "open", now).WillReturnRows(taskRows().AddRow(7, "open", 1, now, "UTC", 9, "pending", 0, nil, ""))
+	m.ExpectQuery("SELECT "+regexp.QuoteMeta(taskColumns)).WithArgs(int64(7), "open", now).WillReturnRows(taskRows().AddRow(7, "open", 1, now, "UTC", 9, "pending", 0, nil, "", "once", ""))
 	m.ExpectExec("UPDATE accounts SET schedulable").WithArgs(true, now, int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
 	m.ExpectRollback()
 	m.ExpectBegin()
@@ -116,13 +116,13 @@ func TestSavePersistsUTCAndOriginalZoneAndReplacesSameAction(t *testing.T) {
 				rows.AddRow(version)
 			}
 			m.ExpectQuery("SELECT version FROM account_schedulable_timers").WithArgs(int64(7), "open").WillReturnRows(rows)
-			m.ExpectQuery("SELECT EXISTS").WithArgs(int64(7), "open", due).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-			m.ExpectExec("INSERT INTO account_schedulable_timers").WithArgs(int64(7), "open", version+1, due, "Asia/Shanghai", int64(9)).WillReturnResult(sqlmock.NewResult(0, 1))
+			m.ExpectQuery("SELECT EXISTS").WithArgs(int64(7), "open", due, "once", "Asia/Shanghai", "", now).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+			m.ExpectExec("INSERT INTO account_schedulable_timers").WithArgs(int64(7), "open", version+1, due, "Asia/Shanghai", int64(9), "once", "").WillReturnResult(sqlmock.NewResult(0, 1))
 			result := "scheduled"
 			if version > 0 {
 				result = "replaced"
 			}
-			m.ExpectExec("INSERT INTO account_schedulable_timer_audit").WithArgs(int64(7), "open", version+1, int64(9), due, "Asia/Shanghai", now, result, "").WillReturnResult(sqlmock.NewResult(1, 1))
+			m.ExpectExec("INSERT INTO account_schedulable_timer_audit").WithArgs(int64(7), "open", version+1, int64(9), due, "Asia/Shanghai", now, result, "", "once", "").WillReturnResult(sqlmock.NewResult(1, 1))
 			m.ExpectCommit()
 			task, err := s.Save(context.Background(), 7, 9, SaveRequest{Input: Input{Mode: "relative", Hours: 8, Timezone: "Asia/Shanghai"}, Action: "open", ExpectedVersion: version})
 			if err != nil || !task.ExecuteAt.Equal(due) || task.Version != version+1 || task.Timezone != "Asia/Shanghai" {
@@ -202,7 +202,7 @@ func TestExecutionRechecksVersionStatusAndNotifiesAfterCommit(t *testing.T) {
 			s.AfterCommit = func(context.Context, int64) { notified++ }
 			m.ExpectBegin()
 			expectAccount(m, c.accountStatus, c.deleted)
-			m.ExpectQuery("SELECT "+regexp.QuoteMeta(taskColumns)).WithArgs(int64(7), c.action, now).WillReturnRows(taskRows().AddRow(7, c.action, c.version, due, "Asia/Shanghai", 9, c.status, 0, nil, ""))
+			m.ExpectQuery("SELECT "+regexp.QuoteMeta(taskColumns)).WithArgs(int64(7), c.action, now).WillReturnRows(taskRows().AddRow(7, c.action, c.version, due, "Asia/Shanghai", 9, c.status, 0, nil, "", "once", ""))
 			active := c.version == 1 && c.status == "pending"
 			result := "executed"
 			if c.reason != "" {
@@ -213,7 +213,7 @@ func TestExecutionRechecksVersionStatusAndNotifiesAfterCommit(t *testing.T) {
 					m.ExpectExec("UPDATE accounts SET schedulable").WithArgs(c.action == "open", now, int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
 				}
 				m.ExpectExec("UPDATE account_schedulable_timers").WithArgs(int64(7), c.action, result, now, c.reason, int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
-				m.ExpectExec("INSERT INTO account_schedulable_timer_audit").WithArgs(int64(7), c.action, int64(1), int64(9), due, "Asia/Shanghai", now, result, c.reason).WillReturnResult(sqlmock.NewResult(1, 1))
+				m.ExpectExec("INSERT INTO account_schedulable_timer_audit").WithArgs(int64(7), c.action, int64(1), int64(9), due, "Asia/Shanghai", now, result, c.reason, "once", "").WillReturnResult(sqlmock.NewResult(1, 1))
 				m.ExpectCommit()
 			} else {
 				m.ExpectRollback()
@@ -260,5 +260,92 @@ func TestBusyAccountIsSkippedWithoutMisreportingDeletion(t *testing.T) {
 	m.ExpectRollback()
 	if err := s.execute(context.Background(), Task{AccountID: 7, Action: "open", Version: 1}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSaveDailyPersistsRecurrenceWithoutAbsoluteConfirmation(t *testing.T) {
+	s, m := testStore(t)
+	now := s.now()
+	due := now.Add(24 * time.Hour) // The fixture clock is exactly 08:00 Beijing.
+	m.ExpectBegin()
+	expectAccount(m, "active", false)
+	m.ExpectQuery("SELECT version FROM account_schedulable_timers").WithArgs(int64(7), "open").WillReturnRows(sqlmock.NewRows([]string{"version"}))
+	m.ExpectQuery("SELECT EXISTS").WithArgs(int64(7), "open", due, "daily", "Asia/Shanghai", "08:00", now).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	m.ExpectExec("INSERT INTO account_schedulable_timers").WithArgs(int64(7), "open", int64(1), due, "Asia/Shanghai", int64(9), "daily", "08:00").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.ExpectExec("INSERT INTO account_schedulable_timer_audit").WithArgs(int64(7), "open", int64(1), int64(9), due, "Asia/Shanghai", now, "scheduled", "", "daily", "08:00").WillReturnResult(sqlmock.NewResult(1, 1))
+	m.ExpectCommit()
+	task, err := s.Save(context.Background(), 7, 9, SaveRequest{Input: Input{Mode: "daily", Time: "08:00", Timezone: "Asia/Shanghai"}, Action: "open"})
+	if err != nil || task.Recurrence != "daily" || task.DailyTime != "08:00" || !task.ExecuteAt.Equal(due) {
+		t.Fatalf("got %+v %v", task, err)
+	}
+}
+
+func TestDailyWindowRejectsEqualTimesBeforeOpeningTransaction(t *testing.T) {
+	s, _ := testStore(t)
+	_, err := s.SaveDailyWindow(context.Background(), 7, 9, DailyWindowRequest{OpenTime: "08:00", CloseTime: "08:00", Timezone: "Asia/Shanghai"})
+	if ErrorCode(err) != "conflict" {
+		t.Fatalf("equal clocks accepted: %v", err)
+	}
+}
+
+func TestDailyWindowChecksBothVersionsBeforeEitherWrite(t *testing.T) {
+	s, m := testStore(t)
+	m.ExpectBegin()
+	expectAccount(m, "active", false)
+	m.ExpectQuery("SELECT version FROM account_schedulable_timers").WithArgs(int64(7), "open").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(3))
+	m.ExpectQuery("SELECT version FROM account_schedulable_timers").WithArgs(int64(7), "close").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(5))
+	m.ExpectRollback()
+	_, err := s.SaveDailyWindow(context.Background(), 7, 9, DailyWindowRequest{OpenTime: "08:00", CloseTime: "01:00", Timezone: "Asia/Shanghai", ExpectedOpenVersion: 3, ExpectedCloseVersion: 4})
+	if ErrorCode(err) != "version" {
+		t.Fatalf("stale second version accepted: %v", err)
+	}
+}
+
+func TestDailyExecutionAuditsOccurrenceAndFencesOldWorkers(t *testing.T) {
+	cases := []struct {
+		name, status, zone, result, reason string
+		late, deleted, stale, advance      bool
+	}{
+		{name: "successful execution", status: "active", zone: "Asia/Shanghai", result: "executed", advance: true},
+		{name: "late opening skips and continues", status: "active", zone: "Asia/Shanghai", result: "skipped", reason: "open_expired", late: true, advance: true},
+		{name: "inactive opening skips and continues", status: "disabled", zone: "Asia/Shanghai", result: "skipped", reason: "account_inactive", advance: true},
+		{name: "deleted account terminates recurrence", status: "active", zone: "Asia/Shanghai", result: "skipped", reason: "account_deleted", deleted: true},
+		{name: "invalid persisted zone fails closed", status: "active", zone: "Mars/City", result: "failed", reason: "recurrence_invalid"},
+		{name: "old instance cannot repeat occurrence", status: "active", zone: "Asia/Shanghai", stale: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, m := testStore(t)
+			now := s.now()
+			due := now
+			if c.late {
+				due = now.Add(-16 * time.Minute)
+			}
+			candidate := Task{AccountID: 7, Action: "open", Version: 1, ExecuteAt: due, Timezone: c.zone, RequestedBy: 9, Status: "pending", Recurrence: "daily", DailyTime: "08:00"}
+			version := 1
+			if c.stale {
+				version = 2
+			}
+			m.ExpectBegin()
+			expectAccount(m, c.status, c.deleted)
+			m.ExpectQuery("SELECT "+regexp.QuoteMeta(taskColumns)).WithArgs(int64(7), "open", now).WillReturnRows(taskRows().AddRow(7, "open", version, due, c.zone, 9, "pending", 0, nil, "", "daily", "08:00"))
+			if c.stale {
+				m.ExpectRollback()
+			} else {
+				if c.reason == "" {
+					m.ExpectExec("UPDATE accounts SET schedulable").WithArgs(true, now, int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+				}
+				if c.advance {
+					m.ExpectExec("UPDATE account_schedulable_timers").WithArgs(int64(7), "open", now.Add(24*time.Hour), now, c.reason, int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+				} else {
+					m.ExpectExec("UPDATE account_schedulable_timers").WithArgs(int64(7), "open", c.result, now, c.reason, int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+				}
+				m.ExpectExec("INSERT INTO account_schedulable_timer_audit").WithArgs(int64(7), "open", int64(1), int64(9), due, c.zone, now, c.result, c.reason, "daily", "08:00").WillReturnResult(sqlmock.NewResult(1, 1))
+				m.ExpectCommit()
+			}
+			if err := s.execute(context.Background(), candidate); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

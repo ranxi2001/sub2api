@@ -101,6 +101,31 @@ func (h *Handler) Save(c *gin.Context) {
 	}
 	response.Success(c, task)
 }
+
+func (h *Handler) SaveDailyWindow(c *gin.Context) {
+	repo, id, actor, ok := h.access(c)
+	if !ok {
+		return
+	}
+	windowRepo, ok := repo.(accounttimer.DailyWindowRepository)
+	if !ok {
+		response.Error(c, http.StatusServiceUnavailable, "Daily account timers unavailable")
+		return
+	}
+	var req accounttimer.DailyWindowRequest
+	if c.ShouldBindJSON(&req) != nil {
+		response.BadRequest(c, "Invalid daily timer request")
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	snapshot, err := windowRepo.SaveDailyWindow(ctx, id, actor, req)
+	if err != nil {
+		accountTimerError(c, err)
+		return
+	}
+	response.Success(c, snapshot)
+}
 func (h *Handler) Cancel(c *gin.Context) {
 	repo, id, actor, ok := h.access(c)
 	if !ok {

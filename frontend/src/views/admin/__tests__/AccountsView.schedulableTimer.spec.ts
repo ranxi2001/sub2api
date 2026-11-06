@@ -121,7 +121,14 @@ function mountView() {
         BulkEditAccountModal: true,
         PlatformTypeBadge: true,
         AccountCapacityCell: true,
-        SchedulableTimerControl: true,
+        // The component tests cover its dialog/entry. This stub exercises the
+        // existing parent handler reached from the dialog's immediate action.
+        SchedulableTimerControl: {
+          name: 'SchedulableTimerControl',
+          props: ['accountId', 'accountName', 'schedulable', 'switching', 'canManageTimers', 'refreshKey'],
+          emits: ['toggle', 'executed'],
+          template: `<div data-test="unified-scheduling-control"><button :disabled="switching" :title="'admin.accounts.schedulable' + (schedulable ? 'Enabled' : 'Disabled')" @click="$emit('toggle')">dialog-immediate-action</button></div>`
+        },
         AccountStatusIndicator: true,
         AccountTodayStatsCell: true,
         AccountGroupsCell: true,
@@ -191,7 +198,14 @@ function selectedIds() {
   return wrapper.findComponent({ name: 'AccountBulkActionsBar' }).props('selectedIds')
 }
 
-describe('account immediate scheduling without confirmation', () => {
+describe('account immediate scheduling delegated by the unified task dialog', () => {
+  it('passes current state and administrator timer capability to the unified control', async () => {
+    wrapper = mountView()
+    await flushPromises()
+    const control = wrapper.findComponent({ name: 'SchedulableTimerControl' })
+    expect(control.props()).toMatchObject({ accountId: 7, schedulable: true, canManageTimers: true, switching: false })
+    expect(wrapper.find('[data-test="scheduling-7"] > button').exists()).toBe(false)
+  })
   it.each([true, false])('directly switches schedulable=%s through the original API and refreshes plans', async (schedulable) => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     listAccounts.mockResolvedValue({ items: [{ ...baseAccount, id: 7, name: 'timer-fixture', schedulable }], total: 1, page: 1, page_size: 20, pages: 1 })

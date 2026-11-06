@@ -94,6 +94,10 @@ func TestScopedAdminReviewGroupPriorityAndStatus(t *testing.T) {
 		require.NoError(t, err)
 		_, err = db.Exec(string(migration))
 		require.NoError(t, err)
+		dailyMigration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "335_account_daily_schedulable_timers.sql"))
+		require.NoError(t, err)
+		_, err = db.Exec(string(dailyMigration))
+		require.NoError(t, err)
 		_, err = db.Exec(`INSERT INTO account_schedulable_timers(account_id,action,version,execute_at,timezone,requested_by,status,next_attempt_at) VALUES($1,'close',1,NOW()+interval '1 hour','UTC',9,'pending',NOW()+interval '1 hour')`, account.ID)
 		require.NoError(t, err)
 		_, err = db.Exec(`CREATE FUNCTION reject_review_schedulable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION '模拟调度提交失败'; RETURN NULL; END $$;

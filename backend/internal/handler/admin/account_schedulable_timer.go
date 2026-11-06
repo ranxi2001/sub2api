@@ -38,4 +38,7 @@ func (h *AccountHandler) schedulableTimerAPI() *accounttimerapi.Handler {
 func (h *AccountHandler) ListSchedulableTimers(c *gin.Context)   { h.schedulableTimerAPI().List(c) }
 func (h *AccountHandler) PreviewSchedulableTimer(c *gin.Context) { h.schedulableTimerAPI().Preview(c) }
 func (h *AccountHandler) SaveSchedulableTimer(c *gin.Context)    { h.schedulableTimerAPI().Save(c) }
-func (h *AccountHandler) CancelSchedulableTimer(c *gin.Context)  { h.schedulableTimerAPI().Cancel(c) }
+func (h *AccountHandler) SaveDailySchedulableWindow(c *gin.Context) {
+	h.schedulableTimerAPI().SaveDailyWindow(c)
+}
+func (h *AccountHandler) CancelSchedulableTimer(c *gin.Context) { h.schedulableTimerAPI().Cancel(c) }
