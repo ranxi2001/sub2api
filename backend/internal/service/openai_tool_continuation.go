@@ -38,16 +38,22 @@ func isCodexToolCallContextItemType(typ string) bool {
 	}
 }
 
+// This list is shared with the conservative orphan-output fast rejection.
+var codexToolCallOutputItemTypes = [...]string{
+	"function_call_output",
+	"tool_search_output",
+	"custom_tool_call_output",
+	"mcp_tool_call_output",
+}
+
 func isCodexToolCallOutputItemType(typ string) bool {
-	switch strings.TrimSpace(typ) {
-	case "function_call_output",
-		"tool_search_output",
-		"custom_tool_call_output",
-		"mcp_tool_call_output":
-		return true
-	default:
-		return false
+	typ = strings.TrimSpace(typ)
+	for _, outputType := range codexToolCallOutputItemTypes {
+		if typ == outputType {
+			return true
+		}
 	}
+	return false
 }
 
 // NeedsToolContinuation 判定请求是否需要工具调用续链处理。
