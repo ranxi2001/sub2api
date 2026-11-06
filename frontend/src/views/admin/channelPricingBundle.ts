@@ -15,6 +15,11 @@ export interface PricingBundle {
   platforms: PricingPlatform[]
 }
 
+export interface PricingImport {
+  bundles: PricingBundle[]
+  isCollection: boolean
+}
+
 type Translate = (key: string, params?: Record<string, unknown>) => string
 
 const FORMAT = 'sub2api-channel-pricing-bundle'
@@ -179,13 +184,17 @@ export function serializePricingCollection(bundles: PricingBundle[], t: Translat
   })
 }
 
-export function parsePricingCollection(text: string, t: Translate): PricingBundle[] {
+export function parsePricingImport(text: string, t: Translate): PricingImport {
   const value = parseFile(text)
   const file = object(value, ['format', 'version', 'price_unit', 'channels', 'name', 'platforms', 'platform', 'model_pricing'])
-  if (file.format !== COLLECTION_FORMAT) return [decodeBundleFile(file, t)]
+  if (file.format !== COLLECTION_FORMAT) return { bundles: [decodeBundleFile(file, t)], isCollection: false }
   object(file, ['format', 'version', 'price_unit', 'channels'])
   if (file.version !== 1 || file.price_unit !== PRICE_UNIT || !Array.isArray(file.channels) || !file.channels.length || file.channels.length > 100) return invalid()
   const totals = { rules: 0, models: 0 }
   const records = file.channels.map(channel => bundleRecord(channel, totals))
-  return records.map(bundle => decodeBundle(bundle, t))
+  return { bundles: records.map(bundle => decodeBundle(bundle, t)), isCollection: true }
+}
+
+export function parsePricingCollection(text: string, t: Translate): PricingBundle[] {
+  return parsePricingImport(text, t).bundles
 }

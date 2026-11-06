@@ -435,7 +435,10 @@ describe('ChannelsView pricing import', () => {
     wrapper.unmount()
   })
 
-  it('previews a single imported pricing template for all selected channels without writes', async () => {
+  it.each([
+    ['bundle', bundleJSON, ['openai', 'anthropic']],
+    ['legacy single-platform file', json, ['openai']],
+  ] as const)('previews a %s as one pricing template for all selected channels without writes', async (_label, file, expectedPlatforms) => {
     const first = sourceChannel()
     const second = { ...sourceChannel(), id: 8, name: 'Other channel' }
     listChannels.mockResolvedValue({ items: [first, second], total: 2 })
@@ -444,13 +447,60 @@ describe('ChannelsView pricing import', () => {
     await flushPromises()
     await wrapper.get('[data-row-select="7"]').setValue(true)
     await wrapper.get('[data-row-select="8"]').setValue(true)
-    await selectListFile(wrapper, bundleJSON, true)
+    await selectListFile(wrapper, file, true)
 
     const editor = wrapper.findComponent({ name: 'BulkPricingEditorPreview' })
     expect(editor.props('show')).toBe(true)
     expect(wrapper.findAll('[data-bulk-channel]').map(channel => channel.attributes('data-bulk-channel'))).toEqual(['7', '8'])
-    expect((editor.props('initialPricing') as PricingBundle).platforms.map(platform => platform.platform)).toEqual(['openai', 'anthropic'])
+    expect((editor.props('initialPricing') as PricingBundle).platforms.map(platform => platform.platform)).toEqual(expectedPlatforms)
     expect(editor.props('initialPricingById')).toBeUndefined()
+    expect(createChannel).not.toHaveBeenCalled()
+    expect(updateChannel).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['additional selected channels', [7, 8]],
+    ['a different selected channel', [8]],
+  ] as const)('rejects a one-channel collection when there are %s without writes', async (_label, selectedIds) => {
+    const first = sourceChannel()
+    const second = { ...sourceChannel(), id: 8, name: 'Other channel' }
+    listChannels.mockResolvedValue({ items: [first, second], total: 2 })
+    getChannelById.mockImplementation((id: number) => Promise.resolve(id === first.id ? first : second))
+    const wrapper = mountView()
+    await flushPromises()
+    for (const id of selectedIds) await wrapper.get(`[data-row-select="${id}"]`).setValue(true)
+    const file = serializePricingCollection([
+      { name: first.name, platforms: [{ platform: 'openai', entries: [formEntry('first-import')] }] },
+    ], key => key)
+    await selectListFile(wrapper, file, true)
+
+    expect(showError).toHaveBeenCalledWith('admin.channels.pricingTransfer.selectionMismatch')
+    expect(wrapper.find('[data-testid="bulk-editor"]').exists()).toBe(false)
+    expect(createChannel).not.toHaveBeenCalled()
+    expect(updateChannel).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('matches a one-channel collection to its selected channel by name without writes', async () => {
+    const first = sourceChannel()
+    listChannels.mockResolvedValue({ items: [first], total: 1 })
+    getChannelById.mockResolvedValue(first)
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-row-select="7"]').setValue(true)
+    const file = serializePricingCollection([
+      { name: first.name, platforms: [{ platform: 'openai', entries: [formEntry('first-import')] }] },
+    ], key => key)
+    await selectListFile(wrapper, file, true)
+
+    const editor = wrapper.findComponent({ name: 'BulkPricingEditorPreview' })
+    expect(editor.props('show')).toBe(true)
+    expect(editor.props('initialPricing')).toBeUndefined()
+    const byId = editor.props('initialPricingById') as Record<number, PricingBundle>
+    expect(Object.keys(byId)).toEqual(['7'])
+    expect(byId[7].platforms[0].entries[0].models).toEqual(['first-import'])
+    expect(showError).not.toHaveBeenCalled()
     expect(createChannel).not.toHaveBeenCalled()
     expect(updateChannel).not.toHaveBeenCalled()
     wrapper.unmount()

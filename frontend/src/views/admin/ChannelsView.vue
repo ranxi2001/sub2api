@@ -713,7 +713,7 @@ import { useAuthStore } from '@/stores/auth'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { MAX_PRICING_FILE_BYTES, parseChannelPricing, serializeChannelPricing } from './channelPricingTransfer'
-import { channelPricingToPlatforms, parsePricingCollection, serializePricingBundle, serializePricingCollection, type PricingBundle } from './channelPricingBundle'
+import { channelPricingToPlatforms, parsePricingCollection, parsePricingImport, serializePricingBundle, serializePricingCollection, type PricingBundle } from './channelPricingBundle'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1081,13 +1081,13 @@ async function importListPricing(event: Event, intoSelection = false) {
   readingPricing.value = true
   try {
     if (file.size > MAX_PRICING_FILE_BYTES) throw new Error('admin.channels.pricingTransfer.invalidFile')
-    const drafts = parsePricingCollection(await file.text(), t)
+    const { bundles: drafts, isCollection } = parsePricingImport(await file.text(), t)
     if (generation !== pricingImportGeneration) return
     if (intoSelection) {
       const targets = await fetchSelectedChannels(ids)
       if (generation !== pricingImportGeneration) return
       let byId: Record<number, PricingBundle> | undefined
-      if (drafts.length > 1) {
+      if (isCollection) {
         // Never infer targets by array position: collections must match names exactly.
         const names = new Set(drafts.map(draft => draft.name))
         const targetNames = new Set(targets.map(channel => channel.name))
@@ -1097,7 +1097,7 @@ async function importListPricing(event: Event, intoSelection = false) {
         byId = Object.fromEntries(targets.map(channel => [channel.id, drafts.find(draft => draft.name === channel.name)!]))
       }
       bulkEditChannels.value = targets
-      bulkInitialPricing.value = drafts.length === 1 ? drafts[0] : undefined
+      bulkInitialPricing.value = isCollection ? undefined : drafts[0]
       bulkInitialPricingById.value = byId
       showBulkEdit.value = true
     } else {
