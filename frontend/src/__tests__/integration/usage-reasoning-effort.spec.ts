@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
+import { createPinia } from 'pinia'
 
 import UserUsageView from '@/views/user/UsageView.vue'
 import AdminUsageView from '@/views/admin/UsageView.vue'
@@ -224,6 +225,7 @@ function reasoningCellText(wrapper: ReturnType<typeof mount>): string {
 function mountAdminUsage() {
   return mount(AdminUsageView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         ...sharedPageStubs,
         UsageFilters: adminFiltersStub,
