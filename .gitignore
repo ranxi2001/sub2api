@@ -138,6 +138,7 @@ docs/*
 !docs/ai-ops-codex.md
 !docs/openai-context-limit-errors.md
 !docs/stream-timing.md
+!docs/openai-sse-delivery.md
 !docs/user-traffic.md
 !docs/typesafe-content-audit.md
 !docs/multi-host-session-owner.md

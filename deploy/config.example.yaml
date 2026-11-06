@@ -302,6 +302,9 @@ gateway:
   # Pre-output attempt staging is capped at 8 MiB; overflow fails over without exposing partial SSE data.
   # 首次输出前的单次尝试暂存上限为 8 MiB；溢出时切号且不暴露不完整 SSE 数据。
   openai_first_output_timeout_seconds: 0
+  # Trusted OpenAI OAuth plugin metadata delivery; opt-in and requires a compatible signed plugin.
+  # 提前提交会缩小首正文前的故障切换窗口；元数据不改变语义 TTFT。
+  openai_plugin_sse_early_events_enabled: false
   # Opt-in HTTP upload/submission deadline shared across account/proxy retries.
   # accounts.extra.openai_upload_timeout_seconds overrides it (0 disables).
   openai_upload_timeout_seconds: 0
