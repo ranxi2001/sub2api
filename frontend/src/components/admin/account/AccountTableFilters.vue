@@ -21,7 +21,12 @@ import type { AdminGroup } from '@/types'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[] }>()
 const emit = defineEmits(['update:searchQuery', 'update:filters', 'change']); const { t } = useI18n()
-const updatePlatform = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, platform: value }) }
+const updatePlatform = (value: string | number | boolean | null) => {
+  const group = props.filters.group
+  const groupMatchesPlatform = !value || !group || group === 'ungrouped' ||
+    (props.groups || []).some(g => String(g.id) === String(group) && g.platform === value)
+  emit('update:filters', { ...props.filters, platform: value, group: groupMatchesPlatform ? group : '' })
+}
 const updateType = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, type: value }) }
 const updateStatus = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, status: value }) }
 const updatePrivacyMode = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, privacy_mode: value }) }
@@ -39,6 +44,8 @@ const privacyOpts = computed(() => [
 const gOpts = computed(() => [
   { value: '', label: t('admin.accounts.allGroups') },
   { value: 'ungrouped', label: t('admin.accounts.ungroupedGroup') },
-  ...(props.groups || []).map(g => ({ value: String(g.id), label: g.name }))
+  ...(props.groups || [])
+    .filter(g => !props.filters.platform || g.platform === props.filters.platform)
+    .map(g => ({ value: String(g.id), label: g.name }))
 ])
 </script>

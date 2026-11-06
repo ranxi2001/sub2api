@@ -28,6 +28,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/utils/__tests__/openaiTwoFAAdmission.spec.ts \
 	src/components/admin/account/__tests__/BulkExport2FADialog.spec.ts \
 	src/components/admin/account/__tests__/AccountBulkActionsBar.spec.ts \
+	src/components/admin/account/__tests__/AccountTableFilters.spec.ts \
 	src/features/security-penalties/__tests__/SecurityRecords.spec.ts \
 	src/views/user/__tests__/ProfileView.spec.ts \
 	src/components/account/__tests__/SIWCAccountSettings.spec.ts \
