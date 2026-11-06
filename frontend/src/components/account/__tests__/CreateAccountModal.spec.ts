@@ -783,7 +783,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(syncUpstreamModelsMock).toHaveBeenCalledWith(42)
   })
 
-  it('keeps all live identities when syncing a creation whitelist after editing a mapping', async () => {
+  it.each(['whitelist', 'mapping'] as const)('keeps reconciled creation models when inspecting %s mode', async (mode) => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
     await selectButtonByText(wrapper, 'API Key')
@@ -803,9 +803,11 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     selector.vm.$emit('upstream-synced')
     await flushPromises()
 
-    await selectButtonByText(wrapper, 'admin.accounts.modelMapping')
-    expect(wrapper.find('input[placeholder="admin.accounts.requestModel"]').exists()).toBe(false)
-    await selectButtonByText(wrapper, 'admin.accounts.modelWhitelist')
+    if (mode === 'mapping') {
+      await selectButtonByText(wrapper, 'admin.accounts.modelMapping')
+      expect(wrapper.find('input[placeholder="admin.accounts.requestModel"]').exists()).toBe(false)
+      return
+    }
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
 
