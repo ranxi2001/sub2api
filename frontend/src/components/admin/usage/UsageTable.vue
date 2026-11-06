@@ -278,11 +278,6 @@
               >{{ formatUsageCacheRate(row) }}</span>
               <span v-else data-testid="latency-cache-rate" class="col-start-3 row-start-4 text-gray-400 dark:text-gray-500">-</span>
             </template>
-            <span v-if="enableTimingDetails && row.stream" data-testid="latency-content-timing" class="col-span-2 col-start-2 mt-1 border-t border-gray-200 pt-1 text-[10px] text-gray-500 dark:border-dark-600" :title="t('requestTiming.contentOrigin')">
-              {{ t('requestTiming.eventShort') }} {{ contentMs(row.content_timing?.sse_event_first_ms) }} ·
-              {{ t('requestTiming.semanticShort') }} {{ contentMs(row.content_timing?.semantic_first_ms) }} ·
-              {{ t('requestTiming.textShort') }} {{ contentMs(row.content_timing?.visible_text_first_ms) }}
-            </span>
           </component>
         </template>
 
@@ -781,7 +776,6 @@ const formatUserAgent = (ua: string): string => {
 }
 
 // 超过 1 分钟简化为 "Xm Ys"，免去人工换算（超过 1 小时再进位为 "Xh Ym"）
-const contentMs = (ms: number | null | undefined): string => ms == null || !Number.isFinite(ms) || ms < 0 ? '—' : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`
 const formatDuration = (ms: number | null | undefined): string => {
   if (ms == null) return '-'
   if (ms < 1000) return `${ms}ms`
