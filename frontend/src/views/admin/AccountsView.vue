@@ -338,7 +338,12 @@
             </div>
           </template>
           <template #cell-schedulable="{ row }">
-            <SchedulableTimerControl :account-id="row.id" :account-name="row.name" :schedulable="row.schedulable" :switching="togglingSchedulable === row.id" :can-manage-timers="authStore.isAdmin" :notice-user-id="authStore.isAdmin ? authStore.user?.id : undefined" :refresh-key="timerRefreshKey" @executed="handleTimerExecuted" @toggle="handleToggleSchedulable(row)" />
+            <div class="flex flex-col items-start gap-1">
+              <SchedulableTimerControl v-if="authStore.isAdmin" :account-id="row.id" :account-name="row.name" :schedulable="row.schedulable" :switching="togglingSchedulableIds.has(row.id)" :can-manage-timers="authStore.isAdmin" :notice-user-id="authStore.user?.id" :refresh-key="timerRefreshKey" @executed="handleTimerExecuted" @toggle="handleToggleSchedulable(row)" />
+              <button type="button" role="switch" :aria-checked="row.schedulable" :aria-label="t('admin.accounts.schedulable')" @click="handleToggleSchedulable(row)" :disabled="togglingSchedulableIds.has(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
+              </button>
+            </div>
           </template>
           <template #cell-performance="{ row }">
             <AccountPerformanceCell :metrics="performanceMetrics[row.id]" :unavailable="performanceUnavailable" :can-configure="authStore.isAdmin" :notice-user-id="authStore.isAdmin ? authStore.user?.id : null" :upstream-error-threshold="performanceErrorThreshold" @configure="performanceAccount = row" />
@@ -705,7 +710,7 @@ const iqTestingAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
-const togglingSchedulable = ref<number | null>(null)
+const togglingSchedulableIds = reactive(new Set<number>())
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
@@ -2767,8 +2772,9 @@ const confirmCreateSparkShadow = async () => {
 const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
 const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
 const handleToggleSchedulable = async (a: Account) => {
+  if (togglingSchedulableIds.has(a.id)) return
   const nextSchedulable = !a.schedulable
-  togglingSchedulable.value = a.id
+  togglingSchedulableIds.add(a.id)
   try {
     const updated = await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
     timerRefreshKey.value++
@@ -2778,7 +2784,7 @@ const handleToggleSchedulable = async (a: Account) => {
     console.error('Failed to toggle schedulable:', error)
     appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
   } finally {
-    togglingSchedulable.value = null
+    togglingSchedulableIds.delete(a.id)
   }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
