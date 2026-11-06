@@ -101,10 +101,9 @@ describe('unified scheduling tasks with one-shot compatibility', () => {
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toContain('timer.errors.timezone')
   })
-  it('moves immediate scheduling into the task dialog and keeps its loading guard', async () => {
+  it('keeps the optional immediate action and its loading guard in the task dialog', async () => {
     render({ accountId: 7, schedulable: true })
     await flushPromises()
-    expect(wrapper.get('[data-test="timer-current-status"]').text()).toContain('timer.statusOn')
     expect(wrapper.find('[data-test="timer-immediate"]').exists()).toBe(false)
     await wrapper.get('[data-test="timer-manage"]').trigger('click')
     await flushPromises()

@@ -1,7 +1,6 @@
 <template>
   <div class="mb-1 min-w-0 text-left text-xs" @click.stop>
     <div class="flex flex-wrap items-center gap-2">
-      <span v-if="schedulable !== undefined" data-test="timer-current-status" :class="schedulable ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-dark-400'">{{ t(`admin.accounts.timer.${schedulable ? 'statusOn' : 'statusOff'}`) }}</span>
       <button type="button" data-test="timer-manage" class="text-primary-600 hover:underline disabled:opacity-50 dark:text-primary-400" :disabled="busy || loading || switching" :aria-expanded="expanded" @click="begin()">{{ t('admin.accounts.timer.manage') }}</button>
       <NewFeatureBadge v-if="canManageTimers && noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.accountDailyScheduling" :user-id="noticeUserId" compact />
     </div>
