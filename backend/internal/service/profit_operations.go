@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
+
+const profitOperationsQueryTimeout = 5 * time.Minute
 
 type ProfitOperationsSnapshot struct {
 	UpstreamOperationsSnapshot
@@ -50,13 +53,19 @@ func (s *ChannelService) ProfitOperations(ctx context.Context, f UpstreamOperati
 	if err := NormalizeProfitOperationsFilter(&f); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, profitOperationsQueryTimeout)
 	defer cancel()
 	repo, ok := s.repo.(ProfitOperationsRepository)
 	if !ok {
 		return nil, infraerrors.ServiceUnavailable("PROFIT_OPERATIONS_UNAVAILABLE", "Profit operations data source unavailable")
 	}
-	return repo.ReadProfitOperations(ctx, f)
+	out, err := repo.ReadProfitOperations(ctx, f)
+	// Database drivers can return their own cancellation error. Preserve the
+	// request's deadline/cancellation so callers can distinguish a timeout.
+	if err != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return out, err
 }
 
 // OperationsCostMultiplier distinguishes the scheduling default from a saved

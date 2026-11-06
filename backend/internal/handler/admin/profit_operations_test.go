@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http/httptest"
+	"testing"
+
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"net/http/httptest"
-	"testing"
 )
 
 func TestProfitOperationsHTTPValidation(t *testing.T) {
@@ -49,6 +51,15 @@ func TestProfitOperationsHTTPIndependentScopesAndSafeFailure(t *testing.T) {
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 	require.Equal(t, 500, w.Code)
+	require.Contains(t, w.Body.String(), `"reason":"PROFIT_OPERATIONS_QUERY_FAILED"`)
 	require.NotContains(t, w.Body.String(), "sensitive")
 	require.NotContains(t, w.Body.String(), `"requests":0`)
+	repo.err = fmt.Errorf("sensitive driver details: %w", context.DeadlineExceeded)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+	require.Equal(t, 504, w.Code)
+	require.Contains(t, w.Body.String(), `"reason":"PROFIT_OPERATIONS_TIMEOUT"`)
+	require.NotContains(t, w.Body.String(), "sensitive")
+	require.NotContains(t, w.Body.String(), `"requests":0`)
+	require.NotContains(t, w.Body.String(), `"summary"`, "timeouts cannot return a partial financial snapshot")
 }
