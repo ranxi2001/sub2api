@@ -78,7 +78,13 @@ function formatMetric(m:ProfitMetrics,key:typeof amountKeys[number]) { return ke
 async function load() {
  const id=++request; controller?.abort(); controller=new AbortController(); loading.value=true; error.value=''; snapshot.value=null
  try { const next=await readProfitOperations({...applied.value},controller.signal); if(alive && request===id) snapshot.value=next }
- catch { if(alive && request===id) error.value=t('profitOps.queryFailed') }
+ catch (cause) {
+  if(alive && request===id) {
+   const failure=cause as { status?: number; reason?: string; code?: string } | null
+   const timedOut=failure?.status===504 || failure?.reason==='PROFIT_OPERATIONS_TIMEOUT' || failure?.code==='ECONNABORTED' || failure?.code==='ETIMEDOUT'
+   error.value=t(timedOut ? 'profitOps.queryTimeout' : 'profitOps.queryFailed')
+  }
+ }
  finally { if(alive && request===id) loading.value=false }
 }
 function apply() { const a=new Date(from.value), b=new Date(until.value); if(!Number.isFinite(a.getTime())||!Number.isFinite(b.getTime())||b<=a||b.getTime()-a.getTime()>31*86400000){error.value=t('profitOps.invalidRange');return} applied.value={...draft.value,from:a.toISOString(),until:b.toISOString(),page:1};void load() }

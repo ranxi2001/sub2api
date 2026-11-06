@@ -23,7 +23,8 @@ export interface OperationsSnapshot {
  quality: Section<Quality & { total: number }>; errors: Section<ErrorLogs>
 }
 export async function readProfitOperations( params: OperationsQuery, signal?: AbortSignal): Promise<OperationsSnapshot> {
- return (await apiClient.get<OperationsSnapshot>('/admin/profit-operations/snapshot', { params, signal })).data
+ // Full-range accounting may take minutes; leave time for the server's five-minute budget and response.
+ return (await apiClient.get<OperationsSnapshot>('/admin/profit-operations/snapshot', { params, signal, timeout: 330_000 })).data
 }
 export async function readExplicitChannelProfitOperations(query: OperationsQuery, channelId: number, signal?: AbortSignal): Promise<OperationsSnapshot> {
  return readProfitOperations({ ...query, upstream: '', channel_id: channelId }, signal)

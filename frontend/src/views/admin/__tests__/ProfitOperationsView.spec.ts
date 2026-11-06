@@ -46,6 +46,36 @@ describe('independent profit operations', () => {
   expect(w.get('[data-testid="profit-summary"]').text()).toContain('profitOps.unknown')
   expect(w.text()).not.toMatch(/NaN|Infinity/); w.unmount()
  })
+ it.each([
+  { status: 504, reason: 'PROFIT_OPERATIONS_TIMEOUT' },
+  { status: 504, message: 'synthetic proxy timeout' },
+  { status: 0, code: 'ECONNABORTED' },
+  { status: 0, code: 'ETIMEDOUT' },
+ ])('distinguishes a timeout from an empty result and allows retry: %j', async (failure) => {
+  vi.mocked(readProfitOperations).mockRejectedValueOnce(failure)
+  const w = mount(ProfitOperationsView); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toBe('profitOps.queryTimeout')
+  expect(w.find('[data-testid="profit-summary"]').exists()).toBe(false)
+  expect(w.find('[role="status"]').exists()).toBe(false)
+  await w.get('[data-testid="refresh-operations"]').trigger('click'); await flushPromises()
+  expect(w.find('[role="alert"]').exists()).toBe(false)
+  expect(w.get('[data-testid="profit-summary"]').text()).toContain('25.00%')
+  w.unmount()
+ })
+ it('keeps a pending aggregation visible and cancels it when leaving the page', async () => {
+  let rejectPending!: (reason: unknown) => void
+  vi.mocked(readProfitOperations).mockImplementationOnce(() => new Promise((_, reject) => { rejectPending = reject }))
+  const w = mount(ProfitOperationsView); await flushPromises()
+  expect(w.get('[role="status"]').text()).toBe('profitOps.loading')
+  expect(w.find('[role="alert"]').exists()).toBe(false)
+  expect(w.find('[data-testid="profit-summary"]').exists()).toBe(false)
+  const signal = vi.mocked(readProfitOperations).mock.calls[0]![1]!
+  expect(signal.aborted).toBe(false)
+  w.unmount()
+  expect(signal.aborted).toBe(true)
+  rejectPending({ code: 'ERR_CANCELED' }); await flushPromises()
+  expect(readProfitOperations).toHaveBeenCalledTimes(1)
+ })
  it('applies model scope and sort after resetting pagination and ignores stale replies', async () => {
   const w = mount(ProfitOperationsView); await flushPromises()
   await w.get('[data-testid="model-filter"]').setValue('vendor-model')

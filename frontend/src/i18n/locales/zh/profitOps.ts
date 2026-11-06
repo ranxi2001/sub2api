@@ -32,7 +32,7 @@ export default {
   "apply": "应用筛选",
   "today": "今天",
   "last24h": "近24小时",
-  "loading": "读取中…",
+  "loading": "正在汇总，请稍候；数据较多时可能需要几分钟。",
   "queried": "读取时间",
   "summary": "筛选范围合计",
   "requests": "请求记录数",
@@ -76,5 +76,6 @@ export default {
   "errorNote": "留存错误日志仅表示当前账号集合中的诊断记录，排除 count_tokens；不是完整请求失败率。5xx 不能证明降智。仅列前 20 个错误分类。",
   "errorRecords": "日志条数",
   "queryFailed": "查询失败，请重试；未将失败显示为零。",
+  "queryTimeout": "本次统计耗时过长，未能完成，请稍后重试；未将失败显示为零。",
   "invalidRange": "请选择不超过31天、结束晚于开始的有效时间范围。"
 }

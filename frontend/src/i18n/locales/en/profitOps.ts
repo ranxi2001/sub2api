@@ -32,7 +32,7 @@ export default {
   "apply": "Apply filters",
   "today": "Today",
   "last24h": "Last 24 hours",
-  "loading": "Reading…",
+  "loading": "Aggregating; large ranges may take a few minutes. Please wait.",
   "queried": "Read at",
   "summary": "Filtered totals",
   "requests": "Request records",
@@ -76,5 +76,6 @@ export default {
   "errorNote": "Diagnostic log counts for the current account cohort, excluding count_tokens, do not represent a complete request failure rate. 5xx does not prove degraded intelligence. Only the first 20 error categories are listed.",
   "errorRecords": "Log records",
   "queryFailed": "Query failed; retry. Failure has not been displayed as zero.",
+  "queryTimeout": "This aggregation took too long to complete. Please retry later; failure has not been displayed as zero.",
   "invalidRange": "Choose a valid half-open range of at most 31 days."
 }
