@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -86,7 +87,7 @@ func IsExplicitImageGenerationIntent(endpoint string, requestedModel string, bod
 	if IsImageGenerationEndpoint(endpoint) || isOpenAIImageGenerationModel(requestedModel) {
 		return true
 	}
-	if len(body) == 0 || !gjson.ValidBytes(body) {
+	if len(body) == 0 || !mayContainExplicitImageGenerationIntent(body) || !gjson.ValidBytes(body) {
 		return false
 	}
 	var modelSeen, toolsSeen, toolChoiceSeen bool
@@ -112,6 +113,24 @@ func IsExplicitImageGenerationIntent(endpoint string, requestedModel string, bod
 		return !imageIntent && (!modelSeen || !toolsSeen || !toolChoiceSeen)
 	})
 	return imageIntent
+}
+
+// A false result rules out the markers used by the explicit intent checks.
+// Escaped Unicode and native tool declarations use the full validator and
+// parser, as do model or tool-choice candidates.
+// Keep this filter aligned with the recognized tool types and tool choices
+// whenever those rules gain new forms.
+func mayContainExplicitImageGenerationIntent(body []byte) bool {
+	if bytes.Contains(body, []byte("_generation")) || bytes.Contains(body, []byte(`\u`)) {
+		return true
+	}
+	if isOpenAIImageGenerationModel(gjson.GetBytes(body, "model").String()) {
+		return true
+	}
+	if !bytes.Contains(body, []byte("_gen")) || !bytes.Contains(body, []byte("_choice")) {
+		return false
+	}
+	return strings.Contains(gjson.GetBytes(body, "tool_choice").Raw, "image_gen")
 }
 
 // IsImageGenerationIntentForPlatform applies platform-specific intent rules.
@@ -238,6 +257,7 @@ func openAIJSONToolsContainNativeImageGeneration(tools gjson.Result) bool {
 }
 
 func isOpenAIImageGenerationType(value string) bool {
+	// Keep mayContainExplicitImageGenerationIntent conservative if this changes.
 	return strings.TrimSpace(value) == "image_generation"
 }
 
@@ -362,6 +382,7 @@ func openAIJSONToolChoiceSelectsExplicitImageGeneration(choice gjson.Result) boo
 }
 
 func isOpenAIImageGenFunctionReference(namespace string, name string) bool {
+	// Keep mayContainExplicitImageGenerationIntent conservative if this changes.
 	namespace = strings.TrimSpace(namespace)
 	name = strings.TrimSpace(name)
 	if namespace == "image_gen" && name == "imagegen" {
