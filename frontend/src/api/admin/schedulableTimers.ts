@@ -1,11 +1,16 @@
 import { apiClient } from '../client'
 
 export type TimerAction = 'open' | 'close'
-export interface TimerInput {
+interface OneShotTimerInput {
   mode: 'relative' | 'absolute'
   hours: number
   minutes: number
   date: string
+  time: string
+  timezone: string
+}
+export type TimerInput = OneShotTimerInput | {
+  mode: 'daily'
   time: string
   timezone: string
 }
@@ -31,6 +36,9 @@ export interface SchedulableTimer {
   attempts: number
   actual_at: string | null
   reason: string
+  // Older API responses have no recurrence fields and represent one-shot plans.
+  recurrence?: 'once' | 'daily'
+  daily_time?: string
 }
 export interface TimerAudit {
   action: TimerAction
@@ -50,6 +58,13 @@ export interface TimerSnapshot {
   open_grace_seconds: number
   max_delay_minutes: number
 }
+export interface DailyWindowInput {
+  open_time: string
+  close_time: string
+  timezone: string
+  expected_open_version: number
+  expected_close_version: number
+}
 export const schedulableTimersAPI = {
   async list(id: number) {
     return (await apiClient.get<TimerSnapshot>(`/admin/accounts/${id}/schedulable-timers`)).data
@@ -59,6 +74,9 @@ export const schedulableTimersAPI = {
   },
   async save(id: number, input: TimerInput & { action: TimerAction; expected_version: number; confirmed_at?: string }) {
     return (await apiClient.post<SchedulableTimer>(`/admin/accounts/${id}/schedulable-timers`, input)).data
+  },
+  async saveDailyWindow(id: number, input: DailyWindowInput) {
+    return (await apiClient.post<TimerSnapshot>(`/admin/accounts/${id}/schedulable-timers/daily-window`, input)).data
   },
   async cancel(id: number, action: TimerAction, version: number) {
     await apiClient.delete(`/admin/accounts/${id}/schedulable-timers/${action}`, { params: { version } })
