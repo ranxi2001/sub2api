@@ -828,6 +828,10 @@ type GatewayService struct {
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+
+	// ccPingHoldOverride 仅供测试覆盖 Chat Completions 兼容流在首段输出前
+	// 暂不转发上游 ping 的时长；nil 时使用 ccUpstreamPingHoldBeforeOutput。
+	ccPingHoldOverride *time.Duration
 }
 
 // NewGatewayService creates a new GatewayService

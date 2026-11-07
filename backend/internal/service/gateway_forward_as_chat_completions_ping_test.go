@@ -60,7 +60,7 @@ func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
 	}
 	finished := make(chan outcome, 1)
 	go func() {
-		result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
+		result, err := newCCPingForwardingTestService().handleCCStreamingFromAnthropic(
 			&http.Response{Body: reader}, context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 		)
 		finished <- outcome{result: result, err: err}
@@ -159,7 +159,7 @@ func TestHandleCCStreamingFromAnthropic_PingFlushesImmediately(t *testing.T) {
 func TestHandleCCStreamingFromAnthropic_PingDoesNotSetFirstToken(t *testing.T) {
 	writer := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(writer)
-	result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
+	result, err := newCCPingForwardingTestService().handleCCStreamingFromAnthropic(
 		&http.Response{Body: io.NopCloser(strings.NewReader("event: ping\ndata: {\"type\":\"ping\"}\n\n"))},
 		context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 	)
@@ -184,7 +184,7 @@ func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testi
 			stream += "event: ping\ndata: {\"type\":\"ping\"}\n\n" +
 				"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":7}}\n\n" +
 				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-			result, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
+			result, err := newCCPingForwardingTestService().handleCCStreamingFromAnthropic(
 				&http.Response{Body: io.NopCloser(strings.NewReader(stream))},
 				context, "gpt-5", "claude-sonnet-4.5", nil, time.Now(),
 			)
@@ -203,4 +203,11 @@ func TestHandleCCStreamingFromAnthropic_PingWriteFailureStopsDownstream(t *testi
 			}
 		})
 	}
+}
+
+// newCCPingForwardingTestService 关闭首段输出前的 ping 保留窗口，
+// 让心跳测试覆盖「收到上游 ping 立即转发」这条路径。
+func newCCPingForwardingTestService() *GatewayService {
+	noHold := time.Duration(0)
+	return &GatewayService{ccPingHoldOverride: &noHold}
 }
