@@ -5189,6 +5189,12 @@
                         >
                           {{ platform }}
                         </label>
+                        <NewFeatureBadge
+                          v-if="platform === 'mistral'"
+                          :notice-id="NEW_FEATURE_NOTICES.mistralBudgetUsage"
+                          :user-id="authStore.user?.id"
+                          class="ml-2"
+                        />
                         <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                           {{
                             t(
