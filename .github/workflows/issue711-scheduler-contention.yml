@@ -1,0 +1,144 @@
+name: Issue711 scheduler contention
+
+on:
+  push:
+    branches: [fix/scheduler-snapshot-lock-contention]
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/repository/account_codex_snapshot.go'
+      - 'backend/internal/repository/account_scheduler_publication_unit_test.go'
+      - 'backend/internal/service/openai_codex_snapshot_contract.go'
+      - 'backend/internal/service/scheduler_snapshot_latest_accounts_test.go'
+      - 'backend/internal/integration/issue711/**'
+      - '.github/workflows/issue711-scheduler-contention.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: ${{ matrix.mode }} / PG18 + independent Redis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [green, red-locks, red-state]
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: issue711
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d issue711"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis-a:
+        image: redis:8.4-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 12
+      redis-b:
+        image: redis:8.4-alpine
+        ports: ['6380:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      CI: 'true'
+      ISSUE711_REQUIRED: 'true'
+      ISSUE711_POSTGRES_DSN: postgres://postgres:synthetic-ci-only@127.0.0.1:5432/issue711?sslmode=disable
+      ISSUE711_REDIS_A: 127.0.0.1:6379
+      ISSUE711_REDIS_B: 127.0.0.1:6380
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Record exact candidate and regression identity
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/head.txt
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          sha256sum backend/internal/integration/issue711/snapshot_contention_test.go > evidence/tests.sha256
+          go version | tee evidence/toolchain.txt
+      - name: Restore exact defective production blob in isolated RED job
+        if: matrix.mode != 'green'
+        env:
+          MODE: ${{ matrix.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
+          git fetch --no-tags --depth=1 origin "$baseline"
+          if [ "$MODE" = red-locks ]; then
+            target=backend/internal/repository/account_codex_snapshot.go
+            expected=4b0f4c612101ef6d83080e96ae205164ab164b1c
+          else
+            target=backend/internal/service/openai_codex_snapshot_contract.go
+            expected=8029364741588ba7263ae581f1f22b4dc4315ff2
+          fi
+          git show "$baseline:$target" > "$target"
+          test "$(git hash-object "$target")" = "$expected"
+          printf '%s %s %s\n' "$baseline" "$target" "$expected" | tee evidence/baseline.txt
+          git diff --stat
+      - name: Exact head unit safety and race checks
+        if: matrix.mode == 'green'
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service ./internal/repository \
+            -run '^(TestSchedulerPublicationLockRoundTripAndRollback|TestSchedulerSnapshotUsesLatestCompleteAccounts|TestSchedulerSnapshotIDRetryFiltersLatestMembership|TestSchedulerOutboxRetry)' \
+            -count=1 -v -timeout=5m 2>&1 | tee ../evidence/unit-green.log
+          ! grep -Eq 'no tests to run|--- SKIP:' ../evidence/unit-green.log
+      - name: Real PostgreSQL and Redis behavioral RED or GREEN
+        env:
+          MODE: ${{ matrix.mode }}
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            green) regression='^TestIssue711';;
+            red-locks) regression='^TestIssue711BatchedPublicationContention$';;
+            red-state) regression='^TestIssue711StaleRebuildCannotRestoreAccount$';;
+          esac
+          set +e
+          go test -race -tags=integration ./internal/integration/issue711 -run "$regression" \
+            -count=1 -v -timeout=5m > ../evidence/integration.log 2>&1
+          result=$?
+          set -e
+          cat ../evidence/integration.log
+          printf '%s\n' "$result" > ../evidence/exit.txt
+          if grep -Eq '\[build failed\]|\[setup failed\]|undefined:|syntax error:|no tests to run|panic:|--- SKIP:|WARNING: DATA RACE|race detected during execution' ../evidence/integration.log; then
+            echo 'Compilation, fixture errors, missing tests and skips are not behavioral evidence'
+            exit 1
+          fi
+          if [ "$MODE" = green ]; then
+            test "$result" -eq 0
+            for name in BatchedPublicationContention StaleRebuildCannotRestoreAccount PublicationFailureKeepsActiveAndFencesOldWriter TwoWritersDrainAccountChanges; do
+              grep -F -- "--- PASS: TestIssue711$name" ../evidence/integration.log
+            done
+          else
+            test "$result" -ne 0
+            if [ "$MODE" = red-locks ]; then
+              grep -F -- '--- FAIL: TestIssue711BatchedPublicationContention' ../evidence/integration.log
+              grep -F -- 'lock acquisition round trips must be bounded per publication' ../evidence/integration.log
+            else
+              grep -F -- '--- FAIL: TestIssue711StaleRebuildCannotRestoreAccount' ../evidence/integration.log
+              grep -F -- 'stale rebuild restored a disabled account' ../evidence/integration.log
+            fi
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue711-${{ matrix.mode }}-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
