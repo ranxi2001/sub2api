@@ -77,10 +77,11 @@ func TestHandleCCStreamingFromAnthropic_PingForwardedAfterHoldWindow(t *testing.
 	hold := 50 * time.Millisecond
 	writer := &ccPingResponseWriter{ResponseRecorder: httptest.NewRecorder(), flushed: make(chan string, 8)}
 	c, _ := gin.CreateTestContext(writer)
+	c.Set(ccPingHoldContextKey, hold)
 	reader, upstream := io.Pipe()
 	finished := make(chan error, 1)
 	go func() {
-		_, err := (&GatewayService{ccPingHoldOverride: &hold}).handleCCStreamingFromAnthropic(
+		_, err := (&GatewayService{}).handleCCStreamingFromAnthropic(
 			&http.Response{Header: http.Header{}, Body: reader}, c, "claude-sonnet-4-6", "claude-sonnet-4-6", nil, time.Now(),
 		)
 		finished <- err

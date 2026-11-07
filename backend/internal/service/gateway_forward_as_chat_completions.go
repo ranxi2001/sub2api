@@ -396,9 +396,17 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 // 恢复转发心跳，远低于常见代理 60–100 秒的空闲超时。
 const ccUpstreamPingHoldBeforeOutput = 30 * time.Second
 
-func (s *GatewayService) ccUpstreamPingHold() time.Duration {
-	if s != nil && s.ccPingHoldOverride != nil {
-		return *s.ccPingHoldOverride
+// ccPingHoldContextKey 仅供测试在单个请求的 gin.Context 上覆盖保留时长
+// （值为 time.Duration）；生产代码不设置该键。
+const ccPingHoldContextKey = "sub2api.cc_upstream_ping_hold"
+
+func ccUpstreamPingHold(c *gin.Context) time.Duration {
+	if c != nil {
+		if v, ok := c.Get(ccPingHoldContextKey); ok {
+			if hold, ok := v.(time.Duration); ok {
+				return hold
+			}
+		}
 	}
 	return ccUpstreamPingHoldBeforeOutput
 }
@@ -435,7 +443,7 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	firstChunk := true
 	writerSizeBeforeStream := c.Writer.Size()
 	streamStartedAt := time.Now()
-	pingHold := s.ccUpstreamPingHold()
+	pingHold := ccUpstreamPingHold(c)
 
 	stream := newAnthropicCompatStream(s.cfg, c, resp, "forward_as_cc", requestID)
 	defer stream.stop()
