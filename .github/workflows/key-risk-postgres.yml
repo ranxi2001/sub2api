@@ -2,7 +2,7 @@ name: Key risk PostgreSQL acceptance
 
 on:
   push:
-    branches: [production]
+    branches: [production, review/pr717-merge-fixes]
     paths:
       - 'backend/internal/keyrisk/**'
       - 'backend/migrations/*key_risk*.sql'
