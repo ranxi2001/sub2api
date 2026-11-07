@@ -1,0 +1,113 @@
+name: Upstream v0.2.20 selected regressions
+
+on:
+  push:
+    branches: [cherry/upstream-v0.2.20]
+  pull_request:
+    branches: [production]
+
+permissions:
+  contents: read
+
+jobs:
+  selected-race:
+    if: github.head_ref == 'cherry/upstream-v0.2.20' || github.ref_name == 'cherry/upstream-v0.2.20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify candidate identity
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Codex non-stream exact candidate GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/pr722-green"
+          mkdir -p "$proof"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD | tee "$proof/candidate.txt"
+          git ls-files -s backend/internal/service/openai_gateway_passthrough.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_oauth_passthrough_non_stream_test.go | tee "$proof/blobs.txt"
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/service -run '^TestOpenAIGatewayService_OAuthLike(NonStreamTerminalMatrix|StreamTrueStillStreams|NonStreamJSONLiteralFramingPreserved)$' -count=1 -timeout=5m) > "$proof/tests.jsonl" 2>&1
+          result=$?
+          set -e
+          echo "$result" > "$proof/exit.txt"
+          cat "$proof/tests.jsonl"
+          python3 .github/scripts/pr722-codex-nonstream-proof.py green "$proof/tests.jsonl" "$result" | tee "$proof/summary.txt"
+      - name: Protocol, authentication and resource regressions with race detection
+        working-directory: backend
+        run: >-
+          go test -race -tags=unit
+          ./internal/pkg/apicompat ./internal/pkg/antigravity
+          ./internal/service ./internal/handler ./internal/server/middleware
+          -run '^(TestOpenAIGatewayService_OAuth|TestBedrockEventStreamDecoder|TestGeminiTextDelta|TestResponsesReasoningContent|TestOpenAICompatBufferedReasoningContent|TestMessageContentWireConsistent|TestMessageRefusalPreserved|TestEmptyMessageContentArray|TestHandleUpstreamError_Kimi|TestSanitizeGrokResponsesModelInput|TestOpenAIBodyLimitFailoverExhausted|TestUpdateSessionWindow_|TestHandleUpstreamError_SamplesWeeklyUsage|TestAccountUsageService_.*SetupToken|TestStreamingProcessorResponseShapes|TestAccountTestService_OpenAIImage|TestProbeOpenAIAPIKeyResponsesSupport|TestAPIKeyAuthLookupFailureWhenClientGoneReturns499|TestAPIKeyAuthRejectsNonUTF8KeyAsInvalid|TestAPIKeyService_GetByKeyRejectsNonUTF8BeforeLookup|TestCleanGeminiRequest_|TestBuildAnthropicMessagesURL|TestAnthropicMessagesURL_|TestAccountTestService_CloudflareMessagesRejectsBetaQuery)'
+          -count=1 -v -timeout=15m
+      - name: Backend compilation
+        working-directory: backend
+        run: go build ./cmd/server
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr722-green-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/pr722-green/
+
+  codex-nonstream-red:
+    if: github.head_ref == 'cherry/upstream-v0.2.20' || github.ref_name == 'cherry/upstream-v0.2.20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: red
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: red/backend/go.mod
+          cache-dependency-path: red/backend/go.sum
+      - name: Prove four SetupToken missing-header counterexamples on isolated old code
+        working-directory: red
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/pr722-red"
+          mkdir -p "$proof"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD | tee "$proof/candidate.txt"
+          original=f5c61be7ad8b2b129b4d35e163395aefffdd97df
+          echo "$original" | tee "$proof/tested-production-source.txt"
+          git fetch --no-tags --depth=1 origin "$original"
+          targets=(backend/internal/service/openai_gateway_passthrough.go backend/internal/service/openai_gateway_response_handling.go)
+          git restore --source="$original" -- "${targets[@]}"
+          for target in "${targets[@]}"; do
+            expected=$(git rev-parse "$original:$target")
+            actual=$(git hash-object "$target")
+            test "$actual" = "$expected"
+            printf '%s %s %s\n' "$target" "$expected" "$actual" | tee -a "$proof/production-blobs.txt"
+          done
+          regression=backend/internal/service/openai_oauth_passthrough_non_stream_test.go
+          test "$(git hash-object "$regression")" = "$(git rev-parse "HEAD:$regression")"
+          git rev-parse "HEAD:$regression" | tee "$proof/candidate-test-blob.txt"
+          git diff --stat | tee "$proof/restored-diff.txt"
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/service -run '^TestOpenAIGatewayService_OAuthLike(NonStreamTerminalMatrix|StreamTrueStillStreams|NonStreamJSONLiteralFramingPreserved)$' -count=1 -timeout=5m) > "$proof/tests.jsonl" 2>&1
+          result=$?
+          set -e
+          echo "$result" > "$proof/exit.txt"
+          cat "$proof/tests.jsonl"
+          python3 .github/scripts/pr722-codex-nonstream-proof.py red "$proof/tests.jsonl" "$result" | tee "$proof/summary.txt"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr722-red-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/pr722-red/

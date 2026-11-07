@@ -141,6 +141,9 @@ func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, accou
 	if provider == PlatformCline {
 		return s.queryClineUsage(ctx, account)
 	}
+	if provider == PlatformMistral {
+		return s.queryMistralUsage(ctx, account)
+	}
 	if provider != PlatformKimi && provider != PlatformZhipu && provider != PlatformMiniMax && provider != PlatformOpenCodeGo {
 		return nil, infraerrors.New(http.StatusBadRequest, "CN_QUOTA_NOT_CODING_PLAN", "account is not a kimi/zhipu/minimax coding plan or opencode go account")
 	}
@@ -309,6 +312,12 @@ func validateCodingPlanAccount(account *Account) error {
 	if account.IsCline() {
 		if !account.clineAccountAPISupported() {
 			return infraerrors.New(http.StatusBadRequest, "CN_QUOTA_NOT_CODING_PLAN", "cline usage is only available for api key accounts on the official host")
+		}
+		return nil
+	}
+	if account.IsMistral() {
+		if !account.mistralUsageSupported() {
+			return infraerrors.New(http.StatusBadRequest, "CN_QUOTA_NOT_CODING_PLAN", "mistral usage is only available for api key accounts on the official host")
 		}
 		return nil
 	}

@@ -18,6 +18,53 @@ func isMultiGroupBillingInfoRequest(c *gin.Context, key *service.APIKey) bool {
 	return c.Request.URL.Path == "/v1/sub2api/billing" && len(key.ConfiguredGroupIDs()) > 1
 }
 
+const modelListingGroupsKey = "api_key.model_listing_groups"
+const modelListingRefreshKey = "api_key.model_listing_refresh"
+const modelListingClientPolicyKey = "api_key.model_listing_client_policy"
+
+type modelListingRefresh func(context.Context) ([]*service.APIKey, error)
+
+// ModelListingClientPolicy supplies the same configured client policy used by
+// GroupCodexCLIOnly before authentication considers each directory candidate.
+func ModelListingClientPolicy(settings *service.SettingService, auth APIKeyAuthMiddleware) APIKeyAuthMiddleware {
+	return APIKeyAuthMiddleware(func(c *gin.Context) {
+		if settings != nil && c.Request.Method == http.MethodGet &&
+			(c.Request.URL.Path == "/v1/models" || c.Request.URL.Path == "/models") &&
+			!c.Request.URL.Query().Has("model") && c.Query("client_version") == "" {
+			c.Set(modelListingClientPolicyKey, func() service.CodexRestrictionPolicy {
+				return settings.GetCodexRestrictionPolicy(c.Request.Context())
+			})
+		}
+		auth(c)
+	})
+}
+
+// Only the ordinary collection uses a union. Explicit model selection, model
+// retrieval and Codex manifests retain their existing request-group semantics.
+func isMultiGroupModelListing(c *gin.Context, key *service.APIKey) bool {
+	return key != nil && len(key.ConfiguredGroupIDs()) > 1 && c.Request.Method == http.MethodGet &&
+		(c.Request.URL.Path == "/v1/models" || c.Request.URL.Path == "/models") &&
+		!c.Request.URL.Query().Has("model") && c.Query("client_version") == ""
+}
+
+func GetModelListingGroups(c *gin.Context) ([]*service.APIKey, bool) {
+	value, ok := c.Get(modelListingGroupsKey)
+	groups, valid := value.([]*service.APIKey)
+	return groups, ok && valid
+}
+
+// RefreshModelListingGroups runs synchronously after a queued directory request
+// acquires its key slot. Queue revalidation pins one billing group; discovery
+// must also recheck every other bound group's current permissions.
+func RefreshModelListingGroups(c *gin.Context) ([]*service.APIKey, error) {
+	value, _ := c.Get(modelListingRefreshKey)
+	refresh, ok := value.(modelListingRefresh)
+	if !ok {
+		return nil, infraerrors.ServiceUnavailable("MODEL_LISTING_UNAVAILABLE", "Model listing authorization is unavailable")
+	}
+	return refresh(c.Request.Context())
+}
+
 func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subscriptions *service.SubscriptionService, cfg *config.Config, key *service.APIKey, google bool) (*service.APIKey, error) {
 	var err error
 	key, err = applySecurityPenalty(c, keys, key)
@@ -112,6 +159,13 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 		}
 		if group.CodexCLIOnly {
 			policy := service.CodexRestrictionPolicy{EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals}
+			if isMultiGroupModelListing(c, key) {
+				if value, exists := c.Get(modelListingClientPolicyKey); exists {
+					if loadPolicy, ok := value.(func() service.CodexRestrictionPolicy); ok {
+						policy = loadPolicy()
+					}
+				}
+			}
 			if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
 				policy.EngineFingerprintSignals = nil
 			}
@@ -122,6 +176,29 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 		return true
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, key.UserID)
+	if isMultiGroupModelListing(c, key) {
+		groups, err := keys.ModelListingGroups(ctx, key, accepts)
+		if err != nil {
+			AbortWithError(c, infraerrors.Code(err), "MODEL_LISTING_UNAVAILABLE", "Model listing authorization is unavailable")
+			return nil, err
+		}
+		c.Set(modelListingGroupsKey, groups)
+		if key.ConcurrencyLimit > 0 {
+			c.Set(modelListingRefreshKey, modelListingRefresh(func(ctx context.Context) ([]*service.APIKey, error) {
+				latest, err := keys.GetByKeyUncached(ctx, key.Key)
+				if err != nil {
+					return nil, err
+				}
+				if latest == nil || latest.ID != key.ID || latest.UserID != key.UserID || latest.User == nil ||
+					!latest.User.IsActive() || !latest.IsActive() || latest.IsExpired() || latest.IsQuotaExhausted() {
+					return nil, infraerrors.Forbidden("MODEL_LISTING_UNAVAILABLE", "Model listing authorization changed")
+				}
+				return keys.ModelListingGroups(ctx, latest, accepts)
+			}))
+		}
+		SetOpsFallbackAPIKey(c, groups[0])
+		return groups[0], nil
+	}
 	selected, err := keys.SelectRequestGroup(ctx, key, models, kind, subscriptions, accepts, checkBilling)
 	if err != nil {
 		status := infraerrors.Code(err)

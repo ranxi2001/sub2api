@@ -1,5 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import AccountUsageCell from '../AccountUsageCell.vue'
 import type { Account } from '@/types'
 
@@ -440,6 +443,70 @@ describe('AccountUsageCell', () => {
     expect(wrapper.find('[data-test="cn-balance-cell"]').exists()).toBe(true)
     // 子单元格可见时不显示 `-` 占位符（按量账号与订阅账号用同一套单元格）。
     expect(wrapper.text()).not.toContain('-')
+  })
+
+  it('Mistral 官方端点账号渲染月度预算窗口与剩余额度单元格，自定义中转显示占位符', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 9106,
+          platform: 'mistral',
+          type: 'apikey',
+          credentials: { api_key: 'mstrl_test', base_url: 'https://api.mistral.ai/v1' }
+        })
+      },
+      global: {
+        stubs: { ...cnUsageCellStubs, UsageProgressBar: true, AccountQuotaInfo: true }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="cn-quota-cell"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="cn-balance-cell"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('-')
+
+    const relayWrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 9107,
+          platform: 'mistral',
+          type: 'apikey',
+          credentials: { api_key: 'mstrl_test', base_url: 'https://relay.example.com/v1' }
+        })
+      },
+      global: {
+        stubs: { ...cnUsageCellStubs, UsageProgressBar: true, AccountQuotaInfo: true }
+      }
+    })
+
+    await flushPromises()
+
+    expect(relayWrapper.find('div[title="admin.accounts.cnProviders.noBalanceEndpoint"]').exists()).toBe(true)
+  })
+
+  it('shares the Mistral announcement across the real usage cell and another entry', async () => {
+    localStorage.removeItem('sub2api:new-feature-notices:v1:41')
+    const pinia = createPinia()
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        noticeUserId: 41,
+        account: makeAccount({ id: 9108, platform: 'mistral', type: 'apikey', credentials: { base_url: 'https://api.mistral.ai/v1' } })
+      },
+      global: { plugins: [pinia], stubs: { ...cnUsageCellStubs, UsageProgressBar: true, AccountQuotaInfo: true } }
+    })
+    const otherEntry = mount(NewFeatureBadge, {
+      props: { userId: 41, noticeId: NEW_FEATURE_NOTICES.mistralBudgetUsage },
+      global: { plugins: [pinia] }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+    await otherEntry.get('[data-testid="new-feature-badge"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+    wrapper.unmount()
+    otherEntry.unmount()
+    localStorage.removeItem('sub2api:new-feature-notices:v1:41')
   })
 
   it('Antigravity 图片用量会聚合新旧 image 模型', async () => {

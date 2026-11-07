@@ -1,0 +1,99 @@
+name: Multi-group model catalogue
+
+on:
+  push:
+    branches: [fix/multigroup-model-list-union]
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/handler/gateway*'
+      - 'backend/internal/service/api_key_groups.go'
+      - 'backend/internal/service/gateway*'
+      - 'backend/internal/server/middleware/api_key*'
+      - 'backend/internal/server/routes/gateway_models_union_test.go'
+      - '.github/workflows/multigroup-model-list.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  catalogue:
+    name: catalogue-${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Verify exact candidate and clean checkout
+        working-directory: candidate
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test -z "$(git status --porcelain)"
+          go version
+      - name: Restore and verify original production blobs in isolated RED checkout
+        if: matrix.mode == 'RED'
+        working-directory: candidate
+        run: |
+          set -euo pipefail
+          baseline=7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for target in \
+            backend/internal/handler/gateway_handler.go \
+            backend/internal/service/gateway_service.go \
+            backend/internal/service/api_key_groups.go \
+            backend/internal/server/middleware/api_key_auth.go \
+            backend/internal/server/middleware/api_key_groups.go \
+            backend/internal/server/routes/gateway.go; do
+            git show "$baseline:$target" > "$target"
+            expected=$(git rev-parse "$baseline:$target")
+            actual=$(git hash-object "$target")
+            echo "$target baseline=$expected restored=$actual"
+            test "$actual" = "$expected"
+          done
+          rm backend/internal/handler/gateway_models_union.go backend/internal/service/gateway_model_catalog.go
+          test -f backend/internal/server/routes/gateway_models_union_test.go
+          git diff --stat
+      - name: RED must fail at the precise union behavior assertion
+        if: matrix.mode == 'RED'
+        working-directory: candidate/backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          go test -tags=unit ./internal/server/routes -run '^TestMultiGroupModelsUnionTextAndCheapImage$' -count=1 -v > "$RUNNER_TEMP/catalogue-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/catalogue-red.log"
+          test "$result" -ne 0
+          ! grep -Eqi 'build failed|no tests to run|undefined:|panic:|--- SKIP:|setup failed' "$RUNNER_TEMP/catalogue-red.log"
+          grep -q -- '--- FAIL: TestMultiGroupModelsUnionTextAndCheapImage' "$RUNNER_TEMP/catalogue-red.log"
+          grep -q 'UNION_REGRESSION: ordinary discovery must include text and cheap image groups' "$RUNNER_TEMP/catalogue-red.log"
+          grep -q 'text-model' "$RUNNER_TEMP/catalogue-red.log"
+          echo 'RED verified: compiled baseline failed the missing text-model union assertion.'
+      - name: GREEN focused regressions and race checks
+        if: matrix.mode == 'GREEN'
+        working-directory: candidate/backend
+        run: >-
+          go test -race -tags=unit ./internal/server/routes ./internal/handler ./internal/service ./internal/server/middleware
+          -run '^(TestMultiGroupModelsUnion|TestGatewayRoutesPinnedModels|TestGatewayCompositeRouteModels|TestOrdinaryPinnedModels|TestAPIKeyMultiGroupSelection|TestVipCredit.*Subscription|TestGatewayModels_|TestPinnedModels)'
+          -count=1 -v -timeout=5m
+      - name: Preserve regression evidence
+        if: always() && matrix.mode == 'RED'
+        uses: actions/upload-artifact@v6
+        with:
+          name: catalogue-red-${{ github.event_name }}
+          path: ${{ runner.temp }}/catalogue-red.log
+          if-no-files-found: error

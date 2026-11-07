@@ -53,6 +53,12 @@
                 />
                 <NewFeatureBadge
                   v-if="tab.key === 'gateway'"
+                  :notice-id="NEW_FEATURE_NOTICES.deepSeekSearch"
+                  :user-id="authStore.user?.id"
+                  class="settings-tab-badge"
+                />
+                <NewFeatureBadge
+                  v-if="tab.key === 'gateway'"
                   :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting"
                   :user-id="authStore.user?.id"
                   class="settings-tab-badge"
@@ -5215,6 +5221,12 @@
                         >
                           {{ platform }}
                         </label>
+                        <NewFeatureBadge
+                          v-if="platform === 'mistral'"
+                          :notice-id="NEW_FEATURE_NOTICES.mistralBudgetUsage"
+                          :user-id="authStore.user?.id"
+                          class="ml-2"
+                        />
                         <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                           {{
                             t(
@@ -6086,9 +6098,12 @@
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
-              <h2 id="settings-section-web-search-emulation" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.webSearchEmulation.title") }}
-              </h2>
+              <div class="flex items-center gap-2">
+                <h2 id="settings-section-web-search-emulation" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
+                  {{ t("admin.settings.webSearchEmulation.title") }}
+                </h2>
+                <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.deepSeekSearch" :user-id="authStore.user?.id" />
+              </div>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 {{ t("admin.settings.webSearchEmulation.description") }}
               </p>
@@ -6163,8 +6178,15 @@
                         :options="[
                           { value: 'brave', label: 'Brave Search' },
                           { value: 'tavily', label: 'Tavily' },
+                          { value: 'deepseek', label: 'DeepSeek' },
                         ]"
                         class="w-36"
+                        @click.stop
+                      />
+                      <NewFeatureBadge
+                        v-if="provider.type === 'deepseek'"
+                        :notice-id="NEW_FEATURE_NOTICES.deepSeekSearch"
+                        :user-id="authStore.user?.id"
                         @click.stop
                       />
                       <!-- Quota summary (always visible) -->
@@ -6207,6 +6229,9 @@
                     v-if="expandedProviders[pIdx]"
                     class="space-y-3 border-t border-gray-100 px-4 pb-4 pt-3 dark:border-dark-700"
                   >
+                    <p v-if="provider.type === 'deepseek'" class="text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.webSearchEmulation.deepSeekHint") }}
+                    </p>
                     <!-- API Key with inline show/copy -->
                     <div>
                       <label class="text-xs text-gray-500">{{

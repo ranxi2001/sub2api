@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
@@ -235,6 +236,9 @@ func NormalizeLenientJSONRequestBody(body []byte, maxNormalizedBytes int64) ([]b
 	if int64(len(body)) > maxNormalizedBytes {
 		return nil, &http.MaxBytesError{Limit: maxNormalizedBytes}
 	}
+	if len(body) >= 64<<10 && !hasJSONControlBytes(body) {
+		return body, nil
+	}
 
 	var out []byte
 	inString := false
@@ -288,6 +292,26 @@ func trimUTF8BOM(body []byte) []byte {
 
 func isJSONControlByte(b byte) bool {
 	return b < 0x20 || b == 0x7f
+}
+
+func hasJSONControlBytes(body []byte) bool {
+	const ones, high = uint64(0x0101010101010101), uint64(0x8080808080808080)
+	for len(body) >= 8 {
+		word := binary.LittleEndian.Uint64(body)
+		// A zero byte identifies either a value below 0x20 or the DEL byte.
+		low := word & 0xe0e0e0e0e0e0e0e0
+		del := word ^ 0x7f7f7f7f7f7f7f7f
+		if (low-ones)&^low&high != 0 || (del-ones)&^del&high != 0 {
+			return true
+		}
+		body = body[8:]
+	}
+	for _, b := range body {
+		if isJSONControlByte(b) {
+			return true
+		}
+	}
+	return false
 }
 
 func appendJSONUnicodeEscape(dst []byte, b byte) []byte {

@@ -4,6 +4,8 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  mistralBudgetUsage: 'mistral-budget-usage-initial-announcement',
+  deepSeekSearch: 'deepseek-search-provider-initial-announcement',
   groupAntiDistillation: 'group-openai-anti-distillation-initial-announcement',
   channelPricingTransfer: 'channel-pricing-import-export-initial-announcement',
   channelPricingListActions: 'channel-pricing-list-actions-initial-announcement',
