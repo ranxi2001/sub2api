@@ -129,6 +129,9 @@ func (s *CNProviderBalanceService) queryBalanceForAccount(ctx context.Context, a
 	if account.IsCline() {
 		return s.queryClineBalance(ctx, account)
 	}
+	if account.IsMistral() {
+		return s.queryMistralBalance(ctx, account)
+	}
 	provider := account.Platform
 	if provider != PlatformKimi && provider != PlatformDeepseek {
 		return nil, infraerrors.New(http.StatusBadRequest, "CN_BALANCE_NO_ENDPOINT", "account provider has no balance endpoint")
@@ -283,6 +286,13 @@ func validatePayGAccount(account *Account) error {
 	if account.IsCommandCode() {
 		if !account.commandCodeUsageSupported() {
 			return infraerrors.New(http.StatusBadRequest, "CN_BALANCE_NO_ENDPOINT", "command code balance is only available for api key accounts on the official host")
+		}
+		return nil
+	}
+	// Mistral 预算剩余额度与月度窗口同源，只查官方主机。
+	if account.IsMistral() {
+		if !account.mistralUsageSupported() {
+			return infraerrors.New(http.StatusBadRequest, "CN_BALANCE_NO_ENDPOINT", "mistral balance is only available for api key accounts on the official host")
 		}
 		return nil
 	}

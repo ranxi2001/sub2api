@@ -31,6 +31,14 @@ Mistral 原生 Chat 的 `content` 可以从 thinking 数组，经含首段 text 
 
 Mistral 账号的 Codex 目录使用已保存的上游上下文、推理档位和输入模态快照，图片能力根据该账号的同步元数据确定，不套用其他供应商的模型名默认值。原生 Chat 的 developer 消息经现有适配改为 system，顺序和其他字段保持不变。
 
+## 预算与用量探测
+
+推理端点指向官方主机 `https://api.mistral.ai` 的 Mistral API Key 账号支持预算与套餐探测（自定义中转域名不发起官方探测，探测 URL 经全局出站安全白名单校验）：
+
+- `GET /v1/billing/budget`：返回 `vibe_budget` 与 `api_budget`（含 `usage_percentage`、`initial_budget`、`currency`、`reset_at`、`payg_enabled`）。`mstrl_` 前缀的 Vibe Key 读取 `vibe_budget`，常规 API Key 读取 `api_budget`，缺失时互为回退；显式存在的 0 额度预算不跨池回退。
+- `GET /v1/billing/subscription`：返回 `plan_name`、`payg_enabled`、`vibe_payg_enabled`，用于展示套餐等级（如 `INDIVIDUAL` → `Pro`）并在预算对象省略 `payg_enabled` 时提供按量付费状态兜底。
+- 调度与恢复：月度窗口与换算后的剩余额度写入账号 `extra` 快照，支持月度使用率阈值停调与周期低余额停调；开启 `payg_enabled` 时跳过包月额度阈值限制并解除既有预算耗尽冷却。上游返回 `402`（如 `Vibe budget exhausted.`）时记为可恢复的临时停调而非永久 `error`。
+
 ## 离线回归依据
 
 - [Mistral reasoning 文档](https://docs.mistral.ai/studio/conversations/reasoning)：流式阶段及多轮原生历史要求。

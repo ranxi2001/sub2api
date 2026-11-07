@@ -474,8 +474,8 @@
           class="text-xs text-gray-400"
           :title="t('admin.accounts.cnProviders.noBalanceEndpoint')"
         >-</div>
-        <CNProviderQuotaCell :account="account" />
-        <CNProviderBalanceCell :account="account" />
+        <CNProviderQuotaCell :account="account" @probed="handleCNQuotaProbed" />
+        <CNProviderBalanceCell :account="account" :probed-balance="cnProbedBalance" />
       </div>
     </template>
 
@@ -826,6 +826,18 @@ const shouldFetchUsage = computed(() => {
 // credentialsBuilder 的单一实现）：都不可见时显示 `-` 占位符。
 const cnQuotaCellVisible = computed(() => cnQuotaCellVisibleFn(props.account))
 const cnBalanceCellVisible = computed(() => cnBalanceCellVisibleFn(props.account))
+const cnProbedBalance = ref<import('@/api/admin/cnProviders').CNProviderBalanceResult | null>(null)
+const handleCNQuotaProbed = (result: import('@/api/admin/cnProviders').CNProviderQuotaProbeResult) => {
+  if (result.balance?.success) {
+    cnProbedBalance.value = result.balance
+  }
+}
+watch(
+  () => props.account.id,
+  () => {
+    cnProbedBalance.value = null
+  }
+)
 
 const isBatchManaged = computed(() => typeof props.requestBatchedUsage === 'function')
 
