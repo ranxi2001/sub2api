@@ -113,6 +113,9 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if account.IsSIWCEnabled() && account.AuthConnectionID == "" {
 		return false
 	}
+	if s != nil {
+		ctx = s.rateLimitService.maybeRotateOpenAITOTPOn429(ctx, account, statusCode)
+	}
 	// Observe other HTTP responses before request/model-scoped policies return.
 	// The shared handler below skips this reset to keep one observation per response.
 	if s != nil && s.rateLimitService != nil && !isOpenAIIPUnauthorizedResponse(statusCode, responseBody) {

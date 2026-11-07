@@ -3,6 +3,9 @@ import { reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import AutoConfigView from '../AutoConfigView.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
 import { getAutoConfig, saveAutoConfig, type AutoConfig } from '@/api/admin/autoConfig'
 import { listQualityPlans } from '@/api/admin/accountQuality'
 import { getAll, list as listGroups } from '@/api/admin/groups'
@@ -22,15 +25,68 @@ vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('@/api/admin/autoConfig', async importOriginal => ({ ...await importOriginal<typeof import('@/api/admin/autoConfig')>(), getAutoConfig: vi.fn(), saveAutoConfig: vi.fn() }))
 vi.mock('@/api/admin/accountQuality', () => ({ listQualityPlans: vi.fn() }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn(), list: vi.fn() }))
-const config: AutoConfig = { openai_two_fa_admission: defaultOpenAITwoFAAdmissionConfig(), model_billing: defaultModelBillingConfig(), model_mappings: defaultOAuthModelMappings('openai'), excel_bps: defaultExcelBPSDefaults(), enabled: false, platform: 'openai', priority: 50, load_factor: 1, concurrency: 3, cost_multiplier: 0.07, group_ids: [], upgrade_enabled: false, upgrade_group_ids: [], successes_per_step: 20, upgrade_step: 1, max_concurrency: 100, cooldown_seconds: 60, revision: '' }
+const config: AutoConfig = { openai_totp_rotate_on_429: false, openai_two_fa_admission: defaultOpenAITwoFAAdmissionConfig(), model_billing: defaultModelBillingConfig(), model_mappings: defaultOAuthModelMappings('openai'), excel_bps: defaultExcelBPSDefaults(), enabled: false, platform: 'openai', priority: 50, load_factor: 1, concurrency: 3, cost_multiplier: 0.07, group_ids: [], upgrade_enabled: false, upgrade_group_ids: [], successes_per_step: 20, upgrade_step: 1, max_concurrency: 100, cooldown_seconds: 60, revision: '' }
 beforeEach(() => {
-	setActivePinia(createPinia())
+ localStorage.clear(); setActivePinia(createPinia())
  vi.resetAllMocks(); vi.mocked(listQualityPlans).mockResolvedValue([]); state.auth = reactive({ user: { id: 1, role: 'admin' } })
  vi.mocked(listGroups).mockImplementation(async () => ({ items: await getAll(), page: 1, page_size: 100, pages: 1, total: 2 }) as any)
  vi.mocked(getAutoConfig).mockResolvedValue(structuredClone(config)); vi.mocked(saveAutoConfig).mockImplementation(async c => c)
  vi.mocked(getAll).mockResolvedValue([{ id: 5, name: 'OpenAI test', platform: 'openai', status: 'active' }, { id: 6, name: 'Anthropic test', platform: 'anthropic', status: 'active' }] as Group[])
 })
 describe('AutoConfigView', () => {
+ it('keeps the new 429 notice independent of old dismissals and persists its dismissal', async () => {
+  const id = NEW_FEATURE_NOTICES.oauthInitialTOTPRotation429
+  const oldId = NEW_FEATURE_NOTICES.protocolFeatureSwitches
+  useNewFeatureNoticeStore().dismiss(1, oldId)
+  const w = mount(AutoConfigView); await flushPromises()
+  const rotationNotice = (view: typeof w) => view.findAllComponents(NewFeatureBadge).find(badge => badge.props('noticeId') === id)!
+  const other = mount(NewFeatureBadge, { props: { noticeId: id, userId: 1 } })
+  expect(rotationNotice(w).find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  expect(other.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  await rotationNotice(w).get('[data-testid="new-feature-badge"]').trigger('click')
+  expect(rotationNotice(w).find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+  expect(w.get('[data-testid="initial-model-selection"]').find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  expect(other.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+  expect(w.get<HTMLInputElement>('[data-testid="totp-rotate-on-429"]').element.checked).toBe(false)
+  w.unmount(); other.unmount()
+  setActivePinia(createPinia())
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(rotationNotice(reloaded).find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+  expect(useNewFeatureNoticeStore().isDismissed(1, oldId)).toBe(true)
+  const future = mount(NewFeatureBadge, { props: { noticeId: 'future-announcement-test', userId: 1 } })
+  expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  reloaded.unmount(); future.unmount()
+ })
+ it('saves the 429 2FA opt-in with initial OAuth configuration and reloads it', async () => {
+  const w = mount(AutoConfigView); await flushPromises()
+  const checkbox = '[data-testid="totp-rotate-on-429"]'
+  expect(w.get<HTMLInputElement>(checkbox).element.checked).toBe(false)
+  expect(w.get(checkbox).element.closest('section')).toBe(w.get('[data-testid="initial-enabled"]').element.closest('section'))
+  await w.get('[data-testid="initial-enabled"]').setValue(true)
+  await w.get('[data-testid="initial-group-5"]').setValue(true)
+  await w.get(checkbox).setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, enabled: true, group_ids: [5], openai_totp_rotate_on_429: true })
+  expect(w.get<HTMLInputElement>(checkbox).element.checked).toBe(true)
+  w.unmount()
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_totp_rotate_on_429: true })
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(reloaded.get<HTMLInputElement>(checkbox).element.checked).toBe(true)
+  await reloaded.get('[data-testid="platform"]').setValue('anthropic')
+  expect(reloaded.find(checkbox).exists()).toBe(false)
+  await reloaded.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenLastCalledWith({ ...config, platform: 'anthropic', selected_models: null, quality_rule: null, model_mappings: [] })
+  reloaded.unmount()
+ })
+ it('keeps the 429 2FA option off for legacy settings', async () => {
+  const { openai_totp_rotate_on_429: _rotation, ...legacy } = config
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(legacy)
+  const w = mount(AutoConfigView); await flushPromises()
+  expect(w.get<HTMLInputElement>('[data-testid="totp-rotate-on-429"]').element.checked).toBe(false)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalledWith(config)
+  w.unmount()
+ })
  it('starts with the Luna 10x rule disabled and saves model billing independently', async () => {
   const w = mount(AutoConfigView); await flushPromises()
   expect(w.get<HTMLInputElement>('[data-testid="model-billing-enabled"]').element.checked).toBe(false)

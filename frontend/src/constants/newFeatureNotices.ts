@@ -20,6 +20,7 @@ export const NEW_FEATURE_NOTICES = {
   apiKeyLongContext: 'api-key-long-context-control-initial-announcement',
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
+  oauthInitialTOTPRotation429: 'oauth-initial-totp-rotation-on-429-initial-announcement',
   aiOpsCodex: 'ai-ops-codex-observe-initial-announcement',
   bepusdtPayment: 'bepusdt-embedded-payment-initial-announcement',
   accountDailyScheduling: 'account-daily-schedulable-timers-initial-announcement',
