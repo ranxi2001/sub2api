@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -49,14 +50,23 @@ func TestGeminiTextDeltaMatchesLegacy(t *testing.T) {
 }
 
 func TestGeminiTextDeltaIncrementalAllocationsStayLinear(t *testing.T) {
-	chunk := strings.Repeat("x", 100)
-	const chunks = 2000
+	// Distinct prefixes keep every chunk on the incremental path. Repeating
+	// one chunk would be deduplicated and would never grow the stored text.
+	chunks := make([]string, 2000)
+	wantBytes := 0
+	for i := range chunks {
+		chunks[i] = strconv.Itoa(i) + ":" + strings.Repeat("x", 100)
+		wantBytes += len(chunks[i])
+	}
+	gotBytes := 0
 	allocs := testing.AllocsPerRun(5, func() {
 		var state geminiTextDelta
-		for i := 0; i < chunks; i++ {
+		for _, chunk := range chunks {
 			_ = state.next(chunk)
 		}
+		gotBytes = state.seen.Len()
 	})
+	require.Equal(t, wantBytes, gotBytes, "every incremental chunk must be retained")
 	// Concatenation allocates once per chunk; amortized growth needs O(log n).
 	require.Less(t, allocs, float64(100), "allocs per stream: %v", allocs)
 }
