@@ -30,6 +30,9 @@ func fixture(t *testing.T) (*Service, *fakeMail) {
 	t.Helper()
 	dsn := os.Getenv("KEYRISK_TEST_POSTGRES_DSN")
 	if dsn == "" {
+		if os.Getenv("KEYRISK_TEST_REQUIRED") == "true" {
+			t.Fatal("KEYRISK_TEST_POSTGRES_DSN is required for key risk acceptance")
+		}
 		t.Skip("requires isolated local KEYRISK_TEST_POSTGRES_DSN")
 	}
 	u, e := url.Parse(dsn)

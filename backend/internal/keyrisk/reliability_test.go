@@ -219,3 +219,47 @@ func TestPendingNoticeMergesAdditionalSelectedKeys(t *testing.T) {
 	}
 	t.Fatal("recipient missing")
 }
+
+func TestRiskNoticeIncludesAllKeysBeyondFifty(t *testing.T) {
+	s, m := fixture(t)
+	ctx := context.Background()
+	cfg := DefaultConfig()
+	cfg.MaxReminders = 1
+	if err := s.Save(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, s, `INSERT INTO api_keys(id,user_id,name) SELECT id,1,'overflow-'||id FROM generate_series(1001,1050) id;
+INSERT INTO usage_logs(ip_address,user_id,api_key_id) SELECT '192.0.2.1',1,id FROM generate_series(1001,1050) id`)
+	run(t, s)
+	events, err := s.Events(ctx, 0)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("risk event: %v %v", events, err)
+	}
+	if err := s.Notify(ctx, events[0].ID, 99); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.deliver(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for i, to := range m.to {
+		if to != "one@example.invalid" {
+			continue
+		}
+		if strings.Count(m.body[i], "<li>") != 51 || !strings.Contains(m.body[i], "overflow-1050") {
+			t.Fatalf("risk mail omitted keys after the first fifty: %s", m.body[i])
+		}
+	}
+	if len(m.to) != 3 {
+		t.Fatalf("wanted one notification per owner, got %v", m.to)
+	}
+	var recorded int
+	if err := s.DB.QueryRowContext(ctx, "SELECT cardinality(key_ids) FROM key_risk_deliveries WHERE user_id=1 AND event_id=$1", events[0].ID).Scan(&recorded); err != nil || recorded != 51 {
+		t.Fatalf("delivery attribution lost keys: %d %v", recorded, err)
+	}
+	exec(t, s, "DELETE FROM key_risk_outbox")
+	exec(t, s, "UPDATE key_risk_deliveries SET attempted_at=attempted_at-interval '25 hours'")
+	queued, err := s.NotifyUsers(ctx, events[0].ID, 99)
+	if err != nil || queued != 0 {
+		t.Fatalf("complete notification must still respect the event reminder cap: %d %v", queued, err)
+	}
+}

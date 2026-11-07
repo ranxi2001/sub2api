@@ -447,7 +447,7 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
  JOIN key_risk_recipients r ON r.event_id=i.event_id AND r.generation=i.generation AND r.user_id=k.user_id
  WHERE i.outbox_id=$4 AND i.key_id=k.id AND v.state='pending' AND r.acknowledged_at IS NULL
  AND (SELECT count(*) FROM key_risk_deliveries d WHERE d.event_id=r.event_id AND d.generation=r.generation AND d.user_id=r.user_id)<$5)))
- ORDER BY k.id LIMIT 50`, user, kind, time.Now().Add(-time.Duration(c.AgeDays)*24*time.Hour), id, c.MaxReminders)
+	 ORDER BY k.id LIMIT CASE WHEN $2='age' THEN 50 ELSE NULL END`, user, kind, time.Now().Add(-time.Duration(c.AgeDays)*24*time.Hour), id, c.MaxReminders)
 	if e != nil {
 		return false, e
 	}
