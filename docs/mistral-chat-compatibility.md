@@ -25,7 +25,7 @@ Mistral 原生 Chat 的 `content` 可以从 thinking 数组，经含首段 text 
 
 ## 推理与路由
 
-`reasoning.effort` 的非空值优先于 `reasoning_effort`，出站统一为 Mistral 原生 `reasoning_effort` 并移除 nested `reasoning`。只有最终上游模型恰为 `zai-glm-5-3` 时应用其已确认档位映射：none/minimal → low，medium → high，xhigh → max。用量元数据读取最终出站档位。
+`reasoning.effort` 的非空值优先于 `reasoning_effort`，出站统一为 Mistral 原生 `reasoning_effort` 并移除 nested `reasoning`。最终上游模型命中已确认的 Mistral 档位白名单家族时应用映射：GLM（`zai-glm-5-3`、`zai-glm-5-3-flash`）映射为 none/minimal → low、medium → high、xhigh → max；DeepSeek（`deepseek-*`、`deepseek_*`，白名单 `none`/`low`/`high`/`xhigh`/`max`）映射为 minimal → low、medium → high、x-high/extra_high → xhigh、ultra → max、off/disabled → none，空值/auto/default/未知或非字符串值移除交由上游默认处理。Mistral 平台出站不注入 DeepSeek thinking-mode 的 `reasoning_content` 占位符，并在发送前兜底剥离残留的 `reasoning_content`/`reasoning_details` 与归一化 `reasoning_effort`。用量元数据读取最终出站档位。
 
 复合分组支持明确的 `mistral/` 前缀及 Mistral 原生模型族。显式路由和精确账号映射保持优先，跨平台精确归属冲突继续拒绝。共享 GLM 名称不据此归为 Mistral；`zai-glm-5-3` 需要 `mistral/` 前缀或显式路由/精确账号映射。
 
