@@ -708,6 +708,7 @@ export default {
         enabledHint: '全局开关。关闭后所有渠道和账号的 web search 模拟均不生效。',
         providers: '搜索服务商',
         addProvider: '添加服务商',
+        deepSeekHint: '使用 DeepSeek 独立 Search API 和 DeepSeek API Key。查询须为 1–128 个 Unicode 字符；返回搜索结果，不抓取完整网页。',
         providerType: '服务商类型',
         apiKey: 'API Key',
         apiKeyPlaceholder: '输入 API Key',

@@ -715,6 +715,7 @@ export default {
         enabledHint: 'Global switch. When disabled, web search emulation is inactive for all channels and accounts.',
         providers: 'Search Providers',
         addProvider: 'Add Provider',
+        deepSeekHint: 'Uses the standalone DeepSeek Search API with a DeepSeek API key. Queries must contain 1–128 Unicode characters; returns search results without fetching full pages.',
         providerType: 'Provider Type',
         apiKey: 'API Key',
         apiKeyPlaceholder: 'Enter API Key',
