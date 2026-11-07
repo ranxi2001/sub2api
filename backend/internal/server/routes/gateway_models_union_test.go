@@ -6,9 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,16 +19,20 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/testutil"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
 type unionKeys struct {
 	service.APIKeyRepository
+	mu  sync.RWMutex
 	key *service.APIKey
 }
 
 func (r *unionKeys) GetByKeyForAuth(context.Context, string) (*service.APIKey, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	k := *r.key
 	u := *k.User
 	k.User = &u
@@ -35,11 +42,14 @@ func (*unionKeys) UpdateLastUsed(context.Context, int64, time.Time) error { retu
 
 type unionGroups struct {
 	service.GroupRepository
+	mu     sync.RWMutex
 	groups map[int64]*service.Group
 	err    error
 }
 
 func (r *unionGroups) GetByIDLite(_ context.Context, id int64) (*service.Group, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -73,11 +83,14 @@ func (r *unionAccounts) ListModelAvailabilityCandidates(ctx context.Context, id 
 
 type unionRates struct {
 	service.UserGroupRateRepository
+	mu     sync.RWMutex
 	denied map[int64][]string
 	err    error
 }
 
 func (r *unionRates) GetDeniedModelsByUserAndGroup(_ context.Context, _, id int64) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.denied[id], r.err
 }
 func (*unionRates) GetRPMOverrideByUserAndGroup(context.Context, int64, int64) (*int, error) {
@@ -122,12 +135,14 @@ func (p *unionProbe) ProbeAPIKeyGroup(_ context.Context, g *service.Group, model
 }
 
 type unionFixture struct {
-	key      *service.APIKey
-	groups   *unionGroups
-	accounts *unionAccounts
-	rates    *unionRates
-	subs     *unionSubscriptions
-	probe    *unionProbe
+	key         *service.APIKey
+	groups      *unionGroups
+	accounts    *unionAccounts
+	rates       *unionRates
+	subs        *unionSubscriptions
+	probe       *unionProbe
+	concurrency *service.ConcurrencyService
+	keyRepo     *unionKeys
 }
 
 func newUnionFixture() *unionFixture {
@@ -152,14 +167,15 @@ func (f *unionFixture) router(t *testing.T, forced string, openAI *service.OpenA
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{RunMode: config.RunModeStandard}
-	keys := service.NewAPIKeyService(&unionKeys{key: f.key}, nil, f.groups, f.subs, f.rates, nil, cfg)
+	f.keyRepo = &unionKeys{key: f.key}
+	keys := service.NewAPIKeyService(f.keyRepo, nil, f.groups, f.subs, f.rates, nil, cfg)
 	var resolver *service.CompositeRouteResolver
 	if routeRepo != nil {
 		resolver = service.NewCompositeRouteResolver(routeRepo)
 	}
 	gateway := service.NewGatewayService(f.accounts, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, resolver, nil, nil)
 	h := &handler.Handlers{
-		Gateway:       handler.NewGatewayHandler(gateway, openAI, nil, nil, nil, nil, nil, nil, keys, nil, nil, nil, nil, cfg, nil),
+		Gateway:       handler.NewGatewayHandler(gateway, openAI, nil, nil, nil, f.concurrency, nil, nil, keys, nil, nil, nil, nil, cfg, nil),
 		OpenAIGateway: handler.NewOpenAIGatewayHandler(openAI, nil, nil, nil, nil, nil, nil, nil, cfg),
 		AsyncImage:    handler.NewAsyncImageHandler(nil, nil),
 	}
@@ -320,4 +336,210 @@ func TestMultiGroupModelsUnionForcedPlatform(t *testing.T) {
 	f := newUnionFixture()
 	f.accounts.groups[1] = append(f.accounts.groups[1], service.Account{ID: 103, Platform: service.PlatformAnthropic, Credentials: map[string]any{"model_mapping": map[string]any{"claude-test": "claude-test"}}})
 	require.Equal(t, []string{"claude-test"}, unionIDs(t, unionRequest(f.router(t, service.PlatformAnthropic, nil, nil), "GET", "/v1/models")))
+}
+
+type unionRoutes struct {
+	service.CompositeModelRouteRepository
+	routes []service.CompositeModelRoute
+	err    error
+}
+
+func (r *unionRoutes) ListByGroup(context.Context, int64, bool) ([]service.CompositeModelRoute, error) {
+	return r.routes, r.err
+}
+
+func TestMultiGroupModelsUnionCompositeRoutes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*unionFixture, *unionRoutes)
+		want   []string
+		status int
+	}{
+		{"available alias", func(*unionFixture, *unionRoutes) {}, []string{"image-model", "public-text", "shared-model", "text-model"}, 200},
+		{"no target accounts", func(f *unionFixture, _ *unionRoutes) { f.accounts.groups[1] = nil }, []string{"image-model", "shared-model"}, 200},
+		{"wrong target platform", func(_ *unionFixture, r *unionRoutes) { r.routes[0].TargetPlatform = service.PlatformAnthropic }, []string{"image-model", "shared-model", "text-model"}, 200},
+		{"upstream restricted", func(f *unionFixture, _ *unionRoutes) {
+			f.accounts.groups[1][0].AccountGroups = []service.AccountGroup{{GroupID: 1, AllowedModels: []string{"shared-model"}}}
+		}, []string{"image-model", "shared-model"}, 200},
+		{"route dependency", func(_ *unionFixture, r *unionRoutes) { r.err = errors.New("offline") }, nil, 503},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newUnionFixture()
+			f.groups.groups[1].Platform = service.PlatformComposite
+			routes := &unionRoutes{routes: []service.CompositeModelRoute{
+				{PublicModel: "public-text", TargetPlatform: service.PlatformOpenAI, UpstreamModel: "text-model", Enabled: true, MatchType: service.CompositeRouteMatchExact},
+				{PublicModel: "disabled-alias", TargetPlatform: service.PlatformOpenAI, UpstreamModel: "text-model", Enabled: false, MatchType: service.CompositeRouteMatchExact},
+				{PublicModel: "prefix-", TargetPlatform: service.PlatformOpenAI, UpstreamModel: "text-model", Enabled: true, MatchType: service.CompositeRouteMatchPrefix},
+			}}
+			tc.change(f, routes)
+			w := unionRequest(f.router(t, "", nil, routes), http.MethodGet, "/v1/models")
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+			if tc.status == 200 {
+				require.Equal(t, tc.want, unionIDs(t, w))
+			}
+		})
+	}
+}
+
+type unionUpstream struct {
+	service.HTTPUpstream
+	mu         sync.Mutex
+	fail       bool
+	codexCalls int
+	methods    []string
+}
+
+func (u *unionUpstream) Do(req *http.Request, _ string, id int64, _ int) (*http.Response, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.methods = append(u.methods, req.Method)
+	if u.fail {
+		return nil, errors.New("discovery offline")
+	}
+	body := `{"data":[{"id":"upstream-text","context_window":123456,"source_account":` + strconv.FormatInt(id, 10) + `},{"id":"shared-model","source_account":` + strconv.FormatInt(id, 10) + `}]}`
+	if req.URL.Query().Has("client_version") {
+		u.codexCalls++
+		body = `{"models":[{"slug":"gpt-6.1-sol","multi_agent_version":"v2","multi_agent_reasoning_effort":"xhigh"}]}`
+	}
+	return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+func (f *unionFixture) pinnedService(u *unionUpstream) *service.OpenAIGatewayService {
+	for id, accounts := range f.accounts.groups {
+		accounts[0].Credentials = map[string]any{"api_key": "synthetic-upstream-key", "base_url": "https://models.example/v1", "model_mapping": map[string]any{"public-text": "upstream-text", "shared-model": "shared-model"}}
+		f.accounts.groups[id] = accounts
+		f.groups.groups[id].CodexModelsManifestConfig = service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{accounts[0].ID}}
+	}
+	return service.NewOpenAIGatewayService(f.accounts, nil, nil, nil, nil, nil, nil, nil, &config.Config{}, nil, nil, nil, nil, nil, u, nil, nil, nil, nil, nil, nil, nil, nil)
+}
+func TestMultiGroupModelsUnionPinnedMappingAndDeterministicMetadata(t *testing.T) {
+	f := newUnionFixture()
+	u := &unionUpstream{}
+	s := f.pinnedService(u)
+	f.groups.groups[1].ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{"public-*", "shared-model"}}
+	f.rates.denied[1] = []string{"public-text"}
+	r := f.router(t, "", s, nil)
+	first := unionRequest(r, http.MethodGet, "/v1/models")
+	require.Equal(t, []string{"public-text", "shared-model"}, unionIDs(t, first))
+	require.Contains(t, first.Body.String(), `"context_window":123456`)
+	require.Contains(t, first.Body.String(), `"source_account":101`)
+	f.key.GroupIDs = []int64{2, 1}
+	f.key.GroupID = &f.groups.groups[2].ID
+	f.key.Group = f.groups.groups[2]
+	f.groups.groups[1].RateMultiplier = 100
+	f.groups.groups[2].RateMultiplier = 0.001
+	second := unionRequest(f.router(t, "", s, nil), http.MethodGet, "/v1/models")
+	require.Equal(t, first.Body.String(), second.Body.String())
+	require.Empty(t, second.Header().Get("ETag"))
+	require.Zero(t, u.codexCalls)
+	for _, method := range u.methods {
+		require.Equal(t, http.MethodGet, method, "discovery cannot issue paid generation POST")
+	}
+}
+func TestMultiGroupModelsUnionPinnedFailureAndEmpty(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(strconv.FormatBool(empty), func(t *testing.T) {
+			f := newUnionFixture()
+			u := &unionUpstream{fail: !empty}
+			s := f.pinnedService(u)
+			if empty {
+				for _, g := range f.groups.groups {
+					g.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{"missing"}}
+				}
+			}
+			w := unionRequest(f.router(t, "", s, nil), http.MethodGet, "/v1/models")
+			if empty {
+				require.Empty(t, unionIDs(t, w))
+			} else {
+				require.Equal(t, 503, w.Code)
+				require.NotContains(t, w.Body.String(), `"data"`)
+			}
+		})
+	}
+}
+func TestMultiGroupModelsUnionCodexAndClientRestrictions(t *testing.T) {
+	f := newUnionFixture()
+	f.groups.groups[1].CodexCLIOnly = true
+	r := f.router(t, "", nil, nil)
+	require.Equal(t, []string{"image-model", "shared-model"}, unionIDs(t, unionRequest(r, http.MethodGet, "/v1/models")))
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer synthetic-union-key")
+	req.Header.Set("User-Agent", "codex-tui/0.163.0 (Ubuntu 22.4.0; x86_64) xterm-256color")
+	req.Header.Set("Originator", "codex-tui")
+	req.Header.Set("X-Codex-Window-Id", "test-codex-window")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, []string{"image-model", "shared-model", "text-model"}, unionIDs(t, w))
+	f = newUnionFixture()
+	u := &unionUpstream{}
+	s := f.pinnedService(u)
+	r = f.router(t, "", s, nil)
+	w = unionRequest(r, http.MethodGet, "/v1/models?client_version=0.163.0")
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"models"`)
+	require.NotContains(t, w.Body.String(), `"data"`)
+	require.Positive(t, u.codexCalls)
+	require.Positive(t, f.probe.calls, "Codex must retain existing selected-group path")
+}
+
+func TestMultiGroupModelsUnionKeyExpiryAndQuota(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*service.APIKey)
+	}{
+		{"expired", func(k *service.APIKey) { past := time.Now().Add(-time.Hour); k.ExpiresAt = &past }},
+		{"quota exhausted", func(k *service.APIKey) { k.Status = service.StatusAPIKeyQuotaExhausted }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newUnionFixture()
+			tc.change(f.key)
+			require.Equal(t, 403, unionRequest(f.router(t, "", nil, nil), http.MethodGet, "/v1/models").Code)
+		})
+	}
+}
+
+func TestMultiGroupModelsUnionRefreshesNonRepresentativeGroupAfterQueue(t *testing.T) {
+	for _, change := range []string{"unbind", "disable", "deny"} {
+		t.Run(change, func(t *testing.T) {
+			f := newUnionFixture()
+			f.key.ConcurrencyLimit = 1
+			cache := testutil.NewRedisConcurrencyCache(t)
+			f.concurrency = service.NewConcurrencyService(cache)
+			f.concurrency.SetAPIKeyQueuePolicy(service.APIKeyQueuePolicy{MaxWaiting: 5, Timeout: 3 * time.Second})
+			keyCache := cache.(service.APIKeyConcurrencyCache)
+			queueCache := cache.(service.APIKeySlotQueueCache)
+			require.NoError(t, keyCache.TrackAPIKeySlot(context.Background(), f.key.ID, "holder"))
+			r := f.router(t, "", nil, nil)
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() { done <- unionRequest(r, http.MethodGet, "/v1/models") }()
+			require.Eventually(t, func() bool {
+				_, waiting, err := queueCache.GetAPIKeyQueueStats(context.Background(), f.key.ID)
+				return err == nil && waiting == 1
+			}, 2*time.Second, time.Millisecond)
+			switch change {
+			case "unbind":
+				f.keyRepo.mu.Lock()
+				latest := *f.keyRepo.key
+				latest.GroupIDs = []int64{1}
+				f.keyRepo.key = &latest
+				f.keyRepo.mu.Unlock()
+			case "disable":
+				f.groups.mu.Lock()
+				g := *f.groups.groups[2]
+				g.Status = service.StatusDisabled
+				f.groups.groups[2] = &g
+				f.groups.mu.Unlock()
+			case "deny":
+				f.rates.mu.Lock()
+				f.rates.denied[2] = []string{"image-model", "shared-model"}
+				f.rates.mu.Unlock()
+			}
+			require.NoError(t, keyCache.ReleaseAPIKeySlot(context.Background(), f.key.ID, "holder"))
+			select {
+			case w := <-done:
+				require.Equal(t, []string{"shared-model", "text-model"}, unionIDs(t, w), "queued discovery must not reuse the non-representative group's stale permissions")
+			case <-time.After(4 * time.Second):
+				t.Fatal("queued discovery did not finish")
+			}
+		})
+	}
 }

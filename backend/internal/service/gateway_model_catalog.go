@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
@@ -65,13 +66,28 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 			}
 		}
 	}
-	if platform == PlatformComposite {
-		models, err := s.GetCompositeRouteModels(ctx, &groupID, "")
+	if platform == PlatformComposite && s.compositeResolver != nil && s.compositeResolver.repo != nil {
+		routes, err := s.compositeResolver.repo.ListByGroup(ctx, groupID, false)
 		if err != nil {
 			return nil, err
 		}
-		for _, model := range models {
-			seen[model] = struct{}{}
+		for _, route := range routes {
+			public := strings.TrimSpace(route.PublicModel)
+			if !route.Enabled || route.MatchType != CompositeRouteMatchExact || public == "" {
+				continue
+			}
+			upstream := strings.TrimSpace(route.UpstreamModel)
+			if upstream == "" {
+				upstream = public
+			}
+			// An alias is a source only when its concrete target is usable in
+			// this group. A route declaration alone cannot revive an empty group.
+			for _, account := range accounts {
+				if account.Platform == route.TargetPlatform && account.IsModelAllowedInGroup(&groupID, upstream) && account.IsModelSupported(upstream) {
+					seen[public] = struct{}{}
+					break
+				}
+			}
 		}
 	}
 	models := make([]string, 0, len(seen))

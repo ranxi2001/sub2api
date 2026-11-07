@@ -1157,6 +1157,14 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	if groups, ok := middleware2.GetModelListingGroups(c); ok {
+		if apiKey != nil && apiKey.ConcurrencyLimit > 0 {
+			var err error
+			groups, err = middleware2.RefreshModelListingGroups(c)
+			if err != nil {
+				writeOpenAIModelsError(c, http.StatusServiceUnavailable, "api_error", "Model listing authorization changed; please retry")
+				return
+			}
+		}
 		h.multiGroupModels(c, groups)
 		return
 	}

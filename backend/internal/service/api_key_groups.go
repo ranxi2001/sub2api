@@ -154,7 +154,7 @@ type apiKeyGroupCandidate struct {
 // group, probes capacity, loads prices, or recovers credit. Each candidate owns
 // its User snapshot so per-group restrictions cannot contaminate auth caches.
 func (s *APIKeyService) ModelListingGroups(ctx context.Context, key *APIKey, accepts func(*APIKey) bool) ([]*APIKey, error) {
-	if key == nil || key.User == nil || s.groupRepo == nil || s.localAuth != nil {
+	if key == nil || key.User == nil || s.groupRepo == nil || s.userGroupRateRepo == nil || s.localAuth != nil {
 		return nil, infraerrors.ServiceUnavailable("MODEL_LISTING_UNAVAILABLE", "Model listing authorization is unavailable")
 	}
 	var out []*APIKey

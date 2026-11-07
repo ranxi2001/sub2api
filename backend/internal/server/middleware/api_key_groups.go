@@ -19,6 +19,9 @@ func isMultiGroupBillingInfoRequest(c *gin.Context, key *service.APIKey) bool {
 }
 
 const modelListingGroupsKey = "api_key.model_listing_groups"
+const modelListingRefreshKey = "api_key.model_listing_refresh"
+
+type modelListingRefresh func(context.Context) ([]*service.APIKey, error)
 
 // Only the ordinary collection uses a union. Explicit model selection, model
 // retrieval and Codex manifests retain their existing request-group semantics.
@@ -32,6 +35,18 @@ func GetModelListingGroups(c *gin.Context) ([]*service.APIKey, bool) {
 	value, ok := c.Get(modelListingGroupsKey)
 	groups, valid := value.([]*service.APIKey)
 	return groups, ok && valid
+}
+
+// RefreshModelListingGroups runs synchronously after a queued directory request
+// acquires its key slot. Queue revalidation pins one billing group; discovery
+// must also recheck every other bound group's current permissions.
+func RefreshModelListingGroups(c *gin.Context) ([]*service.APIKey, error) {
+	value, _ := c.Get(modelListingRefreshKey)
+	refresh, ok := value.(modelListingRefresh)
+	if !ok {
+		return nil, infraerrors.ServiceUnavailable("MODEL_LISTING_UNAVAILABLE", "Model listing authorization is unavailable")
+	}
+	return refresh(c.Request.Context())
 }
 
 func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subscriptions *service.SubscriptionService, cfg *config.Config, key *service.APIKey, google bool) (*service.APIKey, error) {
@@ -145,6 +160,19 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 			return nil, err
 		}
 		c.Set(modelListingGroupsKey, groups)
+		if key.ConcurrencyLimit > 0 {
+			c.Set(modelListingRefreshKey, modelListingRefresh(func(ctx context.Context) ([]*service.APIKey, error) {
+				latest, err := keys.GetByKeyUncached(ctx, key.Key)
+				if err != nil {
+					return nil, err
+				}
+				if latest == nil || latest.ID != key.ID || latest.UserID != key.UserID || latest.User == nil ||
+					!latest.User.IsActive() || (!latest.IsActive() && latest.Status != service.StatusAPIKeyQuotaExhausted) || latest.IsExpired() {
+					return nil, infraerrors.Forbidden("MODEL_LISTING_UNAVAILABLE", "Model listing authorization changed")
+				}
+				return keys.ModelListingGroups(ctx, latest, accepts)
+			}))
+		}
 		SetOpsFallbackAPIKey(c, groups[0])
 		return groups[0], nil
 	}
