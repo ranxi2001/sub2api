@@ -32,6 +32,7 @@ function mountView(locale: 'en' | 'zh' = 'en') {
 let wrapper: ReturnType<typeof mountView> | undefined
 beforeEach(() => {
   vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-11-05T00:20:01Z'))
   auth.isAdmin = true
   for (const fn of Object.values(api)) fn.mockReset()
   api.status.mockResolvedValue({ ...ready })
@@ -99,6 +100,56 @@ describe('AI operations observe-only page', () => {
     await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
     expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
     expect(api.create).not.toHaveBeenCalled()
+  })
+
+  it.each(['en', 'zh'] as const)('shows the cooldown and blocks a consented run until it expires in %s', async locale => {
+    api.status.mockResolvedValue({ ...ready, last_run_at: '2026-11-05T00:19:01Z' })
+    wrapper = mountView(locale); await flushPromises()
+    expect(wrapper.get('[data-testid="ai-ops-cooldown"]').text()).toContain('4:00')
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
+    await vi.advanceTimersByTimeAsync(239000)
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.find('[data-testid="ai-ops-cooldown"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeUndefined()
+    expect(api.create).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, 'invalid-time'])('does not invent a cooldown for an unknown timestamp (%s)', async last_run_at => {
+    api.status.mockResolvedValue({ ...ready, last_run_at })
+    wrapper = mountView(); await flushPromises()
+    expect(wrapper.find('[data-testid="ai-ops-cooldown"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeUndefined()
+    expect(api.create).not.toHaveBeenCalled()
+  })
+
+  it('uses a newer retained run to keep the cooldown when status is stale', async () => {
+    const latest = { ...run(), created_at: '2026-11-05T00:19:01Z' }
+    api.status.mockResolvedValue({ ...ready, last_run_at: '2026-11-05T00:00:00Z' })
+    api.list.mockResolvedValue({ items: [latest], total: 1 })
+    api.get.mockResolvedValue(latest)
+    wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
+    expect(wrapper.get('[data-testid="ai-ops-cooldown"]').text()).toContain('4:00')
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
+    expect(api.create).not.toHaveBeenCalled()
+  })
+
+  it.each(['stale', 'failed'] as const)('keeps the accepted run cooldown after a %s status refresh', async refreshState => {
+    api.status.mockResolvedValueOnce({ ...ready })
+    if (refreshState === 'failed') api.status.mockRejectedValueOnce(new Error('status unavailable'))
+    api.status.mockResolvedValue({ ...ready })
+    api.create.mockResolvedValue({ ...run('accepted-run'), created_at: new Date().toISOString() })
+    wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
+    await wrapper.get('[data-testid="ai-ops-start"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="ai-ops-refresh"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
+    expect(wrapper.get('[data-testid="ai-ops-cooldown"]').text()).toContain('5:00')
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
+    expect(api.create).toHaveBeenCalledOnce()
   })
 
   it('polls only the selected run and stops when the run completes', async () => {
@@ -183,10 +234,58 @@ describe('AI operations observe-only page', () => {
     await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
     await wrapper.get('[data-testid="ai-ops-start"]').trigger('click'); await flushPromises()
     expect(wrapper.text()).toContain(en.startFailed)
+    expect(wrapper.get('[data-testid="ai-ops-state"]').text()).toBe(en.awaitingConfirmation)
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="ai-ops-refresh"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeUndefined()
+    expect(api.create).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    [429, en.rateLimited], [409, en.stateChanged],
+  ])('explains HTTP %i without replaying a paid request', async (status, expected) => {
+    api.create.mockRejectedValue({ status, message: 'provider secret must not be shown' })
+    wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
+    await wrapper.get('[data-testid="ai-ops-start"]').trigger('click'); await flushPromises()
+    expect(wrapper.text()).toContain(expected)
+    expect(wrapper.text()).not.toContain('provider secret must not be shown')
+    expect((wrapper.get('[data-testid="ai-ops-cost-consent"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(api.create).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an uncertain submission locked until both status and history refresh successfully', async () => {
+    api.create.mockRejectedValue({ status: 0 })
+    wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
+    await wrapper.get('[data-testid="ai-ops-start"]').trigger('click'); await flushPromises()
+    api.status.mockRejectedValueOnce(new Error('status unavailable'))
+    await wrapper.get('[data-testid="ai-ops-refresh"]').trigger('click'); await flushPromises()
+    api.list.mockRejectedValueOnce(new Error('history unavailable'))
+    await wrapper.get('[data-testid="ai-ops-refresh"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="ai-ops-cost-consent"]').setValue(true)
     expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="ai-ops-refresh"]').trigger('click'); await flushPromises()
     expect(wrapper.get('[data-testid="ai-ops-start"]').attributes('disabled')).toBeUndefined()
     expect(api.create).toHaveBeenCalledOnce()
+  })
+
+  it('starts with history and technical details collapsed, without hiding evidence limitations', async () => {
+    const report = run()
+    report.evidence[0].status = 'truncated'
+    api.list.mockResolvedValue({ items: [report], total: 1 })
+    api.get.mockResolvedValue(report)
+    wrapper = mountView(); await flushPromises()
+    expect(wrapper.get('[data-testid="ai-ops-history"]').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-testid="ai-ops-report-details"]').attributes('open')).toBeUndefined()
+    expect(wrapper.get('[data-testid="ai-ops-report-limitations"]').text()).toContain(en.limitationsHint)
+    expect(wrapper.get('[data-testid="ai-ops-incomplete-evidence"]').text()).toContain('1')
+    expect(wrapper.get('[data-testid="ai-ops-summary"]').text()).toBe('Summary run-a')
+    expect(api.create).not.toHaveBeenCalled()
   })
 
   it('renders model output and evidence as escaped text with no apply control', async () => {

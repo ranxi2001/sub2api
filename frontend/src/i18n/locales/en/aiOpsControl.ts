@@ -1,6 +1,9 @@
 export default {
   title: 'Controlled execution',
   description: 'Diagnostic reports remain suggestions. Production changes use a saved policy, fresh evidence and an explicit approval, or separately authorized automatic rules.',
+  compactDescription: 'Production changes require separate authorization. Read-only diagnosis works independently.',
+  advancedDetails: 'Policy, approvals and action history',
+  readOnly: 'Production execution is disabled. This does not block read-only diagnosis; policy and action history remain available below.',
   refresh: 'Refresh policy and actions',
   loading: 'Loading execution controls…',
   loadFailed: 'Unable to read execution controls. Refresh before making changes.',

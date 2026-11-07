@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"strings"
 	"unicode/utf8"
 
@@ -151,9 +152,14 @@ func resolveOpenAIClientSessionIdentity(c *gin.Context, body []byte) openAIClien
 		return missingOpenAIClientSessionIdentity()
 	}
 
-	root := parseRawJSONView(body)
-	bodyThreadIdentity := openAIClientMetadataIdentityAcrossEnvelope(root, "thread_id")
-	bodySessionIdentity := openAIClientMetadataIdentityAcrossEnvelope(root, "session_id")
+	bodyThreadIdentity := openAIIdentityValue{status: OpenAIClientSessionIdentityMissing}
+	bodySessionIdentity := openAIIdentityValue{status: OpenAIClientSessionIdentityMissing}
+	// Escaped keys must use the original parser to preserve identity conflicts.
+	if bytes.Contains(body, []byte("client_metadata")) || bytes.Contains(body, []byte(`\u`)) {
+		root := parseRawJSONView(body)
+		bodyThreadIdentity = openAIClientMetadataIdentityAcrossEnvelope(root, "thread_id")
+		bodySessionIdentity = openAIClientMetadataIdentityAcrossEnvelope(root, "session_id")
+	}
 	bodyThread, invalidBodyThread := bodyThreadIdentity.value, bodyThreadIdentity.status == OpenAIClientSessionIdentityInvalid
 	bodySession, invalidBodySession := bodySessionIdentity.value, bodySessionIdentity.status == OpenAIClientSessionIdentityInvalid
 
