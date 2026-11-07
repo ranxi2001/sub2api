@@ -31,7 +31,7 @@ func TestOAuthInitialSelectionImportedMappings(t *testing.T) {
 			credentials := map[string]any{"access_token": "fixture", "model_mapping": mapping}
 			extra := map[string]any{}
 			if passthrough {
-				extra["openai_passthrough_enabled"] = true
+				extra["openai_passthrough"] = true
 			}
 			input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: credentials, Extra: extra}
 			require.NoError(t, svc.ApplyOAuthAutoConfig(t.Context(), input))
@@ -172,5 +172,46 @@ func TestOAuthInitialSelectionCatalog(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(projected, &catalog))
 		require.Len(t, catalog.Data, len(selected))
+	}
+}
+
+func TestOAuthInitialSelectionMixedCatalogKeepsExistingAccountModels(t *testing.T) {
+	restricted := Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{OAuthInitialModelSelectionKey: []string{}, "model_mapping": map[string]any{}}}
+	require.Empty(t, supplementUnmappedOpenAIModels([]Account{restricted}, nil, []string{}), "all-restricted group remains authoritatively empty")
+	existing := Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.Contains(t, supplementUnmappedOpenAIModels([]Account{restricted, existing}, nil, []string{}), "gpt-6.1-sol", "new restrictions cannot hide an existing unrestricted account's catalog")
+}
+
+func TestOAuthInitialSelectionDoesNotApplyCodexNormalizationToOtherPlatforms(t *testing.T) {
+	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok} {
+		account := &Account{Platform: platform, Type: AccountTypeOAuth, Credentials: map[string]any{OAuthInitialModelSelectionKey: []string{"gpt-6"}, "model_mapping": map[string]any{"gpt-6": "gpt-6"}}}
+		require.True(t, account.IsModelSupported("gpt-6"), platform)
+	}
+}
+
+func TestOAuthInitialSelectionAdminCreatePersistsPolicy(t *testing.T) {
+	svc, _ := initialSelectionFixture(t, PlatformGemini, []string{"gemini-3.5-flash"})
+	repo := &autoConfigAccountRepo{}
+	svc.accountRepo = repo
+	created, err := svc.CreateAccount(t.Context(), &CreateAccountInput{Name: "fixture-create", Platform: PlatformGemini, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "fixture"}, Concurrency: 1, SkipDefaultGroupBind: true, SkipMixedChannelCheck: true})
+	require.NoError(t, err)
+	require.Same(t, repo.created, created)
+	require.Equal(t, []int64{2}, repo.groups)
+	require.True(t, created.IsModelSupported("gemini-3.5-flash"))
+	require.False(t, created.IsModelSupported("gemini-excluded"))
+}
+
+func TestOAuthInitialSelectionAllPlatformCatalogsRemainEmpty(t *testing.T) {
+	groupID := int64(2)
+	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok} {
+		account := Account{ID: 3, Platform: platform, Type: AccountTypeOAuth, Credentials: map[string]any{OAuthInitialModelSelectionKey: []string{}, "model_mapping": map[string]any{}}}
+		repo := &modelsListAccountRepoStub{byGroup: map[int64][]Account{groupID: {account}}}
+		svc := &GatewayService{accountRepo: repo}
+		for count := 0; count < 2; count++ {
+			models := svc.GetAvailableModels(t.Context(), &groupID, platform)
+			require.NotNil(t, models, platform)
+			require.Empty(t, models, platform)
+			require.Empty(t, ModelListingSource(platform, models, DefaultModelIDsForPlatform(platform)), platform)
+		}
 	}
 }

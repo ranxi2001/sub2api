@@ -15,6 +15,9 @@ import (
 // 与平台默认列表（fallbackModels）。账号映射为空时回落默认列表；Anthropic
 // 平台两者取并集，其余平台以账号映射键为准。
 func ModelListingSource(platform string, availableModels, fallbackModels []string) []string {
+	if availableModels != nil && len(availableModels) == 0 {
+		return availableModels
+	}
 	if platform == PlatformOpenAI && availableModels != nil {
 		return availableModels
 	}

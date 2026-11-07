@@ -1426,7 +1426,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		if cached, found := s.modelsListCache.Get(cacheKey); found {
 			if models, ok := cached.([]string); ok {
 				modelsListCacheHitTotal.Add(1)
-				return cloneStringSlice(models)
+				return cloneModelCatalogSlice(models)
 			}
 		}
 	}
@@ -1537,10 +1537,10 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	}
 
 	if s.modelsListCache != nil {
-		s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
+		s.modelsListCache.Set(cacheKey, cloneModelCatalogSlice(models), s.modelsListCacheTTL)
 		modelsListCacheStoreTotal.Add(1)
 	}
-	return cloneStringSlice(models)
+	return cloneModelCatalogSlice(models)
 }
 
 func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, groupID int64, model string) (CompositeModelOwnership, error) {
@@ -1777,4 +1777,12 @@ func (s *GatewayService) debugLogGatewaySnapshot(tag string, headers http.Header
 
 	// 写入文件（调试用，并发写入可能交错但不影响可读性）
 	_, _ = f.WriteString(buf.String())
+}
+
+// Model catalogs distinguish an authoritative empty policy from no declaration.
+func cloneModelCatalogSlice(models []string) []string {
+	if models == nil {
+		return nil
+	}
+	return append([]string{}, models...)
 }

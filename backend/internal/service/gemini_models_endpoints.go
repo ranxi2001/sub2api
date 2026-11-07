@@ -33,10 +33,12 @@ func (s *GeminiMessagesCompatService) DeclaredModelIDs(ctx context.Context, grou
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
 	seen := make(map[string]struct{})
+	declaredAccount := false
 	for i := range accounts {
 		if accounts[i].Platform != PlatformGemini {
 			continue
 		}
+		declaredAccount = true
 		mapping := accounts[i].GetModelMapping()
 		if len(mapping) == 0 && !accounts[i].hasOAuthInitialModelSelection() {
 			return nil, nil
@@ -44,6 +46,9 @@ func (s *GeminiMessagesCompatService) DeclaredModelIDs(ctx context.Context, grou
 		for model := range mapping {
 			seen[model] = struct{}{}
 		}
+	}
+	if !declaredAccount {
+		return nil, nil
 	}
 	models := make([]string, 0, len(seen))
 	for model := range seen {

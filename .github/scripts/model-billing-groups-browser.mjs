@@ -28,7 +28,6 @@ const virtual = {
 const html = `<!doctype html><meta charset="utf-8"><div id="app"></div><script type="module">
 import {createApp} from 'vue';
 import {createPinia} from 'pinia';
-import {createPinia} from 'pinia';
 const {default:Page}=new URLSearchParams(location.search).has('baseline')?await import('/src/views/admin/ModelBillingBaseline.vue'):await import('/src/views/admin/AutoConfigView.vue');
 import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';
 import {defaultExcelBPSDefaults} from '/src/utils/excelBPSDefaults.ts';
