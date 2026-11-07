@@ -75,7 +75,10 @@ func TestPR714HeaderWaitDoesNotTimeOutAnEstablishedStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: start\n\n")
-		w.(http.Flusher).Flush()
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush synthetic SSE headers: %v", err)
+			return
+		}
 		select {
 		case <-time.After(1500 * time.Millisecond):
 			_, _ = io.WriteString(w, "data: complete\n\n")

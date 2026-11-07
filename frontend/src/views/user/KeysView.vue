@@ -3,6 +3,7 @@
     <TablePageLayout>
       <template #filters>
         <div class="flex flex-col gap-3">
+          <UserKeyRiskNotices />
           <div class="flex flex-wrap items-center gap-3">
             <SearchInput
               v-model="filterSearch"
@@ -1319,6 +1320,7 @@
 </template>
 
 <script setup lang="ts">
+import UserKeyRiskNotices from '@/features/ip-audit/UserKeyRiskNotices.vue'
 	import { ref, reactive, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'
