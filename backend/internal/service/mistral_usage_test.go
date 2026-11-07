@@ -349,6 +349,30 @@ func TestMistralProbeErrorAndFallbackCases(t *testing.T) {
 	require.Zero(t, recUpstream.calls)
 }
 
+func TestMistralBillingPermissionDeniedDoesNotInvalidateKey(t *testing.T) {
+	account := mistralUsageTestAccount(97, "mstrl_permission_limited_key")
+	upstream := &commandCodeAlphaUpstream{responses: map[string]commandCodeAlphaResponse{
+		"/v1/billing/budget": {status: http.StatusForbidden, body: `{"message":"missing see_org_inference_usage"}`},
+	}}
+	repo := &cnBalanceProbeRepo{account: account}
+	quota, err := NewCNProviderQuotaService(repo, nil, upstream, &config.Config{}).QueryUsage(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.False(t, quota.Success)
+	require.True(t, quota.CredentialValid, "billing permission alone does not establish an invalid inference key")
+	require.Equal(t, http.StatusForbidden, quota.StatusCode)
+	require.Contains(t, quota.Error, "permission denied")
+	require.NotContains(t, quota.Error, "Authentication failed")
+	require.False(t, quota.Persisted)
+
+	balance, err := NewCNProviderBalanceService(repo, nil, upstream, &config.Config{}).QueryBalance(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.False(t, balance.Success)
+	require.Equal(t, http.StatusForbidden, balance.StatusCode)
+	require.Contains(t, balance.Error, "permission denied")
+	require.False(t, balance.Persisted)
+	require.Empty(t, repo.extraWrites, "unavailable billing data must not overwrite the saved balance")
+}
+
 func TestMistralZeroAllowanceDoesNotSwitchToOtherBudget(t *testing.T) {
 	account := mistralUsageTestAccount(97, "mstrl_zero_vibe")
 	upstream := newMistralBillingUpstream(

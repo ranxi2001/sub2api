@@ -108,7 +108,9 @@ func (e *mistralHTTPError) Error() string {
 }
 
 func (e *mistralHTTPError) unauthorized() bool {
-	return e.status == http.StatusUnauthorized || e.status == http.StatusForbidden
+	// Billing reads require see_org_inference_usage. A 403 can mean that the
+	// key still works for inference but cannot read the organization's budget.
+	return e.status == http.StatusUnauthorized
 }
 
 type mistralUsageClient struct {
@@ -366,6 +368,8 @@ func mistralFetchFailure(err error) (status int, message string, ok bool) {
 	switch {
 	case errors.As(err, &httpErr) && httpErr.unauthorized():
 		return httpErr.status, fmt.Sprintf("Authentication failed (HTTP %d)", httpErr.status), true
+	case errors.As(err, &httpErr) && httpErr.status == http.StatusForbidden:
+		return httpErr.status, "Billing usage permission denied (HTTP 403); inference credentials may still be valid", true
 	case errors.As(err, &httpErr):
 		return httpErr.status, fmt.Sprintf("API error (HTTP %d): %s", httpErr.status, httpErr.body), true
 	case errors.Is(err, errMistralInvalidResponse):
@@ -397,7 +401,7 @@ func (s *CNProviderQuotaService) queryMistralUsage(ctx context.Context, account 
 		}
 		result.StatusCode = status
 		result.Error = message
-		result.CredentialValid = status != http.StatusUnauthorized && status != http.StatusForbidden
+		result.CredentialValid = status != http.StatusUnauthorized
 		return result, nil
 	}
 
