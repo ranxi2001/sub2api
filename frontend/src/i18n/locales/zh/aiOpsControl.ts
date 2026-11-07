@@ -1,6 +1,9 @@
 export default {
   title: '受控执行',
   description: '诊断报告保留为建议。生产变更须符合已保存策略和新鲜证据，并逐次审批，或另行授权自动规则执行。',
+  compactDescription: '生产变更须另行授权，只读诊断可独立使用。',
+  advancedDetails: '策略、审批与动作历史',
+  readOnly: '生产执行已关闭，不影响只读诊断。可展开查看策略与动作记录。',
   refresh: '刷新策略与动作记录',
   loading: '正在读取执行控制…',
   loadFailed: '无法读取执行控制，请刷新后再操作。',
