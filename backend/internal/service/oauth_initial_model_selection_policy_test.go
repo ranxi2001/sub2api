@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/gin-gonic/gin"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/gin-gonic/gin"
+	gocache "github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/require"
 )
 
@@ -208,7 +210,7 @@ func TestOAuthInitialSelectionAllPlatformCatalogsRemainEmpty(t *testing.T) {
 	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok} {
 		account := Account{ID: 3, Platform: platform, Type: AccountTypeOAuth, Credentials: map[string]any{OAuthInitialModelSelectionKey: []string{}, "model_mapping": map[string]any{}}}
 		repo := &modelsListAccountRepoStub{byGroup: map[int64][]Account{groupID: {account}}}
-		svc := &GatewayService{accountRepo: repo}
+		svc := &GatewayService{accountRepo: repo, modelsListCache: gocache.New(time.Minute, time.Minute), modelsListCacheTTL: time.Minute}
 		for count := 0; count < 2; count++ {
 			models := svc.GetAvailableModels(t.Context(), &groupID, platform)
 			require.NotNil(t, models, platform)
@@ -292,5 +294,20 @@ func TestOAuthInitialSelectionAntigravityFinalThinkingTarget(t *testing.T) {
 		}
 		require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 		require.Contains(t, response.Body.String(), "not in whitelist")
+	}
+}
+
+func TestOAuthInitialSelectionSharedMultiGroupCatalog(t *testing.T) {
+	const groupID int64 = 2
+	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok} {
+		restricted := Account{ID: 1, Platform: platform, Type: AccountTypeOAuth, Credentials: map[string]any{OAuthInitialModelSelectionKey: []string{}, "model_mapping": map[string]any{}}}
+		repo := &modelsListAccountRepoStub{byGroup: map[int64][]Account{groupID: {restricted}}}
+		svc := &GatewayService{accountRepo: repo}
+		for _, catalogPlatform := range []string{platform, PlatformComposite} {
+			models, err := svc.GetGroupModelCatalog(t.Context(), groupID, catalogPlatform)
+			require.NoError(t, err)
+			require.NotNil(t, models)
+			require.Empty(t, models, "strict group catalogs must preserve an explicitly empty initial scope")
+		}
 	}
 }

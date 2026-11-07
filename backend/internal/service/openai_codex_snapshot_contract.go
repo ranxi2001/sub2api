@@ -126,16 +126,13 @@ func (c *codexOrderedSchedulerCache) SetAccount(ctx context.Context, a *Account)
 	})
 }
 func (c *codexOrderedSchedulerCache) SetSnapshot(ctx context.Context, b SchedulerBucket, t SchedulerBucketWriteToken, accounts []Account) error {
-	return c.withFreshUsage(ctx, accounts, func(fresh []Account) error {
-		if isOutboxRetryPublication(ctx) {
-			fresh = filterOutboxRetryBucketAccounts(ctx, b, fresh)
-		}
+	return c.withLatestSnapshotAccounts(ctx, b, accounts, func(fresh []Account) error {
 		return c.SchedulerCache.SetSnapshot(ctx, b, t, fresh)
 	})
 }
 func (c *codexOrderedSchedulerCache) SetSnapshotAndReturnAccountIDs(ctx context.Context, b SchedulerBucket, t SchedulerBucketWriteToken, accounts []Account) ([]int64, error) {
 	var ids []int64
-	err := c.withFreshUsage(ctx, accounts, func(fresh []Account) error {
+	err := c.withLatestSnapshotAccounts(ctx, b, accounts, func(fresh []Account) error {
 		if writer, ok := c.SchedulerCache.(schedulerSnapshotAccountIDWriter); ok {
 			var err error
 			ids, err = writer.SetSnapshotAndReturnAccountIDs(ctx, b, t, fresh)
@@ -151,6 +148,34 @@ func (c *codexOrderedSchedulerCache) SetSnapshotAndReturnAccountIDs(ctx context.
 	})
 	return ids, err
 }
+
+// A rebuild's initial query can precede a committed disable, credential edit or
+// BPS/quality change. Unlike request feedback, it has no runtime fields to merge:
+// publish the complete row read under the shared account fence, in input order.
+// Keep this separate from SetAccount's request-feedback merge contract.
+func (c *codexOrderedSchedulerCache) withLatestSnapshotAccounts(ctx context.Context, b SchedulerBucket, accounts []Account, publish func([]Account) error) error {
+	ids := make([]int64, 0, len(accounts))
+	for _, account := range accounts {
+		ids = append(ids, account.ID)
+	}
+	return c.source.WithLatestSchedulerAccounts(ctx, ids, func(fresh []Account) error {
+		byID := make(map[int64]Account, len(fresh))
+		for _, account := range fresh {
+			byID[account.ID] = account
+		}
+		ordered := make([]Account, 0, len(accounts))
+		for _, account := range accounts {
+			if current, exists := byID[account.ID]; exists {
+				ordered = append(ordered, current)
+			}
+		}
+		if isOutboxRetryPublication(ctx) {
+			ordered = filterOutboxRetryBucketAccounts(ctx, b, ordered)
+		}
+		return publish(ordered)
+	})
+}
+
 func (c *codexOrderedSchedulerCache) SetSnapshotByAccountIDs(ctx context.Context, b SchedulerBucket, t SchedulerBucketWriteToken, ids []int64) error {
 	if writer, ok := c.SchedulerCache.(schedulerSnapshotAccountIDWriter); ok {
 		return writer.SetSnapshotByAccountIDs(ctx, b, t, ids)
