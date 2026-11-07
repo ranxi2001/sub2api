@@ -117,7 +117,7 @@ func (s *Service) Events(ctx context.Context, before int64) ([]Event, error) {
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Event{}
 	for rows.Next() {
 		var v Event
@@ -133,7 +133,7 @@ func (s *Service) Events(ctx context.Context, before int64) ([]Event, error) {
 	if e = rows.Err(); e != nil {
 		return nil, e
 	}
-	rows.Close()
+	_ = rows.Close()
 	if e = s.attachRecipients(ctx, out); e != nil {
 		return nil, e
 	}
@@ -277,14 +277,14 @@ func (s *Service) RunOnce(ctx context.Context) (err error) {
 		var r Request
 		var ip sql.NullString
 		if e = rows.Scan(&ip, &r.UserID, &r.KeyID, &r.At); e != nil {
-			rows.Close()
+			_ = rows.Close()
 			return e
 		}
 		r.IP = ip.String
 		rs = append(rs, r)
 	}
 	e = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if e != nil {
 		return e
 	}
@@ -434,7 +434,7 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
 		for locked.Next() {
 		}
 		err = locked.Err()
-		locked.Close()
+		_ = locked.Close()
 		if err != nil {
 			return false, err
 		}
@@ -459,7 +459,7 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
 		var name string
 		var at time.Time
 		if e = rows.Scan(&key, &name, &at); e != nil {
-			rows.Close()
+			_ = rows.Close()
 			return false, e
 		}
 		fmt.Fprintf(&body, `<li>%s <span style="color:#6b7280">#%d</span> (%s)</li>`, html.EscapeString(name), key, at.UTC().Format("2006-01-02"))
@@ -467,7 +467,7 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
 		selectedKeys = append(selectedKeys, key)
 	}
 	e = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if e != nil {
 		return false, e
 	}
