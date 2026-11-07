@@ -111,6 +111,20 @@ func (s *OpenAIOAuthReauthService) GetTOTPRotation(ctx context.Context, id int64
 	return safeRotation(result), nil
 }
 func (s *OpenAIOAuthReauthService) CreateTOTPRotation(ctx context.Context, id int64) (*OpenAITOTPRotation, error) {
+	return s.createTOTPRotation(ctx, id, false)
+}
+
+// CreateTOTPRotationOn429 uses the same saved credentials and recovery protocol
+// as manual rotation, with an additional durable cooldown for automatic tasks.
+func (s *OpenAIOAuthReauthService) CreateTOTPRotationOn429(ctx context.Context, id int64) (*OpenAITOTPRotation, error) {
+	return s.createTOTPRotation(ctx, id, true)
+}
+
+type openAITOTP429Repository interface {
+	CreateTOTPRotationOn429(context.Context, int64, string, time.Time) (*OpenAITOTPRotation, error)
+}
+
+func (s *OpenAIOAuthReauthService) createTOTPRotation(ctx context.Context, id int64, automatic bool) (*OpenAITOTPRotation, error) {
 	repo, err := s.rotationRepo()
 	if err != nil {
 		return nil, err
@@ -118,6 +132,10 @@ func (s *OpenAIOAuthReauthService) CreateTOTPRotation(ctx context.Context, id in
 	account, cfg, err := s.rotationConfig(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	// Re-read the account instead of trusting the gateway's scheduling snapshot.
+	if automatic && (!openAITOTPRotateOn429Enabled(account) || !account.IsActive()) {
+		return nil, nil
 	}
 	if err = s.checkWorkerMode(OpenAIOAuthReauthModePasswordTOTP); err != nil {
 		return nil, err
@@ -130,7 +148,16 @@ func (s *OpenAIOAuthReauthService) CreateTOTPRotation(ctx context.Context, id in
 	if err != nil {
 		return nil, err
 	}
-	result, err := repo.CreateTOTPRotation(ctx, id, hash, cfg.UpdatedAt)
+	var result *OpenAITOTPRotation
+	if automatic {
+		autoRepo, ok := repo.(openAITOTP429Repository)
+		if !ok {
+			return nil, infraerrors.ServiceUnavailable("TOTP_UNAVAILABLE", "Automatic 2FA rotation is unavailable")
+		}
+		result, err = autoRepo.CreateTOTPRotationOn429(ctx, id, hash, cfg.UpdatedAt)
+	} else {
+		result, err = repo.CreateTOTPRotation(ctx, id, hash, cfg.UpdatedAt)
+	}
 	if err != nil {
 		if infraerrors.Code(err) == 409 {
 			return nil, err

@@ -21,6 +21,7 @@ import (
 // RateLimitService 处理限流和过载状态管理
 type RateLimitService struct {
 	accountOps            *AccountOpsService
+	openAITOTP429Rotator  openAITOTP429Rotator
 	qualityTrigger        *quality5xxTrigger
 	accountRepo           AccountRepository
 	usageRepo             UsageLogRepository
@@ -356,6 +357,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 // handleUpstreamErrorAfterStreakReset keeps account policy handling shared with
 // the OpenAI gateway, which resets the streak before its early-return policies.
 func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	ctx = s.maybeRotateOpenAITOTPOn429(ctx, account, statusCode)
 	// An edge refusal must not reach account-specific rules, linked-account
 	// mutation or quota handlers, even when administrators configured a broad 403.
 	if statusCode == http.StatusForbidden && isCloudflareBotBlockResponse(responseBody) {

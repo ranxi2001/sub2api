@@ -28,6 +28,88 @@ func totpRotationFixture(t *testing.T) (context.Context, *openAIOAuthReauthRepos
 	return ctx, repo, cfg
 }
 
+func TestTOTPRotationOn429ConcurrentCreationAndCooldown(t *testing.T) {
+	ctx, repo, cfg := totpRotationFixture(t)
+	type outcome struct {
+		task *service.OpenAITOTPRotation
+		err  error
+	}
+	const workers = 6
+	start, results := make(chan struct{}), make(chan outcome, workers)
+	for range workers {
+		go func() {
+			<-start
+			task, err := repo.CreateTOTPRotationOn429(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+			results <- outcome{task, err}
+		}()
+	}
+	close(start)
+	var created *service.OpenAITOTPRotation
+	count := 0
+	for range workers {
+		result := <-results
+		require.NoError(t, result.err)
+		if result.task != nil {
+			count++
+			created = result.task
+		}
+	}
+	require.Equal(t, 1, count, "concurrent API replicas may create only one task")
+	claimed, err := repo.ClaimTOTPRotation(ctx, "worker")
+	require.NoError(t, err)
+	require.Equal(t, created.TaskID, claimed.TaskID)
+	require.NoError(t, repo.FinishTOTPRotation(ctx, claimed.TaskID, "worker", false, "login_failed"))
+
+	_, err = integrationDB.ExecContext(ctx, `UPDATE openai_totp_rotations SET updated_at=NOW()-INTERVAL '30 minutes' WHERE task_id=$1`, created.TaskID)
+	require.NoError(t, err)
+	task, err := repo.CreateTOTPRotationOn429(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.NoError(t, err)
+	require.Nil(t, task, "a failed task also consumes the hourly automatic budget")
+	_, err = integrationDB.ExecContext(ctx, `UPDATE openai_totp_rotations SET updated_at=NOW()-INTERVAL '61 minutes' WHERE task_id=$1`, created.TaskID)
+	require.NoError(t, err)
+	task, err = repo.CreateTOTPRotationOn429(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.NotEqual(t, created.TaskID, task.TaskID)
+}
+
+func TestTOTPRotationOn429DoesNotReplaceUnresolvedTask(t *testing.T) {
+	ctx, repo, cfg := totpRotationFixture(t)
+	manual, err := repo.CreateTOTPRotation(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE openai_totp_rotations SET state='uncertain',candidate_ciphertext='enc:candidate',updated_at=NOW()-INTERVAL '2 hours' WHERE task_id=$1`, manual.TaskID)
+	require.NoError(t, err)
+	task, err := repo.CreateTOTPRotationOn429(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.NoError(t, err)
+	require.Nil(t, task, "uncertain tasks block automatic replacement even after cooldown")
+	latest, err := repo.GetTOTPRotation(ctx, cfg.AccountID)
+	require.NoError(t, err)
+	require.Equal(t, manual.TaskID, latest.TaskID)
+	require.Equal(t, "enc:candidate", latest.CandidateCiphertext)
+}
+
+func TestTOTPRotationOn429KeepsManualRotationAndReauthExclusion(t *testing.T) {
+	ctx, repo, cfg := totpRotationFixture(t)
+	automatic, err := repo.CreateTOTPRotationOn429(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.NoError(t, err)
+	_, err = repo.ClaimTOTPRotation(ctx, "worker")
+	require.NoError(t, err)
+	require.NoError(t, repo.FinishTOTPRotation(ctx, automatic.TaskID, "worker", false, "login_failed"))
+	manual, err := repo.CreateTOTPRotation(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.NoError(t, err, "manual rotation keeps its existing behavior during automatic cooldown")
+	_, err = repo.ClaimTOTPRotation(ctx, "worker")
+	require.NoError(t, err)
+	require.NoError(t, repo.FinishTOTPRotation(ctx, manual.TaskID, "worker", false, "login_failed"))
+	_, err = repo.CreateTOTPRotationOn429(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE openai_totp_rotations SET updated_at=NOW()-INTERVAL '2 hours' WHERE account_id=$1`, cfg.AccountID)
+	require.NoError(t, err)
+	_, err = repo.CreateTask(ctx, cfg.AccountID, "snapshot")
+	require.NoError(t, err)
+	_, err = repo.CreateTOTPRotationOn429(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.Error(t, err, "an active re-login still excludes automatic rotation")
+}
+
 func TestTOTPRotationAtomicActivationAndExclusion(t *testing.T) {
 	ctx, repo, cfg := totpRotationFixture(t)
 	r, err := repo.CreateTOTPRotation(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
