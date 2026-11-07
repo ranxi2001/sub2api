@@ -69,7 +69,7 @@ try {
   await build({
     root, configFile: false, cacheDir: join(output, 'vite-cache'),
     resolve: { alias: [
-      { find: '@/api/admin', replacement: api },
+      { find: /^@\/api\/admin$/, replacement: api },
       { find: /^@\/i18n$/, replacement: locale },
       { find: '@fixture-i18n', replacement: locale },
       { find: '@', replacement: join(root, 'src') },
