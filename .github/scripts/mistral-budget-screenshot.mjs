@@ -61,7 +61,7 @@ try {
       h('p',{class:'text-sm text-gray-500 mb-5'},'实际 AccountUsageCell · CI 离线组件预览 · 虚构数据'),
       h('table',{class:'w-full rounded-lg border bg-white dark:bg-dark-800'},[
         h('thead',[h('tr',[h('th',{class:'p-4 text-left'},'账号'),h('th',{class:'p-4 text-left'},'用量与余额')])]),
-        h('tbody',[h('tr',[h('td',{class:'p-4 align-top'},account.name),h('td',{class:'p-4',id:'usage-cell'},[h(mode==='before'?Before:After,{account})])])])
+        h('tbody',[h('tr',[h('td',{class:'p-4 align-top'},account.name),h('td',{class:'p-4',id:'usage-cell'},[h(mode==='before'?Before:After,{account,noticeUserId:41})])])])
       ])
     ])}).use(createPinia()).use(i18n).mount('#app');
   `, { flag: 'wx' })
