@@ -93,10 +93,15 @@ func applyOAuthInitialModels(input *CreateAccountInput, rules []OAuthModelMappin
 	account := &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
 	filtered := make(map[string]any)
 	for _, source := range selected {
+		target := account.GetMappedModel(source)
+		// Provider defaults are not an explicit import whitelist. Preserve a
+		// newly configured alias whose selected target the provider supports.
+		if !eligible[source] && !malformed && len(mapping) == 0 && target != source && original.IsModelSupported(target) {
+			eligible[source] = true
+		}
 		if !eligible[source] {
 			continue
 		}
-		target := account.GetMappedModel(source)
 		if slices.Contains(selected, target) {
 			filtered[source] = target
 		}

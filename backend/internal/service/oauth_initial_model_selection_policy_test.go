@@ -215,3 +215,11 @@ func TestOAuthInitialSelectionAllPlatformCatalogsRemainEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestOAuthInitialSelectionTemplateAliasWithoutImportScope(t *testing.T) {
+	input := &CreateAccountInput{Platform: PlatformAntigravity, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "fixture"}}
+	applyOAuthInitialModels(input, []OAuthModelMappingRule{{From: "custom", To: "gemini-3.6-flash"}}, []string{"custom", "gemini-3.6-flash"})
+	account := &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
+	require.True(t, account.IsModelSupported("custom"))
+	require.Equal(t, "gemini-3.6-flash", account.GetMappedModel("custom"))
+}
