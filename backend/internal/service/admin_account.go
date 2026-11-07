@@ -1324,7 +1324,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		_, changesMapping := input.Credentials["model_mapping"]
 		_, changesCompact := input.Credentials["compact_model_mapping"]
 		_, changesMode := input.Credentials[OpenAIModelMappingModeKey]
-		if changesMapping || changesCompact || changesMode {
+		if (changesMapping || changesCompact || changesMode) && slices.ContainsFunc(cachedTargets, func(a *Account) bool { return a.hasOAuthInitialModelSelection() }) {
 			input.Credentials = maps.Clone(input.Credentials)
 			input.Credentials[OAuthInitialModelSelectionKey] = nil
 		}
