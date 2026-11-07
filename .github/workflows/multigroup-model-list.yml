@@ -50,11 +50,14 @@ jobs:
           set -euo pipefail
           baseline=7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
           git fetch --no-tags --depth=1 origin "$baseline"
+          # Keep both auth middlewares on the same baseline: Google auth can
+          # depend on helpers introduced later in api_key_auth.go.
           for target in \
             backend/internal/handler/gateway_handler.go \
             backend/internal/service/gateway_service.go \
             backend/internal/service/api_key_groups.go \
             backend/internal/server/middleware/api_key_auth.go \
+            backend/internal/server/middleware/api_key_auth_google.go \
             backend/internal/server/middleware/api_key_groups.go \
             backend/internal/server/routes/gateway.go; do
             git show "$baseline:$target" > "$target"

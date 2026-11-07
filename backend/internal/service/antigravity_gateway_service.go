@@ -263,6 +263,9 @@ func mapAntigravityModel(account *Account, requestedModel string) string {
 		return ""
 	}
 	requestedModel = strings.TrimPrefix(requestedModel, "models/")
+	if account.hasOAuthInitialModelSelection() && !account.IsModelSupported(requestedModel) {
+		return ""
+	}
 
 	// 获取映射表（未配置时自动使用 DefaultAntigravityModelMapping）
 	mapping := account.GetModelMapping()
@@ -303,7 +306,13 @@ func (s *AntigravityGatewayService) getMappedModel(account *Account, requestedMo
 // 404 "Requested entity was not found." 拒绝，因此所有转发入口都必须经过这一步。
 // thinkingLevel 为空时按 high 兜底；调用方可按自身协议传入推导出的档位。
 func (s *AntigravityGatewayService) getMappedModelForThinkingLevel(account *Account, requestedModel string, thinkingLevel string) string {
+	if account.hasOAuthInitialModelSelection() && !account.IsModelSupported(strings.TrimPrefix(requestedModel, "models/")) {
+		return ""
+	}
 	if mapped, ok := resolveGeminiThinkingVariantForLevel(account, requestedModel, thinkingLevel); ok {
+		if !account.oauthInitialSelectionAllows(mapped) {
+			return ""
+		}
 		return mapped
 	}
 	return mapAntigravityModel(account, requestedModel)

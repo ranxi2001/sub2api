@@ -229,3 +229,5 @@ issues/
 
 # Local macOS re-auth Worker runtime (ephemeral, never commit)
 tools/local-worker/
+
+!docs/key-risk-patrol.md

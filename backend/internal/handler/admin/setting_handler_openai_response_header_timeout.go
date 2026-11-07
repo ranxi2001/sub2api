@@ -8,8 +8,10 @@ import (
 )
 
 type updateOpenAIResponseHeaderTimeoutSettingsRequest struct {
-	Enabled *bool `json:"enabled"`
-	Seconds *int  `json:"seconds"`
+	Enabled       *bool    `json:"enabled"`
+	Seconds       *int     `json:"seconds"`
+	ImageGroupIDs *[]int64 `json:"image_group_ids"`
+	ImageSeconds  *int     `json:"image_seconds"`
 }
 
 // GetOpenAIResponseHeaderTimeoutSettings returns the admin-configurable
@@ -37,10 +39,25 @@ func (h *SettingHandler) UpdateOpenAIResponseHeaderTimeoutSettings(c *gin.Contex
 		response.BadRequest(c, "enabled and seconds are required")
 		return
 	}
-	if err := h.settingService.SetOpenAIResponseHeaderTimeoutSettings(c.Request.Context(), &service.OpenAIResponseHeaderTimeoutSettings{
-		Enabled: *req.Enabled,
-		Seconds: *req.Seconds,
-	}); err != nil {
+	current, err := h.settingService.GetOpenAIResponseHeaderTimeoutSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	// Clients that predate the image fields must not clear the saved groups.
+	settings := service.OpenAIResponseHeaderTimeoutSettings{
+		Enabled:       *req.Enabled,
+		Seconds:       *req.Seconds,
+		ImageGroupIDs: current.ImageGroupIDs,
+		ImageSeconds:  current.ImageSeconds,
+	}
+	if req.ImageGroupIDs != nil {
+		settings.ImageGroupIDs = *req.ImageGroupIDs
+	}
+	if req.ImageSeconds != nil {
+		settings.ImageSeconds = *req.ImageSeconds
+	}
+	if err := h.settingService.SetOpenAIResponseHeaderTimeoutSettings(c.Request.Context(), &settings); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}

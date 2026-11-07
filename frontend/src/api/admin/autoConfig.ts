@@ -12,6 +12,7 @@ export interface AutoConfig {
  openai_totp_rotate_on_429?: boolean
  quality_rule?: OAuthInitialQualityRule | null
  model_billing?: ModelBillingConfig
+ selected_models?: string[] | null
  model_mappings?: OAuthModelMappingRule[] | null
  excel_bps?: ExcelBPSDefaults
  enabled: boolean

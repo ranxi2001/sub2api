@@ -31,3 +31,26 @@ func TestAccountModelScopeValidationBeforePersistence(t *testing.T) {
 	require.Error(t, err)
 	require.Zero(t, repo.updateCalls)
 }
+
+func TestOAuthInitialSelectionBulkOwnershipKeepsLegacyCredentials(t *testing.T) {
+	for _, snapshot := range []bool{false, true} {
+		for _, field := range []string{"model_mapping", OpenAIModelMappingModeKey, "compact_model_mapping"} {
+			credentials := map[string]any{"model_mapping": map[string]any{"gpt-6.1-sol": "gpt-6.1-sol"}}
+			if snapshot {
+				credentials[OAuthInitialModelSelectionKey] = []string{"gpt-6.1-sol"}
+			}
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: credentials}
+			repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{account}}
+			svc := &adminServiceImpl{accountRepo: repo}
+			var value any = map[string]any{"gpt-6-luna": "gpt-6-luna"}
+			if field == OpenAIModelMappingModeKey {
+				value = "aliases"
+			}
+			_, err := svc.BulkUpdateAccounts(t.Context(), &BulkUpdateAccountsInput{AccountIDs: []int64{1}, Credentials: map[string]any{field: value}})
+			require.NoError(t, err)
+			marker, exists := repo.lastBulkUpdate.Credentials[OAuthInitialModelSelectionKey]
+			require.Equal(t, snapshot, exists, "legacy account updates must not gain a snapshot field")
+			require.Nil(t, marker, "manual model changes release an existing scope")
+		}
+	}
+}

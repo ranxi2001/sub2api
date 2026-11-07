@@ -1528,6 +1528,8 @@ export async function updateStreamTimeoutSettings(
 export interface OpenAIResponseHeaderTimeoutSettings {
   enabled: boolean;
   seconds: number;
+  image_group_ids: number[];
+  image_seconds: number;
 }
 
 export async function getOpenAIResponseHeaderTimeoutSettings(): Promise<OpenAIResponseHeaderTimeoutSettings> {

@@ -215,7 +215,12 @@ func (s *GatewayService) ForwardAsResponses(
 			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 		}
 	} else {
+		writerSizeBeforeBody := c.Writer.Size()
 		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
+		var sseErr *sseStreamErrorEventError
+		if errors.As(handleErr, &sseErr) {
+			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeBody)
+		}
 	}
 
 	attachClaudeCodeMimicInjection(c, account, result)
@@ -434,11 +439,20 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 
 		// Stop queued success events after a terminal safety rejection.
-		if event.Type == "error" && isAnthropicCompatSafetyRejection([]byte(payload)) {
-			message := sanitizeUpstreamErrorMessage(gjson.Get(payload, "error.message").String())
-			writeResponsesError(c, http.StatusForbidden, "permission_error", message)
-			MarkResponseCommitted(c)
-			return nil, fmt.Errorf("upstream safety rejection: %s", message)
+		if event.Type == "error" {
+			if isAnthropicCompatSafetyRejection([]byte(payload)) {
+				message := sanitizeUpstreamErrorMessage(gjson.Get(payload, "error.message").String())
+				writeResponsesError(c, http.StatusForbidden, "permission_error", message)
+				MarkResponseCommitted(c)
+				return nil, fmt.Errorf("upstream safety rejection: %s", message)
+			}
+			// 缓冲模式尚未向客户端写出任何内容：交给调用方按流内 error 事件做
+			// 账号故障转移，而不是忽略后返回 502 或截断的半截响应。
+			logger.L().Warn("forward_as_responses buffered: upstream error event",
+				zap.String("request_id", requestID),
+				zap.String("error_type", gjson.Get(payload, "error.type").String()),
+			)
+			return nil, &sseStreamErrorEventError{RawData: payload}
 		}
 
 		if event.Type == "message_start" && event.Message != nil {

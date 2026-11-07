@@ -1321,6 +1321,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// Bulk may mix platforms; always drop ephemeral SSO/password keys (cookie
 	// only when platform is known Grok — empty platform still strips password/*).
 	if input.Credentials != nil {
+		_, changesMapping := input.Credentials["model_mapping"]
+		_, changesCompact := input.Credentials["compact_model_mapping"]
+		_, changesMode := input.Credentials[OpenAIModelMappingModeKey]
+		if (changesMapping || changesCompact || changesMode) && slices.ContainsFunc(cachedTargets, func(a *Account) bool { return a.hasOAuthInitialModelSelection() }) {
+			input.Credentials = maps.Clone(input.Credentials)
+			input.Credentials[OAuthInitialModelSelectionKey] = nil
+		}
 		input.Credentials = SanitizeStoredCredentials("", input.Credentials)
 	}
 

@@ -1,0 +1,73 @@
+name: Image header timeout acceptance
+on:
+  push:
+    branches: [review/pr714-merge-fixes]
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/handler/pr714_image_header_timeout_test.go'
+      - 'backend/internal/repository/pr714_image_header_timeout_test.go'
+      - 'backend/internal/service/openai_images.go'
+      - 'backend/internal/service/openai_images_header_timeout_test.go'
+      - 'backend/internal/service/setting_openai_response_header_timeout.go'
+      - '.github/workflows/image-header-timeout.yml'
+      - '.github/scripts/image-header-timeout-screenshot.mjs'
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Real loopback image forwarding, regional transport and setting boundaries
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/handler ./internal/repository ./internal/service ./internal/handler/admin -run '^(TestPR714|TestOpenAIImageResponseHeaderTimeout|TestForwardImagesAppliesResponseHeaderTimeout|TestOpenAIResponseHeaderTimeout)' -count=1 -v -timeout=10m | tee "$RUNNER_TEMP/image-header-tests.log"
+          ! grep -Eq 'no tests to run|--- SKIP:' "$RUNNER_TEMP/image-header-tests.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: image-header-backend-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/image-header-tests.log
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/SettingsView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/image-header-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/image-header-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual SettingsView with synthetic configuration
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/image-header-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/image-header-ui
+          SOURCE_BASE: c4587c3a2e66121d088f74bb0561368c24738c50
+        run: node .github/scripts/image-header-timeout-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: image-header-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/image-header-ui

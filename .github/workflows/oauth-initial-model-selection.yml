@@ -1,0 +1,117 @@
+name: OAuth initial model selection
+on:
+  push:
+    branches: [feat/oauth-initial-model-selection]
+  pull_request:
+    paths:
+      - 'backend/internal/service/*model*'
+      - 'backend/internal/service/oauth_auto_config*'
+      - 'backend/internal/service/account_credentials_redact.go'
+      - 'backend/internal/service/admin_account.go'
+      - 'backend/internal/service/gateway_scheduling.go'
+      - 'backend/internal/handler/admin/account_auto_config*'
+      - 'frontend/src/**/OAuthInitialModelSelection*'
+      - 'frontend/src/**/AutoConfigView*'
+      - 'frontend/src/**/newFeatureNotices*'
+      - '.github/workflows/oauth-initial-model-selection.yml'
+      - '.github/scripts/oauth-initial-model-selection-browser.mjs'
+permissions:
+  contents: read
+jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+      - uses: actions/checkout@v6
+        with:
+          ref: 7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
+          path: baseline
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Baseline must fail unchanged admission assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C baseline rev-parse HEAD > evidence/red-head.txt
+          cp candidate/backend/internal/service/oauth_initial_model_selection_test.go baseline/backend/internal/service/
+          set +e
+          (cd baseline/backend && go test -tags=unit ./internal/service -run '^TestOAuthInitialModelSelectionAdmission$' -count=1 -v) > evidence/red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red.log
+          test "$result" -ne 0
+          if grep -Eq '\[build failed\]|\[setup failed\]|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' evidence/red.log; then exit 1; fi
+          grep -F 'excluded model admission' evidence/red.log
+          grep -F -- '--- FAIL: TestOAuthInitialModelSelectionAdmission/selected' evidence/red.log
+          grep -F -- '--- FAIL: TestOAuthInitialModelSelectionAdmission/none' evidence/red.log
+      - name: Clean exact candidate service and HTTP regressions
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          git -C candidate rev-parse HEAD | tee evidence/green-head.txt
+          test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git -C candidate diff --exit-code
+          (cd candidate/backend && go test -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^(TestOAuthInitial|TestApplyOAuthCredentialsPreservesExistingNonAuthCredentials|TestAutoConfigSelectedModels|TestOAuthModelMapping|TestAutoConfig|TestApplyUpstreamModels|TestAutomaticUpstreamModels|TestAccountIsModelSupported|TestOpenAI.*Model)' -count=1 -v) 2>&1 | tee evidence/green.log
+          if grep -Eq -- '--- SKIP:|no tests to run' evidence/green.log; then exit 1; fi
+          grep -F -- '--- PASS: TestOAuthInitialModelSelectionAdmission' evidence/green.log
+          grep -F -- '--- PASS: TestAutoConfigSelectedModels' evidence/green.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-initial-admission-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14
+  selection-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Actual Vue model selection, notice lifecycle and locales
+        run: >-
+          pnpm --dir frontend exec vitest run
+          src/views/admin/__tests__/AutoConfigView.spec.ts
+          src/components/admin/operations/__tests__/OAuthInitialModelSelection.spec.ts
+          src/components/account/__tests__/EditAccountModal.spec.ts
+          src/components/admin/operations/__tests__/SmartOpsNav.spec.ts
+          src/i18n/__tests__/localeKeyCompleteness.spec.ts
+          --maxWorkers=1 --minWorkers=1
+      - name: Install isolated mock browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/oauth-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/oauth-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - run: git fetch --no-tags --depth=1 origin 7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
+      - name: Real Vue desktop and mobile interactions with synthetic APIs
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/oauth-browser/node_modules/playwright
+          OAUTH_SELECTION_SCREENSHOT_DIR: ${{ github.workspace }}/evidence/screenshots
+        run: node .github/scripts/oauth-initial-model-selection-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-initial-selection-ui-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14

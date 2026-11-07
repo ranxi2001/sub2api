@@ -33,7 +33,7 @@ func GroupModelAllowlistFromDomain(cfg domain.GroupModelAllowlist) GroupModelAll
 // left unchanged so callers retain their existing discovery fallback. Each
 // account contributes only defaults allowed by its own group restrictions.
 func supplementUnmappedOpenAIModels(accounts []Account, groupID *int64, models []string) []string {
-	if len(models) == 0 {
+	if len(models) == 0 && !slices.ContainsFunc(accounts, func(a Account) bool { return a.hasOAuthInitialModelSelection() }) {
 		return models
 	}
 	catalog := openai.DefaultModelIDs()
@@ -41,6 +41,9 @@ func supplementUnmappedOpenAIModels(accounts []Account, groupID *int64, models [
 	seen := make(map[string]struct{}, len(catalog))
 	for i := range accounts {
 		account := &accounts[i]
+		if account.hasOAuthInitialModelSelection() {
+			continue
+		}
 		if account.Platform != PlatformOpenAI || (!account.IsOpenAIPassthroughEnabled() && !account.IsOpenAIModelMappingAliases() && len(account.GetModelMapping()) != 0) {
 			continue
 		}

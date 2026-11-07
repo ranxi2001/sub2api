@@ -642,6 +642,7 @@ func (s *OpenAIGatewayService) ForwardImages(
 	if account.IsSIWCEnabled() {
 		return nil, fmt.Errorf("SIWC does not support image generation; select Codex for this account")
 	}
+	ctx = s.withOpenAIImageResponseHeaderTimeout(ctx, c)
 	switch account.Type {
 	case AccountTypeAPIKey:
 		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel)
@@ -650,6 +651,23 @@ func (s *OpenAIGatewayService) ForwardImages(
 	default:
 		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
 	}
+}
+
+// withOpenAIImageResponseHeaderTimeout applies the longer wait an admin chose
+// for this API key's group, keeping chat traffic on the global timeout.
+func (s *OpenAIGatewayService) withOpenAIImageResponseHeaderTimeout(ctx context.Context, c *gin.Context) context.Context {
+	if s == nil || s.settingService == nil || c == nil {
+		return ctx
+	}
+	value, ok := c.Get("api_key")
+	if !ok {
+		return ctx
+	}
+	apiKey, ok := value.(*APIKey)
+	if !ok || apiKey == nil {
+		return ctx
+	}
+	return WithHTTPUpstreamResponseHeaderTimeout(ctx, s.settingService.OpenAIImageResponseHeaderTimeout(ctx, apiKey.GroupID))
 }
 
 func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(

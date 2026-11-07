@@ -278,7 +278,7 @@ func (s *ModelPlazaService) accountModels(ctx context.Context, g *Group) ([]Supp
 	for platform := range platforms {
 		ids := s.gatewayService.GetAvailableModels(ctx, &g.ID, platform)
 		// 复用 /v1/models 对未映射账号的平台目录；CN 供应商仅枚举账号映射。
-		if len(ids) == 0 && (platform != PlatformOpenAI || ids == nil) && !IsMultiProtocolAPIKeyProvider(platform) {
+		if ids == nil && !IsMultiProtocolAPIKeyProvider(platform) {
 			ids = DefaultModelIDsForPlatform(platform)
 		}
 		if g.ModelAllowlistEnabled() {

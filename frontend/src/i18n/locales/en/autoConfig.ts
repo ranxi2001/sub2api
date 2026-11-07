@@ -1,4 +1,17 @@
 export default {
+  selection: {
+    "accountHint": "This account retains its initial model scope (an empty scope disables every model). Normal saves and reauthorization preserve it; changing model mappings takes ownership.",
+    "takeOver": "Use manual model settings when saving (release the initial scope; empty mappings restore default support)",
+    "title": "Initial model selection",
+    "enable": "Limit models for new OAuth accounts",
+    "hint": "Off or unset keeps existing model behavior. When enabled, only selected exact request and target models are allowed. Candidates use the account editor’s platform catalog; availability still depends on the upstream.",
+    "all": "Select all candidates",
+    "none": "Deselect all",
+    "custom": "Add a custom model (exact name)",
+    "add": "Add and select",
+    "empty": "No models selected: new accounts will support no models after saving. This differs from an empty account-editor mapping restoring defaults. Turn this limit off to keep existing behavior.",
+    "scope": "Initializes new accounts only. Existing accounts and reauthorization do not reapply the template. Selections intersect imported whitelists; both mapping source and target must be selected. Automatic model sync cannot restore excluded models. Manually changing an account’s model scope takes ownership."
+},
   admission: {
     "pending": "Awaiting admission: 21 streak {count}/{required}",
     "passed": "Admission passed",

@@ -225,6 +225,10 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 	thinkingEnabled := claudeRequest.Thinking != nil &&
 		(claudeRequest.Thinking.Type == "enabled" || claudeRequest.Thinking.Type == "adaptive")
 	mappedModel = applyThinkingModelSuffix(mappedModel, thinkingEnabled)
+	if !account.oauthInitialSelectionAllows(mappedModel) {
+		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
+		return nil, s.writeAntigravityCompatError(c, http.StatusForbidden, "permission_error", fmt.Sprintf("model %s not in whitelist", mappedModel))
+	}
 	if geminiImageGenerationDenied(c, nil, request.originalModel, mappedModel) {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", ImageGenerationPermissionMessage())
 	}
