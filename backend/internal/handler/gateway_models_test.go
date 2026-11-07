@@ -1727,3 +1727,20 @@ func TestOAuthInitialSelectionEmptyCompositeCatalog(t *testing.T) {
 		require.Empty(t, h.codexModelIDsForGroup(t.Context(), group, ""))
 	}
 }
+
+func TestOAuthInitialSelectionMultiGroupCatalogUnion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	restricted := service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{service.OAuthInitialModelSelectionKey: []string{}, "model_mapping": map[string]any{}}}
+	existing := service.Account{ID: 2, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6.1-sol": "gpt-6.1-sol"}}}
+	repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{1: {restricted}, 2: {existing}}}
+	h := newGatewayModelsHandlerForTest(repo)
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	h.multiGroupModels(c, []*service.APIKey{{Group: &service.Group{ID: 1, Platform: service.PlatformOpenAI}}, {Group: &service.Group{ID: 2, Platform: service.PlatformOpenAI}}})
+	require.Equal(t, http.StatusOK, response.Code)
+	var models gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &models))
+	require.Len(t, models.Data, 1)
+	require.Equal(t, "gpt-6.1-sol", models.Data[0].ID)
+}
