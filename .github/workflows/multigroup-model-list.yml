@@ -55,7 +55,8 @@ jobs:
             backend/internal/service/gateway_service.go \
             backend/internal/service/api_key_groups.go \
             backend/internal/server/middleware/api_key_auth.go \
-            backend/internal/server/middleware/api_key_groups.go; do
+            backend/internal/server/middleware/api_key_groups.go \
+            backend/internal/server/routes/gateway.go; do
             git show "$baseline:$target" > "$target"
             expected=$(git rev-parse "$baseline:$target")
             actual=$(git hash-object "$target")

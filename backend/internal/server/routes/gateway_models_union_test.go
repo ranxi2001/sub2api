@@ -143,6 +143,7 @@ type unionFixture struct {
 	probe       *unionProbe
 	concurrency *service.ConcurrencyService
 	keyRepo     *unionKeys
+	settings    *service.SettingService
 }
 
 func newUnionFixture() *unionFixture {
@@ -175,7 +176,7 @@ func (f *unionFixture) router(t *testing.T, forced string, openAI *service.OpenA
 	}
 	gateway := service.NewGatewayService(f.accounts, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, resolver, nil, nil)
 	h := &handler.Handlers{
-		Gateway:       handler.NewGatewayHandler(gateway, openAI, nil, nil, nil, f.concurrency, nil, nil, keys, nil, nil, nil, nil, cfg, nil),
+		Gateway:       handler.NewGatewayHandler(gateway, openAI, nil, nil, nil, f.concurrency, nil, nil, keys, nil, nil, nil, nil, cfg, f.settings),
 		OpenAIGateway: handler.NewOpenAIGatewayHandler(openAI, nil, nil, nil, nil, nil, nil, nil, cfg),
 		AsyncImage:    handler.NewAsyncImageHandler(nil, nil),
 	}
@@ -183,7 +184,7 @@ func (f *unionFixture) router(t *testing.T, forced string, openAI *service.OpenA
 	if forced != "" {
 		r.Use(middleware.ForcePlatform(forced))
 	}
-	RegisterGatewayRoutes(r, h, middleware.NewAPIKeyAuthMiddleware(keys, nil, cfg), keys, nil, nil, nil, resolver, cfg)
+	RegisterGatewayRoutes(r, h, middleware.NewAPIKeyAuthMiddleware(keys, nil, cfg), keys, nil, nil, f.settings, resolver, cfg)
 	f.probe.accounts = f.accounts
 	keys.SetGroupRouter(f.probe)
 	// A POST authentication boundary records the selected billing identity without
@@ -485,14 +486,15 @@ func TestMultiGroupModelsUnionKeyExpiryAndQuota(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		change func(*service.APIKey)
+		status int
 	}{
-		{"expired", func(k *service.APIKey) { past := time.Now().Add(-time.Hour); k.ExpiresAt = &past }},
-		{"quota exhausted", func(k *service.APIKey) { k.Status = service.StatusAPIKeyQuotaExhausted }},
+		{"expired", func(k *service.APIKey) { past := time.Now().Add(-time.Hour); k.ExpiresAt = &past }, http.StatusForbidden},
+		{"quota exhausted", func(k *service.APIKey) { k.Status = service.StatusAPIKeyQuotaExhausted }, http.StatusTooManyRequests},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newUnionFixture()
 			tc.change(f.key)
-			require.Equal(t, 403, unionRequest(f.router(t, "", nil, nil), http.MethodGet, "/v1/models").Code)
+			require.Equal(t, tc.status, unionRequest(f.router(t, "", nil, nil), http.MethodGet, "/v1/models").Code)
 		})
 	}
 }
@@ -540,6 +542,73 @@ func TestMultiGroupModelsUnionRefreshesNonRepresentativeGroupAfterQueue(t *testi
 			case <-time.After(4 * time.Second):
 				t.Fatal("queued discovery did not finish")
 			}
+		})
+	}
+}
+
+type unionSettings struct {
+	service.SettingRepository
+	values map[string]string
+}
+
+func (r *unionSettings) GetValue(_ context.Context, key string) (string, error) {
+	return r.values[key], nil
+}
+func TestMultiGroupModelsUnionConfiguredCodexPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		values   map[string]string
+		official bool
+		want     []string
+	}{
+		{"minimum version", map[string]string{service.SettingKeyMinCodexVersion: "0.200.0"}, true, []string{"shared-model", "text-model"}},
+		{"blacklist", map[string]string{service.SettingKeyCodexCLIOnlyBlacklist: `[{"originator":"codex-tui"}]`}, true, []string{"shared-model", "text-model"}},
+		{"configured whitelist", map[string]string{service.SettingKeyCodexCLIOnlyWhitelist: `[{"originator":"catalog-client","skip_engine_fingerprint":true}]`}, false, []string{"image-model", "shared-model", "text-model"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newUnionFixture()
+			f.groups.groups[2].CodexCLIOnly = true
+			f.settings = service.NewSettingService(&unionSettings{values: tc.values}, &config.Config{})
+			req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+			req.Header.Set("Authorization", "Bearer synthetic-union-key")
+			if tc.official {
+				req.Header.Set("User-Agent", "codex-tui/0.163.0 (Ubuntu 22.4.0; x86_64) xterm-256color")
+				req.Header.Set("Originator", "codex-tui")
+				req.Header.Set("X-Codex-Window-Id", "test-codex-window")
+			} else {
+				req.Header.Set("User-Agent", "catalog-client/1.0")
+				req.Header.Set("Originator", "catalog-client")
+			}
+			w := httptest.NewRecorder()
+			f.router(t, "", nil, nil).ServeHTTP(w, req)
+			require.Equal(t, tc.want, unionIDs(t, w))
+		})
+	}
+}
+
+func TestMultiGroupModelsUnionDefaultAndAccountSources(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*unionFixture)
+		want   []string
+	}{
+		{"default source", func(f *unionFixture) {
+			f.accounts.groups[1][0].Credentials = nil
+			f.groups.groups[1].ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{"gpt-6.1-sol", "unavailable-model"}}
+		}, []string{"gpt-6.1-sol", "image-model", "shared-model"}},
+		{"account group restriction", func(f *unionFixture) {
+			f.accounts.groups[1][0].AccountGroups = []service.AccountGroup{{GroupID: 1, AllowedModels: []string{"shared-model"}}}
+		}, []string{"image-model", "shared-model"}},
+		{"unmapped restricted account", func(f *unionFixture) {
+			f.accounts.groups[1][0].Credentials = nil
+			f.accounts.groups[1][0].AccountGroups = []service.AccountGroup{{GroupID: 1, AllowedModels: []string{"gpt-6.1-sol"}}}
+		}, []string{"gpt-6.1-sol", "image-model", "shared-model"}},
+		{"wrong platform mapping", func(f *unionFixture) { f.accounts.groups[1][0].Platform = service.PlatformAnthropic }, []string{"image-model", "shared-model"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newUnionFixture()
+			tc.change(f)
+			require.Equal(t, tc.want, unionIDs(t, unionRequest(f.router(t, "", nil, nil), http.MethodGet, "/v1/models")))
 		})
 	}
 }
