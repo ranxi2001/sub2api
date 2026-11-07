@@ -1461,6 +1461,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	// Collect unique models from all accounts
 	modelSet := make(map[string]struct{})
 	hasAnyMapping := false
+	hasInitialSelection := false
 
 	for _, acc := range accounts {
 		// Passthrough routing accepts models independently of model_mapping, so a
@@ -1470,6 +1471,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		// the ordinary accounts in the same group still count.
 		mapping := acc.GetModelMapping()
 		if acc.hasOAuthInitialModelSelection() {
+			hasInitialSelection = true
 			hasAnyMapping = true // an empty selection is an authoritative empty catalog
 		}
 		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() && !acc.hasOAuthInitialModelSelection() {
@@ -1500,6 +1502,21 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 				}
 				modelSet[model] = struct{}{}
 				hasAnyMapping = true
+			}
+		}
+	}
+	// A new account's empty scope cannot suppress the default catalog of an
+	// older unrestricted account in the same group. Pure legacy groups retain
+	// their existing fallback behavior.
+	if hasInitialSelection && platform != PlatformOpenAI {
+		for _, acc := range accounts {
+			if acc.hasOAuthInitialModelSelection() || len(acc.GetModelMapping()) > 0 {
+				continue
+			}
+			for _, model := range DefaultModelIDsForPlatform(acc.Platform) {
+				if (platform == "" || acc.Platform == platform || mixedListingModelAllowed(platform, model)) && acc.IsModelSupported(model) && acc.IsModelAllowedInGroup(groupID, model) {
+					modelSet[model] = struct{}{}
+				}
 			}
 		}
 	}

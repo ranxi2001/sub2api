@@ -261,3 +261,14 @@ func TestOAuthInitialSelectionExistingAccountEditDoesNotReapplyTemplate(t *testi
 		require.True(t, updated.IsModelSupported("gpt-6-luna"), "manual mapping takes ownership even with a globally enabled template")
 	}
 }
+
+func TestOAuthInitialSelectionMixedCatalogAllPlatforms(t *testing.T) {
+	groupID := int64(2)
+	for _, platform := range []string{PlatformAnthropic, PlatformGemini, PlatformGrok} {
+		restricted := Account{ID: 1, Platform: platform, Type: AccountTypeOAuth, Credentials: map[string]any{OAuthInitialModelSelectionKey: []string{}, "model_mapping": map[string]any{}}}
+		existing := Account{ID: 2, Platform: platform, Type: AccountTypeOAuth}
+		repo := &modelsListAccountRepoStub{byGroup: map[int64][]Account{groupID: {restricted, existing}}}
+		svc := &GatewayService{accountRepo: repo}
+		require.NotEmpty(t, svc.GetAvailableModels(t.Context(), &groupID, platform), "a new restricted account must not hide the old account's models: %s", platform)
+	}
+}
