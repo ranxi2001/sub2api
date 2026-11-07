@@ -18,6 +18,22 @@ func isMultiGroupBillingInfoRequest(c *gin.Context, key *service.APIKey) bool {
 	return c.Request.URL.Path == "/v1/sub2api/billing" && len(key.ConfiguredGroupIDs()) > 1
 }
 
+const modelListingGroupsKey = "api_key.model_listing_groups"
+
+// Only the ordinary collection uses a union. Explicit model selection, model
+// retrieval and Codex manifests retain their existing request-group semantics.
+func isMultiGroupModelListing(c *gin.Context, key *service.APIKey) bool {
+	return key != nil && len(key.ConfiguredGroupIDs()) > 1 && c.Request.Method == http.MethodGet &&
+		(c.Request.URL.Path == "/v1/models" || c.Request.URL.Path == "/models") &&
+		!c.Request.URL.Query().Has("model") && c.Query("client_version") == ""
+}
+
+func GetModelListingGroups(c *gin.Context) ([]*service.APIKey, bool) {
+	value, ok := c.Get(modelListingGroupsKey)
+	groups, valid := value.([]*service.APIKey)
+	return groups, ok && valid
+}
+
 func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subscriptions *service.SubscriptionService, cfg *config.Config, key *service.APIKey, google bool) (*service.APIKey, error) {
 	var err error
 	key, err = applySecurityPenalty(c, keys, key)
@@ -122,6 +138,16 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 		return true
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, key.UserID)
+	if isMultiGroupModelListing(c, key) {
+		groups, err := keys.ModelListingGroups(ctx, key, accepts)
+		if err != nil {
+			AbortWithError(c, infraerrors.Code(err), "MODEL_LISTING_UNAVAILABLE", "Model listing authorization is unavailable")
+			return nil, err
+		}
+		c.Set(modelListingGroupsKey, groups)
+		SetOpsFallbackAPIKey(c, groups[0])
+		return groups[0], nil
+	}
 	selected, err := keys.SelectRequestGroup(ctx, key, models, kind, subscriptions, accepts, checkBilling)
 	if err != nil {
 		status := infraerrors.Code(err)

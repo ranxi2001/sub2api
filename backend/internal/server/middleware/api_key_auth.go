@@ -201,7 +201,14 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			AbortWithError(c, http.StatusForbidden, "API_KEY_EXPIRED", "API key 已过期")
 			return
 		}
-		metadataReadRequest := billingInfoRequest || pelicanReadRequest
+		_, modelListingRequest := GetModelListingGroups(c)
+		metadataReadRequest := billingInfoRequest || pelicanReadRequest || modelListingRequest
+		// Discovery does not spend balance or quota, but expired keys must not
+		// regain access through the metadata path.
+		if modelListingRequest && (apiKey.Status == service.StatusAPIKeyExpired || apiKey.IsExpired()) {
+			AbortWithError(c, http.StatusForbidden, "API_KEY_EXPIRED", "API key 已过期")
+			return
+		}
 		// Async image task polling only reads data that already belongs to the
 		// authenticated key and must remain available after the completed
 		// generation consumes the key's remaining balance.
