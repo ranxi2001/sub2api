@@ -1,0 +1,39 @@
+name: Upstream v0.2.20 selected regressions
+
+on:
+  push:
+    branches: [cherry/upstream-v0.2.20]
+  pull_request:
+    branches: [production]
+
+permissions:
+  contents: read
+
+jobs:
+  selected-race:
+    if: github.head_ref == 'cherry/upstream-v0.2.20' || github.ref_name == 'cherry/upstream-v0.2.20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify candidate identity
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Protocol, authentication and resource regressions with race detection
+        working-directory: backend
+        run: >-
+          go test -race -tags=unit
+          ./internal/pkg/apicompat ./internal/pkg/antigravity
+          ./internal/service ./internal/handler ./internal/server/middleware
+          -run '^(TestOpenAIGatewayService_OAuth|TestBedrockEventStreamDecoder|TestGeminiTextDelta|TestResponsesReasoningContent|TestOpenAICompatBufferedReasoningContent|TestMessageContentWireConsistent|TestMessageRefusalPreserved|TestEmptyMessageContentArray|TestHandleUpstreamError_Kimi|TestSanitizeGrokResponsesModelInput|TestOpenAIBodyLimitFailoverExhausted|TestUpdateSessionWindow_|TestHandleUpstreamError_SamplesWeeklyUsage|TestAccountUsageService_.*SetupToken|TestStreamingProcessorResponseShapes|TestAccountTestService_OpenAIImage|TestProbeOpenAIAPIKeyResponsesSupport|TestAPIKeyAuthLookupFailureWhenClientGoneReturns499|TestAPIKeyAuthRejectsNonUTF8KeyAsInvalid|TestAPIKeyService_GetByKeyRejectsNonUTF8BeforeLookup|TestCleanGeminiRequest_|TestBuildAnthropicMessagesURL|TestAnthropicMessagesURL_|TestAccountTestService_CloudflareMessagesRejectsBetaQuery)'
+          -count=1 -v -timeout=15m
+      - name: Backend compilation
+        working-directory: backend
+        run: go build ./cmd/server
