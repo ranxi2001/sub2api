@@ -55,6 +55,7 @@ jobs:
             backend/internal/service/gateway_service.go \
             backend/internal/service/api_key_groups.go \
             backend/internal/server/middleware/api_key_auth.go \
+            backend/internal/server/middleware/api_key_auth_google.go \
             backend/internal/server/middleware/api_key_groups.go \
             backend/internal/server/routes/gateway.go; do
             git show "$baseline:$target" > "$target"
