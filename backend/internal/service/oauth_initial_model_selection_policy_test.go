@@ -223,3 +223,41 @@ func TestOAuthInitialSelectionTemplateAliasWithoutImportScope(t *testing.T) {
 	require.True(t, account.IsModelSupported("custom"))
 	require.Equal(t, "gemini-3.6-flash", account.GetMappedModel("custom"))
 }
+
+type initialSelectionEditRepo struct {
+	AccountRepository
+	account *Account
+}
+
+func (r *initialSelectionEditRepo) GetByID(context.Context, int64) (*Account, error) {
+	copy := *r.account
+	return &copy, nil
+}
+func (r *initialSelectionEditRepo) Update(_ context.Context, a *Account) error {
+	r.account = a
+	return nil
+}
+func TestOAuthInitialSelectionExistingAccountEditDoesNotReapplyTemplate(t *testing.T) {
+	for _, selected := range [][]string{{}, {"gpt-6.1-sol"}} {
+		policy, _ := initialSelectionFixture(t, PlatformOpenAI, selected)
+		input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+		require.NoError(t, policy.ApplyOAuthAutoConfig(t.Context(), input))
+		repo := &initialSelectionEditRepo{account: &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Name: "before", Credentials: input.Credentials, Extra: map[string]any{}}}
+		policy.accountRepo = repo
+		edited := maps.Clone(input.Credentials)
+		if len(selected) == 0 {
+			delete(edited, "model_mapping")
+		}
+		updated, err := policy.UpdateAccount(t.Context(), 3, &UpdateAccountInput{Name: "after", Credentials: edited})
+		require.NoError(t, err)
+		require.Equal(t, "after", updated.Name)
+		require.True(t, updated.hasOAuthInitialModelSelection())
+		require.False(t, updated.IsModelSupported("gpt-6-luna"))
+		edited = maps.Clone(updated.Credentials)
+		edited["model_mapping"] = map[string]any{"gpt-6-luna": "gpt-6-luna"}
+		updated, err = policy.UpdateAccount(t.Context(), 3, &UpdateAccountInput{Credentials: edited})
+		require.NoError(t, err)
+		require.False(t, updated.hasOAuthInitialModelSelection())
+		require.True(t, updated.IsModelSupported("gpt-6-luna"), "manual mapping takes ownership even with a globally enabled template")
+	}
+}

@@ -63,7 +63,7 @@ jobs:
           git -C candidate rev-parse HEAD | tee evidence/green-head.txt
           test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_HEAD"
           git -C candidate diff --exit-code
-          (cd candidate/backend && go test -tags=unit ./internal/service ./internal/handler/admin -run '^(TestOAuthInitial|TestAutoConfigSelectedModels|TestOAuthModelMapping|TestAutoConfig|TestApplyUpstreamModels|TestAutomaticUpstreamModels|TestAccountIsModelSupported|TestOpenAI.*Model)' -count=1 -v) 2>&1 | tee evidence/green.log
+          (cd candidate/backend && go test -tags=unit ./internal/service ./internal/handler/admin -run '^(TestOAuthInitial|TestApplyOAuthCredentialsPreservesExistingNonAuthCredentials|TestAutoConfigSelectedModels|TestOAuthModelMapping|TestAutoConfig|TestApplyUpstreamModels|TestAutomaticUpstreamModels|TestAccountIsModelSupported|TestOpenAI.*Model)' -count=1 -v) 2>&1 | tee evidence/green.log
           if grep -Eq -- '--- SKIP:|no tests to run' evidence/green.log; then exit 1; fi
           grep -F -- '--- PASS: TestOAuthInitialModelSelectionAdmission' evidence/green.log
           grep -F -- '--- PASS: TestAutoConfigSelectedModels' evidence/green.log
