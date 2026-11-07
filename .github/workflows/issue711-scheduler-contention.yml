@@ -46,6 +46,7 @@ jobs:
         options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       CI: 'true'
+      ISSUE711_REQUIRED: 'true'
       ISSUE711_POSTGRES_DSN: postgres://postgres:synthetic-ci-only@127.0.0.1:5432/issue711?sslmode=disable
       ISSUE711_REDIS_A: 127.0.0.1:6379
       ISSUE711_REDIS_B: 127.0.0.1:6380

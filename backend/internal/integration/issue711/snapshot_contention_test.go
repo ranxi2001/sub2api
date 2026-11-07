@@ -84,7 +84,7 @@ func setup(t *testing.T) *fixture {
 	dsn := os.Getenv("ISSUE711_POSTGRES_DSN")
 	addresses := []string{os.Getenv("ISSUE711_REDIS_A"), os.Getenv("ISSUE711_REDIS_B")}
 	if dsn == "" || addresses[0] == "" || addresses[1] == "" {
-		if os.Getenv("CI") != "" {
+		if os.Getenv("ISSUE711_REQUIRED") != "" {
 			t.Fatal("issue711 CI requires PostgreSQL and two independent Redis servers")
 		}
 		t.Skip("dedicated issue711 CI supplies isolated PostgreSQL and two Redis servers")
