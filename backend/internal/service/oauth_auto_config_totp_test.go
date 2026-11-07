@@ -59,3 +59,42 @@ func TestOAuthAutoConfigTOTPRotationLegacyAndRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, loaded.OpenAITOTPRotateOn429)
 }
+
+func TestOAuthInitialModelsAndTOTPRotation(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		models         []string
+		allowsChosen   bool
+		allowsExcluded bool
+	}{
+		{"legacy", nil, true, true},
+		{"selected", []string{"gpt-6.1-sol"}, true, false},
+		{"none", []string{}, false, false},
+	} {
+		for _, rotate := range []bool{false, true} {
+			t.Run(tc.name+map[bool]string{false: "/rotation-off", true: "/rotation-on"}[rotate], func(t *testing.T) {
+				cfg := DefaultOAuthAutoConfig()
+				cfg.Enabled, cfg.GroupIDs = true, []int64{2}
+				cfg.SelectedModels, cfg.ModelMappings = tc.models, nil
+				cfg.OpenAITOTPRotateOn429 = rotate
+				raw, err := json.Marshal(cfg)
+				require.NoError(t, err)
+				repo := &accountOpsSettingsStub{raw: string(raw)}
+				loaded, err := GetOAuthAutoConfig(t.Context(), repo)
+				require.NoError(t, err)
+				require.Equal(t, tc.models, loaded.SelectedModels)
+				require.Equal(t, rotate, loaded.OpenAITOTPRotateOn429)
+				svc := &adminServiceImpl{
+					settingService: NewSettingService(repo, nil),
+					groupRepo:      autoConfigGroups{group: &Group{ID: 2, Platform: PlatformOpenAI, Status: StatusActive}},
+				}
+				input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+				require.NoError(t, svc.ApplyOAuthAutoConfig(t.Context(), input))
+				require.Equal(t, rotate, input.Extra[OpenAITOTPRotateOn429ExtraKey])
+				account := &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
+				require.Equal(t, tc.allowsChosen, account.IsModelSupported("gpt-6.1-sol"))
+				require.Equal(t, tc.allowsExcluded, account.IsModelSupported("gpt-6-luna"))
+			})
+		}
+	}
+}
