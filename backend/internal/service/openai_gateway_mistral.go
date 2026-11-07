@@ -201,22 +201,11 @@ func normalizeMistralChatRequest(account *Account, body []byte) ([]byte, error) 
 			changed = true
 		}
 	}
-	// Only the confirmed final upstream model has this effort vocabulary.
-	if model == "zai-glm-5-3" {
-		effort, _ := mistralString(root["reasoning_effort"])
-		mapped := ""
-		switch effort {
-		case "none", "minimal":
-			mapped = "low"
-		case "medium":
-			mapped = "high"
-		case "xhigh":
-			mapped = "max"
-		}
-		if mapped != "" {
-			root["reasoning_effort"], _ = json.Marshal(mapped)
-			changed = true
-		}
+	// Map the effort onto the native vocabulary of the final upstream model.
+	// Only families with a confirmed Mistral allow-list are rewritten (GLM and
+	// DeepSeek); see mistralReasoningEffortFamilyFor / mapMistralReasoningEffort.
+	if applyMistralReasoningEffort(root, model) {
+		changed = true
 	}
 	for _, key := range []string{"store", "thinking", "enable_thinking"} {
 		if _, exists := root[key]; exists {
@@ -469,4 +458,150 @@ func cleanMistralRequestBlocks(raw json.RawMessage) (json.RawMessage, bool, stri
 		return nil, false, "", false, errMistralContent
 	}
 	return cleaned, true, text.String(), textOnly, nil
+}
+
+// mistralReasoningEffortFamily identifies a Mistral-hosted model family whose
+// reasoning_effort vocabulary has been confirmed against the live upstream.
+type mistralReasoningEffortFamily int
+
+const (
+	mistralEffortFamilyNone mistralReasoningEffortFamily = iota
+	// GLM on Mistral (zai-glm-5-3, zai-glm-5-3-flash): native scale low/high/max.
+	mistralEffortFamilyGLM
+	// DeepSeek on Mistral (e.g. deepseek-v4-1-flash-1017). Upstream 400:
+	// "reasoning_effort 'medium' is not supported for this model; supported
+	// values: ['none', 'low', 'high', 'xhigh', 'max']".
+	mistralEffortFamilyDeepSeek
+)
+
+// mistralReasoningEffortFamilyFor classifies the final (post model-mapping)
+// upstream model. GLM stays exact-match (ds.2/ds.3 behavior; aliases such as
+// zai-glm-5-3-latest are deliberately untouched). Every DeepSeek-named model
+// routed to platform=mistral shares one allow-list.
+func mistralReasoningEffortFamilyFor(model string) mistralReasoningEffortFamily {
+	normalized := strings.TrimSpace(model)
+	if normalized == "zai-glm-5-3" || normalized == "zai-glm-5-3-flash" {
+		return mistralEffortFamilyGLM
+	}
+	lower := strings.ToLower(normalized)
+	if strings.HasPrefix(lower, "deepseek-") || strings.HasPrefix(lower, "deepseek_") {
+		return mistralEffortFamilyDeepSeek
+	}
+	return mistralEffortFamilyNone
+}
+
+// canonicalMistralEffortToken lower-cases and strips separators so that
+// "Medium", "x-high", "extra_high" and "X High" compare equal.
+func canonicalMistralEffortToken(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	return strings.NewReplacer("-", "", "_", "", " ", "").Replace(value)
+}
+
+// mapMistralReasoningEffort maps one client effort string onto the family's
+// native vocabulary. It returns (value, keep); keep=false means the field must
+// be removed so the upstream applies its own default instead of answering 400.
+//
+// DeepSeek on Mistral (allow-list none/low/high/xhigh/max):
+//
+//	none, low, high, xhigh, max   -> unchanged (canonical lower-case spelling)
+//	minimal                       -> low   (same as the GLM table)
+//	medium                        -> high  (next supported level; never downgrade)
+//	extrahigh / x-high / x_high   -> xhigh
+//	ultra                         -> max
+//	off / disabled                -> none
+//	"" / auto / default / unknown -> removed (upstream default)
+//
+// GLM on Mistral keeps its ds.2 table (none/minimal->low, medium->high,
+// xhigh->max) and keeps forwarding unknown values unchanged.
+func mapMistralReasoningEffort(family mistralReasoningEffortFamily, raw string) (string, bool) {
+	token := canonicalMistralEffortToken(raw)
+	switch family {
+	case mistralEffortFamilyGLM:
+		switch token {
+		case "none", "minimal", "low":
+			return "low", true
+		case "medium", "high":
+			return "high", true
+		case "xhigh", "extrahigh", "max":
+			return "max", true
+		default:
+			return raw, true
+		}
+	case mistralEffortFamilyDeepSeek:
+		switch token {
+		case "none", "off", "disabled":
+			return "none", true
+		case "minimal", "low":
+			return "low", true
+		case "medium", "high":
+			return "high", true
+		case "xhigh", "extrahigh":
+			return "xhigh", true
+		case "max", "ultra":
+			return "max", true
+		default:
+			return "", false
+		}
+	default:
+		return raw, true
+	}
+}
+
+// applyMistralReasoningEffort rewrites root["reasoning_effort"] in place for
+// model families with a confirmed Mistral allow-list. JSON null is preserved
+// (explicit omission). For DeepSeek, non-string values (numbers, bools,
+// objects) can never be valid and are removed instead of being forwarded into
+// a 400/422; GLM keeps its ds.2 behavior of preserving them. Returns whether
+// root changed.
+func applyMistralReasoningEffort(root mistralObject, model string) bool {
+	family := mistralReasoningEffortFamilyFor(model)
+	if family == mistralEffortFamilyNone {
+		return false
+	}
+	raw, exists := root["reasoning_effort"]
+	if !exists || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false
+	}
+	effort, isString := mistralString(raw)
+	if !isString {
+		if family == mistralEffortFamilyDeepSeek {
+			delete(root, "reasoning_effort")
+			return true
+		}
+		return false
+	}
+	mapped, keep := mapMistralReasoningEffort(family, effort)
+	if !keep {
+		delete(root, "reasoning_effort")
+		return true
+	}
+	if mapped == effort {
+		return false
+	}
+	root["reasoning_effort"], _ = json.Marshal(mapped)
+	return true
+}
+
+// enforceMistralChatReasoningEffort is the last-mile guard at the shared CC
+// send point (sendCCUpstreamRequest): whatever ran after
+// normalizeMistralChatRequest, a Mistral body never leaves with an effort
+// outside the model's allow-list. The mapping is idempotent, so bodies that
+// were already normalized are returned byte-for-byte.
+func enforceMistralChatReasoningEffort(account *Account, body []byte) []byte {
+	if account == nil || account.Platform != PlatformMistral || len(body) == 0 {
+		return body
+	}
+	var root mistralObject
+	if json.Unmarshal(body, &root) != nil || root == nil {
+		return body
+	}
+	model, _ := mistralString(root["model"])
+	if !applyMistralReasoningEffort(root, model) {
+		return body
+	}
+	out, err := json.Marshal(root)
+	if err != nil {
+		return body
+	}
+	return out
 }

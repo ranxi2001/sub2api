@@ -822,6 +822,25 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(later.find('[data-testid="new-feature-badge"]').exists()).toBe(true);
   });
 
+  it("shows the Mistral budget notice independently and keeps its dismissal on remount", async () => {
+    localStorage.setItem("sub2api:new-feature-notices:v1:41", JSON.stringify([NEW_FEATURE_NOTICES.protocolFeatureSwitches]));
+    const wrapper = mountView();
+    await flushPromises();
+    const badge = wrapper.findAllComponents(NewFeatureBadge)
+      .find(b => b.props('noticeId') === NEW_FEATURE_NOTICES.mistralBudgetUsage);
+    expect(badge).toBeDefined();
+    await badge!.get('[data-testid="new-feature-badge"]').trigger('click');
+    await flushPromises();
+    expect(badge!.find('[data-testid="new-feature-badge"]').exists()).toBe(false);
+    wrapper.unmount();
+    const refreshed = mountView();
+    await flushPromises();
+    expect(refreshed.findAllComponents(NewFeatureBadge)
+      .filter(b => b.props('noticeId') === NEW_FEATURE_NOTICES.mistralBudgetUsage)
+      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(0);
+    refreshed.unmount();
+  });
+
   it.each([0, 1])("dismisses the forecast notice from real entry %s and keeps it dismissed on remount", async (index) => {
     const wrapper = mountView();
     await flushPromises();

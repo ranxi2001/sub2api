@@ -42,6 +42,15 @@ func TestMistralRequestCompatibility(t *testing.T) {
 		{"invalid flags", `"model":"zai-glm-5-3","thinking":"disabled","enable_thinking":"false"`, ``},
 		{"null flag", `"model":"zai-glm-5-3","enable_thinking":null`, ``},
 		{"other disabled", `"model":"mistral-small-latest","enable_thinking":false`, `"none"`},
+		{"deepseek none", `"model":"deepseek-v4-1-flash-1017","reasoning_effort":"none"`, `"none"`},
+		{"deepseek minimal", `"model":"deepseek-v4-1-flash-1017","reasoning_effort":"minimal"`, `"low"`},
+		{"deepseek low", `"model":"deepseek-v4-1-flash-1017","reasoning_effort":"low"`, `"low"`},
+		{"deepseek medium", `"model":"deepseek-v4-1-flash-1017","reasoning_effort":"medium"`, `"high"`},
+		{"deepseek high", `"model":"deepseek-v4-1-flash-1017","reasoning_effort":"high"`, `"high"`},
+		{"deepseek xhigh", `"model":"deepseek-v4-1-flash-1017","reasoning_effort":"xhigh"`, `"xhigh"`},
+		{"deepseek max", `"model":"deepseek-v4-1-flash-1017","reasoning_effort":"max"`, `"max"`},
+		{"glm flash medium", `"model":"zai-glm-5-3-flash","reasoning_effort":"medium"`, `"high"`},
+		{"glm flash none", `"model":"zai-glm-5-3-flash","reasoning_effort":"none"`, `"low"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []byte(`{` + tc.input + `,"messages":[{"role":"user","content":"hello"}],"metadata":{"keep":true},"reasoning":{"keep":true}}`)
