@@ -1504,6 +1504,29 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: true, seconds: 60, image_group_ids: [7, 8], image_seconds: 200 });
   });
 
+  it("keeps the image timeout announcement independent and dismissed after remount", async () => {
+    const oldNotice = NEW_FEATURE_NOTICES.protocolFeatureSwitches;
+    const notice = NEW_FEATURE_NOTICES.openaiImageHeaderTimeoutGroups;
+    localStorage.setItem('sub2api:new-feature-notices:v1:41', JSON.stringify([oldNotice]));
+    getOpenAIResponseHeaderTimeoutSettings.mockResolvedValue({ enabled: true, seconds: 60, image_group_ids: [], image_seconds: 180 });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const badge = wrapper.findAllComponents(NewFeatureBadge).find(b => b.props('noticeId') === notice);
+    expect(badge).toBeDefined();
+    await badge!.get('[data-testid="new-feature-badge"]').trigger('click');
+    await flushPromises();
+    expect(badge!.find('[data-testid="new-feature-badge"]').exists()).toBe(false);
+    wrapper.unmount();
+    const refreshed = mountView();
+    await flushPromises();
+    expect(refreshed.findAllComponents(NewFeatureBadge).filter(b => b.props('noticeId') === notice)
+      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(0);
+    const dismissed = JSON.parse(localStorage.getItem('sub2api:new-feature-notices:v1:41') ?? '[]');
+    expect(dismissed).toEqual(expect.arrayContaining([oldNotice, notice]));
+    refreshed.unmount();
+  });
+
   it("loads, disables, enables and saves the OpenAI header timeout with server readback", async () => {
     getOpenAIResponseHeaderTimeoutSettings.mockResolvedValueOnce({ enabled: false, seconds: 45 });
     const wrapper = mountView();
