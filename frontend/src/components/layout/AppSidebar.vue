@@ -81,17 +81,24 @@
               </button>
               <!-- Children -->
               <div v-if="!sidebarCollapsed && isGroupExpanded(item)" class="mb-1 ml-4 border-l border-gray-200 pl-2 dark:border-dark-600">
-                <router-link
-                  v-for="child in item.children"
-                  :key="child.path"
-                  :to="child.path"
-                  class="sidebar-link mb-0.5 py-1.5 text-sm"
-                  :class="{ 'sidebar-link-active': route.path === child.path }"
-                  @click="handleMenuItemClick(child.path)"
-                >
-                  <component :is="child.icon" class="h-4 w-4 flex-shrink-0" />
-                  <span>{{ child.label }}</span>
-                </router-link>
+                <div v-for="child in item.children" :key="child.path" class="relative">
+                  <router-link
+                    :to="child.path"
+                    class="sidebar-link mb-0.5 py-1.5 text-sm"
+                    :class="{ 'sidebar-link-active': route.path === child.path }"
+                    :style="child.path === '/admin/ai-ops' ? { paddingRight: '3.5rem' } : undefined"
+                    @click="handleMenuItemClick(child.path)"
+                  >
+                    <component :is="child.icon" class="h-4 w-4 flex-shrink-0" />
+                    <span>{{ child.label }}</span>
+                  </router-link>
+                  <NewFeatureBadge
+                    v-if="child.path === '/admin/ai-ops'"
+                    :notice-id="NEW_FEATURE_NOTICES.aiOpsCodex"
+                    :user-id="authStore.user?.id"
+                    class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
+                  />
+                </div>
               </div>
             </template>
             <!-- Normal item (no children) -->
@@ -238,6 +245,7 @@ import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 import { getCustomMenuLabel } from '@/utils/customMenu'
+import { filterSmartOpsSidebar } from '@/utils/smartOpsSidebar'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 
 interface NavItem {
@@ -891,6 +899,7 @@ const adminNavItems = computed((): NavItem[] => {
       { path: '/admin/pelican-tests', label: t('pelicanTests.title'), icon: PelicanTestsIcon },
       { path: '/admin/group-cache-tests', label: t('admin.groupCacheTest.title'), icon: QualityOpsIcon },
       { path: '/admin/request-captures', label: t('admin.requestCapture.title'), icon: RequestCaptureIcon, featureFlag: () => adminSettingsStore.requestCaptureEnabled },
+      { path: '/admin/ai-ops', label: t('aiOps.title'), icon: SmartOpsIcon, featureFlag: () => authStore.isAdmin },
       { path: '/admin/harvest-flow', label: t('nav.harvestFlow'), icon: FlowIcon },
     ] },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
@@ -941,7 +950,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
   ]
 
-  const visible = applyFeatureFlags(baseItems)
+  const visible = filterSmartOpsSidebar(applyFeatureFlags(baseItems), adminSettingsStore.smartOpsHiddenMenuItems)
 
   // 简单模式下，在系统设置前插入 API密钥
   if (authStore.isSimpleMode) {

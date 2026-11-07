@@ -1,5 +1,9 @@
 <template>
   <div :class="flat ? '' : 'card overflow-hidden'">
+    <div v-if="enableTimingDetails && noticeUserId != null && !observerMode" class="flex items-center gap-2 border-b border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400">
+      <span>{{ t('requestTiming.contentTitle') }}</span>
+      <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.streamFirstEventTiming" :user-id="noticeUserId" />
+    </div>
     <div
       v-if="showIpGeoToolbar"
       class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
@@ -541,7 +545,7 @@
         </div>
       </div>
   </UsageDetailPopover>
-  <UsageTimingDialog :record="timingRecord" @close="timingRecord = null" />
+  <UsageTimingDialog :record="timingRecord" :notice-user-id="noticeUserId" @close="timingRecord = null" />
 </template>
 
 <script setup lang="ts">
@@ -550,6 +554,8 @@ import { useWindowSize } from '@vueuse/core'
 import UsageDetailPopover from './UsageDetailPopover.vue'
 import UsageApiKeyName from './UsageApiKeyName.vue'
 import UsageTimingDialog from './UsageTimingDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { observerUsageContext } from './observerUsageContext'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -618,6 +624,8 @@ interface Props {
   defaultSortOrder?: 'asc' | 'desc'
   showAccountBilling?: boolean
   enableTimingDetails?: boolean
+  /** Current admin ID for the shared feature notice; omitted on user/observer pages. */
+  noticeUserId?: number | null
   showUpstreamEndpoint?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean

@@ -367,6 +367,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	responsesBody = updatedBody
 	responsesReq.ServiceTier = normalizedOpenAIServiceTierValue(gjson.GetBytes(responsesBody, "service_tier").String())
+	if err := s.checkAPIKeyLongContextBeforeSend(ctx, c, responsesBody, upstreamModel); err != nil {
+		return nil, err
+	}
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
@@ -952,6 +955,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 			UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 			Stream:                        true,
+			ClientDisconnect:              clientDisconnected,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
 		}
@@ -986,10 +990,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if isTerminalEvent {
 			terminalEventType = strings.TrimSpace(event.Type)
 			if event.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
+				usage = copyOpenAIUsageFromResponsesUsage(event.Usage, usage)
 			}
 			if event.Response != nil && event.Response.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
+				usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage, usage)
 			}
 		}
 		if strings.TrimSpace(event.Type) == "response.failed" || strings.TrimSpace(event.Type) == "error" {

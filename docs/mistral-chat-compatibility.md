@@ -25,11 +25,19 @@ Mistral 原生 Chat 的 `content` 可以从 thinking 数组，经含首段 text 
 
 ## 推理与路由
 
-`reasoning.effort` 的非空值优先于 `reasoning_effort`，出站统一为 Mistral 原生 `reasoning_effort` 并移除 nested `reasoning`。只有最终上游模型恰为 `zai-glm-5-3` 时应用其已确认档位映射：none/minimal → low，medium → high，xhigh → max。用量元数据读取最终出站档位。
+`reasoning.effort` 的非空值优先于 `reasoning_effort`，出站统一为 Mistral 原生 `reasoning_effort` 并移除 nested `reasoning`。最终上游模型命中已确认的 Mistral 档位白名单家族时应用映射：GLM（`zai-glm-5-3`、`zai-glm-5-3-flash`）映射为 none/minimal → low、medium → high、xhigh → max；DeepSeek（`deepseek-*`、`deepseek_*`，白名单 `none`/`low`/`high`/`xhigh`/`max`）映射为 minimal → low、medium → high、x-high/extra_high → xhigh、ultra → max、off/disabled → none，空值/auto/default/未知或非字符串值移除交由上游默认处理。Mistral 平台出站不注入 DeepSeek thinking-mode 的 `reasoning_content` 占位符，并在发送前兜底剥离残留的 `reasoning_content`/`reasoning_details` 与归一化 `reasoning_effort`。用量元数据读取最终出站档位。
 
 复合分组支持明确的 `mistral/` 前缀及 Mistral 原生模型族。显式路由和精确账号映射保持优先，跨平台精确归属冲突继续拒绝。共享 GLM 名称不据此归为 Mistral；`zai-glm-5-3` 需要 `mistral/` 前缀或显式路由/精确账号映射。
 
 Mistral 账号的 Codex 目录使用已保存的上游上下文、推理档位和输入模态快照，图片能力根据该账号的同步元数据确定，不套用其他供应商的模型名默认值。原生 Chat 的 developer 消息经现有适配改为 system，顺序和其他字段保持不变。
+
+## 预算与用量探测
+
+推理端点指向官方主机 `https://api.mistral.ai` 的 Mistral API Key 账号支持预算与套餐探测（自定义中转域名不发起官方探测，探测 URL 经全局出站安全白名单校验）：
+
+- `GET /v1/billing/budget`：返回 `vibe_budget` 与 `api_budget`（含 `usage_percentage`、`initial_budget`、`currency`、`reset_at`、`payg_enabled`）。`mstrl_` 前缀的 Vibe Key 读取 `vibe_budget`，常规 API Key 读取 `api_budget`，缺失时互为回退；显式存在的 0 额度预算不跨池回退。
+- `GET /v1/billing/subscription`：返回 `plan_name`、`payg_enabled`、`vibe_payg_enabled`，用于展示套餐等级（如 `INDIVIDUAL` → `Pro`）并在预算对象省略 `payg_enabled` 时提供按量付费状态兜底。
+- 调度与恢复：月度窗口与换算后的剩余额度写入账号 `extra` 快照，支持月度使用率阈值停调与周期低余额停调；开启 `payg_enabled` 时跳过包月额度阈值限制并解除既有预算耗尽冷却。上游返回 `402`（如 `Vibe budget exhausted.`）时记为可恢复的临时停调而非永久 `error`。
 
 ## 离线回归依据
 

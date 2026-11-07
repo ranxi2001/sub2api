@@ -137,7 +137,17 @@ func (s *PaymentService) confirmPayment(ctx context.Context, oid int64, tradeNo 
 		})
 		return fmt.Errorf("invalid paid amount from provider: %v", paid)
 	}
-	if math.Abs(paid-o.PayAmount) > paymentAmountToleranceForCurrency(PaymentOrderCurrency(o)) {
+	amountMatches := math.Abs(paid-o.PayAmount) <= paymentAmountToleranceForCurrency(PaymentOrderCurrency(o))
+	if pk == payment.TypeBEpusdt {
+		currency := PaymentOrderCurrency(o)
+		paidMinor, paidErr := payment.AmountToMinorUnit(strconv.FormatFloat(paid, 'f', -1, 64), currency)
+		expectedMinor, expectedErr := payment.AmountToMinorUnit(strconv.FormatFloat(o.PayAmount, 'f', -1, 64), currency)
+		amountMatches = paidErr == nil && expectedErr == nil && paidMinor == expectedMinor
+		if o.PaymentTradeNo != "" && o.PaymentTradeNo != tradeNo {
+			return fmt.Errorf("bepusdt transaction ID mismatch")
+		}
+	}
+	if !amountMatches {
 		s.writeAuditLog(ctx, o.ID, "PAYMENT_AMOUNT_MISMATCH", pk, map[string]any{"expected": o.PayAmount, "paid": paid, "tradeNo": tradeNo})
 		return fmt.Errorf("amount mismatch: expected %s, got %s", strconv.FormatFloat(o.PayAmount, 'f', -1, 64), strconv.FormatFloat(paid, 'f', -1, 64))
 	}
@@ -179,16 +189,27 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	previousStatus := o.Status
 	now := time.Now()
 	grace := now.Add(-paymentGraceMinutes * time.Minute)
+	if pk == payment.TypeBEpusdt && psSnapshotStringValue(o.ProviderSnapshot["collection_mode"]) == "embedded" {
+		// Match the collection engine's three-hour historical scan window.
+		// Chain confirmations and callback retries can exceed the fiat grace.
+		grace = now.Add(-bepusdtOrderRecoveryWindow)
+	}
+	expired := paymentorder.And(paymentorder.StatusEQ(OrderStatusExpired), paymentorder.UpdatedAtGTE(grace))
+	if payment.GetBasePaymentType(pk) == payment.TypeEasyPay {
+		expired = paymentorder.And(paymentorder.StatusEQ(OrderStatusExpired), paymentorder.ExpiresAtGTE(now.Add(-easyPayOrderRecoveryWindow)))
+	}
+	eligible := paymentorder.Or(paymentorder.StatusEQ(OrderStatusPending), paymentorder.StatusEQ(OrderStatusCancelled), expired)
+	if payment.GetBasePaymentType(pk) == payment.TypeEasyPay {
+		eligible = paymentorder.And(eligible, paymentorder.ExpiresAtGTE(now.Add(-easyPayOrderRecoveryWindow)))
+		if background, _ := ctx.Value(easyPayBackgroundRecoveryKey{}).(bool); background {
+			// Recheck at the atomic update boundary: a manual cancellation or
+			// refund racing a scan must not be reversed by the worker.
+			eligible = paymentorder.And(eligible, paymentorder.StatusIn(OrderStatusPending, OrderStatusExpired))
+		}
+	}
 	c, err := s.entClient.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
-		paymentorder.Or(
-			paymentorder.StatusEQ(OrderStatusPending),
-			paymentorder.StatusEQ(OrderStatusCancelled),
-			paymentorder.And(
-				paymentorder.StatusEQ(OrderStatusExpired),
-				paymentorder.UpdatedAtGTE(grace),
-			),
-		),
+		eligible,
 	).SetStatus(OrderStatusPaid).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).ClearFailedAt().ClearFailedReason().Save(ctx)
 	if err != nil {
 		return fmt.Errorf("update to PAID: %w", err)
@@ -230,11 +251,16 @@ func (s *PaymentService) alreadyProcessed(ctx context.Context, o *dbent.PaymentO
 			"status", cur.Status,
 			"updatedAt", cur.UpdatedAt,
 		)
-		s.writeAuditLog(ctx, o.ID, "PAYMENT_AFTER_EXPIRY", "system", map[string]any{
+		detail := map[string]any{
 			"status":    cur.Status,
 			"updatedAt": cur.UpdatedAt,
 			"reason":    "payment arrived after expiry grace period",
-		})
+		}
+		if payment.GetBasePaymentType(expectedNotificationProviderKeyForOrder(s.registry, cur, "")) == payment.TypeEasyPay {
+			detail["reason"] = "EasyPay recovery deadline elapsed; manual reconciliation required"
+			detail["recovery_until"] = cur.ExpiresAt.Add(easyPayOrderRecoveryWindow)
+		}
+		s.writeAuditLog(ctx, o.ID, "PAYMENT_AFTER_EXPIRY", "system", detail)
 		return nil
 	default:
 		return nil

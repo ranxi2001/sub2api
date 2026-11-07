@@ -22,6 +22,7 @@ import (
 
 // GroupHandler handles admin group management
 type GroupHandler struct {
+	antiDistillation     *service.GroupAntiDistillationService
 	adminService         service.AdminService
 	dashboardService     *service.DashboardService
 	groupCapacityService *service.GroupCapacityService

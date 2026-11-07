@@ -309,7 +309,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		if err != nil {
 			return nil, nil, err
 		}
-		targetURL = validatedURL + "/v1/messages?beta=true"
+		targetURL = buildAnthropicMessagesURL(validatedURL)
 	}
 
 	stripClaudeCodeIdentity := account != nil && account.IsAnthropicStripClaudeCodeIdentityEnabled()
@@ -396,6 +396,9 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	account.ApplyHeaderOverrides(req.Header)
 	filterSonnet55ToolsetBetaHeader(req.Header, body, gjson.GetBytes(body, "model").String())
 
+	if err := checkAPIKeyLongContextBeforeForward(ctx, c, s.billingService, body, gjson.GetBytes(body, "model").String()); err != nil {
+		return nil, nil, err
+	}
 	return req, body, nil
 }
 

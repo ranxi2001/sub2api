@@ -19,6 +19,9 @@ func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID,
 	}
 	resolver := s.userGroupRateResolver
 	if resolver == nil {
+		if s.userGroupRateRepo == nil && s.userGroupRateCache == nil {
+			return groupDefaultMultiplier
+		}
 		resolver = newUserGroupRateResolver(
 			s.userGroupRateRepo,
 			s.userGroupRateCache,

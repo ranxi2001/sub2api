@@ -28,6 +28,7 @@ type AdminUpdateAPIKeyGroupRequest struct {
 	ResetRateLimitUsage *bool              `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
 	ModelMapping        *map[string]string `json:"model_mapping"`
 	ReasoningEffort     *string            `json:"reasoning_effort"`
+	AllowLongContext    *bool              `json:"allow_long_context"`
 }
 
 // UpdateGroup handles updating an API key's admin-managed fields.
@@ -44,8 +45,8 @@ func (h *AdminAPIKeyHandler) UpdateGroup(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	input := service.AdminUpdateAPIKeySettingsInput{GroupID: req.GroupID, ModelMapping: req.ModelMapping, ReasoningEffort: req.ReasoningEffort}
-	hasModelPolicy := req.ModelMapping != nil || req.ReasoningEffort != nil
+	input := service.AdminUpdateAPIKeySettingsInput{GroupID: req.GroupID, ModelMapping: req.ModelMapping, ReasoningEffort: req.ReasoningEffort, AllowLongContext: req.AllowLongContext}
+	hasModelPolicy := req.ModelMapping != nil || req.ReasoningEffort != nil || req.AllowLongContext != nil
 	input.ResetRateLimitUsage = req.ResetRateLimitUsage != nil && *req.ResetRateLimitUsage
 	if err := input.Validate(); err != nil {
 		response.ErrorFrom(c, err)
@@ -71,7 +72,7 @@ func (h *AdminAPIKeyHandler) UpdateGroup(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if resetKey != nil && req.GroupID == nil && req.ModelMapping == nil && req.ReasoningEffort == nil {
+	if resetKey != nil && req.GroupID == nil && !hasModelPolicy {
 		result.APIKey = resetKey
 	}
 

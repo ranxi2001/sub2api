@@ -27,8 +27,18 @@ var OpsContextLimitRejectionNeedles = []string{
 }
 
 func IsOpsContextLimitRejection(status, upstreamStatus int, message string) bool {
+	// A gateway-normalized 400 may retain the relay's original 5xx status.
+	// Require the canonical context code, not generic payload/length wording.
+	if status == 400 && strings.Contains(strings.ToLower(message), "context_length_exceeded") {
+		return true
+	}
 	if upstreamStatus > 0 {
 		status = upstreamStatus
+	}
+	// Some Responses providers wrap an explicit context rejection in HTTP 502.
+	// Only accept the canonical code here, not generic payload/length prose.
+	if status == 502 {
+		return strings.Contains(strings.ToLower(message), "context_length_exceeded")
 	}
 	if status != 400 && status != 413 && status != 422 {
 		return false
@@ -73,6 +83,9 @@ func NormalizeOpsClientRejection(entry *OpsInsertErrorLogInput) {
 		message += " " + *entry.UpstreamErrorMessage
 	}
 	modelRejected := IsOpsModelCapabilityRejection(entry.StatusCode, upstreamStatus, message)
+	if entry.UpstreamErrorDetail != nil && (upstreamStatus == 502 || (upstreamStatus <= 0 && entry.StatusCode == 502)) {
+		message += " " + *entry.UpstreamErrorDetail
+	}
 	contextRejected := IsOpsContextLimitRejection(entry.StatusCode, upstreamStatus, message)
 	if modelRejected || contextRejected {
 		entry.IsBusinessLimited = true

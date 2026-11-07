@@ -16,8 +16,8 @@ const (
 	// paymentOrderExpiryLeaderLockKey gates the periodic reconcile + expiry sweep so
 	// that only one instance issues the upstream payment-provider calls per cycle.
 	paymentOrderExpiryLeaderLockKey = "payment:order:expiry:leader"
-	// paymentOrderExpiryLeaderLockTTL must exceed the combined reconcile + expiry
-	// timeouts (2 * expiryCheckTimeout) so the lock never expires mid-run.
+	// paymentOrderExpiryLeaderLockTTL must exceed regular reconciliation +
+	// EasyPay recovery + expiry (30 + 15 + 30 seconds).
 	paymentOrderExpiryLeaderLockTTL = 3 * time.Minute
 )
 
@@ -104,6 +104,17 @@ func (s *PaymentOrderExpiryService) runOnce() {
 		slog.Warn("[PaymentOrderExpiry] failed to reconcile pending payment orders", "error", err)
 	} else if recovered > 0 {
 		slog.Info("[PaymentOrderExpiry] reconciled paid orders", "count", recovered)
+	}
+
+	// Use an independent deadline: ordinary provider failures must not consume
+	// the entire opportunity to recover a previously unconfirmed EasyPay order.
+	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), easyPayRecoveryCheckTimeout)
+	recovered, err = s.paymentSvc.ReconcileRecoverableEasyPayOrders(recoveryCtx)
+	recoveryCancel()
+	if err != nil {
+		slog.Warn("[PaymentOrderExpiry] failed to reconcile recoverable EasyPay orders", "error", err)
+	} else if recovered > 0 {
+		slog.Info("[PaymentOrderExpiry] recovered EasyPay orders", "count", recovered)
 	}
 
 	expireCtx, cancel := context.WithTimeout(context.Background(), expiryCheckTimeout)

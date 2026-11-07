@@ -512,7 +512,14 @@ func (p *openAIResponsesToolSchemaParser) parseString() (int, int, error) {
 	}
 	start := p.pos
 	p.pos++
+	const special = "\"\\\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
 	for p.pos < len(p.body) {
+		next := bytes.IndexAny(p.body[p.pos:], special)
+		if next < 0 {
+			p.pos = len(p.body)
+			break
+		}
+		p.pos += next
 		switch p.body[p.pos] {
 		case '"':
 			p.pos++
@@ -540,10 +547,7 @@ func (p *openAIResponsesToolSchemaParser) parseString() (int, int, error) {
 				return 0, 0, p.syntaxError("invalid string escape")
 			}
 		default:
-			if p.body[p.pos] < 0x20 {
-				return 0, 0, p.syntaxError("control character in string")
-			}
-			p.pos++
+			return 0, 0, p.syntaxError("control character in string")
 		}
 	}
 	return 0, 0, p.syntaxError("unterminated string")

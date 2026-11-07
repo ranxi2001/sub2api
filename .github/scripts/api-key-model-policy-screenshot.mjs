@@ -35,8 +35,8 @@ let browser, server
 try {
   writeFileSync(api, `
     const initialKeys = [
-      {id:17,user_id:99,name:'Fictional Key A',key:'fixture-only-key-a-never-issued',status:'active',group_id:null,group_ids:[],created_at:'2026-11-04T00:00:00Z',model_mapping:{'gpt-6.1-sol':'gpt-5.6-sol'},reasoning_effort:'high'},
-      {id:18,user_id:99,name:'Fictional Key B',key:'fixture-only-key-b-never-issued',status:'active',group_id:null,group_ids:[],created_at:'2026-11-04T00:00:00Z',model_mapping:{},reasoning_effort:''},
+      {id:17,user_id:99,name:'Fictional Key A',key:'fixture-only-key-a-never-issued',status:'active',group_id:null,group_ids:[],created_at:'2026-11-04T00:00:00Z',model_mapping:{'gpt-6.1-sol':'gpt-5.6-sol'},reasoning_effort:'high',allow_long_context:true},
+      {id:18,user_id:99,name:'Fictional Key B',key:'fixture-only-key-b-never-issued',status:'active',group_id:null,group_ids:[],created_at:'2026-11-04T00:00:00Z',model_mapping:{},reasoning_effort:'',allow_long_context:true},
     ];
     const state={keys:structuredClone(initialKeys),writes:[],failNext:false,successes:[]};
     window.__keyPolicyFixture=state;
@@ -134,16 +134,21 @@ try {
     if (await page.locator('[data-test="edit-key-model-policy"]').count() !== 2) throw Error('Missing real key entry')
     await capture(lang + '-entry')
     await openPolicy()
+    const longContextSwitch = page.getByRole('switch', { name: lang === 'zh' ? '允许长上下文' : 'Allow long context', exact: true })
+    if (await longContextSwitch.getAttribute('aria-checked') !== 'true') throw Error('Long context was not allowed by default')
+    await longContextSwitch.click()
+    if (await longContextSwitch.getAttribute('aria-checked') !== 'false') throw Error('Long context switch did not turn off')
     if (await page.locator('[data-test="mapping-source"]').inputValue() !== 'gpt-6.1-sol') throw Error('Saved source was not loaded')
     await page.locator('[data-test="mapping-target"]').fill('gpt-5.6-sol-fast')
     await page.locator('[data-test="reasoning-effort"]').selectOption('xhigh')
     await capture(lang + '-configured')
     await savePolicy()
     const saved = await page.evaluate(() => window.__keyPolicyFixture.writes.at(-1))
-    if (saved.id !== 17 || JSON.stringify(saved.policy) !== JSON.stringify({ model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol-fast' }, reasoning_effort: 'xhigh' })) throw Error('Unexpected saved policy')
+    if (saved.id !== 17 || JSON.stringify(saved.policy) !== JSON.stringify({ model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol-fast' }, reasoning_effort: 'xhigh', allow_long_context: false })) throw Error('Unexpected saved policy')
     await openPolicy()
     if (await page.locator('[data-test="mapping-target"]').inputValue() !== 'gpt-5.6-sol-fast') throw Error('Saved mapping did not return on reopen')
     if (await page.locator('[data-test="reasoning-effort"]').inputValue() !== 'xhigh') throw Error('Saved effort did not return on reopen')
+    if (await longContextSwitch.getAttribute('aria-checked') !== 'false') throw Error('Saved long-context permission did not return on reopen')
     await capture(lang + '-saved')
     await page.setViewportSize({ width: 390, height: 844 })
     await capture(lang + '-mobile')
@@ -152,11 +157,12 @@ try {
     await page.locator('[data-test="reasoning-effort"]').selectOption('')
     await savePolicy()
     const cleared = await page.evaluate(() => window.__keyPolicyFixture.writes.at(-1))
-    if (JSON.stringify(cleared.policy) !== JSON.stringify({ model_mapping: {}, reasoning_effort: '' })) throw Error('Policy clear did not send explicit empty values')
+    if (JSON.stringify(cleared.policy) !== JSON.stringify({ model_mapping: {}, reasoning_effort: '', allow_long_context: false })) throw Error('Policy clear did not send explicit empty values')
     const untouched = await page.evaluate(() => window.__keyPolicyFixture.keys.find(key => key.id === 18))
-    if (Object.keys(untouched.model_mapping).length || untouched.reasoning_effort !== '') throw Error('Another key changed')
+    if (Object.keys(untouched.model_mapping).length || untouched.reasoning_effort !== '' || untouched.allow_long_context !== true) throw Error('Another key changed')
     await openPolicy()
     if (await page.locator('[data-test="model-mapping-row"]').count() !== 0) throw Error('Cleared mapping returned after reopen')
+    if (await longContextSwitch.getAttribute('aria-checked') !== 'false') throw Error('Clearing model policy changed long-context permission')
     await capture(lang + '-cleared')
     await page.locator('[data-test="reasoning-effort"]').selectOption('low')
     await page.evaluate(() => { window.__keyPolicyFixture.failNext = true })
@@ -164,8 +170,9 @@ try {
     await page.getByRole('alert').waitFor()
     if (await page.getByRole('alert').textContent() !== 'Fictional save failure') throw Error('Save failure was not shown')
     if (await page.locator('[data-test="reasoning-effort"]').inputValue() !== 'low') throw Error('Failed save discarded edits')
+    if (await longContextSwitch.getAttribute('aria-checked') !== 'false') throw Error('Failed save discarded long-context permission')
     await capture(lang + '-save-error')
-    interactions.push({ lang, real_entry: true, saved_mapping_and_effort: true, reopen_readback: true, explicit_clear: true, other_key_unchanged: true, failed_save_retains_edit: true })
+    interactions.push({ lang, real_entry: true, saved_mapping_and_effort: true, long_context_default_allowed: true, long_context_disabled_and_saved: true, reopen_readback: true, long_context_reopen_readback: true, explicit_clear: true, clear_preserves_long_context_permission: true, other_key_unchanged: true, other_key_long_context_still_allowed: true, failed_save_retains_edit: true, failed_save_retains_long_context_permission: true })
   }
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({
     source_commit: sourceCommit,

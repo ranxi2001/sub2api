@@ -86,6 +86,21 @@ func setupSyncUpstreamModelsRouter(adminSvc service.AdminService, upstream servi
 	return router
 }
 
+func TestAccountHandlerSyncUpstreamModelsRejectsInvalidApplyOptionsBeforeUpstream(t *testing.T) {
+	for _, body := range []string{`{"automatic":true}`, `{"apply":"yes"}`, `{"apply":`} {
+		t.Run(body, func(t *testing.T) {
+			upstream := &syncUpstreamHTTPUpstream{}
+			router := setupSyncUpstreamModelsRouter(newStubAdminService(), upstream)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/44/models/sync-upstream", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Empty(t, upstream.requests)
+		})
+	}
+}
+
 func TestAccountHandlerGetAvailableModels_GrokUsesXAIModels(t *testing.T) {
 	svc := &availableModelsAdminService{
 		stubAdminService: newStubAdminService(),

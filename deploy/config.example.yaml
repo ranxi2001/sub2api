@@ -302,6 +302,9 @@ gateway:
   # Pre-output attempt staging is capped at 8 MiB; overflow fails over without exposing partial SSE data.
   # 首次输出前的单次尝试暂存上限为 8 MiB；溢出时切号且不暴露不完整 SSE 数据。
   openai_first_output_timeout_seconds: 0
+  # Trusted OpenAI OAuth plugin metadata delivery; opt-in and requires a compatible signed plugin.
+  # 提前提交会缩小首正文前的故障切换窗口；元数据不改变语义 TTFT。
+  openai_plugin_sse_early_events_enabled: false
   # Opt-in HTTP upload/submission deadline shared across account/proxy retries.
   # accounts.extra.openai_upload_timeout_seconds overrides it (0 disables).
   openai_upload_timeout_seconds: 0
@@ -600,6 +603,16 @@ gateway:
   # Concurrency slot expiration time (minutes)
   # 并发槽位过期时间（分钟）
   concurrency_slot_ttl_minutes: 30
+  # Dedicated expiration for regular API key concurrency slots (seconds).
+  # 0 = inherit concurrency_slot_ttl_minutes (default; upgrading alone changes
+  # nothing). Explicit values must be at least 30 seconds. Applies only to the
+  # shared Redis implementation; account/user slots, Live leases and the
+  # regional concurrency authority are unaffected.
+  # 普通 API Key 并发槽位的独立过期时间（秒）。0 表示继承
+  # concurrency_slot_ttl_minutes（默认，仅升级不改变行为）；显式设置时不低于
+  # 30 秒。仅作用于普通共享 Redis 实现；account/user 槽位、Live 租约及
+  # regional authority 不受影响。
+  api_key_slot_ttl_seconds: 0
   # Stream data interval timeout (seconds), 0=disable
   # 流数据间隔超时（秒），0=禁用
   stream_data_interval_timeout: 180

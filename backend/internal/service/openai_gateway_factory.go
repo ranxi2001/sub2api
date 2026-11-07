@@ -8,6 +8,7 @@ import (
 // The production composition root attaches optional services before starting
 // the harvest loop; no post-construction setter races with startup.
 type OpenAIGatewayDependencies struct {
+	GroupProtection  *GroupAntiDistillationService
 	TimezoneProber   ProxyExitInfoProber
 	RegionalMetering *RegionalMetering
 	Accounts         AccountRepository
@@ -50,6 +51,7 @@ func ProvideOpenAIGatewayService(d OpenAIGatewayDependencies) *OpenAIGatewayServ
 		WithOpenAIRPMCache(d.RPMCache),
 		WithRegionalMetering(d.RegionalMetering),
 		func(s *OpenAIGatewayService) {
+			s.SetGroupAntiDistillationService(d.GroupProtection)
 			s.codexHarvest = d.Harvest
 			s.requestTimezoneProber = d.TimezoneProber
 			s.safetyPromptStore = d.SafetyPromptStore

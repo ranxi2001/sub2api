@@ -246,6 +246,7 @@ func (s *CNProviderBalanceCheckService) collectAccountProbeTargets() []accountPr
 	}{
 		{PlatformCommandCode, (*Account).commandCodeUsageSupported, s.checkCommandCode},
 		{PlatformCline, (*Account).clineAccountAPISupported, s.checkCline},
+		{PlatformMistral, (*Account).mistralUsageSupported, s.checkMistral},
 	} {
 		accounts, err := s.accountRepo.ListByPlatform(context.Background(), p.platform)
 		if err != nil {
@@ -289,6 +290,30 @@ func (s *CNProviderBalanceCheckService) checkCline(ctx context.Context, account 
 		log.Printf("[CNBalance] cline usage account %d error: %s", account.ID, result.Error)
 	}
 	return cnBalanceNoChange
+}
+
+// checkMistral 探测 Mistral 月度预算窗口与剩余额度；手动可调度的账号再按剩余额度停调 / 恢复。
+// 开启按量付费（payg_enabled）的账号不受包月预算余额阈值限制。
+func (s *CNProviderBalanceCheckService) checkMistral(ctx context.Context, account *Account, threshold float64) cnBalanceCheckOutcome {
+	result, err := s.quotaService.QueryUsage(ctx, account.ID)
+	if err != nil {
+		log.Printf("[CNBalance] mistral usage account %d failed: %v", account.ID, err)
+		return cnBalanceNoChange
+	}
+	if result == nil || !result.Success || result.Balance == nil {
+		if result != nil && result.Error != "" {
+			log.Printf("[CNBalance] mistral usage account %d error: %s", account.ID, result.Error)
+		}
+		return cnBalanceNoChange
+	}
+	if !account.Schedulable {
+		return cnBalanceNoChange
+	}
+	effectiveThreshold := threshold
+	if result.Source == mistralQuotaSourcePayg || !mistralWindowsBinding(account.Extra) {
+		effectiveThreshold = 0
+	}
+	return s.applyBalanceResult(ctx, account, result.Balance, effectiveThreshold)
 }
 
 // probeQuota 探测单个 coding plan 账号的滚动窗口用量并落 extra 快照。

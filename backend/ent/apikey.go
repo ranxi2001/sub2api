@@ -42,6 +42,8 @@ type APIKey struct {
 	ModelMapping map[string]string `json:"model_mapping,omitempty"`
 	// Administrator-managed reasoning effort override; empty follows the request
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Administrator-managed permission to use long context requests
+	AllowLongContext bool `json:"allow_long_context,omitempty"`
 	// Last usage time of this API key
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	// Allowed IPs/CIDRs, e.g. ["192.168.1.100", "10.0.0.0/8"]
@@ -129,6 +131,8 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case apikey.FieldModelMapping, apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
 			values[i] = new([]byte)
+		case apikey.FieldAllowLongContext:
+			values[i] = new(sql.NullBool)
 		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
 			values[i] = new(sql.NullFloat64)
 		case apikey.FieldID, apikey.FieldUserID, apikey.FieldConcurrencyLimit, apikey.FieldGroupID:
@@ -227,6 +231,12 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field reasoning_effort", values[i])
 			} else if value.Valid {
 				_m.ReasoningEffort = value.String
+			}
+		case apikey.FieldAllowLongContext:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field allow_long_context", values[i])
+			} else if value.Valid {
+				_m.AllowLongContext = value.Bool
 			}
 		case apikey.FieldLastUsedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -414,6 +424,9 @@ func (_m *APIKey) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("reasoning_effort=")
 	builder.WriteString(_m.ReasoningEffort)
+	builder.WriteString(", ")
+	builder.WriteString("allow_long_context=")
+	builder.WriteString(fmt.Sprintf("%v", _m.AllowLongContext))
 	builder.WriteString(", ")
 	if v := _m.LastUsedAt; v != nil {
 		builder.WriteString("last_used_at=")

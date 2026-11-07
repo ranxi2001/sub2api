@@ -32,6 +32,7 @@ const (
 	IngressRejectAPIKeyAuthOverloaded   IngressRejectReason = "api_key_auth_overloaded"
 	IngressRejectModelNotAllowed        IngressRejectReason = "model_not_allowed"
 	IngressRejectStreamRequired         IngressRejectReason = "stream_required"
+	IngressRejectLongContextDisabled    IngressRejectReason = "long_context_disabled"
 	IngressRejectSubagentsBlocked       IngressRejectReason = "subagents_blocked"
 	IngressRejectCodexClientRequired    IngressRejectReason = "codex_client_required"
 )

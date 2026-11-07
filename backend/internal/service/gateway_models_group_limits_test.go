@@ -13,11 +13,11 @@ func TestGetAvailableModels_RestrictedDefaultCatalogWithMappedAccount(t *testing
 			name                     string
 			allowed, present, absent []string
 		}{
-			{"gpt wildcard", []string{"gpt-*"}, []string{"gpt-5.5", "gpt-image-1"}, []string{"codex-auto-review"}},
-			{"narrow wildcard", []string{"gpt-5.4*"}, []string{"gpt-5.4", "gpt-5.4-mini"}, []string{"gpt-5.5", "gpt-image-1", "codex-auto-review"}},
-			{"exact catalog model", []string{"gpt-5.5"}, []string{"gpt-5.5"}, []string{"gpt-5.4", "codex-auto-review"}},
-			{"custom model", []string{"allowed-model"}, []string{"allowed-model"}, []string{"gpt-5.5", "codex-auto-review"}},
-			{"nonmatching wildcard", []string{"unknown-*"}, nil, []string{"gpt-5.5", "codex-auto-review"}},
+			{"gpt wildcard", []string{"gpt-*"}, []string{"gpt-6.1-sol", "gpt-image-2"}, []string{"codex-auto-review"}},
+			{"narrow wildcard", []string{"gpt-5.6*"}, []string{"gpt-5.6", "gpt-5.6-terra"}, []string{"gpt-6.1-sol", "gpt-image-2", "codex-auto-review"}},
+			{"exact catalog model", []string{"gpt-6.1-sol"}, []string{"gpt-6.1-sol"}, []string{"gpt-5.6", "codex-auto-review"}},
+			{"custom model", []string{"allowed-model"}, []string{"allowed-model"}, []string{"gpt-6.1-sol", "codex-auto-review"}},
+			{"nonmatching wildcard", []string{"unknown-*"}, nil, []string{"gpt-6.1-sol", "codex-auto-review"}},
 		} {
 			name := tc.name + "/unmapped"
 			if passthrough {

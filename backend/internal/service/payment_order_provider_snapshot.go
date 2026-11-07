@@ -137,6 +137,16 @@ func validateProviderSnapshotMetadata(order *dbent.PaymentOrder, providerKey str
 	}
 
 	switch strings.TrimSpace(providerKey) {
+	case payment.TypeBEpusdt:
+		if metadata["currency"] != snapshot.Currency {
+			return fmt.Errorf("bepusdt currency mismatch")
+		}
+		if metadata["order_id"] != order.OutTradeNo {
+			return fmt.Errorf("bepusdt merchant order ID mismatch")
+		}
+		if tradeType := metadata["trade_type"]; tradeType != "" && tradeType != order.PaymentType {
+			return fmt.Errorf("bepusdt payment network mismatch")
+		}
 	case payment.TypeWxpay:
 		if expected := strings.TrimSpace(snapshot.MerchantAppID); expected != "" {
 			actual := strings.TrimSpace(metadata["appid"])

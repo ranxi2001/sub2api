@@ -255,6 +255,22 @@ func registerAdminAPIKeyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	ops := admin.Group("/ops")
 	{
+		// AI observe mode uses a separate bounded companion service. These routes
+		// deliberately grant no production account/scheduling mutation capability.
+		ops.GET("/ai/status", h.Admin.Ops.GetAIOpsStatus)
+		ops.GET("/ai/runs", h.Admin.Ops.ListAIOpsRuns)
+		ops.GET("/ai/runs/:id", h.Admin.Ops.GetAIOpsRun)
+		ops.POST("/ai/runs", h.Admin.Ops.CreateAIOpsRun)
+		ops.GET("/ai/policy", h.Admin.Ops.GetAIOpsPolicy)
+		ops.PUT("/ai/policy", h.Admin.Ops.SaveAIOpsPolicy)
+		ops.POST("/ai/halt", h.Admin.Ops.HaltAIOps)
+		ops.POST("/ai/proposals/preview", h.Admin.Ops.PreviewAIOpsProposal)
+		ops.POST("/ai/proposals/:id/apply", h.Admin.Ops.ApplyAIOpsProposal)
+		ops.GET("/ai/actions", h.Admin.Ops.ListAIOpsActions)
+		ops.POST("/ai/actions/:id/rollback", h.Admin.Ops.RollbackAIOpsAction)
+		ops.GET("/ai/probes", h.Admin.Ops.ListAIOpsProbes)
+		ops.POST("/ai/probes", h.Admin.Ops.CreateAIOpsProbe)
+
 		// Realtime ops signals
 		ops.GET("/concurrency", h.Admin.Ops.GetConcurrencyStats)
 		ops.GET("/user-concurrency", h.Admin.Ops.GetUserConcurrencyStats)
@@ -409,6 +425,8 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.POST("/:id/composite-routes/preview", h.Admin.Group.PreviewCompositeRoute)
 		groups.PUT("/:id/composite-routes/:route_id", h.Admin.Group.UpdateCompositeRoute)
 		groups.DELETE("/:id/composite-routes/:route_id", h.Admin.Group.DeleteCompositeRoute)
+		groups.GET("/:id/anti-distillation", h.Admin.Group.GetAntiDistillation)
+		groups.PUT("/:id/anti-distillation", h.Admin.Group.SaveAntiDistillation)
 		groups.GET("/:id", h.Admin.Group.GetByID)
 		groups.POST("", h.Admin.Group.Create)
 		groups.POST("/:id/duplicate", h.Admin.Group.Duplicate)
@@ -523,6 +541,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id/schedulable-timers", h.Admin.Account.ListSchedulableTimers)
 		accounts.POST("/:id/schedulable-timers/preview", h.Admin.Account.PreviewSchedulableTimer)
 		accounts.POST("/:id/schedulable-timers", h.Admin.Account.SaveSchedulableTimer)
+		accounts.POST("/:id/schedulable-timers/daily-window", h.Admin.Account.SaveDailySchedulableWindow)
 		accounts.DELETE("/:id/schedulable-timers/:action", h.Admin.Account.CancelSchedulableTimer)
 		accounts.POST("/models/sync-upstream-preview", h.Admin.Account.SyncUpstreamModelsPreview)
 		accounts.GET("/:id/models", h.Admin.Account.GetAvailableModels)

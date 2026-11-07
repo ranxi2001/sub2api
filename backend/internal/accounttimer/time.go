@@ -1,4 +1,4 @@
-// Package accounttimer implements one-shot scheduling without model calls or browser timers.
+// Package accounttimer implements persistent account scheduling without model calls or browser timers.
 package accounttimer
 
 import (
@@ -97,17 +97,53 @@ func Resolve(in Input, now time.Time, p Policy) (Preview, error) {
 				return out, err
 			}
 		}
+	case "daily":
+		if in.Date != "" || in.Hours != 0 || in.Minutes != 0 {
+			return out, invalid("datetime")
+		}
+		due, err = nextDaily(in.Time, loc, now)
+		if err != nil {
+			return out, err
+		}
 	default:
 		return out, invalid("mode")
 	}
 	if !due.After(now) {
 		return out, invalid("past")
 	}
-	if due.Sub(now) > p.MaxDelay {
+	if in.Mode != "daily" && due.Sub(now) > p.MaxDelay {
 		return out, invalid("duration")
 	}
 	local := due.In(loc)
 	return Preview{due.UTC(), in.Timezone, local.Format("2006-01-02"), local.Format("15:04"), local.Format("-07:00"), now.UTC()}, nil
+}
+
+// nextDaily advances by local calendar dates, never by a fixed 24-hour duration.
+// A gap/fold day has no unambiguous execution time, so that date is skipped.
+// The bounded search also handles whole-day political timezone changes without
+// allowing malformed persisted state to keep a worker running indefinitely.
+func nextDaily(clock string, loc *time.Location, after time.Time) (time.Time, error) {
+	parsed, err := time.Parse("15:04", clock)
+	if err != nil || parsed.Format("15:04") != clock {
+		return time.Time{}, invalid("datetime")
+	}
+	day, err := time.Parse("2006-01-02", after.In(loc).Format("2006-01-02"))
+	if err != nil {
+		return time.Time{}, invalid("datetime")
+	}
+	for offset := 0; offset < 8; offset++ {
+		due, wallErr := resolveWall(day.AddDate(0, 0, offset).Format("2006-01-02"), clock, loc)
+		if ErrorCode(wallErr) == "dst" {
+			continue
+		}
+		if wallErr != nil {
+			return time.Time{}, wallErr
+		}
+		if due.After(after) {
+			return due.UTC(), nil
+		}
+	}
+	return time.Time{}, invalid("dst")
 }
 
 // Enumerate offsets around the requested wall date, then round-trip every

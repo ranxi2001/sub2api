@@ -228,9 +228,135 @@ describe('ModelWhitelistSelector', () => {
     expect(copyToClipboard).not.toHaveBeenCalled()
   })
 
+  it('replaces saved models and removes only mappings whose targets are no longer live', async () => {
+    syncUpstreamModels.mockResolvedValue({
+      models: [' gpt-image-2 ', 'gpt-image-2', 'new-image', '', '*'],
+      discovery_source: 'upstream'
+    })
+    const mappings = [
+      { from: 'paint', to: 'gpt-image-2' },
+      { from: 'old-paint', to: 'removed-image' },
+      { from: 'legacy-*', to: 'gpt-image-2' }
+    ]
+    const wrapper = mountSelector({
+      accountId: 46,
+      modelValue: ['gpt-image-2', 'removed-image'],
+      modelMappings: mappings
+    })
+
+    await syncButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(syncUpstreamModels).toHaveBeenCalledWith(46)
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['gpt-image-2', 'new-image']]])
+    expect(wrapper.emitted('update:modelMappings')).toEqual([[[
+      { from: 'paint', to: 'gpt-image-2' },
+      { from: 'legacy-*', to: 'gpt-image-2' }
+    ]]])
+    expect(wrapper.props('modelMappings')).toEqual(mappings)
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsSuccess')
+    expect(wrapper.emitted('upstream-synced')).toBeUndefined()
+  })
+
+  it('also replaces the creation preview without clearing models first', async () => {
+    syncUpstreamModelsPreview.mockResolvedValue({
+      models: ['target'], discovery_source: 'upstream'
+    })
+    const wrapper = mountSelector({
+      modelValue: ['removed-model'],
+      modelMappings: [{ from: 'public-alias', to: 'target' }, { from: 'retired-alias', to: 'retired-target' }],
+      syncCredentials: { platform: 'openai', type: 'apikey', api_key: 'test-key' }
+    })
+
+    await syncButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['target']]])
+    expect(wrapper.emitted('update:modelMappings')).toEqual([[[{ from: 'public-alias', to: 'target' }]]])
+    expect(wrapper.emitted('upstream-synced')).toEqual([[]])
+  })
+
+  it('keeps a live alias target when its public name is also advertised upstream', async () => {
+    syncUpstreamModels.mockResolvedValue({
+      models: ['public-model', 'target'], discovery_source: 'upstream'
+    })
+    const wrapper = mountSelector({
+      accountId: 46,
+      modelValue: ['removed-model'],
+      modelMappings: [{ from: 'public-model', to: 'target' }]
+    })
+
+    await syncButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['target']]])
+    expect(wrapper.emitted('update:modelMappings')).toEqual([[[{ from: 'public-model', to: 'target' }]]])
+  })
+
+  it('reports a removal-only sync as a change', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['live-model'], discovery_source: 'upstream' })
+    const wrapper = mountSelector({ accountId: 46, modelValue: ['live-model', 'removed-model'] })
+
+    await syncButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['live-model']]])
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsSuccess')
+    expect(showInfo).not.toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsNoChanges')
+  })
+
+  it('reports removing only a stale alias as a change', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['live-model'], discovery_source: 'upstream' })
+    const wrapper = mountSelector({
+      accountId: 46, modelValue: ['live-model'],
+      modelMappings: [{ from: 'retired-alias', to: 'retired-target' }]
+    })
+
+    await syncButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:modelMappings')).toEqual([[[]]])
+    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsSuccess')
+    expect(showInfo).not.toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsNoChanges')
+  })
+
+  it('reports no change when the same whitelist arrives in a different order', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['second', 'first'], discovery_source: 'upstream' })
+    const wrapper = mountSelector({
+      accountId: 46, modelValue: ['first', 'second'],
+      modelMappings: [{ from: 'alias', to: 'first' }]
+    })
+
+    await syncButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(showInfo).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsNoChanges')
+    expect(showSuccess).not.toHaveBeenCalled()
+  })
+
+  it.each([{ models: [] }, { models: ['', '  '] }, { models: ['*', 'gpt-*'] }])(
+    'keeps the draft when upstream has no concrete model IDs: %j',
+    async ({ models }) => {
+      syncUpstreamModels.mockResolvedValue({ models, discovery_source: 'upstream' })
+      const wrapper = mountSelector({
+        accountId: 46, modelValue: ['existing-model'],
+        modelMappings: [{ from: 'alias', to: 'existing-model' }]
+      })
+
+      await syncButton(wrapper).trigger('click')
+      await flushPromises()
+
+      expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+      expect(wrapper.emitted('update:modelMappings')).toBeUndefined()
+      expect(showInfo).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsEmpty')
+      expect(showSuccess).not.toHaveBeenCalled()
+    }
+  )
+
   it('warns when model IDs sync but capability metadata is incomplete', async () => {
     syncUpstreamModels.mockResolvedValue({
       models: ['x-preview-f-free'],
+      discovery_source: 'upstream',
       warnings: [
         {
           code: 'upstream_model_metadata_incomplete',
@@ -286,6 +412,7 @@ describe('ModelWhitelistSelector', () => {
   it('shows success and a partial warning when some capabilities were saved', async () => {
     syncUpstreamModels.mockResolvedValue({
       models: ['gpt-6-astra', 'gpt-image-2'],
+      discovery_source: 'upstream',
       warnings: [
         {
           code: 'upstream_model_metadata_partial',
@@ -321,6 +448,7 @@ describe('ModelWhitelistSelector', () => {
   it('reports a successful preview so account creation can persist metadata', async () => {
     syncUpstreamModelsPreview.mockResolvedValue({
       models: ['x-preview-f-free'],
+      discovery_source: 'upstream',
       metadata: {
         'x-preview-f-free': {
           id: 'x-preview-f-free',
@@ -354,7 +482,7 @@ describe('ModelWhitelistSelector', () => {
     syncUpstreamModelsPreview.mockRejectedValueOnce({
       status: 502,
       message: 'Upstream model list request failed with HTTP 401',
-    }).mockResolvedValueOnce({ models: ['draft-model'] })
+    }).mockResolvedValueOnce({ models: ['draft-model'], discovery_source: 'upstream' })
     const wrapper = mountSelector({
       syncCredentials: { platform: 'openai', type: 'apikey', base_url: 'https://first.example/v1', api_key: 'first-test-key' },
     })
@@ -389,12 +517,13 @@ describe('ModelWhitelistSelector', () => {
     await button.trigger('click')
     await flushPromises()
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.emitted('update:modelMappings')).toBeUndefined()
     expect(showWarning).toHaveBeenCalledWith('admin.accounts.grokModelDiagnostics.configuredFallback')
     expect(showSuccess).not.toHaveBeenCalled()
     expect(wrapper.emitted('upstream-sync-finished')).toHaveLength(1)
   })
 
-  it('still appends a real catalog when capability metadata is incomplete', async () => {
+  it('replaces stale model IDs even when capability metadata is incomplete', async () => {
     syncUpstreamModels.mockResolvedValue({
       models: ['grok-4.7'],
       discovery_source: 'upstream',
@@ -404,21 +533,24 @@ describe('ModelWhitelistSelector', () => {
     const button = wrapper.findAll('button').find(b => b.text() === 'admin.accounts.syncUpstreamModels')!
     await button.trigger('click')
     await flushPromises()
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['grok-4', 'grok-4.7']]])
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['grok-4.7']]])
     expect(showWarning).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsMetadataIncomplete')
     expect(showSuccess).not.toHaveBeenCalled()
     expect(wrapper.emitted('upstream-sync-finished')).toHaveLength(1)
     expect(wrapper.emitted('upstream-synced')).toBeUndefined()
   })
 
-  it('keeps appending models when a non-grok sync omits discovery fields', async () => {
+  it('keeps the draft when a sync omits its discovery source', async () => {
     syncUpstreamModels.mockResolvedValue({ models: ['gpt-6'] })
-    const wrapper = mountSelector({ platform: 'openai', accountId: 46, modelValue: [] })
-    const button = wrapper.findAll('button').find(b => b.text() === 'admin.accounts.syncUpstreamModels')!
-    await button.trigger('click')
+    const wrapper = mountSelector({
+      platform: 'openai', accountId: 46, modelValue: ['gpt-5.6-sol'],
+      modelMappings: [{ from: 'latest', to: 'gpt-5.6-sol' }]
+    })
+    await syncButton(wrapper).trigger('click')
     await flushPromises()
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['gpt-6']]])
-    expect(showSuccess).toHaveBeenCalledWith('admin.accounts.syncUpstreamModelsSuccess')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.emitted('update:modelMappings')).toBeUndefined()
+    expect(showSuccess).not.toHaveBeenCalled()
     expect(wrapper.emitted('upstream-sync-finished')).toHaveLength(1)
     expect(wrapper.emitted('upstream-synced')).toBeUndefined()
   })
@@ -478,6 +610,7 @@ describe('ModelWhitelistSelector', () => {
     await button.trigger('click')
     await flushPromises()
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.emitted('update:modelMappings')).toBeUndefined()
     expect(showError).toHaveBeenCalled()
     expect(showSuccess).not.toHaveBeenCalled()
     expect(wrapper.emitted('upstream-sync-finished')).toHaveLength(1)
@@ -542,9 +675,71 @@ describe('ModelWhitelistSelector', () => {
     await secondSync
     await flushPromises()
     expect(wrapper.vm.isSyncingUpstream).toBe(false)
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['b-local', 'b-catalog']]])
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['b-catalog']]])
     expect(wrapper.emitted('upstream-sync-finished')).toEqual([[]])
     expect(showSuccess).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { field: 'base URL', changes: { base_url: 'https://second.example/v1' } },
+    { field: 'API key', changes: { api_key: 'second-test-key' } }
+  ])('ignores an old creation preview after its $field changes while a new preview is pending', async ({ changes }) => {
+    const first = deferred<any>()
+    const second = deferred<any>()
+    syncUpstreamModelsPreview.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const initialCredentials = {
+      platform: 'openai', type: 'apikey', base_url: 'https://first.example/v1', api_key: 'first-test-key'
+    }
+    const wrapper = mountSelector({
+      syncCredentials: initialCredentials,
+      modelValue: ['a-local'],
+      modelMappings: [{ from: 'a-alias', to: 'a-target' }]
+    })
+    const firstSync = wrapper.vm.syncUpstreamModels()
+    expect(wrapper.vm.isSyncingUpstream).toBe(true)
+
+    const nextCredentials = { ...initialCredentials, ...changes }
+    await wrapper.setProps({
+      syncCredentials: nextCredentials,
+      modelValue: ['b-local'],
+      modelMappings: [{ from: 'b-alias', to: 'b-target' }]
+    })
+    expect(wrapper.vm.isSyncingUpstream).toBe(false)
+    const secondSync = wrapper.vm.syncUpstreamModels()
+    await flushPromises()
+    expect(syncUpstreamModelsPreview).toHaveBeenNthCalledWith(1, initialCredentials)
+    expect(syncUpstreamModelsPreview).toHaveBeenNthCalledWith(2, nextCredentials)
+    expect(wrapper.vm.isSyncingUpstream).toBe(true)
+    expect((syncButton(wrapper).element as HTMLButtonElement).disabled).toBe(true)
+
+    first.resolve({
+      models: ['a-private-catalog'], discovery_source: 'upstream',
+      warnings: [{ code: 'upstream_model_metadata_incomplete', message: 'old preview metadata' }]
+    })
+    await firstSync
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.emitted('update:modelMappings')).toBeUndefined()
+    expect(wrapper.emitted('upstream-synced')).toBeUndefined()
+    expect(wrapper.emitted('upstream-sync-finished')).toBeUndefined()
+    expect(showSuccess).not.toHaveBeenCalled()
+    expect(showWarning).not.toHaveBeenCalled()
+    expect(showError).not.toHaveBeenCalled()
+    expect(showInfo).not.toHaveBeenCalled()
+    expect(wrapper.vm.isSyncingUpstream).toBe(true)
+    expect((syncButton(wrapper).element as HTMLButtonElement).disabled).toBe(true)
+
+    second.resolve({ models: ['b-target'], discovery_source: 'upstream' })
+    await secondSync
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['b-target']]])
+    expect(wrapper.emitted('update:modelMappings')).toEqual([[[{ from: 'b-alias', to: 'b-target' }]]])
+    expect(wrapper.emitted('upstream-synced')).toEqual([[]])
+    expect(wrapper.emitted('upstream-sync-finished')).toBeUndefined()
+    expect(showSuccess).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.isSyncingUpstream).toBe(false)
+    expect((syncButton(wrapper).element as HTMLButtonElement).disabled).toBe(false)
     wrapper.unmount()
   })
 
@@ -559,6 +754,7 @@ describe('ModelWhitelistSelector', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="sync-upstream-models"]').exists()).toBe(false)
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(wrapper.emitted('update:modelMappings')).toBeUndefined()
     expect(showWarning).toHaveBeenCalledWith('admin.accounts.grokModelDiagnostics.configuredFallback')
     expect(showSuccess).not.toHaveBeenCalled()
     expect(wrapper.emitted('upstream-sync-finished')).toEqual([[]])
@@ -591,7 +787,7 @@ describe('ModelWhitelistSelector', () => {
 
     second.resolve({ models: ['b-catalog'], discovery_source: 'upstream' })
     await flushPromises()
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['b-local', 'b-catalog']]])
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['b-catalog']]])
     expect(showSuccess).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('upstream-sync-finished')).toHaveLength(1)
     expect((syncButton(wrapper).element as HTMLButtonElement).disabled).toBe(false)

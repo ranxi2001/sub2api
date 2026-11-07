@@ -681,7 +681,7 @@ func TestOpenAIWSPassthroughBareErrorAuthoritativeUsageSettlesOnce(t *testing.T)
 			require.Equal(t, "resp_recovered", result.RequestID)
 			if completed {
 				require.Equal(t, "response.completed", result.UpstreamTerminalEvent)
-				require.Equal(t, OpenAIUsage{InputTokens: 9, OutputTokens: 4, CacheReadInputTokens: 3, CacheCreationInputTokens: 2}, result.Usage)
+				require.Equal(t, OpenAIUsage{InputTokens: 9, OutputTokens: 4, CacheReadInputTokens: 3, CacheCreationInputTokens: 2, CacheReadKnown: true}, result.Usage)
 			} else {
 				require.Empty(t, result.UpstreamTerminalEvent, "bare error is not normalized to a response terminal")
 				require.Equal(t, OpenAIUsage{InputTokens: 2, OutputTokens: 1}, result.Usage)

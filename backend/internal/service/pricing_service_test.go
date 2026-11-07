@@ -41,6 +41,38 @@ func TestPricingNonEmptyInvalidRemoteURLStillReturnsValidationError(t *testing.T
 	require.Contains(t, err.Error(), "invalid pricing url")
 }
 
+func TestBillingServiceUnknownGPTModelKeepsLegacyFallbackPricing(t *testing.T) {
+	legacyPricing := &LiteLLMModelPricing{
+		InputCostPerToken:       2.5e-6,
+		OutputCostPerToken:      15e-6,
+		CacheReadInputTokenCost: 0.25e-6,
+	}
+	probePricing := &LiteLLMModelPricing{
+		InputCostPerToken:       5e-6,
+		OutputCostPerToken:      30e-6,
+		CacheReadInputTokenCost: 0.5e-6,
+	}
+	pricingSvc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-5.4":     legacyPricing,
+		"gpt-5.6-sol": probePricing,
+	}}
+	require.Same(t, legacyPricing, pricingSvc.GetModelPricing("gpt-unlisted-custom"))
+	require.Same(t, probePricing, pricingSvc.GetModelPricing("gpt-5.6-sol"))
+
+	svc := NewBillingService(&config.Config{}, pricingSvc)
+	cost, err := svc.CalculateCost("gpt-unlisted-custom", UsageTokens{
+		InputTokens:     1000,
+		OutputTokens:    100,
+		CacheReadTokens: 200,
+	}, 1)
+	require.NoError(t, err)
+	require.InDelta(t, 1000*2.5e-6, cost.InputCost, 1e-12)
+	require.InDelta(t, 100*15e-6, cost.OutputCost, 1e-12)
+	require.InDelta(t, 200*0.25e-6, cost.CacheReadCost, 1e-12)
+	require.InDelta(t, 0.00405, cost.TotalCost, 1e-12)
+	require.InDelta(t, cost.TotalCost, cost.ActualCost, 1e-12)
+}
+
 func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	svc := &PricingService{}
 	body := []byte(`{

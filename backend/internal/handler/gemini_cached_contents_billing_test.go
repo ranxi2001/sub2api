@@ -316,8 +316,16 @@ func newCachedBillingEnv(t *testing.T, balance float64, accountIDs ...int64) *ca
 		"litellm_provider":"gemini","mode":"chat","input_cost_per_token":%g,"output_cost_per_token":0.00001,
 		"cache_storage_cost_per_token_per_hour":%g},"gemini-alias":{
 		"litellm_provider":"gemini","mode":"chat","input_cost_per_token":%g,"output_cost_per_token":0.00001,
+		"cache_storage_cost_per_token_per_hour":%g},"gemini-policy-test":{
+		"litellm_provider":"gemini","mode":"chat","input_cost_per_token":%g,"output_cost_per_token":0.00001,
+		"long_context_input_token_threshold":100,"long_context_input_cost_multiplier":2,
+		"cache_storage_cost_per_token_per_hour":%g},"gemini-policy-public272-test":{
+		"litellm_provider":"gemini","mode":"chat","input_cost_per_token":%g,"output_cost_per_token":0.00001,
+		"long_context_input_token_threshold":272000,"long_context_input_cost_multiplier":2,
 		"cache_storage_cost_per_token_per_hour":%g}}`,
-		cachedBillingInputPrice, cachedBillingStoragePrice, cachedBillingInputPrice, cachedBillingAliasStoragePrice)), 0o644))
+		cachedBillingInputPrice, cachedBillingStoragePrice, cachedBillingInputPrice, cachedBillingAliasStoragePrice,
+		cachedBillingInputPrice, cachedBillingStoragePrice,
+		cachedBillingInputPrice, cachedBillingStoragePrice)), 0o644))
 	cfg := &config.Config{}
 	cfg.Pricing.DataDir = dir
 	cfg.Pricing.UpdateIntervalHours = 100000
@@ -353,7 +361,7 @@ func newCachedBillingEnv(t *testing.T, balance float64, accountIDs ...int64) *ca
 		concurrencyHelper:          NewConcurrencyHelper(service.NewConcurrencyService(&fakeConcurrencyCache{}), SSEPingFormatNone, 0),
 		geminiCachedContentService: service.NewGeminiCachedContentService(repo, compat, cfg),
 	}
-	apiKey := &service.APIKey{ID: 7, UserID: 3, GroupID: &groupID, Group: group, Status: service.StatusActive,
+	apiKey := &service.APIKey{ID: 7, UserID: 3, GroupID: &groupID, Group: group, Status: service.StatusActive, AllowLongContext: true,
 		User: &service.User{ID: 3, Concurrency: 10, Balance: balance}}
 	return &cachedBillingEnv{h: h, repo: repo, upstream: upstream, usage: usage, apiKey: apiKey, group: group, accounts: accounts}
 }
@@ -455,6 +463,50 @@ func TestGeminiCachedContentsCreate_ChargesInputAndStorage(t *testing.T) {
 		require.False(t, record.ExpireTime.After(time.Now().Add(24*time.Hour)), "本地到期时间不超过请求的有效期")
 		require.Equal(t, "gcache:create:"+record.PublicID, env.usage.first().RequestID, "费用行按缓存 ID 可检索")
 	}
+}
+
+func TestGeminiCachedContentsCreate_LongContextRechecksAccountMapping(t *testing.T) {
+	for _, allowLongContext := range []bool{false, true} {
+		t.Run(fmt.Sprintf("allow=%t", allowLongContext), func(t *testing.T) {
+			env := newCachedBillingEnv(t, 500, 900)
+			env.apiKey.AllowLongContext = allowLongContext
+			env.accounts[900].Credentials["model_mapping"] = map[string]any{"gemini-alias": "gemini-policy-test"}
+			env.upstream.createBody = cachedBillingCreateBody(time.Now().Add(time.Hour))
+			body := `{"model":"models/gemini-alias","ttl":"3600s","contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("context ", 150) + `"}]}]}`
+			// The public model has no reduced threshold and passes initial admission.
+			require.NoError(t, env.h.CheckAPIKeyLongContext(context.Background(), env.apiKey, []byte(body), "gemini-alias"))
+
+			rec := env.serve(http.MethodPost, "/v1beta/cachedContents", body, nil, env.h.GeminiCachedContentsCreate)
+			if allowLongContext {
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				require.Equal(t, 1, env.upstream.methodCalls(http.MethodPost))
+				require.Len(t, env.repo.records, 1)
+				return
+			}
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), "100-token limit")
+			require.Zero(t, env.upstream.methodCalls(http.MethodPost), "account mapping must be checked before cache creation")
+			require.Empty(t, env.repo.records)
+			require.Empty(t, env.usage.totals(), "a local rejection incurs no cache input or storage charge")
+		})
+	}
+}
+
+func TestGeminiCachedContentsCreate_UnknownAccountTargetUsesDefaultContextLimit(t *testing.T) {
+	env := newCachedBillingEnv(t, 500, 900)
+	env.apiKey.AllowLongContext = false
+	env.accounts[900].Credentials["model_mapping"] = map[string]any{"gemini-policy-public272-test": "gemini-unknown-context-target"}
+	body := `{"model":"models/gemini-policy-public272-test","Model":"gemini-policy-public272-test","ttl":"3600s","contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("context ", 210_000) + `"}]}]}`
+	// The known public model permits this input, but the unpriced account target
+	// has the default 200k boundary regardless of the public model's 272k tier.
+	require.NoError(t, env.h.CheckAPIKeyLongContext(context.Background(), env.apiKey, []byte(body), "gemini-policy-public272-test"))
+
+	rec := env.serve(http.MethodPost, "/v1beta/cachedContents", body, nil, env.h.GeminiCachedContentsCreate)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "200000-token limit")
+	require.Zero(t, env.upstream.methodCalls(http.MethodPost))
+	require.Empty(t, env.repo.records)
+	require.Empty(t, env.usage.totals())
 }
 
 func TestGeminiCachedContentsCreate_UnaffordableStorageDeletesUpstreamAndBillsInputOnly(t *testing.T) {

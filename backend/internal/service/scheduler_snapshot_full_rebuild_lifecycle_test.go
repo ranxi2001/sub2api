@@ -636,6 +636,10 @@ func TestSchedulerFullRebuildFreshReopenLockBusyRetriesWithoutBlockingOrdinaryTa
 	require.Equal(t, 1, groupZeroPublished, "ordinary tasks must still run when one strict Reopen task is busy")
 	require.Equal(t, 2*schedulerCanonicalAccountQueryCount(), accounts.callCount())
 
+	// Failed handlers retain their durable event and wait before retrying.
+	svc.outboxEventRetryMu.Lock()
+	svc.outboxEventRetry.retryAt = time.Now().Add(-time.Second)
+	svc.outboxEventRetryMu.Unlock()
 	svc.pollOutbox()
 	require.Equal(t, int64(1), cache.currentWatermark())
 	require.Equal(t, 4*schedulerCanonicalAccountQueryCount(), accounts.callCount())
@@ -660,6 +664,42 @@ func TestSchedulerFullRebuildOrdinaryLockBusyKeepsExistingSkipSemantics(t *testi
 	attempts, published := cache.counts(busyBucket)
 	require.Zero(t, attempts)
 	require.Zero(t, published)
+}
+
+func TestSchedulerOutboxRetryRetiredBucketRequiresFreshGroupAuthority(t *testing.T) {
+	const groupID int64 = 107
+	bucket := schedulerBucketsForGroup(groupID)[0]
+	for _, state := range []string{"active", "inactive", "missing", "read_error"} {
+		t.Run(state, func(t *testing.T) {
+			cache := newFullRebuildLifecycleCache(bucket)
+			require.NoError(t, cache.retirementRaceCache.RetireBucket(context.Background(), bucket))
+			groups := &fullRebuildLifecycleGroupRepo{fresh: make(map[int64]*Group), freshErr: make(map[int64]error)}
+			switch state {
+			case "active":
+				groups.fresh[groupID] = &Group{ID: groupID, Status: StatusActive, Hydrated: true}
+			case "inactive":
+				groups.fresh[groupID] = &Group{ID: groupID, Status: StatusDisabled, Hydrated: true}
+			case "read_error":
+				groups.freshErr[groupID] = errors.New("synthetic authority read failure")
+			}
+			svc := newFullRebuildLifecycleService(cache, nil, &fullRebuildAccountRepo{}, groups, config.RunModeStandard)
+			ctx := context.WithValue(context.Background(), schedulerOutboxRetryPublicationKey{}, true)
+			tasks, err := svc.prepareBucketWriteTasks(ctx, []SchedulerBucket{bucket})
+			if state == "read_error" {
+				require.Error(t, err)
+				require.Empty(t, tasks)
+				return
+			}
+			require.NoError(t, err)
+			if state == "active" {
+				require.Len(t, tasks, 1)
+				require.Equal(t, bucket, tasks[0].bucket)
+			} else {
+				require.Empty(t, tasks, "missing/inactive group must not be reopened by a delayed account event")
+				require.Empty(t, cache.tokens())
+			}
+		})
+	}
 }
 
 func requireFullRebuildNoMutationOrDB(t *testing.T, cache *fullRebuildLifecycleCache, accounts *fullRebuildAccountRepo) {

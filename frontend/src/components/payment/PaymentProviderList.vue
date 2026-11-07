@@ -62,6 +62,7 @@
               :provider="p"
               :enabled="isEnabled(p.provider_key)"
               :available-types="getTypes(p.provider_key)"
+              :user-id="userId"
               @toggle-field="(field) => emit('toggleField', p, field)"
               @toggle-type="(type) => emit('toggleType', p, type)"
               @edit="emit('edit', p)"
@@ -108,6 +109,7 @@ const props = defineProps<{
   enabledPaymentTypes: string[]
   allPaymentTypes: TypeOption[]
   redirectLabel: string
+  userId?: number | null
 }>()
 
 const emit = defineEmits<{

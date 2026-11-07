@@ -141,24 +141,20 @@ func readAccountPerformance(ctx context.Context, db sqlExecutor, ids []int64, no
 		m.WindowStart, m.WindowEnd = since, now
 		out[m.AccountID] = m
 	}
-	return out, rows.Err()
-}
-func (r *accountPerformanceRepository) Read(ctx context.Context, ids []int64, now time.Time) (map[int64]service.AccountPerformance, error) {
-	out, err := readAccountPerformance(ctx, r.db, ids, now)
-	if err != nil || len(out) == 0 {
-		return out, err
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
-	var since time.Time
-	for _, m := range out {
-		since = m.WindowStart
-		break
-	}
+	// Read and the transactional evaluator share the exact process-local
+	// response store and configured window, including incomplete windows.
 	evidence := upstreamstats.Default.Snapshot(ids, since, now)
 	for id, m := range out {
 		m.UpstreamError = evidence[id]
 		out[id] = m
 	}
 	return out, nil
+}
+func (r *accountPerformanceRepository) Read(ctx context.Context, ids []int64, now time.Time) (map[int64]service.AccountPerformance, error) {
+	return readAccountPerformance(ctx, r.db, ids, now)
 }
 func (r *accountPerformanceRepository) EnabledIDs(ctx context.Context) ([]int64, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT m.account_id FROM account_performance_monitors m JOIN accounts a ON a.id=m.account_id WHERE m.config->>'enabled'='true' AND NOT m.paused AND a.deleted_at IS NULL ORDER BY m.account_id`)
@@ -183,7 +179,8 @@ func performancePaused(ctx context.Context, db sqlExecutor, ids []int64) (map[in
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := db.QueryContext(ctx, `SELECT account_id FROM account_performance_monitors WHERE paused AND account_id=ANY($1)`, pq.Array(ids))
+	rows, err := db.QueryContext(ctx, `SELECT account_id FROM account_performance_monitors WHERE paused AND account_id=ANY($1)
+UNION SELECT account_id FROM ai_ops_controls WHERE ai_paused AND account_id=ANY($1)`, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}

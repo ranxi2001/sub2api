@@ -83,6 +83,13 @@ func integrationStore(t *testing.T) (*Store, *time.Time, *atomic.Int64) {
 	if _, err = db.Exec(timerFixture); err != nil {
 		t.Fatal(err)
 	}
+	dailyMigration, err := os.ReadFile("../../migrations/335_account_daily_schedulable_timers.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(dailyMigration)); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
 	notified := &atomic.Int64{}
 	s := &Store{DB: db, Now: func() time.Time { return now }, Policy: DefaultPolicy(), Enqueue: func(ctx context.Context, tx *sql.Tx, id int64) error {
@@ -368,6 +375,202 @@ func TestMigrationIsAdditiveAndHasIndexedPendingLookup(t *testing.T) {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("unexpected %s", forbidden)
 		}
+	}
+}
+
+func TestIntegrationDailyCrossMidnightRepeatsOnceAcrossWorkersAndManualOverrideStopsBoth(t *testing.T) {
+	s, now, notified := integrationStore(t)
+	*now = now.Add(-time.Minute) // 07:59 Beijing; both daily events are future.
+	ctx := context.Background()
+	snapshot, err := s.SaveDailyWindow(ctx, 7, 9, DailyWindowRequest{OpenTime: "08:00", CloseTime: "01:00", Timezone: "Asia/Shanghai"})
+	if err != nil || len(snapshot.Tasks) != 2 {
+		t.Fatalf("window %+v: %v", snapshot, err)
+	}
+	open := snapshotTask(t, s, "open")
+	closeTask := snapshotTask(t, s, "close")
+	if open.Recurrence != "daily" || open.DailyTime != "08:00" || closeTask.DailyTime != "01:00" || closeTask.ExecuteAt.Sub(open.ExecuteAt) != 17*time.Hour {
+		t.Fatalf("wrong cross-midnight events: %+v %+v", open, closeTask)
+	}
+	*now = open.ExecuteAt
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() { defer wg.Done(); errs <- s.RunDue(ctx) }()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	advanced := snapshotTask(t, s, "open")
+	if advanced.Version != open.Version+1 || advanced.Status != "pending" || advanced.Attempts != 0 || advanced.ActualAt == nil || !advanced.ExecuteAt.Equal(open.ExecuteAt.Add(24*time.Hour)) {
+		t.Fatalf("daily event did not advance: %+v", advanced)
+	}
+	if scalar(t, s.DB, "SELECT count(*) FROM fixture_outbox") != 1 || notified.Load() != 1 || scalar(t, s.DB, "SELECT count(*) FROM accounts WHERE schedulable") != 1 {
+		t.Fatal("concurrent instances repeated/missed the opening")
+	}
+	if err = s.execute(ctx, open); err != nil || scalar(t, s.DB, "SELECT count(*) FROM fixture_outbox") != 1 {
+		t.Fatalf("stale claimed occurrence repeated: %v", err)
+	}
+	*now = closeTask.ExecuteAt
+	if err = s.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if scalar(t, s.DB, "SELECT count(*) FROM accounts WHERE schedulable") != 0 || snapshotTask(t, s, "close").Status != "pending" {
+		t.Fatal("next-day 01:00 must close and retain tomorrow's plan")
+	}
+	*now = advanced.ExecuteAt
+	if err = s.RunDue(ctx); err != nil || scalar(t, s.DB, "SELECT count(*) FROM accounts WHERE schedulable") != 1 {
+		t.Fatalf("next daily opening did not run: %v", err)
+	}
+	if scalar(t, s.DB, "SELECT count(*) FROM account_schedulable_timer_audit WHERE result='executed' AND recurrence='daily'") != 3 {
+		t.Fatal("each daily occurrence must retain its own audit")
+	}
+	if err = s.Manual(ctx, 7, 19, false); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(48 * time.Hour)
+	if err = s.RunDue(ctx); err != nil || scalar(t, s.DB, "SELECT count(*) FROM accounts WHERE schedulable") != 0 || scalar(t, s.DB, "SELECT count(*) FROM account_schedulable_timers WHERE status='pending'") != 0 {
+		t.Fatalf("manual override must cancel both daily actions: %v", err)
+	}
+}
+
+func TestIntegrationDailyWindowReplacementIsAtomicAndAllowsSwappingTimes(t *testing.T) {
+	s, _, _ := integrationStore(t)
+	ctx := context.Background()
+	_, err := s.SaveDailyWindow(ctx, 7, 9, DailyWindowRequest{OpenTime: "08:00", CloseTime: "01:00", Timezone: "Asia/Shanghai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeOpen, beforeClose := snapshotTask(t, s, "open"), snapshotTask(t, s, "close")
+	request := DailyWindowRequest{OpenTime: "01:00", CloseTime: "08:00", Timezone: "Asia/Shanghai", ExpectedOpenVersion: beforeOpen.Version, ExpectedCloseVersion: beforeClose.Version}
+	// Fail only the second audit write, after the first action already changed.
+	_, err = s.DB.Exec(`CREATE FUNCTION reject_daily_close_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+ BEGIN IF NEW.action='close' THEN RAISE EXCEPTION 'fixture second write'; END IF; RETURN NEW; END $$;
+ CREATE TRIGGER reject_daily_close_audit BEFORE INSERT ON account_schedulable_timer_audit
+ FOR EACH ROW EXECUTE FUNCTION reject_daily_close_audit();`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SaveDailyWindow(ctx, 7, 19, request); err == nil {
+		t.Fatal("partial pair must not commit")
+	}
+	if got := snapshotTask(t, s, "open"); got.Version != beforeOpen.Version || got.DailyTime != beforeOpen.DailyTime || got.Status != "pending" {
+		t.Fatalf("first action escaped rollback: %+v", got)
+	}
+	if got := snapshotTask(t, s, "close"); got.Version != beforeClose.Version || got.DailyTime != beforeClose.DailyTime || got.Status != "pending" {
+		t.Fatalf("second action escaped rollback: %+v", got)
+	}
+	if scalar(t, s.DB, "SELECT count(*) FROM account_schedulable_timer_audit") != 2 {
+		t.Fatal("rolled-back replacement left audit rows")
+	}
+	if _, err = s.DB.Exec("DROP TRIGGER reject_daily_close_audit ON account_schedulable_timer_audit"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SaveDailyWindow(ctx, 7, 19, request); err != nil {
+		t.Fatalf("swapping pair times should not hit old uniqueness slots: %v", err)
+	}
+	if got := snapshotTask(t, s, "open"); got.Version != beforeOpen.Version+1 || got.DailyTime != "01:00" {
+		t.Fatal(got)
+	}
+	if got := snapshotTask(t, s, "close"); got.Version != beforeClose.Version+1 || got.DailyTime != "08:00" {
+		t.Fatal(got)
+	}
+	if _, err = s.SaveDailyWindow(ctx, 7, 19, request); ErrorCode(err) != "version" {
+		t.Fatalf("stale pair editor accepted: %v", err)
+	}
+	request.ExpectedOpenVersion++
+	if _, err = s.SaveDailyWindow(ctx, 7, 19, request); ErrorCode(err) != "version" {
+		t.Fatalf("stale close version must leave open untouched: %v", err)
+	}
+	if got := snapshotTask(t, s, "open"); got.Version != beforeOpen.Version+1 {
+		t.Fatalf("first action changed before second version check: %+v", got)
+	}
+}
+
+func TestIntegrationDailySkippedOpenContinuesButDeletedStops(t *testing.T) {
+	s, now, _ := integrationStore(t)
+	ctx := context.Background()
+	*now = now.Add(-time.Minute)
+	_, err := s.Save(ctx, 7, 9, SaveRequest{Input: Input{Mode: "daily", Time: "08:00", Timezone: "Asia/Shanghai"}, Action: "open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := snapshotTask(t, s, "open")
+	// The service missed several days, including today's 08:00. Preserve the
+	// conservative grace contract: do not substitute today's occurrence for the
+	// persisted stale opening even though today is only five minutes late.
+	*now = open.ExecuteAt.Add(72*time.Hour + 5*time.Minute)
+	if err = s.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	open = snapshotTask(t, s, "open")
+	if open.Status != "pending" || open.Reason != "open_expired" || !open.ExecuteAt.After(now.Add(23*time.Hour)) || scalar(t, s.DB, "SELECT count(*) FROM accounts WHERE schedulable") != 0 {
+		t.Fatalf("late open lost the recurring plan or enabled account: %+v", open)
+	}
+	if _, err = s.DB.Exec("UPDATE accounts SET status='disabled'"); err != nil {
+		t.Fatal(err)
+	}
+	*now = open.ExecuteAt
+	if err = s.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	open = snapshotTask(t, s, "open")
+	if open.Status != "pending" || open.Reason != "account_inactive" {
+		t.Fatal(open)
+	}
+	if _, err = s.DB.Exec("UPDATE accounts SET deleted_at=now()"); err != nil {
+		t.Fatal(err)
+	}
+	*now = open.ExecuteAt
+	if err = s.RunDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshotTask(t, s, "open"); got.Status != "skipped" || got.Reason != "account_deleted" {
+		t.Fatalf("deleted account should stop recurring: %+v", got)
+	}
+}
+
+func TestIntegrationDailyConflictChecksCoverFutureOneShotsAndZones(t *testing.T) {
+	cases := []struct {
+		name          string
+		first, second SaveRequest
+	}{
+		{"daily then same local one shot tomorrow", SaveRequest{Input: Input{Mode: "daily", Time: "08:00", Timezone: "Asia/Shanghai"}, Action: "open"}, SaveRequest{Input: Input{Mode: "relative", Hours: 48, Timezone: "Asia/Shanghai"}, Action: "close"}},
+		{"one shot then matching daily", SaveRequest{Input: Input{Mode: "relative", Hours: 48, Timezone: "Asia/Shanghai"}, Action: "close"}, SaveRequest{Input: Input{Mode: "daily", Time: "08:00", Timezone: "Asia/Shanghai"}, Action: "open"}},
+		{"daily pair must share timezone", SaveRequest{Input: Input{Mode: "daily", Time: "08:00", Timezone: "Asia/Shanghai"}, Action: "open"}, SaveRequest{Input: Input{Mode: "daily", Time: "01:00", Timezone: "America/New_York"}, Action: "close"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, _, _ := integrationStore(t)
+			if _, err := s.Save(context.Background(), 7, 9, c.first); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Save(context.Background(), 7, 9, c.second); ErrorCode(err) != "conflict" {
+				t.Fatalf("missed recurring conflict: %v", err)
+			}
+		})
+	}
+}
+
+func TestIntegrationDailyMigrationPreservesOldOneShotsAndCanRepeat(t *testing.T) {
+	s, _, _ := integrationStore(t)
+	saveRelative(t, s, "open", 1)
+	data, err := os.ReadFile("../../migrations/335_account_daily_schedulable_timers.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(string(data)); err != nil {
+		t.Fatal(err)
+	}
+	if task := snapshotTask(t, s, "open"); task.Recurrence != "once" || task.DailyTime != "" || task.Status != "pending" {
+		t.Fatalf("old one-shot semantics changed: %+v", task)
+	}
+	if _, err = s.DB.Exec("UPDATE account_schedulable_timers SET recurrence='daily',daily_time='25:00'"); err == nil {
+		t.Fatal("database must reject malformed daily clocks")
 	}
 }
 

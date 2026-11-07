@@ -153,6 +153,9 @@ def contexts(args):
         (dest / 'deploy').mkdir(exist_ok=True)
         shutil.copy2('deploy/docker-entrypoint.sh', dest / 'deploy/docker-entrypoint.sh')
         shutil.copytree('backend/resources', dest / 'backend/resources', dirs_exist_ok=True)
+        shutil.copy2('THIRD_PARTY_NOTICES.md', dest / 'THIRD_PARTY_NOTICES.md')
+        (dest / 'LICENSES').mkdir(exist_ok=True)
+        shutil.copy2('LICENSES/BEpusdt-GPL-3.0.txt', dest / 'LICENSES/BEpusdt-GPL-3.0.txt')
 
 
 def main():

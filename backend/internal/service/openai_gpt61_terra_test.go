@@ -20,7 +20,7 @@ import (
 func TestGPT61TerraIdentityAndEffort(t *testing.T) {
 	require.Contains(t, openai.DefaultModelIDs(), "gpt-6.1-terra")
 	require.Equal(t, "gpt-5.6-sol", openai.DefaultModelIDs()[0])
-	require.Equal(t, "gpt-5.4", openai.DefaultTestModel)
+	require.Equal(t, "gpt-5.6-sol", openai.DefaultTestModel)
 	for _, effort := range []string{"none", "low", "medium", "high", "xhigh", "max"} {
 		model := "openai/GPT-6.1-Terra-" + effort
 		require.True(t, openai.IsGPT61TerraModelSpelling(model))

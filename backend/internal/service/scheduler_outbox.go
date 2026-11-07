@@ -29,3 +29,21 @@ type SchedulerOutboxRepository interface {
 type SchedulerOutboxCleanupLease interface {
 	Release()
 }
+
+// SchedulerOutboxRetryRepository is optional for alternate/test repositories.
+// DeferOutboxEvent must durably copy the original event before acknowledging it
+// in the main stream. Retry ownership is fenced by a monotonically increasing
+// generation; a worker that has lost its lease cannot remove/reschedule a new
+// owner's task.
+type SchedulerOutboxRetryRepository interface {
+	DeferOutboxEvent(ctx context.Context, eventID int64) error
+	ClaimOutboxRetry(ctx context.Context, lease time.Duration) (*SchedulerOutboxRetry, error)
+	CompleteOutboxRetry(ctx context.Context, eventID, generation int64) error
+	RescheduleOutboxRetry(ctx context.Context, eventID, generation int64, delay time.Duration) error
+}
+
+type SchedulerOutboxRetry struct {
+	Event      SchedulerOutboxEvent
+	Generation int64
+	Attempts   int
+}

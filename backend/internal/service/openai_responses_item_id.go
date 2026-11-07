@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -63,6 +64,10 @@ func shouldStripOpenAIResponsesNonPairCallID(itemType string) bool {
 }
 
 func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {
+	// Escaped keys need the full parser; absent ID keys cannot require stripping.
+	if !bytes.Contains(body, []byte(`"id"`)) && !bytes.Contains(body, []byte(`"call_id"`)) && !bytes.Contains(body, []byte(`\u`)) {
+		return body, false, nil
+	}
 	input := parseRawJSONView(body).Get("input")
 	if !input.IsArray() {
 		return body, false, nil

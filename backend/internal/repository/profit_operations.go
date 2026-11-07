@@ -113,7 +113,9 @@ const profitOperationsCohort = `accounts_config AS (
 // Join the complete projection before applying the selected cohort. Joining only
 // cohort would turn every configured account outside it into account_missing.
 const profitOperationsBase = `WITH ` + profitOperationsCohort + `, scoped AS (
- SELECT u.*,COALESCE(c.key,'unknown:account_missing') AS upstream_key,
+ SELECT u.account_id,u.requested_model,u.model,u.upstream_model,u.total_cost,u.actual_cost,u.stream,u.first_token_ms,
+ u.account_stats_cost,u.input_tokens,u.output_tokens,u.cache_read_tokens,u.cache_creation_tokens,u.duration_ms,u.billing_type,u.created_at,u.queue_timing,u.queue_wait_ms,
+ COALESCE(c.key,'unknown:account_missing') AS upstream_key,
  COALESCE(c.attribution,'account_missing') AS attribution,c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,c.multiplier,c.channel_id AS explicit_channel_id,c.channel_name,c.channel_code,c.channel_remark,c.channel_revision,c.assignment,COALESCE(c.cost_basis,'account_missing') AS cost_basis,
  COALESCE(NULLIF(u.requested_model,''),u.model) AS public_model,
  u.total_cost AS cost_base

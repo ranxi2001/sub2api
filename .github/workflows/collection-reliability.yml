@@ -1,0 +1,102 @@
+name: Embedded collection reliability
+
+on:
+  pull_request:
+    paths:
+      - 'backend/third_party/bepusdt/**'
+      - 'backend/internal/bepusdt/**'
+      - 'backend/internal/payment/**'
+      - 'backend/internal/service/payment*'
+      - 'backend/internal/handler/*payment*'
+      - 'backend/internal/handler/admin/payment*'
+      - 'backend/internal/server/routes/payment*'
+      - 'backend/go.*'
+      - 'frontend/src/components/payment/**'
+      - 'frontend/src/views/user/*Payment*'
+      - 'frontend/src/views/user/__tests__/*Payment*'
+      - 'frontend/src/views/admin/SettingsView.vue'
+      - 'frontend/src/views/admin/__tests__/SettingsView.spec.ts'
+      - 'frontend/src/api/*payment*'
+      - 'frontend/src/api/admin/bepusdt.ts'
+      - 'frontend/src/types/payment.ts'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/i18n/**'
+      - 'frontend/src/router/**'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
+      - '.github/release-tools/**'
+      - '.goreleaser*.yaml'
+      - '*Dockerfile*'
+      - 'backend/Dockerfile'
+      - 'deploy/Dockerfile'
+      - '.github/workflows/collection-reliability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  collection:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify scanner retries, payment matching and callbacks
+        working-directory: backend
+        run: |
+          go test -race -p 2 github.com/v03413/bepusdt/app/conf github.com/v03413/bepusdt/app/task github.com/v03413/bepusdt/app/task/notify
+          go test -race -p 2 -tags unit ./internal/bepusdt ./internal/payment/provider
+          go test -p 2 -tags unit ./internal/service ./internal/handler/admin -run 'Test.*(Payment|BEpusdt|Crypto)' -count=1
+
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Payment UI, administrator notices and translations
+        run: >-
+          pnpm --dir frontend exec vitest run
+          src/components/payment/__tests__
+          src/views/user/__tests__/CryptoPaymentView.spec.ts
+          src/views/admin/__tests__/SettingsView.spec.ts
+          src/components/common/__tests__/NewFeatureBadge.spec.ts
+          src/i18n/__tests__/localeKeyCompleteness.spec.ts
+      - name: Frontend production build
+        run: pnpm --dir frontend run build
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Embedded server build
+        working-directory: backend
+        run: CGO_ENABLED=0 go build -tags embed -trimpath -o "$RUNNER_TEMP/sub2api-bepusdt" ./cmd/server
+
+  packaging:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install PyYAML==6.0.3
+      - name: Release Docker contexts preserve notices and licenses
+        run: python3 -m unittest discover -s .github/release-tools -p 'test_release_matrix.py'

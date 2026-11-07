@@ -56,13 +56,15 @@ type smartProtocolNetwork struct {
 	toolEvents     atomic.Int32
 	fail           string
 	partialRelease chan struct{}
+	createdRead    chan struct{}
+	reasoningRead  chan struct{}
 }
 
 func newSmartProtocolNetwork(t *testing.T, mode string, known bool, fail string) *smartProtocolNetwork {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	f := &smartProtocolNetwork{t: t, ctx: ctx, cancel: cancel, results: make(chan *OpenAIForwardResult, 32), errors: make(chan error, 16), timings: make(chan requesttiming.Snapshot, 16), fail: fail, partialRelease: make(chan struct{})}
+	f := &smartProtocolNetwork{t: t, ctx: ctx, cancel: cancel, results: make(chan *OpenAIForwardResult, 32), errors: make(chan error, 16), timings: make(chan requesttiming.Snapshot, 16), fail: fail, partialRelease: make(chan struct{}), createdRead: make(chan struct{}, 1), reasoningRead: make(chan struct{}, 1)}
 	cfg := &config.Config{}
 	f.cfg = cfg
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -94,7 +96,10 @@ func newSmartProtocolNetwork(t *testing.T, mode string, known bool, fail string)
 				f.wsCalls.Add(1)
 				f.remember(body)
 				for i, event := range f.events(body) {
-					if i == 1 || ((fail == "content_prefix" || fail == "reasoning_item_only" || fail == "reasoning_part_only") && (i == 4 || i == 5)) {
+					if !f.waitForTimingPredecessor(event) {
+						return
+					}
+					if i == 1 {
 						time.Sleep(5 * time.Millisecond)
 					}
 					if err := conn.Write(ctx, coderws.MessageText, []byte(event)); err != nil {
@@ -126,7 +131,10 @@ func newSmartProtocolNetwork(t *testing.T, mode string, known bool, fail string)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		for i, event := range f.events(body) {
-			if i == 1 || ((fail == "content_prefix" || fail == "reasoning_item_only" || fail == "reasoning_part_only") && (i == 4 || i == 5)) {
+			if !f.waitForTimingPredecessor(event) {
+				return
+			}
+			if i == 1 {
 				time.Sleep(5 * time.Millisecond)
 			}
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", event)
@@ -208,6 +216,9 @@ func (f *smartProtocolNetwork) events(body []byte) []string {
 	}
 	id := "resp_" + seed
 	events := []string{fmt.Sprintf(`{"type":"response.created","response":{"id":%q}}`, id)}
+	if f.hasTimingStages() {
+		events = append(events, `{"type":"keepalive","test_stage":"metadata"}`)
+	}
 	if f.fail == "content_prefix" || f.fail == "no_content" || f.fail == "reasoning_item_only" || f.fail == "reasoning_part_only" {
 		events = append(events, `{"type":"response.output_text.delta","delta":""}`, `{"type":"response.metadata.delta","delta":"working"}`, `{"type":"response.output_item.added","item":{"type":"function_call","name":"lookup","arguments":""}}`)
 	}
@@ -218,6 +229,9 @@ func (f *smartProtocolNetwork) events(body []byte) []string {
 	}
 	if f.fail == "reasoning_part_only" {
 		events = append(events, `{"type":"response.content_part.added","part":{"type":"reasoning_text","text":""}}`)
+	}
+	if f.hasTimingStages() {
+		events = append(events, `{"type":"keepalive","test_stage":"reasoning"}`)
 	}
 	if f.fail == "reasoning_item_only" || f.fail == "reasoning_part_only" {
 		return append(events, fmt.Sprintf(`{"type":"response.completed","response":{"id":%q,"status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":7}}}`, id))
@@ -246,6 +260,56 @@ func (f *smartProtocolNetwork) events(body []byte) []string {
 	events = append(events, fmt.Sprintf(`{"type":"response.completed","response":{"id":%q,"model":"gpt-5.1","status":"completed","output":[],"usage":{"input_tokens":3,"output_tokens":7}}}`, id))
 	return events
 }
+
+func (f *smartProtocolNetwork) hasTimingStages() bool {
+	return f.fail == "content_prefix" || f.fail == "reasoning_item_only" || f.fail == "reasoning_part_only"
+}
+
+func smartProtocolIsTypedReasoning(event string) bool {
+	switch gjson.Get(event, "type").String() {
+	case "response.output_item.added":
+		return gjson.Get(event, "item.type").String() == "reasoning"
+	case "response.content_part.added":
+		return gjson.Get(event, "part.type").String() == "reasoning_text"
+	}
+	return false
+}
+
+func (f *smartProtocolNetwork) waitForTimingPredecessor(event string) bool {
+	if !f.hasTimingStages() {
+		return true
+	}
+	var observed <-chan struct{}
+	switch {
+	case smartProtocolIsTypedReasoning(event):
+		observed = f.createdRead
+	case f.fail == "content_prefix" && gjson.Get(event, "type").String() == "response.function_call_arguments.delta":
+		observed = f.reasoningRead
+	case f.fail != "content_prefix" && gjson.Get(event, "type").String() == "response.completed":
+		observed = f.reasoningRead
+	default:
+		return true
+	}
+	// A sender-side delay cannot keep the gateway from reading buffered stages
+	// in the same millisecond. Keepalives pass HTTP first-output staging without
+	// committing the attempt or flushing staged metadata/empty reasoning. Receipt
+	// proves the preceding stage was parsed; cross the metric's precision boundary
+	// before sending the next stage, preserving every strict timing assertion.
+	select {
+	case <-observed:
+	case <-f.ctx.Done():
+		return false
+	}
+	timer := time.NewTimer(2 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-f.ctx.Done():
+		return false
+	}
+}
+
 func (f *smartProtocolNetwork) dial() *coderws.Conn {
 	f.t.Helper()
 	c, _, err := coderws.Dial(f.ctx, "ws"+strings.TrimPrefix(f.ingress.URL, "http"), nil)
@@ -263,6 +327,21 @@ func (f *smartProtocolNetwork) terminal(c *coderws.Conn) string {
 	for {
 		_, event, err := c.Read(f.ctx)
 		require.NoError(f.t, err)
+		if f.hasTimingStages() && gjson.GetBytes(event, "type").String() == "keepalive" {
+			var observed chan struct{}
+			switch gjson.GetBytes(event, "test_stage").String() {
+			case "metadata":
+				observed = f.createdRead
+			case "reasoning":
+				observed = f.reasoningRead
+			}
+			if observed != nil {
+				select {
+				case observed <- struct{}{}:
+				default:
+				}
+			}
+		}
 		if gjson.GetBytes(event, "type").String() == "response.function_call_arguments.delta" {
 			f.toolEvents.Add(1)
 		}

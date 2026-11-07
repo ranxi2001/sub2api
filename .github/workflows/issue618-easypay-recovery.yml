@@ -1,0 +1,32 @@
+name: Issue618 EasyPay confirmation recovery
+on:
+  push:
+    branches: [fix/payment-confirmation-recovery-618]
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/payment*.go'
+      - 'backend/internal/payment/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/issue618-easypay-recovery.yml'
+permissions:
+  contents: read
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Real EasyPay adapter and order recovery regressions
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/service -run '^TestEasyPayRecovery' -count=1 -v -timeout=8m
+      - name: Keep EasyPay callback confirmation and signature guards
+        working-directory: backend
+        run: go test -race ./internal/payment/provider -run '^TestEasyPay(Query|Confirm|Notify)' -count=1 -v -timeout=4m

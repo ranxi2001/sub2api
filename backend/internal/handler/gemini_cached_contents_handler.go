@@ -210,6 +210,30 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		mappedModel := account.GetMappedModel(modelName)
+		// Account selection may lower the context boundary after ingress admission.
+		// Recheck before creating an upstream cache or incurring storage charges.
+		currentAPIKey := apiKey
+		if latestKey, ok := middleware.GetAPIKeyFromContext(c); ok && latestKey != nil {
+			currentAPIKey = latestKey
+		}
+		outboundBody, err := geminiCachedContentContextPolicyBody(body, mappedModel)
+		if err != nil {
+			accountReleaseFunc()
+			googleError(c, http.StatusBadRequest, "Invalid cached content payload")
+			return
+		}
+		if err := h.CheckAPIKeyLongContext(c.Request.Context(), currentAPIKey, outboundBody, mappedModel); err != nil {
+			accountReleaseFunc()
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			middleware.MarkIngressRejected(c, middleware.IngressRejectLongContextDisabled)
+			code := "context_unverifiable"
+			var policyErr *service.APIKeyLongContextError
+			if errors.As(err, &policyErr) {
+				code = policyErr.Code
+			}
+			googleErrorWithType(c, http.StatusBadRequest, "invalid_request_error", code, err.Error())
+			return
+		}
 		usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, mappedModel)
 		if !h.gatewayService.CacheStoragePriced(c.Request.Context(), &service.RecordUsageInput{
 			Result:             &service.ForwardResult{Model: modelName, UpstreamModel: mappedModel, CacheStorageTokenHours: 1},
@@ -330,6 +354,23 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 	}
 	markOpsRoutingCapacityLimited(c)
 	googleError(c, http.StatusServiceUnavailable, "No available Gemini accounts support explicit context caching")
+}
+
+// Match the final account model while preserving visible input for admission.
+// Canonicalization prevents a duplicate or case-variant public model from
+// replacing the unknown upstream model's default context boundary.
+func geminiCachedContentContextPolicyBody(body []byte, mappedModel string) ([]byte, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	for field := range payload {
+		if strings.EqualFold(field, "model") {
+			delete(payload, field)
+		}
+	}
+	payload["model"], _ = json.Marshal(mappedModel)
+	return json.Marshal(payload)
 }
 
 // GeminiCachedContentsList GET /v1beta/cachedContents

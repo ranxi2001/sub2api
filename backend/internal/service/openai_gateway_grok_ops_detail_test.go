@@ -108,7 +108,7 @@ func TestForwardGrokChatViaResponsesRecordsUpstreamErrorDetail(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
-	c.Set("api_key", &APIKey{ID: 7601})
+	c.Set("api_key", &APIKey{ID: 7601, AllowLongContext: true})
 
 	account := grokChatBridgeTestAccount(76)
 	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{

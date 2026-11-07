@@ -317,6 +317,25 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 	if latest.Platform != selected.Platform || (latest.Type != selected.Type && selected.AuthConnectionID == "") {
 		return nil, denyOpenAITurn("account_binding_changed")
 	}
+	// Independent AI pauses must be checked at the final send boundary as well
+	// as slot acquisition. The normal account admission cache cannot grant
+	// permission after an AI control transaction paused the selected account.
+	if s != nil && s.accountRepo != nil && (s.schedulerSnapshot == nil || s.schedulerSnapshot.localSnapshotReader == nil) {
+		if guard, ok := s.accountRepo.(interface {
+			AIOpsRuntime(context.Context, []int64) (map[int64]AIOpsRuntime, error)
+		}); ok {
+			checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			controls, err := guard.AIOpsRuntime(checkCtx, []int64{latest.ID})
+			cancel()
+			if err != nil {
+				return nil, denyOpenAITurn("latest_state_unavailable")
+			}
+			control, found := controls[latest.ID]
+			if !found || control.Paused {
+				return nil, denyOpenAITurn("account_ineligible")
+			}
+		}
+	}
 	if authoritativeRead && !latest.IsSchedulable() {
 		return nil, denyOpenAITurn("account_ineligible")
 	}
@@ -349,6 +368,9 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 // an admission point, not an atomic transaction spanning SQL and network I/O.
 func (s *OpenAIGatewayService) admitOpenAITurn(ctx context.Context, c *gin.Context, selected *Account, outboundModel string, payload ...[]byte) (*Account, error) {
 	if len(payload) > 0 {
+		if err := s.checkAPIKeyLongContextBeforeSend(ctx, c, payload[0], outboundModel); err != nil {
+			return nil, err
+		}
 		ctx = WithOpenAIImageGenerationRequest(ctx, outboundModel, payload[0])
 	}
 	groupID, enforceGroup := openAITurnAdmissionGroupFromContext(c)

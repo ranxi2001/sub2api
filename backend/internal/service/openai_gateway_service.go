@@ -226,6 +226,11 @@ func (s *OpenAICodexUsageSnapshot) Normalize() *NormalizedCodexLimits {
 
 // OpenAIUsage represents OpenAI API response usage
 type OpenAIUsage struct {
+	// CacheReadKnown records an explicit, valid cache read counter from the
+	// upstream. Missing counters must never become zero-cache protection samples.
+	CacheReadKnown bool `json:"-"`
+	// Preserve request modality when a terminal usage omits earlier media details.
+	cacheReadMediaObserved   bool
 	InputTokens              int `json:"input_tokens"`
 	ImageInputTokens         int `json:"image_input_tokens,omitempty"`
 	ImageCacheReadTokens     int `json:"image_cache_read_tokens,omitempty"`
@@ -336,7 +341,8 @@ type OpenAIForwardResult struct {
 	wsAccountFailoverReplayInput []json.RawMessage
 	// Local stream-read timeout is not an observed upstream terminal event.
 	// Keep observed partial usage without reporting a successful generation.
-	streamReadIncomplete bool
+	streamReadIncomplete      bool
+	antiDistillationRequestID string
 }
 
 const maxOpenAIQueueWait = time.Hour
@@ -512,6 +518,7 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
+	groupAntiDistillation   *GroupAntiDistillationService
 	smartProtocolHistory    openAISmartProtocolHistory
 	requestTimezoneEgress   openAIRequestTimezoneEgress
 	requestTimezoneProber   ProxyExitInfoProber

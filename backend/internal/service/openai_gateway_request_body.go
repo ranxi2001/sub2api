@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"net/http"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -1560,7 +1561,7 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		}
 	}
 	needsOrphanCleanup := account != nil && account.IsOpenAIOAuthLike() &&
-		gjson.GetBytes(normalized, "input").IsArray()
+		gjson.GetBytes(normalized, "input").IsArray() && openAIResponsesMayNeedOrphanCleanup(normalized)
 	if needsOrphanCleanup || openAIResponsesInputMayNeedTruncation(normalized) {
 		var reqBody map[string]any
 		if err := decodeOpenAIJSONUseNumber(normalized, &reqBody); err != nil {
@@ -2630,7 +2631,7 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 	case strings.HasPrefix(normalized, "deepseek-v4"), strings.HasPrefix(normalized, "deepseek-flash"):
 		// deepseek-flash（= DeepSeek-V4.1-Flash）与 v4 系同为 low/high/max 档位。
 		return true
-	case strings.HasPrefix(normalized, "glm-"), normalized == "zai-glm-5-3":
+	case strings.HasPrefix(normalized, "glm-"), normalized == "zai-glm-5-3", normalized == "zai-glm-5-3-flash":
 		return true
 	case strings.HasPrefix(normalized, "kimi-"), strings.HasPrefix(normalized, "moonshot-"):
 		return true

@@ -9,6 +9,8 @@ import type { AccountListItem, UpstreamBillingProbeSnapshot } from '@/types'
 import DataTable from '@/components/common/DataTable.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import type { User } from '@/types'
 
 // Only replace the backend transport and unrelated navigation/dialogs. The
@@ -84,7 +86,9 @@ const backend: AxiosAdapter = async config => {
     case '/admin/accounts/performance': data = {}; break
     case '/admin/accounts/today-stats/batch': data = { stats: {} }; break
     default:
-      if (/\/accounts\/\d+\/schedulable-timers$/.test(config.url ?? '')) {
+      if (/\/accounts\/\d+\/models\/sync-upstream$/.test(config.url ?? '')) {
+        data = { models: ['current-model'], applied: true, changed: false }
+      } else if (/\/accounts\/\d+\/schedulable-timers$/.test(config.url ?? '')) {
         data = { tasks: [], history: [], server_now: new Date().toISOString(), poll_seconds: 30, open_grace_seconds: 900, max_delay_minutes: 100 }
       } else throw new Error(`Unmocked fixture backend: ${config.method} ${config.url}`)
   }
@@ -469,6 +473,92 @@ describe('AccountsView automatic declaration refresh', () => {
     const before = requests.length
     compact.complete()
     await flushPromises()
+    expect(requests).toHaveLength(before)
+  })
+
+  it('keeps upstream model discovery opt-in while ordinary automatic table refresh runs', async () => {
+    const view = await mountView(true)
+    await view.get('button[title="自动刷新"]').trigger('click')
+    expect(view.get('[data-testid="auto-refresh-upstream-models"]').attributes('aria-checked')).toBe('false')
+    await view.get('button[title="自动刷新"]').trigger('click')
+    await tick()
+    expect(requests.filter(request => request.url?.endsWith('/models/sync-upstream'))).toHaveLength(0)
+    expect(requests.filter(request => request.url === '/admin/accounts').length).toBeGreaterThan(1)
+  })
+
+  it('persists model sync, sends apply mode only for visible eligible accounts and refreshes changed rows', async () => {
+    const view = await mountView(true)
+    overrides.set('/admin/accounts/41/models/sync-upstream', async config => {
+      rows[0] = { ...rows[0]!, name: 'Refreshed model catalog', updated_at: '2026-11-06T00:00:00Z' }
+      listRevision++
+      return reply(config, { models: ['current-model'], applied: true, changed: true })
+    })
+    await view.get('button[title="自动刷新"]').trigger('click')
+    await view.get('[data-testid="auto-refresh-upstream-models"]').trigger('click')
+    expect(JSON.parse(localStorage.getItem('account-auto-refresh')!)).toMatchObject({ sync_upstream_models: true })
+    await view.get('button[title="自动刷新"]').trigger('click')
+    await tick()
+    const syncs = requests.filter(request => request.url?.endsWith('/models/sync-upstream'))
+    expect(syncs.map(request => request.url)).toEqual([
+      '/admin/accounts/41/models/sync-upstream', '/admin/accounts/42/models/sync-upstream'
+    ])
+    expect(syncs.every(request => JSON.parse(request.data).apply === true && JSON.parse(request.data).automatic === true)).toBe(true)
+    expect(view.text()).toContain('Refreshed model catalog')
+    await tick()
+    expect(requests.filter(request => request.url?.endsWith('/models/sync-upstream'))).toHaveLength(2)
+  })
+
+  it('aborts model requests on disable and does not reload rows from late completed writes', async () => {
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5, sync_upstream_models: true }))
+    const first = holdNext('/admin/accounts/41/models/sync-upstream', { models: ['new'], applied: true, changed: true })
+    const second = holdNext('/admin/accounts/42/models/sync-upstream', { models: ['new'], applied: true, changed: true })
+    const view = await mountView(true)
+    await tick()
+    expect(first.config().signal?.aborted).toBe(false)
+    await toggleAutoRefresh(view)
+    expect(first.config().signal?.aborted).toBe(true)
+    expect(second.config().signal?.aborted).toBe(true)
+    const listsBefore = requests.filter(request => request.url === '/admin/accounts').length
+    first.complete()
+    second.complete()
+    await flushPromises()
+    await tick()
+    expect(requests.filter(request => request.url === '/admin/accounts')).toHaveLength(listsBefore)
+  })
+
+  it('shares the new model-sync notice across both entries and keeps dismissals after remount', async () => {
+    const view = await mountView(true)
+    useNewFeatureNoticeStore().dismiss(1, NEW_FEATURE_NOTICES.vipAutoCredit)
+    await view.get('button[title="自动刷新"]').trigger('click')
+    expect(view.findAll('[data-testid="account-auto-refresh"] [data-testid="new-feature-badge"]')).toHaveLength(2)
+    await view.findAll('[data-testid="account-auto-refresh"] [data-testid="new-feature-badge"]')[0]!.trigger('click')
+    expect(view.findAll('[data-testid="account-auto-refresh"] [data-testid="new-feature-badge"]')).toHaveLength(0)
+    expect(view.get('[data-testid="auto-refresh-upstream-models"]').attributes('aria-checked')).toBe('false')
+    view.unmount()
+    wrapper = undefined
+    const remounted = await mountView(true)
+    await remounted.get('button[title="自动刷新"]').trigger('click')
+    expect(remounted.findAll('[data-testid="account-auto-refresh"] [data-testid="new-feature-badge"]')).toHaveLength(0)
+    expect(useNewFeatureNoticeStore().isDismissed(1, NEW_FEATURE_NOTICES.vipAutoCredit)).toBe(true)
+  })
+
+  it('stops model discovery when the tab is hidden and discards completions after teardown', async () => {
+    localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5, sync_upstream_models: true }))
+    const first = holdNext('/admin/accounts/41/models/sync-upstream', { models: ['new'], applied: true, changed: true })
+    const second = holdNext('/admin/accounts/42/models/sync-upstream', { models: ['new'], applied: true, changed: true })
+    const view = await mountView(true)
+    await vi.advanceTimersByTimeAsync(1000)
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(first.config().signal?.aborted).toBe(true)
+    expect(second.config().signal?.aborted).toBe(true)
+    view.unmount()
+    wrapper = undefined
+    const before = requests.length
+    first.complete()
+    second.complete()
+    await flushPromises()
+    await tick()
     expect(requests).toHaveLength(before)
   })
 })

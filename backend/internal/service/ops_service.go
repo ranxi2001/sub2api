@@ -43,6 +43,13 @@ type OpsRuntimeSettingsRefreshHealth struct {
 
 // OpsService provides ingestion and query APIs for the Ops monitoring module.
 type OpsService struct {
+	aiOpsMu            sync.Mutex
+	aiOpsCancel        context.CancelFunc
+	aiOpsDone          chan struct{}
+	aiOpsProbeRunner   func(context.Context, int64, string, string) (bool, error)
+	aiOpsProbeWG       sync.WaitGroup
+	aiOpsContext       context.Context
+	aiOpsStopping      bool
 	autoConfigObserver func(AccountConcurrencyResult)
 	opsRepo            OpsRepository
 	settingRepo        SettingRepository
@@ -337,6 +344,7 @@ func (s *OpsService) StopRuntimeSettingsRefresh() {
 	if s == nil {
 		return
 	}
+	s.StopAIOpsController()
 	s.runtimeRefreshMu.Lock()
 	cancel := s.runtimeRefreshCancel
 	done := s.runtimeRefreshDone

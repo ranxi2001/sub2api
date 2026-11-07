@@ -52,6 +52,60 @@ func TestNextEightCrossesLocalDay(t *testing.T) {
 		t.Fatalf("%+v %v", p, err)
 	}
 }
+
+func TestDailyResolvesNextLocalOccurrenceAndSkipsAmbiguousDates(t *testing.T) {
+	cases := []struct {
+		name, now, clock, zone, want string
+	}{
+		{"today before opening", "2026-11-05T23:59:00Z", "08:00", "Asia/Shanghai", "2026-11-06T00:00:00Z"},
+		{"exact opening advances", "2026-11-06T00:00:00Z", "08:00", "Asia/Shanghai", "2026-11-07T00:00:00Z"},
+		{"cross midnight closing", "2026-11-06T00:00:00Z", "01:00", "Asia/Shanghai", "2026-11-06T17:00:00Z"},
+		{"UTC midnight", "2026-11-06T23:59:00Z", "00:00", "UTC", "2026-11-07T00:00:00Z"},
+		{"spring gap date skipped", "2027-03-14T05:00:00Z", "02:30", "America/New_York", "2027-03-15T06:30:00Z"},
+		{"fall duplicate date skipped", "2026-11-01T04:00:00Z", "01:30", "America/New_York", "2026-11-02T06:30:00Z"},
+		{"spring local hour after offset change", "2027-03-13T13:01:00Z", "08:00", "America/New_York", "2027-03-14T12:00:00Z"},
+		{"fall local hour after offset change", "2026-10-31T12:01:00Z", "08:00", "America/New_York", "2026-11-01T13:00:00Z"},
+		{"political whole day skip", "2011-12-30T09:59:00Z", "08:00", "Pacific/Apia", "2011-12-30T18:00:00Z"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			now, err := time.Parse(time.RFC3339, c.now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, err := Resolve(Input{Mode: "daily", Time: c.clock, Timezone: c.zone}, now, DefaultPolicy())
+			if err != nil || preview.ExecuteAt.Format(time.RFC3339) != c.want || preview.LocalTime != c.clock {
+				t.Fatalf("got %+v %v; want %s at %s", preview, err, c.want, c.clock)
+			}
+		})
+	}
+}
+
+func TestDailyRejectsMixedModesAndMalformedClocks(t *testing.T) {
+	cases := []Input{
+		{Mode: "daily", Time: "08:00", Date: "2026-11-07", Timezone: "Asia/Shanghai"},
+		{Mode: "daily", Time: "08:00", Hours: 1, Timezone: "Asia/Shanghai"},
+		{Mode: "daily", Time: "08:00", Minutes: -1, Timezone: "Asia/Shanghai"},
+	}
+	for _, clock := range []string{"", "8:00", "08:0", "24:00", "08:00:00", " 08:00"} {
+		cases = append(cases, Input{Mode: "daily", Time: clock, Timezone: "UTC"})
+	}
+	for _, in := range cases {
+		if _, err := Resolve(in, time.Now(), DefaultPolicy()); ErrorCode(err) != "datetime" {
+			t.Fatalf("accepted invalid daily input %+v: %v", in, err)
+		}
+	}
+}
+
+func TestDailyUsesCalendarRecurrenceRatherThanOneShotPlanningHorizon(t *testing.T) {
+	now := time.Date(2027, 3, 14, 5, 0, 0, 0, time.UTC)
+	policy := DefaultPolicy()
+	policy.MaxDelay = 24 * time.Hour
+	preview, err := Resolve(Input{Mode: "daily", Time: "02:30", Timezone: "America/New_York"}, now, policy)
+	if err != nil || preview.ExecuteAt.Format(time.RFC3339) != "2027-03-15T06:30:00Z" {
+		t.Fatalf("one-shot horizon blocked a valid daily plan: %+v %v", preview, err)
+	}
+}
 func TestExecutionPolicy(t *testing.T) {
 	now := time.Now()
 	p := DefaultPolicy()

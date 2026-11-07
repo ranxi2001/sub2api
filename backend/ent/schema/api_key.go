@@ -58,6 +58,9 @@ func (APIKey) Fields() []ent.Field {
 			MaxLen(16).
 			Default("").
 			Comment("Administrator-managed reasoning effort override; empty follows the request"),
+		field.Bool("allow_long_context").
+			Default(true).
+			Comment("Administrator-managed permission to use long context requests"),
 		field.Time("last_used_at").
 			Optional().
 			Nillable().

@@ -110,6 +110,9 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	upstreamStart := time.Now()
 	var resp *http.Response
 	for attempt := 0; ; attempt++ {
+		if err := s.checkAPIKeyLongContextBeforeSend(ctx, c, patchedBody, upstreamModel); err != nil {
+			return nil, err
+		}
 		upstreamReq, buildErr := buildGrokResponsesRequest(upstreamCtx, c, account, patchedBody, token, cacheIdentity, s.cfg, s.settingService)
 		if buildErr != nil {
 			return nil, buildErr

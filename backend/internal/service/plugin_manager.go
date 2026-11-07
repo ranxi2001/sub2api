@@ -983,6 +983,7 @@ func (m *PluginManager) RoundTripOpenAIOAuth(ctx context.Context, request *http.
 		}
 		return nil, true, err
 	}
+	markOpenAIPluginSSEPreflight(response, request, route.runtime.installation)
 	return response, true, nil
 }
 

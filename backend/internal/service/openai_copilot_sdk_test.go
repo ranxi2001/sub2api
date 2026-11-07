@@ -80,7 +80,7 @@ func TestCopilotSDKForwardPreservesNativeContract(t *testing.T) {
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest("POST", path, bytes.NewReader(body))
 			c.Request.Header.Set("X-Sub2API-Client-ID", "spoofed")
-			c.Set("api_key", &APIKey{ID: 42})
+			c.Set("api_key", &APIKey{ID: 42, AllowLongContext: true})
 			account := &Account{ID: 71, Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "sidecar-key"}, Extra: map[string]any{"openai_copilot_sdk": true}}
 			result, err := svc.Forward(c.Request.Context(), c, account, body)
 			require.NoError(t, err)

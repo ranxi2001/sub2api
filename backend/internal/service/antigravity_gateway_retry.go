@@ -538,6 +538,9 @@ urlFallbackLoop:
 				return nil, err
 			}
 
+			if err := checkAPIKeyLongContextBeforeForward(p.ctx, p.c, nil, p.body, extractOpenAICodexTicketModel(p.body)); err != nil {
+				return nil, err
+			}
 			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			s.rateLimitService.observeQualityResponse(upstreamReq.Context(), p.account, resp, err)
 			if err == nil && resp == nil {

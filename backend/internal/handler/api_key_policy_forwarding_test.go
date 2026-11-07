@@ -87,8 +87,8 @@ func TestAPIKeyPolicyHTTPFinalUpstreamPayloadAndKeyIsolation(t *testing.T) {
 				repo.accounts = []service.Account{account}
 				group := &service.Group{ID: 3131, Platform: service.PlatformOpenAI, Status: service.StatusActive, AllowMessagesDispatch: true}
 				keys := map[string]*service.APIKey{
-					"key-a": {ID: 11, GroupID: &group.ID, Group: group, User: &service.User{ID: 100}, ModelMapping: map[string]string{"gpt-6.1-sol": "gpt-5.6-sol"}, ReasoningEffort: "high"},
-					"key-b": {ID: 12, GroupID: &group.ID, Group: group, User: &service.User{ID: 100}},
+					"key-a": {ID: 11, GroupID: &group.ID, Group: group, User: &service.User{ID: 100}, ModelMapping: map[string]string{"gpt-6.1-sol": "gpt-5.6-sol"}, ReasoningEffort: "high", AllowLongContext: true},
+					"key-b": {ID: 12, GroupID: &group.ID, Group: group, User: &service.User{ID: 100}, AllowLongContext: true},
 				}
 				router := gin.New()
 				router.Use(func(c *gin.Context) {

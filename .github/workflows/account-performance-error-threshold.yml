@@ -1,0 +1,67 @@
+name: Account performance HTTP error thresholds
+
+on:
+  push:
+    branches: [feat/account-performance-error-rate]
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/account_performance*'
+      - 'backend/internal/repository/account_performance*'
+      - 'backend/internal/pkg/upstreamstats/**'
+      - 'frontend/src/types/accountPerformance.ts'
+      - 'frontend/src/components/account/AccountPerformance*'
+      - 'frontend/src/components/account/__tests__/AccountPerformance*'
+      - 'frontend/src/i18n/locales/*/accountPerformance.ts'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/api/__tests__/admin.accounts.performance.spec.ts'
+      - '.github/workflows/account-performance-error-threshold.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Bounds, real HTTP evidence, evaluation and pause ownership
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/service ./internal/repository -run '^TestAccountPerformance' -count=1 -v -timeout=10m
+      - name: Bounded process-local HTTP collector
+        working-directory: backend
+        run: go test -race ./internal/pkg/upstreamstats -count=1 -v -timeout=2m
+      - name: Migrated PostgreSQL pause evidence and configuration
+        working-directory: backend
+        env:
+          CI: 'true'
+        run: go test -tags=integration ./internal/repository -run '^TestAccountPerformance' -count=1 -v -timeout=10m
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Error bounds, legacy payloads and new feature notice behavior
+        working-directory: frontend
+        run: pnpm exec vitest run src/components/account/__tests__/AccountPerformanceDialog.spec.ts src/components/account/__tests__/AccountPerformanceCell.spec.ts src/api/__tests__/admin.accounts.performance.spec.ts
+      - name: Typecheck and production bundle
+        run: pnpm --dir frontend run build

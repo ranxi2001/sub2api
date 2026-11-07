@@ -281,27 +281,60 @@ func TestGrokCatalogSyncPreviewAndPureReadDoNotPersist(t *testing.T) {
 	require.Equal(t, before+2, len(readUpstream.requests))
 }
 
-func TestGrokCatalogSyncNonGrokOmitsDiscoverySource(t *testing.T) {
-	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body: io.NopCloser(strings.NewReader(`{"data":[{
-			"id":"gpt-test",
-			"reasoning":false,
-			"input_modalities":["text"],
-			"context_window":128000
-		}]}`)),
-	}}
-	repo := &upstreamModelMetadataRepoStub{}
-	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream, cfg: upstreamModelSyncTestConfig()}
-	catalog, err := svc.SyncUpstreamModelCatalog(context.Background(), &Account{
-		ID: 44, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
-		Credentials: map[string]any{"api_key": "key", "base_url": "https://provider.example/v1"},
-	})
-	require.NoError(t, err)
-	require.Empty(t, catalog.DiscoverySource)
-	require.NotContains(t, grokCatalogJSON(t, catalog), "discovery_source")
-	require.Zero(t, repo.casCalls)
+func TestUpstreamCatalogSyncNonGrokReportsDiscoverySource(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		source string
+		models []string
+	}{
+		{
+			name: "live", status: http.StatusOK, source: "upstream", models: []string{"gpt-test"},
+			body: `{"data":[{"id":"gpt-test","reasoning":false,"input_modalities":["text"],"context_window":128000}]}`,
+		},
+		{
+			name: "missing_endpoint", status: http.StatusNotFound, source: "configured_fallback", models: []string{"gpt-configured"},
+			body: `{"error":"missing models endpoint"}`,
+		},
+		{
+			name: "unsupported_method", status: http.StatusMethodNotAllowed, source: "configured_fallback", models: []string{"gpt-configured"},
+			body: `{"error":"unsupported models method"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: tc.status,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
+			}}
+			account := &Account{
+				ID: 44, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Credentials: map[string]any{
+					"api_key": "key", "base_url": "https://provider.example/v1",
+					"model_mapping": map[string]any{"alias": "gpt-configured"},
+				},
+			}
+			credentialsBefore := cloneGrokCatalogMemoryValue(account.Credentials)
+			repo := &upstreamModelMetadataRepoStub{}
+			svc := &AccountTestService{
+				accountRepo: repo, httpUpstream: upstream, cfg: upstreamModelSyncTestConfig(),
+				modelMetadataRegistry:   map[string]modelsDevProvider{"test": {API: "https://provider.example/v1"}},
+				modelMetadataRegistryAt: time.Now(),
+			}
+			catalog, err := svc.SyncUpstreamModelCatalog(context.Background(), account)
+			require.NoError(t, err)
+			require.Equal(t, tc.source, catalog.DiscoverySource)
+			require.Equal(t, tc.models, catalog.Models)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal([]byte(grokCatalogJSON(t, catalog)), &payload))
+			require.Equal(t, tc.source, payload["discovery_source"])
+			require.Equal(t, credentialsBefore, cloneGrokCatalogMemoryValue(account.Credentials))
+			require.Nil(t, catalog.GrokModelDiagnostics)
+			require.Zero(t, repo.casCalls, "non-Grok discovery must not write Grok catalog state")
+			require.Len(t, upstream.requests, 1, "all requests use the offline models fixture")
+		})
+	}
 }
 
 func TestGrokCatalogSyncManualIgnoresFreshTTL(t *testing.T) {

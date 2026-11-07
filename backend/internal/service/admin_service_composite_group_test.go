@@ -202,7 +202,7 @@ func TestAdminService_CompositeModelsListCandidatesIncludeConcreteAccountMapping
 	require.Contains(t, candidates, "gpt-custom")
 	require.Contains(t, candidates, "gemini-custom")
 	require.Contains(t, candidates, "kimi-custom")
-	require.Contains(t, candidates, "gpt-5.5")
+	require.Contains(t, candidates, "gpt-6.1-sol")
 	require.Contains(t, candidates, "gemini-2.5-flash")
 }
 

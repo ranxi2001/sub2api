@@ -35,6 +35,9 @@ errors:{status:'ready',queried_at:new Date().toISOString(),data:{source:'ops_err
 capacity:{status:'ready',queried_at:new Date().toISOString(),data:{source:'accounts',scope:'current configuration',accounts:6,schedulable:5,configured_concurrency:30}}};}
 `
 const settings = `export const useAdminSettingsStore=()=>({requestCaptureEnabled:false})`
+// SmartOpsNav reads the signed-in admin. Keep its identity synthetic and avoid
+// pulling the real auth store's API barrel into this isolated fixture graph.
+const auth = `export const useAuthStore=()=>({isAdmin:true,isObserver:false,user:{id:1,role:'admin'}})`
 const shell = `import {h} from 'vue';export default {setup(_,ctx){return ()=>h('main',{class:'mx-auto max-w-7xl p-4 text-gray-900'},ctx.slots.default?.())}}`
 const html = `<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="app"></div><script type="module">
 import {createApp} from 'vue';import {createPinia} from 'pinia';import {createRouter,createWebHistory,RouterView} from 'vue-router';import {createI18n} from 'vue-i18n';
@@ -45,17 +48,20 @@ process.chdir(frontend)
 const server = await createServer({ root: frontend, configFile: false, plugins: [vue(), {
   name: 'channel-operations-offline',
   resolveId(id) { if (id.startsWith('virtual:channel-')) return '\0' + id },
-  load(id) { if (id === '\0virtual:channel-fixture') return fixture; if (id === '\0virtual:channel-shell') return shell; if (id === '\0virtual:channel-settings') return settings },
+  load(id) { if (id === '\0virtual:channel-fixture') return fixture; if (id === '\0virtual:channel-shell') return shell; if (id === '\0virtual:channel-settings') return settings; if (id === '\0virtual:channel-auth') return auth },
   configureServer(vite) { vite.middlewares.use((req, res, next) => { if (req.url?.split('?')[0] === '/admin/channel-operations') { res.setHeader('Content-Type', 'text/html'); void vite.transformIndexHtml('/admin/channel-operations', html).then(value => res.end(value)); return } next() }) }
-}], resolve: { alias: [{ find: '@/api/admin/channelOperations', replacement: 'virtual:channel-fixture' }, { find: '@/api/admin/channels', replacement: 'virtual:channel-fixture' }, { find: '@/components/layout/AppLayout.vue', replacement: 'virtual:channel-shell' }, { find: '@/stores/adminSettings', replacement: 'virtual:channel-settings' }, { find: '@', replacement: path.join(frontend, 'src') }] }, css: { postcss: { plugins: [tailwind({ config: path.join(frontend, 'tailwind.config.js') }), autoprefixer()] } }, server: { host: '127.0.0.1', port: 4183, strictPort: true }, optimizeDeps: { noDiscovery: true, include: ['vue', 'vue-i18n', 'pinia', 'vue-router'] } })
+}], resolve: { alias: [{ find: '@/api/admin/channelOperations', replacement: 'virtual:channel-fixture' }, { find: '@/api/admin/channels', replacement: 'virtual:channel-fixture' }, { find: '@/components/layout/AppLayout.vue', replacement: 'virtual:channel-shell' }, { find: '@/stores/adminSettings', replacement: 'virtual:channel-settings' }, { find: '@/stores/auth', replacement: 'virtual:channel-auth' }, { find: '@', replacement: path.join(frontend, 'src') }] }, css: { postcss: { plugins: [tailwind({ config: path.join(frontend, 'tailwind.config.js') }), autoprefixer()] } }, server: { host: '127.0.0.1', port: 4183, strictPort: true }, optimizeDeps: { noDiscovery: true, include: ['vue', 'vue-i18n', 'pinia', 'vue-router'] } })
 await server.listen()
 const browser = await chromium.launch({ headless: true })
+const failures = [], consoleErrors = [], apiRequests = []
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } }), failures = [], apiRequests = []
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } })
   page.on('pageerror', error => failures.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()) })
   await page.route('**/api/**', route => { apiRequests.push(route.request().url()); return route.abort() })
   await page.goto('http://127.0.0.1:4183/admin/channel-operations?channel_id=7', { waitUntil: 'networkidle' })
   await page.getByTestId('usage-section').getByText('1,604', { exact: true }).first().waitFor()
+  await page.getByRole('link', { name: 'AI 运维', exact: true }).waitFor()
   await page.screenshot({ path: path.join(output, 'desktop-synthetic.png'), fullPage: true })
   await page.getByText('持久化模型谱系（最多 50 组）', { exact: false }).click()
   await page.getByText('public-alias', { exact: true }).waitFor()
@@ -79,6 +85,8 @@ try {
   if (failures.length || apiRequests.length) throw new Error('browser_errors_or_unexpected_api_requests: ' + failures.join('; '))
   await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), synthetic: true, actualComponent: 'ChannelOperationsView.vue', confirmedMutations: mutations, liveApiCalls: 0, paidRequests: 0, browserErrors: failures, mobileWidth: width }, null, 2))
 } catch (error) {
+  await fs.writeFile(path.join(output, 'browser-failures.json'), JSON.stringify({ browserErrors: failures, consoleErrors, unexpectedApiRequests: apiRequests }, null, 2))
+  await fs.writeFile(path.join(output, 'failure.json'), JSON.stringify({ error: String(error), browserErrors: failures, apiRequests }, null, 2))
   for (const page of browser.contexts().flatMap(context => context.pages())) {
     await page.screenshot({ path: path.join(output, 'failure-synthetic.png'), fullPage: true })
     await fs.writeFile(path.join(output, 'failure.txt'), String(error) + '\n' + await page.locator('body').innerText())

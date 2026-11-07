@@ -438,6 +438,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		UsageShowCacheRate:                    settings.UsageShowCacheRate,
 		UsageShowCacheRateToUsers:             settings.UsageShowCacheRateToUsers,
 		UsageShowUpstreamResponseModelToUsers: settings.UsageShowUpstreamResponseModelToUsers,
+		SmartOpsHiddenMenuItems:               settings.SmartOpsHiddenMenuItems,
 		RequestCaptureEnabled:                 settings.RequestCaptureEnabled,
 		RequestCaptureQuotaMiB:                settings.RequestCaptureQuotaMiB,
 		RequestCaptureRetentionDays:           settings.RequestCaptureRetentionDays,

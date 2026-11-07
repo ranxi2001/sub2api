@@ -200,6 +200,15 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 字段，上游 400 "The `reasoning_content` in the thinking mode must be
 	// passed back to the API"。在共用出站点补空格占位，真实明文不覆盖。
 	body = ensureDeepSeekChatReasoningPlaceholders(account, body)
+	body = stripDisallowedMistralChatMessageExtras(account, body)
+	// Mistral answers 400 for efforts outside the model allow-list. Every caller
+	// already normalizes; this keeps any future CC send path safe as well.
+	body = enforceMistralChatReasoningEffort(account, body)
+	// Check after every conversion and account model mapping, including hidden
+	// reasoning replay and the provider-specific placeholders added above.
+	if err := s.checkAPIKeyLongContextBeforeSend(context.WithoutCancel(ctx), c, body, extractOpenAICodexTicketModel(body)); err != nil {
+		return nil, err
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
 	releaseUpstreamCtx()
@@ -313,6 +322,7 @@ func (s *OpenAIGatewayService) scanCCStream(
 		}
 
 		if u := extractCCStreamUsage(payload); u != nil {
+			mergeOpenAIProtectionUsageEvidence(st.Usage, u)
 			st.Usage = *u
 		}
 
