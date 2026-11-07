@@ -217,15 +217,6 @@ func anthropicStreamEventIsTerminal(eventName, data string) bool {
 	return gjson.Get(trimmed, "type").String() == "message_stop"
 }
 
-func cloneStringSlice(src []string) []string {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make([]string, len(src))
-	copy(dst, src)
-	return dst
-}
-
 // IsForceCacheBilling 检查是否启用强制缓存计费
 func IsForceCacheBilling(ctx context.Context) bool {
 	v, _ := ctx.Value(ForceCacheBillingContextKey).(bool)
