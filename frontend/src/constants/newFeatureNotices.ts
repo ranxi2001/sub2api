@@ -5,6 +5,7 @@
  */
 export const NEW_FEATURE_NOTICES = {
   oauthInitialModelSelection: 'oauth-initial-model-selection-initial-announcement',
+  deepSeekSearch: 'deepseek-search-provider-initial-announcement',
   groupAntiDistillation: 'group-openai-anti-distillation-initial-announcement',
   channelPricingTransfer: 'channel-pricing-import-export-initial-announcement',
   channelPricingListActions: 'channel-pricing-list-actions-initial-announcement',
