@@ -150,6 +150,57 @@ type apiKeyGroupCandidate struct {
 	availability APIKeyGroupAvailability
 }
 
+// ModelListingGroups checks only read entitlements. It never selects a billing
+// group, probes capacity, loads prices, or recovers credit. Each candidate owns
+// its User snapshot so per-group restrictions cannot contaminate auth caches.
+func (s *APIKeyService) ModelListingGroups(ctx context.Context, key *APIKey, accepts func(*APIKey) bool) ([]*APIKey, error) {
+	if key == nil || key.User == nil || s.groupRepo == nil || s.userGroupRateRepo == nil || s.localAuth != nil {
+		return nil, infraerrors.ServiceUnavailable("MODEL_LISTING_UNAVAILABLE", "Model listing authorization is unavailable")
+	}
+	var out []*APIKey
+	for _, id := range key.ConfiguredGroupIDs() {
+		group, err := s.groupRepo.GetByIDLite(ctx, id)
+		if errors.Is(err, ErrGroupNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if group == nil || !group.IsActive() {
+			continue
+		}
+		if group.IsSubscriptionType() {
+			if s.userSubRepo == nil {
+				return nil, infraerrors.ServiceUnavailable("MODEL_LISTING_UNAVAILABLE", "Subscription authorization is unavailable")
+			}
+			sub, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, key.UserID, id)
+			if errors.Is(err, ErrSubscriptionNotFound) || errors.Is(err, ErrSubscriptionExpired) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if sub == nil || !sub.IsActive() {
+				continue
+			}
+		} else if !key.User.CanBindGroup(id, group.IsExclusive) {
+			continue
+		}
+		candidate, err := s.apiKeyWithGroup(ctx, key, group)
+		if err != nil {
+			return nil, err
+		}
+		if accepts == nil || accepts(candidate) {
+			out = append(out, candidate)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Group.ID < out[j].Group.ID })
+	if len(out) == 0 {
+		return nil, infraerrors.Forbidden("NO_ELIGIBLE_API_KEY_GROUP", "No selected group permits model listing")
+	}
+	return out, nil
+}
+
 // SelectRequestGroup prefers immediately available groups, then the lowest
 // effective token multiplier (including user overrides and peak hours). Equal
 // rates prefer lower load, with randomized ties to avoid a permanent hot group.

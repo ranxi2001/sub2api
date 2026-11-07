@@ -89,6 +89,14 @@ func TestEnsureDeepSeekChatReasoningPlaceholders(t *testing.T) {
 		got := ensureDeepSeekChatReasoningPlaceholders(nil, missing)
 		require.Equal(t, string(missing), string(got))
 	})
+
+	t.Run("mistral_platform_deepseek_model_unchanged", func(t *testing.T) {
+		mistralAccount := &Account{Platform: PlatformMistral, Type: AccountTypeAPIKey}
+		body := bytes.ReplaceAll(missing, []byte("deepseek-chat"), []byte("deepseek-v4-1-flash-1017"))
+		got := ensureDeepSeekChatReasoningPlaceholders(mistralAccount, body)
+		require.Equal(t, string(body), string(got))
+		require.False(t, gjson.GetBytes(got, "messages.1.reasoning_content").Exists())
+	})
 }
 
 func TestForwardResponses_DeepSeekReasoningUsesOutboundModel(t *testing.T) {

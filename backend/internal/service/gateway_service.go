@@ -1445,6 +1445,17 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		return nil
 	}
 
+	models := availableModelsFromAccounts(accounts, groupID, platform)
+	if s.modelsListCache != nil {
+		s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
+		modelsListCacheStoreTotal.Add(1)
+	}
+	return models
+}
+
+// availableModelsFromAccounts is shared by legacy discovery and strict multi-group
+// discovery so mappings, mixed scheduling and account/group limits stay aligned.
+func availableModelsFromAccounts(accounts []Account, groupID *int64, platform string) []string {
 	// Filter by platform if specified. Mixed scheduling (a gemini group routing
 	// to antigravity accounts) is honoured here as well, so the advertised list
 	// stays in sync with what the request path can actually serve.
@@ -1506,10 +1517,6 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		}
 	}
 	if !hasAnyMapping {
-		if s.modelsListCache != nil {
-			s.modelsListCache.Set(cacheKey, []string(nil), s.modelsListCacheTTL)
-			modelsListCacheStoreTotal.Add(1)
-		}
 		return nil
 	}
 
@@ -1530,10 +1537,6 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		}
 	}
 
-	if s.modelsListCache != nil {
-		s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
-		modelsListCacheStoreTotal.Add(1)
-	}
 	return cloneStringSlice(models)
 }
 

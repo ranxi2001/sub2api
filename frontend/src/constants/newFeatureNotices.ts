@@ -5,6 +5,8 @@
  */
 export const NEW_FEATURE_NOTICES = {
   keyRisk: 'key-risk-notices-acknowledgement-initial-announcement',
+  mistralBudgetUsage: 'mistral-budget-usage-initial-announcement',
+  deepSeekSearch: 'deepseek-search-provider-initial-announcement',
   groupAntiDistillation: 'group-openai-anti-distillation-initial-announcement',
   channelPricingTransfer: 'channel-pricing-import-export-initial-announcement',
   channelPricingListActions: 'channel-pricing-list-actions-initial-announcement',

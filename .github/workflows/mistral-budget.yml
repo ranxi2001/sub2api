@@ -1,0 +1,58 @@
+name: Mistral budget acceptance
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/mistral_usage*'
+      - 'frontend/src/components/account/AccountUsageCell.vue'
+      - '.github/scripts/mistral-budget-screenshot.mjs'
+      - '.github/workflows/mistral-budget.yml'
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - working-directory: backend
+        run: go test -race -tags=unit ./internal/service -run '^(TestMistral|TestCNProviderBalanceCheckRunOnceProbesMistral|TestHandleUpstreamError_Mistral)' -count=1 -v -timeout=10m
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vitest run src/components/account/__tests__/AccountUsageCell.spec.ts src/components/account/__tests__/CNProviderQuotaCell.spec.ts src/components/account/__tests__/CNProviderBalanceCell.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/views/admin/__tests__/SettingsView.spec.ts
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mistral-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/mistral-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual Mistral account cell before, after and after probing
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/mistral-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/mistral-ui
+          SOURCE_BASE: 7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
+        run: node .github/scripts/mistral-budget-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mistral-budget-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/mistral-ui

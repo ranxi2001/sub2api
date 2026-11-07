@@ -123,9 +123,12 @@ func TestOpenAIImagesJSONKeepalive_KeepsOAuthNonStreamResponseValid(t *testing.T
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
 
+	stop := StartOpenAIImagesJSONKeepalive(c, 5*time.Millisecond)
+	defer stop()
+	waitForOpenAIImagesJSONKeepalive(t, c)
+
 	reader, writer := io.Pipe()
 	go func() {
-		time.Sleep(20 * time.Millisecond)
 		_, _ = io.WriteString(writer,
 			"data: {\"type\":\"response.completed\",\"response\":{\"created_at\":1710000000,\"output\":[{\"type\":\"image_generation_call\",\"result\":\"aW1hZ2U=\",\"output_format\":\"png\"}]}}\n\n"+
 				"data: [DONE]\n\n",
@@ -133,7 +136,6 @@ func TestOpenAIImagesJSONKeepalive_KeepsOAuthNonStreamResponseValid(t *testing.T
 		_ = writer.Close()
 	}()
 
-	stop := StartOpenAIImagesJSONKeepalive(c, 5*time.Millisecond)
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
