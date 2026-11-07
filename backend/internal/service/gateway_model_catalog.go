@@ -71,24 +71,54 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 		if err != nil {
 			return nil, err
 		}
+		activeRoutes := make([]CompositeModelRoute, 0, len(routes))
+		candidates := make(map[string]struct{}, len(seen)+len(routes))
+		for model := range seen {
+			candidates[model] = struct{}{}
+		}
 		for _, route := range routes {
-			public := strings.TrimSpace(route.PublicModel)
-			if !route.Enabled || route.MatchType != CompositeRouteMatchExact || public == "" {
+			if !route.Enabled {
 				continue
 			}
-			upstream := strings.TrimSpace(route.UpstreamModel)
-			if upstream == "" {
-				upstream = public
+			activeRoutes = append(activeRoutes, route)
+			if public := strings.TrimSpace(route.PublicModel); public != "" && normalizeCompositeRouteMatchType(route.MatchType) == CompositeRouteMatchExact {
+				candidates[public] = struct{}{}
 			}
-			// An alias is a source only when its concrete target is usable in
-			// this group. A route declaration alone cannot revive an empty group.
-			for _, account := range accounts {
-				if account.Platform == route.TargetPlatform && account.IsModelAllowedInGroup(&groupID, upstream) && account.IsModelSupported(upstream) {
-					seen[public] = struct{}{}
+		}
+		available := make(map[string]struct{}, len(candidates))
+		for model := range candidates {
+			// Ordinary discovery covers every endpoint. A selected explicit route
+			// overrides account mappings, including when its target is unusable.
+			for _, endpoint := range []string{CompositeRouteEndpointAny, CompositeRouteEndpointMessages,
+				CompositeRouteEndpointCountTokens, CompositeRouteEndpointResponses, CompositeRouteEndpointChatCompletions,
+				CompositeRouteEndpointEmbeddings, CompositeRouteEndpointImages, CompositeRouteEndpointGemini} {
+				route, matched := matchCompositeRoute(activeRoutes, model, endpoint)
+				if !matched {
+					if _, fromAccount := seen[model]; fromAccount {
+						available[model] = struct{}{}
+						break
+					}
+					continue
+				}
+				if route.TargetPlatform == PlatformTypeSafe && endpoint != CompositeRouteEndpointAny {
+					continue
+				}
+				upstream := strings.TrimSpace(route.UpstreamModel)
+				if upstream == "" {
+					upstream = model
+				}
+				for _, account := range accounts {
+					if account.Platform == route.TargetPlatform && account.IsModelAllowedInGroup(&groupID, upstream) && account.IsModelSupported(upstream) {
+						available[model] = struct{}{}
+						break
+					}
+				}
+				if _, ok := available[model]; ok {
 					break
 				}
 			}
 		}
+		seen = available
 	}
 	models := make([]string, 0, len(seen))
 	for model := range seen {

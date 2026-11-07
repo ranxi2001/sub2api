@@ -362,6 +362,42 @@ func TestMultiGroupModelsUnionCompositeRoutes(t *testing.T) {
 		{"upstream restricted", func(f *unionFixture, _ *unionRoutes) {
 			f.accounts.groups[1][0].AccountGroups = []service.AccountGroup{{GroupID: 1, AllowedModels: []string{"shared-model"}}}
 		}, []string{"image-model", "shared-model"}, 200},
+		{"exact overrides account", func(_ *unionFixture, r *unionRoutes) {
+			r.routes = []service.CompositeModelRoute{{PublicModel: "text-model", TargetPlatform: service.PlatformAnthropic, Enabled: true, MatchType: service.CompositeRouteMatchExact}}
+		}, []string{"image-model", "shared-model"}, 200},
+		{"prefix overrides account", func(_ *unionFixture, r *unionRoutes) {
+			r.routes = []service.CompositeModelRoute{{PublicModel: "text-", TargetPlatform: service.PlatformAnthropic, Enabled: true, MatchType: service.CompositeRouteMatchPrefix}}
+		}, []string{"image-model", "shared-model"}, 200},
+		{"available endpoint overrides any", func(_ *unionFixture, r *unionRoutes) {
+			r.routes = []service.CompositeModelRoute{
+				{PublicModel: "text-model", TargetPlatform: service.PlatformAnthropic, Enabled: true, MatchType: service.CompositeRouteMatchExact},
+				{PublicModel: "text-model", TargetPlatform: service.PlatformOpenAI, Enabled: true, MatchType: service.CompositeRouteMatchExact, Endpoint: service.CompositeRouteEndpointResponses},
+			}
+		}, []string{"image-model", "shared-model", "text-model"}, 200},
+		{"other endpoint remains available", func(_ *unionFixture, r *unionRoutes) {
+			r.routes = []service.CompositeModelRoute{
+				{PublicModel: "text-model", TargetPlatform: service.PlatformOpenAI, Enabled: true, MatchType: service.CompositeRouteMatchExact},
+				{PublicModel: "text-model", TargetPlatform: service.PlatformAnthropic, Enabled: true, MatchType: service.CompositeRouteMatchExact, Endpoint: service.CompositeRouteEndpointResponses},
+			}
+		}, []string{"image-model", "shared-model", "text-model"}, 200},
+		{"exact overrides available prefix", func(_ *unionFixture, r *unionRoutes) {
+			r.routes = []service.CompositeModelRoute{
+				{PublicModel: "text-", TargetPlatform: service.PlatformOpenAI, Enabled: true, MatchType: service.CompositeRouteMatchPrefix},
+				{PublicModel: "text-model", TargetPlatform: service.PlatformAnthropic, Enabled: true, MatchType: service.CompositeRouteMatchExact},
+			}
+		}, []string{"image-model", "shared-model"}, 200},
+		{"priority winner unavailable", func(_ *unionFixture, r *unionRoutes) {
+			r.routes = []service.CompositeModelRoute{
+				{PublicModel: "text-model", TargetPlatform: service.PlatformOpenAI, Enabled: true, MatchType: service.CompositeRouteMatchExact},
+				{PublicModel: "text-model", TargetPlatform: service.PlatformAnthropic, Enabled: true, MatchType: service.CompositeRouteMatchExact, Priority: -1},
+			}
+		}, []string{"image-model", "shared-model"}, 200},
+		{"id winner unavailable", func(_ *unionFixture, r *unionRoutes) {
+			r.routes = []service.CompositeModelRoute{
+				{ID: 2, PublicModel: "text-model", TargetPlatform: service.PlatformOpenAI, Enabled: true, MatchType: service.CompositeRouteMatchExact},
+				{ID: 1, PublicModel: "text-model", TargetPlatform: service.PlatformAnthropic, Enabled: true, MatchType: service.CompositeRouteMatchExact},
+			}
+		}, []string{"image-model", "shared-model"}, 200},
 		{"route dependency", func(_ *unionFixture, r *unionRoutes) { r.err = errors.New("offline") }, nil, 503},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -563,7 +599,8 @@ func TestMultiGroupModelsUnionConfiguredCodexPolicy(t *testing.T) {
 	}{
 		{"minimum version", map[string]string{service.SettingKeyMinCodexVersion: "0.200.0"}, true, []string{"shared-model", "text-model"}},
 		{"blacklist", map[string]string{service.SettingKeyCodexCLIOnlyBlacklist: `[{"originator":"codex-tui"}]`}, true, []string{"shared-model", "text-model"}},
-		{"configured whitelist", map[string]string{service.SettingKeyCodexCLIOnlyWhitelist: `[{"originator":"catalog-client","skip_engine_fingerprint":true}]`}, false, []string{"image-model", "shared-model", "text-model"}},
+		{"configured whitelist", map[string]string{service.SettingKeyCodexCLIOnlyWhitelist: `[{"originator":"catalog-client","ua_contains":["catalog-client/"],"skip_engine_fingerprint":true}]`}, false, []string{"image-model", "shared-model", "text-model"}},
+		{"incomplete whitelist rejected", map[string]string{service.SettingKeyCodexCLIOnlyWhitelist: `[{"originator":"catalog-client","skip_engine_fingerprint":true}]`}, false, []string{"shared-model", "text-model"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newUnionFixture()

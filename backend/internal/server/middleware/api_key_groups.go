@@ -161,7 +161,9 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 			policy := service.CodexRestrictionPolicy{EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals}
 			if isMultiGroupModelListing(c, key) {
 				if value, exists := c.Get(modelListingClientPolicyKey); exists {
-					policy = value.(func() service.CodexRestrictionPolicy)()
+					if loadPolicy, ok := value.(func() service.CodexRestrictionPolicy); ok {
+						policy = loadPolicy()
+					}
 				}
 			}
 			if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
