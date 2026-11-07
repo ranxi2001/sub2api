@@ -11,6 +11,7 @@ export interface AutoConfig {
  openai_two_fa_admission?: OpenAITwoFAAdmissionConfig
  quality_rule?: OAuthInitialQualityRule | null
  model_billing?: ModelBillingConfig
+ selected_models?: string[] | null
  model_mappings?: OAuthModelMappingRule[] | null
  excel_bps?: ExcelBPSDefaults
  enabled: boolean

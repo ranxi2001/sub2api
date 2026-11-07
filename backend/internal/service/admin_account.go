@@ -1321,6 +1321,10 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// Bulk may mix platforms; always drop ephemeral SSO/password keys (cookie
 	// only when platform is known Grok — empty platform still strips password/*).
 	if input.Credentials != nil {
+		if _, changesMapping := input.Credentials["model_mapping"]; changesMapping {
+			input.Credentials = maps.Clone(input.Credentials)
+			input.Credentials[OAuthInitialModelSelectionKey] = nil
+		}
 		input.Credentials = SanitizeStoredCredentials("", input.Credentials)
 	}
 

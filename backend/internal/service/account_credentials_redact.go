@@ -1,5 +1,7 @@
 package service
 
+import "reflect"
+
 // SensitiveCredentialKeys 列出 Account.Credentials JSON map 中绝不允许返回到前端的子键。
 // dto 层做响应脱敏、service 层做更新合并都引用此清单——新增凭证类型时务必同步。
 var SensitiveCredentialKeys = []string{
@@ -47,6 +49,13 @@ func MergePreservingSensitiveCreds(existing, incoming map[string]any) map[string
 		if existingVal, ok := existing[key]; ok {
 			out[key] = existingVal
 		}
+	}
+	// A manual model edit takes ownership of the account's scope. Token-only
+	// refresh/reauthorization uses MergeCredentials and retains this snapshot.
+	if !reflect.DeepEqual(existing["model_mapping"], incoming["model_mapping"]) || !reflect.DeepEqual(existing[OpenAIModelMappingModeKey], incoming[OpenAIModelMappingModeKey]) {
+		delete(out, OAuthInitialModelSelectionKey)
+	} else if value, exists := existing[OAuthInitialModelSelectionKey]; exists {
+		out[OAuthInitialModelSelectionKey] = value
 	}
 	return out
 }

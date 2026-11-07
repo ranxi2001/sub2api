@@ -45,7 +45,7 @@ func (s *AccountTestService) SyncUpstreamModelCatalogWithOptions(ctx context.Con
 	}
 	// Credential shadows and explicit OAuth alias mode have a narrower account
 	// policy than their parent's full catalog; do not broaden that policy.
-	if account.IsCredentialShadow() || account.IsOpenAIModelMappingAliases() {
+	if account.IsCredentialShadow() || account.IsOpenAIModelMappingAliases() || account.hasOAuthInitialModelSelection() {
 		return skippedUpstreamModelSync("account_policy", nil), nil
 	}
 	if options.Automatic && (account.Status != StatusActive || !account.Schedulable) {
