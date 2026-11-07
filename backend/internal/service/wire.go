@@ -154,6 +154,9 @@ func ProvideOpenAIOAuthReauthService(
 	svc.configureWorker(cfg, buildInfo)
 	if gateway, ok := runtimeBlocker.(*OpenAIGatewayService); ok {
 		gateway.excelOAuthReauth = svc
+		if gateway.rateLimitService != nil {
+			gateway.rateLimitService.openAITOTP429Rotator = svc
+		}
 	}
 	return svc
 }

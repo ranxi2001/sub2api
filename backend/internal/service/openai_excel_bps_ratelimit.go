@@ -51,6 +51,7 @@ func (s *OpenAIGatewayService) coolDownExcelBPS(ctx context.Context, account *Ac
 	if s == nil || account == nil {
 		return
 	}
+	ctx = s.rateLimitService.maybeRotateOpenAITOTPOn429(ctx, account, http.StatusTooManyRequests)
 	if account.AuthConnectionID != "" {
 		s.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, http.Header{"Retry-After": []string{retryAfter}}, nil)
 		return

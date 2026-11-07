@@ -32,6 +32,14 @@ func (r *openAIOAuthReauthRepository) GetTOTPRotation(ctx context.Context, accou
 }
 
 func (r *openAIOAuthReauthRepository) CreateTOTPRotation(ctx context.Context, accountID int64, hash string, version time.Time) (*service.OpenAITOTPRotation, error) {
+	return r.createTOTPRotation(ctx, accountID, hash, version, false)
+}
+
+func (r *openAIOAuthReauthRepository) CreateTOTPRotationOn429(ctx context.Context, accountID int64, hash string, version time.Time) (*service.OpenAITOTPRotation, error) {
+	return r.createTOTPRotation(ctx, accountID, hash, version, true)
+}
+
+func (r *openAIOAuthReauthRepository) createTOTPRotation(ctx context.Context, accountID int64, hash string, version time.Time, automatic bool) (*service.OpenAITOTPRotation, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -46,6 +54,18 @@ func (r *openAIOAuthReauthRepository) CreateTOTPRotation(ctx context.Context, ac
 	}
 	if !current.Equal(version) {
 		return nil, infraerrors.Conflict("TOTP_CONFIG_CHANGED", "Login configuration changed; reload before retrying")
+	}
+	if automatic {
+		// The config row lock serializes this check with creation on every API
+		// replica. Never replace an unresolved task, or rotate repeatedly on a
+		// stream of 429s, including immediately after a manual rotation.
+		var blocked bool
+		err = tx.QueryRowContext(ctx, `SELECT EXISTS (
+ SELECT 1 FROM openai_totp_rotations WHERE account_id=$1
+ AND (state NOT IN ('succeeded','failed') OR updated_at >= NOW() - INTERVAL '1 hour'))`, accountID).Scan(&blocked)
+		if err != nil || blocked {
+			return nil, err
+		}
 	}
 	var taskID int64
 	err = tx.QueryRowContext(ctx, `INSERT INTO openai_oauth_reauth_tasks
