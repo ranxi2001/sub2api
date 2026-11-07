@@ -459,7 +459,7 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe
 		upstreamMsg,
 		retryableOnSameAccount || oauth429Retry,
 	)
-	if shouldDisable && failoverErr.RequestScopedTransient {
+	if shouldDisable && account != nil && account.Platform == PlatformOpenAI && failoverErr.RequestScopedTransient {
 		// A configured model cooldown takes precedence over capacity-shed replay.
 		failoverErr.RetryableOnSameAccount = false
 	}
