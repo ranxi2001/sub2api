@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -45,7 +46,11 @@ func TestTOTPRotationOn429UsesCredentialOperationsConfig(t *testing.T) {
 	expectedHash, err := hashReauthCredentials(account.Credentials)
 	require.NoError(t, err)
 	require.Equal(t, expectedHash, repo.hash)
-	require.Empty(t, task.CandidateCiphertext, "automatic creation uses the same redacted status")
+	// Recovery fields stay available internally but must never reach the API.
+	status, err := json.Marshal(task)
+	require.NoError(t, err)
+	require.NotContains(t, string(status), "encrypted:")
+	require.NotContains(t, string(status), "worker-private")
 	claim, err := svc.ClaimTOTPRotation(t.Context(), "worker")
 	require.NoError(t, err)
 	require.Equal(t, "user@example.com", claim.LoginEmail)
