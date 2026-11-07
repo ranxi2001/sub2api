@@ -25,6 +25,7 @@ describe('NewFeatureBadge', () => {
   it.each([
     ['pricing transfer', NEW_FEATURE_NOTICES.channelPricingTransfer],
     ['stream event timing', NEW_FEATURE_NOTICES.streamFirstEventTiming],
+    ['Mistral budget usage', NEW_FEATURE_NOTICES.mistralBudgetUsage],
   ])('keeps %s dismissal shared and persistent across feature announcements', async (_feature, noticeId) => {
     const pinia = createPinia()
     setActivePinia(pinia)

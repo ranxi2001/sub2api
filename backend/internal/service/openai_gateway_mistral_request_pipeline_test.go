@@ -151,3 +151,55 @@ func TestMistralInvalidRequestDoesNotCallUpstream(t *testing.T) {
 	require.Empty(t, upstream.requests)
 	require.NotContains(t, w.Body.String(), "hello")
 }
+
+func TestMistralDeepSeekMultiTurnOmitsReasoningContentAcrossEndpoints(t *testing.T) {
+	for _, endpoint := range []string{"/v1/chat/completions", "/v1/responses", "/v1/messages"} {
+		t.Run(endpoint, func(t *testing.T) {
+			request := map[string]any{"model": "deepseek-v4.1-flash", "stream": false}
+			switch endpoint {
+			case "/v1/chat/completions":
+				request["messages"] = []any{
+					map[string]any{"role": "user", "content": "hi"},
+					map[string]any{"role": "assistant", "content": "hello"},
+					map[string]any{"role": "user", "content": "follow up"},
+				}
+			case "/v1/responses":
+				request["input"] = []any{
+					map[string]any{"type": "message", "role": "user", "content": "hi"},
+					map[string]any{"type": "reasoning", "id": "rs_missing", "encrypted_content": "enc"},
+					map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "hello"}}},
+					map[string]any{"type": "message", "role": "user", "content": "follow up"},
+				}
+			case "/v1/messages":
+				request["max_tokens"] = 64
+				request["messages"] = []any{
+					map[string]any{"role": "user", "content": "hi"},
+					map[string]any{"role": "assistant", "content": "hello"},
+					map[string]any{"role": "user", "content": "follow up"},
+				}
+			}
+			body, err := json.Marshal(request)
+			require.NoError(t, err)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+			upstream := &httpUpstreamRecorder{resp: mistralTestResponse(`{"id":"fixture","model":"deepseek-v4-1-flash-1017","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`)}
+			account := rawChatCompletionsTestAccount()
+			account.Platform = PlatformMistral
+			account.Credentials["api_protocol"] = APIProtocolAdaptive
+			account.Credentials["model_mapping"] = map[string]any{"deepseek-v4.1-flash": "deepseek-v4-1-flash-1017"}
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+			switch endpoint {
+			case "/v1/chat/completions":
+				_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+			case "/v1/responses":
+				_, err = svc.Forward(context.Background(), c, account, body)
+			case "/v1/messages":
+				_, err = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+			}
+			require.NoError(t, err)
+			require.Len(t, upstream.requests, 1)
+			require.Equal(t, "deepseek-v4-1-flash-1017", gjson.GetBytes(upstream.lastBody, "model").String())
+			require.False(t, gjson.GetBytes(upstream.lastBody, "messages.1.reasoning_content").Exists(), "Mistral rejects assistant.reasoning_content with HTTP 422 extra_forbidden")
+		})
+	}
+}
