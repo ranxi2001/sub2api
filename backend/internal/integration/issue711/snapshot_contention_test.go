@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -320,14 +321,17 @@ func TestIssue711PublicationFailureKeepsActiveAndFencesOldWriter(t *testing.T) {
 	fresh, err := f.repo[0].GetByID(ctx, f.ids[0])
 	require.NoError(t, err)
 	require.NoError(t, f.cache[0].SetAccount(ctx, fresh))
+	token, err := f.cache[0].CaptureBucketWriteToken(ctx, f.bucket)
+	require.NoError(t, err)
 	// Actual Redis failure, not an error-returning mock cache.
 	require.NoError(t, f.redis[0].Do(ctx, "CLIENT", "PAUSE", 600, "WRITE").Err())
 	short, cancel := context.WithTimeout(ctx, 80*time.Millisecond)
-	err = f.publish(short, 0, f.ids, nil)
+	err = f.repo[0].(service.LatestSchedulerAccountsRepository).WithLatestSchedulerAccounts(short, f.ids, func(accounts []service.Account) error {
+		return f.cache[0].SetSnapshot(short, f.bucket, token, accounts)
+	})
 	cancel()
 	require.Error(t, err, "paused Redis publication must fail within its context")
-	require.Eventually(t, func() bool { return f.redis[0].Ping(ctx).Err() == nil }, 3*time.Second, 20*time.Millisecond)
-	// Reading the active pointer waits for any already-submitted write to finish.
+	require.NoError(t, f.redis[0].Set(ctx, "issue711:write-resumed", "1", 0).Err(), "wait for the real Redis write pause to end")
 	after, err := f.redis[0].Get(ctx, activeKey).Result()
 	require.NoError(t, err)
 	require.Equal(t, before, after, "failed publication must preserve the last active snapshot")
@@ -337,7 +341,11 @@ func TestIssue711PublicationFailureKeepsActiveAndFencesOldWriter(t *testing.T) {
 	require.Len(t, accounts, 512)
 	assertAccount(t, f.cache[0], f.ids[0])
 	require.NoError(t, f.publish(ctx, 0, f.ids, nil), "retry must successfully publish committed state")
-	require.Greater(t, f.redis[0].Get(ctx, activeKey).Val(), before)
+	beforeVersion, err := strconv.ParseInt(before, 10, 64)
+	require.NoError(t, err)
+	afterVersion, err := f.redis[0].Get(ctx, activeKey).Int64()
+	require.NoError(t, err)
+	require.Greater(t, afterVersion, beforeVersion)
 	old, err := f.cache[0].CaptureBucketWriteToken(ctx, f.bucket)
 	require.NoError(t, err)
 	require.NoError(t, f.cache[0].RetireBucket(ctx, f.bucket))
@@ -360,7 +368,18 @@ func TestIssue711TwoWritersDrainAccountChanges(t *testing.T) {
 	}
 	// Several poll windows of real repository changes continually enqueue
 	// account_changed, with both snapshot writers live on their own Redis.
-	for n := range 8 {
+	var initial [2]int64
+	require.Eventually(t, func() bool {
+		for i := range 2 {
+			value, err := f.redis[i].Get(ctx, "sched:active:"+f.bucket.String()).Int64()
+			if err != nil {
+				return false
+			}
+			initial[i] = value
+		}
+		return true
+	}, 15*time.Second, 50*time.Millisecond, "both writers must establish their initial snapshots")
+	for n := range 20 {
 		require.NoError(t, f.repo[n%2].UpdateExtra(ctx, f.ids[n], map[string]any{"openai_excel_bps": n%2 == 0}))
 		time.Sleep(180 * time.Millisecond)
 	}
@@ -381,7 +400,10 @@ func TestIssue711TwoWritersDrainAccountChanges(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, hit)
 		require.Len(t, accounts, 512)
-		for n := range 8 {
+		version, err := f.redis[i].Get(ctx, "sched:active:"+f.bucket.String()).Int64()
+		require.NoError(t, err)
+		require.Greater(t, version, initial[i], "account_changed must publish a newer bucket version on each Redis")
+		for n := range 20 {
 			a, err := f.cache[i].GetAccount(ctx, f.ids[n])
 			require.NoError(t, err)
 			require.Equal(t, n%2 == 0, a.Extra["openai_excel_bps"])

@@ -34,16 +34,16 @@ jobs:
           POSTGRES_DB: issue711
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U postgres -d issue711'
+          --health-cmd "pg_isready -U postgres -d issue711"
           --health-interval 5s --health-timeout 5s --health-retries 12
       redis-a:
         image: redis:8.4-alpine
         ports: ['6379:6379']
-        options: --health-cmd 'redis-cli ping' --health-interval 5s --health-timeout 5s --health-retries 12
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 12
       redis-b:
         image: redis:8.4-alpine
         ports: ['6380:6379']
-        options: --health-cmd 'redis-cli ping' --health-interval 5s --health-timeout 5s --health-retries 12
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       CI: 'true'
       ISSUE711_POSTGRES_DSN: postgres://postgres:synthetic-ci-only@127.0.0.1:5432/issue711?sslmode=disable
@@ -115,7 +115,7 @@ jobs:
           set -e
           cat ../evidence/integration.log
           printf '%s\n' "$result" > ../evidence/exit.txt
-          if grep -Eq '\[build failed\]|\[setup failed\]|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' ../evidence/integration.log; then
+          if grep -Eq '\[build failed\]|\[setup failed\]|undefined:|syntax error:|no tests to run|panic:|--- SKIP:|WARNING: DATA RACE|race detected during execution' ../evidence/integration.log; then
             echo 'Compilation, fixture errors, missing tests and skips are not behavioral evidence'
             exit 1
           fi
