@@ -1394,7 +1394,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const vm = wrapper.vm as unknown as {
       openAIResponseHeaderTimeoutForm: { enabled: boolean; seconds: number };
     };
-    expect(vm.openAIResponseHeaderTimeoutForm).toEqual({ enabled: false, seconds: 20 });
+    expect(vm.openAIResponseHeaderTimeoutForm).toEqual({ enabled: false, seconds: 20, image_group_ids: [], image_seconds: 180 });
 
     await flushPromises();
     await openGatewayTab(wrapper);
@@ -1402,13 +1402,35 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.find('[data-testid="openai-header-timeout-seconds"]').exists()).toBe(false);
     await wrapper.get('[data-testid="openai-header-timeout-save"]').trigger('click');
     await flushPromises();
-    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: false, seconds: 20 });
+    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: false, seconds: 20, image_group_ids: [], image_seconds: 180 });
 
     await wrapper.get('[data-testid="openai-header-timeout-enabled"]').setValue(true);
     expect((wrapper.get('[data-testid="openai-header-timeout-seconds"]').element as HTMLInputElement).value).toBe('20');
     await wrapper.get('[data-testid="openai-header-timeout-save"]').trigger('click');
     await flushPromises();
-    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: true, seconds: 20 });
+    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: true, seconds: 20, image_group_ids: [], image_seconds: 180 });
+  });
+
+  it("saves the image timeout groups with the OpenAI header timeout", async () => {
+    getOpenAIResponseHeaderTimeoutSettings.mockResolvedValueOnce({ enabled: true, seconds: 60, image_group_ids: [7], image_seconds: 150 });
+    getGroups.mockResolvedValue([
+      { id: 7, name: "image-a", platform: "openai", status: "active", rate_multiplier: 1, subscription_type: "standard" },
+      { id: 8, name: "image-b", platform: "openai", status: "active", rate_multiplier: 1, subscription_type: "standard" },
+      { id: 9, name: "claude", platform: "anthropic", status: "active", rate_multiplier: 1, subscription_type: "standard" },
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const selector = wrapper.get('[data-testid="openai-image-header-timeout-groups"]');
+    const checkboxes = selector.findAll('input[type="checkbox"]');
+    expect(checkboxes).toHaveLength(2);
+    expect((checkboxes[0].element as HTMLInputElement).checked).toBe(true);
+    await checkboxes[1].setValue(true);
+    expect((wrapper.get('[data-testid="openai-image-header-timeout-seconds"]').element as HTMLInputElement).value).toBe('150');
+    await wrapper.get('[data-testid="openai-image-header-timeout-seconds"]').setValue('200');
+    await wrapper.get('[data-testid="openai-header-timeout-save"]').trigger('click');
+    await flushPromises();
+    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: true, seconds: 60, image_group_ids: [7, 8], image_seconds: 200 });
   });
 
   it("loads, disables, enables and saves the OpenAI header timeout with server readback", async () => {
@@ -1422,13 +1444,13 @@ describe("admin SettingsView payment visible method controls", () => {
     updateOpenAIResponseHeaderTimeoutSettings.mockResolvedValueOnce({ enabled: true, seconds: 61 });
     await wrapper.get('[data-testid="openai-header-timeout-save"]').trigger('click');
     await flushPromises();
-    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: true, seconds: 60 });
+    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: true, seconds: 60, image_group_ids: [], image_seconds: 180 });
     expect((wrapper.get('[data-testid="openai-header-timeout-seconds"]').element as HTMLInputElement).value).toBe('61');
     expect(showSuccess).toHaveBeenCalledWith('admin.settings.openaiResponseHeaderTimeout.saved');
     await wrapper.get('[data-testid="openai-header-timeout-enabled"]').setValue(false);
     await wrapper.get('[data-testid="openai-header-timeout-save"]').trigger('click');
     await flushPromises();
-    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: false, seconds: 61 });
+    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: false, seconds: 61, image_group_ids: [], image_seconds: 180 });
   });
 
   it("keeps the edited timeout after a save error and allows retry", async () => {
@@ -1445,7 +1467,7 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.get('[data-testid="openai-header-timeout-save"]').attributes('disabled')).toBeUndefined();
     await wrapper.get('[data-testid="openai-header-timeout-save"]').trigger('click');
     await flushPromises();
-    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: true, seconds: 42 });
+    expect(updateOpenAIResponseHeaderTimeoutSettings).toHaveBeenLastCalledWith({ enabled: true, seconds: 42, image_group_ids: [], image_seconds: 180 });
   });
 
   it("requires a successful reload after a timeout settings load failure", async () => {

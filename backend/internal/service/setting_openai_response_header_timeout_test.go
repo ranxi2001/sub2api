@@ -58,7 +58,7 @@ func TestOpenAIResponseHeaderTimeoutSettingsGetMissingDefaultDisabled(t *testing
 			svc := NewSettingService(repo, cfg)
 			settings, err := svc.GetOpenAIResponseHeaderTimeoutSettings(t.Context())
 			require.NoError(t, err)
-			require.Equal(t, &OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 20}, settings)
+			require.Equal(t, &OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 20, ImageGroupIDs: []int64{}, ImageSeconds: 180}, settings)
 
 			seconds, enabled := svc.GetOpenAIResponseHeaderTimeoutCached(t.Context())
 			require.False(t, enabled)
@@ -94,8 +94,8 @@ func TestOpenAIResponseHeaderTimeoutPersistedSettingsOverrideDefaults(t *testing
 			value string
 			want  OpenAIResponseHeaderTimeoutSettings
 		}{
-			{"enabled", `{"enabled":true,"seconds":30}`, OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 30}},
-			{"disabled", `{"enabled":false,"seconds":33}`, OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 33}},
+			{"enabled", `{"enabled":true,"seconds":30}`, OpenAIResponseHeaderTimeoutSettings{Enabled: true, Seconds: 30, ImageGroupIDs: []int64{}, ImageSeconds: 180}},
+			{"disabled", `{"enabled":false,"seconds":33}`, OpenAIResponseHeaderTimeoutSettings{Enabled: false, Seconds: 33, ImageGroupIDs: []int64{}, ImageSeconds: 180}},
 		} {
 			t.Run(name+"/"+saved.name, func(t *testing.T) {
 				repo := &panelRateLimitSettingRepo{values: map[string]string{SettingKeyOpenAIResponseHeaderTimeoutSettings: saved.value}}
