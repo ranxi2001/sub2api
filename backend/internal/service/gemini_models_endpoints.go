@@ -38,7 +38,7 @@ func (s *GeminiMessagesCompatService) DeclaredModelIDs(ctx context.Context, grou
 			continue
 		}
 		mapping := accounts[i].GetModelMapping()
-		if len(mapping) == 0 {
+		if len(mapping) == 0 && !accounts[i].hasOAuthInitialModelSelection() {
 			return nil, nil
 		}
 		for model := range mapping {

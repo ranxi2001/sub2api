@@ -11,6 +11,10 @@
       @submit.prevent="handleSubmit"
       class="space-y-5"
     >
+      <div v-if="account.credentials?.oauth_initial_selected_models != null" data-testid="initial-model-scope-snapshot" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+        <p>{{ t('autoConfig.selection.accountHint') }}</p>
+        <label class="mt-2 flex items-center gap-2"><input v-model="releaseInitialModelSelection" data-testid="release-initial-model-selection" type="checkbox" />{{ t('autoConfig.selection.takeOver') }}</label>
+      </div>
       <AccountUpstreamChannelBinding v-if="show" :account-ids="[account.id]" />
       <div>
         <label class="input-label">{{ t('common.name') }}</label>
@@ -4213,6 +4217,7 @@ const isBedrockAPIKeyMode = computed(() =>
 )
 const modelMappings = ref<ModelMapping[]>([])
 const openaiModelAliases = ref(false)
+const releaseInitialModelSelection = ref(false)
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
@@ -5045,6 +5050,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
   }
+  releaseInitialModelSelection.value = false
   openaiModelAliases.value = newAccount.credentials?.model_mapping_mode === 'aliases'
   // 进入回填窗口：抑制 CN 模式/协议 watcher 联动重置 base_url（见 syncingForm 注释）。
   syncingForm.value = true
@@ -6164,6 +6170,9 @@ const saveAutoBPSRule = async (accountID: number) => {
 }
 
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
+  if (releaseInitialModelSelection.value) {
+    updatePayload.credentials = { ...(updatePayload.credentials as Record<string, unknown> ?? props.account?.credentials), oauth_initial_selected_models: null }
+  }
   submitting.value = true
   try {
     let updatedAccount = await adminAPI.accounts.update(accountID, withAntigravityConfirmFlag(updatePayload))

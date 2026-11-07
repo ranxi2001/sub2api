@@ -3285,3 +3285,16 @@ describe('OpenAI connection account type boundary in the actual editor', () => {
     expect(wrapper.get('[data-testid="anthropic-mimic-claude-code-toggle"]').classes()).not.toContain('bg-primary-600')
   })
 })
+
+
+describe('initial OAuth model scope ownership', () => {
+ it.each([false, true])('shows the saved scope and only releases it on explicit takeover (%s)', async release => {
+  const account = { ...buildAccount(), type: 'oauth', credentials: { model_mapping: {}, model_mapping_mode: 'whitelist', oauth_initial_selected_models: [] } }
+  const wrapper = mountModal(account); await flushPromises()
+  expect(wrapper.get('[data-testid="initial-model-scope-snapshot"]').text()).toContain('autoConfig.selection.accountHint')
+  if (release) await wrapper.get('[data-testid="release-initial-model-selection"]').setValue(true)
+  await wrapper.get('#edit-account-form').trigger('submit.prevent'); await flushPromises()
+  expect(updateAccountMock).toHaveBeenCalledWith(1, expect.objectContaining({ credentials: expect.objectContaining({ oauth_initial_selected_models: release ? null : [] }) }))
+  wrapper.unmount()
+ })
+})

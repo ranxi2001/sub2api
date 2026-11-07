@@ -259,13 +259,13 @@ func (s *AntigravityGatewayService) handleAntigravityModelRateLimitBeforePolicy(
 // 完全依赖映射配置：账户映射（通配符）→ 默认映射兜底（DefaultAntigravityModelMapping）
 // 注意：返回空字符串表示模型不被支持，调度时会过滤掉该账号
 func mapAntigravityModel(account *Account, requestedModel string) string {
-	if account.hasOAuthInitialModelSelection() && !account.IsModelSupported(requestedModel) {
-		return ""
-	}
 	if account == nil {
 		return ""
 	}
 	requestedModel = strings.TrimPrefix(requestedModel, "models/")
+	if account.hasOAuthInitialModelSelection() && !account.IsModelSupported(requestedModel) {
+		return ""
+	}
 
 	// 获取映射表（未配置时自动使用 DefaultAntigravityModelMapping）
 	mapping := account.GetModelMapping()

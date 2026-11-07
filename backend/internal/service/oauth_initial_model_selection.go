@@ -59,6 +59,13 @@ func applyOAuthInitialModels(input *CreateAccountInput, rules []OAuthModelMappin
 	}
 	// Read the original import scope before aliases are added. A selection can
 	// narrow an explicit import whitelist, but cannot broaden it.
+	input.Credentials = maps.Clone(input.Credentials)
+	if input.Credentials == nil {
+		input.Credentials = make(map[string]any)
+	}
+	if typed, ok := input.Credentials["model_mapping"].(map[string]string); ok {
+		input.Credentials["model_mapping"] = asAnyModelMapping(typed)
+	}
 	original := &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
 	mapping := rawUpstreamModelMapping(original)
 	_, supplied := input.Credentials["model_mapping"]
@@ -72,6 +79,9 @@ func applyOAuthInitialModels(input *CreateAccountInput, rules []OAuthModelMappin
 	eligible := make(map[string]bool, len(selected))
 	for _, model := range selected {
 		eligible[model] = !malformed && original.IsModelSupported(model)
+		if len(mapping) > 0 && !original.IsOpenAIModelMappingAliases() {
+			eligible[model] = eligible[model] && mappingSupportsRequestedModel(mapping, model)
+		}
 	}
 	applyOAuthModelMappings(input, rules)
 	// Use the same provider defaults/aliases as account editing. Convert typed
@@ -79,13 +89,6 @@ func applyOAuthInitialModels(input *CreateAccountInput, rules []OAuthModelMappin
 	input.Credentials = maps.Clone(input.Credentials)
 	if input.Credentials == nil {
 		input.Credentials = make(map[string]any)
-	}
-	if typed, ok := input.Credentials["model_mapping"].(map[string]string); ok {
-		converted := make(map[string]any, len(typed))
-		for source, target := range typed {
-			converted[source] = target
-		}
-		input.Credentials["model_mapping"] = converted
 	}
 	account := &Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
 	filtered := make(map[string]any)

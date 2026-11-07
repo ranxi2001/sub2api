@@ -108,7 +108,7 @@ describe('AutoConfigView', () => {
   await w.get('[data-testid="mapping-from-0"]').setValue('claude-*')
   await w.get('[data-testid="mapping-to-0"]').setValue('claude-example')
   await w.get('form').trigger('submit'); await flushPromises()
-  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, quality_rule: null, platform: 'anthropic', model_mappings: [{ from: 'claude-*', to: 'claude-example' }] })
+  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, selected_models: null, quality_rule: null, platform: 'anthropic', model_mappings: [{ from: 'claude-*', to: 'claude-example' }] })
   w.unmount()
  })
  it('saves model mappings and billing rules together without resetting either', async () => {
@@ -173,7 +173,7 @@ describe('AutoConfigView', () => {
  it('clears incompatible initial groups when platform changes', async () => {
   const w = mount(AutoConfigView); await flushPromises(); await w.get('[data-testid="initial-group-5"]').setValue(true)
   await w.get('[data-testid="platform"]').setValue('anthropic'); await w.get('form').trigger('submit'); await flushPromises()
-  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, quality_rule: null, platform: 'anthropic', model_mappings: [] }); w.unmount()
+  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, selected_models: null, quality_rule: null, platform: 'anthropic', model_mappings: [] }); w.unmount()
  })
  it('does not allow saving before a successful load and supports retry', async () => {
   vi.mocked(getAutoConfig).mockRejectedValueOnce(new Error('offline')); const w = mount(AutoConfigView); await flushPromises()
@@ -312,4 +312,45 @@ it('keeps scopes during a group page failure, retries all pages and preserves ID
  expect(w.get('[data-testid="model-billing-unavailable-0-999"]').text()).toContain('#999')
  expect(listGroups).toHaveBeenLastCalledWith(2,100,expect.objectContaining({status:'active'}))
  w.unmount()
+})
+
+
+describe('initial model selection real page interactions', () => {
+ it('selects platform models, excludes Luna, persists and reloads, and distinguishes none from unset', async () => {
+  const w = mount(AutoConfigView); await flushPromises()
+  expect(w.get<HTMLInputElement>('[data-testid="model-selection-enabled"]').element.checked).toBe(false)
+  await w.get('[data-testid="model-selection-enabled"]').setValue(true)
+  expect(w.get<HTMLInputElement>('[data-model="gpt-6-luna"]').element.checked).toBe(true)
+  await w.get('[data-model="gpt-6-luna"]').setValue(false)
+  await w.get('form').trigger('submit'); await flushPromises()
+  let saved = vi.mocked(saveAutoConfig).mock.calls.at(-1)![0]
+  expect(saved.selected_models).toContain('gpt-6.1-sol')
+  expect(saved.selected_models).not.toContain('gpt-6-luna')
+  expect(saved.model_billing).toEqual(config.model_billing)
+  vi.mocked(getAutoConfig).mockResolvedValue(structuredClone(saved)); w.unmount()
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(reloaded.get<HTMLInputElement>('[data-model="gpt-6-luna"]').element.checked).toBe(false)
+  await reloaded.get('[data-testid="model-selection-none"]').trigger('click')
+  expect(reloaded.get('[data-testid="model-selection-empty"]').text()).toContain('autoConfig.selection.empty')
+  await reloaded.get('form').trigger('submit'); await flushPromises()
+  saved = vi.mocked(saveAutoConfig).mock.calls.at(-1)![0]; expect(saved.selected_models).toEqual([])
+  await reloaded.get('[data-testid="model-selection-enabled"]').setValue(false)
+  await reloaded.get('form').trigger('submit'); await flushPromises()
+  expect(vi.mocked(saveAutoConfig).mock.calls.at(-1)![0].selected_models).toBeNull()
+  reloaded.unmount()
+ })
+ it('clears platform-specific selection and offers the real next-platform catalog', async () => {
+  vi.mocked(getAutoConfig).mockResolvedValue({ ...structuredClone(config), selected_models: ['gpt-6.1-sol'] })
+  const w = mount(AutoConfigView); await flushPromises()
+  await w.get('[data-testid="platform"]').setValue('anthropic')
+  expect(w.get<HTMLInputElement>('[data-testid="model-selection-enabled"]').element.checked).toBe(false)
+  await w.get('[data-testid="model-selection-enabled"]').setValue(true)
+  expect(w.find('[data-model="gpt-6-luna"]').exists()).toBe(false)
+  expect(w.find('[data-model="claude-sonnet-4-6"]').exists()).toBe(true)
+  await w.get('[data-testid="model-selection-custom"]').setValue(' custom-model ')
+  await w.get('[data-testid="model-selection-add"]').trigger('click')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(vi.mocked(saveAutoConfig).mock.calls.at(-1)![0].selected_models).toContain('custom-model')
+  w.unmount()
+ })
 })

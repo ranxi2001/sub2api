@@ -1469,10 +1469,16 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		// supplementUnmappedOpenAIModels contribute the default set. Mappings on
 		// the ordinary accounts in the same group still count.
 		mapping := acc.GetModelMapping()
-		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() {
+		if acc.hasOAuthInitialModelSelection() {
+			hasAnyMapping = true // an empty selection is an authoritative empty catalog
+		}
+		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() && !acc.hasOAuthInitialModelSelection() {
 			mapping = nil
 		}
 		for model := range mapping {
+			if acc.hasOAuthInitialModelSelection() && !acc.IsModelSupported(model) {
+				continue
+			}
 			// Accounts pulled in through mixed scheduling only contribute the
 			// models that belong to the listing platform (e.g. an antigravity
 			// account's claude-* mappings must not surface on a gemini group).
@@ -1487,7 +1493,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 			hasAnyMapping = true
 		}
 		// 没有映射的账号默认支持全部模型；在本分组被限制时改为公布限制清单里的具体模型名。
-		if len(mapping) == 0 {
+		if len(mapping) == 0 && !acc.hasOAuthInitialModelSelection() {
 			for _, model := range groupAllowedConcreteModels(&acc, groupID) {
 				if platform != "" && acc.Platform != platform && !mixedListingModelAllowed(platform, model) {
 					continue

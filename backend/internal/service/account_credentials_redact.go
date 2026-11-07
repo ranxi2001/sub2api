@@ -52,10 +52,18 @@ func MergePreservingSensitiveCreds(existing, incoming map[string]any) map[string
 	}
 	// A manual model edit takes ownership of the account's scope. Token-only
 	// refresh/reauthorization uses MergeCredentials and retains this snapshot.
-	if !reflect.DeepEqual(existing["model_mapping"], incoming["model_mapping"]) || !reflect.DeepEqual(existing[OpenAIModelMappingModeKey], incoming[OpenAIModelMappingModeKey]) {
+	release, explicitRelease := incoming[OAuthInitialModelSelectionKey]
+	if explicitRelease && release == nil || !sameOAuthModelMapping(existing["model_mapping"], incoming["model_mapping"]) || !sameOAuthModelMapping(existing["compact_model_mapping"], incoming["compact_model_mapping"]) || !reflect.DeepEqual(existing[OpenAIModelMappingModeKey], incoming[OpenAIModelMappingModeKey]) {
 		delete(out, OAuthInitialModelSelectionKey)
 	} else if value, exists := existing[OAuthInitialModelSelectionKey]; exists {
 		out[OAuthInitialModelSelectionKey] = value
 	}
 	return out
+}
+
+func sameOAuthModelMapping(left, right any) bool {
+	// The account editor omits empty maps on an otherwise unrelated save.
+	// That must not turn a deliberately empty initial scope into defaults.
+	l, r := asAnyModelMapping(left), asAnyModelMapping(right)
+	return len(l) == 0 && len(r) == 0 || reflect.DeepEqual(l, r)
 }

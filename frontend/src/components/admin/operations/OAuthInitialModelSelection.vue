@@ -28,7 +28,7 @@ const props = defineProps<{ modelValue?: string[] | null; platform: string; user
 const emit = defineEmits<{ 'update:modelValue': [value: string[] | null] }>()
 const { t } = useI18n(), custom = ref('')
 const options = computed(() => [...new Set([...getModelsByPlatform(props.platform), ...(props.modelValue ?? []), ...props.mappings.flatMap(rule => [rule.from.trim(), rule.to.trim()]).filter(name => name && !name.includes('*'))])])
-const validCustom = computed(() => Boolean(custom.value.trim()) && !/[\s*\x00-\x1f\x7f]/.test(custom.value.trim()) && new TextEncoder().encode(custom.value.trim()).length <= 256)
+const validCustom = computed(() => Boolean(custom.value.trim()) && !/[\s*]/.test(custom.value.trim()) && [...custom.value.trim()].every(char => char.charCodeAt(0) >= 32 && !(char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159)) && new TextEncoder().encode(custom.value.trim()).length <= 256)
 function toggle(event: Event) { emit('update:modelValue', (event.target as HTMLInputElement).checked ? [...options.value] : null) }
 function select(model: string) { emit('update:modelValue', props.modelValue?.includes(model) ? props.modelValue.filter(value => value !== model) : [...(props.modelValue ?? []), model]) }
 function addCustom() { if (validCustom.value) { emit('update:modelValue', [...new Set([...(props.modelValue ?? []), custom.value.trim()])]); custom.value = '' } }

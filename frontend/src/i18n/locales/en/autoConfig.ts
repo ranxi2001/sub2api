@@ -1,5 +1,7 @@
 export default {
   selection: {
+    "accountHint": "This account retains its initial model scope (an empty scope disables every model). Normal saves and reauthorization preserve it; changing model mappings takes ownership.",
+    "takeOver": "Use manual model settings when saving (release the initial scope; empty mappings restore default support)",
     "title": "Initial model selection",
     "enable": "Limit models for new OAuth accounts",
     "hint": "Off or unset keeps existing model behavior. When enabled, only selected exact request and target models are allowed. Candidates use the account editor’s platform catalog; availability still depends on the upstream.",
