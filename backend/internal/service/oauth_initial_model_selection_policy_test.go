@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/gin-gonic/gin"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -270,5 +272,25 @@ func TestOAuthInitialSelectionMixedCatalogAllPlatforms(t *testing.T) {
 		repo := &modelsListAccountRepoStub{byGroup: map[int64][]Account{groupID: {restricted, existing}}}
 		svc := &GatewayService{accountRepo: repo}
 		require.NotEmpty(t, svc.GetAvailableModels(t.Context(), &groupID, platform), "a new restricted account must not hide the old account's models: %s", platform)
+	}
+}
+
+func TestOAuthInitialSelectionAntigravityFinalThinkingTarget(t *testing.T) {
+	body := []byte(`{"model":"custom","messages":[{"role":"user","content":"fixture"}],"thinking":{"type":"enabled","budget_tokens":1024}}`)
+	account := &Account{Platform: PlatformAntigravity, Type: AccountTypeOAuth, Credentials: map[string]any{OAuthInitialModelSelectionKey: []string{"custom", "claude-sonnet-4-5"}, "model_mapping": map[string]any{"custom": "claude-sonnet-4-5"}}}
+	svc := &AntigravityGatewayService{} // nil token provider proves rejection precedes upstream work
+	for _, compat := range []bool{false, true} {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPost, "/fixture", nil)
+		if compat {
+			_, err := svc.prepareAntigravityCompatCall(t.Context(), c, account, antigravityCompatRequest{originalModel: "custom", claudeBody: body})
+			require.Error(t, err)
+		} else {
+			_, err := svc.Forward(t.Context(), c, account, body, false)
+			require.Error(t, err)
+		}
+		require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+		require.Contains(t, response.Body.String(), "not in whitelist")
 	}
 }
