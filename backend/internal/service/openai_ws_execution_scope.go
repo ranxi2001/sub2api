@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -31,6 +32,11 @@ const (
 	openAIWSRequestKindCompaction = "compaction"
 )
 
+func openAIWSMayContainClientMetadata(body []byte) bool {
+	// Escaped JSON keys still require the existing metadata parser.
+	return bytes.Contains(body, []byte("client_metadata")) || bytes.Contains(body, []byte(`\u`))
+}
+
 // resolveOpenAIWSClientThreadID 提取 codex 客户端的线程标识。codex 多智能体会话里
 // 父线程与全部子智能体共用同一个 session-id 头，只有线程标识能把它们区分开。
 // 优先级：thread-id 头 → x-codex-turn-metadata 头 → x-codex-window-id 头 → 请求体 client_metadata。
@@ -48,7 +54,7 @@ func resolveOpenAIWSClientThreadID(c *gin.Context, body []byte) string {
 			}
 		}
 	}
-	if len(body) == 0 {
+	if !openAIWSMayContainClientMetadata(body) {
 		return ""
 	}
 	if id := strings.TrimSpace(gjson.GetBytes(body, "client_metadata.thread_id").String()); id != "" {
@@ -90,7 +96,7 @@ func openAIWSExecutionTurnMetadata(c *gin.Context, body []byte) codexTurnMetadat
 			return metadata
 		}
 	}
-	if len(body) == 0 {
+	if !openAIWSMayContainClientMetadata(body) {
 		return codexTurnMetadata{}
 	}
 	metadata, _ := parseCodexTurnMetadata(gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader).String())
@@ -103,7 +109,7 @@ func openAIWSExecutionSubagent(c *gin.Context, body []byte) string {
 			return strings.ToLower(subagent)
 		}
 	}
-	if len(body) == 0 {
+	if !openAIWSMayContainClientMetadata(body) {
 		return ""
 	}
 	return strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "client_metadata."+openAISubagentHeader).String()))

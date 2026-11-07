@@ -4,6 +4,7 @@ package service
 // 负载感知调度、配额自动暂停判定、并发槽位获取。仅做代码搬迁，无任何行为变更。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -107,7 +108,8 @@ func explicitOpenAIRequestSessionID(c *gin.Context, body []byte) string {
 	if sessionID == "" && isGrokRequestContext(c) {
 		sessionID = strings.TrimSpace(c.GetHeader(grokConversationIDHeader))
 	}
-	if sessionID == "" && len(body) > 0 {
+	// Escaped keys still require the original envelope-aware lookup.
+	if sessionID == "" && (bytes.Contains(body, []byte("prompt_cache_key")) || bytes.Contains(body, []byte(`\u`))) {
 		sessionID = strings.TrimSpace(openAIRequestPayloadView(body).Get("prompt_cache_key").String())
 	}
 	if sessionID == "" && isGrokRequestContext(c) && len(body) > 0 {
