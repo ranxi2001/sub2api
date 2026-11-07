@@ -22,6 +22,7 @@ func TestValidateWebSearchConfig_Valid(t *testing.T) {
 		Providers: []WebSearchProviderConfig{
 			{Type: "brave", QuotaLimit: int64Ptr(1000)},
 			{Type: "tavily", QuotaLimit: int64Ptr(500)},
+			{Type: "deepseek", QuotaLimit: int64Ptr(500)},
 		},
 	}
 	require.NoError(t, validateWebSearchConfig(cfg))
@@ -263,4 +264,43 @@ func TestResetWebSearchUsage_NilManager(t *testing.T) {
 	err := ResetWebSearchUsage(context.Background(), "brave")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not initialized")
+}
+
+func TestWebSearchConfig_DeepSeekPersistenceAndSanitization(t *testing.T) {
+	cfg := parseWebSearchConfigJSON(`{"enabled":true,"providers":[{"type":"deepseek","api_key":"fictional-secret","proxy_id":42,"quota_limit":1000}]}`)
+	require.NoError(t, validateWebSearchConfig(cfg))
+	sanitized := SanitizeWebSearchConfig(context.Background(), cfg)
+	require.Equal(t, "deepseek", sanitized.Providers[0].Type)
+	require.Equal(t, int64(42), *sanitized.Providers[0].ProxyID)
+	require.Equal(t, int64(1000), *sanitized.Providers[0].QuotaLimit)
+	require.Empty(t, sanitized.Providers[0].APIKey)
+	require.True(t, sanitized.Providers[0].APIKeyConfigured)
+	require.Equal(t, "fictional-secret", cfg.Providers[0].APIKey)
+	cfg.Providers = append(cfg.Providers, cfg.Providers[0])
+	require.ErrorContains(t, validateWebSearchConfig(cfg), "duplicate type")
+}
+
+func TestSaveWebSearchConfig_DeepSeekPreservesKeyAndReloadsManager(t *testing.T) {
+	webSearchEmulationSF.Forget(sfKeyWebSearchConfig)
+	webSearchEmulationCache.Store(&cachedWebSearchEmulationConfig{})
+	defer func() {
+		webSearchEmulationSF.Forget(sfKeyWebSearchConfig)
+		webSearchEmulationCache.Store(&cachedWebSearchEmulationConfig{})
+	}()
+	repo := newStubSettingRepo()
+	repo.values[SettingKeyWebSearchEmulationConfig] = `{"enabled":true,"providers":[{"type":"deepseek","api_key":"fictional-existing-key"}]}`
+	var rebuilt *WebSearchEmulationConfig
+	svc := &SettingService{settingRepo: repo, webSearchManagerBuilder: func(cfg *WebSearchEmulationConfig, _ map[int64]string) { rebuilt = cfg }}
+	cfg := &WebSearchEmulationConfig{Enabled: true, Providers: []WebSearchProviderConfig{{Type: "deepseek", QuotaLimit: int64Ptr(2000)}}}
+	require.NoError(t, svc.SaveWebSearchEmulationConfig(context.Background(), cfg))
+	stored := parseWebSearchConfigJSON(repo.values[SettingKeyWebSearchEmulationConfig])
+	require.Equal(t, "fictional-existing-key", stored.Providers[0].APIKey)
+	require.Equal(t, int64(2000), *stored.Providers[0].QuotaLimit)
+	require.Equal(t, cfg, rebuilt)
+	require.Empty(t, SanitizeWebSearchConfig(context.Background(), cfg).Providers[0].APIKey)
+	require.True(t, SanitizeWebSearchConfig(context.Background(), cfg).Providers[0].APIKeyConfigured)
+	// Newly enabled DeepSeek with no existing key must still fail validation.
+	repo.values[SettingKeyWebSearchEmulationConfig] = ""
+	cfg.Providers[0].APIKey = ""
+	require.ErrorContains(t, svc.SaveWebSearchEmulationConfig(context.Background(), cfg), "has no API key")
 }
