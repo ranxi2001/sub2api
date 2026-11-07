@@ -26,4 +26,5 @@ export const NEW_FEATURE_NOTICES = {
   accountAutoRefreshUpstreamModels: 'account-auto-refresh-upstream-models-initial-announcement',
   streamFirstEventTiming: 'stream-first-event-timing-initial-announcement',
   openaiImageHeaderTimeoutGroups: 'openai-image-header-timeout-groups-initial-announcement',
+  oauthInitialModelSelection: 'oauth-initial-model-selection-initial-announcement',
 } as const

@@ -27,6 +27,7 @@ const virtual = {
 }
 const html = `<!doctype html><meta charset="utf-8"><div id="app"></div><script type="module">
 import {createApp} from 'vue';
+import {createPinia} from 'pinia';
 const {default:Page}=new URLSearchParams(location.search).has('baseline')?await import('/src/views/admin/ModelBillingBaseline.vue'):await import('/src/views/admin/AutoConfigView.vue');
 import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';
 import {defaultExcelBPSDefaults} from '/src/utils/excelBPSDefaults.ts';
@@ -35,7 +36,7 @@ import '/src/style.css';
 window.fixture={enabled:false,platform:'openai',priority:50,load_factor:1,concurrency:3,cost_multiplier:0.07,group_ids:[],upgrade_enabled:false,upgrade_group_ids:[],successes_per_step:20,upgrade_step:1,max_concurrency:100,cooldown_seconds:60,revision:'synthetic',excel_bps:defaultExcelBPSDefaults(),openai_two_fa_admission:defaultOpenAITwoFAAdmissionConfig(),model_mappings:[{from:'gpt-5.4',to:'gpt-5.5'}],model_billing:{enabled:true,rules:[{model:'gpt-6-luna*',multiplier:10,group_ids:[5]},{model:'claude-*',multiplier:3,group_ids:[6]}]}};
 const lang=new URLSearchParams(location.search).get('lang')||'zh';await loadLocaleMessages(lang);i18n.global.locale.value=lang;
 if(new URLSearchParams(location.search).has('baseline')){const {default:autoConfig}=await import('/src/views/admin/ModelBillingBaselineLocale.ts');i18n.global.mergeLocaleMessage('zh',{autoConfig})}
-createApp(Page).use(i18n).mount('#app');</script>`
+createApp(Page).use(i18n).use(createPinia()).mount('#app');</script>`
 process.chdir(frontend)
 const server = await createServer({
   root: frontend, configFile: false, envFile: false,

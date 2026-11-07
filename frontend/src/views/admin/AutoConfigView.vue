@@ -44,7 +44,7 @@
           <section class="card space-y-5">
             <header class="flex items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('autoConfig.initial') }}</h2><label class="flex items-center gap-2 text-sm"><input v-model="draft.enabled" data-testid="initial-enabled" type="checkbox" role="switch" />{{ t('autoConfig.enable') }}</label></header>
             <p class="text-sm leading-6 text-gray-500">{{ t('autoConfig.initialHint') }}</p>
-            <label class="block"><span class="field-label">{{ t('autoConfig.platform') }}</span><select v-model="draft.platform" data-testid="platform" class="input w-full" @change="draft.group_ids = []; draft.model_mappings = defaultOAuthModelMappings(draft.platform); draft.quality_rule = null; selectedQualityRule = ''"><option v-for="p in platforms" :key="p.value" :value="p.value">{{ p.label }}</option></select></label>
+            <label class="block"><span class="field-label">{{ t('autoConfig.platform') }}</span><select v-model="draft.platform" data-testid="platform" class="input w-full" @change="draft.group_ids = []; draft.model_mappings = defaultOAuthModelMappings(draft.platform); draft.selected_models = null; draft.quality_rule = null; selectedQualityRule = ''"><option v-for="p in platforms" :key="p.value" :value="p.value">{{ p.label }}</option></select></label>
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><label v-for="field in initialFields" :key="field.key"><span class="field-label">{{ t('autoConfig.' + field.key) }}</span><input v-model.number="draft[field.key]" :data-testid="field.key" type="number" :min="field.min" max="10000" step="1" required class="input w-full" /></label><label><span class="field-label">{{ t('autoConfig.cost_multiplier') }}</span><input v-model.number="draft.cost_multiplier" data-testid="cost_multiplier" type="number" min="0" max="1000000" step="0.001" required class="input w-full" /></label></div>
             <p class="text-xs leading-5 text-gray-500">{{ t('autoConfig.loadHint') }}</p>
             <fieldset><legend class="field-label">{{ t('autoConfig.groups') }}</legend><div class="group-list"><label v-for="g in initialGroups" :key="g.id" class="group-option"><input v-model="draft.group_ids" :value="g.id" type="checkbox" :data-testid="'initial-group-' + g.id" /><span>{{ g.name }} <small class="text-gray-400">#{{ g.id }}</small></span></label><p v-if="!initialGroups.length" class="text-sm text-gray-500">{{ t('autoConfig.noGroups') }}</p></div></fieldset>
@@ -60,6 +60,7 @@
               <p v-if="draft.quality_rule" data-testid="quality-rule-summary" class="text-sm text-gray-500">{{ draft.quality_rule.model_id }} · {{ draft.quality_rule.cron_expression }} · {{ t(draft.quality_rule.enabled ? 'qualityOps.activeShort' : 'qualityOps.paused') }}</p>
               <p class="text-xs leading-5 text-gray-500">{{ t('autoConfig.quality.copyHint') }}</p>
             </fieldset>
+            <OAuthInitialModelSelection v-model="draft.selected_models" :platform="draft.platform" :mappings="draft.model_mappings" :user-id="auth.user?.id" />
             <fieldset class="space-y-3 border-t border-gray-100 pt-4 dark:border-dark-700" data-testid="initial-model-mappings">
               <legend class="field-label">{{ t('autoConfig.mapping.title') }}</legend>
               <p class="text-xs leading-5 text-gray-500">{{ t('autoConfig.mapping.hint') }}</p>
@@ -97,6 +98,7 @@ import OpenAITwoFAAdmissionCard from '@/components/admin/operations/OpenAITwoFAA
 import { defaultOpenAITwoFAAdmissionConfig, openaiTwoFAAdmissionError, type OpenAITwoFAAdmissionConfig } from '@/utils/openaiTwoFAAdmission'
 import { defaultOAuthModelMappings, oauthModelMappingsError, oauthModelMappingsPayload, type OAuthModelMappingRule } from '@/utils/oauthModelMappings'
 import { defaultExcelBPSDefaults, excelBPSDefaultsError, excelBPSDefaultsPayload, type ExcelBPSDefaults } from '@/utils/excelBPSDefaults'
+import OAuthInitialModelSelection from '@/components/admin/operations/OAuthInitialModelSelection.vue'
 import AutoConfigHistory from '@/components/admin/operations/AutoConfigHistory.vue'
 import { getModelBillingGroups } from '@/api/admin/autoConfig'
 import { getAll } from '@/api/admin/groups'

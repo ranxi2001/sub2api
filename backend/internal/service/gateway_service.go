@@ -217,15 +217,6 @@ func anthropicStreamEventIsTerminal(eventName, data string) bool {
 	return gjson.Get(trimmed, "type").String() == "message_stop"
 }
 
-func cloneStringSlice(src []string) []string {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make([]string, len(src))
-	copy(dst, src)
-	return dst
-}
-
 // IsForceCacheBilling 检查是否启用强制缓存计费
 func IsForceCacheBilling(ctx context.Context) bool {
 	v, _ := ctx.Value(ForceCacheBillingContextKey).(bool)
@@ -1426,7 +1417,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		if cached, found := s.modelsListCache.Get(cacheKey); found {
 			if models, ok := cached.([]string); ok {
 				modelsListCacheHitTotal.Add(1)
-				return cloneStringSlice(models)
+				return cloneModelCatalogSlice(models)
 			}
 		}
 	}
@@ -1447,7 +1438,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 
 	models := availableModelsFromAccounts(accounts, groupID, platform)
 	if s.modelsListCache != nil {
-		s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
+		s.modelsListCache.Set(cacheKey, cloneModelCatalogSlice(models), s.modelsListCacheTTL)
 		modelsListCacheStoreTotal.Add(1)
 	}
 	return models
@@ -1472,6 +1463,7 @@ func availableModelsFromAccounts(accounts []Account, groupID *int64, platform st
 	// Collect unique models from all accounts
 	modelSet := make(map[string]struct{})
 	hasAnyMapping := false
+	hasInitialSelection := false
 
 	for _, acc := range accounts {
 		// Passthrough routing accepts models independently of model_mapping, so a
@@ -1480,10 +1472,17 @@ func availableModelsFromAccounts(accounts []Account, groupID *int64, platform st
 		// supplementUnmappedOpenAIModels contribute the default set. Mappings on
 		// the ordinary accounts in the same group still count.
 		mapping := acc.GetModelMapping()
-		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() {
+		if acc.hasOAuthInitialModelSelection() {
+			hasInitialSelection = true
+			hasAnyMapping = true // an empty selection is an authoritative empty catalog
+		}
+		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() && !acc.hasOAuthInitialModelSelection() {
 			mapping = nil
 		}
 		for model := range mapping {
+			if acc.hasOAuthInitialModelSelection() && !acc.IsModelSupported(model) {
+				continue
+			}
 			// Accounts pulled in through mixed scheduling only contribute the
 			// models that belong to the listing platform (e.g. an antigravity
 			// account's claude-* mappings must not surface on a gemini group).
@@ -1498,13 +1497,28 @@ func availableModelsFromAccounts(accounts []Account, groupID *int64, platform st
 			hasAnyMapping = true
 		}
 		// 没有映射的账号默认支持全部模型；在本分组被限制时改为公布限制清单里的具体模型名。
-		if len(mapping) == 0 {
+		if len(mapping) == 0 && !acc.hasOAuthInitialModelSelection() {
 			for _, model := range groupAllowedConcreteModels(&acc, groupID) {
 				if platform != "" && acc.Platform != platform && !mixedListingModelAllowed(platform, model) {
 					continue
 				}
 				modelSet[model] = struct{}{}
 				hasAnyMapping = true
+			}
+		}
+	}
+	// A new account's empty scope cannot suppress the default catalog of an
+	// older unrestricted account in the same group. Pure legacy groups retain
+	// their existing fallback behavior.
+	if hasInitialSelection && platform != PlatformOpenAI {
+		for _, acc := range accounts {
+			if acc.hasOAuthInitialModelSelection() || len(acc.GetModelMapping()) > 0 {
+				continue
+			}
+			for _, model := range DefaultModelIDsForPlatform(acc.Platform) {
+				if (platform == "" || acc.Platform == platform || mixedListingModelAllowed(platform, model)) && acc.IsModelSupported(model) && acc.IsModelAllowedInGroup(groupID, model) {
+					modelSet[model] = struct{}{}
+				}
 			}
 		}
 	}
@@ -1537,7 +1551,7 @@ func availableModelsFromAccounts(accounts []Account, groupID *int64, platform st
 		}
 	}
 
-	return cloneStringSlice(models)
+	return cloneModelCatalogSlice(models)
 }
 
 func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, groupID int64, model string) (CompositeModelOwnership, error) {
@@ -1774,4 +1788,12 @@ func (s *GatewayService) debugLogGatewaySnapshot(tag string, headers http.Header
 
 	// 写入文件（调试用，并发写入可能交错但不影响可读性）
 	_, _ = f.WriteString(buf.String())
+}
+
+// Model catalogs distinguish an authoritative empty policy from no declaration.
+func cloneModelCatalogSlice(models []string) []string {
+	if models == nil {
+		return nil
+	}
+	return append([]string{}, models...)
 }

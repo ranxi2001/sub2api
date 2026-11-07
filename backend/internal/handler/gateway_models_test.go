@@ -1704,3 +1704,43 @@ func TestDefaultModelIDsForPlatform_CompositeFallbackExcludesTypeSafe(t *testing
 	require.NotContains(t, service.DefaultModelIDsForPlatform(service.PlatformComposite), "jev-latest")
 	require.NotContains(t, defaultCodexModelIDsForPlatform(service.PlatformComposite), "jev-latest")
 }
+
+func TestOAuthInitialSelectionEmptyCompositeCatalog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const groupID int64 = 7724
+	repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{groupID: {{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{service.OAuthInitialModelSelectionKey: []string{}, "model_mapping": map[string]any{}}}}}}
+	for _, allowlist := range []bool{false, true} {
+		h := newGatewayModelsHandlerForTest(repo)
+		group := &service.Group{ID: groupID, Platform: service.PlatformComposite}
+		if allowlist {
+			group.ModelAllowlist = service.GroupModelAllowlist{Enabled: true, Models: []string{"gpt-*"}}
+		}
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{Group: group})
+		h.Models(c)
+		require.Equal(t, http.StatusOK, response.Code)
+		var models gatewayModelsResponseForTest
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &models))
+		require.Empty(t, models.Data)
+		require.Empty(t, h.codexModelIDsForGroup(t.Context(), group, ""))
+	}
+}
+
+func TestOAuthInitialSelectionMultiGroupCatalogUnion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	restricted := service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{service.OAuthInitialModelSelectionKey: []string{}, "model_mapping": map[string]any{}}}
+	existing := service.Account{ID: 2, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6.1-sol": "gpt-6.1-sol"}}}
+	repo := &gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{1: {restricted}, 2: {existing}}}
+	h := newGatewayModelsHandlerForTest(repo)
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	h.multiGroupModels(c, []*service.APIKey{{Group: &service.Group{ID: 1, Platform: service.PlatformOpenAI}}, {Group: &service.Group{ID: 2, Platform: service.PlatformOpenAI}}})
+	require.Equal(t, http.StatusOK, response.Code)
+	var models gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &models))
+	require.Len(t, models.Data, 1)
+	require.Equal(t, "gpt-6.1-sol", models.Data[0].ID)
+}
