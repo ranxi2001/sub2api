@@ -327,7 +327,7 @@ describe('initial model selection real page interactions', () => {
   expect(saved.selected_models).toContain('gpt-6.1-sol')
   expect(saved.selected_models).not.toContain('gpt-6-luna')
   expect(saved.model_billing).toEqual(config.model_billing)
-  vi.mocked(getAutoConfig).mockResolvedValue(structuredClone(saved)); w.unmount()
+  vi.mocked(getAutoConfig).mockResolvedValue(JSON.parse(JSON.stringify(saved))); w.unmount()
   const reloaded = mount(AutoConfigView); await flushPromises()
   expect(reloaded.get<HTMLInputElement>('[data-model="gpt-6-luna"]').element.checked).toBe(false)
   await reloaded.get('[data-testid="model-selection-none"]').trigger('click')
