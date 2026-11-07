@@ -26,7 +26,9 @@ func newTOTP429TestService(t *testing.T) (*OpenAIOAuthReauthService, *totp429Tes
 	svc, base := newRotationService(t)
 	repo := &totp429TestRepo{rotationTestRepo: base}
 	svc.repo = repo
-	account := svc.accounts.(*reauthTestAccountReader).account
+	reader, ok := svc.accounts.(*reauthTestAccountReader)
+	require.True(t, ok)
+	account := reader.account
 	account.Status = StatusActive
 	account.Extra = map[string]any{OpenAITOTPRotateOn429ExtraKey: true}
 	svc.totpWorkerLastSeen.Store(time.Now().UnixNano())
