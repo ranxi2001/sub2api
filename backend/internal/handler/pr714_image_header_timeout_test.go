@@ -50,7 +50,11 @@ func TestPR714ImagesWaitOnlyForSelectedGroups(t *testing.T) {
 			require.NoError(t, settings.SetOpenAIResponseHeaderTimeoutSettings(t.Context(), &service.OpenAIResponseHeaderTimeoutSettings{
 				Enabled: tc.enabled, Seconds: 1, ImageGroupIDs: []int64{7}, ImageSeconds: 3,
 			}))
-			gateway := service.NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, nil, nil,
+			account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Status: service.StatusActive, Schedulable: true,
+				Credentials: map[string]any{"api_key": "fixture-only", "base_url": upstream.URL}, GroupIDs: []int64{tc.groupID}}
+			repo := openAIImagesFailoverAccountRepo{accounts: []service.Account{*account}}
+			gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil, nil,
 				cfg, nil, nil, nil, nil, nil, repository.ProvideHTTPUpstream(cfg, settings), nil, nil, nil, nil, nil, nil, settings, nil)
 			t.Cleanup(gateway.CloseOpenAIWSPool)
 			body := []byte(`{"model":"gpt-image-2","prompt":"synthetic","response_format":"b64_json"}`)
@@ -61,8 +65,6 @@ func TestPR714ImagesWaitOnlyForSelectedGroups(t *testing.T) {
 			c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
 			c.Request.Header.Set("Content-Type", "application/json")
 			c.Set("api_key", &service.APIKey{ID: 42, GroupID: &tc.groupID})
-			account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
-				Credentials: map[string]any{"api_key": "fixture-only", "base_url": upstream.URL}, GroupIDs: []int64{tc.groupID}}
 			parsed, err := gateway.ParseOpenAIImagesRequest(c, body)
 			require.NoError(t, err)
 			_, err = gateway.ForwardImages(ctx, c, account, body, parsed, "")
