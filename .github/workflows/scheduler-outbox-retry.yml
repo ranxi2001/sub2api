@@ -33,6 +33,45 @@ jobs:
         working-directory: backend
         env:
           CI: 'true'
-        run: >-
-          go test -race -tags=integration ./internal/repository
-          -run '^TestSchedulerOutboxRetryPostgres' -count=1 -timeout=10m
+          GOTRACEBACK: crash
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence
+          uname -a > ../evidence/kernel.txt
+          go version > ../evidence/toolchain.txt
+          go env GOOS GOARCH CGO_ENABLED GOTOOLCHAIN >> ../evidence/toolchain.txt
+          docker version > ../evidence/docker-version.txt
+          docker info > ../evidence/docker-info.txt
+          if ! command -v gdb >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdb
+          fi
+          ulimit -c unlimited
+          sudo sysctl -w "kernel.core_pattern=$RUNNER_TEMP/scheduler-retry.core.%p" > ../evidence/core-pattern.txt
+          export GORACE="log_path=$PWD/../evidence/race history_size=4"
+          binary="$RUNNER_TEMP/scheduler-retry.test"
+          go test -c -race -tags=integration ./internal/repository -o "$binary"
+          set +e
+          "$binary" -test.run '^TestSchedulerOutboxRetryPostgres' -test.count=1 -test.v=true -test.timeout=10m > ../evidence/integration.log 2>&1
+          result=$?
+          set -e
+          cat ../evidence/integration.log
+          printf '%s\n' "$result" > ../evidence/exit.txt
+          if [ "$result" -ne 0 ]; then
+            for core in "$RUNNER_TEMP"/scheduler-retry.core.*; do
+              [ -f "$core" ] || continue
+              # Core files inherit the runner environment. Only retain a
+              # backtrace without argument/local values, never the raw core.
+              gdb -batch -ex 'set print frame-arguments none' -ex 'thread apply all bt' \
+                "$binary" "$core" > "../evidence/backtrace-$(basename "$core").txt" 2>&1 || true
+            done
+          fi
+          exit "$result"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: scheduler-outbox-retry-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14
