@@ -52,7 +52,17 @@ func fixture(t *testing.T) (*Service, *fakeMail) {
 		t.Fatal(e)
 	}
 	db.SetMaxOpenConns(2)
-	t.Cleanup(func() { db.Close(); root.Exec("DROP SCHEMA " + schema + " CASCADE"); root.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+		if _, err := root.Exec("DROP SCHEMA " + schema + " CASCADE"); err != nil {
+			t.Error(err)
+		}
+		if err := root.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	m := &fakeMail{}
 	s := &Service{DB: db, Mail: m}
 	exec(t, s, `CREATE TABLE users(id bigint PRIMARY KEY,email text,username text DEFAULT '',status text DEFAULT 'active',deleted_at timestamptz);CREATE TABLE api_keys(id bigint PRIMARY KEY,user_id bigint,name text,status text DEFAULT 'active',created_at timestamptz DEFAULT now(),deleted_at timestamptz,expires_at timestamptz);CREATE TABLE usage_logs(id bigserial PRIMARY KEY,ip_address text,user_id bigint,api_key_id bigint,created_at timestamptz DEFAULT now());`)

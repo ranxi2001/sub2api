@@ -113,15 +113,16 @@ func (h *SettingHandler) ActOnKeyRisk(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
 	queued := 0
-	if req.Action == "block" {
+	switch req.Action {
+	case "block":
 		var ip string
 		e = h.keyRisk.DB.QueryRowContext(ctx, "SELECT evidence->>'ip' FROM key_risk_events WHERE id=$1 AND rule='cross_user_ip'", id).Scan(&ip)
 		if e == nil {
 			e = h.blockKeyRiskIP(ctx, c, ip)
 		}
-	} else if req.Action == "notify" {
+	case "notify":
 		queued, e = h.keyRisk.NotifyUsers(ctx, id, actor.UserID)
-	} else {
+	default:
 		e = h.keyRisk.SetState(ctx, id, actor.UserID, req.Action)
 	}
 	if e != nil {

@@ -205,7 +205,7 @@ func (s *Service) NotifyUsers(ctx context.Context, id, actor int64) (int, error)
 	if e != nil {
 		return 0, e
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, e = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(3330501)"); e != nil {
 		return 0, e
 	}
@@ -257,7 +257,7 @@ func (s *Service) RunOnce(ctx context.Context) (err error) {
 	if e != nil {
 		return e
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var locked bool
 	if e = tx.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock(3330501)").Scan(&locked); e != nil || !locked {
 		return e
@@ -380,7 +380,7 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
 	if e != nil {
 		return false, e
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	// Use the queue lock before outbox/recipient locks to prevent lock-order inversions.
 	if _, e = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(3330501)"); e != nil {
 		return false, e

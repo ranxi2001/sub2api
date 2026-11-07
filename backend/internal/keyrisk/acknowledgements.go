@@ -56,7 +56,7 @@ func (s *Service) UserNotices(ctx context.Context, user, before int64) ([]UserNo
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []UserNotice{}
 	for rows.Next() {
 		var n UserNotice
@@ -109,7 +109,7 @@ func (s *Service) attachRecipients(ctx context.Context, events []Event) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var event int64
 		var r Recipient
@@ -146,13 +146,13 @@ func (s *Service) attachNames(ctx context.Context, events []Event) error {
 			var id int64
 			var name string
 			if err = rows.Scan(&id, &name); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return err
 			}
 			users[id] = name
 		}
 		err = rows.Err()
-		rows.Close()
+		_ = rows.Close()
 		if err != nil {
 			return err
 		}
@@ -166,13 +166,13 @@ func (s *Service) attachNames(ctx context.Context, events []Event) error {
 			var id int64
 			var name string
 			if err = rows.Scan(&id, &name); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return err
 			}
 			keys[id] = name
 		}
 		err = rows.Err()
-		rows.Close()
+		_ = rows.Close()
 		if err != nil {
 			return err
 		}
