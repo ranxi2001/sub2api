@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  keyRisk: 'key-risk-notices-acknowledgement-initial-announcement',
   groupAntiDistillation: 'group-openai-anti-distillation-initial-announcement',
   channelPricingTransfer: 'channel-pricing-import-export-initial-announcement',
   channelPricingListActions: 'channel-pricing-list-actions-initial-announcement',

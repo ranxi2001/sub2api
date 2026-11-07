@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	"github.com/Wei-Shaw/sub2api/internal/keyrisk"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -52,6 +53,7 @@ func firstNonEmpty(values ...string) string {
 
 // SettingHandler 系统设置处理器
 type SettingHandler struct {
+	keyRisk                  *keyrisk.Service
 	ipAuditPenaltyRelease    func(context.Context, int64, int64, string) (service.SecurityPenaltySummary, error)
 	ipAuditLogs              *service.AuditLogService
 	ipAuditPenaltySummary    func(context.Context, int64) (service.SecurityPenaltySummary, error)
