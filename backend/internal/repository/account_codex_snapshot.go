@@ -11,6 +11,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 func hasCodexWindowUpdates(updates map[string]any) bool {
@@ -194,8 +195,17 @@ func (r *accountRepository) WithLatestSchedulerAccounts(ctx context.Context, ids
 	}
 	slices.Sort(keys)
 	keys = slices.Compact(keys)
-	for _, key := range keys {
-		if _, err := client.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", key); err != nil {
+	if len(keys) == 1 {
+		if _, err := client.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", keys[0]); err != nil {
+			return err
+		}
+	} else if len(keys) > 1 {
+		// Keep the account-level publication fence shared with single-account
+		// feedback, but acquire it in one database round trip. The ordered
+		// subquery feeds the volatile lock function in the same global order as
+		// before, including when two buckets overlap on only some accounts.
+		if _, err := client.ExecContext(ctx, `SELECT pg_advisory_xact_lock(lock_key)
+FROM (SELECT unnest($1::bigint[]) AS lock_key ORDER BY lock_key) AS ordered_locks`, pq.Array(keys)); err != nil {
 			return err
 		}
 	}

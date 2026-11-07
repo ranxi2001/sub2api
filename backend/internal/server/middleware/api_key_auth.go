@@ -11,12 +11,17 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 const maxAPIKeyAuthorizationHeaderBytes = service.MaxAPIKeyCredentialBytes + 128
+
+// statusClientClosedRequest 非标准状态码 499：客户端在响应前断开。
+const statusClientClosedRequest = 499
 
 // NewAPIKeyAuthMiddleware 创建 API Key 认证中间件
 func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) APIKeyAuthMiddleware {
@@ -129,6 +134,9 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				AbortWithError(c, http.StatusServiceUnavailable, "API_KEY_AUTH_OVERLOADED", "API key authentication is temporarily unavailable")
 				return
 			}
+			if abortIfAPIKeyLookupClientGone(c, err) {
+				return
+			}
 			AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
 			return
 		}
@@ -201,7 +209,18 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			AbortWithError(c, http.StatusForbidden, "API_KEY_EXPIRED", "API key 已过期")
 			return
 		}
-		metadataReadRequest := billingInfoRequest || pelicanReadRequest
+		_, modelListingRequest := GetModelListingGroups(c)
+		metadataReadRequest := billingInfoRequest || pelicanReadRequest || modelListingRequest
+		// Discovery does not spend balance or quota, but expired keys must not
+		// regain access through the metadata path.
+		if modelListingRequest && (apiKey.Status == service.StatusAPIKeyExpired || apiKey.IsExpired()) {
+			AbortWithError(c, http.StatusForbidden, "API_KEY_EXPIRED", "API key 已过期")
+			return
+		}
+		if modelListingRequest && (apiKey.Status == service.StatusAPIKeyQuotaExhausted || apiKey.IsQuotaExhausted()) {
+			abortWithAPIKeyQuotaError(c)
+			return
+		}
 		// Async image task polling only reads data that already belongs to the
 		// authenticated key and must remain available after the completed
 		// generation consumes the key's remaining balance.
@@ -498,4 +517,18 @@ func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool)
 		return "GROUP_DISABLED", "API Key 所属分组已停用", false
 	}
 	return "", "", true
+}
+
+// abortIfAPIKeyLookupClientGone 处理 GetByKey 的非业务错误。
+// 客户端已断开（连接关闭、HTTP/2 流被取消）时请求 ctx 被取消，查 Key 拿到的只是
+// context 错误，不是服务端故障：以 499 结束并返回 true。其余错误记一行日志（不含 key），
+// 由调用方按 500 处理。
+func abortIfAPIKeyLookupClientGone(c *gin.Context, err error) bool {
+	ctx := c.Request.Context()
+	if ctx.Err() != nil {
+		c.AbortWithStatus(statusClientClosedRequest)
+		return true
+	}
+	logger.FromContext(ctx).Warn("api key lookup failed", zap.Error(err))
+	return false
 }

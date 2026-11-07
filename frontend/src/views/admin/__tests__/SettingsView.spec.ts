@@ -775,6 +775,53 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
+  it("offers DeepSeek alongside existing search providers and saves its settings", async () => {
+    getWebSearchEmulationConfig.mockResolvedValue({ enabled: true, providers: [] });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const add = wrapper.findAll('button').find(b => b.text() === 'admin.settings.webSearchEmulation.addProvider');
+    await add!.trigger('click');
+    const providerSelect = wrapper.findAll('select').find(s => s.find('option[value="deepseek"]').exists())!;
+    expect(providerSelect.findAll('option').map(o => o.attributes('value'))).toEqual(['brave', 'tavily', 'deepseek']);
+    await providerSelect.setValue('deepseek');
+    expect(wrapper.text()).toContain('admin.settings.webSearchEmulation.deepSeekHint');
+    await wrapper.get('input[placeholder="admin.settings.webSearchEmulation.apiKeyPlaceholder"]').setValue('fictional-deepseek-key');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(updateWebSearchEmulationConfig).toHaveBeenCalledWith({ enabled: true, providers: [expect.objectContaining({ type: 'deepseek', api_key: 'fictional-deepseek-key', proxy_id: null })] });
+    expect(zhSettings.settings.webSearchEmulation.deepSeekHint).toContain('1–128');
+    expect(enSettings.settings.webSearchEmulation.deepSeekHint).toContain('standalone DeepSeek Search API');
+  });
+
+  it.each([0, 1, 2])("dismisses DeepSeek notice at entry %s, persists it, and preserves other announcements", async (index) => {
+    const old = NEW_FEATURE_NOTICES.protocolFeatureSwitches;
+    const future = 'fixture-next-search-provider-announcement';
+    localStorage.setItem('sub2api:new-feature-notices:v1:41', JSON.stringify([old]));
+    getWebSearchEmulationConfig.mockResolvedValue({ enabled: true, providers: [{ type: 'deepseek', api_key: '', api_key_configured: true, quota_limit: null, proxy_id: null }] });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const badges = () => wrapper.findAllComponents(NewFeatureBadge)
+      .filter(b => b.props('noticeId') === NEW_FEATURE_NOTICES.deepSeekSearch)
+      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'));
+    expect(badges()).toHaveLength(3);
+    await badges()[index]!.trigger('click');
+    expect(badges()).toHaveLength(0);
+    expect(updateWebSearchEmulationConfig).not.toHaveBeenCalled();
+    wrapper.unmount();
+    const refreshed = mountView();
+    await flushPromises();
+    expect(refreshed.findAllComponents(NewFeatureBadge)
+      .filter(b => b.props('noticeId') === old || b.props('noticeId') === NEW_FEATURE_NOTICES.deepSeekSearch)
+      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(0);
+    expect(refreshed.findAllComponents(NewFeatureBadge)
+      .filter(b => b.props('noticeId') === NEW_FEATURE_NOTICES.serverlessIPRouting)
+      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]')).length).toBeGreaterThan(0);
+    const later = mount(NewFeatureBadge, { props: { noticeId: future, userId: 41 }, global: { plugins: [createPinia()] } });
+    expect(later.find('[data-testid="new-feature-badge"]').exists()).toBe(true);
+  });
+
   it("shows the Mistral budget notice independently and keeps its dismissal on remount", async () => {
     localStorage.setItem("sub2api:new-feature-notices:v1:41", JSON.stringify([NEW_FEATURE_NOTICES.protocolFeatureSwitches]));
     const wrapper = mountView();
@@ -895,6 +942,11 @@ describe("admin SettingsView payment visible method controls", () => {
     await tabBadge("gateway").trigger("click");
     await flushPromises();
 
+    // Gateway has independent announcements; dismissing one leaves the other
+    // in normal flow until it is dismissed as well.
+    expect(tabBadge("gateway").exists()).toBe(true);
+    await tabBadge("gateway").trigger("click");
+    await flushPromises();
     expect(tabBadge("gateway").exists()).toBe(false);
     expect(tabBadge("email").exists()).toBe(true);
     expect(tabBar.querySelector("[style]")).toBeNull();
