@@ -195,7 +195,11 @@ func (r *accountRepository) WithLatestSchedulerAccounts(ctx context.Context, ids
 	}
 	slices.Sort(keys)
 	keys = slices.Compact(keys)
-	if len(keys) > 0 {
+	if len(keys) == 1 {
+		if _, err := client.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", keys[0]); err != nil {
+			return err
+		}
+	} else if len(keys) > 1 {
 		// Keep the account-level publication fence shared with single-account
 		// feedback, but acquire it in one database round trip. The ordered
 		// subquery feeds the volatile lock function in the same global order as
