@@ -1,0 +1,73 @@
+name: Key risk PostgreSQL acceptance
+
+on:
+  push:
+    branches: [production, review/pr717-merge-fixes]
+    paths:
+      - 'backend/internal/keyrisk/**'
+      - 'backend/migrations/*key_risk*.sql'
+      - '.github/workflows/key-risk-postgres.yml'
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/keyrisk/**'
+      - 'backend/migrations/*key_risk*.sql'
+      - '.github/workflows/key-risk-postgres.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.1
+        env:
+          POSTGRES_USER: keyrisk
+          POSTGRES_PASSWORD: keyrisk-ci-only
+          POSTGRES_DB: keyrisk_task
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keyrisk -d keyrisk_task"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      KEYRISK_TEST_REQUIRED: 'true'
+      KEYRISK_TEST_POSTGRES_DSN: postgres://keyrisk:keyrisk-ci-only@127.0.0.1:5432/keyrisk_task?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify checkout identity
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - name: Run PostgreSQL risk and notification regressions with race detection
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -json ./internal/keyrisk -count=1 -timeout=10m | tee "$RUNNER_TEMP/key-risk-tests.jsonl"
+          python3 - "$RUNNER_TEMP/key-risk-tests.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          skipped = [row['Test'] for row in rows if row.get('Action') == 'skip' and row.get('Test')]
+          passed = {row['Test'] for row in rows if row.get('Action') == 'pass' and row.get('Test')}
+          required = {'TestRiskNoticeIncludesAllKeysBeyondFifty', 'TestReminderLimitSurvivesOutboxCleanupAndRestart', 'TestAcknowledgementIsOwnedIdempotentAndSuppressesQueuedMail', 'TestUpgradePreservesPriorDeliveryAttempts'}
+          if skipped or not required <= passed:
+              raise SystemExit(f'Incomplete PostgreSQL acceptance: skipped={skipped}, missing={sorted(required - passed)}')
+          print(f'{len(passed)} risk tests passed; no skipped tests')
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: key-risk-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/key-risk-tests.jsonl

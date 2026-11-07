@@ -711,6 +711,70 @@ func (s *HTTPUpstreamSuite) TestOpenAIHarvestProfileDisablesKeepAlives() {
 	require.Equal(s.T(), 0, transport.MaxIdleConns)
 }
 
+func upstreamResponseHeaderTimeout(t *testing.T, entry *upstreamClientEntry) time.Duration {
+	t.Helper()
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(t, ok, "expected *http.Transport")
+	return transport.ResponseHeaderTimeout
+}
+
+func (s *HTTPUpstreamSuite) TestResponseHeaderTimeoutOverrideUsesSeparateClient() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIResponseHeaderTimeout: 60,
+		OpenAIHTTP2:                 config.GatewayOpenAIHTTP2Config{Enabled: true},
+	}
+	svc := s.newService()
+	profile := service.HTTPUpstreamProfileOpenAI
+	normal, err := svc.getClientEntry("", 1, 1, profile, false, false)
+	require.NoError(s.T(), err)
+	relaxed, err := svc.getClientEntryWithHeaderTimeout("", 1, 1, profile, false, false, 150*time.Second)
+	require.NoError(s.T(), err)
+	require.NotSame(s.T(), normal, relaxed)
+	require.Equal(s.T(), 60*time.Second, upstreamResponseHeaderTimeout(s.T(), normal))
+	require.Equal(s.T(), 150*time.Second, upstreamResponseHeaderTimeout(s.T(), relaxed))
+
+	normalAgain, err := svc.getClientEntry("", 1, 1, profile, false, false)
+	require.NoError(s.T(), err)
+	require.Same(s.T(), normal, normalAgain, "relaxed requests must not evict the normal client")
+	relaxedAgain, err := svc.getClientEntryWithHeaderTimeout("", 1, 1, profile, false, false, 150*time.Second)
+	require.NoError(s.T(), err)
+	require.Same(s.T(), relaxed, relaxedAgain)
+
+	shorter, err := svc.getClientEntryWithHeaderTimeout("", 1, 1, profile, false, false, 30*time.Second)
+	require.NoError(s.T(), err)
+	require.Same(s.T(), normal, shorter, "an override must never shorten the timeout")
+}
+
+func (s *HTTPUpstreamSuite) TestResponseHeaderTimeoutOverrideKeepsDisabledTimeout() {
+	s.cfg.Gateway = config.GatewayConfig{OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: true}}
+	svc := s.newService()
+	entry, err := svc.getClientEntryWithHeaderTimeout("", 1, 1, service.HTTPUpstreamProfileOpenAI, false, false, 150*time.Second)
+	require.NoError(s.T(), err)
+	require.Zero(s.T(), upstreamResponseHeaderTimeout(s.T(), entry))
+}
+
+func (s *HTTPUpstreamSuite) TestRequestResponseHeaderTimeoutReachesClientSelection() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIResponseHeaderTimeout: 60,
+		OpenAIHTTP2:                 config.GatewayOpenAIHTTP2Config{Enabled: true},
+	}
+	svc := s.newService()
+	req := httptest.NewRequest(http.MethodPost, "https://image.example.test/v1/images/generations", nil)
+	req = req.WithContext(service.WithHTTPUpstreamResponseHeaderTimeout(req.Context(), 150*time.Second))
+	entry, err := svc.acquireRequestClient(req, "", 1, 1, service.HTTPUpstreamProfileOpenAI)
+	require.NoError(s.T(), err)
+	defer atomic.AddInt64(&entry.inFlight, -1)
+	require.Equal(s.T(), 150*time.Second, upstreamResponseHeaderTimeout(s.T(), entry))
+
+	fingerprint := &tlsfingerprint.Profile{Name: "test"}
+	tlsEntry, err := svc.acquireRequestClientWithTLS(req, "", 1, 1, fingerprint, service.HTTPUpstreamProfileOpenAI)
+	require.NoError(s.T(), err)
+	defer atomic.AddInt64(&tlsEntry.inFlight, -1)
+	normalTLS, err := svc.getClientEntryWithTLS("", 1, 1, fingerprint, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.NotSame(s.T(), tlsEntry, normalTLS)
+}
+
 func (s *HTTPUpstreamSuite) TestOpenAIHeaderTimeoutChangeRebuildsClient() {
 	s.cfg.Gateway = config.GatewayConfig{
 		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{Enabled: true},

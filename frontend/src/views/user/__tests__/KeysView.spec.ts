@@ -255,6 +255,7 @@ const mountView = async () => {
     global: {
       plugins: [createPinia()],
       stubs: {
+        UserKeyRiskNotices: true,
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,
         DataTable: DataTableStub,

@@ -1266,6 +1266,12 @@ export default {
         seconds: '超时时间（秒）',
         secondsHint:
           '范围 1–600 秒，默认 20 秒。慢非流式响应及 SSE 响应头可能在首 token 前超时；已收到响应头的正文流、原生上游 WebSocket 使用各自时限。',
+        imageTitle: '生图放宽分组',
+        imageHint:
+          '选中的分组里，生图和改图请求按下面的时间等待，其他请求和其他分组仍按上面的超时。适合要等图出完才返回的上游。',
+        imageGroups: '放宽的分组',
+        imageSeconds: '生图超时时间（秒）',
+        imageSecondsHint: '范围 1–600 秒，默认 180 秒。不大于上面的超时时间时不生效。',
         saved: 'OpenAI 响应头超时设置保存成功',
         saveFailed: '保存 OpenAI 响应头超时设置失败',
         loadFailed: '无法加载已保存的超时设置，请重新加载后编辑。'

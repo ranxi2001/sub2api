@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ const (
 	openAIResponseHeaderTimeoutMinSeconds     = 1
 	openAIResponseHeaderTimeoutMaxSeconds     = 600
 	openAIResponseHeaderTimeoutDefaultSeconds = 20
+	openAIImageResponseHeaderTimeoutSeconds   = 180
 	openAIResponseHeaderTimeoutCacheTTL       = 60 * time.Second
 	openAIResponseHeaderTimeoutErrorTTL       = 5 * time.Second
 	openAIResponseHeaderTimeoutDBTimeout      = 5 * time.Second
@@ -28,6 +30,11 @@ const (
 type OpenAIResponseHeaderTimeoutSettings struct {
 	Enabled bool `json:"enabled"`
 	Seconds int  `json:"seconds"`
+	// ImageGroupIDs lists the groups whose image requests wait ImageSeconds
+	// instead of Seconds. Image upstreams may send no header until the image is
+	// finished, so an empty list keeps the single global timeout.
+	ImageGroupIDs []int64 `json:"image_group_ids"`
+	ImageSeconds  int     `json:"image_seconds"`
 }
 
 type cachedOpenAIResponseHeaderTimeoutSettings struct {
@@ -45,7 +52,12 @@ func DefaultOpenAIResponseHeaderTimeoutSettings(cfg *config.Config) *OpenAIRespo
 		seconds = cfg.Gateway.OpenAIResponseHeaderTimeout
 		enabled = true
 	}
-	return &OpenAIResponseHeaderTimeoutSettings{Enabled: enabled, Seconds: seconds}
+	return &OpenAIResponseHeaderTimeoutSettings{
+		Enabled:       enabled,
+		Seconds:       seconds,
+		ImageGroupIDs: []int64{},
+		ImageSeconds:  openAIImageResponseHeaderTimeoutSeconds,
+	}
 }
 
 func normalizeOpenAIResponseHeaderTimeoutSettings(settings, fallback *OpenAIResponseHeaderTimeoutSettings) {
@@ -55,6 +67,21 @@ func normalizeOpenAIResponseHeaderTimeoutSettings(settings, fallback *OpenAIResp
 	if settings.Seconds < openAIResponseHeaderTimeoutMinSeconds || settings.Seconds > openAIResponseHeaderTimeoutMaxSeconds {
 		settings.Seconds = fallback.Seconds
 	}
+	if settings.ImageSeconds < openAIResponseHeaderTimeoutMinSeconds || settings.ImageSeconds > openAIResponseHeaderTimeoutMaxSeconds {
+		settings.ImageSeconds = fallback.ImageSeconds
+	}
+	settings.ImageGroupIDs = normalizeOpenAIImageTimeoutGroupIDs(settings.ImageGroupIDs)
+}
+
+func normalizeOpenAIImageTimeoutGroupIDs(groupIDs []int64) []int64 {
+	normalized := make([]int64, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		if groupID > 0 {
+			normalized = append(normalized, groupID)
+		}
+	}
+	slices.Sort(normalized)
+	return slices.Compact(normalized)
 }
 
 // GetOpenAIResponseHeaderTimeoutSettings reads the DB override (admin handler
@@ -92,8 +119,16 @@ func (s *SettingService) SetOpenAIResponseHeaderTimeoutSettings(ctx context.Cont
 	if settings.Seconds < openAIResponseHeaderTimeoutMinSeconds || settings.Seconds > openAIResponseHeaderTimeoutMaxSeconds {
 		return fmt.Errorf("seconds must be between %d-%d", openAIResponseHeaderTimeoutMinSeconds, openAIResponseHeaderTimeoutMaxSeconds)
 	}
+	saved := *settings
+	if saved.ImageSeconds == 0 {
+		saved.ImageSeconds = openAIImageResponseHeaderTimeoutSeconds
+	}
+	if saved.ImageSeconds < openAIResponseHeaderTimeoutMinSeconds || saved.ImageSeconds > openAIResponseHeaderTimeoutMaxSeconds {
+		return fmt.Errorf("image_seconds must be between %d-%d", openAIResponseHeaderTimeoutMinSeconds, openAIResponseHeaderTimeoutMaxSeconds)
+	}
+	saved.ImageGroupIDs = normalizeOpenAIImageTimeoutGroupIDs(saved.ImageGroupIDs)
 
-	data, err := json.Marshal(settings)
+	data, err := json.Marshal(saved)
 	if err != nil {
 		return fmt.Errorf("marshal OpenAI response header timeout settings: %w", err)
 	}
@@ -105,7 +140,7 @@ func (s *SettingService) SetOpenAIResponseHeaderTimeoutSettings(ctx context.Cont
 		return err
 	}
 	s.openAIResponseHeaderTimeoutGen++
-	s.storeOpenAIResponseHeaderTimeoutCache(*settings, openAIResponseHeaderTimeoutCacheTTL)
+	s.storeOpenAIResponseHeaderTimeoutCache(saved, openAIResponseHeaderTimeoutCacheTTL)
 	return nil
 }
 
@@ -113,17 +148,33 @@ func (s *SettingService) SetOpenAIResponseHeaderTimeoutSettings(ctx context.Cont
 // transport hot path. It never blocks on a DB read when the cache is fresh and
 // preserves the last known value on DB errors.
 func (s *SettingService) GetOpenAIResponseHeaderTimeoutCached(ctx context.Context) (int, bool) {
+	settings := s.cachedOpenAIResponseHeaderTimeoutSettings(ctx)
+	return settings.Seconds, settings.Enabled
+}
+
+// OpenAIImageResponseHeaderTimeout returns the longer wait for image requests
+// in a selected group, or zero when the global timeout applies.
+func (s *SettingService) OpenAIImageResponseHeaderTimeout(ctx context.Context, groupID *int64) time.Duration {
+	if groupID == nil {
+		return 0
+	}
+	settings := s.cachedOpenAIResponseHeaderTimeoutSettings(ctx)
+	if !settings.Enabled || settings.ImageSeconds <= settings.Seconds || !slices.Contains(settings.ImageGroupIDs, *groupID) {
+		return 0
+	}
+	return time.Duration(settings.ImageSeconds) * time.Second
+}
+
+func (s *SettingService) cachedOpenAIResponseHeaderTimeoutSettings(ctx context.Context) OpenAIResponseHeaderTimeoutSettings {
 	if s == nil {
-		fallback := DefaultOpenAIResponseHeaderTimeoutSettings(nil)
-		return fallback.Seconds, fallback.Enabled
+		return *DefaultOpenAIResponseHeaderTimeoutSettings(nil)
 	}
 	if s.settingRepo == nil {
-		fallback := DefaultOpenAIResponseHeaderTimeoutSettings(s.cfg)
-		return fallback.Seconds, fallback.Enabled
+		return *DefaultOpenAIResponseHeaderTimeoutSettings(s.cfg)
 	}
 	if cached, ok := s.openAIResponseHeaderTimeoutCache.Load().(*cachedOpenAIResponseHeaderTimeoutSettings); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
-			return cached.settings.Seconds, cached.settings.Enabled
+			return cached.settings
 		}
 	}
 
@@ -164,10 +215,9 @@ func (s *SettingService) GetOpenAIResponseHeaderTimeoutCached(ctx context.Contex
 		return *settings, nil
 	})
 	if settings, ok := result.(OpenAIResponseHeaderTimeoutSettings); ok {
-		return settings.Seconds, settings.Enabled
+		return settings
 	}
-	fallback := DefaultOpenAIResponseHeaderTimeoutSettings(s.cfg)
-	return fallback.Seconds, fallback.Enabled
+	return *DefaultOpenAIResponseHeaderTimeoutSettings(s.cfg)
 }
 
 func (s *SettingService) storeOpenAIResponseHeaderTimeoutCache(settings OpenAIResponseHeaderTimeoutSettings, ttl time.Duration) {

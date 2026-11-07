@@ -38,6 +38,10 @@ func RegisterUserRoutes(
 		user := authenticated.Group("/user")
 		{
 			user.GET("/profile", h.User.GetProfile)
+			if h.Admin != nil && h.Admin.Setting != nil {
+				user.GET("/key-risks", h.Admin.Setting.GetMyKeyRisks)
+				user.POST("/key-risks/:id/acknowledge", h.Admin.Setting.AcknowledgeMyKeyRisk)
+			}
 			if h.Admin != nil && h.Admin.PromptAudit != nil {
 				user.GET("/security/summary", h.Admin.PromptAudit.MyPenaltySummary)
 				user.GET("/security/events", h.Admin.PromptAudit.MyPenaltyEvents)

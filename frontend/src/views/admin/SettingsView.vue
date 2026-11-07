@@ -643,6 +643,32 @@
                   <input data-testid="openai-header-timeout-seconds" v-model.number="openAIResponseHeaderTimeoutForm.seconds" type="number" min="1" max="600" class="input w-32" />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.openaiResponseHeaderTimeout.secondsHint") }}</p>
                 </div>
+                <div v-if="openAIResponseHeaderTimeoutForm.enabled" class="space-y-4 border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div>
+                    <h3 class="flex items-center gap-2 font-medium text-gray-900 dark:text-white">
+                      {{ t("admin.settings.openaiResponseHeaderTimeout.imageTitle") }}
+                      <NewFeatureBadge
+                        :notice-id="NEW_FEATURE_NOTICES.openaiImageHeaderTimeoutGroups"
+                        :user-id="authStore.user?.id"
+                      />
+                    </h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t("admin.settings.openaiResponseHeaderTimeout.imageHint") }}</p>
+                  </div>
+                  <GroupSelector
+                    v-model="openAIResponseHeaderTimeoutForm.image_group_ids"
+                    data-testid="openai-image-header-timeout-groups"
+                    :groups="openAIImageTimeoutGroups"
+                    :label="t('admin.settings.openaiResponseHeaderTimeout.imageGroups')"
+                    platform="openai"
+                  />
+                  <div>
+                    <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.openaiResponseHeaderTimeout.imageSeconds") }}
+                    </label>
+                    <input data-testid="openai-image-header-timeout-seconds" v-model.number="openAIResponseHeaderTimeoutForm.image_seconds" type="number" min="1" max="600" class="input w-32" />
+                    <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.openaiResponseHeaderTimeout.imageSecondsHint") }}</p>
+                  </div>
+                </div>
                 <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700">
                   <button data-testid="openai-header-timeout-save" type="button" @click="saveOpenAIResponseHeaderTimeoutSettings" :disabled="openAIResponseHeaderTimeoutSaving" class="btn btn-primary btn-sm">
                     <svg v-if="openAIResponseHeaderTimeoutSaving" class="mr-1 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -9655,6 +9681,7 @@ import { useAdminSettingsStore } from "@/stores/adminSettings";
 import BalanceForecastSettings from "@/components/settings/BalanceForecastSettings.vue";
 import SmartOpsSidebarSettings from "@/components/settings/SmartOpsSidebarSettings.vue";
 import NewFeatureBadge from "@/components/common/NewFeatureBadge.vue";
+import GroupSelector from "@/components/common/GroupSelector.vue";
 import { NEW_FEATURE_NOTICES } from "@/constants/newFeatureNotices";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
 import {
@@ -9774,6 +9801,7 @@ const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
 const subscriptionGroups = ref<AdminGroup[]>([]);
+const openAIImageTimeoutGroups = ref<AdminGroup[]>([]);
 // Upstream billing probe state
 const upstreamBillingProbeLoading = ref(true);
 const upstreamBillingProbeSaving = ref(false);
@@ -9843,6 +9871,8 @@ const openAIResponseHeaderTimeoutSaving = ref(false);
 const openAIResponseHeaderTimeoutForm = reactive({
   enabled: false,
   seconds: 20,
+  image_group_ids: [] as number[],
+  image_seconds: 180,
 });
 
 // Rectifier 状态
@@ -13079,8 +13109,12 @@ async function loadOpenAIResponseHeaderTimeoutSettings() {
   openAIResponseHeaderTimeoutLoading.value = true;
   openAIResponseHeaderTimeoutLoadFailed.value = false;
   try {
-    const settings = await adminAPI.settings.getOpenAIResponseHeaderTimeoutSettings();
+    const [settings, groups] = await Promise.all([
+      adminAPI.settings.getOpenAIResponseHeaderTimeoutSettings(),
+      adminAPI.groups.getAll(),
+    ]);
     Object.assign(openAIResponseHeaderTimeoutForm, settings);
+    openAIImageTimeoutGroups.value = groups;
   } catch (_error: unknown) {
     openAIResponseHeaderTimeoutLoadFailed.value = true;
   } finally {
@@ -13094,6 +13128,8 @@ async function saveOpenAIResponseHeaderTimeoutSettings() {
     const updated = await adminAPI.settings.updateOpenAIResponseHeaderTimeoutSettings({
       enabled: openAIResponseHeaderTimeoutForm.enabled,
       seconds: openAIResponseHeaderTimeoutForm.seconds,
+      image_group_ids: openAIResponseHeaderTimeoutForm.image_group_ids,
+      image_seconds: openAIResponseHeaderTimeoutForm.image_seconds,
     });
     Object.assign(openAIResponseHeaderTimeoutForm, updated);
     appStore.showSuccess(t("admin.settings.openaiResponseHeaderTimeout.saved"));

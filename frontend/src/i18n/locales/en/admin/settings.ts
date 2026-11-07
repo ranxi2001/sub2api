@@ -1272,6 +1272,12 @@ export default {
         seconds: 'Timeout (seconds)',
         secondsHint:
           '1–600 seconds; default 20s. Slow nonstream responses and SSE headers can time out before the first token. Body streams after headers and native WebSocket upstreams use their own limits.',
+        imageTitle: 'Longer wait for image groups',
+        imageHint:
+          'Image generation and edit requests in the selected groups use the timeout below. Other requests and groups keep the timeout above. Use it for upstreams that respond only after the image is finished.',
+        imageGroups: 'Groups',
+        imageSeconds: 'Image timeout (seconds)',
+        imageSecondsHint: '1–600 seconds; default 180s. It has no effect unless it is longer than the timeout above.',
         saved: 'OpenAI response header timeout settings saved',
         saveFailed: 'Failed to save OpenAI response header timeout settings',
         loadFailed: 'Could not load the saved timeout. Reload before editing.'
