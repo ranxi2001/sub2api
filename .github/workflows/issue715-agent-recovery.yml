@@ -34,7 +34,7 @@ jobs:
           git rev-parse HEAD
           test -z "$(git status --porcelain)"
           cd backend
-          go test -race -tags=unit ./internal/service -run '^Test(Issue715|AstraCodexToolCapabilities|EncryptedSticky|EncryptedPrioritySticky|OpenAIGatewayService_SelectAccountWithScheduler_Encrypted)' -count=1 -v -timeout=10m
+          go test -race -tags=unit ./internal/service ./internal/handler -run '^Test(Issue715|AstraCodexToolCapabilities|EncryptedSticky|EncryptedPrioritySticky|OpenAIGatewayService_SelectAccountWithScheduler_Encrypted)' -count=1 -v -timeout=10m
 
   red:
     runs-on: ubuntu-latest
@@ -76,3 +76,44 @@ jobs:
           grep -q 'bridge capability repair must invalidate the native ETag' "$RUNNER_TEMP/issue715-red.log"
           grep -q -- '--- FAIL: TestIssue715LiveBridgeCapabilityCannotOverrideWire' "$RUNNER_TEMP/issue715-red.log"
           grep -q 'live bridge manifest must not restore v2' "$RUNNER_TEMP/issue715-red.log"
+
+  red-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Original business chain with retained new handler regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          original=6df0cd5bb0ce4d774d34004008f9dd661d236468
+          targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go)
+          added=backend/internal/service/openai_agent_message_recovery.go
+          git fetch --no-tags --depth=1 origin "$original"
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "${targets[@]}"
+          rm -- "$added"
+          for target in "${targets[@]}"; do
+            expected=$(git rev-parse "$original:$target")
+            actual=$(git hash-object "$target")
+            echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
+            test "$expected" = "$actual"
+          done
+          test ! -e "$added"
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue715HTTPResumesSameTaskAcrossTwoTurns$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-recovery-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue715-recovery-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-recovery-red.log"
+          grep -q -- '--- FAIL: TestIssue715HTTPResumesSameTaskAcrossTwoTurns/false' "$RUNNER_TEMP/issue715-recovery-red.log"
+          grep -q -- '--- FAIL: TestIssue715HTTPResumesSameTaskAcrossTwoTurns/true' "$RUNNER_TEMP/issue715-recovery-red.log"
+          grep -q 'same task and tool context must survive route drift' "$RUNNER_TEMP/issue715-recovery-red.log"

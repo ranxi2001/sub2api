@@ -29,6 +29,7 @@ import (
 
 // openaiStreamingResult streaming response result
 type openaiStreamingResult struct {
+	agentCompleted   bool
 	clientDisconnect bool
 	usage            *OpenAIUsage
 	firstTokenMs     *int
@@ -39,6 +40,7 @@ type openaiStreamingResult struct {
 }
 
 type openaiNonStreamingResult struct {
+	agentCompleted bool
 	*OpenAIUsage
 	usage            *OpenAIUsage
 	responseID       string
@@ -268,6 +270,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	sawResponseFailed := false
 	terminalEventType := ""
 	terminalSuccessful := false
+	agentCompleted := false
 	protectionTerminalSuccessful := false
 	responsesSemanticOutputSeen := false
 	capacityFailoverSuppressedLogged := false
@@ -426,6 +429,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			markPriorityDownstreamDisconnect(ctx)
 		}
 		return &openaiStreamingResult{
+			agentCompleted:   agentCompleted && !sawFailedEvent && !clientDisconnected,
 			usage:            usage,
 			clientDisconnect: clientDisconnected,
 			firstTokenMs:     firstTokenMs,
@@ -600,6 +604,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if openAIStreamEventIsTerminalWithType(data, eventType) {
 				sawTerminalEvent = true
 				terminalSuccessful = IsSuccessfulStreamTerminal(dataBytes)
+				if eventType == "response.completed" && gjson.GetBytes(dataBytes, "response.status").String() == "completed" && gjson.GetBytes(dataBytes, "response.error").Type == gjson.Null {
+					agentCompleted = true
+				} else if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" || eventType == "response.cancelled" || eventType == "response.canceled" {
+					agentCompleted = false
+				}
 				protectionTerminalSuccessful = openAIProtectionSuccessfulTerminal(dataBytes, eventType)
 				terminalEventType = eventType
 				if strings.TrimSpace(data) == "[DONE]" {
@@ -1928,6 +1937,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 
 	return &openaiNonStreamingResult{
+		agentCompleted:   gjson.GetBytes(body, "status").String() == "completed" && gjson.GetBytes(body, "error").Type == gjson.Null,
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
@@ -2052,6 +2062,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 
 	return &openaiNonStreamingResult{
+		agentCompleted:   terminalOK && terminalType == "response.completed" && gjson.GetBytes(terminalPayload, "response.status").String() == "completed" && gjson.GetBytes(terminalPayload, "response.error").Type == gjson.Null,
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
