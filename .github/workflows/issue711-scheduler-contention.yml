@@ -94,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -tags=unit ./internal/service ./internal/repository \
-            -run '^(TestSchedulerPublicationLockRoundTripAndRollback|TestSchedulerSnapshotUsesLatestCompleteAccounts|TestSchedulerSnapshotIDRetryFiltersLatestMembership|TestSchedulerOutboxRetry)' \
+            -run '^(TestSchedulerPublicationLockRoundTripAndRollback|TestSchedulerPublicationDiagnostics|TestSchedulerSnapshotUsesLatestCompleteAccounts|TestSchedulerSnapshotIDRetryFiltersLatestMembership|TestSchedulerOutboxRetry)' \
             -count=1 -v -timeout=5m 2>&1 | tee ../evidence/unit-green.log
           ! grep -Eq 'no tests to run|--- SKIP:' ../evidence/unit-green.log
       - name: Real PostgreSQL and Redis behavioral RED or GREEN
