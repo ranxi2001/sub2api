@@ -49,7 +49,7 @@ export function copyQualityRuleConfig(source: PelicanTestConfig): PelicanTestCon
       remove_group_ids: qualityUsesGroups(action) ? [...(policy.remove_group_ids || [])] : [],
       remove_models: action === 'remove_models' ? [...(policy.remove_models || [])] : undefined,
       recovery_concurrency: action === 'remove_models' ? policy.recovery_concurrency : undefined,
-      retest_rest_minutes: qualityUsesRetestRest(action) ? policy.retest_rest_minutes ?? 0 : 0,
+      ...(qualityUsesRetestRest(action) && policy.retest_rest_minutes !== undefined ? { retest_rest_minutes: policy.retest_rest_minutes } : {}),
       auto_restore: action === 'observe_only' ? false : policy.auto_restore ?? false,
       judge: policy.judge ? { ...(policy.judge.kind ? { kind: policy.judge.kind } : {}), group_id: policy.judge.group_id, model_id: policy.judge.model_id, prompt: policy.judge.prompt } : undefined,
       bps: bps ? {
@@ -109,7 +109,8 @@ export function qualityActionPayload(policy: QualityPolicy): QualityPolicy {
   const next = { ...policy, remove_group_ids: qualityUsesGroups(policy.action) ? [...policy.remove_group_ids] : [] }
   const rest = qualityUsesRetestRest(next.action) ? policy.retest_rest_minutes ?? 0 : 0
   if (!Number.isInteger(rest) || rest < 0 || rest > 10080) throw new Error('qualityOps.invalidRetestRest')
-  next.retest_rest_minutes = rest
+  if (rest > 0) next.retest_rest_minutes = rest
+  else delete next.retest_rest_minutes
   if (qualityUsesGroups(next.action) && !next.remove_group_ids.length) throw new Error('qualityOps.selectGroups')
   if (next.action === 'remove_models') {
     next.remove_models = [...(policy.remove_models || [])]
@@ -225,7 +226,7 @@ export function buildQualityRulePatch(
     config.quality.remove_group_ids = []
     config.quality.auto_restore = false
     delete config.quality.bps
-    config.quality.retest_rest_minutes = 0
+    delete config.quality.retest_rest_minutes
   }
   // Automatic BPS switching remains a separate native-probe policy.
   if (config.quality.action === 'enable_bps' && config.question_kind !== STATE_PROBE_QUESTION) throw new Error('qualityOps.bpsRequiresProbe')

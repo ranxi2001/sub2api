@@ -86,15 +86,15 @@
                     :to="child.path"
                     class="sidebar-link mb-0.5 py-1.5 text-sm"
                     :class="{ 'sidebar-link-active': route.path === child.path }"
-                    :style="['/admin/ai-ops', '/admin/auto-config'].includes(child.path) ? { paddingRight: '3.5rem' } : undefined"
+                    :style="['/admin/ai-ops', '/admin/auto-config', '/admin/account-quality'].includes(child.path) ? { paddingRight: '3.5rem' } : undefined"
                     @click="handleMenuItemClick(child.path)"
                   >
                     <component :is="child.icon" class="h-4 w-4 flex-shrink-0" />
                     <span>{{ child.label }}</span>
                   </router-link>
                   <NewFeatureBadge
-                    v-if="['/admin/ai-ops', '/admin/auto-config'].includes(child.path)"
-                    :notice-id="child.path === '/admin/auto-config' ? NEW_FEATURE_NOTICES.oauthInitialModelSelection : NEW_FEATURE_NOTICES.aiOpsCodex"
+                    v-if="['/admin/ai-ops', '/admin/auto-config', '/admin/account-quality'].includes(child.path)"
+                    :notice-id="child.path === '/admin/account-quality' ? NEW_FEATURE_NOTICES.qualityRetestRest : child.path === '/admin/auto-config' ? NEW_FEATURE_NOTICES.oauthInitialModelSelection : NEW_FEATURE_NOTICES.aiOpsCodex"
                     :user-id="authStore.user?.id"
                     class="absolute right-2 top-1/2 z-10 -translate-y-1/2"
                   />
@@ -891,7 +891,7 @@ const adminNavItems = computed((): NavItem[] => {
       { path: '/admin/priority-scheduling', label: t('priorityScheduling.title'), icon: AccountOpsIcon },
       { path: '/admin/channel-operations', label: t('channelOps.title'), icon: ChannelIcon },
       { path: '/admin/profit-operations', label: t('profitOps.title'), icon: PriceTagIcon },
-      { path: '/admin/account-quality', label: t('qualityOps.title'), icon: QualityOpsIcon, noticeId: NEW_FEATURE_NOTICES.qualityRetestRest },
+      { path: '/admin/account-quality', label: t('qualityOps.title'), icon: QualityOpsIcon },
       { path: '/admin/controlled-experiments', label: t('controlledExperiments.title'), icon: QualityOpsIcon },
       { path: '/admin/account-ops', label: t('accountOps.title'), icon: AccountOpsIcon },
       { path: '/admin/token-guard', label: t('tokenGuard.title'), icon: TokenGuardIcon },

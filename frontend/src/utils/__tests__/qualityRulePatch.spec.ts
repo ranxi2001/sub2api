@@ -37,7 +37,8 @@ describe('quality rule copy inputs', () => {
     expect(buildQualityRulePatch(current, source, ['restore']).pelican_config!.quality!.retest_rest_minutes).toBe(30)
     expect(buildQualityRulePatch(current, source, ['action']).pelican_config!.quality!.retest_rest_minutes).toBe(90)
     expect(qualityRuleFieldValue(current, 'action')).not.toEqual(qualityRuleFieldValue({ ...current, pelican_config: source.pelican_config }, 'action'))
-    expect(qualityActionPayload({ ...source.pelican_config.quality, action: 'observe_only' }).retest_rest_minutes).toBe(0)
+    expect(qualityActionPayload({ ...source.pelican_config.quality, action: 'observe_only' }).retest_rest_minutes).toBeUndefined()
+    expect(qualityActionPayload({ ...source.pelican_config.quality, retest_rest_minutes: 0 }).retest_rest_minutes).toBeUndefined()
     for (const value of [-1, 1.5, 10081, NaN]) {
       expect(() => qualityActionPayload({ ...source.pelican_config.quality, retest_rest_minutes: value })).toThrow('qualityOps.invalidRetestRest')
     }
