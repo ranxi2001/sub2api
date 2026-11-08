@@ -34,11 +34,17 @@ func TestOpenAIReauthPreserves429SchedulingPolicy(t *testing.T) {
 				Type: service.AccountTypeOAuth, Credentials: old, Extra: tc.extra,
 			})
 			require.NoError(t, tx.Client().Account.UpdateOneID(a.ID).SetSchedulable(tc.before).Exec(ctx))
-			var taskID int64
-			require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO openai_oauth_reauth_tasks
+			rows, err := tx.Client().QueryContext(ctx, `INSERT INTO openai_oauth_reauth_tasks
  (account_id,status,stage,expected_credentials_hash,worker_id)
  VALUES ($1,$2,$3,'synthetic-hash','worker') RETURNING id`,
-				a.ID, service.OpenAIOAuthReauthStatusCallbackProcessing, service.OpenAIOAuthReauthStageApplyingCredentials).Scan(&taskID))
+				a.ID, service.OpenAIOAuthReauthStatusCallbackProcessing, service.OpenAIOAuthReauthStageApplyingCredentials)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = rows.Close() })
+			require.True(t, rows.Next(), "the callback task must be created in the account transaction")
+			var taskID int64
+			require.NoError(t, rows.Scan(&taskID))
+			require.NoError(t, rows.Err())
+			require.NoError(t, rows.Close())
 
 			applied, err := repo.ApplyOpenAIOAuthReauth(ctx, taskID, "worker", a.ID, old,
 				map[string]any{"access_token": "new", "refresh_token": "new-rt"}, nil)
