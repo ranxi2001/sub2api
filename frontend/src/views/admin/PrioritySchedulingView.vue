@@ -354,8 +354,8 @@ function formatRate(value: number) {
   return value > 0 ? `${(value * 100).toFixed(1)}%` : '—'
 }
 function latencyClass(value: number) {
-  const target = draft.value?.target_ttft_ms ?? 3000
-  if (!value) return 'text-gray-400'
+  const target = latency.value?.target_ttft_ms
+  if (!value || !target) return 'text-gray-400'
   if (value <= target) return 'text-emerald-600'
   if (value <= target * 2) return 'text-amber-600'
   return 'text-red-600'

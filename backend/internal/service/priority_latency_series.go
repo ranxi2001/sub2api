@@ -61,6 +61,7 @@ type PriorityLatencyAccountSeries struct {
 
 type PriorityLatencySeries struct {
 	ConfigRevision     string                         `json:"config_revision"`
+	TargetTTFTMs       int                            `json:"target_ttft_ms,omitempty"`
 	At                 time.Time                      `json:"at"`
 	Model              string                         `json:"model"`
 	GroupID            *int64                         `json:"group_id"`

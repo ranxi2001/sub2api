@@ -83,9 +83,12 @@ describe('priority explicit scope filters', () => {
     expect(oldSignal?.aborted, 'save barrier must cancel the old HTTP read').toBe(true)
     old.resolve({ data: analysis({ model: 'not-in-latest-pool', group_id: 11, minutes: 15 }, 'R1') }); await oldRead; await flushPromises()
     expect(vm.snapshot.config_revision, 'complete old R1 pair must not publish across successful save').not.toBe('R1')
-    fresh.resolve({ data: analysis({ model: 'not-in-latest-pool', group_id: 11, minutes: 15 }, 'R2') }); await flushPromises()
+    const freshPair = analysis({ model: 'not-in-latest-pool', group_id: 11, minutes: 15 }, 'R2')
+    freshPair.latency.target_ttft_ms = 4000
+    fresh.resolve({ data: freshPair }); await flushPromises()
     expect(vm.snapshot.config_revision).toBe('R2'); expect(vm.latency.config_revision).toBe('R2')
     expect(vm.draft.target_ttft_ms).toBe(9000); expect(vm.groups).toBe('17'); expect(vm.modelsText).toBe('new-unsaved-model')
+    expect(vm.latencyClass(5000), 'latency color must use the captured analysis target, never the unsaved draft').toBe('text-amber-600')
     expect(reads().at(-1)?.[1]).toMatchObject({ params: { model: 'not-in-latest-pool', group_id: 11, minutes: 15 } })
     await vm.refresh(); await flushPromises()
     expect(vm.draft.target_ttft_ms).toBe(9000)
@@ -160,7 +163,7 @@ describe('priority explicit scope filters', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(15000); await flushPromises()
     expect(reads()).toHaveLength(4)
-    expect(reads().every(([, options]) => JSON.stringify(options) === JSON.stringify({ params: { model: 'fixture-model', group_id: 11, minutes: 60 } }))).toBe(true)
+    expect(reads().every(([, options]) => JSON.stringify((options as any)?.params) === JSON.stringify({ model: 'fixture-model', group_id: 11, minutes: 60 }))).toBe(true)
     expect(vi.mocked(apiClient.get).mock.calls.some(([url]) => url === '/admin/priority-scheduling/snapshot')).toBe(false)
     for (const name of ['candidate', 'latency']) {
       expect(wrapper!.getComponent(`[data-testid="${name}-pagination"]`).props()).toMatchObject({ page: 3, pageSize: 10 })

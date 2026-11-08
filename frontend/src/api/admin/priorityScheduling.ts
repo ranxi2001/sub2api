@@ -138,6 +138,7 @@ export interface PriorityLatencyAccount {
 }
 export interface PriorityLatencySeries {
   config_revision?: string
+  target_ttft_ms?: number
   at: string
   model: string
   group_id: number | null

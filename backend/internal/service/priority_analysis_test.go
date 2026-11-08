@@ -64,6 +64,7 @@ func TestPriorityAnalysisCompleteExplicitScope(t *testing.T) {
 	require.Equal(t, group, *history.signals.GroupID)
 	require.Equal(t, 15, got.Snapshot.WindowMinutes)
 	require.Equal(t, priorityConfigRevision(cfg), got.Snapshot.ConfigRevision)
+	require.Equal(t, cfg.TargetTTFTMs, got.Latency.TargetTTFTMs, "display target must come from the captured revision")
 	require.Equal(t, history.signals.UsageUntil, history.buckets.Until)
 	require.Equal(t, history.signals.UsageSince, history.buckets.Since)
 	require.Nil(t, got.Snapshot.Candidates[0].LoadPercent, "unobserved live capacity is unknown, never invented zero")

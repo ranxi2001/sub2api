@@ -29,14 +29,25 @@ func (s *OpenAIGatewayService) PriorityAnalysis(ctx context.Context, q PriorityA
 	if s == nil || s.settingService == nil {
 		return nil, ErrPriorityLatencySeriesUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, priorityAnalysisTimeout)
 	defer cancel()
-	cfg, err := s.settingService.GetPrioritySchedulingConfig(ctx)
+	preparation, release, err := s.priorityAnalysis.prepare(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Release preparation before joining a flight, including every error path.
+	released := false
+	defer func() {
+		if !released {
+			release()
+		}
+	}()
+	cfg, err := s.settingService.GetPrioritySchedulingConfig(preparation)
 	if err != nil {
 		return nil, err
 	}
 	if s.channelService != nil && q.GroupID != nil {
-		lookup, err := s.priorityAnalysisChannel(ctx, *q.GroupID)
+		lookup, err := s.priorityAnalysisChannel(preparation, *q.GroupID)
 		if err != nil {
 			return nil, fmt.Errorf("priority analysis mapping: %w", err)
 		}
@@ -44,7 +55,21 @@ func (s *OpenAIGatewayService) PriorityAnalysis(ctx context.Context, q PriorityA
 			q.RouteModel = resolveMapping(lookup, *q.GroupID, q.Model).MappedModel
 		}
 	}
-	return ReadPriorityAnalysis(ctx, s.accountRepo, s.usageLogRepo, cfg, q)
+	key := priorityAnalysisFlightKey{model: q.Model, routeModel: q.RouteModel, revision: priorityConfigRevision(cfg), minutes: q.Minutes}
+	key.principal, _ = ctx.Value(priorityAnalysisPrincipalKey{}).(string)
+	if key.principal == "" {
+		key.private = new(byte)
+	}
+	if q.GroupID != nil {
+		id := *q.GroupID
+		q.GroupID = &id
+		key.group = id
+	}
+	release()
+	released = true
+	return s.priorityAnalysis.read(ctx, key, func(work context.Context) (*PriorityAnalysis, error) {
+		return ReadPriorityAnalysis(work, s.accountRepo, s.usageLogRepo, cfg, q)
+	})
 }
 
 // ReadPriorityAnalysis only uses repository reads and locally owned scores. It
@@ -105,7 +130,7 @@ func ReadPriorityAnalysis(ctx context.Context, accounts AccountRepository, usage
 		}
 	}
 	snapshot := &PrioritySchedulingSnapshot{At: now, EvaluatedAt: now, Model: q.Model, GroupID: q.GroupID, Mode: cfg.Mode, SelectionPolicy: "read_only_analysis", ConfigRevision: revision, WindowMinutes: q.Minutes, MinSamples: cfg.MinSamples, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, LatencyPenaltyMode: cfg.LatencyPenaltyMode, HistoryReady: true, HistoryStatus: "ready", HistoryObservedAt: &now, HistoryWindowEnd: &now, Candidates: make([]PrioritySchedulingScore, 0, len(ids))}
-	series := &PriorityLatencySeries{ConfigRevision: revision, At: now, Model: q.Model, GroupID: q.GroupID, BucketMinutes: 5, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, Accounts: make([]PriorityLatencyAccountSeries, 0, len(ids))}
+	series := &PriorityLatencySeries{ConfigRevision: revision, TargetTTFTMs: cfg.TargetTTFTMs, At: now, Model: q.Model, GroupID: q.GroupID, BucketMinutes: 5, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, Accounts: make([]PriorityLatencyAccountSeries, 0, len(ids))}
 	byAccount := make(map[int64][]PriorityLatencyBucket)
 	for _, b := range buckets {
 		byAccount[b.AccountID] = append(byAccount[b.AccountID], b)

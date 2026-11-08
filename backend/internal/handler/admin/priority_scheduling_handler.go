@@ -1,11 +1,14 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -132,7 +135,13 @@ func (h *AccountHandler) PrioritySchedulingAnalysis(c *gin.Context) {
 		response.BadRequest(c, "model is required (maximum 200 bytes)")
 		return
 	}
-	result, err := h.openAIGatewayService.PriorityAnalysis(c.Request.Context(), q)
+	ctx := c.Request.Context()
+	if subject, ok := middleware.GetAuthSubjectFromContext(c); ok {
+		role, _ := middleware.GetUserRoleFromContext(c)
+		identity, _ := json.Marshal([]any{subject.UserID, role, c.GetString("auth_method"), adminaccess.FromContext(ctx)})
+		ctx = service.WithPriorityAnalysisPrincipal(ctx, string(identity))
+	}
+	result, err := h.openAIGatewayService.PriorityAnalysis(ctx, q)
 	if err != nil {
 		response.Error(c, http.StatusServiceUnavailable, "Priority analysis read failed")
 		return

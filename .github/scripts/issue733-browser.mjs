@@ -65,7 +65,7 @@ const config = { enabled: true, mode: 'balanced', group_ids: [11], models: ['dem
 const now = () => new Date(Date.UTC(2026, 10, 8, 9, state.tick)).toISOString()
 const accounts = () => Array.from({ length: state.count }, (_, i) => ({ account_id: i + 1, account_name: `Demo account ${String(i + 1).padStart(3, '0')}`, score: 80 - i / 10 + state.tick, tier: i % 9 === 0 ? 'degraded' : 'eligible', reasons: i % 9 === 0 ? ['latency_above_target'] : [], priority: i % 3, concurrency: 10, load_factor: 10, load_percent: (i * 7) % 80, waiting: 0, rate: 0.5, revenue: 2.5, theoretical_cost: 0.5, profit: 2, margin: 0.8, economics_source: 'usage', profit_samples: 30, samples: 30, p90_ttft_ms: 1200 + i * 20 + state.tick, quality_passed: 29, quality_samples: 30, error_rate: 0.03, error_successes: 29, error_failures: 1, error_window_minutes: 10, error_endpoint: state.endpoint, error_observed_at: now(), bound_groups: 2, selection_weight: 2.5 }))
 function snap() { const rows = accounts(); return { at: now(), evaluated_at: now(), model: state.model, group_id: state.group, mode: 'balanced', config_revision: state.revision, history_ready: true, history_status: 'ready', latency_percentile: 90, latency_measurement: 'legacy_forward', window_minutes: 60, candidates: state.reverse ? rows.reverse() : rows } }
-function latency(minutes) { const rows = accounts().map((r, i) => ({ ...r, p50_ttft_ms: 700 + i, p99_ttft_ms: 3500 + i, error_rate: 0.03, slow_samples: 1, error_samples: 1, buckets: Array.from({ length: minutes / 5 }, (_, b) => ({ account_id: r.account_id, bucket: new Date(Date.UTC(2026, 10, 8, 6, b * 5)).toISOString(), samples: 5, p50_ttft_ms: 700, p90_ttft_ms: 1200 + b * 40 + i, p99_ttft_ms: 3500, slow_samples: 1, error_samples: 1 })) })); return { at: now(), model: state.model, group_id: state.group, bucket_minutes: 5, config_revision: state.revision, latency_percentile: 90, latency_measurement: 'legacy_forward', accounts: state.reverse ? rows.reverse() : rows } }
+function latency(minutes) { const rows = accounts().map((r, i) => ({ ...r, p50_ttft_ms: 700 + i, p99_ttft_ms: 3500 + i, error_rate: 0.03, slow_samples: 1, error_samples: 1, buckets: Array.from({ length: minutes / 5 }, (_, b) => ({ account_id: r.account_id, bucket: new Date(Date.UTC(2026, 10, 8, 6, b * 5)).toISOString(), samples: 5, p50_ttft_ms: 700, p90_ttft_ms: 1200 + b * 40 + i, p99_ttft_ms: 3500, slow_samples: 1, error_samples: 1 })) })); return { at: now(), model: state.model, group_id: state.group, bucket_minutes: 5, target_ttft_ms: config.target_ttft_ms, config_revision: state.revision, latency_percentile: 90, latency_measurement: 'legacy_forward', accounts: state.reverse ? rows.reverse() : rows } }
 let heldLatency = null
 async function routeBackend(page) {
   await page.route('**/fixture/**', async route => {
@@ -77,7 +77,7 @@ async function routeBackend(page) {
     else if (endpoint === 'config') body = config
     else if (endpoint === 'analysis') {
       const model=url.searchParams.get('model'), group=Number(url.searchParams.get('group_id'))||null, minutes=Number(url.searchParams.get('minutes'))
-      assert(['demo-model','archive-model','not-in-latest-pool'].includes(model)); assert([null,11,17].includes(group)); assert([15,60,180].includes(minutes))
+      assert(['demo-model','archive-model','not-in-latest-pool','public-alias'].includes(model)); assert([null,11,17,23].includes(group)); assert([15,60,180].includes(minutes))
       body={snapshot:{...snap(),model,group_id:group,window_minutes:minutes},latency:{...latency(minutes),model,group_id:group}}
       if(state.latencyError||state.snapshotError)status=503
       if(heldLatency){const hold=heldLatency;heldLatency=null;hold.started();await hold.promise}
@@ -148,6 +148,29 @@ try {
   await page.getByTestId('priority-group-filter').locator('button').first().click()
   await page.getByRole('option',{name:'Archive group (#17)',exact:true}).click()
   await page.waitForFunction(()=>window.fixtureView().snapshot?.group_id===17&&!window.fixtureView().refreshing)
+
+  // Real strict-platform catalogs must permit Composite and retain its public alias.
+  await page.getByTestId('priority-group-filter').locator('button').first().click()
+  assert.equal(await page.getByRole('option',{name:'Anthropic group (#29)',exact:true}).count(),0)
+  await page.getByRole('option',{name:'Composite group (#23)',exact:true}).click()
+  await page.waitForFunction(()=>window.fixtureView().snapshot?.group_id===23&&!window.fixtureView().refreshing)
+  await page.getByTestId('priority-model-filter').locator('button').first().click()
+  await page.locator('.select-search-input').fill('public-alias')
+  await page.getByRole('option').filter({hasText:'public-alias'}).click()
+  await page.waitForFunction(()=>window.fixtureView().snapshot?.model==='public-alias'&&!window.fixtureView().refreshing)
+  for(const group of [17,23]) {
+    await page.getByTestId('priority-group-filter').locator('button').first().click()
+    await page.getByRole('option',{name:group===17?'Archive group (#17)':'Composite group (#23)',exact:true}).click()
+    await page.waitForFunction(group=>window.fixtureView().snapshot?.group_id===group&&!window.fixtureView().refreshing,group)
+    assert.equal(await page.evaluate(()=>window.fixtureView().selectedModel),'public-alias')
+  }
+  measurements.push({phase:'followup-composite-switch',group:23,model:'public-alias',catalog:'strict openai + composite'})
+  await screenshot(page,'after-composite-public-alias.png','candidate')
+  await page.getByTestId('priority-model-filter').locator('button').first().click()
+  await page.getByRole('option',{name:'archive-model',exact:true}).click()
+  await page.getByTestId('priority-group-filter').locator('button').first().click()
+  await page.getByRole('option',{name:'Archive group (#17)',exact:true}).click()
+  await page.waitForFunction(()=>window.fixtureView().snapshot?.group_id===17&&window.fixtureView().snapshot?.model==='archive-model'&&!window.fixtureView().refreshing)
 
   assert.equal(await page.getByTestId('latency-toggle').getAttribute('aria-expanded'), 'false')
   assert.equal(await page.locator('#priority-latency-content').isVisible(), false)
