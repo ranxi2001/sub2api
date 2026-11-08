@@ -187,7 +187,9 @@ describe('priority scheduling', () => {
     const wrapper = mount(PrioritySchedulingView); await flushPromises()
     await wrapper.get('[data-testid="mode"]').setValue('custom')
     vi.mocked(getPrioritySnapshot).mockRejectedValueOnce(new Error('offline'))
-    await (wrapper.vm as any).refresh(); expect(wrapper.findAll('[role="alert"]').map(alert => alert.text()).join(' ')).toContain('priorityScheduling.error')
+    await (wrapper.vm as any).refresh(); expect(wrapper.get('[data-testid="candidate-status"]').attributes('role')).toBe('alert')
+    expect(wrapper.get('[data-testid="candidate-status"]').text()).toContain('priorityScheduling.reading.stale')
+    expect((wrapper.vm as any).snapshotError).toBe('priorityScheduling.error')
     expect((wrapper.get('[data-testid="mode"]').element as HTMLSelectElement).value).toBe('custom'); wrapper.unmount()
   })
   it('ignores in-flight settings after logout', async () => {

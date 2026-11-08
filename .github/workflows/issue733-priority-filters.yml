@@ -75,6 +75,25 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Fixed mapped-catalog error-cache behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/filters-pg"
+          git fetch origin 82e27a58c9b49c42c0afc6aa22ee8b536e5a2958
+          git worktree add --detach "$RUNNER_TEMP/filters-mapping-baseline" 82e27a58c9b49c42c0afc6aa22ee8b536e5a2958
+          cp backend/internal/service/priority_analysis_channel_regression_test.go "$RUNNER_TEMP/filters-mapping-baseline/backend/internal/service/"
+          git show 82e27a58c9b49c42c0afc6aa22ee8b536e5a2958:backend/internal/service/priority_analysis.go > "$RUNNER_TEMP/filters-pg/mapping-baseline.go"
+          cmp "$RUNNER_TEMP/filters-pg/mapping-baseline.go" "$RUNNER_TEMP/filters-mapping-baseline/backend/internal/service/priority_analysis.go"
+          set +e
+          (cd "$RUNNER_TEMP/filters-mapping-baseline/backend" && go test -tags=unit ./internal/service -run '^TestPriorityAnalysisMappingErrorCannotBecomeEmptySuccess$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/filters-pg/mapping-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/filters-pg/mapping-red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestPriorityAnalysisMappingErrorCannotBecomeEmptySuccess' "$RUNNER_TEMP/filters-pg/mapping-red.log"
+          grep -q -- 'a failed mapping read must never become an empty successful catalog' "$RUNNER_TEMP/filters-pg/mapping-red.log"
+          ! grep -Eq 'build failed|undefined:|no tests to run|panic:' "$RUNNER_TEMP/filters-pg/mapping-red.log"
       - name: Real adapters and read-only scope unit regressions
         run: cd backend && go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^(TestPriorityAnalysis|TestPriorityRecompute|TestPriorityLatencySeries)' -count=1 -v -timeout=10m
       - name: Fixed baseline real PostgreSQL upper-bound RED

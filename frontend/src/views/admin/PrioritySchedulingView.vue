@@ -55,8 +55,7 @@
           </button>
 
         </header>
-        <p data-testid="latency-status" role="status" class="px-5 pb-3 text-xs text-gray-500">{{ t(latencyError ? (latency ? 'priorityScheduling.reading.stale' : 'priorityScheduling.latencyPanel.error') : latencyLoading ? (latency ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.loading') : latency ? 'priorityScheduling.filters.updated' : 'priorityScheduling.filters.choose') }}</p>
-        <p v-if="latencyError" role="alert" class="px-5 pb-3 text-sm text-red-600">{{ latencyError }}</p>
+        <p data-testid="latency-status" :role="latencyError ? 'alert' : 'status'" class="reading-status px-5 pb-3 text-xs" :class="latencyError ? 'text-red-600' : 'text-gray-500'">{{ t(latencyError ? (latency ? 'priorityScheduling.reading.stale' : 'priorityScheduling.latencyPanel.error') : latencyLoading ? (latency ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.loading') : latency ? 'priorityScheduling.filters.updated' : 'priorityScheduling.filters.choose') }}</p>
         <div id="priority-latency-content" data-latency-content v-show="latencyExpanded" class="latency-content border-t border-gray-100 dark:border-dark-700">
           <details class="px-5 py-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.latencyPanel.hint') }}</p></details>
           <p v-if="latency" class="px-5 pb-3 text-xs text-gray-500">{{ new Date(latency.at).toLocaleString() }} · {{ latency.model }} · {{ t('priorityScheduling.group') }}: {{ latency.group_id ?? '—' }} · P{{ latency.latency_percentile ?? 90 }} · {{ latency.latency_measurement ?? 'legacy_forward' }} · {{ latency.bucket_minutes }}m</p>
@@ -87,8 +86,7 @@
         <header class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('priorityScheduling.filters.candidates') }}</h2><div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary" :disabled="recomputeLoading" data-testid="recompute" @click="recompute">{{ t(recomputeLoading ? 'priorityScheduling.recompute.running' : 'priorityScheduling.filters.recomputeLatest') }}</button><button class="btn btn-secondary" :disabled="refreshing" @click="refresh">{{ t('priorityScheduling.refresh') }}</button></div></header>
         <p v-if="recomputeError" role="alert" class="mt-3 text-red-600">{{ recomputeError }}</p>
         <details class="my-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.filters.analysisHint') }}</p></details>
-        <p v-if="snapshotError" role="alert" class="text-red-600">{{ snapshotError }}</p>
-        <p v-if="!snapshot" data-testid="snapshot-initial-state" role="status" class="py-8 text-center text-sm text-gray-500">{{ t(snapshotError ? 'priorityScheduling.error' : refreshing ? 'priorityScheduling.loading' : 'priorityScheduling.filters.choose') }}</p>
+        <p v-if="!snapshot" data-testid="snapshot-initial-state" :role="snapshotError ? 'alert' : 'status'" class="py-8 text-center text-sm text-gray-500">{{ t(snapshotError ? 'priorityScheduling.error' : refreshing ? 'priorityScheduling.loading' : 'priorityScheduling.filters.choose') }}</p>
         <template v-else>
           <p data-testid="priority-snapshot-at" class="mb-4 text-sm text-gray-500">{{ new Date(snapshot.at).toLocaleString() }} · {{ t('priorityScheduling.model') }}: {{ snapshot.model }} · {{ t('priorityScheduling.group') }}: {{ snapshot.group_id ?? '—' }} · {{ t(`priorityScheduling.modes.${snapshot.mode}`) }} · {{ t('priorityScheduling.latencyPenaltyMode') }}: {{ t(`priorityScheduling.latencyPenaltyModes.${snapshot.latency_penalty_mode || 'deprioritize'}`) }}</p>
           <p v-if="snapshot.history_status && snapshot.history_status !== 'ready'" role="status" class="text-sm text-amber-600">{{ t(`priorityScheduling.historyStates.${snapshot.history_status}`) }}</p>
@@ -97,7 +95,7 @@
           <p v-if="snapshot.evaluated_at && snapshot.evaluated_at !== snapshot.at" data-testid="priority-evaluated-at" class="mb-3 text-xs text-gray-500">{{ t('priorityScheduling.evaluatedAt') }}: {{ new Date(snapshot.evaluated_at).toLocaleString() }}<template v-if="snapshot.history_observed_at"> · {{ t('priorityScheduling.historyObservedAt') }}: {{ new Date(snapshot.history_observed_at).toLocaleString() }}</template></p>
           <p v-if="snapshot.latency_fallback" role="status" class="mb-3 text-sm text-amber-600" data-testid="priority-latency-fallback">{{ t('priorityScheduling.latencyFallback') }}</p>
           <p class="mb-3 text-xs text-gray-500">P{{ snapshot.latency_percentile ?? 90 }} · {{ snapshot.latency_measurement ?? 'legacy_forward' }} · {{ t('priorityScheduling.window_minutes') }}: {{ snapshot.window_minutes ?? '—' }} · {{ t('priorityScheduling.configRevision') }}: {{ snapshot.config_revision ?? '—' }}<template v-if="snapshot.history_window_end"> · {{ t('priorityScheduling.windowEnd') }}: {{ new Date(snapshot.history_window_end).toLocaleString() }}</template></p>
-          <p data-testid="candidate-status" role="status" class="mb-3 text-xs text-gray-500">{{ t(snapshotError ? 'priorityScheduling.reading.stale' : refreshing ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.filters.updated') }}</p>
+          <p data-testid="candidate-status" :role="snapshotError ? 'alert' : 'status'" class="reading-status mb-3 text-xs" :class="snapshotError ? 'text-red-600' : 'text-gray-500'">{{ t(snapshotError ? 'priorityScheduling.reading.stale' : refreshing ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.filters.updated') }}</p>
           <div class="mb-3 flex flex-wrap items-center justify-between gap-3"><span class="text-sm font-medium">{{ t('priorityScheduling.account') }} ({{ candidateRows.length }})</span><label class="flex items-center gap-2 text-sm sm:hidden">{{ t('priorityScheduling.reading.pageSize') }}<select v-model.number="candidatePageSize" class="input" data-testid="candidate-mobile-size"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select></label></div>
           <div v-if="candidateRows.length" data-testid="priority-candidate-scroll" class="overflow-x-auto">
           <DataTable :key="displayScope(snapshot)" data-testid="candidate-table" data-reading-scroll="candidates" class="reading-table candidate-table" :columns="candidateColumns" :data="candidatePageRows" row-key="account_id">
@@ -564,6 +562,7 @@ onBeforeUnmount(() => { stopHistoryRefresh(); alive = false; generation++ })
 </script>
 <style scoped>
 .card { @apply rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900; }
+.reading-status { min-height: 3rem; }
 .field-title { @apply mb-2 block text-xs font-medium text-gray-600 dark:text-gray-300; }
 input[type=checkbox] { @apply h-4 w-4 rounded text-primary-600; }
 .latency-panel { transition-property: background-color, border-color, box-shadow; display: flex; flex-direction: column; max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); }

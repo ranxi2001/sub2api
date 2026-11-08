@@ -29,12 +29,14 @@ func (s *OpenAIGatewayService) PriorityAnalysis(ctx context.Context, q PriorityA
 	if s == nil || s.settingService == nil {
 		return nil, ErrPriorityLatencySeriesUnavailable
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	cfg, err := s.settingService.GetPrioritySchedulingConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if s.channelService != nil && q.GroupID != nil {
-		lookup, err := s.channelService.lookupGroupChannel(ctx, *q.GroupID)
+		lookup, err := s.priorityAnalysisChannel(ctx, *q.GroupID)
 		if err != nil {
 			return nil, fmt.Errorf("priority analysis mapping: %w", err)
 		}
@@ -170,7 +172,7 @@ func (s *OpenAIGatewayService) PriorityAnalysisModels(ctx context.Context, group
 		extra = append(extra, cfg.Models...)
 	}
 	if s.channelService != nil && groupID != nil {
-		lookup, err := s.channelService.lookupGroupChannel(ctx, *groupID)
+		lookup, err := s.priorityAnalysisChannel(ctx, *groupID)
 		if err != nil {
 			return nil, err
 		}
@@ -218,4 +220,48 @@ func priorityAnalysisModelNames(accounts []Account, groupID *int64, extra []stri
 	}
 	slices.Sort(out)
 	return out
+}
+
+// Read the selected channel directly. Routing's shared error cache intentionally
+// fails open; diagnostics must propagate those failures instead of reporting an
+// authoritative empty pool. The temporary mapping cache is owned by this call.
+func (s *OpenAIGatewayService) priorityAnalysisChannel(ctx context.Context, groupID int64) (*channelLookup, error) {
+	if s.channelService == nil {
+		return nil, nil
+	}
+	if s.channelService.repo == nil {
+		return nil, ErrPriorityLatencySeriesUnavailable
+	}
+	repo := s.channelService.repo
+	id, err := repo.GetChannelIDByGroupID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if id == 0 {
+		return nil, nil
+	}
+	channel, err := repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if channel == nil {
+		return nil, errors.New("priority analysis channel missing")
+	}
+	if !channel.IsActive() {
+		return nil, nil
+	}
+	platforms, err := repo.GetGroupPlatforms(ctx, []int64{groupID})
+	if err != nil {
+		return nil, err
+	}
+	platform := platforms[groupID]
+	if platform == "" {
+		return nil, errors.New("priority analysis group platform missing")
+	}
+	cache := populateChannelCache([]Channel{*channel}, platforms)
+	owned := cache.channelByGroupID[groupID]
+	if owned == nil {
+		return nil, errors.New("priority analysis channel binding changed")
+	}
+	return &channelLookup{cache: cache, channel: owned, platform: channelLookupPlatform(ctx, platform)}, nil
 }
