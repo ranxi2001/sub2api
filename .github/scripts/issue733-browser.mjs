@@ -182,7 +182,7 @@ try {
   const after = await geometry(page)
   for (const item of before) {
     const next = after.find(row => row.name === item.name)
-    assert.deepEqual(next.ids, item.ids); assert.equal(next.row, item.row); assert(Math.abs(next.offset - item.offset) < 1); assert.equal(next.left, item.left); assert.equal(next.top, item.top); assert.equal(next.height, item.height)
+    assert.deepEqual(next.ids, item.ids); assert.equal(next.row, item.row); assert(Math.abs(next.offset - item.offset) < 1); assert.equal(next.left, item.left); if(item.name !== 'candidates') assert.equal(next.top, item.top); else assert(next.top > item.top, 'expanded earlier diagnostics require anchor compensation'); assert.equal(next.height, item.height)
     assert.equal(await page.locator(`[data-reading-scroll="${item.name}"]`).getAttribute('data-saved-node'), 'same')
   }
   assert.equal(await page.getByTestId('enabled').isChecked(), false)
