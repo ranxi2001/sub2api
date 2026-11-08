@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -132,11 +134,9 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	copyReq.URL = &copyURL
 	// The actual request may have already been consumed by a caller. Only the
 	// immutable final payload is used for the compatibility check.
-	bodyReq, err := http.NewRequestWithContext(ctx, http.MethodPost, copyURL.String(), bytes.NewReader(payload))
-	if err != nil {
-		return err
+	copyReq.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(payload)), nil
 	}
-	copyReq.GetBody = bodyReq.GetBody
 	finish, err := r.service.prepareOpenAIAgentRecoveryAttempt(ctx, account, copyReq)
 	if err != nil {
 		return err
@@ -152,11 +152,13 @@ func (r *openAIWSAgentRecovery) beginSocket(account *Account, source, payload []
 	if r == nil {
 		return nil
 	}
-	req, err := http.NewRequest(http.MethodPost, address, nil)
+	addressURL, err := url.Parse(address)
 	if err != nil {
 		return err
 	}
-	req.Header = headers
+	// A compatibility descriptor only; the existing transport owns URL
+	// validation and the physical socket. Never submit this synthetic request.
+	req := &http.Request{Method: http.MethodPost, URL: addressURL, Header: headers}
 	return r.begin(account, source, payload, req, mode)
 }
 
