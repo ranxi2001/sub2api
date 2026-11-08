@@ -154,7 +154,7 @@ jobs:
           test "$result" -ne 0
           ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-delivery-red.log"
           grep -q -- '--- FAIL: TestIssue715HTTPFailedDeliveryNeverGrantsOwner/json/error' "$RUNNER_TEMP/issue715-delivery-red.log"
-          grep -q -- '--- FAIL: TestIssue715HTTPFailedDeliveryNeverGrantsOwner/aggregate/cancel' "$RUNNER_TEMP/issue715-delivery-red.log"
+          grep -q -- '--- FAIL: TestIssue715HTTPFailedDeliveryNeverGrantsOwner/aggregate/error' "$RUNNER_TEMP/issue715-delivery-red.log"
           grep -q 'failed downstream delivery must not grant a successful owner' "$RUNNER_TEMP/issue715-delivery-red.log"
 
   red-generated:

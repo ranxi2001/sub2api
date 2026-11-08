@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -76,7 +78,10 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 		return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, request)
 	}
 	request.items = openAIAgentRecoveryItemDigests(body)
-	request.toolResult = gjson.GetBytes(body, "input.#(type==function_call_output)").Exists()
+	gjson.GetBytes(body, "input").ForEach(func(_, item gjson.Result) bool {
+		request.toolResult = request.toolResult || isCodexToolCallOutputItemType(item.Get("type").String())
+		return !request.toolResult
+	})
 	for _, item := range request.items {
 		request.keys = append(request.keys, request.itemKey(item))
 	}
@@ -313,9 +318,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 			return noop, nil
 		}
 	}
-	wire, _ := json.Marshal([]any{req.URL.String(), req.Header.Get("Authorization"),
-		req.Header.Get("ChatGPT-Account-Id"), req.Header.Get("OpenAI-Organization"), req.Header.Get("OpenAI-Project"),
-		req.Header.Values("OpenAI-Beta"), req.Header.Values("x-codex-beta-features"), req.Header.Values(responsesLiteHeader),
+	wire, _ := json.Marshal([]any{req.URL.String(), openAIAgentRecoveryWireHeaders(req.Header),
 		gjson.GetBytes(body, "model").String()})
 	binding := openAIAgentRecoveryBinding{accountID: account.ID, config: openAIAgentRecoveryConfig(account, request.model), wire: sha256.Sum256(wire), expiresAt: time.Now().Add(s.openAIWSSessionStickyTTL())}
 	if request.owner != nil && !sameOpenAIAgentRecoveryRoute(*request.owner, binding) {
@@ -433,4 +436,23 @@ func observeOpenAIAgentRecoveryOutput(c *gin.Context, body []byte, nested bool) 
 func OpenAIAgentToolResultContinuation(ctx context.Context) bool {
 	r := openAIAgentRecoveryFromContext(ctx)
 	return r != nil && r.owner != nil && r.toolResult
+}
+
+// Header overrides may retain wire casing rather than net/http's canonical
+// spelling. Header.Get/Values would miss those actual outbound identity fields.
+// Include every spelling/value deterministically, including duplicate variants.
+func openAIAgentRecoveryWireHeaders(header http.Header) []any {
+	var keys []string
+	for key := range header {
+		switch strings.ToLower(key) {
+		case "authorization", "chatgpt-account-id", "openai-organization", "openai-project", "openai-beta", "x-codex-beta-features", strings.ToLower(responsesLiteHeader):
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	values := make([]any, 0, len(keys))
+	for _, key := range keys {
+		values = append(values, []any{key, header[key]})
+	}
+	return values
 }

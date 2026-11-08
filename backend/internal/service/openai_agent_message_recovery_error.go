@@ -35,3 +35,10 @@ func (e *OpenAIAgentRecoveryError) ClientMessage() string {
 func openAIAgentRecoveryError(reason string) error {
 	return &OpenAIAgentRecoveryError{Reason: reason}
 }
+
+// Preserve completed upstream accounting while propagating downstream failure.
+// This is never eligible for retry/failover, even if no bytes were delivered.
+type openAINonStreamingDeliveryError struct{ err error }
+
+func (e *openAINonStreamingDeliveryError) Error() string { return e.err.Error() }
+func (e *openAINonStreamingDeliveryError) Unwrap() error { return e.err }

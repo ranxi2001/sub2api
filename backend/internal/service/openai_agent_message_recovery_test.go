@@ -268,3 +268,36 @@ func TestIssue715PlainRequestsWithoutSafeCaptureKeepOriginalBehavior(t *testing.
 		require.Empty(t, svc.agentMessageRecovery.bindings)
 	}
 }
+
+func TestIssue715RecoveryIncludesActualWireHeaderCasing(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+	c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+	req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(issue715OpaqueBody))
+	require.NoError(t, err)
+	req.Header["openai-organization"] = []string{"fixture-org-one"}
+	ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(issue715OpaqueBody), "fixture-session", "gpt-6-astra")
+	complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(issue715OpaqueBody))
+	require.NoError(t, err)
+	complete(true)
+	ctx = svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(issue715OpaqueBody), "fixture-session", "gpt-6-astra")
+	req.Header["openai-organization"] = []string{"fixture-org-two"}
+	_, err = svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(issue715OpaqueBody))
+	var recovery *OpenAIAgentRecoveryError
+	require.ErrorAs(t, err, &recovery, "a raw-cased wire identity change must not hide behind Header.Get")
+	require.Equal(t, "wire_changed", recovery.Reason)
+}
+
+func TestIssue715ToolResultContinuationCoversCodexOutputTypes(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	issue715LearnRoute(t, svc, account, issue715OpaqueBody)
+	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+	c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+	for _, typ := range codexToolCallOutputItemTypes {
+		body := issue715OpaqueBody[:len(issue715OpaqueBody)-2] + `,{"type":"` + typ + `","call_id":"fixture-call","output":"fixture already applied"}]}`
+		ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(body), "fixture-session", "gpt-6-astra")
+		require.True(t, OpenAIAgentToolResultContinuation(ctx), typ+" must stop ambiguous automatic replay")
+	}
+}

@@ -1558,6 +1558,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		var usage *OpenAIUsage
 		var firstTokenMs *int
 		var clientDisconnected bool
+		var downstreamDeliveryErr error
 		agentCompleted := false
 		responseID := ""
 		imageCount := 0
@@ -1653,7 +1654,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if phaseErr := openAIHTTPPhaseError(resp); phaseErr != nil {
 				return nil, handleOpenAIHTTPPhaseError(c, account, phaseErr)
 			}
-			if err != nil {
+			var deliveryErr *openAINonStreamingDeliveryError
+			if nonStreamResult != nil && errors.As(err, &deliveryErr) {
+				downstreamDeliveryErr = err
+				clientDisconnected = true
+			} else if err != nil {
 				if signal, ok := asOpenAICompactFallbackSignal(err); ok {
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
 						c, account, requestedModel, body, http.StatusBadRequest, signal.message, signal.payload, compactModelFallbackRetried,
@@ -1726,7 +1731,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			forwardResult.SearchCount = searchCount
 		}
 		stampOpenAIResponsesUpstreamEndpoint(c, forwardResult)
-		return forwardResult, nil
+		return forwardResult, downstreamDeliveryErr
 	}
 }
 

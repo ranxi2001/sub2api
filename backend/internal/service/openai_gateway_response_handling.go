@@ -1936,14 +1936,13 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
+	var deliveryErr error
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
-		if err := writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body); err != nil {
-			return nil, err
-		}
+		deliveryErr = writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body)
 	}
 
 	observeOpenAIAgentRecoveryOutput(c, body, false)
-	return &openaiNonStreamingResult{
+	result := &openaiNonStreamingResult{
 		agentCompleted:   openAIAgentCompletedResponse(body, false),
 		OpenAIUsage:      usage,
 		usage:            usage,
@@ -1951,7 +1950,12 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
 		searchCount:      countGrokNativeSearchCallsFromJSONBytes(body),
-	}, nil
+	}
+	if deliveryErr != nil {
+		result.agentCompleted = false
+		return result, &openAINonStreamingDeliveryError{err: deliveryErr}
+	}
+	return result, nil
 }
 
 func isEventStreamResponse(header http.Header) bool {
@@ -2061,16 +2065,15 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			contentType = "text/event-stream"
 		}
 	}
+	var deliveryErr error
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		// 上游的 Content-Type（text/event-stream）已复制到响应头，而 c.Data
 		// 不会覆盖已存在的 Content-Type，这里需显式设置为聚合后的类型。
-		if err := writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body); err != nil {
-			return nil, err
-		}
+		deliveryErr = writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body)
 	}
 
 	observeOpenAIAgentRecoveryOutput(c, body, false)
-	return &openaiNonStreamingResult{
+	result := &openaiNonStreamingResult{
 		agentCompleted:   terminalOK && terminalType == "response.completed" && openAIAgentCompletedResponse(terminalPayload, true),
 		OpenAIUsage:      usage,
 		usage:            usage,
@@ -2078,7 +2081,12 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
 		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
 		searchCount:      countGrokNativeSearchCallsFromSSEBody(bodyText),
-	}, nil
+	}
+	if deliveryErr != nil {
+		result.agentCompleted = false
+		return result, &openAINonStreamingDeliveryError{err: deliveryErr}
+	}
+	return result, nil
 }
 
 // Gin's Data renderer discards the downstream Write error. A completed upstream

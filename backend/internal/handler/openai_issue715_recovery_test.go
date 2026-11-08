@@ -506,3 +506,68 @@ func TestIssue715HTTPRecoveryCannotBypassLongContextPermission(t *testing.T) {
 	require.Equal(t, "context_unverifiable", gjson.Get(rec.Body.String(), "error.code").String())
 	require.Equal(t, []int64{1}, upstream.ids, "compatibility ownership must not override API-key permissions")
 }
+
+func TestIssue715HTTPFinalWireChangeHasCompatibilityEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accounts := issue715Accounts()
+	credentials := func(org string) map[string]any {
+		return map[string]any{"api_key": "fixture-key", "header_override_enabled": true, "header_overrides": map[string]any{"openai-organization": org}}
+	}
+	accounts[0].Type = service.AccountTypeAPIKey
+	accounts[0].Credentials = credentials("fixture-org-one")
+	upstream := &issue715Upstream{}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+	status, answer := issue715Request(t, handler, issue715Body(false, false), 99, "fixture-715-thread", false)
+	require.Equal(t, 200, status, answer)
+	accounts[0].Credentials = credentials("fixture-org-two")
+	status, answer = issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
+	require.Equal(t, 409, status, "final-send wire refusal must be a classified compatibility error")
+	require.Equal(t, "encrypted_agent_recovery_wire_changed", gjson.Get(answer, "error.code").String())
+	require.Equal(t, []int64{1}, upstream.ids, "changed final wire must be refused before upstream submission")
+}
+
+func TestIssue715HTTPFailedDeliveryKeepsCompletedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, format := range []string{"json", "aggregate"} {
+		for _, failure := range []string{"error", "short", "cancel"} {
+			t.Run(format+"/"+failure, func(t *testing.T) {
+				accounts := issue715Accounts()
+				upstream := &issue715Upstream{}
+				if format == "aggregate" {
+					upstream.mode = "aggregate"
+				}
+				handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+				body := issue715Body(false, false)
+				c, _ := newIssue715Context(t, body)
+				c.Request.Header.Set("session_id", "fixture-715-thread")
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				defer cancel()
+				c.Request = c.Request.WithContext(handler.gatewayService.WithOpenAIAgentMessageRecovery(ctx, c, []byte(body), "fixture-715-thread", "gpt-5.1"))
+				c.Writer = &issue715DeliveryWriter{ResponseWriter: c.Writer, mode: failure, cancel: cancel}
+				result, err := handler.gatewayService.Forward(c.Request.Context(), c, &accounts[0], []byte(body))
+				require.Error(t, err)
+				require.NotNil(t, result, "downstream delivery failure must retain completed upstream accounting")
+				require.True(t, result.ClientDisconnect)
+				require.EqualValues(t, 5, result.Usage.InputTokens)
+				require.EqualValues(t, 3, result.Usage.OutputTokens)
+				require.Equal(t, []int64{1}, upstream.ids)
+			})
+		}
+	}
+}
+
+func TestIssue715HTTPPoolCustomToolResultNeverReplays(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accounts := issue715Accounts()
+	accounts[0].Type = service.AccountTypeAPIKey
+	accounts[0].Credentials = map[string]any{"api_key": "fixture-key", "pool_mode": true, "pool_mode_retry_count": 2, "pool_mode_retry_status_codes": []any{520}}
+	upstream := &issue715Upstream{}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+	status, answer := issue715Request(t, handler, issue715Body(false, false), 99, "fixture-715-thread", false)
+	require.Equal(t, 200, status, answer)
+	body := strings.TrimSuffix(issue715Body(false, false), `]}`) + `,{"type":"custom_tool_call","name":"fixture_note","call_id":"custom_fixture_715","input":"note balance 18"},{"type":"custom_tool_call_output","call_id":"custom_fixture_715","output":"fixture note already written"}]}`
+	upstream.mode = "pool_failure"
+	issue715Request(t, handler, body, 99, "fixture-715-thread", false)
+	require.Equal(t, []int64{1, 1}, upstream.ids, "a custom tool result must also stop pool-mode auto replay")
+	require.Contains(t, string(upstream.bodies[1]), "fixture note already written")
+}
