@@ -74,7 +74,7 @@ v2 模式路由的解析优先级：分类型模式字符串 → 分类型布尔
 ### `http_bridge`（HTTP 桥接）
 
 - 客户端仍用 WS ingress，但网关把 turn 转成 HTTP 请求发往上游，再把 SSE 事件包装成 WS 事件返回。
-- HTTP 上游请求会移除 `previous_response_id`；连接内的普通续轮按已缓存的 input 和收集到的工具调用项重建上下文，不保证包含完整的 assistant 输出历史。不能仅凭任意或跨连接的 response ID 恢复完整对话。
+- legacy 无状态续轮通常移除 `previous_response_id`，按连接内缓存的 input 和工具调用项重建上下文，不保证包含完整的 assistant 输出历史；smart stateful 会话保留该锚点。加密代理项的归属保护也会保留该锚点，并在发送前核对账号、实际传输和 response 归属；对已知完整代理项，客户端显式 `store=true` 时还会保留客户端完整历史，避免 legacy 重建重复拼接任务。不能仅凭任意或跨连接的 response ID 恢复完整对话；完整边界见[加密代理任务续接](openai-agent-continuation.md)。
 - 失败后的跨账号重放仍受限制：需要可重建的 input，工具输出须有配对的调用上下文，且不能含账号绑定的加密内容或 `item_reference`；当前 turn 已向下游输出非心跳事件后不会因此切账号重放。
 - 确认上游 HTTP 可用、WS 不可用时可显式选用；仅凭 1013 / “no available account” 不能确定故障来源。
 - 它不是原生 WS 加速；上游仍走 HTTP/SSE，延迟特性以 HTTP 路径为准。

@@ -359,17 +359,47 @@ func TestIssue715HTTPRecoveryErrorsIdentifyCompatibility(t *testing.T) {
 func TestIssue715RecoveryErrorCommittedSSEEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := &OpenAIGatewayHandler{}
-	c, rec := newIssue715Context(t, issue715Body(true, true))
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.WriteHeaderNow()
-	require.True(t, handler.handleOpenAIAgentRecoveryError(c, &service.OpenAIAgentRecoveryError{Reason: "wire_changed"}, false))
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), "event: response.failed")
-	for _, line := range strings.Split(rec.Body.String(), "\n") {
-		if strings.HasPrefix(line, "data: ") {
-			payload := strings.TrimPrefix(line, "data: ")
-			require.Equal(t, "encrypted_agent_recovery_wire_changed", gjson.Get(payload, "response.error.code").String())
-			require.Equal(t, "failed", gjson.Get(payload, "response.status").String())
+	for _, test := range []struct{ reason, action string }{
+		{"delivery_pending", "do not resend tool results while delivery is uncertain"},
+		{"store_unavailable", "do not clear its records or switch accounts"},
+		{"owner_unavailable", "check the original account's access and availability"},
+		{"owner_conflict", "do not switch accounts or replay tool results"},
+		{"route_changed", "current authorized credentials"},
+		{"wire_changed", "verify the original endpoint, adapter and model"},
+	} {
+		for _, committed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/committed=%v", test.reason, committed), func(t *testing.T) {
+				c, rec := newIssue715Context(t, issue715Body(true, true))
+				if committed {
+					c.Writer.Header().Set("Content-Type", "text/event-stream")
+					c.Writer.WriteHeaderNow()
+				}
+				require.True(t, handler.handleOpenAIAgentRecoveryError(c, &service.OpenAIAgentRecoveryError{Reason: test.reason}, false))
+				payload, errorPath := rec.Body.String(), "error"
+				if committed {
+					require.Equal(t, http.StatusOK, rec.Code)
+					require.Contains(t, payload, "event: response.failed")
+					var data []string
+					for _, line := range strings.Split(payload, "\n") {
+						if strings.HasPrefix(line, "data: ") {
+							data = append(data, strings.TrimPrefix(line, "data: "))
+						}
+					}
+					require.Len(t, data, 1, "one terminal refusal, without a success event")
+					payload, errorPath = data[0], "response.error"
+					require.Equal(t, "failed", gjson.Get(payload, "response.status").String())
+				} else {
+					require.Equal(t, http.StatusConflict, rec.Code)
+					require.Equal(t, "invalid_request_error", gjson.Get(payload, errorPath+".type").String())
+				}
+				require.Equal(t, "encrypted_agent_recovery_"+test.reason, gjson.Get(payload, errorPath+".code").String())
+				message := gjson.Get(payload, errorPath+".message").String()
+				require.Contains(t, message, "Preserve this task and context")
+				require.Contains(t, message, test.action, "client must receive the appropriate next step, including after headers were committed")
+				if test.reason == "wire_changed" {
+					require.NotContains(t, message, "HTTP transport", "the same classification can come from WS")
+				}
+			})
 		}
 	}
 }
