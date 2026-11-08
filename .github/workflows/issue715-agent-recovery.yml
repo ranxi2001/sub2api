@@ -292,13 +292,18 @@ jobs:
           git rev-parse HEAD
           original=e7f54240d83765c90a98e961ad5e33b0fa35ab56
           target=backend/internal/service/openai_ws_agent_recovery.go
+          caller=backend/internal/service/openai_ws_forwarder_ingress.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "$target"; git diff --exit-code' EXIT
-          git restore --source="$original" -- "$target"
+          trap 'git restore --source=HEAD -- "$target" "$caller"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "$target" "$caller"
           expected=$(git rev-parse "$original:$target")
           actual=$(git hash-object "$target")
           echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
           test "$expected" = "$actual"
+          expected_caller=$(git rev-parse "$original:$caller")
+          actual_caller=$(git hash-object "$caller")
+          echo "baseline=$original path=$caller expected_blob=$expected_caller tested_blob=$actual_caller"
+          test "$expected_caller" = "$actual_caller"
           set +e
           (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715WSBridgeValidatesBuiltPayload$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-ws-wire-red.log" 2>&1
           result=$?
