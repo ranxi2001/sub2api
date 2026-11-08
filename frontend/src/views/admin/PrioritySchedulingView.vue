@@ -260,12 +260,12 @@ function readingRestore() {
   const saved = [...(readingRoot.value?.querySelectorAll<HTMLElement>('[data-reading-scroll], [data-latency-content]') ?? [])].map(el => {
     const bounds = el.getBoundingClientRect()
     const rows = readingAnchors(el)
-    const row = rows.find(item => item.getBoundingClientRect().bottom > bounds.top + 48)
+    const row = rows.find(item => item.getBoundingClientRect().bottom > bounds.top + 48) ?? rows.at(-1)
     return { el, left: el.scrollLeft, top: el.scrollTop, id: row?.dataset.rowId ?? row?.dataset.readingAccount, offset: row ? row.getBoundingClientRect().top - bounds.top : 0 }
   })
   return async () => {
     await nextTick()
-    for (const item of saved) {
+    for (const item of saved.reverse()) {
       if (!item.el.isConnected) continue
       item.el.scrollLeft = item.left
       const anchor = readingAnchors(item.el).find(row => (row.dataset.rowId ?? row.dataset.readingAccount) === item.id)
@@ -425,7 +425,7 @@ async function loadLatency() {
     const value = await getPriorityLatency(minutes, 5)
     if (!active(version) || request !== latencyRequestGeneration || minutes !== latencyMinutes.value || scope !== displayScope(snapshot.value)) return
     const current = snapshot.value!
-    if (value.model !== current.model || value.group_id !== current.group_id ||
+    if ((current.config_revision != null && value.config_revision !== current.config_revision) || value.model !== current.model || value.group_id !== current.group_id ||
       (current.latency_percentile != null && value.latency_percentile !== current.latency_percentile) ||
       (current.latency_measurement != null && value.latency_measurement !== current.latency_measurement)) {
       latencyError.value = t('priorityScheduling.latencyPanel.error')

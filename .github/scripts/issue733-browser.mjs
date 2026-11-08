@@ -67,7 +67,7 @@ const config = { enabled: true, mode: 'balanced', group_ids: [11], models: ['dem
 const now = () => new Date(Date.UTC(2026, 10, 8, 9, state.tick)).toISOString()
 const accounts = () => Array.from({ length: state.count }, (_, i) => ({ account_id: i + 1, account_name: `Demo account ${String(i + 1).padStart(3, '0')}`, score: 80 - i / 10 + state.tick, tier: i % 9 === 0 ? 'degraded' : 'eligible', reasons: i % 9 === 0 ? ['latency_above_target'] : [], priority: i % 3, concurrency: 10, load_factor: 10, load_percent: (i * 7) % 80, waiting: 0, rate: 0.5, revenue: 2.5, theoretical_cost: 0.5, profit: 2, margin: 0.8, economics_source: 'usage', profit_samples: 30, samples: 30, p90_ttft_ms: 1200 + i * 20 + state.tick, quality_passed: 29, quality_samples: 30, error_rate: 0.03, error_successes: 29, error_failures: 1, error_window_minutes: 10, error_endpoint: '/v1/responses', error_observed_at: now(), bound_groups: 2, selection_weight: 2.5 }))
 function snap() { const rows = accounts(); return { at: now(), evaluated_at: now(), model: state.model, group_id: state.group, mode: 'balanced', config_revision: state.revision, history_ready: true, history_status: 'ready', latency_percentile: 90, latency_measurement: 'legacy_forward', window_minutes: 60, candidates: state.reverse ? rows.reverse() : rows } }
-function latency(minutes) { const rows = accounts().map((r, i) => ({ ...r, p50_ttft_ms: 700 + i, p99_ttft_ms: 3500 + i, error_rate: 0.03, slow_samples: 1, error_samples: 1, buckets: Array.from({ length: minutes / 5 }, (_, b) => ({ account_id: r.account_id, bucket: new Date(Date.UTC(2026, 10, 8, 6, b * 5)).toISOString(), samples: 5, p50_ttft_ms: 700, p90_ttft_ms: 1200 + b * 40 + i, p99_ttft_ms: 3500, slow_samples: 1, error_samples: 1 })) })); return { at: now(), model: state.model, group_id: state.group, bucket_minutes: 5, latency_percentile: 90, latency_measurement: 'legacy_forward', accounts: state.reverse ? rows.reverse() : rows } }
+function latency(minutes) { const rows = accounts().map((r, i) => ({ ...r, p50_ttft_ms: 700 + i, p99_ttft_ms: 3500 + i, error_rate: 0.03, slow_samples: 1, error_samples: 1, buckets: Array.from({ length: minutes / 5 }, (_, b) => ({ account_id: r.account_id, bucket: new Date(Date.UTC(2026, 10, 8, 6, b * 5)).toISOString(), samples: 5, p50_ttft_ms: 700, p90_ttft_ms: 1200 + b * 40 + i, p99_ttft_ms: 3500, slow_samples: 1, error_samples: 1 })) })); return { at: now(), model: state.model, group_id: state.group, bucket_minutes: 5, config_revision: state.revision, latency_percentile: 90, latency_measurement: 'legacy_forward', accounts: state.reverse ? rows.reverse() : rows } }
 let heldLatency = null
 async function routeBackend(page) {
   await page.route('**/fixture/**', async route => {
@@ -108,9 +108,9 @@ async function setPager(page, name, pageSize, pageNumber) {
 }
 async function geometry(page) {
   return page.evaluate(() => [...document.querySelectorAll('[data-reading-scroll]')].map(el => {
-    const bounds = el.getBoundingClientRect(), rows = [...el.querySelectorAll('[data-row-id]')]
-    const row = rows.find(item => item.getBoundingClientRect().bottom > bounds.top + 48)
-    return { name: el.dataset.readingScroll, left: el.scrollLeft, top: el.scrollTop, height: bounds.height, scrollHeight: el.scrollHeight, width: el.clientWidth, scrollWidth: el.scrollWidth, row: row?.dataset.rowId, offset: row ? row.getBoundingClientRect().top - bounds.top : 0, ids: rows.map(item => item.dataset.rowId) }
+    const bounds = el.getBoundingClientRect(); let rows = [...el.querySelectorAll('[data-row-id]')]; if (!rows.length) rows = [...el.querySelectorAll('[data-reading-account]')]
+    const row = rows.find(item => item.getBoundingClientRect().bottom > bounds.top + 48) ?? rows.at(-1)
+    return { name: el.dataset.readingScroll, left: el.scrollLeft, top: el.scrollTop, height: bounds.height, scrollHeight: el.scrollHeight, width: el.clientWidth, scrollWidth: el.scrollWidth, row: row?.dataset.rowId ?? row?.dataset.readingAccount, offset: row ? row.getBoundingClientRect().top - bounds.top : 0, ids: rows.map(item => item.dataset.rowId ?? item.dataset.readingAccount) }
   }))
 }
 try {
