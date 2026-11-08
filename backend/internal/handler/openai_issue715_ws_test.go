@@ -106,9 +106,10 @@ func (u *issue715WSOracle) server(t *testing.T) *httptest.Server {
 
 func issue715WSNode(t *testing.T, mode, upstream string, cache service.GatewayCache, drift bool) *openAIWSPassthroughHandlerHarness {
 	t.Helper()
-	return newOpenAIWSPassthroughHandlerHarnessWithCache(t, upstream,
+	return newOpenAIWSPassthroughHandlerHarnessWithKey(t, upstream,
 		http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}},
 		map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false"}, cache,
+		func(key *service.APIKey) { key.AllowLongContext = true },
 		func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, repo *service.AccountRepository) {
 			a.ID, a.Priority = 1, 0
 			a.Credentials["api_key"] = "fixture-ws-one"
