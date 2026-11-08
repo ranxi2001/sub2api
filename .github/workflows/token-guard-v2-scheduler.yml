@@ -1,0 +1,87 @@
+name: Credential patrol scheduling
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/account_token_guard_v2*.go'
+      - 'backend/internal/repository/account_token_guard_v2*.go'
+      - 'backend/internal/service/openai_codex_models_service*.go'
+      - 'backend/internal/service/openai_credential_probe*.go'
+      - 'frontend/src/views/admin/ops/TokenGuardV2View.vue'
+      - 'frontend/src/views/admin/ops/__tests__/TokenGuardV2View.spec.ts'
+      - '.github/scripts/token-guard-v2-browser.mjs'
+      - '.github/workflows/token-guard-v2-scheduler.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  scheduler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Scheduling, cancellation and retained re-login budget under race detector
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-evidence
+          git rev-parse HEAD > test-evidence/head.txt
+          (cd backend && go test -race -tags=unit ./internal/service -run '^Test(AccountTokenGuardV2|ReloginBudget|ExhaustedRelogin|RestoredBudget)' -count=1 -v -timeout=10m) 2>&1 | tee test-evidence/scheduler.log
+      - name: PostgreSQL cutoff, lease fencing and budget persistence
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          (cd backend && go test -tags=integration ./internal/repository -run '^Test(AccountTokenGuardV2|ReloginBudget)' -count=1 -v -timeout=15m) 2>&1 | tee test-evidence/storage.log
+          if grep -Eq -- '--- SKIP:|no tests to run' test-evidence/storage.log; then exit 1; fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: credential-patrol-${{ github.event.pull_request.head.sha }}
+          path: test-evidence/
+          if-no-files-found: error
+
+  browser:
+    name: Actual credential operations UI / synthetic APIs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated browser for CI only
+        run: |
+          npm install --prefix "$RUNNER_TEMP/token-guard-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/token-guard-browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Real page before and after, readback and desktop/mobile screenshots
+        env:
+          CI: 'true'
+          TOKEN_GUARD_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/token-guard-browser/node_modules/playwright
+          TOKEN_GUARD_SCREENSHOT_DIR: ${{ runner.temp }}/token-guard-screenshots
+        run: node .github/scripts/token-guard-v2-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: credential-patrol-ui-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/token-guard-screenshots
+          if-no-files-found: error

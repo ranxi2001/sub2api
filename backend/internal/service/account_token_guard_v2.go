@@ -11,10 +11,12 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -27,6 +29,8 @@ const (
 	AccountTokenGuardV2ProbeInterval   = 30 * time.Minute
 	AccountTokenGuardV2RetryInterval   = 5 * time.Minute
 	accountTokenGuardV2LeaseDuration   = 2 * time.Minute
+	accountTokenGuardV2CycleDuration   = 90 * time.Second
+	accountTokenGuardV2ProbeWorkers    = 3
 	AccountTokenGuardV2ReloginCooldown = 30 * time.Minute
 	AccountTokenGuardV2FailThreshold   = 2
 
@@ -116,8 +120,9 @@ type AccountTokenGuardV2Repository interface {
 	PruneDeletedAccounts(ctx context.Context) (int64, error)
 	GetAccount(ctx context.Context, accountID int64) (*AccountTokenGuardV2Record, error)
 	ListAccounts(ctx context.Context) ([]AccountTokenGuardV2Record, error)
-	ClaimDue(ctx context.Context, owner string, leaseDuration time.Duration, limit int) ([]AccountTokenGuardV2Record, error)
+	ClaimDue(ctx context.Context, owner string, leaseDuration time.Duration, limit int, dueBefore time.Time) ([]AccountTokenGuardV2Record, error)
 	ClaimAccount(ctx context.Context, accountID int64, owner string, leaseDuration time.Duration) (*AccountTokenGuardV2Record, error)
+	ReleaseProbe(ctx context.Context, accountID int64, owner string) error
 	CompleteProbe(ctx context.Context, accountID int64, owner string, result AccountTokenGuardV2ProbeCompletion) error
 	MarkReauthRequested(ctx context.Context, accountID int64, requestedAt, cooldownUntil time.Time) error
 	RescheduleEnabled(ctx context.Context) error
@@ -134,7 +139,7 @@ type AccountTokenGuardV2AccountReader interface {
 }
 
 type AccountTokenGuardV2Prober interface {
-	FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error)
+	FetchOpenAIModelsListFresh(ctx context.Context, account *Account) (*OpenAIModelsResponse, error)
 }
 
 type AccountTokenGuardV2AccountInput struct {
@@ -187,6 +192,7 @@ type AccountTokenGuardV2Service struct {
 	reauth   *OpenAIOAuthReauthService
 
 	leaseOwner string
+	runMu      sync.Mutex
 	startOnce  sync.Once
 	rootCtx    context.Context
 	cancel     context.CancelFunc
@@ -258,7 +264,7 @@ func (s *AccountTokenGuardV2Service) Start() {
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
 			runCycle := func() {
-				ctx, cancel := context.WithTimeout(s.rootCtx, 90*time.Second)
+				ctx, cancel := context.WithTimeout(s.rootCtx, accountTokenGuardV2CycleDuration)
 				defer cancel()
 				if rows, err := s.repo.ListAccounts(ctx); err == nil && len(rows) > 0 {
 					s.reauth.EnsureWorker()
@@ -402,6 +408,18 @@ func (s *AccountTokenGuardV2Service) recordView(ctx context.Context, record Acco
 }
 
 func (s *AccountTokenGuardV2Service) RunDue(ctx context.Context) (int, error) {
+	// A cycle waits for its probes and final lease writes before releasing this
+	// lock. Overlapping callers must not multiply the bounded worker pool.
+	if !s.runMu.TryLock() {
+		return 0, nil
+	}
+	defer s.runMu.Unlock()
+	startedAt := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, accountTokenGuardV2CycleDuration)
+	defer cancel()
+	// Freeze eligibility at cycle start. A long cycle must not repeatedly probe
+	// accounts whose retry interval elapses while other accounts are running.
+	dueBefore := s.clockNow()
 	// Clean all orphaned records, including paused accounts and future probes.
 	// Only the database's account deletion state is authoritative, not read errors.
 	removed, err := s.repo.PruneDeletedAccounts(ctx)
@@ -411,17 +429,38 @@ func (s *AccountTokenGuardV2Service) RunDue(ctx context.Context) (int, error) {
 	if removed > 0 {
 		slog.Info("account_token_guard_v2_deleted_accounts_pruned", "count", removed)
 	}
-	records, err := s.repo.ClaimDue(ctx, s.leaseOwner, accountTokenGuardV2LeaseDuration, 10)
-	if err != nil {
-		return 0, err
+	group, workCtx := errgroup.WithContext(ctx)
+	var completed atomic.Int64
+	for range accountTokenGuardV2ProbeWorkers {
+		group.Go(func() error {
+			for {
+				if err := workCtx.Err(); err != nil {
+					return err
+				}
+				// Claim only when this slot is free: no leased account waits
+				// behind a slow probe, and every claim has its own fencing token.
+				owner := s.newProbeOwner()
+				records, err := s.repo.ClaimDue(workCtx, owner, accountTokenGuardV2LeaseDuration, 1, dueBefore)
+				if err != nil {
+					return err
+				}
+				if len(records) == 0 {
+					return nil
+				}
+				if err := s.runProbe(workCtx, records[0]); err != nil {
+					return err
+				}
+				completed.Add(1)
+			}
+		})
 	}
-	for i := range records {
-		if err := ctx.Err(); err != nil {
-			return i, err
-		}
-		s.runProbe(ctx, records[i])
-	}
-	return len(records), nil
+	err = group.Wait()
+	slog.Info("account_token_guard_v2_cycle_completed", "processed", completed.Load(), "duration_ms", time.Since(startedAt).Milliseconds(), "cancelled", ctx.Err() != nil)
+	return int(completed.Load()), err
+}
+
+func (s *AccountTokenGuardV2Service) newProbeOwner() string {
+	return s.leaseOwner + "/" + uuid.NewString()
 }
 
 func (s *AccountTokenGuardV2Service) ProbeNow(ctx context.Context, accountID int64) (*AccountTokenGuardV2Account, error) {
@@ -432,14 +471,16 @@ func (s *AccountTokenGuardV2Service) ProbeNow(ctx context.Context, accountID int
 	if existing == nil {
 		return nil, infraerrors.New(http.StatusNotFound, "TOKEN_GUARD_V2_NOT_FOUND", "monitored account not found")
 	}
-	record, err := s.repo.ClaimAccount(ctx, accountID, s.leaseOwner, accountTokenGuardV2LeaseDuration)
+	record, err := s.repo.ClaimAccount(ctx, accountID, s.newProbeOwner(), accountTokenGuardV2LeaseDuration)
 	if err != nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "TOKEN_GUARD_V2_CLAIM_FAILED", "failed to start account inspection")
 	}
 	if record == nil {
 		return nil, infraerrors.Conflict("TOKEN_GUARD_V2_PROBE_BUSY", "account inspection is already running")
 	}
-	s.runProbe(ctx, *record)
+	if err := s.runProbe(ctx, *record); err != nil {
+		return nil, err
+	}
 	return s.accountView(ctx, accountID)
 }
 
@@ -460,11 +501,24 @@ func (s *AccountTokenGuardV2Service) ReloginNow(ctx context.Context, accountID i
 	return task, nil
 }
 
-func (s *AccountTokenGuardV2Service) runProbe(ctx context.Context, record AccountTokenGuardV2Record) {
+func (s *AccountTokenGuardV2Service) runProbe(ctx context.Context, record AccountTokenGuardV2Record) error {
+	owner := record.LeaseOwner
+	// CompleteProbe normally clears the lease. Early failures and cancellation
+	// still release this claim without changing the probe history or due time.
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := s.repo.ReleaseProbe(releaseCtx, record.AccountID, owner); err != nil {
+			slog.Warn("account_token_guard_v2_lease_release_failed", "account_id", record.AccountID)
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	rules, err := s.GetRules(ctx)
 	if err != nil {
 		slog.Warn("account_token_guard_v2_rules_read_failed", "error", err)
-		return
+		return err
 	}
 	now := s.clockNow()
 	completion := AccountTokenGuardV2ProbeCompletion{
@@ -473,15 +527,21 @@ func (s *AccountTokenGuardV2Service) runProbe(ctx context.Context, record Accoun
 		CooldownUntil: record.CooldownUntil,
 	}
 	account, err := s.accounts.GetAccount(ctx, record.AccountID)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil || account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsCredentialShadow() || account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() {
 		completion.ProbeDetail = "account is no longer an eligible OpenAI OAuth parent account"
 		completion.BlockedReason = completion.ProbeDetail
-		s.completeProbe(ctx, record.AccountID, completion)
-		return
+		return s.completeProbe(ctx, record.AccountID, owner, completion)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	state, detail := s.probeAccount(probeCtx, account)
 	cancel()
+	if err := ctx.Err(); err != nil {
+		// Stopping the scheduler is not an account authentication failure.
+		return err
+	}
 	completion.ProbeState = state
 	completion.ProbeDetail = detail
 	completion.BlockedReason = ""
@@ -489,11 +549,13 @@ func (s *AccountTokenGuardV2Service) runProbe(ctx context.Context, record Accoun
 	pending := false
 	if hasBudget {
 		var updated *AccountTokenGuardV2Record
-		updated, pending, err = budgetRepo.ReconcileReloginBudget(ctx, record.AccountID, s.leaseOwner, rules, now, state)
+		updated, pending, err = budgetRepo.ReconcileReloginBudget(ctx, record.AccountID, owner, rules, now, state)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil || updated == nil {
 			completion.BlockedReason = "re-login budget could not be reconciled"
-			s.completeProbe(ctx, record.AccountID, completion)
-			return
+			return s.completeProbe(ctx, record.AccountID, owner, completion)
 		}
 		record = *updated
 		completion.CooldownUntil = record.CooldownUntil
@@ -522,8 +584,11 @@ func (s *AccountTokenGuardV2Service) runProbe(ctx context.Context, record Accoun
 		}
 		if hasBudget && record.Enabled && record.AutoReloginEnabled && !record.AutoReloginExhausted && !pending && completion.FailStreak >= rules.FailStreakThreshold && !cooldownActive {
 			task, taskErr := s.reauth.createTaskForProfile(ctx, record.AccountID, "codex", func(createCtx context.Context, id int64, hash string) (*OpenAIOAuthReauthTaskRecord, error) {
-				return budgetRepo.CreateAutomaticRelogin(createCtx, id, hash, s.leaseOwner, rules, s.clockNow())
+				return budgetRepo.CreateAutomaticRelogin(createCtx, id, hash, owner, rules, s.clockNow())
 			})
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if taskErr == nil && task != nil {
 				completion.LastReauthAt = &now
 				cooldown := now.Add(time.Duration(rules.ReloginCooldownSeconds) * time.Second)
@@ -534,25 +599,40 @@ func (s *AccountTokenGuardV2Service) runProbe(ctx context.Context, record Accoun
 			} else if taskErr != nil {
 				completion.BlockedReason = "automatic re-login could not be queued"
 				completion.ProbeDetail = detail + "; " + completion.BlockedReason
+				slog.Warn("account_token_guard_v2_relogin_queue_failed", "account_id", record.AccountID, "reason", safeTokenGuardReloginReason(taskErr))
 			}
 		}
 	}
-	s.completeProbe(ctx, record.AccountID, completion)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return s.completeProbe(ctx, record.AccountID, owner, completion)
 }
 
-func (s *AccountTokenGuardV2Service) completeProbe(ctx context.Context, accountID int64, completion AccountTokenGuardV2ProbeCompletion) {
+func safeTokenGuardReloginReason(err error) string {
+	switch reason := infraerrors.Reason(err); reason {
+	case "OPENAI_REAUTH_UNAVAILABLE", "OPENAI_REAUTH_WORKER_UNAVAILABLE", "OPENAI_REAUTH_CONFIG_REQUIRED", "OPENAI_REAUTH_CONFIG_READ_FAILED", "OPENAI_REAUTH_CONFIG_DECRYPT_FAILED", "OPENAI_REAUTH_ENCRYPTION_KEY_REQUIRED", "OPENAI_REAUTH_CREDENTIAL_SNAPSHOT_FAILED", "OPENAI_REAUTH_ACCOUNT_NOT_FOUND", "OPENAI_REAUTH_ACCOUNT_INVALID", "OPENAI_REAUTH_TASK_CREATE_FAILED":
+		return reason
+	default:
+		return "unknown"
+	}
+}
+
+func (s *AccountTokenGuardV2Service) completeProbe(ctx context.Context, accountID int64, owner string, completion AccountTokenGuardV2ProbeCompletion) error {
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := s.repo.CompleteProbe(persistCtx, accountID, s.leaseOwner, completion); err != nil {
+	if err := s.repo.CompleteProbe(persistCtx, accountID, owner, completion); err != nil {
 		slog.Warn("account_token_guard_v2_probe_save_failed", "account_id", accountID, "error", err)
+		return err
 	}
+	return nil
 }
 
 func (s *AccountTokenGuardV2Service) probeAccount(ctx context.Context, account *Account) (string, string) {
 	if strings.TrimSpace(account.GetCredential("access_token")) == "" {
 		return AccountTokenGuardV2ProbeAuth, "account has no access token"
 	}
-	_, err := s.prober.FetchOpenAIModelsList(ctx, account)
+	_, err := s.prober.FetchOpenAIModelsListFresh(ctx, account)
 	if err == nil {
 		return AccountTokenGuardV2ProbeOK, "credential accepted"
 	}

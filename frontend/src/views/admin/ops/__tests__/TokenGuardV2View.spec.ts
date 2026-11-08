@@ -8,6 +8,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
 import TokenGuardV2View from '../TokenGuardV2View.vue'
 import { getCredentialEncryption } from '@/api/admin/credentialEncryption'
+import type { TokenGuardV2Rules, TokenGuardV2Status } from '@/api/admin/accountTokenGuardV2'
 
 const api = vi.hoisted(() => ({
   listGuard: vi.fn(),
@@ -573,4 +574,194 @@ it('uses local proxies for email OTP under the remote global engine', async () =
   expect(view.get('#token-guard-v2-proxy').attributes('disabled')).toBeDefined()
   await view.get('input[value="email_otp_url"]').setValue()
   expect(view.get('#token-guard-v2-proxy').attributes('disabled')).toBeUndefined()
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(complete => { resolve = complete })
+  return { promise, resolve }
+}
+
+describe('inspection recovery progress', () => {
+  const queuedTask = {
+    id: 12, account_id: 42, status: 'queued', stage: 'queued', attempt: 0,
+    created_at: '2026-11-08T10:00:00Z', updated_at: '2026-11-08T10:00:00Z'
+  }
+
+  it('reads the completed inspection immediately without waiting for the polling interval', async () => {
+    const data = await api.listGuard()
+    const failed = { ...data.accounts[0], probe_state: 'auth', fail_streak: 1 }
+    api.listGuard.mockResolvedValue({ ...data, accounts: [failed] })
+    const view = await mountControls()
+    const healthy = { ...failed, probe_state: 'ok', fail_streak: 0, last_probe_at: '2026-11-08T10:00:00Z' }
+    api.probeGuard.mockResolvedValue(healthy)
+    api.listGuard.mockResolvedValue({ ...data, accounts: [healthy] })
+    const callsBeforeAction = api.listGuard.mock.calls.length
+
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.inspectNow')!.trigger('click')
+    await flushPromises()
+
+    expect(api.probeGuard).toHaveBeenCalledWith(42)
+    expect(api.listGuard).toHaveBeenCalledTimes(callsBeforeAction + 1)
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.healthy')
+    expect(view.get('tbody').text()).toContain('tokenGuardV2.probeStates.ok')
+  })
+
+  it('keeps duplicate actions blocked until the post-action read finishes', async () => {
+    const data = await api.listGuard()
+    const view = await mountControls()
+    const fresh = deferred<TokenGuardV2Status>()
+    api.reloginGuard.mockResolvedValue(queuedTask)
+    api.listGuard.mockReturnValueOnce(fresh.promise)
+    const button = view.findAll('button').find(item => item.text() === 'tokenGuardV2.reloginNow')!
+
+    await button.trigger('click')
+    await flushPromises()
+    expect(button.attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(api.reloginGuard).toHaveBeenCalledTimes(1)
+
+    fresh.resolve({ ...data, accounts: [{ ...data.accounts[0], latest_task: queuedTask }] })
+    await flushPromises()
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.queued')
+  })
+
+  it('does not let a rule submission invalidate the post-action account read', async () => {
+    const data = await api.listGuard()
+    const view = await mountControls()
+    await view.get('[data-testid="guard-tab-rules"]').trigger('click')
+    await view.get('#token-guard-v2-rule-threshold').setValue('3')
+    await view.get('[data-testid="guard-tab-accounts"]').trigger('click')
+    const fresh = deferred<TokenGuardV2Status>()
+    api.reloginGuard.mockResolvedValue(queuedTask)
+    api.listGuard.mockReturnValueOnce(fresh.promise)
+
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.reloginNow')!.trigger('click')
+    await flushPromises()
+    await view.get('[data-testid="guard-tab-rules"]').trigger('click')
+    const rulesForm = view.get('#token-guard-v2-rules')
+    expect(rulesForm.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    // Programmatic form submission must honor the same exclusion as the button.
+    await rulesForm.trigger('submit')
+    await flushPromises()
+    expect(api.saveRules).not.toHaveBeenCalled()
+
+    fresh.resolve({ ...data, accounts: [{ ...data.accounts[0], latest_task: queuedTask }] })
+    await flushPromises()
+    expect(rulesForm.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await view.get('[data-testid="guard-tab-accounts"]').trigger('click')
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.queued')
+  })
+
+  it('does not start an account action while a rule save is pending', async () => {
+    const data = await api.listGuard()
+    const view = await mountControls()
+    await view.get('[data-testid="guard-tab-rules"]').trigger('click')
+    await view.get('#token-guard-v2-rule-threshold').setValue('3')
+    const saved = deferred<TokenGuardV2Rules>()
+    api.saveRules.mockReturnValueOnce(saved.promise)
+    await view.get('#token-guard-v2-rules').trigger('submit')
+    await flushPromises()
+    await view.get('[data-testid="guard-tab-accounts"]').trigger('click')
+    const action = view.findAll('button').find(button => button.text() === 'tokenGuardV2.reloginNow')!
+    expect(action.attributes('disabled')).toBeDefined()
+    // Dispatch directly to exercise the function guard as well as disabled UI.
+    action.element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(api.reloginGuard).not.toHaveBeenCalled()
+    expect(api.probeGuard).not.toHaveBeenCalled()
+
+    saved.resolve({ ...data, fail_streak_threshold: 3 })
+    await flushPromises()
+    expect(action.attributes('disabled')).toBeUndefined()
+    expect(view.text()).toContain('tokenGuardV2.rulesSaved')
+  })
+
+  it('ignores an older refresh response after the action read has applied', async () => {
+    const data = await api.listGuard()
+    const view = await mountControls()
+    const old = deferred<TokenGuardV2Status>()
+    api.listGuard.mockReturnValueOnce(old.promise)
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.refresh')!.trigger('click')
+    api.reloginGuard.mockResolvedValue(queuedTask)
+    api.listGuard.mockResolvedValueOnce({ ...data, accounts: [{ ...data.accounts[0], latest_task: queuedTask }] })
+
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.reloginNow')!.trigger('click')
+    await flushPromises()
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.queued')
+
+    old.resolve(data)
+    await flushPromises()
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.queued')
+    expect(view.text()).toContain('tokenGuardV2.reloginQueued')
+  })
+
+  it('keeps historical authentication failure inside details while recovery is queued', async () => {
+    const data = await api.listGuard()
+    const account = {
+      ...data.accounts[0], probe_state: 'auth', fail_streak: 3, latest_task: queuedTask,
+      probe_failure: { code: 'requires_relogin', category: 'requires_relogin', stage: 'inspection', action: 'reauthorize' }
+    }
+    api.listGuard.mockResolvedValue({ ...data, fail_streak_threshold: 3, accounts: [account] })
+    api.probeGuard.mockResolvedValue(account)
+    const view = await mountControls()
+
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.inspectNow')!.trigger('click')
+    await flushPromises()
+
+    expect(view.find('[role="alert"]').exists()).toBe(false)
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.queued')
+    const history = view.get('[data-testid="probe-history-42"]')
+    expect(history.attributes('open')).toBeUndefined()
+    expect(history.text()).toContain('tokenGuardV2.operationFailure.reasons.requires_relogin')
+    expect(history.find('[data-testid="credential-operation-failure"]').exists()).toBe(true)
+  })
+
+  it.each([
+    { label: 'paused', account: { enabled: false } },
+    { label: 'disabled', account: { auto_relogin_enabled: false } },
+    { label: 'configuration', account: { login_config: undefined } },
+    { label: 'waiting', account: { probe_state: 'auth', fail_streak: 2 }, text: 'tokenGuardV2.automationStates.waiting 2 3' },
+    { label: 'scheduled', account: { probe_state: 'auth', fail_streak: 3 } },
+    { label: 'queued', account: { latest_task: queuedTask } },
+    { label: 'running', account: { latest_task: { ...queuedTask, status: 'callback_processing' } } },
+    { label: 'cooldown', account: { cooldown_until: '2099-11-08T10:00:00Z', relogin_fail_streak: 0 } },
+    { label: 'scheduled', account: {
+      probe_state: 'auth', fail_streak: 3, cooldown_until: '2000-01-01T00:00:00Z',
+      blocked_reason: 'automatic re-login cooling down'
+    } },
+    { label: 'blocked', account: {
+      probe_state: 'auth', fail_streak: 3, cooldown_until: '2000-01-01T00:00:00Z',
+      blocked_reason: 'automatic re-login could not be queued'
+    } },
+    { label: 'blocked', account: { blocked_reason: 'automatic re-login could not be queued' } },
+    { label: 'exhausted', account: { auto_relogin_exhausted: true }, text: 'tokenGuardV2.reloginBudgetExhausted' },
+    { label: 'verifying', account: {
+      probe_state: 'auth', last_probe_at: '2026-11-08T09:59:00Z',
+      latest_task: { ...queuedTask, status: 'succeeded', finished_at: '2026-11-08T10:00:00Z' }
+    } }
+  ])('shows $label as the current recovery state', async ({ label, account, text }) => {
+    const data = await api.listGuard()
+    api.listGuard.mockResolvedValue({ ...data, fail_streak_threshold: 3, accounts: [{ ...data.accounts[0], ...account }] })
+    const view = await mountControls()
+
+    expect(view.get('[data-testid="automation-state-42"]').text()).toContain(text || `tokenGuardV2.automationStates.${label}`)
+  })
+
+  it('ends credential verification only after a later inspection', async () => {
+    const data = await api.listGuard()
+    const account = {
+      ...data.accounts[0], last_probe_at: '2026-11-08T09:59:00Z',
+      latest_task: { ...queuedTask, status: 'succeeded', finished_at: '2026-11-08T10:00:00Z' }
+    }
+    api.listGuard.mockResolvedValue({ ...data, accounts: [account] })
+    const view = await mountControls()
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.verifying')
+    api.listGuard.mockResolvedValue({ ...data, accounts: [{ ...account, last_probe_at: '2026-11-08T10:01:00Z' }] })
+
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.refresh')!.trigger('click')
+    await flushPromises()
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.healthy')
+  })
 })

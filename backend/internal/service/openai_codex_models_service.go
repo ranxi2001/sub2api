@@ -1738,6 +1738,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 }
 
 func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	useCache := !isFreshOpenAICredentialProbe(ctx)
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -1838,7 +1839,14 @@ func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Contex
 		accountConcurrency:  account.Concurrency,
 		useAPIKeyUpstream:   useAPIKeyUpstream,
 	}
+	if !useCache {
+		request.headers.Del("If-None-Match")
+		request.headers.Set("Cache-Control", "no-cache")
+	}
 	if useAPIKeyUpstream {
+		if !useCache {
+			return s.fetchCodexModelsManifestUpstream(ctx, request, "")
+		}
 		return s.fetchCachedOpenAIModels(ctx, request, s.fetchCodexModelsManifestUpstreamForRequest(request), ifNoneMatch)
 	}
 	// OAuth 账号同样经过账号级缓存；闭包保留 agent identity 任务恢复逻辑，
@@ -1866,6 +1874,12 @@ func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Contex
 		}
 		setOpenAIChatGPTAccountHeaders(request.headers, credAccount)
 		return s.fetchCodexModelsManifestUpstream(fetchCtx, request, ifNoneMatch)
+	}
+	if !useCache {
+		// Credential inspection must observe this request's upstream response.
+		// Neither cached success, stale fallback nor an independent background
+		// refresh can verify the current token or the current inspection lease.
+		return oauthFetch(ctx, "")
 	}
 	return s.fetchCachedOpenAIModels(ctx, request, oauthFetch, ifNoneMatch)
 }
