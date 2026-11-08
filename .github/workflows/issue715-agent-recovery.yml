@@ -98,7 +98,7 @@ jobs:
           git rev-parse HEAD
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go)
-          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/repository/gateway_cache_agent_recovery.go)
+          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go)
           git fetch --no-tags --depth=1 origin "$original"
           trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
@@ -192,3 +192,111 @@ jobs:
           grep -q -- '--- FAIL: TestIssue715HTTPGeneratedTaskReturnsToItsProducer/generated-json' "$RUNNER_TEMP/issue715-generated-red.log"
           grep -q -- '--- FAIL: TestIssue715HTTPGeneratedTaskReturnsToItsProducer/generated-stream-items' "$RUNNER_TEMP/issue715-generated-red.log"
           grep -q 'newly generated task must return to its producer before any prior successful input' "$RUNNER_TEMP/issue715-generated-red.log"
+
+  red-first-delivery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Reviewed pre-fix delivery order with identical barrier regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          original=242f5b0892a59d95005099e6294262b066bd2f8b
+          targets=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go)
+          added=backend/internal/service/openai_agent_message_delivery.go
+          git fetch --no-tags --depth=1 origin "$original"
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "${targets[@]}"
+          rm -- "$added"
+          for target in "${targets[@]}"; do
+            expected=$(git rev-parse "$original:$target")
+            actual=$(git hash-object "$target")
+            echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
+            test "$expected" = "$actual"
+          done
+          set +e
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestIssue715HTTPFirstDeliveryCrossNodeBarrier$/(generated-json|generated-stream|generated-stream-items)$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-first-delivery-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue715-first-delivery-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|fixture barrier not reached' "$RUNNER_TEMP/issue715-first-delivery-red.log"
+          for format in generated-json generated-stream generated-stream-items; do
+            grep -q -- "--- FAIL: TestIssue715HTTPFirstDeliveryCrossNodeBarrier/$format" "$RUNNER_TEMP/issue715-first-delivery-red.log"
+          done
+          grep -q 'client-visible first delivery must not race shared ownership' "$RUNNER_TEMP/issue715-first-delivery-red.log"
+
+  deadline-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Original SQL deadline with PostgreSQL lock snapshots
+        shell: bash
+        run: |
+          #!/usr/bin/env bash
+          # CI-only diagnostic. Do not run in the local worktree.
+          # Invoke at repository root after actions/setup-go. Docker is required.
+          # Upload $RUNNER_TEMP/issue715-deadline-diag with if: always().
+          set -euo pipefail
+          issue715_diag_dir="${RUNNER_TEMP:?}/issue715-deadline-diag"
+          mkdir -p "$issue715_diag_dir"
+          git rev-parse HEAD > "$issue715_diag_dir/head.txt"
+          git diff --exit-code -- backend/internal/repository/ops_repo_dashboard.go backend/internal/repository/ops_repo_dashboard_integration_test.go backend/internal/repository/integration_harness_test.go backend/go.mod backend/go.sum
+          # Preserve the original test's 50 ms request deadline and real lock fixture.
+          # -timeout only caps this diagnostic process, not the asserted deadline.
+          (
+            cd backend
+            go test -tags=integration ./internal/repository -run '^TestOpsOutputTPSQueryDeadline$' -count=20 -v -timeout=2m
+          ) > "$issue715_diag_dir/test.log" 2>&1 &
+          issue715_diag_pid=$!
+          issue715_diag_samples=0
+          while kill -0 "$issue715_diag_pid" 2>/dev/null; do
+            # The repository harness owns these ephemeral containers. No published
+            # PostgreSQL host port or testsupport API is needed: psql is inside the image.
+            # This job must run alone on its runner (normal Actions job isolation).
+            while IFS= read -r issue715_diag_container; do
+              test -n "$issue715_diag_container" || continue
+              issue715_diag_samples=$((issue715_diag_samples + 1))
+              date -u +'%Y-%m-%dT%H:%M:%S.%NZ' >> "$issue715_diag_dir/postgres-state.log"
+              docker inspect --format '{{.Id}} {{.Config.Image}} {{.State.Status}} {{.State.StartedAt}}' "$issue715_diag_container" >> "$issue715_diag_dir/postgres-state.log" 2>&1 || true
+              timeout 4s docker exec -e PGCONNECT_TIMEOUT=2 "$issue715_diag_container" psql -X -U postgres -d sub2api_test -v ON_ERROR_STOP=1 -P pager=off -c "SELECT clock_timestamp() AS captured_at, pid, backend_start, xact_start, query_start, state_change, state, wait_event_type, wait_event, pg_blocking_pids(pid) AS blockers, left(query,1600) AS query FROM pg_stat_activity WHERE datname='sub2api_test' AND pid<>pg_backend_pid() ORDER BY pid; SELECT pid, locktype, relation::regclass AS relation, virtualtransaction, virtualxid, transactionid, mode, granted, waitstart FROM pg_locks WHERE database=(SELECT oid FROM pg_database WHERE datname='sub2api_test') ORDER BY pid, granted, locktype, mode;" >> "$issue715_diag_dir/postgres-state.log" 2>&1 || true
+              docker logs --timestamps --tail=100 "$issue715_diag_container" > "$issue715_diag_dir/postgres-${issue715_diag_container}.log" 2>&1 || true
+            done < <(docker ps -q --filter label=org.testcontainers=true --filter ancestor=postgres:18.1-alpine3.23)
+            sleep 1
+          done
+          set +e
+          wait "$issue715_diag_pid"
+          issue715_diag_result=$?
+          set -e
+          cat "$issue715_diag_dir/test.log"
+          printf 'exit=%s postgres_samples=%s\n' "$issue715_diag_result" "$issue715_diag_samples" | tee "$issue715_diag_dir/result.txt"
+          if test "$issue715_diag_result" -ne 0; then
+            # Expose useful state near a timeout without dumping the whole polling file.
+            tail -n 160 "$issue715_diag_dir/postgres-state.log" 2>/dev/null || true
+            exit "$issue715_diag_result"
+          fi
+          # Docker absence/fixture failure/no tests must not become a diagnostic PASS.
+          test "$issue715_diag_samples" -gt 0
+          test "$(rg -c '^=== RUN   TestOpsOutputTPSQueryDeadline$' "$issue715_diag_dir/test.log")" -eq 20
+          test "$(rg -c '^--- PASS: TestOpsOutputTPSQueryDeadline ' "$issue715_diag_dir/test.log")" -eq 20
+          ! rg -n '^--- (FAIL|SKIP):|panic:|\[build failed\]|\[no tests to run\]|skipping integration tests' "$issue715_diag_dir/test.log"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue715-deadline-diagnostic-${{ github.sha }}
+          path: ${{ runner.temp }}/issue715-deadline-diag/

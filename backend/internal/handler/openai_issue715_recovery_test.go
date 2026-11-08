@@ -92,6 +92,11 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 			tool := gjson.Parse(output).Array()[1].Raw
 			return response(200, "text/event-stream", fmt.Sprintf("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":%s}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":%s}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\ndata: [DONE]\n\n", issue715Agent, tool, payload))
 		}
+		if mode == "generated-stream-multiline" && !strings.Contains(input, "fixture-task-reference-715") {
+			payload = strings.Replace(payload, `,"output":`, ",\n data: "+`"output":`, 1)
+			payload = strings.ReplaceAll(payload, "\n data:", "\ndata:")
+			return response(200, "text/event-stream", fmt.Sprintf("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\ndata: [DONE]\n\n", payload))
+		}
 		event := "response.completed"
 		if mode == "incomplete" {
 			event = "response.incomplete"
@@ -303,9 +308,14 @@ func TestIssue715HTTPFailedDeliveryNeverGrantsOwner(t *testing.T) {
 				require.Positive(t, writer.writes, "must fail inside actual downstream delivery")
 				require.Equal(t, []int64{1}, upstream.ids, "a downstream failure cannot replay the request")
 				accounts[0].Priority, accounts[1].Priority = 100, 0
-				issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
-				require.GreaterOrEqual(t, len(upstream.ids), 2)
-				require.Equal(t, int64(2), upstream.ids[1], "failed downstream delivery must not grant a successful owner")
+				status, answer := issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
+				if strings.HasPrefix(format, "generated") {
+					require.Equal(t, http.StatusConflict, status, answer)
+					require.Len(t, upstream.ids, 1, "failed generated delivery must fence ordinary routing without granting an owner")
+				} else {
+					require.GreaterOrEqual(t, len(upstream.ids), 2)
+					require.Equal(t, int64(2), upstream.ids[1], "failed downstream delivery must not grant a successful owner")
+				}
 			})
 		}
 	}

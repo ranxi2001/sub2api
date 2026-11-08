@@ -1400,6 +1400,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return nil, recoveryErr
 		}
+		defer completeAgentRecovery(false) // revoke pending exposure on every early return
 		upstreamStart := time.Now()
 		resp, err := func() (*http.Response, error) {
 			stop := s.startOpenAIHeaderWaitKeepalive(c, reqStream)
@@ -1576,6 +1577,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				return nil, handleOpenAIHTTPPhaseError(c, account, phaseErr)
 			}
 
+			var agentRecoveryErr *OpenAIAgentRecoveryError
+			if streamResult != nil && errors.As(err, &agentRecoveryErr) {
+				downstreamDeliveryErr = err
+				streamResult.agentCompleted = false
+				err = nil
+			}
 			if err != nil {
 				var encryptedSignal *openAIEncryptedContentRecoverySignal
 				if errors.As(err, &encryptedSignal) {
@@ -1657,7 +1664,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			var deliveryErr *openAINonStreamingDeliveryError
 			if nonStreamResult != nil && errors.As(err, &deliveryErr) {
 				downstreamDeliveryErr = err
-				clientDisconnected = true
+				var recoveryErr *OpenAIAgentRecoveryError
+				clientDisconnected = !errors.As(err, &recoveryErr)
 			} else if err != nil {
 				if signal, ok := asOpenAICompactFallbackSignal(err); ok {
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(

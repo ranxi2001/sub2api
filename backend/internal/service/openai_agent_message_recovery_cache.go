@@ -27,6 +27,15 @@ func decodeOpenAIAgentRecoveryBinding(raw string) (openAIAgentRecoveryBinding, b
 	if raw == "" {
 		return b, false, nil
 	}
+	if raw == "failed" {
+		b.failed = true
+		return b, true, nil
+	}
+	if pending, route, ok := decodeOpenAIAgentRecoveryPending(raw); ok {
+		b, found, err := decodeOpenAIAgentRecoveryBinding(route)
+		b.pending = pending
+		return b, found, err
+	}
 	if raw == "conflict" {
 		b.conflicted = true
 		return b, true, nil

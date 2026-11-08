@@ -1205,6 +1205,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		if err != nil {
 			if h.handleOpenAIAgentRecoveryError(c, err, streamStarted) {
+				submitResponsesUsage(result)
 				return
 			}
 			if service.IsOpenAITurnAdmissionError(err) {

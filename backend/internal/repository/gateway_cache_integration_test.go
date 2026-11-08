@@ -176,4 +176,17 @@ func (s *GatewayCacheSuite) TestIssue715AgentOwnership() {
 	value, err = cache.GetOpenAIAgentRecovery(s.ctx, key)
 	require.NoError(s.T(), err)
 	require.Empty(s.T(), value)
+	pendingKey := strings.Repeat("d", 64)
+	require.NoError(s.T(), cache.ReserveOpenAIAgentRecovery(s.ctx, pendingKey, "route-a", "pending:first", time.Minute))
+	require.Error(s.T(), other.FinishOpenAIAgentRecovery(s.ctx, pendingKey, "route-a", "pending:other", false, time.Minute))
+	require.NoError(s.T(), other.FinishOpenAIAgentRecovery(s.ctx, pendingKey, "route-a", "pending:first", true, time.Minute))
+	raw, err := cache.GetOpenAIAgentRecovery(s.ctx, pendingKey)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "route-a", raw)
+	require.NoError(s.T(), other.ReserveOpenAIAgentRecovery(s.ctx, pendingKey, "route-a", "pending:next", time.Minute))
+	require.NoError(s.T(), other.FinishOpenAIAgentRecovery(s.ctx, pendingKey, "route-a", "pending:next", false, time.Minute))
+	raw, err = cache.GetOpenAIAgentRecovery(s.ctx, pendingKey)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "route-a", raw, "abort cannot revoke an existing grant")
+
 }

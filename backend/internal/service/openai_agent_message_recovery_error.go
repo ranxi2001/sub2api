@@ -24,6 +24,8 @@ func (e *OpenAIAgentRecoveryError) ClientMessage() string {
 		reason = "The proven encrypted agent route or credentials changed."
 	case "wire_changed":
 		reason = "The proven encrypted agent HTTP transport changed."
+	case "delivery_pending":
+		reason = "The encrypted agent producer has not confirmed delivery yet."
 	case "store_unavailable":
 		reason = "Encrypted agent compatibility records are temporarily unavailable."
 	default:

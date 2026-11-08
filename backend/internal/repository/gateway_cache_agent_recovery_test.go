@@ -45,3 +45,38 @@ func TestIssue715RedisOwnerSharedExpiryAndConflicts(t *testing.T) {
 	_, err = cache.GetOpenAIAgentRecovery(ctx, key)
 	require.Error(t, err, "Redis errors cannot be downgraded to cache misses")
 }
+
+func TestIssue715RedisDeliveryTokenCAS(t *testing.T) {
+	cache, mr := newHTTPResponseOwnerTestCache(t)
+	other := &gatewayCache{rdb: cache.rdb}
+	ctx := context.Background()
+	key := strings.Repeat("c", 64)
+	reserve := func(token string) error {
+		return cache.ReserveOpenAIAgentRecovery(ctx, key, "route-one", token, time.Minute)
+	}
+	finish := func(token string, commit bool) error {
+		return other.FinishOpenAIAgentRecovery(ctx, key, "route-one", token, commit, time.Minute)
+	}
+	value := func() string { raw, err := cache.GetOpenAIAgentRecovery(ctx, key); require.NoError(t, err); return raw }
+	require.NoError(t, reserve("pending:first"))
+	require.Equal(t, "pending:first", value())
+	require.Error(t, finish("pending:foreign", false), "foreign abort cannot revoke producer")
+	require.Equal(t, "pending:first", value())
+	require.NoError(t, finish("pending:first", true))
+	require.Equal(t, "route-one", value())
+	require.NoError(t, reserve("pending:second"))
+	require.NoError(t, finish("pending:second", false))
+	require.Equal(t, "route-one", value(), "failed later producer must preserve an existing successful grant")
+	mr.Del(openAIAgentRecoveryPrefix + key)
+	require.NoError(t, reserve("pending:first"))
+	require.NoError(t, finish("pending:first", false))
+	require.Equal(t, "failed", value())
+	require.Error(t, finish("pending:first", true), "late commit cannot resurrect aborted output")
+	require.Equal(t, "failed", value())
+	mr.Del(openAIAgentRecoveryPrefix + key)
+	require.NoError(t, reserve("pending:first"))
+	require.Error(t, reserve("pending:second"))
+	require.Equal(t, "conflict", value(), "concurrent producers are never last-writer-wins")
+	require.Error(t, finish("pending:first", true))
+	require.Equal(t, "conflict", value())
+}

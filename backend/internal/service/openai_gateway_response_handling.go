@@ -568,7 +568,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		sendErrorEvent(code, message)
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
-	processSSELine := func(line string, queueDrained bool) {
+	processSSELineRaw := func(line string, queueDrained bool) {
 		if streamEarlyErr != nil {
 			return
 		}
@@ -806,8 +806,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				data = string(stampedData)
 				line = "data: " + data
 			}
-			if eventType == "response.completed" {
-				observeOpenAIAgentRecoveryOutput(c, dataBytes, true)
+			if err := observeOpenAIAgentRecoveryOutput(c, dataBytes, true); err != nil {
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				streamEarlyErr = err
+				return
 			}
 			// Replace model in response if needed.
 			if needModelReplace {
@@ -976,6 +978,41 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				failureDelivered = true
 			}
 		}
+	}
+
+	// A legal SSE event can split JSON over several data lines. Hold partial
+	// JSON before the buffered writer can expose an opaque item, then feed one
+	// complete JSON document through the same reconstruction/ownership gate.
+	var recoveryData []string
+	recoveryBytes := 0
+	processSSELine := func(line string, queueDrained bool) {
+		r := openAIAgentRecoveryFromContext(ctx)
+		if r == nil || r.delivery == nil {
+			processSSELineRaw(line, queueDrained)
+			return
+		}
+		if data, ok := extractOpenAISSEDataLine(line); ok {
+			if len(recoveryData) > 0 || (!json.Valid([]byte(data)) && strings.TrimSpace(data) != "[DONE]") {
+				recoveryBytes += len(data) + 1
+				if recoveryBytes > maxLineSize {
+					streamEarlyErr = fmt.Errorf("encrypted agent SSE event exceeds size limit")
+					return
+				}
+				recoveryData = append(recoveryData, data)
+				return
+			}
+		}
+		if line == "" && len(recoveryData) > 0 {
+			var compact bytes.Buffer
+			if err := json.Compact(&compact, []byte(strings.Join(recoveryData, "\n"))); err != nil {
+				streamEarlyErr = fmt.Errorf("invalid multiline Responses SSE JSON")
+				return
+			}
+			recoveryData = nil
+			recoveryBytes = 0
+			processSSELineRaw("data: "+compact.String(), false)
+		}
+		processSSELineRaw(line, queueDrained)
 	}
 
 	// 无超时/无 keepalive 的常见路径走同步扫描，减少 goroutine 与 channel 开销。
@@ -1937,12 +1974,11 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	var deliveryErr error
-	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
+	deliveryErr := observeOpenAIAgentRecoveryOutput(c, body, false)
+	if deliveryErr == nil && !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		deliveryErr = writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body)
 	}
 
-	observeOpenAIAgentRecoveryOutput(c, body, false)
 	result := &openaiNonStreamingResult{
 		agentCompleted:   openAIAgentCompletedResponse(body, false),
 		OpenAIUsage:      usage,
@@ -2066,14 +2102,13 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			contentType = "text/event-stream"
 		}
 	}
-	var deliveryErr error
-	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
+	deliveryErr := observeOpenAIAgentRecoveryOutput(c, body, false)
+	if deliveryErr == nil && !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		// 上游的 Content-Type（text/event-stream）已复制到响应头，而 c.Data
 		// 不会覆盖已存在的 Content-Type，这里需显式设置为聚合后的类型。
 		deliveryErr = writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body)
 	}
 
-	observeOpenAIAgentRecoveryOutput(c, body, false)
 	result := &openaiNonStreamingResult{
 		agentCompleted:   terminalOK && terminalType == "response.completed" && openAIAgentCompletedResponse(terminalPayload, true),
 		OpenAIUsage:      usage,
