@@ -805,6 +805,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				data = string(stampedData)
 				line = "data: " + data
 			}
+			if eventType == "response.completed" {
+				observeOpenAIAgentRecoveryOutput(c, dataBytes, true)
+			}
 			// Replace model in response if needed.
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -1939,6 +1942,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
+	observeOpenAIAgentRecoveryOutput(c, body, false)
 	return &openaiNonStreamingResult{
 		agentCompleted:   openAIAgentCompletedResponse(body, false),
 		OpenAIUsage:      usage,
@@ -2065,6 +2069,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		}
 	}
 
+	observeOpenAIAgentRecoveryOutput(c, body, false)
 	return &openaiNonStreamingResult{
 		agentCompleted:   terminalOK && terminalType == "response.completed" && openAIAgentCompletedResponse(terminalPayload, true),
 		OpenAIUsage:      usage,

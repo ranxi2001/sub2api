@@ -1677,7 +1677,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			searchCount = nonStreamResult.searchCount
 		}
 		s.bindHTTPResponseAccount(ctx, c, account, responseID)
-		completeAgentRecovery(agentCompleted && !clientDisconnected)
+		completeAgentRecovery(agentCompleted && !clientDisconnected && c.Request.Context().Err() == nil && !OpenAIHeaderWaitDisconnected(c))
 
 		// Extract and save Codex usage snapshot from response headers (for OAuth accounts).
 		// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。

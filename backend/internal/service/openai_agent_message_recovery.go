@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -19,43 +18,10 @@ import (
 )
 
 // These are compatibility observations, not plaintext history or a substitute
-// for admission. They are deliberately process-local and expire with affinity.
+// for admission. Redis shares them when available; local adapters expire them
+// with affinity. Neither storage mode can reconstruct unknown task contents.
 // An old/first-seen payload has no observation and follows ordinary admission.
 const openAIAgentRecoveryMaxEntries = 65536
-
-var errOpenAIAgentRecoveryUnavailable = errors.New("encrypted agent continuation has no unchanged compatible route")
-
-// OpenAIAgentRecoveryError is a local compatibility refusal, not a failure of
-// the entire account pool. Reasons contain no route IDs, credentials or input.
-type OpenAIAgentRecoveryError struct {
-	Reason string
-}
-
-func (e *OpenAIAgentRecoveryError) Error() string { return e.ClientMessage() }
-func (e *OpenAIAgentRecoveryError) Unwrap() error { return errOpenAIAgentRecoveryUnavailable }
-func (e *OpenAIAgentRecoveryError) ClientCode() string {
-	return "encrypted_agent_recovery_" + e.Reason
-}
-func (e *OpenAIAgentRecoveryError) ClientMessage() string {
-	var reason string
-	switch e.Reason {
-	case "owner_conflict":
-		reason = "The encrypted agent items have conflicting compatible owners."
-	case "route_changed":
-		reason = "The proven encrypted agent route or credentials changed."
-	case "wire_changed":
-		reason = "The proven encrypted agent HTTP transport changed."
-	case "store_unavailable":
-		reason = "Encrypted agent compatibility records are temporarily unavailable."
-	default:
-		reason = "The proven encrypted agent owner is currently unavailable."
-	}
-	return reason + " Preserve this task and context; restore the original compatible route before continuing."
-}
-
-func openAIAgentRecoveryError(reason string) error {
-	return &OpenAIAgentRecoveryError{Reason: reason}
-}
 
 type openAIAgentRecoveryContextKey struct{}
 
@@ -73,13 +39,19 @@ type openAIAgentRecoveryState struct {
 }
 
 type openAIAgentRecoveryRequest struct {
-	keys     [][32]byte
-	items    [][32]byte
-	owner    *openAIAgentRecoveryBinding
-	conflict bool
-	groupID  int64
-	model    string
-	session  string
+	keyID            int64
+	outputs          [][32]byte
+	disallowLearning bool
+	lookupErr        error
+	toolResult       bool
+	known            map[[32]byte]bool
+	keys             [][32]byte
+	items            [][32]byte
+	owner            *openAIAgentRecoveryBinding
+	conflict         bool
+	groupID          int64
+	model            string
+	session          string
 }
 
 // WithOpenAIAgentMessageRecovery observes only opaque item identities. A route
@@ -89,6 +61,8 @@ type openAIAgentRecoveryRequest struct {
 func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Context, c *gin.Context, body []byte, sessionHash, model string) context.Context {
 	request := &openAIAgentRecoveryRequest{groupID: getOpenAIGroupIDFromContext(c), model: model, session: sessionHash}
 	keyID := getAPIKeyIDFromContext(c)
+	request.keyID = keyID
+	request.disallowLearning = isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c)
 	if s == nil || keyID <= 0 || sessionHash == "" || model == "" {
 		return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, request)
 	}
@@ -98,18 +72,35 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 		return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, request)
 	}
 	request.items = openAIAgentRecoveryItemDigests(body)
-	if len(request.items) == 0 {
-		return ctx
-	}
+	request.toolResult = gjson.GetBytes(body, "input.#(type==function_call_output)").Exists()
 	for _, item := range request.items {
-		scope, _ := json.Marshal([]string{strconv.FormatInt(keyID, 10), strconv.FormatInt(request.groupID, 10), sessionHash, model, hex.EncodeToString(item[:])})
-		request.keys = append(request.keys, sha256.Sum256(scope))
+		request.keys = append(request.keys, request.itemKey(item))
 	}
 	state := &s.agentMessageRecovery
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	shared, _ := s.cache.(OpenAIAgentRecoveryCache)
+	storeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	for _, key := range request.keys {
-		binding, found := state.bindings[key]
+		var binding openAIAgentRecoveryBinding
+		var found bool
+		if shared != nil {
+			// Shared storage is authoritative, including a miss or read failure.
+			// Never resurrect a warm local grant after another node conflicts it.
+			raw, err := shared.GetOpenAIAgentRecovery(storeCtx, hex.EncodeToString(key[:]))
+			if err != nil {
+				request.lookupErr = openAIAgentRecoveryError("store_unavailable")
+				break
+			}
+			binding, found, err = decodeOpenAIAgentRecoveryBinding(raw)
+			if err != nil {
+				request.lookupErr = openAIAgentRecoveryError("store_unavailable")
+				break
+			}
+		} else {
+			state.mu.Lock()
+			binding, found = state.bindings[key]
+			state.mu.Unlock()
+		}
 		if !found || !time.Now().Before(binding.expiresAt) {
 			continue
 		}
@@ -117,6 +108,10 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 			request.conflict = true
 			break
 		}
+		if request.known == nil {
+			request.known = make(map[[32]byte]bool)
+		}
+		request.known[key] = true
 		copy := binding
 		request.owner = &copy
 	}
@@ -130,10 +125,14 @@ func openAIAgentRecoveryFromContext(ctx context.Context) *openAIAgentRecoveryReq
 
 func openAIAgentRecoveryBound(ctx context.Context) bool {
 	request := openAIAgentRecoveryFromContext(ctx)
-	return request != nil && (request.owner != nil || request.conflict)
+	return request != nil && (request.owner != nil || request.conflict || request.lookupErr != nil)
 }
 
 func openAIAgentRecoveryItemDigests(body []byte) [][32]byte {
+	return openAIAgentRecoveryDigests(body, "input")
+}
+
+func openAIAgentRecoveryDigests(body []byte, path string) [][32]byte {
 	if !bytes.Contains(body, []byte("agent_message")) && !bytes.Contains(body, []byte(`\u`)) {
 		return nil
 	}
@@ -163,7 +162,7 @@ func openAIAgentRecoveryItemDigests(body []byte) [][32]byte {
 			}
 		}
 	}
-	input := gjson.GetBytes(body, "input")
+	input := gjson.GetBytes(body, path)
 	if input.IsArray() {
 		input.ForEach(func(_, item gjson.Result) bool { visit(item); return true })
 	} else if input.IsObject() {
@@ -200,7 +199,13 @@ func openAIAgentCompletedResponse(body []byte, nested bool) bool {
 
 func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryAccount(ctx context.Context, account *Account) error {
 	request := openAIAgentRecoveryFromContext(ctx)
-	if request == nil || (!request.conflict && request.owner == nil) {
+	if request == nil {
+		return nil
+	}
+	if request.lookupErr != nil {
+		return request.lookupErr
+	}
+	if !request.conflict && request.owner == nil {
 		return nil
 	}
 	if request.conflict {
@@ -244,9 +249,13 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		return noop, ctx.Err()
 	}
 	request := openAIAgentRecoveryFromContext(ctx)
-	if request == nil || len(request.keys) == 0 {
+	if request == nil || request.keyID <= 0 || request.session == "" || request.model == "" {
 		return noop, nil
 	}
+	if request.disallowLearning {
+		return noop, nil
+	}
+	request.outputs = nil
 	if err := s.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
 		return noop, err
 	}
@@ -259,18 +268,30 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		return noop, nil
 	}
 	if req.GetBody == nil {
+		if len(request.items) == 0 && request.owner == nil {
+			return noop, nil
+		}
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	reader, err := req.GetBody()
 	if err != nil {
+		if len(request.items) == 0 && request.owner == nil {
+			return noop, nil
+		}
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	body, err = io.ReadAll(reader)
 	_ = reader.Close()
 	if err != nil {
+		if len(request.items) == 0 && request.owner == nil {
+			return noop, nil
+		}
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
+		if len(request.items) == 0 && request.owner == nil {
+			return noop, nil
+		}
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	items := openAIAgentRecoveryItemDigests(body)
@@ -296,18 +317,55 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	if request.owner != nil && !sameOpenAIAgentRecoveryRoute(*request.owner, binding) {
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
-	state := &s.agentMessageRecovery
-	state.mu.Lock()
-	for _, key := range request.keys {
-		if old, exists := state.bindings[key]; exists && time.Now().Before(old.expiresAt) &&
-			(old.conflicted || !sameOpenAIAgentRecoveryRoute(old, binding)) {
-			state.mu.Unlock()
-			return noop, openAIAgentRecoveryError("owner_conflict")
+	shared, _ := s.cache.(OpenAIAgentRecoveryCache)
+	if shared != nil {
+		storeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		for _, key := range request.keys {
+			raw, err := shared.GetOpenAIAgentRecovery(storeCtx, hex.EncodeToString(key[:]))
+			if err != nil {
+				return noop, openAIAgentRecoveryError("store_unavailable")
+			}
+			old, found, err := decodeOpenAIAgentRecoveryBinding(raw)
+			if err != nil {
+				return noop, openAIAgentRecoveryError("store_unavailable")
+			}
+			if found && (old.conflicted || !sameOpenAIAgentRecoveryRoute(old, binding)) {
+				return noop, openAIAgentRecoveryError("owner_conflict")
+			}
+			if !found && request.known[key] {
+				return noop, openAIAgentRecoveryError("owner_unavailable")
+			}
+		}
+	} else {
+		state := &s.agentMessageRecovery
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		for _, key := range request.keys {
+			if old, exists := state.bindings[key]; exists && time.Now().Before(old.expiresAt) &&
+				(old.conflicted || !sameOpenAIAgentRecoveryRoute(old, binding)) {
+				return noop, openAIAgentRecoveryError("owner_conflict")
+			}
 		}
 	}
-	state.mu.Unlock()
 	return func(completed bool) {
-		if !completed {
+		if !completed || ctx.Err() != nil {
+			return
+		}
+		binding.expiresAt = time.Now().Add(s.openAIWSSessionStickyTTL())
+		keys := append([][32]byte(nil), request.keys...)
+		for _, item := range request.outputs {
+			keys = append(keys, request.itemKey(item))
+		}
+		shared, _ := s.cache.(OpenAIAgentRecoveryCache)
+		if shared != nil {
+			storeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			for _, key := range keys {
+				// After delivery a failed publication cannot be undone. It loses
+				// future availability; it never authorizes an unproven owner.
+				_ = shared.PublishOpenAIAgentRecovery(storeCtx, hex.EncodeToString(key[:]), encodeOpenAIAgentRecoveryBinding(binding), time.Until(binding.expiresAt))
+			}
 			return
 		}
 		state := &s.agentMessageRecovery
@@ -323,7 +381,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 				}
 			}
 		}
-		for _, key := range request.keys {
+		for _, key := range keys {
 			old, exists := state.bindings[key]
 			if exists && time.Now().Before(old.expiresAt) && (old.conflicted || !sameOpenAIAgentRecoveryRoute(old, binding)) {
 				old.conflicted = true
@@ -337,4 +395,32 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 			state.bindings[key] = binding
 		}
 	}, nil
+}
+
+func (r *openAIAgentRecoveryRequest) itemKey(item [32]byte) [32]byte {
+	scope, _ := json.Marshal([]string{strconv.FormatInt(r.keyID, 10), strconv.FormatInt(r.groupID, 10), r.session, r.model, hex.EncodeToString(item[:])})
+	return sha256.Sum256(scope)
+}
+
+// Capture only hashes from the final client representation, after terminal
+// output reconstruction and tool/name restoration. The attempt's completion
+// callback decides whether delivery succeeded; item.done alone grants nothing.
+func observeOpenAIAgentRecoveryOutput(c *gin.Context, body []byte, nested bool) {
+	request := openAIAgentRecoveryFromContext(c.Request.Context())
+	if request == nil || !openAIAgentCompletedResponse(body, nested) {
+		return
+	}
+	path := "output"
+	if nested {
+		path = "response.output"
+	}
+	request.outputs = openAIAgentRecoveryDigests(body, path)
+}
+
+// This does not deduplicate client requests or external tools. It only prevents
+// the handler from automatically replaying an ambiguous result submission on a
+// proven native task route, including pool-mode same-account retry.
+func OpenAIAgentToolResultContinuation(ctx context.Context) bool {
+	r := openAIAgentRecoveryFromContext(ctx)
+	return r != nil && r.owner != nil && r.toolResult
 }

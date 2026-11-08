@@ -7,6 +7,7 @@ on:
       - '.github/workflows/issue715-agent-recovery.yml'
       - 'backend/internal/service/openai_*'
       - 'backend/internal/handler/openai_*'
+      - 'backend/internal/repository/gateway_cache_agent_recovery*'
   workflow_dispatch:
 
 permissions:
@@ -34,7 +35,7 @@ jobs:
           git rev-parse HEAD
           test -z "$(git status --porcelain)"
           cd backend
-          go test -race -tags=unit ./internal/service ./internal/handler -run '^Test(Issue715|AstraCodexToolCapabilities|EncryptedSticky|EncryptedPrioritySticky|OpenAIGatewayService_SelectAccountWithScheduler_Encrypted)' -count=1 -v -timeout=10m
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository -run '^Test(Issue715|AstraCodexToolCapabilities|EncryptedSticky|EncryptedPrioritySticky|OpenAIGatewayService_SelectAccountWithScheduler_Encrypted)' -count=1 -v -timeout=10m
 
   red:
     runs-on: ubuntu-latest
@@ -95,18 +96,18 @@ jobs:
           git rev-parse HEAD
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go)
-          added=backend/internal/service/openai_agent_message_recovery.go
+          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/repository/gateway_cache_agent_recovery.go)
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
-          rm -- "$added"
+          rm -- "${added[@]}"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")
             actual=$(git hash-object "$target")
             echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
             test "$expected" = "$actual"
           done
-          test ! -e "$added"
+          for path in "${added[@]}"; do test ! -e "$path"; done
           set +e
           (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue715HTTPResumesSameTaskAcrossTwoTurns$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-recovery-red.log" 2>&1
           result=$?
@@ -153,3 +154,39 @@ jobs:
           grep -q -- '--- FAIL: TestIssue715HTTPFailedDeliveryNeverGrantsOwner/json/error' "$RUNNER_TEMP/issue715-delivery-red.log"
           grep -q -- '--- FAIL: TestIssue715HTTPFailedDeliveryNeverGrantsOwner/aggregate/cancel' "$RUNNER_TEMP/issue715-delivery-red.log"
           grep -q 'failed downstream delivery must not grant a successful owner' "$RUNNER_TEMP/issue715-delivery-red.log"
+
+  red-generated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Reviewed output path with retained generated-task regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          original=b6d780f1a4fee66c2930219dfe9e400b8f0279de
+          target=backend/internal/service/openai_gateway_response_handling.go
+          git fetch --no-tags --depth=1 origin "$original"
+          trap 'git restore --source=HEAD -- "$target"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "$target"
+          expected=$(git rev-parse "$original:$target")
+          actual=$(git hash-object "$target")
+          echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
+          test "$expected" = "$actual"
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue715HTTPGeneratedTaskReturnsToItsProducer$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-generated-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue715-generated-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-generated-red.log"
+          grep -q -- '--- FAIL: TestIssue715HTTPGeneratedTaskReturnsToItsProducer/generated-json' "$RUNNER_TEMP/issue715-generated-red.log"
+          grep -q -- '--- FAIL: TestIssue715HTTPGeneratedTaskReturnsToItsProducer/generated-stream-items' "$RUNNER_TEMP/issue715-generated-red.log"
+          grep -q 'newly generated task must return to its producer before any prior successful input' "$RUNNER_TEMP/issue715-generated-red.log"

@@ -12,9 +12,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -60,8 +63,11 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 		return response(400, "application/json", `{"error":{"code":"unsupported_encrypted_agent_message","type":"invalid_request_error","param":"input[0].content[1].encrypted_content","message":"fixture incompatible route"}}`)
 	}
 	input := gjson.GetBytes(body, "input").Raw
-	if !bytes.Contains([]byte(input), []byte("fixture-task-reference-715")) || !bytes.Contains([]byte(input), []byte("Keep ledger balance 11")) {
+	if (!bytes.Contains([]byte(input), []byte("fixture-task-reference-715")) && !strings.HasPrefix(mode, "generated")) || !bytes.Contains([]byte(input), []byte("Keep ledger balance 11")) {
 		return response(400, "application/json", `{"error":{"code":"missing_fixture_task_or_context"}}`)
+	}
+	if mode == "pool_failure" {
+		return response(520, "application/json", `{"error":{"type":"server_error","message":"fixture result submission interrupted"}}`)
 	}
 	if mode == "partial" {
 		return response(200, "text/event-stream", "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"started existing task\"}\n\nevent: error\ndata: {\"type\":\"error\",\"code\":\"unsupported_encrypted_agent_message\",\"message\":\"fixture failure after output\"}\n\n")
@@ -70,12 +76,19 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 	if gjson.GetBytes(body, "input.#(type==function_call_output).output").String() == "ledger balance 18; applied once" {
 		output = `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Same task: ledger balance 18; update already applied once"}]}]`
 	}
+	if strings.HasPrefix(mode, "generated") && !strings.Contains(input, "fixture-task-reference-715") {
+		output = "[" + issue715Agent + "," + strings.TrimPrefix(output, "[")
+	}
 	status := "completed"
 	if mode == "incomplete" {
 		status = "incomplete"
 	}
 	payload := fmt.Sprintf(`{"id":"resp_715","status":%q,"error":null,"model":"gpt-5.1","output":%s,"usage":{"input_tokens":5,"output_tokens":3}}`, status, output)
-	if gjson.GetBytes(body, "stream").Bool() || mode == "aggregate" {
+	if gjson.GetBytes(body, "stream").Bool() || mode == "aggregate" || strings.HasPrefix(mode, "generated-stream") {
+		if mode == "generated-stream-items" && !strings.Contains(input, "fixture-task-reference-715") {
+			payload = strings.Replace(payload, output, `[]`, 1)
+			return response(200, "text/event-stream", fmt.Sprintf("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":%s}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\ndata: [DONE]\n\n", issue715Agent, payload))
+		}
 		event := "response.completed"
 		if mode == "incomplete" {
 			event = "response.incomplete"
@@ -104,6 +117,9 @@ func issue715Request(t *testing.T, handler *OpenAIGatewayHandler, body string, k
 		c.Request = c.Request.WithContext(ctx)
 	}
 	handler.Responses(c)
+	if rec.Code >= 400 {
+		t.Logf("fixture HTTP %d: %s", rec.Code, rec.Body.String())
+	}
 	return rec.Code, rec.Body.String()
 }
 
@@ -115,7 +131,7 @@ func TestIssue715HTTPResumesSameTaskAcrossTwoTurns(t *testing.T) {
 			upstream := &issue715Upstream{}
 			handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
 			status, first := issue715Request(t, handler, issue715Body(false, stream), 99, "fixture-715-thread", false)
-			require.Equal(t, 200, status)
+			require.Equal(t, 200, status, first)
 			require.Contains(t, first, "update_ledger")
 			// Execute actual function-call outputs in a fake client. Replay of
 			// call_715_once is a test failure, not silently deduplicated here.
@@ -324,4 +340,139 @@ func TestIssue715RecoveryErrorCommittedSSEEnvelope(t *testing.T) {
 			require.Equal(t, "failed", gjson.Get(payload, "response.status").String())
 		}
 	}
+}
+
+func TestIssue715HTTPGeneratedTaskReturnsToItsProducer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, format := range []string{"generated-json", "generated-stream", "generated-stream-items"} {
+		t.Run(format, func(t *testing.T) {
+			accounts := issue715Accounts()
+			upstream := &issue715Upstream{mode: format}
+			handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+			stream := format == "generated-stream-items"
+			firstBody := strings.Replace(issue715Body(false, stream), issue715Agent+",", "", 1)
+			status, answer := issue715Request(t, handler, firstBody, 99, "fixture-715-thread", false)
+			require.Equal(t, 200, status, answer)
+			require.Contains(t, answer, "fixture-task-reference-715", "the task must be generated before its first consumption")
+			accounts[0].Priority, accounts[1].Priority = 100, 0
+			upstream.mode = ""
+			for turn := 0; turn < 2; turn++ {
+				status, answer = issue715Request(t, handler, issue715Body(true, stream), 99, "fixture-715-thread", false)
+				require.Contains(t, answer, "Same task: ledger balance 18", "newly generated task must return to its producer before any prior successful input")
+				require.Equal(t, 200, status, answer)
+			}
+			require.Equal(t, []int64{1, 1, 1}, upstream.ids)
+		})
+	}
+}
+
+func TestIssue715HTTPConcurrentToolResultsKeepContextWithoutReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accounts := issue715Accounts()
+	upstream := &issue715Upstream{}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+	status, answer := issue715Request(t, handler, issue715Body(false, false), 99, "fixture-715-thread", false)
+	require.Equal(t, 200, status, answer)
+	require.Contains(t, answer, "update_ledger")
+	accounts[0].Priority, accounts[1].Priority = 100, 0
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			status, answer := issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
+			require.Equal(t, 200, status, answer)
+			require.Contains(t, answer, "Same task: ledger balance 18")
+			require.NotContains(t, answer, `"type":"function_call"`)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	require.Equal(t, []int64{1, 1, 1}, upstream.ids, "two client submissions must cause exactly two upstream submissions")
+	for _, body := range upstream.bodies[1:] {
+		require.Contains(t, string(body), "fixture-task-reference-715")
+		require.Contains(t, string(body), "ledger balance 18; applied once")
+		require.Equal(t, "call_715_once", gjson.GetBytes(body, "input.#(type==function_call_output).call_id").String())
+	}
+}
+
+func TestIssue715HTTPInterruptedToolResultDoesNotReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, failure := range []string{"error", "cancel", "pool_failure"} {
+		t.Run(failure, func(t *testing.T) {
+			accounts := issue715Accounts()
+			if failure == "pool_failure" {
+				accounts[0].Type = service.AccountTypeAPIKey
+				accounts[0].Credentials = map[string]any{"api_key": "fixture-key", "pool_mode": true, "pool_mode_retry_count": 2, "pool_mode_retry_status_codes": []any{520}}
+			}
+			upstream := &issue715Upstream{}
+			handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+			status, answer := issue715Request(t, handler, issue715Body(false, false), 99, "fixture-715-thread", false)
+			require.Equal(t, 200, status, answer)
+			call := gjson.Get(answer, "output.0")
+			require.Equal(t, "function_call", call.Get("type").String())
+			toolExecutions, balance := 0, 11
+			toolExecutions++
+			balance += int(gjson.Get(call.Get("arguments").String(), "add").Int())
+			require.Equal(t, 18, balance)
+			if failure == "pool_failure" {
+				upstream.mode = "pool_failure"
+				issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
+			} else {
+				c, _ := newAstraProFailoverContext(t, issue715Body(true, false))
+				c.Request.Header.Set("session_id", "fixture-715-thread")
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				defer cancel()
+				c.Request = c.Request.WithContext(ctx)
+				c.Writer = &issue715DeliveryWriter{ResponseWriter: c.Writer, mode: failure, cancel: cancel}
+				handler.Responses(c)
+			}
+			require.Equal(t, []int64{1, 1}, upstream.ids, "interrupted result submission must not automatically replay generation")
+			upstream.mode = ""
+			status, answer = issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
+			require.Equal(t, 200, status, answer)
+			require.Contains(t, answer, "Same task: ledger balance 18")
+			require.NotContains(t, answer, `"type":"function_call"`)
+			require.Equal(t, 1, toolExecutions)
+			require.Equal(t, 18, balance)
+			require.Equal(t, []int64{1, 1, 1}, upstream.ids)
+		})
+	}
+}
+
+func TestIssue715HTTPGeneratedOwnerSurvivesApplicationRestart(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
+	defer client.Close()
+	accounts := issue715Accounts()
+	upstream := &issue715Upstream{mode: "generated-json"}
+	producer := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, repository.NewGatewayCache(client), accounts...)
+	firstBody := strings.Replace(issue715Body(false, false), issue715Agent+",", "", 1)
+	status, answer := issue715Request(t, producer, firstBody, 99, "fixture-715-thread", false)
+	require.Equal(t, 200, status, answer)
+	require.Contains(t, answer, "fixture-task-reference-715")
+	accounts[0].Priority, accounts[1].Priority = 100, 0
+	upstream.mode = ""
+	// Fresh service/adapter, with no process-local state. Ordinary sticky changes
+	// are deliberately overwritten and cannot establish this compatibility grant.
+	for node := 0; node < 2; node++ {
+		cache := repository.NewGatewayCache(client)
+		resumed := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, cache, accounts...)
+		status, answer = issue715Request(t, resumed, issue715Body(true, false), 99, "fixture-715-thread", false)
+		require.Equal(t, 200, status, answer)
+		require.Contains(t, answer, "Same task: ledger balance 18")
+	}
+	require.Equal(t, []int64{1, 1, 1}, upstream.ids, "shared generated ownership must survive fresh services and scheduler drift")
+	// Deleting/expiring authoritative records cannot resurrect a local grant.
+	for _, key := range mr.Keys() {
+		if strings.HasPrefix(key, "openai_agent_owner:") {
+			mr.Del(key)
+		}
+	}
+	fresh := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, repository.NewGatewayCache(client), accounts...)
+	issue715Request(t, fresh, issue715Body(true, false), 99, "fixture-715-thread", false)
+	require.Equal(t, int64(2), upstream.ids[3], "lost shared evidence cannot grant the prior owner")
 }

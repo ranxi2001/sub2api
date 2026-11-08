@@ -1263,6 +1263,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), false, nil, err)
 					}
+					if service.OpenAIAgentToolResultContinuation(c.Request.Context()) {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
 					if !forbiddenBudget.canRetry(failoverErr, switchCount) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
@@ -4466,15 +4470,6 @@ func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, st
 	default:
 		return http.StatusBadGateway, "upstream_error", "Upstream request failed"
 	}
-}
-
-func (h *OpenAIGatewayHandler) handleOpenAIAgentRecoveryError(c *gin.Context, err error, streamStarted bool) bool {
-	var recovery *service.OpenAIAgentRecoveryError
-	if !errors.As(err, &recovery) {
-		return false
-	}
-	h.handleStreamingAwareErrorWithCode(c, http.StatusConflict, "invalid_request_error", recovery.ClientCode(), recovery.ClientMessage(), streamStarted || c.Writer.Written(), false)
-	return true
 }
 
 // handleStreamingAwareError handles errors that may occur after streaming has started

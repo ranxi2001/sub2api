@@ -422,6 +422,9 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	req OpenAIAccountScheduleRequest,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	recovery := openAIAgentRecoveryFromContext(ctx)
+	if recovery != nil && recovery.lookupErr != nil {
+		return nil, decision, recovery.lookupErr
+	}
 	if recovery != nil && recovery.conflict {
 		return nil, decision, openAIAgentRecoveryError("owner_conflict")
 	}
