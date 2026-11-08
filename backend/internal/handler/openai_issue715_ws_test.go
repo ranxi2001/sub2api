@@ -414,3 +414,66 @@ func TestIssue715WSRecoveryRefusalDoesNotPenalizeAccount(t *testing.T) {
 	}
 	require.True(t, shouldReportOpenAIWSProxyAccountFailure(errors.New("fixture genuine upstream failure")))
 }
+
+type issue715WSFailedWriteCache struct {
+	service.GatewayCache
+	issue715WSDeliveryCache
+	reserved chan string
+	release  chan struct{}
+}
+
+func (c *issue715WSFailedWriteCache) ReserveOpenAIAgentRecovery(ctx context.Context, key, route, token string, ttl time.Duration) error {
+	if err := c.issue715WSDeliveryCache.ReserveOpenAIAgentRecovery(ctx, key, route, token, ttl); err != nil {
+		return err
+	}
+	c.reserved <- key
+	select {
+	case <-c.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestIssue715WSClosedDownstreamCannotCommitGeneratedTask(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeHTTPBridge} {
+		t.Run(mode, func(t *testing.T) {
+			u := &issue715WSOracle{}
+			srv := u.server(t)
+			server := miniredis.RunT(t)
+			client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+			t.Cleanup(func() { _ = client.Close() })
+			base := repository.NewGatewayCache(client)
+			transactional, ok := base.(issue715WSDeliveryCache)
+			require.True(t, ok)
+			cache := &issue715WSFailedWriteCache{GatewayCache: base, issue715WSDeliveryCache: transactional, reserved: make(chan string, 1), release: make(chan struct{})}
+			var once sync.Once
+			release := func() { once.Do(func() { close(cache.release) }) }
+			defer release()
+			h := issue715WSNode(t, mode, srv.URL, cache, false)
+			issue715WSSend(t, h.clientConn, issue715WSCreate("", false))
+			var key string
+			select {
+			case key = <-cache.reserved:
+			case <-time.After(5 * time.Second):
+				t.Fatal("fixture output reservation barrier not reached")
+			}
+			pending, err := transactional.GetOpenAIAgentRecovery(context.Background(), key)
+			require.NoError(t, err)
+			require.True(t, strings.HasPrefix(pending, "pending:"))
+			// Complete the real close handshake while production is blocked
+			// immediately before its actual client write. The ingress reader
+			// acknowledges the close independently of the output goroutine.
+			_ = h.clientConn.Close(coderws.StatusNormalClosure, "fixture closes before task delivery")
+			release()
+			issue600Finish(t, h, http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}})
+			record, err := transactional.GetOpenAIAgentRecovery(context.Background(), key)
+			require.NoError(t, err)
+			require.Equal(t, "failed", record, "actual failed WS write must not register a successful generated-task owner")
+			u.mu.Lock()
+			ids := append([]int64(nil), u.ids...)
+			u.mu.Unlock()
+			require.Equal(t, []int64{1}, ids, "a failed downstream write cannot cause automatic upstream replay")
+		})
+	}
+}
