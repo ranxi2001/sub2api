@@ -10,7 +10,7 @@ import PrioritySchedulingView from '../PrioritySchedulingView.vue'
 import en from '@/i18n/locales/en/priorityScheduling'
 import zh from '@/i18n/locales/zh/priorityScheduling'
 const api = vi.hoisted(() => ({ config: vi.fn(), snapshot: vi.fn(), save: vi.fn() }))
-vi.mock('@/api/admin/priorityScheduling', () => ({ getPriorityAnalysis: async (scope: any) => { const snapshot = { ...await api.snapshot(), model: scope.model, group_id: scope.group_id ?? null, window_minutes: scope.minutes, history_status: 'ready' }; return { snapshot, latency: { ...snapshot, bucket_minutes: 5, accounts: [] } } }, getPriorityStickyBindings: vi.fn().mockResolvedValue({group_id:2,total:0,by_account:[]}), getPriorityConfig: api.config, getPrioritySnapshot: api.snapshot, savePriorityConfig: api.save }))
+vi.mock('@/api/admin/priorityScheduling', () => ({ getPriorityAnalysis: async (scope: any) => { const snapshot = { ...await api.snapshot(), model: scope.model, group_id: scope.group_id ?? null, window_minutes: scope.minutes, history_status: 'ready' }; return { snapshot, latency: { ...snapshot, bucket_minutes: 5, accounts: [] } } }, getPriorityStickyBindings: vi.fn().mockResolvedValue({group_id:2,total:0,by_account:[]}), getPriorityModels: async () => ['mock-model','other-model'], getPriorityConfig: api.config, getPrioritySnapshot: api.snapshot, savePriorityConfig: api.save }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 1, role: 'admin' } }) }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))

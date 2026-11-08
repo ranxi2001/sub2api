@@ -10,7 +10,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => state.auth }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@/api/admin/priorityScheduling', () => ({ getPriorityAnalysis: vi.fn(), getPriorityConfig: vi.fn(), getPrioritySnapshot: vi.fn(), savePriorityConfig: vi.fn(), getPriorityLatency: vi.fn(), recomputePriorityScheduling: vi.fn(), getPriorityStickyBindings: vi.fn(), clearPriorityStickyBindings: vi.fn() }))
+vi.mock('@/api/admin/priorityScheduling', () => ({ getPriorityAnalysis: vi.fn(), getPriorityModels: async () => ['fixture-model','other-model'], getPriorityConfig: vi.fn(), getPrioritySnapshot: vi.fn(), savePriorityConfig: vi.fn(), getPriorityLatency: vi.fn(), recomputePriorityScheduling: vi.fn(), getPriorityStickyBindings: vi.fn(), clearPriorityStickyBindings: vi.fn() }))
 
 vi.mock('@/api/admin/groups', () => ({ getAll: async () => ([{ id: 11, name: 'Fixture' }]), getModelAllowlistCandidates: async () => (['fixture-model','other-model']) }))
 

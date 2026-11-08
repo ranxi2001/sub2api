@@ -32,7 +32,7 @@ beforeEach(() => {
   vi.mocked(apiClient.get).mockImplementation(async (url, options: any) => {
     if (url === '/admin/priority-scheduling/config') return { data: { ...config } }
     if (url === '/admin/groups/all') return { data: [{ id: 11, name: 'Fixture group' }, { id: 17, name: 'Other group' }] }
-    if (String(url).endsWith('/model-allowlist-candidates')) return { data: { models: ['fixture-model', 'not-in-latest-pool'] } }
+    if (url === '/admin/priority-scheduling/models') return { data: { models: ['fixture-model', 'not-in-latest-pool'] } }
     if (url === '/admin/priority-scheduling/analysis') return { data: analysis(options.params) }
     if (url === '/admin/priority-scheduling/snapshot') return { data: { snapshot: null } }
     if (url === '/admin/priority-scheduling/sticky-bindings') return { data: { group_id: options.params.group_id, total: 0, by_account: [] } }
@@ -130,10 +130,23 @@ describe('priority explicit scope filters', () => {
     expect(vi.mocked(apiClient.get)).toHaveBeenCalledTimes(count)
   })
 
+  it('distinguishes first-read failure from a successful empty sample set', async () => {
+    const original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options) => {
+      if (url === '/admin/priority-scheduling/analysis') throw Error('fixture history failure')
+      return original(url, options)
+    })
+    render(); await flushPromises()
+    await wrapper!.get('[data-testid="latency-toggle"]').trigger('click')
+    expect(wrapper!.get('[data-testid="latency-toggle"]').text()).toContain('—')
+    expect(wrapper!.get('[data-testid="latency-panel"]').text()).not.toContain('priorityScheduling.latencyPanel.empty')
+    expect(wrapper!.get('[data-testid="latency-panel"]').text()).toContain('priorityScheduling.latencyPanel.error')
+  })
+
   it('finishes a group catalog read after a window change without changing the selected model', async () => {
     render(); await flushPromises()
     const pending = deferred<any>(), original = vi.mocked(apiClient.get).getMockImplementation()!
-    vi.mocked(apiClient.get).mockImplementation(async (url, options) => String(url).includes('/groups/17/model-allowlist-candidates') ? pending.promise : original(url, options))
+    vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/models' && (options as any)?.params?.group_id === 17 ? pending.promise : original(url, options))
     await choose('priority-group-filter', 'Other group (#17)')
     await wrapper!.get('[data-testid="latency-window"]').setValue('15'); await flushPromises()
     pending.resolve({ data: { models: ['only-in-group-17'] } }); await flushPromises()
@@ -158,7 +171,7 @@ describe('priority explicit scope filters', () => {
     const latest = { ...analysis({ model: 'latest-selection', group_id: 17, minutes: 60 }).snapshot, candidates: [] }
     const original = vi.mocked(apiClient.get).getMockImplementation()!
     vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/snapshot' ? { data: { snapshot: latest } } : original(url, options))
-    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { before: latest, after: latest, timed_out: false, diff: [{ account_id: 42, changed: true, old_score: 1, new_score: 2, old_weight: 1, new_weight: 2, reasons: [] }] } })
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { before: structuredClone(latest), after: structuredClone(latest), timed_out: false, diff: [{ account_id: 42, changed: true, old_score: 1, new_score: 2, old_weight: 1, new_weight: 2, reasons: [] }] } })
     await wrapper!.get('[data-testid="recompute"]').trigger('click'); await flushPromises()
     expect(wrapper!.find('[data-testid="clear-changed-sticky"]').exists()).toBe(true)
     expect((wrapper!.vm as any).snapshot.model).toBe('fixture-model')

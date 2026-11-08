@@ -175,3 +175,21 @@ func (h *AccountHandler) RecomputePriorityScheduling(c *gin.Context) {
 	}
 	response.Success(c, result)
 }
+
+func (h *AccountHandler) PrioritySchedulingModels(c *gin.Context) {
+	var group *int64
+	if raw, exists := c.GetQuery("group_id"); exists {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			response.BadRequest(c, "group_id must be a positive integer")
+			return
+		}
+		group = &value
+	}
+	models, err := h.openAIGatewayService.PriorityAnalysisModels(c.Request.Context(), group)
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "Priority model catalog read failed")
+		return
+	}
+	response.Success(c, gin.H{"models": models})
+}

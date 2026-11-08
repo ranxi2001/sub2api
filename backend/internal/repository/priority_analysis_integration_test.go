@@ -32,6 +32,9 @@ func TestPriorityAnalysisPostgresScopeWindowAndCompletePool(t *testing.T) {
 	}
 	excluded := mustCreateAccount(t, client, &service.Account{Name: "different-group", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
 	mustBindAccountToGroup(t, client, excluded.ID, other.ID, 1)
+	blocked := mustCreateAccount(t, client, &service.Account{Name: "group-model-blocked", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
+	_, err := client.AccountGroup.Create().SetAccountID(blocked.ID).SetGroupID(group.ID).SetPriority(1).SetAllowedModels([]string{"allowed-only"}).Save(ctx)
+	require.NoError(t, err)
 	now := time.Now()
 	add := func(model string, g *int64, at time.Time, ms int) {
 		_, err := usage.Create(ctx, &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: first.ID, RequestID: fmt.Sprintf("analysis-%d", time.Now().UnixNano()), Model: model, RequestedModel: model, GroupID: g, Stream: true, FirstTokenMs: &ms, InputTokens: 10, ActualCost: 1, TotalCost: 2, CreatedAt: at})
@@ -50,6 +53,7 @@ func TestPriorityAnalysisPostgresScopeWindowAndCompletePool(t *testing.T) {
 	require.Len(t, got.Latency.Accounts, 105)
 	for _, row := range got.Snapshot.Candidates {
 		require.NotEqual(t, excluded.ID, row.AccountID)
+		require.NotEqual(t, blocked.ID, row.AccountID)
 	}
 	find := func(value *service.PriorityAnalysis) service.PrioritySchedulingScore {
 		for _, row := range value.Snapshot.Candidates {
@@ -94,4 +98,35 @@ func TestPriorityAnalysisPostgresReadFailureIsNotNoSamples(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "priority analysis history")
 	require.Nil(t, got)
+}
+
+func TestPriorityAnalysisPostgresPublicAliasAndRouteQuality(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	client := tx.Client()
+	group := mustCreateGroup(t, client, &service.Group{Name: "analysis-alias", Platform: service.PlatformOpenAI})
+	account := mustCreateAccount(t, client, &service.Account{Name: "route-only", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"route-model": "upstream-model"}}})
+	mustBindAccountToGroup(t, client, account.ID, group.ID, 1)
+	user := mustCreateUser(t, client, &service.User{Email: "analysis-alias@test.invalid"})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-analysis-alias-fixture", Name: "fixture"})
+	usage := newUsageLogRepositoryWithSQL(client, tx)
+	now := time.Now().Add(-time.Minute)
+	ms := 1234
+	_, err := usage.Create(ctx, &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, RequestID: fmt.Sprintf("analysis-alias-%d", time.Now().UnixNano()), Model: "route-model", RequestedModel: "public-alias", GroupID: &group.ID, Stream: true, FirstTokenMs: &ms, InputTokens: 1, CreatedAt: now})
+	require.NoError(t, err)
+	rows, err := tx.QueryContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at) VALUES($1,'route-model','*/30 * * * *',true,'{"quality":{},"parallel_count":1}',NOW()-INTERVAL '1 hour') RETURNING id`, account.ID)
+	require.NoError(t, err)
+	var plan int64
+	require.True(t, rows.Next())
+	require.NoError(t, rows.Scan(&plan))
+	require.NoError(t, rows.Close())
+	_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment) VALUES($1,'success',$2,$2,$2,'{"model_id":"route-model","parallel_count":1}','analysis-alias-round','passed','{"verdict":"correct"}')`, plan, now)
+	require.NoError(t, err)
+	got, err := service.ReadPriorityAnalysis(ctx, newAccountRepositoryWithSQL(client, tx, nil), usage, service.DefaultPrioritySchedulingConfig(), service.PriorityAnalysisQuery{Model: "public-alias", RouteModel: "route-model", GroupID: &group.ID, Minutes: 60})
+	require.NoError(t, err)
+	require.Len(t, got.Snapshot.Candidates, 1)
+	require.Equal(t, "public-alias", got.Snapshot.Model)
+	require.Equal(t, 1, got.Snapshot.Candidates[0].Samples)
+	require.Equal(t, 1, got.Snapshot.Candidates[0].QualitySamples)
+	require.Equal(t, 1, got.Snapshot.Candidates[0].QualityPassed)
 }

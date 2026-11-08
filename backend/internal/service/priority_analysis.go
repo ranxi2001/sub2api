@@ -148,3 +148,74 @@ func ReadPriorityAnalysis(ctx context.Context, accounts AccountRepository, usage
 	slices.SortStableFunc(snapshot.Candidates, comparePrioritySnapshotScores)
 	return &PriorityAnalysis{Snapshot: snapshot, Latency: series}, nil
 }
+
+// PriorityAnalysisModels uses persisted configuration only; it never performs
+// upstream discovery or limits the catalog to the latest/transient routing pool.
+func (s *OpenAIGatewayService) PriorityAnalysisModels(ctx context.Context, groupID *int64) ([]string, error) {
+	if s == nil || s.accountRepo == nil {
+		return nil, ErrPriorityLatencySeriesUnavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, []string{PlatformOpenAI}, false)
+	if err != nil {
+		return nil, err
+	}
+	var extra []string
+	if s.settingService != nil {
+		cfg, err := s.settingService.GetPrioritySchedulingConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		extra = append(extra, cfg.Models...)
+	}
+	if s.channelService != nil && groupID != nil {
+		lookup, err := s.channelService.lookupGroupChannel(ctx, *groupID)
+		if err != nil {
+			return nil, err
+		}
+		if lookup != nil {
+			for name := range lookup.channel.ModelMapping[PlatformOpenAI] {
+				extra = append(extra, name)
+			}
+		}
+		if s.channelService.groupRepo != nil {
+			group, err := s.channelService.groupRepo.GetByIDLite(ctx, *groupID)
+			if err != nil {
+				return nil, err
+			}
+			extra = append(extra, group.ModelAllowlist.Models...)
+		}
+	}
+	return priorityAnalysisModelNames(accounts, groupID, extra), nil
+}
+
+func priorityAnalysisModelNames(accounts []Account, groupID *int64, extra []string) []string {
+	names := make(map[string]struct{})
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name != "" && len(name) <= 200 && !strings.ContainsAny(name, "*?") {
+			names[name] = struct{}{}
+		}
+	}
+	for _, name := range defaultModelsListCandidateIDs(PlatformOpenAI) {
+		add(name)
+	}
+	for _, name := range extra {
+		add(name)
+	}
+	for i := range accounts {
+		for name := range accounts[i].GetModelMapping() {
+			add(name)
+		}
+		for _, name := range groupAllowedConcreteModels(&accounts[i], groupID) {
+			add(name)
+		}
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out
+}

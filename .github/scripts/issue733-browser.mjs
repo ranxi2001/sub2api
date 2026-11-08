@@ -73,7 +73,7 @@ async function routeBackend(page) {
     requests.push({ endpoint, query: url.search, method: route.request().method() })
     let body, status = 200
     if (url.pathname === '/fixture/admin/groups/all') body = [{id:11,name:'Demo group'},{id:17,name:'Archive group'}]
-    else if (endpoint === 'model-allowlist-candidates') body = {models:['demo-model','archive-model','not-in-latest-pool']}
+    else if (endpoint === 'models') body = {models:['demo-model','archive-model','not-in-latest-pool']}
     else if (endpoint === 'config') body = config
     else if (endpoint === 'analysis') {
       const model=url.searchParams.get('model'), group=Number(url.searchParams.get('group_id'))||null, minutes=Number(url.searchParams.get('minutes'))
@@ -132,7 +132,7 @@ try {
   await old.getByTestId('latency-panel').getByText('Demo account 001', { exact: true }).first().waitFor()
   assert.equal(await old.getByTestId('priority-model-filter').count(),0,'pinned baseline has no model filter')
   assert.equal(await old.getByTestId('priority-group-filter').count(),0,'pinned baseline has no group filter')
-  const cssProof=await old.getByTestId('candidate-table').evaluate(el=>({overflow:getComputedStyle(el).overflowY,whiteSpace:getComputedStyle(el.querySelector('table')).whiteSpace,radius:getComputedStyle(el.closest('section')).borderRadius,headerPadding:getComputedStyle(document.querySelector('[data-testid="latency-panel"] header')).paddingTop}))
+  const cssProof=await old.getByTestId('candidate-table').evaluate(el=>({overflow:getComputedStyle(el).overflowY,whiteSpace:getComputedStyle(el.querySelector('tbody td')).whiteSpace,radius:getComputedStyle(el.closest('section')).borderRadius,headerPadding:getComputedStyle(document.querySelector('[data-testid="latency-panel"] header')).paddingTop}))
   assert.equal(cssProof.overflow,'auto');assert.equal(cssProof.whiteSpace,'nowrap');assert.equal(cssProof.radius,'16px');assert.equal(cssProof.headerPadding,'20px')
   await screenshot(old,'before-desktop.png','baseline')
   measurements.push({phase:'baseline-filter-red',baselineByteEqual:true,modelFilterCount:0,groupFilterCount:0,cssProof})
@@ -243,7 +243,7 @@ try {
   // English copy, same real page. Dark state uses the existing project theme.
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('http://127.0.0.1:4183/.issue733-fixture/index.html?locale=en', { waitUntil: 'networkidle' })
-  assert.match(await page.getByTestId('latency-status').innerText(), /Stable account ID/)
+  assert.match(await page.getByTestId('latency-status').innerText(), /Updated/)
   await page.evaluate(() => document.documentElement.classList.add('dark'))
   await screenshot(page, 'after-english-dark.png', 'candidate')
   // Unmount then wait longer than a real scheduled poll; no timer restart.

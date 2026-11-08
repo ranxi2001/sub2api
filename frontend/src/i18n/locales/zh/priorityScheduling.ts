@@ -1,5 +1,5 @@
 export default {
-  filters: { analysisHint: '按所选模型、分组和时间窗口读取历史；实时容量与进程内尝试估计未采集，以未知显示。重算/清粘性单独针对最近实际选号，使用精确快照身份。', candidates: '候选评分', ungrouped: '未分组', catalogError: '模型或分组目录读取失败，请刷新重试' },
+  filters: { updated: '已更新', choose: '请选择模型与分组', recomputeLatest: '重算最近实际选号', analysisHint: '分流权重不是全局概率。按所选模型、分组和时间窗口读取历史；实时容量与进程内尝试估计未采集，以未知显示。重算/清粘性单独针对最近实际选号，使用精确快照身份。', candidates: '候选评分', ungrouped: '未分组', catalogError: '模型或分组目录读取失败，请刷新重试' },
   reading: { configuration: '调度配置', diagnostics: '诊断详情', buckets: '当前页账号时间桶', pageSize: '每页数量', refreshing: '后台更新中，保留当前内容', stale: '更新失败，显示上次成功数据；将自动重试', stableOrder: '账号按 ID 稳定展示；新增追加、删除移除，不随实时指标重排。' },
   errorRate: "上游尝试错误率",
   error_rate_weight: "错误惩罚权重（%）",
