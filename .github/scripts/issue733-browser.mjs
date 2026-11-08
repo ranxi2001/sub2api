@@ -206,7 +206,9 @@ try {
   await page.setViewportSize({ width: 1280, height: 360 })
   const short = await geometry(page)
   for (const item of short) { assert(item.height <= 360 * 0.55 + 1); if (item.name !== 'buckets') assert(item.scrollHeight > item.height) }
-  assert(await page.getByTestId('latency-panel').evaluate(el => el.getBoundingClientRect().height) <= 330)
+  const shortPanel = await page.getByTestId('latency-panel').evaluate(el => ({height:el.getBoundingClientRect().height,maxHeight:getComputedStyle(el).maxHeight,transition:getComputedStyle(el).transitionProperty}))
+  measurements.push({phase:'short-panel',...shortPanel})
+  assert(shortPanel.height <= 330, JSON.stringify(shortPanel))
   await page.getByTestId('latency-table').scrollIntoViewIfNeeded()
   await screenshot(page, 'after-short-viewport.png', 'candidate')
   measurements.push({ phase: 'short-viewport', geometry: short })

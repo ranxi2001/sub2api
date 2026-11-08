@@ -527,7 +527,7 @@ onBeforeUnmount(() => { stopHistoryRefresh(); alive = false; generation++ })
 .card { @apply rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900; }
 .field-title { @apply mb-2 block text-xs font-medium text-gray-600 dark:text-gray-300; }
 input[type=checkbox] { @apply h-4 w-4 rounded text-primary-600; }
-.latency-panel { display: flex; flex-direction: column; max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); }
+.latency-panel { transition-property: background-color, border-color, box-shadow; display: flex; flex-direction: column; max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); }
 .latency-panel > header, .latency-panel > p { flex-shrink: 0; }
 .latency-content { min-height: 0; max-height: min(48rem, 70vh); max-height: min(48rem, 70dvh); overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
 .latency-content .reading-table { max-height: min(18rem, 32vh); max-height: min(18rem, 32dvh); }
