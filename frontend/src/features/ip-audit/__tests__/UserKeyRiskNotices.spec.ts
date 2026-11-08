@@ -1,14 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import UserKeyRiskNotices from '../UserKeyRiskNotices.vue'
 import { userKeyRiskApi, type UserKeyRiskNotice } from '../keyRiskApi'
 import en from '@/i18n/locales/en/ipAudit'
 import zh from '@/i18n/locales/zh/ipAudit'
+enableAutoUnmount(afterEach)
+afterEach(() => { document.body.replaceChildren() })
 vi.mock('../keyRiskApi', () => ({ userKeyRiskApi: { list: vi.fn(), acknowledge: vi.fn() } }))
 const notice = (): UserKeyRiskNotice => ({ event_id: 4, generation: 2, rule: 'cross_user_ip', state: 'pending', key_ids: [11], keys: [{ id: 11, name: '<Production key>' }], first_seen: '2026-11-07T01:00:00Z', last_seen: '2026-11-07T01:01:00Z', attempts: 1, max_reminders: 3, acknowledged_at: null })
 function render(locale = 'en') {
-  return mount(UserKeyRiskNotices, { global: { plugins: [createI18n({ legacy: false, locale, messages: { en: { ipAudit: en, common: { refresh: 'Refresh', cancel: 'Cancel' } }, zh: { ipAudit: zh, common: { refresh: '刷新', cancel: '取消' } } } })] } })
+  // jsdom invalidates computed-style caches only for nodes attached to its document.
+  return mount(UserKeyRiskNotices, { attachTo: document.body, global: { plugins: [createI18n({ legacy: false, locale, messages: { en: { ipAudit: en, common: { refresh: 'Refresh', cancel: 'Cancel' } }, zh: { ipAudit: zh, common: { refresh: '刷新', cancel: '取消' } } } })] } })
 }
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(userKeyRiskApi.list).mockResolvedValue({ items: [notice()] }); vi.mocked(userKeyRiskApi.acknowledge).mockResolvedValue() })
 describe('Customer risk acknowledgement', () => {
@@ -79,6 +82,7 @@ describe('Customer risk acknowledgement', () => {
   })
   it('keeps each disclosure linked to its own mounted panel', async () => {
     const w = mount({ components: { UserKeyRiskNotices }, template: '<div><UserKeyRiskNotices /><UserKeyRiskNotices /></div>' }, {
+      attachTo: document.body,
       global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en: { ipAudit: en, common: { refresh: 'Refresh', cancel: 'Cancel' } } } })] }
     })
     await flushPromises()
