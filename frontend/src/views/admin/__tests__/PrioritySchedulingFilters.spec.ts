@@ -146,6 +146,23 @@ describe('priority explicit scope filters', () => {
     pending.resolve({ data: { models: ['late-stale-model'] } }); await flushPromises()
     if (wrapper && action !== 'logout') expect((wrapper.vm as any).availableModels).not.toContain('late-stale-model')
   })
+
+  it('followup F3 aborts pending catalog siblings when one directory read fails first', async () => {
+    render(); await flushPromises()
+    const pending = deferred<any>(), original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options: any) => {
+      if (url === '/admin/groups/all' && options?.params?.platform === 'openai') throw Error('fixture directory failed')
+      if (url === '/admin/priority-scheduling/models') return pending.promise
+      return original(url, options)
+    })
+    await choose('priority-group-filter', 'Other group (#17)')
+    const catalog = vi.mocked(apiClient.get).mock.calls.filter(([url]) => url === '/admin/priority-scheduling/models').at(-1)!
+    expect((catalog[1] as any)?.signal.aborted, 'a failed directory must abort its still-pending sibling model read').toBe(true)
+    expect((wrapper!.vm as any).catalogError).toBe(true)
+    fixture.auth.user = null
+    pending.resolve({ data: { models: ['late-orphan-model'] } }); await flushPromises()
+    expect((wrapper!.vm as any).availableModels).toEqual([])
+  })
   it('offers explicit model and group filters independently of the latest pool', async () => {
     render(); await flushPromises()
     expect(wrapper!.find('[data-testid="priority-model-filter"]').exists(), 'administrators must be able to select the analysis model').toBe(true)

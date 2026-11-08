@@ -421,7 +421,12 @@ async function loadCatalog(initial = false) {
     availableGroups.value = [...new Map([...openaiGroups, ...compositeGroups].map(group => [group.id, group])).values()]
     availableModels.value = catalogModels
     if (initial && !selectedModel.value) selectedModel.value = draft.value?.models?.find(model => catalogModels.includes(model)) ?? catalogModels[0] ?? ''
-  } catch { if (active(version) && request === catalogRequestGeneration) catalogError.value = true }
+  } catch {
+    // Promise.all can fail before its sibling requests finish. Keep those reads
+    // from escaping the scope/lifecycle cancellation boundary.
+    controller.abort()
+    if (active(version) && request === catalogRequestGeneration) catalogError.value = true
+  }
   finally {
     if (catalogController === controller) catalogController = undefined
     if (active(version) && request === catalogRequestGeneration) catalogLoading.value = false
