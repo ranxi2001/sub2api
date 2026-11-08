@@ -194,3 +194,38 @@ describe('latency response semantic identity', () => {
     expect((wrapper.vm as any).latencyError).toBe('priorityScheduling.latencyPanel.error')
   })
 })
+
+
+describe('snapshot first read and mutation safety', () => {
+  it('distinguishes a pending first snapshot from a successful empty snapshot', async () => {
+    const pending = deferred<api.PrioritySnapshot | null>()
+    vi.mocked(api.getPrioritySnapshot).mockReturnValueOnce(pending.promise)
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    expect(wrapper.get('[data-testid="snapshot-initial-state"]').text()).toBe('priorityScheduling.loading')
+    pending.resolve(null); await flushPromises()
+    expect(wrapper.get('[data-testid="snapshot-initial-state"]').text()).toBe('priorityScheduling.empty')
+    expect(api.getPriorityLatency).not.toHaveBeenCalled()
+  })
+
+  it('invalidates a pending recompute on timestamp-only polling even though reading scope stays stable', async () => {
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    const pending = deferred<api.PrioritySchedulingRecomputeResult>(), before = snapshot()
+    vi.mocked(api.recomputePriorityScheduling).mockReturnValueOnce(pending.promise)
+    const recompute = (wrapper.vm as any).recompute(); await flushPromises()
+    vi.mocked(api.getPrioritySnapshot).mockResolvedValue({ ...before, at: '2026-11-08T00:01:00Z' })
+    await (wrapper.vm as any).refresh(); await flushPromises()
+    pending.resolve({ before, after: before, diff: [], timed_out: false }); await recompute; await flushPromises()
+    expect((wrapper.vm as any).snapshot.at).toBe('2026-11-08T00:01:00Z')
+    expect(wrapper.find('[data-testid="recompute-diff"]').exists()).toBe(false)
+    expect(wrapper.getComponent('[data-testid="candidate-table"]').props('data')[0].account_id).toBe(1)
+  })
+
+  it('does not clear sticky bindings when confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.mocked(api.getPriorityStickyBindings).mockResolvedValue({ group_id: 2, total: 3, by_account: [{ account_id: 1, count: 3 }] })
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    await wrapper.get('[data-testid="sticky-clear-1"]').trigger('click'); await flushPromises()
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('priorityScheduling.sticky.confirmAccount'))
+    expect(api.clearPriorityStickyBindings).not.toHaveBeenCalled()
+  })
+})
