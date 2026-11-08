@@ -48,7 +48,7 @@ describe('priority scheduling', () => {
     expect(wrapper.text()).toContain('priorityScheduling.errorLocalScope')
     const scroll = wrapper.get('[data-testid="priority-candidate-scroll"]')
     expect(scroll.classes()).toContain('overflow-x-auto')
-    expect(scroll.get('table').classes()).toContain('whitespace-nowrap')
+    expect(scroll.get('tbody td').classes()).toContain('whitespace-nowrap')
     await wrapper.get('[data-testid="error-rate-weight"]').setValue(0)
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(savePriorityConfig).toHaveBeenLastCalledWith({ ...config, error_rate_weight: 0 })

@@ -1,0 +1,157 @@
+name: Issue733 priority reading UI
+on:
+  push:
+    branches: [fix/issue733-priority-ui]
+  pull_request:
+    paths:
+      - 'backend/internal/service/priority_latency_series*'
+      - 'frontend/src/api/admin/priorityScheduling.ts'
+      - 'frontend/src/views/admin/PrioritySchedulingView.vue'
+      - 'frontend/src/views/admin/__tests__/PriorityScheduling*'
+      - 'frontend/src/i18n/locales/*/priorityScheduling.ts'
+      - '.github/scripts/issue733-*'
+      - '.github/workflows/issue733-priority-ui.yml'
+concurrency:
+  group: issue733-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Pinned baseline behavioral RED in isolated checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/issue733-evidence"
+          git worktree add --detach "$RUNNER_TEMP/issue733-baseline" 8889aee65d908c2458becb86d4fe54f4359dc61d
+          cp frontend/src/views/admin/__tests__/PrioritySchedulingReading.spec.ts "$RUNNER_TEMP/issue733-baseline/frontend/src/views/admin/__tests__/"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/issue733-baseline/frontend/node_modules"
+          git show 8889aee65d908c2458becb86d4fe54f4359dc61d:frontend/src/views/admin/PrioritySchedulingView.vue > "$RUNNER_TEMP/issue733-evidence/baseline.vue"
+          cmp "$RUNNER_TEMP/issue733-evidence/baseline.vue" "$RUNNER_TEMP/issue733-baseline/frontend/src/views/admin/PrioritySchedulingView.vue"
+          set +e
+          (cd "$RUNNER_TEMP/issue733-baseline/frontend" && pnpm exec vitest run src/views/admin/__tests__/PrioritySchedulingReading.spec.ts --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/issue733-evidence/red.json") > "$RUNNER_TEMP/issue733-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue733-evidence/red.log"
+          test "$result" -ne 0
+          python3 .github/scripts/issue733-check-red.py "$RUNNER_TEMP/issue733-evidence/red.json"
+      - name: Candidate reading and existing safety regressions GREEN
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingReading.spec.ts src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/views/admin/__tests__/PrioritySchedulingQuantile.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee "$RUNNER_TEMP/issue733-evidence/green.log"
+      - name: Lint changed frontend sources
+        run: pnpm --dir frontend exec eslint src/views/admin/PrioritySchedulingView.vue src/views/admin/__tests__/PrioritySchedulingReading.spec.ts src/i18n/locales/en/priorityScheduling.ts src/i18n/locales/zh/priorityScheduling.ts
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue733-unit-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue733-evidence
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run build
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated CI browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/issue733-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/issue733-browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Render pinned before and candidate with actual styles
+        env:
+          ISSUE733_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/issue733-browser/node_modules/playwright
+          ISSUE733_SCREENSHOT_DIR: ${{ runner.temp }}/issue733-screenshots
+        run: node .github/scripts/issue733-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue733-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue733-screenshots
+          if-no-files-found: error
+
+  scope-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Pinned baseline configuration contract RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/issue733-contract"
+          git worktree add --detach "$RUNNER_TEMP/issue733-contract-baseline" 8889aee65d908c2458becb86d4fe54f4359dc61d
+          cp backend/internal/service/priority_latency_series_regression_test.go "$RUNNER_TEMP/issue733-contract-baseline/backend/internal/service/"
+          git show 8889aee65d908c2458becb86d4fe54f4359dc61d:backend/internal/service/priority_latency_series.go > "$RUNNER_TEMP/issue733-contract/baseline.go"
+          cmp "$RUNNER_TEMP/issue733-contract/baseline.go" "$RUNNER_TEMP/issue733-contract-baseline/backend/internal/service/priority_latency_series.go"
+          set +e
+          (cd "$RUNNER_TEMP/issue733-contract-baseline/backend" && go test -tags=unit ./internal/service -run '^TestPriorityLatencySeriesExposesConfigurationScope$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue733-contract/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue733-contract/red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestPriorityLatencySeriesExposesConfigurationScope' "$RUNNER_TEMP/issue733-contract/red.log"
+          grep -q -- 'latency scope must expose exact configuration revision' "$RUNNER_TEMP/issue733-contract/red.log"
+      - name: Candidate scope and recompute contract GREEN
+        run: |
+          set -euo pipefail
+          (cd backend && go test -tags=unit ./internal/service -run '^(TestPriorityLatencySeries|TestPriorityRecompute)' -count=1 -v -timeout=5m) 2>&1 | tee "$RUNNER_TEMP/issue733-contract/green.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue733-contract-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue733-contract

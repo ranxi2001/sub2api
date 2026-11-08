@@ -46,6 +46,24 @@ func TestPriorityLatencySeriesNoHistorySerializesEmptyBuckets(t *testing.T) {
 	require.JSONEq(t, `[]`, string(response.Accounts[0].Buckets), "the public API must represent an empty series as an array")
 }
 
+func TestPriorityLatencySeriesExposesConfigurationScope(t *testing.T) {
+	cfg := DefaultPrioritySchedulingConfig()
+	svc := &OpenAIGatewayService{usageLogRepo: &priorityLatencySeriesRegressionReader{}}
+	svc.priorityScheduling.latestInput = &prioritySnapshotInput{
+		limited:    true,
+		request:    OpenAIAccountScheduleRequest{RequestedModel: "fixture-model"},
+		config:     cfg,
+		candidates: []openAIAccountCandidateScore{{account: &Account{ID: 77, Name: "Fixture"}}},
+	}
+	series, err := svc.PriorityLatencySeries(context.Background(), 60, 5)
+	require.NoError(t, err)
+	raw, err := json.Marshal(series)
+	require.NoError(t, err)
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(raw, &response))
+	require.Equal(t, priorityConfigRevision(cfg), response["config_revision"], "latency scope must expose exact configuration revision")
+}
+
 func TestPriorityLatencySeriesUsesSnapshotMeasurementAndPercentile(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()
 	cfg.LatencyPercentile = 50
