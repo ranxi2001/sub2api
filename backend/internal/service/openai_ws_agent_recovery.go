@@ -114,10 +114,15 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			return openAIAgentRecoveryError("owner_unavailable")
 		}
 	}
-	if err := r.service.checkOpenAIAgentRecoveryDispatch(ctx, r.c, account, payload); err != nil {
-		return err
-	}
+	// These call sites have already selected a native Responses socket or
+	// Responses HTTP bridge. Do not run the HTTP ingress protocol selector here:
+	// it can query a different model-catalog endpoint and does not describe this
+	// established transport. Final fresh admission and the captured wire remain
+	// authoritative; managed/other credentials are excluded by prepare below.
 	r.request.disallowLearning = r.request.disallowLearning || account.IsExcelBPSEnabledForModel(model) || account.IsPrismBrowserEnabledForModel(model)
+	if r.request.owner != nil && r.request.disallowLearning {
+		return openAIAgentRecoveryError("route_changed")
+	}
 	if err := r.service.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
 		return err
 	}
