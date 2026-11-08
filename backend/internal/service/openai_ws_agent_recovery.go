@@ -85,6 +85,33 @@ func (r *openAIWSAgentRecovery) preventReplay() {
 	}
 }
 
+// Stored native Responses already has a verified response anchor and the
+// client is resending known intact opaque items. Legacy bridge reconstruction
+// would append history again (including tasks/tool results) on every turn.
+// This only chooses representation; begin still rechecks authoritative owners,
+// the exact previous response, permissions and the final built HTTP request.
+func (r *openAIWSAgentRecovery) storedContinuation(source []byte) bool {
+	if r == nil || gjson.GetBytes(source, "store").Type != gjson.True || gjson.GetBytes(source, "previous_response_id").String() == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := openAIAgentRecoveryItemDigests(source)
+	if len(items) == 0 {
+		return false
+	}
+	scope := *openAIAgentRecoveryFromContext(r.ctx)
+	if forward, ok := openAIForwardModelFromContext(r.c.Request.Context()); ok && forward.model != "" {
+		scope.model = forward.model
+	}
+	for _, item := range items {
+		if !r.known[scope.itemKey(item)] {
+			return false
+		}
+	}
+	return true
+}
+
 // req captures the actual URL, final authorization headers and outbound model.
 // A fragment namespaces the fingerprint by adapter; this copy is never sent.
 // Thus a WS grant cannot authorize an HTTP or different-adapter continuation.

@@ -239,6 +239,41 @@ jobs:
           done
           grep -q 'client-visible first delivery must not race shared ownership' "$RUNNER_TEMP/issue715-first-delivery-red.log"
 
+  red-ws-bridge-sequence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Pre-fix bridge with unchanged two-continuation socket regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          original=d91d890049a9bd8bd0e414f30b0cb3b5bcc0f06e
+          target=backend/internal/service/openai_ws_forwarder_ingress.go
+          git fetch --no-tags --depth=1 origin "$original"
+          trap 'git restore --source=HEAD -- "$target"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "$target"
+          expected=$(git rev-parse "$original:$target")
+          actual=$(git hash-object "$target")
+          echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
+          test "$expected" = "$actual"
+          set +e
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestIssue715WSGeneratedTaskContinuation$/http_bridge/cross-node=false$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|--- SKIP:' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          grep -q -- '--- FAIL: TestIssue715WSGeneratedTaskContinuation/http_bridge/cross-node=false' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          grep -q 'generated WS task must continue without rebuilding the session' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+
   red-ws-wire:
     runs-on: ubuntu-latest
     timeout-minutes: 25
