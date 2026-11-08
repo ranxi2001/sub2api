@@ -117,7 +117,11 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	// implement Codex's native encrypted multi-agent message contract, even
 	// when the underlying ChatGPT model advertises it. Explicit nulls override
 	// synced/bundled declarations without disabling ordinary plaintext tools.
-	if account.isExcelBPSUpstreamModelEnabled(modelID) {
+	if account.isExcelBPSUpstreamModelEnabled(modelID) ||
+		(account.IsOpenAI() && shouldForwardOpenAIResponsesViaRawChatCompletions(account)) {
+		// The Chat Completions bridge can concatenate plaintext collaboration
+		// messages, but cannot consume native encrypted agent payloads. A synced
+		// native manifest must not enable v2 on a different wire protocol.
 		capabilities["multi_agent_version"] = json.RawMessage("null")
 		capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
 	}

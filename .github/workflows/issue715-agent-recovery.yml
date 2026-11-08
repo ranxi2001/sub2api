@@ -1,0 +1,72 @@
+name: Issue715 agent continuation
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/workflows/issue715-agent-recovery.yml'
+      - 'backend/internal/service/openai_*'
+      - 'backend/internal/handler/openai_*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue715-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact clean candidate GREEN
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          test -z "$(git status --porcelain)"
+          cd backend
+          go test -race -tags=unit ./internal/service -run '^Test(Issue715|AstraCodexToolCapabilities|EncryptedSticky|EncryptedPrioritySticky|OpenAIGatewayService_SelectAccountWithScheduler_Encrypted)' -count=1 -v -timeout=10m
+
+  red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Pinned original production with the same new regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          original=6df0cd5bb0ce4d774d34004008f9dd661d236468
+          target=backend/internal/service/openai_codex_model_metadata.go
+          git fetch --no-tags --depth=1 origin "$original"
+          trap 'git restore --source=HEAD -- "$target"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "$target"
+          expected=$(git rev-parse "$original:$target")
+          actual=$(git hash-object "$target")
+          echo "baseline=$original expected_blob=$expected tested_blob=$actual"
+          test "$expected" = "$actual"
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715BridgeDoesNotAdvertiseEncryptedAgent$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue715-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-red.log"
+          grep -q -- '--- FAIL: TestIssue715BridgeDoesNotAdvertiseEncryptedAgent' "$RUNNER_TEMP/issue715-red.log"
+          grep -q 'bridge must not create unreadable encrypted tasks' "$RUNNER_TEMP/issue715-red.log"
