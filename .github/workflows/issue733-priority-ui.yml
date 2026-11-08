@@ -1,0 +1,33 @@
+name: Issue733 priority reading UI
+on:
+  push:
+    branches: [fix/issue733-priority-ui]
+  pull_request:
+    paths:
+      - 'frontend/src/views/admin/PrioritySchedulingView.vue'
+      - 'frontend/src/views/admin/__tests__/PriorityScheduling*'
+      - 'frontend/src/i18n/locales/*/priorityScheduling.ts'
+      - '.github/scripts/issue733-*'
+      - '.github/workflows/issue733-priority-ui.yml'
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Candidate reading regression
+        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingReading.spec.ts --maxWorkers=1 --minWorkers=1
