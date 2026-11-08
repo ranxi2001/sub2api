@@ -49,6 +49,8 @@ jobs:
           begin='func ValidateUpstreamOperationsFilter('
           end='func (s *ChannelService) UpstreamOperations('
           s=s[:s.index(begin)]+current[current.index(begin):current.index(end)]+s[s.index(end):]
+          if '"strconv"' not in s:
+              s=s.replace('import (\n', 'import (\n "strconv"\n', 1)
           if '`json:"channel_id,omitempty"`' not in s:
               s=s.replace('Upstream   string    `json:"upstream"`', 'Upstream   string    `json:"upstream"`\n ChannelID int64 `json:"channel_id,omitempty"`')
           s=re.sub(r'\n// OperationsCostMultiplier distinguishes.*?\n}\s*$', '\n', s, flags=re.S)
