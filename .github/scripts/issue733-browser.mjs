@@ -111,7 +111,7 @@ async function setPager(page, name, pageSize, pageNumber) {
 }
 async function geometry(page) {
   return page.evaluate(() => [...document.querySelectorAll('[data-reading-scroll]')].map(el => {
-    const bounds = el.getBoundingClientRect(); let rows = [...el.querySelectorAll('[data-row-id]')]; if (!rows.length) rows = [...el.querySelectorAll('[data-reading-account]')]
+    const bounds = el.getBoundingClientRect(); let rows = [...el.querySelectorAll('[data-row-id]')]; if (!rows.length) rows = [...el.querySelectorAll('[data-field="account"] [data-reading-account]')].map(anchor=>{const card=anchor.closest('[data-field]').parentElement.parentElement;card.dataset.readingAccount=anchor.dataset.readingAccount;return card})
     const row = rows.find(item => item.getBoundingClientRect().bottom > bounds.top + 48) ?? rows.at(-1)
     return { name: el.dataset.readingScroll, left: el.scrollLeft, top: el.scrollTop, height: bounds.height, scrollHeight: el.scrollHeight, width: el.clientWidth, scrollWidth: el.scrollWidth, row: row?.dataset.rowId ?? row?.dataset.readingAccount, offset: row ? row.getBoundingClientRect().top - bounds.top : 0, ids: rows.map(item => item.dataset.rowId ?? item.dataset.readingAccount) }
   }))
@@ -163,6 +163,7 @@ try {
   const bucketIDs = await page.getByTestId('latency-buckets').locator('tbody [data-row-id]').evaluateAll(rows => rows.map(row => row.dataset.rowId))
   const latencyIDs = await page.getByTestId('latency-table').locator('tbody [data-row-id]').evaluateAll(rows => rows.map(row => row.dataset.rowId))
   assert.deepEqual(bucketIDs, latencyIDs); assert.equal(latencyIDs.length, 10); assert.equal(latencyIDs[0], '21')
+  await page.setViewportSize({width:960,height:1000})
   await page.getByText('调度配置', {exact:true}).click()
   await page.getByTestId('enabled').uncheck()
   await page.getByText('调度配置', {exact:true}).click()
@@ -170,7 +171,7 @@ try {
   await page.evaluate(() => { for (const el of document.querySelectorAll('[data-reading-scroll]')) { el.scrollLeft = 220; el.scrollTop = 110; el.dataset.savedNode = 'same' } })
   await page.getByTestId('candidate-table').evaluate(el => {const row=el.querySelector('tbody tr');el.scrollTop=row.offsetTop+row.offsetHeight+4})
   const before = await geometry(page)
-  assert(before.filter(item => item.name !== 'buckets').every(item => item.scrollHeight > item.height)); assert(before.some(item => item.scrollWidth > item.width && item.left > 0))
+  assert(before.filter(item => item.name !== 'buckets').every(item => item.scrollHeight > item.height)); assert(before.every(item => item.scrollWidth > item.width && item.left > 0), JSON.stringify(before))
   // Real 5-second timers, multiple polls, changing at/metrics and backend order.
   const startingReads = requests.filter(r => r.endpoint === 'snapshot').length
   state.reverse = true; state.tick++; state.endpoint='/v1/'+'synthetic-path-'.repeat(30)
@@ -226,7 +227,7 @@ try {
   state.endpoint='/v1/'+'mobile-synthetic-'.repeat(60)
   state.tick++; await refresh(page)
   const mobileAfter = await geometry(page)
-  for(const item of mobileBefore){const next=mobileAfter.find(row=>row.name===item.name);assert.equal(next.row,item.row);assert(Math.abs(next.offset-item.offset)<1)}
+  for(const item of mobileBefore){const next=mobileAfter.find(row=>row.name===item.name);assert.equal(next.row,item.row);assert(Math.abs(next.offset-item.offset)<1);assert(next.offset<next.height,'mobile anchor must belong to a visible account card')}
   measurements.push({phase:'mobile-poll',before:mobileBefore,after:mobileAfter})
   await page.getByTestId('latency-panel').scrollIntoViewIfNeeded()
   await screenshot(page, 'after-mobile.png', 'candidate')

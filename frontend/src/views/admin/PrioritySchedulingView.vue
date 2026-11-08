@@ -255,7 +255,13 @@ watch([latencyRows, latencyPageSize], () => { latencyPage.value = clampPage(late
 // Do not move a reader who scrolled again while Vue was patching.
 function readingAnchors(el: HTMLElement) {
   const rows = [...el.querySelectorAll<HTMLElement>('[data-row-id]')]
-  return rows.length ? rows : [...el.querySelectorAll<HTMLElement>('[data-reading-account]')]
+  return rows.length ? rows : [...el.querySelectorAll<HTMLElement>('[data-reading-account]')].map(anchor => {
+    // The responsive DataTable puts the account slot inside a field/value/card.
+    // Anchor the whole card so reading below its title keeps the same account.
+    const card = anchor.closest('[data-field]')?.parentElement?.parentElement
+    if (card && el.contains(card)) { card.dataset.readingAccount = anchor.dataset.readingAccount; return card }
+    return anchor
+  })
 }
 function readingRestore() {
   const saved = [...(readingRoot.value?.querySelectorAll<HTMLElement>('[data-reading-scroll], [data-latency-content]') ?? [])].map(el => {
