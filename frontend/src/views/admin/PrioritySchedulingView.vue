@@ -41,7 +41,7 @@
         </fieldset>
       </form>
       </details>
-      <section class="card overflow-hidden" data-testid="latency-panel">
+      <section class="card latency-panel overflow-hidden" data-testid="latency-panel">
         <header class="flex flex-wrap items-center justify-between gap-3 p-5">
           <button type="button" data-testid="latency-toggle" class="flex items-center gap-2 text-lg font-semibold" :aria-expanded="latencyExpanded" aria-controls="priority-latency-content" @click="latencyExpanded = !latencyExpanded">
             <Icon :name="latencyExpanded ? 'chevronDown' : 'chevronRight'" size="md" />{{ t('priorityScheduling.latencyPanel.title') }}
@@ -55,7 +55,7 @@
         </header>
         <p data-testid="latency-status" role="status" class="px-5 pb-3 text-xs text-gray-500">{{ t(latencyError ? 'priorityScheduling.reading.stale' : latencyLoading ? (latency ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.loading') : 'priorityScheduling.reading.stableOrder') }}</p>
         <p v-if="latencyError" role="alert" class="px-5 pb-3 text-sm text-red-600">{{ latencyError }}</p>
-        <div id="priority-latency-content" v-show="latencyExpanded" class="border-t border-gray-100 dark:border-dark-700">
+        <div id="priority-latency-content" data-latency-content v-show="latencyExpanded" class="latency-content border-t border-gray-100 dark:border-dark-700">
           <details class="px-5 py-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.latencyPanel.hint') }}</p></details>
           <p v-if="latency" class="px-5 pb-3 text-xs text-gray-500">{{ new Date(latency.at).toLocaleString() }} · {{ latency.model }} · {{ t('priorityScheduling.group') }}: {{ latency.group_id ?? '—' }} · P{{ latency.latency_percentile ?? 90 }} · {{ latency.latency_measurement ?? 'legacy_forward' }} · {{ latency.bucket_minutes }}m</p>
           <div class="flex flex-wrap items-center justify-between gap-3 px-5 pb-3">
@@ -63,7 +63,7 @@
             <label class="flex items-center gap-2 text-sm sm:hidden">{{ t('priorityScheduling.reading.pageSize') }}<select v-model.number="latencyPageSize" class="input" data-testid="latency-mobile-size"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select></label>
           </div>
           <DataTable :key="displayScope(snapshot) + ':' + latencyMinutes" data-testid="latency-table" data-reading-scroll="latency" class="reading-table" :columns="latencyColumns" :data="latencyPageRows" row-key="account_id" :loading="latencyLoading && !latency">
-            <template #cell-account="{ row }"><div class="account-cell"><strong class="font-medium" :title="row.account_name">{{ row.account_name }}</strong><small class="block text-gray-400">#{{ row.account_id }}</small></div></template>
+            <template #cell-account="{ row }"><div class="account-cell" :data-reading-account="row.account_id"><strong class="font-medium" :title="row.account_name">{{ row.account_name }}</strong><small class="block text-gray-400">#{{ row.account_id }}</small></div></template>
             <template #cell-p50="{ row }">{{ formatMs(row.p50_ttft_ms) }}</template>
             <template #cell-p90="{ row }"><span :class="latencyClass(row.p90_ttft_ms)">{{ formatMs(row.p90_ttft_ms) }}</span></template>
             <template #cell-p99="{ row }">{{ formatMs(row.p99_ttft_ms) }}</template>
@@ -71,10 +71,10 @@
             <template #empty><p class="text-sm text-gray-500">{{ t('priorityScheduling.latencyPanel.empty') }}</p></template>
           </DataTable>
           <Pagination v-if="latencyRows.length" data-testid="latency-pagination" :total="latencyRows.length" v-model:page="latencyPage" v-model:page-size="latencyPageSize" />
-          <details class="border-t border-gray-100 dark:border-dark-700" open>
+          <details class="border-t border-gray-100 dark:border-dark-700" data-testid="bucket-details">
             <summary class="cursor-pointer px-5 py-3 text-sm font-medium">{{ t('priorityScheduling.reading.buckets') }}</summary>
             <DataTable :key="displayScope(snapshot) + ':' + latencyMinutes" data-testid="latency-buckets" data-reading-scroll="buckets" class="reading-table bucket-table" :columns="bucketColumns" :data="latencyPageRows" row-key="account_id">
-              <template #cell-account="{ row }"><span class="account-cell block truncate" :title="row.account_name">{{ row.account_name }}</span></template>
+              <template #cell-account="{ row }"><span :data-reading-account="row.account_id" class="account-cell block truncate" :title="row.account_name">{{ row.account_name }}</span></template>
               <template v-for="bucket in latencyBuckets" :key="bucket" #[`cell-${bucket}`]="{ row }"><span class="tabular-nums" :class="latencyClass(bucketLatency(row, bucket) ?? 0)">{{ bucketText(row, bucket) }}</span></template>
               <template #empty><p class="text-sm text-gray-500">{{ t('priorityScheduling.latencyPanel.empty') }}</p></template>
             </DataTable>
@@ -99,7 +99,7 @@
           <div class="mb-3 flex flex-wrap items-center justify-between gap-3"><span class="text-sm font-medium">{{ t('priorityScheduling.account') }} ({{ candidateRows.length }})</span><label class="flex items-center gap-2 text-sm sm:hidden">{{ t('priorityScheduling.reading.pageSize') }}<select v-model.number="candidatePageSize" class="input" data-testid="candidate-mobile-size"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select></label></div>
           <div v-if="candidateRows.length" data-testid="priority-candidate-scroll" class="overflow-x-auto">
           <DataTable :key="displayScope(snapshot)" data-testid="candidate-table" data-reading-scroll="candidates" class="reading-table" :columns="candidateColumns" :data="candidatePageRows" row-key="account_id">
-            <template #cell-account="{ row }"><div class="account-cell"><strong class="font-medium" :title="row.account_name">{{ row.account_name }}</strong><details class="mt-1 text-xs font-normal text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><div class="diagnostic-copy mt-2 space-y-1"><small class="block text-gray-400">#{{ row.account_id }}</small><small v-if="row.bound_groups != null" class="block text-gray-400">{{ t('priorityScheduling.boundGroups') }}: {{ row.bound_groups }}</small></div></details></div></template>
+            <template #cell-account="{ row }"><div class="account-cell" :data-reading-account="row.account_id"><strong class="font-medium" :title="row.account_name">{{ row.account_name }}</strong><details class="mt-1 text-xs font-normal text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><div class="diagnostic-copy mt-2 space-y-1"><small class="block text-gray-400">#{{ row.account_id }}</small><small v-if="row.bound_groups != null" class="block text-gray-400">{{ t('priorityScheduling.boundGroups') }}: {{ row.bound_groups }}</small></div></details></div></template>
             <template #cell-tier="{ row }"><div><span :class="row.tier === 'eligible' ? 'text-emerald-600' : row.tier === 'degraded' ? 'text-amber-600' : 'text-gray-500'">{{ t(`priorityScheduling.tiers.${row.tier}`) }}</span><details class="mt-1 text-xs font-normal text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><div class="diagnostic-copy mt-2 space-y-1"><small v-if="row.oauth_quota_role" class="block font-medium text-primary-600">{{ t(`priorityScheduling.oauthQuotaRoles.${row.oauth_quota_role}`) }}</small><small v-if="row.history_status && row.history_status !== 'ready'" class="block text-amber-600">{{ t(`priorityScheduling.historyStates.${row.history_status}`) }}</small><small v-if="row.latency_stopped" class="block font-medium text-red-600">{{ t('priorityScheduling.latencyPenaltyModes.stop') }}</small><small v-if="row.reasons.includes('latency_above_target') && snapshot.latency_penalty_mode !== 'stop'" class="block font-medium text-amber-600">{{ t('priorityScheduling.softPenalty') }}</small><small v-if="row.latency_recovery" class="block font-medium text-amber-600">{{ t('priorityScheduling.recoveryNote') }}</small><small v-if="row.latency_penalty_until && !row.latency_recovery" class="block text-gray-400">{{ t('priorityScheduling.latencyPenaltyUntil') }}: {{ new Date(row.latency_penalty_until).toLocaleString() }}</small><small v-for="reason in row.reasons" :key="reason" class="block text-gray-400">{{ t(`priorityScheduling.reasons.${reason}`) }}</small></div></details></div></template>
             <template #cell-priority="{ row }"><div>{{ row.priority }}</div></template>
             <template #cell-score="{ row }"><div>{{ row.score.toFixed(1) }}<details class="mt-1 text-xs font-normal text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><div class="diagnostic-copy mt-2 space-y-1"><small v-if="row.selection_weight != null" class="block text-gray-400">{{ t('priorityScheduling.selectionWeight') }}: {{ row.selection_weight.toFixed(2) }}</small><small v-if="row.exploration_eligible" class="block text-gray-400">{{ t('priorityScheduling.explorationEligible') }}</small></div></details></div></template>
@@ -108,7 +108,7 @@
             <template #cell-latency="{ row }"><div>P{{ row.latency_percentile ?? 90 }}: {{ row.samples && selectedLatency(row) != null ? `${Math.round(selectedLatency(row)!)} ms` : t('priorityScheduling.unknown') }}<details class="mt-1 text-xs font-normal text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><div class="diagnostic-copy mt-2 space-y-1"><small class="block text-gray-400">{{ row.samples }} {{ t('priorityScheduling.samples') }}</small><small v-if="row.samples < (snapshot.min_samples ?? 5) || row.samples < tailSampleFloor(row.latency_percentile ?? 90)" class="block text-amber-600">{{ t('priorityScheduling.lowSamples') }}</small><small class="block text-gray-400">{{ t('priorityScheduling.unknown') }}: {{ row.latency_unknown_samples ?? '—' }}</small><small class="block text-gray-400">P90: {{ row.samples ? `${Math.round(row.p90_ttft_ms)} ms` : '—' }}</small><small class="block text-gray-400">{{ t('priorityScheduling.experienceP90') }}: {{ row.experience_samples ? `${Math.round(row.experience_p90_ms ?? 0)} ms (${row.experience_samples})` : '—' }}</small></div></details></div></template>
             <template #cell-load="{ row }"><div>{{ row.load_percent == null ? '—' : `${row.load_percent}%` }}</div></template>
             <template #cell-rate="{ row }"><div>{{ row.rate == null ? '—' : `${row.rate.toFixed(3)}×` }}</div></template>
-            <template #cell-profit="{ row }"><div><template v-if="row.economics_source === 'usage'"><span :class="(row.profit ?? 0) < 0 ? 'text-red-600' : 'text-emerald-600'">${{ row.profit?.toFixed(4) }} · {{ row.margin == null ? '—' : `${(row.margin * 100).toFixed(1)}%` }}</span></template><span v-else class="text-xs text-gray-500">{{ t(`priorityScheduling.economics.${row.economics_source || 'unknown'}`) }}</span><details class="mt-1 text-xs font-normal text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><div class="diagnostic-copy mt-2 space-y-1"><small class="block text-gray-400">${{ row.revenue.toFixed(4) }} − ${{ row.theoretical_cost.toFixed(4) }}</small></div></details></div></template>
+            <template #cell-profit="{ row }"><div><template v-if="row.economics_source === 'usage'"><span :class="(row.profit ?? 0) < 0 ? 'text-red-600' : 'text-emerald-600'">${{ row.profit?.toFixed(4) }} · {{ row.margin == null ? '—' : `${(row.margin * 100).toFixed(1)}%` }}</span></template><span v-else class="text-xs text-gray-500">{{ t(`priorityScheduling.economics.${row.economics_source || 'unknown'}`) }}</span><details v-if="row.economics_source === 'usage'" class="mt-1 text-xs font-normal text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><div class="diagnostic-copy mt-2 space-y-1"><small class="block text-gray-400">${{ row.revenue.toFixed(4) }} − ${{ row.theoretical_cost.toFixed(4) }}</small></div></details></div></template>
           </DataTable>
           </div><p v-else class="py-4 text-sm text-gray-500" data-testid="priority-no-candidates">{{ t('priorityScheduling.noCandidates') }}</p>
           <Pagination v-if="candidateRows.length" data-testid="candidate-pagination" :total="candidateRows.length" v-model:page="candidatePage" v-model:page-size="candidatePageSize" />
@@ -252,19 +252,23 @@ watch([candidateRows, candidatePageSize], () => { candidatePage.value = clampPag
 watch([latencyRows, latencyPageSize], () => { latencyPage.value = clampPage(latencyPage.value, latencyPageSize.value, latencyRows.value.length) })
 // Capture both scroll axes and the first visible account before a reactive patch.
 // Do not move a reader who scrolled again while Vue was patching.
+function readingAnchors(el: HTMLElement) {
+  const rows = [...el.querySelectorAll<HTMLElement>('[data-row-id]')]
+  return rows.length ? rows : [...el.querySelectorAll<HTMLElement>('[data-reading-account]')]
+}
 function readingRestore() {
-  const saved = [...(readingRoot.value?.querySelectorAll<HTMLElement>('[data-reading-scroll]') ?? [])].map(el => {
+  const saved = [...(readingRoot.value?.querySelectorAll<HTMLElement>('[data-reading-scroll], [data-latency-content]') ?? [])].map(el => {
     const bounds = el.getBoundingClientRect()
-    const rows = [...el.querySelectorAll<HTMLElement>('[data-row-id]')]
+    const rows = readingAnchors(el)
     const row = rows.find(item => item.getBoundingClientRect().bottom > bounds.top + 48)
-    return { el, left: el.scrollLeft, top: el.scrollTop, id: row?.dataset.rowId, offset: row ? row.getBoundingClientRect().top - bounds.top : 0 }
+    return { el, left: el.scrollLeft, top: el.scrollTop, id: row?.dataset.rowId ?? row?.dataset.readingAccount, offset: row ? row.getBoundingClientRect().top - bounds.top : 0 }
   })
   return async () => {
     await nextTick()
     for (const item of saved) {
       if (!item.el.isConnected) continue
-      if (item.el.scrollLeft === item.left) item.el.scrollLeft = item.left
-      const anchor = [...item.el.querySelectorAll<HTMLElement>('[data-row-id]')].find(row => row.dataset.rowId === item.id)
+      item.el.scrollLeft = item.left
+      const anchor = readingAnchors(item.el).find(row => (row.dataset.rowId ?? row.dataset.readingAccount) === item.id)
       if (item.el.scrollTop === item.top && anchor) item.el.scrollTop += anchor.getBoundingClientRect().top - item.el.getBoundingClientRect().top - item.offset
     }
   }
@@ -414,7 +418,7 @@ function scheduleHistoryRefresh(version: number, delay: number, attempt: number)
   }, delay)
 }
 async function loadLatency() {
-  if (!canRead() || !snapshot.value) return
+  if (!canRead() || !snapshot.value || latencyLoading.value) return
   const version = generation, request = ++latencyRequestGeneration, scope = displayScope(snapshot.value), minutes = latencyMinutes.value
   latencyLoading.value = true; latencyError.value = ''
   try {
@@ -522,6 +526,10 @@ onBeforeUnmount(() => { stopHistoryRefresh(); alive = false; generation++ })
 .card { @apply rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900; }
 .field-title { @apply mb-2 block text-xs font-medium text-gray-600 dark:text-gray-300; }
 input[type=checkbox] { @apply h-4 w-4 rounded text-primary-600; }
+.latency-panel { display: flex; flex-direction: column; max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); }
+.latency-panel > header, .latency-panel > p { flex-shrink: 0; }
+.latency-content { min-height: 0; max-height: min(48rem, 70vh); max-height: min(48rem, 70dvh); overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
+.latency-content .reading-table { max-height: min(18rem, 32vh); max-height: min(18rem, 32dvh); }
 .reading-table { max-height: min(32rem, 55vh); max-height: min(32rem, 55dvh); overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
 .reading-table :deep(table) { table-layout: fixed; min-width: 76rem; }
 .bucket-table :deep(table) { table-layout: auto; min-width: 100%; }

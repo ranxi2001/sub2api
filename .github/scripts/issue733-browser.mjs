@@ -104,7 +104,7 @@ async function setPager(page, name, pageSize, pageNumber) {
   const pagination = page.getByTestId(`${name}-pagination`)
   await pagination.locator('.select-trigger').click()
   await page.getByRole('option', { name: String(pageSize), exact: true }).click()
-  await pagination.getByRole('button', { name: `前往第 ${pageNumber} 页`, exact: true }).click()
+  await pagination.getByRole('button', { name: `跳转到第 ${pageNumber} 页`, exact: true }).click()
 }
 async function geometry(page) {
   return page.evaluate(() => [...document.querySelectorAll('[data-reading-scroll]')].map(el => {
@@ -154,12 +154,15 @@ try {
   await screenshot(page, 'after-latency-expanded-pagination.png', 'candidate')
   await page.getByTestId('candidate-table').scrollIntoViewIfNeeded()
   await screenshot(page, 'after-candidate-page3.png', 'candidate')
+  await page.getByTestId('bucket-details').locator('summary').click()
+  const panelHeight = await page.getByTestId('latency-panel').evaluate(el => el.getBoundingClientRect().height)
+  assert(panelHeight <= page.viewportSize().height - 30)
   const bucketIDs = await page.getByTestId('latency-buckets').locator('tbody [data-row-id]').evaluateAll(rows => rows.map(row => row.dataset.rowId))
   const latencyIDs = await page.getByTestId('latency-table').locator('tbody [data-row-id]').evaluateAll(rows => rows.map(row => row.dataset.rowId))
   assert.deepEqual(bucketIDs, latencyIDs); assert.equal(latencyIDs.length, 10); assert.equal(latencyIDs[0], '21')
   await page.evaluate(() => { for (const el of document.querySelectorAll('[data-reading-scroll]')) { el.scrollLeft = 220; el.scrollTop = 110; el.dataset.savedNode = 'same' } })
   const before = await geometry(page)
-  assert(before.every(item => item.scrollHeight > item.height)); assert(before.some(item => item.scrollWidth > item.width && item.left > 0))
+  assert(before.filter(item => item.name !== 'buckets').every(item => item.scrollHeight > item.height)); assert(before.some(item => item.scrollWidth > item.width && item.left > 0))
   // Real 5-second timers, multiple polls, changing at/metrics and backend order.
   const startingReads = requests.filter(r => r.endpoint === 'snapshot').length
   state.reverse = true; state.tick++
@@ -193,7 +196,8 @@ try {
   // Short desktop: bounded panels remain internally scrollable.
   await page.setViewportSize({ width: 1280, height: 360 })
   const short = await geometry(page)
-  for (const item of short) { assert(item.height <= 360 * 0.55 + 1); assert(item.scrollHeight > item.height) }
+  for (const item of short) { assert(item.height <= 360 * 0.55 + 1); if (item.name !== 'buckets') assert(item.scrollHeight > item.height) }
+  assert(await page.getByTestId('latency-panel').evaluate(el => el.getBoundingClientRect().height) <= 330)
   await page.getByTestId('latency-table').scrollIntoViewIfNeeded()
   await screenshot(page, 'after-short-viewport.png', 'candidate')
   measurements.push({ phase: 'short-viewport', geometry: short })

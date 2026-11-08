@@ -165,3 +165,20 @@ describe('priority paginated reading and isolation', () => {
     expect(wrapper.find('[data-testid="clear-changed-sticky"]').exists()).toBe(false)
   })
 })
+
+
+describe('slow latency polling', () => {
+  it('lets a same-scope latency response finish across multiple snapshot polls', async () => {
+    vi.useFakeTimers()
+    const pending = deferred<api.PriorityLatencySeries>()
+    vi.mocked(api.getPriorityLatency).mockReturnValue(pending.promise)
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    await vi.advanceTimersByTimeAsync(11000); await flushPromises()
+    expect(api.getPrioritySnapshot).toHaveBeenCalledTimes(3)
+    expect(api.getPriorityLatency).toHaveBeenCalledTimes(1)
+    pending.resolve(series()); await flushPromises()
+    expect((wrapper.vm as any).latency.accounts).toHaveLength(65)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(api.getPriorityLatency).toHaveBeenCalledTimes(2)
+  })
+})
