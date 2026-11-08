@@ -96,4 +96,16 @@ describe('SmartOpsNav', () => {
     expect(useNewFeatureNoticeStore().isDismissed(41, NEW_FEATURE_NOTICES.protocolFeatureSwitches)).toBe(true)
     reloaded.unmount()
   })
+
+  it('shares quality rest dismissal across navigation entries without dismissing other features', async () => {
+    const first = await mountAt('/admin/account-quality')
+    const second = await mountAt('/admin/auto-config')
+    const selector = 'a[href="/admin/account-quality"] + [data-testid="new-feature-badge"]'
+    expect(second.find(selector).exists()).toBe(true)
+    await first.get(selector).trigger('click'); await nextTick()
+    expect(second.find(selector).exists()).toBe(false)
+    expect(useNewFeatureNoticeStore().isDismissed(41, NEW_FEATURE_NOTICES.qualityRetestRest)).toBe(true)
+    expect(useNewFeatureNoticeStore().isDismissed(41, NEW_FEATURE_NOTICES.aiOpsCodex)).toBe(false)
+    first.unmount(); second.unmount()
+  })
 })

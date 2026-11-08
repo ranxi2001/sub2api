@@ -1,0 +1,71 @@
+name: Quality retest rest
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/account_quality.go'
+      - 'backend/internal/service/quality_retest_rest_test.go'
+      - 'backend/internal/service/quality_rule_preset.go'
+      - 'backend/internal/repository/account_quality.go'
+      - 'backend/internal/repository/scheduled_test_repo.go'
+      - 'backend/internal/repository/quality_retest_rest_integration_test.go'
+      - 'frontend/src/**/qualityRulePatch*'
+      - 'frontend/src/**/AccountQualityView*'
+      - '.github/workflows/quality-retest-rest.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Validation and reusable inputs
+        working-directory: backend
+        run: go test -tags=unit ./internal/service -run '^TestQualityRetestRest' -count=1 -v
+      - name: Durable deadlines and all claim sources on isolated PostgreSQL
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head.txt
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestQualityRetestRest' -count=1 -v -timeout=15m) 2>&1 | tee evidence/storage.log
+          if grep -Eq -- '--- SKIP:|no tests to run' evidence/storage.log; then exit 1; fi
+          for name in BlocksEveryClaimUntilDeadline UnknownDoesNotExtendAndZeroKeepsSchedule UsesIndependentModelVerdicts LegacyModelCooldown; do
+            grep -F -- "--- PASS: TestQualityRetestRest$name" evidence/storage.log
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: quality-retest-rest-storage-${{ github.event.pull_request.head.sha }}
+          path: evidence/
+          if-no-files-found: error
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Account and group editors, copies, bulk fields and shared notice dismissal
+        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/AccountQualityView.spec.ts src/utils/__tests__/qualityRulePatch.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts

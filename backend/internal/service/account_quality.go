@@ -56,6 +56,7 @@ type QualityPolicy struct {
 	// RecoveryConcurrency is the temporary OAuth concurrency cap applied when
 	// this rule quarantines an account. Zero keeps the safe default of five.
 	RecoveryConcurrency int               `json:"recovery_concurrency,omitempty"`
+	RetestRestMinutes   int               `json:"retest_rest_minutes,omitempty"`
 	AutoRestore         bool              `json:"auto_restore"`
 	BPS                 *QualityBPSPolicy `json:"bps,omitempty"`
 }
@@ -64,6 +65,12 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 	q := plan.PelicanConfig.Quality
 	if q == nil {
 		return nil
+	}
+	if q.RetestRestMinutes < 0 || q.RetestRestMinutes > 10080 {
+		return fmt.Errorf("quality retest rest must be 0-10080 minutes")
+	}
+	if !q.UsesRetestRest() {
+		q.RetestRestMinutes = 0
 	}
 	if q.Action == QualityActionOpenAITwoFAAdmission {
 		if q.Admission == nil || !q.Admission.Enabled || q.Admission.Validate() != nil || plan.PelicanConfig.QuestionKind != "candy" || plan.PelicanConfig.ParallelCount != 1 || plan.ModelID != q.Admission.ModelID || plan.PelicanConfig.ReasoningEffort != q.Admission.ReasoningEffort || plan.PelicanConfig.TestChannel == "bps" || q.AutoRestore || plan.AutoRecover || plan.PelicanConfig.Prompt != CandyPrompt {
@@ -160,6 +167,11 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 		seen[id] = true
 	}
 	return nil
+}
+
+// BPS has its own recovery interval; observation never quarantines accounts.
+func (q *QualityPolicy) UsesRetestRest() bool {
+	return q.Action == "remove_groups" || q.Action == "disable_scheduling" || q.UsesModelResults()
 }
 
 // One completed wrong answer quarantines; restoration requires every probe to pass.

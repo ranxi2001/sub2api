@@ -49,6 +49,7 @@ export function copyQualityRuleConfig(source: PelicanTestConfig): PelicanTestCon
       remove_group_ids: qualityUsesGroups(action) ? [...(policy.remove_group_ids || [])] : [],
       remove_models: action === 'remove_models' ? [...(policy.remove_models || [])] : undefined,
       recovery_concurrency: action === 'remove_models' ? policy.recovery_concurrency : undefined,
+      ...(qualityUsesRetestRest(action) && policy.retest_rest_minutes !== undefined ? { retest_rest_minutes: policy.retest_rest_minutes } : {}),
       auto_restore: action === 'observe_only' ? false : policy.auto_restore ?? false,
       judge: policy.judge ? { ...(policy.judge.kind ? { kind: policy.judge.kind } : {}), group_id: policy.judge.group_id, model_id: policy.judge.model_id, prompt: policy.judge.prompt } : undefined,
       bps: bps ? {
@@ -98,10 +99,18 @@ export function qualityUsesModelResults(action?: QualityPolicy['action']) {
   return action === 'remove_models' || action === 'isolate_models'
 }
 
+export function qualityUsesRetestRest(action?: QualityPolicy['action']) {
+  return action === 'remove_groups' || action === 'disable_scheduling' || qualityUsesModelResults(action)
+}
+
 // Used by single-account creation, templates and bulk editing. Action cleanup
 // and validation belong here so all entry points preserve the same semantics.
 export function qualityActionPayload(policy: QualityPolicy): QualityPolicy {
   const next = { ...policy, remove_group_ids: qualityUsesGroups(policy.action) ? [...policy.remove_group_ids] : [] }
+  const rest = qualityUsesRetestRest(next.action) ? policy.retest_rest_minutes ?? 0 : 0
+  if (!Number.isInteger(rest) || rest < 0 || rest > 10080) throw new Error('qualityOps.invalidRetestRest')
+  if (rest > 0) next.retest_rest_minutes = rest
+  else delete next.retest_rest_minutes
   if (qualityUsesGroups(next.action) && !next.remove_group_ids.length) throw new Error('qualityOps.selectGroups')
   if (next.action === 'remove_models') {
     next.remove_models = [...(policy.remove_models || [])]
@@ -143,7 +152,7 @@ export function qualityRuleFieldValue(rule: Pick<ScheduledTestPlan, 'model_id' |
     case 'test': return [cfg?.question_kind, cfg?.test_channel || 'account', cfg?.prompt, cfg?.reasoning_effort, cfg?.parallel_count,
       q?.expected_answer, q?.judge?.kind || 'llm', q?.judge?.group_id, q?.judge?.model_id, q?.judge?.prompt]
     case 'restore': return [q?.auto_restore, b?.pass_threshold, b?.hold_on_usage]
-    case 'action': return [q?.action, q?.remove_group_ids || [], q?.remove_models || [], q?.recovery_concurrency,
+    case 'action': return [q?.action, q?.remove_group_ids || [], q?.remove_models || [], q?.recovery_concurrency, q?.retest_rest_minutes ?? 0,
       b ? [b.failure_threshold, b.usage_percent, b.require_all, b.all_models, b.models || [], b.omit_unsupported_tools,
         b.ignore_encrypted_content, b.auto_disable_on_403, b.auto_recover_on_403, b.recovery_interval_minutes,
         b.auto_move_on_403, b.target_group_id, b.session_proxy, b.proxy_source, b.cache_creation_as_input] : null]
@@ -207,6 +216,7 @@ export function buildQualityRulePatch(
     config.quality = qualityActionPayload({ ...config.quality,
       action: source.quality.action, remove_group_ids: source.quality.remove_group_ids,
       remove_models: source.quality.remove_models, recovery_concurrency: source.quality.recovery_concurrency,
+      retest_rest_minutes: source.quality.retest_rest_minutes,
       bps: source.quality.bps })
   }
 
@@ -216,6 +226,7 @@ export function buildQualityRulePatch(
     config.quality.remove_group_ids = []
     config.quality.auto_restore = false
     delete config.quality.bps
+    delete config.quality.retest_rest_minutes
   }
   // Automatic BPS switching remains a separate native-probe policy.
   if (config.quality.action === 'enable_bps' && config.question_kind !== STATE_PROBE_QUESTION) throw new Error('qualityOps.bpsRequiresProbe')
