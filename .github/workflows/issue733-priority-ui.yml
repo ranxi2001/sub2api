@@ -100,6 +100,7 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/issue733-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/issue733-browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
       - name: Render pinned before and candidate with actual styles
         env:
           ISSUE733_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
