@@ -1738,10 +1738,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 }
 
 func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
-	return s.fetchNativeCodexModelsManifestWithCache(ctx, account, clientVersion, ifNoneMatch, true)
-}
-
-func (s *OpenAIGatewayService) fetchNativeCodexModelsManifestWithCache(ctx context.Context, account *Account, clientVersion, ifNoneMatch string, useCache bool) (*OpenAIModelsResponse, error) {
+	useCache := !isFreshOpenAICredentialProbe(ctx)
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}

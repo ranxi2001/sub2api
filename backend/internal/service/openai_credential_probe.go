@@ -7,6 +7,13 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
+type openAICredentialProbeContextKey struct{}
+
+func isFreshOpenAICredentialProbe(ctx context.Context) bool {
+	fresh, _ := ctx.Value(openAICredentialProbeContextKey{}).(bool)
+	return fresh
+}
+
 // FetchOpenAIModelsListFresh verifies an OAuth parent account against the native
 // Codex endpoint. It does not use model-catalog caches or merge Excel/BPS access:
 // a separate inference grant cannot establish this parent token's health.
@@ -21,7 +28,8 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsListFresh(ctx context.Context, a
 	if s.settingService != nil {
 		clientVersion = s.settingService.GetOpenAICodexClientVersion(ctx)
 	}
-	response, err := s.fetchNativeCodexModelsManifestWithCache(ctx, account, clientVersion, "", false)
+	probeCtx := context.WithValue(ctx, openAICredentialProbeContextKey{}, true)
+	response, err := s.fetchNativeCodexModelsManifest(probeCtx, account, clientVersion, "")
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}

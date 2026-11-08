@@ -41,7 +41,7 @@ func (credentialSeamEncryptor) Decrypt(value string) (string, error) { return va
 
 type credentialSeamProber struct{}
 
-func (credentialSeamProber) FetchOpenAIModelsList(context.Context, *service.Account) (*service.OpenAIModelsResponse, error) {
+func (credentialSeamProber) FetchOpenAIModelsListFresh(context.Context, *service.Account) (*service.OpenAIModelsResponse, error) {
 	return nil, errors.New("account_retired")
 }
 
