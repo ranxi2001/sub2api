@@ -2906,7 +2906,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				continue
 			}
 			finalErr := relayErr
-			if unwrapped := errors.Unwrap(relayErr); unwrapped != nil && !IsOpenAITurnAdmissionError(relayErr) && !IsOpenAIRPMError(relayErr) {
+			var clientCloseErr *OpenAIWSClientCloseError
+			if unwrapped := errors.Unwrap(relayErr); unwrapped != nil && !IsOpenAITurnAdmissionError(relayErr) && !IsOpenAIRPMError(relayErr) && !errors.As(relayErr, &clientCloseErr) {
 				finalErr = unwrapped
 			}
 			sessionLease.MarkBroken()

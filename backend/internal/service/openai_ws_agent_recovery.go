@@ -174,7 +174,7 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 	observer := &gin.Context{Request: (&http.Request{}).WithContext(ctx)}
 	if err := observeOpenAIAgentRecoveryOutput(observer, payload, true); err != nil {
 		r.preventReplay()
-		return err
+		return openAIWSAgentRecoveryClose(err)
 	}
 	event := gjson.GetBytes(payload, "type").String()
 	if event == "response.output_item.done" {
