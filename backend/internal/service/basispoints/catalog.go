@@ -23,7 +23,7 @@ func describeCatalog(catalog []any) string {
 			}
 		} else {
 			if supportsFunctionCodeTransport(text(entry["name"]), text(entry["type"]), entry["parameters"]) {
-				line += " Use FUNCTION_CODE transport: set run_officejs summary to " + quoted(functionCodeTransportPrefix+text(entry["name"])) + ". Put the exact code argument directly in native code. Put all other supplied arguments in one JSON object in extended_summary, using only fields declared in the contract; use {} when there are none. Do not include code in that object."
+				line += " For arguments containing a string code field, use FUNCTION_CODE transport: set run_officejs summary to " + quoted(functionCodeTransportPrefix+text(entry["name"])) + ". Put the exact code argument directly in native code. Put all other supplied arguments in one JSON object in extended_summary, using only fields declared in the contract; use {} when there are none. Do not include code in that object. If the selected valid argument branch omits code, use the ordinary FUNCTION envelope with a JSON object in its arguments field instead; do not add code, even as an empty string."
 			} else if supportsFunctionCmdTransport(text(entry["name"]), text(entry["type"]), entry["parameters"]) {
 				line += " Use FUNCTION_CMD transport: set run_officejs summary to " + quoted(functionCmdTransportPrefix+text(entry["name"])) + ". Put the exact cmd argument directly in native code. Put all other supplied arguments in one JSON object in extended_summary, using only fields declared in the contract; use {} when there are none. Do not include cmd in that object."
 			} else {

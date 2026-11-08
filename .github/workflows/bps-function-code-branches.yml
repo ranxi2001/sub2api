@@ -1,0 +1,44 @@
+name: BPS function code branches
+
+on:
+  pull_request:
+    paths:
+      - backend/internal/service/basispoints/**
+      - .github/workflows/bps-function-code-branches.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  function-code-branches:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify regression rejects the original decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/service/basispoints/function_code_transport.go
+          cp "$target" "$RUNNER_TEMP/function-code-current.go"
+          trap 'cp "$RUNNER_TEMP/function-code-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin dc1e1b072faa53ec2e6f0925be39d5d024ec1687
+          git show dc1e1b072faa53ec2e6f0925be39d5d024ec1687:"$target" > "$target"
+          set +e
+          (cd backend && go test ./internal/service/basispoints -run '^TestFunctionCode(TransportSchemaBranches|BranchStreamingIsAtomic)$' -count=1 -v) > "$RUNNER_TEMP/function-code-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/function-code-red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestFunctionCodeTransportSchemaBranches' "$RUNNER_TEMP/function-code-red.log"
+          grep -q -- '--- FAIL: TestFunctionCodeBranchStreamingIsAtomic' "$RUNNER_TEMP/function-code-red.log"
+      - name: Verify branch compatibility and existing BPS regressions
+        working-directory: backend
+        run: go test ./internal/service/basispoints -count=1 -v
