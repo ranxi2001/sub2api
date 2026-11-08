@@ -104,7 +104,9 @@ async function setPager(page, name, pageSize, pageNumber) {
   // Exercise the real selector and real Pagination buttons.
   const pagination = page.getByTestId(`${name}-pagination`)
   await pagination.locator('.select-trigger').click()
-  await page.getByRole('option', { name: String(pageSize), exact: true }).click()
+  const dropdown = page.getByRole('listbox').last()
+  await dropdown.getByRole('option', { name: String(pageSize), exact: true }).click()
+  await dropdown.waitFor({state:'detached'})
   await pagination.getByRole('button', { name: `跳转到第 ${pageNumber} 页`, exact: true }).click()
 }
 async function geometry(page) {
