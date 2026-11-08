@@ -176,3 +176,21 @@ func TestIssue715RecoveryRetainsNativeOwnerAgainstBPSPreference(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue715RecoveryCannotBypassRPM(t *testing.T) {
+	account := Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{715}, Extra: map[string]any{"base_rpm": 1, "rpm_strategy": "sticky_exempt"}}
+	acquired := []int64{}
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}}, cfg: &config.Config{},
+		rpmCache:           &openAIRPMTestCache{counts: map[int64]int{1: 1}},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredIDs: &acquired}),
+	}
+	issue715LearnRoute(t, svc, &account, issue715OpaqueBody)
+	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+	c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+	ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(issue715OpaqueBody), "fixture-session", "gpt-6-astra")
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, int64Ptr(715), "", "fixture-session", "gpt-6-astra", nil, OpenAIUpstreamTransportAny, false)
+	require.Error(t, err)
+	require.Nil(t, selection)
+	require.Empty(t, acquired, "compatibility cannot bypass the hard per-minute admission gate")
+}

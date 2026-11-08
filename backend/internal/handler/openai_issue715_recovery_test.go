@@ -63,6 +63,9 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 	if !bytes.Contains([]byte(input), []byte("fixture-task-reference-715")) || !bytes.Contains([]byte(input), []byte("Keep ledger balance 11")) {
 		return response(400, "application/json", `{"error":{"code":"missing_fixture_task_or_context"}}`)
 	}
+	if mode == "partial" {
+		return response(200, "text/event-stream", "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"started existing task\"}\n\nevent: error\ndata: {\"type\":\"error\",\"code\":\"unsupported_encrypted_agent_message\",\"message\":\"fixture failure after output\"}\n\n")
+	}
 	output := `[{"type":"function_call","call_id":"call_715_once","name":"update_ledger","arguments":"{\"add\":7}"}]`
 	if gjson.GetBytes(body, "input.#(type==function_call_output).output").String() == "ledger balance 18; applied once" {
 		output = `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Same task: ledger balance 18; update already applied once"}]}]`
@@ -192,4 +195,32 @@ func TestIssue715HTTPRecoveryKeepsHardRestrictionsAndScope(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIssue715HTTPPartialOutputNeverReplays(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accounts := issue715Accounts()
+	upstream := &issue715Upstream{}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+	status, _ := issue715Request(t, handler, issue715Body(false, true), 99, "fixture-715-thread", false)
+	require.Equal(t, 200, status)
+	accounts[0].Priority, accounts[1].Priority = 100, 0
+	upstream.mode = "partial"
+	_, answer := issue715Request(t, handler, issue715Body(true, true), 99, "fixture-715-thread", false)
+	require.Contains(t, answer, "started existing task", "the regression must cross the real committed-output boundary")
+	require.Equal(t, []int64{1, 1}, upstream.ids, "output followed by a rejection must never replay any generation")
+}
+
+func TestIssue715HTTPIncompleteNeverGrantsCompatibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accounts := issue715Accounts()
+	upstream := &issue715Upstream{mode: "incomplete"}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+	issue715Request(t, handler, issue715Body(false, false), 99, "fixture-715-thread", false)
+	require.Equal(t, []int64{1}, upstream.ids)
+	accounts[0].Priority, accounts[1].Priority = 100, 0
+	upstream.mode = ""
+	issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
+	require.GreaterOrEqual(t, len(upstream.ids), 2)
+	require.Equal(t, int64(2), upstream.ids[1], "incomplete is not a successful compatibility observation")
 }
