@@ -97,8 +97,8 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
-          targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go)
-          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go)
+          targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
+          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_ws_agent_recovery.go)
           git fetch --no-tags --depth=1 origin "$original"
           trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
@@ -212,10 +212,15 @@ jobs:
           original=242f5b0892a59d95005099e6294262b066bd2f8b
           targets=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go)
           added=backend/internal/service/openai_agent_message_delivery.go
+          ws_original=a575df898ccd0876c4c0eb1559da38cedfdfe99d
+          ws_targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
+          ws_added=backend/internal/service/openai_ws_agent_recovery.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added"; git diff --exit-code' EXIT
+          git fetch --no-tags --depth=1 origin "$ws_original"
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "$ws_added"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
-          rm -- "$added"
+          git restore --source="$ws_original" -- "${ws_targets[@]}"
+          rm -- "$added" "$ws_added"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")
             actual=$(git hash-object "$target")
@@ -233,6 +238,47 @@ jobs:
             grep -q -- "--- FAIL: TestIssue715HTTPFirstDeliveryCrossNodeBarrier/$format" "$RUNNER_TEMP/issue715-first-delivery-red.log"
           done
           grep -q 'client-visible first delivery must not race shared ownership' "$RUNNER_TEMP/issue715-first-delivery-red.log"
+
+  red-ws:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Pinned pre-WS production with identical socket regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          original=a575df898ccd0876c4c0eb1559da38cedfdfe99d
+          targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
+          added=backend/internal/service/openai_ws_agent_recovery.go
+          git fetch --no-tags --depth=1 origin "$original"
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "${targets[@]}"
+          rm -- "$added"
+          for target in "${targets[@]}"; do
+            expected=$(git rev-parse "$original:$target")
+            actual=$(git hash-object "$target")
+            echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
+            test "$expected" = "$actual"
+          done
+          set +e
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestIssue715WSGeneratedTaskContinuation$/.*/cross-node=true$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-ws-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue715-ws-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|--- SKIP:' "$RUNNER_TEMP/issue715-ws-red.log"
+          for mode in ctx_pool passthrough http_bridge; do
+            grep -q -- "--- FAIL: TestIssue715WSGeneratedTaskContinuation/$mode/cross-node=true" "$RUNNER_TEMP/issue715-ws-red.log"
+          done
+          grep -q 'generated opaque WS task and tool result must return to producer' "$RUNNER_TEMP/issue715-ws-red.log"
 
   deadline-diagnostic:
     runs-on: ubuntu-latest
