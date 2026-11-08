@@ -180,7 +180,7 @@ func TestAccountTokenGuardV2StopCancelsCycle(t *testing.T) {
 	svc.Stop()
 }
 
-func (p accountTokenGuardV2TestProber) FetchOpenAIModelsList(context.Context, *Account) (*OpenAIModelsResponse, error) {
+func (p accountTokenGuardV2TestProber) FetchOpenAIModelsListFresh(context.Context, *Account) (*OpenAIModelsResponse, error) {
 	return nil, p.err
 }
 
@@ -346,14 +346,34 @@ func TestAccountTokenGuardV2RulesRejectInvalidRange(t *testing.T) {
 }
 
 func TestAccountTokenGuardV2InvalidSavedRulesDoNotQueueRelogin(t *testing.T) {
-	reauth, reader, reauthRepo, _, _, _ := newReauthTestService("acct-1")
-	record := AccountTokenGuardV2Record{AccountID: 42, Enabled: true, AutoReloginEnabled: true, FailStreak: 2}
-	repo := &accountTokenGuardV2TestRepo{record: &record}
-	settings := &accountTokenGuardV2TestSettings{raw: "invalid-json"}
-	svc := NewAccountTokenGuardV2Service(repo, settings, reader, accountTokenGuardV2TestProber{err: errors.New("invalid token")}, reauth)
-	require.NoError(t, svc.runProbe(context.Background(), record))
-	require.Zero(t, reauthRepo.createCalls)
-	require.Nil(t, repo.completion)
+	for _, test := range []struct{ name, raw, wantError string }{
+		{"invalid JSON", "invalid-json", "invalid character"},
+		{"invalid interval", `{"probe_interval_seconds":59,"retry_interval_seconds":60,"relogin_cooldown_seconds":1800,"fail_streak_threshold":2}`, "probe_interval_seconds"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reauth, reader, reauthRepo, _, _, _ := newReauthTestService("acct-1")
+			next := time.Now().Add(-time.Minute)
+			until := time.Now().Add(time.Minute)
+			record := AccountTokenGuardV2Record{
+				AccountID: 42, Enabled: true, AutoReloginEnabled: true, FailStreak: 2,
+				NextProbeAt: next, LeaseOwner: "invalid-rules-claim", LeaseUntil: &until,
+			}
+			repo := &accountTokenGuardV2TestRepo{record: &record}
+			settings := &accountTokenGuardV2TestSettings{raw: test.raw}
+			svc := NewAccountTokenGuardV2Service(repo, settings, reader, accountTokenGuardV2TestProber{err: errors.New("invalid token")}, reauth)
+			t.Cleanup(svc.cancel)
+
+			require.ErrorContains(t, svc.runProbe(context.Background(), record), test.wantError)
+
+			require.Zero(t, reauthRepo.createCalls)
+			require.Nil(t, repo.completion)
+			require.Equal(t, 2, repo.record.FailStreak)
+			require.Equal(t, next, repo.record.NextProbeAt)
+			require.Nil(t, repo.record.LastProbeAt)
+			require.Empty(t, repo.record.LeaseOwner)
+			require.Nil(t, repo.record.LeaseUntil)
+		})
+	}
 }
 
 func TestAccountTokenGuardV2CustomRulesDriveProbe(t *testing.T) {

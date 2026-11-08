@@ -139,7 +139,7 @@ type AccountTokenGuardV2AccountReader interface {
 }
 
 type AccountTokenGuardV2Prober interface {
-	FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error)
+	FetchOpenAIModelsListFresh(ctx context.Context, account *Account) (*OpenAIModelsResponse, error)
 }
 
 type AccountTokenGuardV2AccountInput struct {
@@ -632,7 +632,7 @@ func (s *AccountTokenGuardV2Service) probeAccount(ctx context.Context, account *
 	if strings.TrimSpace(account.GetCredential("access_token")) == "" {
 		return AccountTokenGuardV2ProbeAuth, "account has no access token"
 	}
-	_, err := s.prober.FetchOpenAIModelsList(ctx, account)
+	_, err := s.prober.FetchOpenAIModelsListFresh(ctx, account)
 	if err == nil {
 		return AccountTokenGuardV2ProbeOK, "credential accepted"
 	}

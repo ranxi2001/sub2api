@@ -5,6 +5,8 @@ on:
     paths:
       - 'backend/internal/service/account_token_guard_v2*.go'
       - 'backend/internal/repository/account_token_guard_v2*.go'
+      - 'backend/internal/service/openai_codex_models_service*.go'
+      - 'backend/internal/service/openai_credential_probe*.go'
       - 'frontend/src/views/admin/ops/TokenGuardV2View.vue'
       - 'frontend/src/views/admin/ops/__tests__/TokenGuardV2View.spec.ts'
       - '.github/workflows/token-guard-v2-scheduler.yml'

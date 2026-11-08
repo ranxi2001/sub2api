@@ -163,7 +163,7 @@ func TestCredentialOperationProbePersistsEvidenceWithoutChangingAccountOrBudget(
 			credentials, err := json.Marshal(reader.account.Credentials)
 			require.NoError(t, err)
 			svc := NewAccountTokenGuardV2Service(repo, nil, reader, accountTokenGuardV2TestProber{err: &codexModelsManifestUpstreamError{err: errors.New("synthetic-private"), statusCode: http.StatusBadRequest, body: fixture.Payload}}, reauth)
-			svc.runProbe(context.Background(), *repo.record)
+			require.NoError(t, svc.runProbe(context.Background(), *repo.record))
 			require.NotNil(t, repo.completion)
 			failure := probeOperationFailure(repo.record.ProbeState, repo.record.ProbeDetail, repo.record.LastProbeAt)
 			require.NotNil(t, failure)

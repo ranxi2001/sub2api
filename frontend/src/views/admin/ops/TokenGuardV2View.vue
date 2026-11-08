@@ -9,10 +9,10 @@
           <p class="subtitle">{{ t('tokenGuardV2.description') }}</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <button class="btn btn-secondary inline-flex items-center gap-2" :disabled="loading" @click="load()">
+          <button class="btn btn-secondary inline-flex items-center gap-2" :disabled="loading || mutationBusy" @click="load()">
             <Icon name="refresh" size="sm" :class="{ 'animate-spin': loading }" />{{ t('tokenGuardV2.refresh') }}
           </button>
-          <button class="btn btn-primary" :disabled="!encryptionReady" @click="openCreate">{{ t('tokenGuardV2.addAccount') }}</button>
+          <button class="btn btn-primary" :disabled="!encryptionReady || mutationBusy" @click="openCreate">{{ t('tokenGuardV2.addAccount') }}</button>
         </div>
       </header>
 
@@ -23,14 +23,14 @@
         <div class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="credential-runtime-controls" :aria-busy="runtimeSaving">
           <div class="grid gap-4 sm:grid-cols-2">
             <label class="field-label">{{ t('tokenGuardV2.reloginEngine') }}
-              <select id="token-guard-v2-engine" :value="runtimeDraft.engine" class="input w-full" :disabled="runtimeSaving || loading || busyId !== 0 || !runtimeLoaded" @change="changeRuntime('engine', $event)">
+              <select id="token-guard-v2-engine" :value="runtimeDraft.engine" class="input w-full" :disabled="mutationBusy || loading || !runtimeLoaded" @change="changeRuntime('engine', $event)">
                 <option v-if="!runtimeDraft.engine" value="" disabled>{{ t('tokenGuardV2.legacyEngine') }}</option>
                 <option value="local_worker">{{ t('tokenGuardV2.localWorkerEngine') }}</option>
                 <option value="session_studio">{{ t('tokenGuardV2.sessionStudioEngine') }}</option>
               </select>
             </label>
             <label class="field-label">{{ t('tokenGuardV2.workerConcurrency') }}
-              <select id="token-guard-v2-concurrency" :value="runtimeDraft.worker_concurrency" class="input w-full" :disabled="runtimeSaving || loading || busyId !== 0 || !runtimeLoaded" @change="changeRuntime('worker_concurrency', $event)">
+              <select id="token-guard-v2-concurrency" :value="runtimeDraft.worker_concurrency" class="input w-full" :disabled="mutationBusy || loading || !runtimeLoaded" @change="changeRuntime('worker_concurrency', $event)">
                 <option v-for="count in 16" :key="count" :value="count">{{ count }}</option>
               </select>
             </label>
@@ -94,8 +94,8 @@
                 <td><span class="badge" :class="item.login_config?.configured ? 'ok' : 'danger'">{{ item.login_config?.configured ? t('tokenGuardV2.configured') : t('tokenGuardV2.incomplete') }}</span><small>{{ configurationDetail(item) }}</small></td>
                 <td>
                   <div class="flex flex-col gap-2">
-                    <label class="inline-flex items-center gap-2" :title="t('tokenGuardV2.autoInspectHint')"><input type="checkbox" role="switch" class="automation-switch" :checked="item.enabled" :aria-label="t('tokenGuardV2.autoInspect')" :data-testid="'auto-inspect-' + item.account_id" :disabled="busyId !== 0 || loading" @change="toggleSwitch(item, 'enabled', $event)" />{{ t('tokenGuardV2.autoInspect') }}</label>
-                    <label class="inline-flex items-center gap-2" :title="t('tokenGuardV2.autoReloginHint')"><input type="checkbox" role="switch" class="automation-switch" :checked="item.auto_relogin_enabled" :aria-label="t('tokenGuardV2.autoRelogin')" :data-testid="'auto-relogin-' + item.account_id" :disabled="busyId !== 0 || loading" @change="toggleSwitch(item, 'auto_relogin_enabled', $event)" />{{ t('tokenGuardV2.autoRelogin') }}</label>
+                    <label class="inline-flex items-center gap-2" :title="t('tokenGuardV2.autoInspectHint')"><input type="checkbox" role="switch" class="automation-switch" :checked="item.enabled" :aria-label="t('tokenGuardV2.autoInspect')" :data-testid="'auto-inspect-' + item.account_id" :disabled="mutationBusy || loading" @change="toggleSwitch(item, 'enabled', $event)" />{{ t('tokenGuardV2.autoInspect') }}</label>
+                    <label class="inline-flex items-center gap-2" :title="t('tokenGuardV2.autoReloginHint')"><input type="checkbox" role="switch" class="automation-switch" :checked="item.auto_relogin_enabled" :aria-label="t('tokenGuardV2.autoRelogin')" :data-testid="'auto-relogin-' + item.account_id" :disabled="mutationBusy || loading" @change="toggleSwitch(item, 'auto_relogin_enabled', $event)" />{{ t('tokenGuardV2.autoRelogin') }}</label>
                     <small>{{ t('tokenGuardV2.reloginBudgetCount', { count: item.relogin_fail_streak || 0, limit: status.relogin_max_failures || 3 }) }}</small>
                     <small :data-testid="'automation-state-' + item.account_id" :class="{ 'text-red-700 dark:text-red-300': item.auto_relogin_exhausted }">{{ automationLabel(item) }}</small>
                   </div>
@@ -106,12 +106,12 @@
                 <td>{{ date(item.latest_task?.finished_at || item.latest_task?.created_at || item.last_reauth_at) }}<small v-if="item.latest_task">{{ taskLabel(item.latest_task) }}</small><CredentialOperationFailureView v-if="taskOperationFailure(item.latest_task)" :failure="taskOperationFailure(item.latest_task)!" /></td>
                 <td>
                   <div class="actions">
-                    <button class="link-btn" @click="openEdit(item)">{{ t('tokenGuardV2.edit') }}</button>
-                    <button class="link-btn" :disabled="busyId === item.account_id" @click="probe(item)">{{ t('tokenGuardV2.inspectNow') }}</button>
-                    <button class="link-btn" :disabled="busyId === item.account_id" @click="relogin(item)">{{ t('tokenGuardV2.reloginNow') }}</button>
-                    <button v-if="item.auto_relogin_exhausted" class="link-btn" :data-testid="'resume-budget-' + item.account_id" :disabled="busyId !== 0 || loading" @click="resumeBudget(item)">{{ t('tokenGuardV2.resumeReloginBudget') }}</button>
+                    <button class="link-btn" :disabled="mutationBusy" @click="openEdit(item)">{{ t('tokenGuardV2.edit') }}</button>
+                    <button class="link-btn" :disabled="mutationBusy" @click="probe(item)">{{ t('tokenGuardV2.inspectNow') }}</button>
+                    <button class="link-btn" :disabled="mutationBusy" @click="relogin(item)">{{ t('tokenGuardV2.reloginNow') }}</button>
+                    <button v-if="item.auto_relogin_exhausted" class="link-btn" :data-testid="'resume-budget-' + item.account_id" :disabled="mutationBusy || loading" @click="resumeBudget(item)">{{ t('tokenGuardV2.resumeReloginBudget') }}</button>
                     <OpenAITOTPDialog :account-id="item.account_id" :account-name="item.account_name" :configured="!!(item.login_config?.password_configured && item.login_config?.totp_configured)" />
-                    <button class="link-btn danger-text" :disabled="busyId === item.account_id" @click="remove(item)">{{ t('tokenGuardV2.remove') }}</button>
+                    <button class="link-btn danger-text" :disabled="mutationBusy" @click="remove(item)">{{ t('tokenGuardV2.remove') }}</button>
                   </div>
                 </td>
               </tr>
@@ -141,14 +141,14 @@
         </div>
         <form id="token-guard-v2-rules" class="rules-form" @submit.prevent="saveRulesConfig">
           <div class="rule-metrics">
-            <label><span>{{ t('tokenGuardV2.ruleProbeInterval') }}</span><input id="token-guard-v2-rule-probe" v-model.number="rulesDraft.probe_interval_minutes" class="input" type="number" min="1" max="1440" required @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.minutes') }}</small></label>
-            <label><span>{{ t('tokenGuardV2.ruleRetryInterval') }}</span><input id="token-guard-v2-rule-retry" v-model.number="rulesDraft.retry_interval_minutes" class="input" type="number" min="1" max="1440" required @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.minutes') }}</small></label>
-            <label><span>{{ t('tokenGuardV2.ruleFailureThreshold') }}</span><input id="token-guard-v2-rule-threshold" v-model.number="rulesDraft.fail_streak_threshold" class="input" type="number" min="1" max="10" required @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.times') }}</small></label>
-            <label><span>{{ t('tokenGuardV2.ruleCooldown') }}</span><input id="token-guard-v2-rule-cooldown" v-model.number="rulesDraft.relogin_cooldown_minutes" class="input" type="number" min="1" max="10080" required @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.minutes') }}</small></label>
-            <label><span>{{ t('tokenGuardV2.ruleReloginBackoffMax') }}</span><input id="token-guard-v2-rule-backoff-max" v-model.number="rulesDraft.relogin_backoff_max_minutes" class="input" type="number" :min="rulesDraft.relogin_cooldown_minutes" max="10080" required @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.minutes') }}</small></label>
-            <label><span>{{ t('tokenGuardV2.ruleReloginMaxFailures') }}</span><input id="token-guard-v2-rule-max-failures" v-model.number="rulesDraft.relogin_max_failures" class="input" type="number" min="1" max="20" required @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.reloginBudgetHint') }}</small></label>
+            <label><span>{{ t('tokenGuardV2.ruleProbeInterval') }}</span><input id="token-guard-v2-rule-probe" v-model.number="rulesDraft.probe_interval_minutes" class="input" type="number" min="1" max="1440" required :disabled="mutationBusy" @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.minutes') }}</small></label>
+            <label><span>{{ t('tokenGuardV2.ruleRetryInterval') }}</span><input id="token-guard-v2-rule-retry" v-model.number="rulesDraft.retry_interval_minutes" class="input" type="number" min="1" max="1440" required :disabled="mutationBusy" @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.minutes') }}</small></label>
+            <label><span>{{ t('tokenGuardV2.ruleFailureThreshold') }}</span><input id="token-guard-v2-rule-threshold" v-model.number="rulesDraft.fail_streak_threshold" class="input" type="number" min="1" max="10" required :disabled="mutationBusy" @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.times') }}</small></label>
+            <label><span>{{ t('tokenGuardV2.ruleCooldown') }}</span><input id="token-guard-v2-rule-cooldown" v-model.number="rulesDraft.relogin_cooldown_minutes" class="input" type="number" min="1" max="10080" required :disabled="mutationBusy" @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.minutes') }}</small></label>
+            <label><span>{{ t('tokenGuardV2.ruleReloginBackoffMax') }}</span><input id="token-guard-v2-rule-backoff-max" v-model.number="rulesDraft.relogin_backoff_max_minutes" class="input" type="number" :min="rulesDraft.relogin_cooldown_minutes" max="10080" required :disabled="mutationBusy" @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.minutes') }}</small></label>
+            <label><span>{{ t('tokenGuardV2.ruleReloginMaxFailures') }}</span><input id="token-guard-v2-rule-max-failures" v-model.number="rulesDraft.relogin_max_failures" class="input" type="number" min="1" max="20" required :disabled="mutationBusy" @input="rulesDirty = true" /><small>{{ t('tokenGuardV2.reloginBudgetHint') }}</small></label>
           </div>
-          <div class="rules-actions"><button type="submit" class="btn btn-primary" :disabled="rulesSaving || !rulesDirty">{{ rulesSaving ? t('tokenGuardV2.saving') : t('tokenGuardV2.saveRules') }}</button></div>
+          <div class="rules-actions"><button type="submit" class="btn btn-primary" :disabled="mutationBusy || !rulesDirty">{{ rulesSaving ? t('tokenGuardV2.saving') : t('tokenGuardV2.saveRules') }}</button></div>
         </form>
         <div class="rule-list">
           <article><span>1</span><div><strong>{{ t('tokenGuardV2.ruleScopeTitle') }}</strong><p>{{ t('tokenGuardV2.ruleScopeHint') }}</p></div></article>
@@ -206,8 +206,8 @@
 
         </form>
         <template #footer>
-          <button type="button" class="btn btn-secondary" :disabled="saving" @click="closeEditor">{{ t('tokenGuardV2.cancel') }}</button>
-          <button type="submit" form="token-guard-v2-editor" class="btn btn-primary" :disabled="saving || !draft.account_id || !encryptionReady">{{ saving ? t('tokenGuardV2.saving') : t('tokenGuardV2.save') }}</button>
+          <button type="button" class="btn btn-secondary" :disabled="mutationBusy" @click="closeEditor">{{ t('tokenGuardV2.cancel') }}</button>
+          <button type="submit" form="token-guard-v2-editor" class="btn btn-primary" :disabled="mutationBusy || !draft.account_id || !encryptionReady">{{ saving ? t('tokenGuardV2.saving') : t('tokenGuardV2.save') }}</button>
         </template>
       </BaseDialog>
     </div>
@@ -279,6 +279,7 @@ const runtimeSaving = ref(false)
 const runtimeLoaded = ref(false)
 const rulesSaving = ref(false)
 const rulesDirty = ref(false)
+const mutationBusy = computed(() => saving.value || busyId.value !== 0 || runtimeSaving.value || rulesSaving.value)
 const error = ref(''), notice = ref('')
 let timer: ReturnType<typeof setInterval> | undefined
 let loadGeneration = 0
@@ -427,8 +428,11 @@ function automationState(item: TokenGuardV2Account) {
   if (!item.auto_relogin_enabled) return 'disabled'
   if (item.auto_relogin_exhausted) return 'exhausted'
   if (!item.login_config?.configured) return 'configuration'
-  if (Date.parse(item.cooldown_until || '') > currentTime.value) return 'cooldown'
-  if (item.blocked_reason) return 'blocked'
+  const cooldownUntil = Date.parse(item.cooldown_until || '')
+  if (cooldownUntil > currentTime.value) return 'cooldown'
+  const expiredCooldown = item.blocked_reason === 'automatic re-login cooling down'
+    && Number.isFinite(cooldownUntil) && cooldownUntil <= currentTime.value
+  if (item.blocked_reason && !expiredCooldown) return 'blocked'
   if (item.probe_state === 'auth') return item.fail_streak < status.fail_streak_threshold ? 'waiting' : 'scheduled'
   if (item.probe_state === 'ok') return 'healthy'
   if (item.probe_state === 'transient') return 'retryInspection'
@@ -472,9 +476,10 @@ function syncRulesDraft(rules: TokenGuardV2Rules) {
   })
 }
 function handleAccountPageSize(size: number) { accountPageSize.value = size; accountPage.value = 1 }
-function openCreate() { error.value = ''; notice.value = ''; editing.value = null; accountGroup.value = ''; accountSearch.value = ''; resetDraft(); editorOpen.value = true }
+function openCreate() { if (mutationBusy.value) return; error.value = ''; notice.value = ''; editing.value = null; accountGroup.value = ''; accountSearch.value = ''; resetDraft(); editorOpen.value = true }
 function selectAccount(account: AccountListItem) { draft.account_id = account.id; draft.login_email = accountEmail(account) }
 function openEdit(item: TokenGuardV2Account) {
+  if (mutationBusy.value) return
   error.value = ''; notice.value = ''
   editing.value = item
   Object.assign(draft, blankDraft(), {
@@ -486,10 +491,10 @@ function openEdit(item: TokenGuardV2Account) {
   })
   editorOpen.value = true
 }
-function closeEditor() { if (!saving.value) editorOpen.value = false }
+function closeEditor() { if (!mutationBusy.value) editorOpen.value = false }
 
 async function load(silent = false, afterAction = false) {
-  if ((!afterAction && (loading.value || busyId.value || saving.value || rulesSaving.value)) || runtimeSaving.value) return
+  if ((!afterAction && (loading.value || mutationBusy.value)) || runtimeSaving.value) return
   const generation = ++loadGeneration
   loading.value = true
   if (!silent) error.value = ''
@@ -519,7 +524,7 @@ async function load(silent = false, afterAction = false) {
 }
 
 async function saveRulesConfig() {
-  if (rulesSaving.value || !rulesDirty.value) return
+  if (mutationBusy.value || !rulesDirty.value) return
   invalidateLoad()
   rulesSaving.value = true; error.value = ''; notice.value = ''
   try {
@@ -543,7 +548,7 @@ async function saveRulesConfig() {
 }
 
 async function save() {
-  if (saving.value || !draft.account_id || !encryptionReady.value) return
+  if (mutationBusy.value || !draft.account_id || !encryptionReady.value) return
   invalidateLoad()
   saving.value = true; error.value = ''; notice.value = ''
   try {
@@ -561,7 +566,7 @@ async function save() {
 }
 
 async function act(item: TokenGuardV2Account, action: () => Promise<unknown>, successKey: string) {
-  if (busyId.value || runtimeSaving.value) return
+  if (mutationBusy.value) return
   invalidateLoad()
   busyId.value = item.account_id; error.value = ''; notice.value = ''
   try {
@@ -585,12 +590,13 @@ async function act(item: TokenGuardV2Account, action: () => Promise<unknown>, su
 const probe = (item: TokenGuardV2Account) => act(item, () => probeTokenGuardV2Account(item.account_id), 'tokenGuardV2.inspectionQueued')
 const relogin = (item: TokenGuardV2Account) => act(item, () => reloginTokenGuardV2Account(item.account_id), 'tokenGuardV2.reloginQueued')
 async function resumeBudget(item: TokenGuardV2Account) {
+  if (mutationBusy.value) return
   if (!window.confirm(t('tokenGuardV2.resumeReloginBudgetConfirm'))) return
   await act(item, async () => { Object.assign(item, await resumeTokenGuardV2Budget(item.account_id)) }, 'tokenGuardV2.reloginBudgetResumed')
 }
 async function toggleSwitch(item: TokenGuardV2Account, field: 'enabled' | 'auto_relogin_enabled', event: Event) {
   const input = event.target as HTMLInputElement
-  if (busyId.value) { input.checked = item[field]; return }
+  if (mutationBusy.value) { input.checked = item[field]; return }
   invalidateLoad()
   busyId.value = item.account_id; error.value = ''; notice.value = ''
   try {
@@ -607,7 +613,7 @@ async function toggleSwitch(item: TokenGuardV2Account, field: 'enabled' | 'auto_
 
 async function changeRuntime(field: keyof TokenGuardV2RuntimeSettings, event: Event) {
   const select = event.target as HTMLSelectElement
-  if (runtimeSaving.value || busyId.value || !runtimeLoaded.value) return
+  if (mutationBusy.value || !runtimeLoaded.value) return
   invalidateLoad()
   const input = { ...runtimeDraft, [field]: field === 'worker_concurrency' ? Number(select.value) : select.value }
   runtimeSaving.value = true; error.value = ''; notice.value = ''
@@ -623,6 +629,7 @@ async function changeRuntime(field: keyof TokenGuardV2RuntimeSettings, event: Ev
 }
 
 const remove = async (item: TokenGuardV2Account) => {
+  if (mutationBusy.value) return
   if (!window.confirm(t('tokenGuardV2.removeConfirm', { account: item.account_name }))) return
   await act(item, () => deleteTokenGuardV2Account(item.account_id), 'tokenGuardV2.removedNotice')
 }

@@ -160,7 +160,7 @@ func (schedulerProbeReader) GetProxy(context.Context, int64) (*Proxy, error) { r
 
 type schedulerProbeFunc func(context.Context, *Account) (*OpenAIModelsResponse, error)
 
-func (f schedulerProbeFunc) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+func (f schedulerProbeFunc) FetchOpenAIModelsListFresh(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 	return f(ctx, account)
 }
 

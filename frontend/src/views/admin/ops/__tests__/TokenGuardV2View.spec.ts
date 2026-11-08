@@ -8,7 +8,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 
 import TokenGuardV2View from '../TokenGuardV2View.vue'
 import { getCredentialEncryption } from '@/api/admin/credentialEncryption'
-import type { TokenGuardV2Status } from '@/api/admin/accountTokenGuardV2'
+import type { TokenGuardV2Rules, TokenGuardV2Status } from '@/api/admin/accountTokenGuardV2'
 
 const api = vi.hoisted(() => ({
   listGuard: vi.fn(),
@@ -627,6 +627,57 @@ describe('inspection recovery progress', () => {
     expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.queued')
   })
 
+  it('does not let a rule submission invalidate the post-action account read', async () => {
+    const data = await api.listGuard()
+    const view = await mountControls()
+    await view.get('[data-testid="guard-tab-rules"]').trigger('click')
+    await view.get('#token-guard-v2-rule-threshold').setValue('3')
+    await view.get('[data-testid="guard-tab-accounts"]').trigger('click')
+    const fresh = deferred<TokenGuardV2Status>()
+    api.reloginGuard.mockResolvedValue(queuedTask)
+    api.listGuard.mockReturnValueOnce(fresh.promise)
+
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.reloginNow')!.trigger('click')
+    await flushPromises()
+    await view.get('[data-testid="guard-tab-rules"]').trigger('click')
+    const rulesForm = view.get('#token-guard-v2-rules')
+    expect(rulesForm.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    // Programmatic form submission must honor the same exclusion as the button.
+    await rulesForm.trigger('submit')
+    await flushPromises()
+    expect(api.saveRules).not.toHaveBeenCalled()
+
+    fresh.resolve({ ...data, accounts: [{ ...data.accounts[0], latest_task: queuedTask }] })
+    await flushPromises()
+    expect(rulesForm.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+    await view.get('[data-testid="guard-tab-accounts"]').trigger('click')
+    expect(view.get('[data-testid="automation-state-42"]').text()).toBe('tokenGuardV2.automationStates.queued')
+  })
+
+  it('does not start an account action while a rule save is pending', async () => {
+    const data = await api.listGuard()
+    const view = await mountControls()
+    await view.get('[data-testid="guard-tab-rules"]').trigger('click')
+    await view.get('#token-guard-v2-rule-threshold').setValue('3')
+    const saved = deferred<TokenGuardV2Rules>()
+    api.saveRules.mockReturnValueOnce(saved.promise)
+    await view.get('#token-guard-v2-rules').trigger('submit')
+    await flushPromises()
+    await view.get('[data-testid="guard-tab-accounts"]').trigger('click')
+    const action = view.findAll('button').find(button => button.text() === 'tokenGuardV2.reloginNow')!
+    expect(action.attributes('disabled')).toBeDefined()
+    // Dispatch directly to exercise the function guard as well as disabled UI.
+    action.element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+    expect(api.reloginGuard).not.toHaveBeenCalled()
+    expect(api.probeGuard).not.toHaveBeenCalled()
+
+    saved.resolve({ ...data, fail_streak_threshold: 3 })
+    await flushPromises()
+    expect(action.attributes('disabled')).toBeUndefined()
+    expect(view.text()).toContain('tokenGuardV2.rulesSaved')
+  })
+
   it('ignores an older refresh response after the action read has applied', async () => {
     const data = await api.listGuard()
     const view = await mountControls()
@@ -676,6 +727,14 @@ describe('inspection recovery progress', () => {
     { label: 'queued', account: { latest_task: queuedTask } },
     { label: 'running', account: { latest_task: { ...queuedTask, status: 'callback_processing' } } },
     { label: 'cooldown', account: { cooldown_until: '2099-11-08T10:00:00Z', relogin_fail_streak: 0 } },
+    { label: 'scheduled', account: {
+      probe_state: 'auth', fail_streak: 3, cooldown_until: '2000-01-01T00:00:00Z',
+      blocked_reason: 'automatic re-login cooling down'
+    } },
+    { label: 'blocked', account: {
+      probe_state: 'auth', fail_streak: 3, cooldown_until: '2000-01-01T00:00:00Z',
+      blocked_reason: 'automatic re-login could not be queued'
+    } },
     { label: 'blocked', account: { blocked_reason: 'automatic re-login could not be queued' } },
     { label: 'exhausted', account: { auto_relogin_exhausted: true }, text: 'tokenGuardV2.reloginBudgetExhausted' },
     { label: 'verifying', account: {
