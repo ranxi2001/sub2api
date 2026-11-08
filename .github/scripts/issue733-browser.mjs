@@ -39,21 +39,17 @@ import Candidate from '/src/views/admin/PrioritySchedulingView.vue';import Basel
 import zh from '/src/i18n/locales/zh/index.ts';import en from '/src/i18n/locales/en/index.ts';import '/src/style.css';
 const app=createApp({render:()=>h(View)});app.use(createI18n({legacy:false,locale:params.get('locale')||'zh',messages:{zh,en}}));app.mount('#app');window.fixtureView=()=>app._instance.subTree.component.setupState;window.fixtureUnmount=()=>app.unmount();</script></html>`
 }
-const fixtureHTML = path.join(frontend, '.issue733-fixture/index.html')
-await fs.mkdir(path.dirname(fixtureHTML), {recursive:true})
+const fixtureDir = path.join(frontend, '.issue733-fixture')
+const fixtureHTML = path.join(fixtureDir, 'index.html')
+await fs.mkdir(fixtureDir, {recursive:true})
 await fs.writeFile(fixtureHTML, html())
-const server = await createServer({ root: frontend, configFile: false,
-  plugins: [vue(), { name: 'issue733-offline-fixture',
-    resolveId(id, importer) {
-      if (id.startsWith('virtual:issue733-')) return '\0issue733-' + id.slice('virtual:issue733-'.length) + '.js'
-      if (id === '../client' && importer?.endsWith('/api/admin/priorityScheduling.ts')) return '\0issue733-client.js'
-    },
-    load(id) { if (id.startsWith('\0issue733-')) return modules[id.slice('\0issue733-'.length, -3)] },
-  }],
+for (const [name, source] of Object.entries(modules)) await fs.writeFile(path.join(fixtureDir, name + '.js'), source)
+const server = await createServer({ root: frontend, configFile: false, plugins: [vue()],
   resolve: { alias: [
-    { find: '@/stores/auth', replacement: 'virtual:issue733-auth' },
-    { find: '@/components/layout/AppLayout.vue', replacement: 'virtual:issue733-layout' },
-    { find: '@/components/admin/operations/SmartOpsNav.vue', replacement: 'virtual:issue733-nav' },
+    { find: '../client', replacement: path.join(fixtureDir, 'client.js') },
+    { find: '@/stores/auth', replacement: path.join(fixtureDir, 'auth.js') },
+    { find: '@/components/layout/AppLayout.vue', replacement: path.join(fixtureDir, 'layout.js') },
+    { find: '@/components/admin/operations/SmartOpsNav.vue', replacement: path.join(fixtureDir, 'nav.js') },
     { find: '@', replacement: path.join(frontend, 'src') },
   ] },
   css: { postcss: { plugins: [tailwind({ ...theme, content: [path.join(frontend, 'index.html'), path.join(frontend, 'src/**/*.{vue,js,ts,jsx,tsx}'), baselinePath, path.join(root, '.github/scripts/issue733-browser.mjs')] }), autoprefixer()] } },
@@ -94,7 +90,7 @@ async function newPage(viewport = { width: 1440, height: 1000 }) {
   const page = await browser.newPage({ viewport })
   page.on('requestfailed', request => networkFailures.push({url:request.url(), error:request.failure()?.errorText}))
   page.on('response', response => {if(response.status() >= 400 && !response.url().includes('/fixture/')) networkFailures.push({url:response.url(),status:response.status()})})
-  page.on('pageerror', error => errors.push(error.message))
+  page.on('pageerror', error => errors.push(error.stack || error.message))
   await routeBackend(page)
   return page
 }
@@ -219,7 +215,11 @@ try {
   assert.equal(await page.getByTestId('latency-table').locator('table').count(), 0)
   const mobile = await geometry(page)
   for (const item of mobile) assert(item.height <= 640 * 0.55 + 1)
+  await page.getByTestId('candidate-table').locator('details summary').first().click()
+  await page.getByTestId('candidate-table').evaluate(el=>{const name=el.querySelector('[data-reading-account]');const card=name.closest('[data-field]').parentElement.parentElement;el.scrollTop=card.offsetTop+card.offsetHeight+4})
   const mobileBefore = await geometry(page)
+  assert(mobileBefore.find(item=>item.name==='candidates').top>0)
+  state.endpoint='/v1/'+'mobile-synthetic-'.repeat(60)
   state.tick++; await refresh(page)
   const mobileAfter = await geometry(page)
   for(const item of mobileBefore){const next=mobileAfter.find(row=>row.name===item.name);assert.equal(next.row,item.row);assert(Math.abs(next.offset-item.offset)<1)}
