@@ -1,4 +1,5 @@
 export default {
+  reading: { configuration: 'Scheduling configuration', diagnostics: 'Diagnostics', buckets: 'Time buckets for this account page', pageSize: 'Rows per page', refreshing: 'Updating in background; current data retained', stale: 'Update failed; showing the last successful data. Retrying automatically.', stableOrder: 'Stable account ID order; additions append and deletions are removed. Live metrics do not reorder rows.' },
   errorRate: "Attempt error rate",
   error_rate_weight: "Error penalty weight (%)",
   error_rate_window_minutes: "Error window (minutes)",
