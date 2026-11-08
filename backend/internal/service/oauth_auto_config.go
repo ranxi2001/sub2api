@@ -18,28 +18,29 @@ const AutoConfigConcurrencyExtraKey = "auto_config_concurrency"
 
 // Initial account fields, BPS defaults, model billing and concurrency upgrades are independent.
 type OAuthAutoConfig struct {
-	OpenAITwoFAAdmission  OpenAITwoFAAdmissionConfig `json:"openai_two_fa_admission"`
-	OpenAITOTPRotateOn429 bool                       `json:"openai_totp_rotate_on_429"`
-	QualityRule           *OAuthInitialQualityRule   `json:"quality_rule,omitempty"`
-	ModelMappings         []OAuthModelMappingRule    `json:"model_mappings"`
-	SelectedModels        []string                   `json:"selected_models"`
-	ModelBilling          ModelBillingConfig         `json:"model_billing"`
-	ExcelBPS              ExcelBPSDefaults           `json:"excel_bps"`
-	UpdatedAt             time.Time                  `json:"updated_at"`
-	Enabled               bool                       `json:"enabled"`
-	Platform              string                     `json:"platform"`
-	Priority              int                        `json:"priority"`
-	LoadFactor            int                        `json:"load_factor"`
-	Concurrency           int                        `json:"concurrency"`
-	GroupIDs              []int64                    `json:"group_ids"`
-	UpgradeEnabled        bool                       `json:"upgrade_enabled"`
-	UpgradeGroupIDs       []int64                    `json:"upgrade_group_ids"`
-	SuccessesPerStep      int                        `json:"successes_per_step"`
-	UpgradeStep           int                        `json:"upgrade_step"`
-	MaxConcurrency        int                        `json:"max_concurrency"`
-	CooldownSeconds       int                        `json:"cooldown_seconds"`
-	CostMultiplier        float64                    `json:"cost_multiplier"`
-	Revision              string                     `json:"revision"`
+	OpenAITwoFAAdmission         OpenAITwoFAAdmissionConfig `json:"openai_two_fa_admission"`
+	OpenAITOTPRotateOn429        bool                       `json:"openai_totp_rotate_on_429"`
+	OpenAIDisableSchedulingOn429 bool                       `json:"openai_disable_scheduling_on_429"`
+	QualityRule                  *OAuthInitialQualityRule   `json:"quality_rule,omitempty"`
+	ModelMappings                []OAuthModelMappingRule    `json:"model_mappings"`
+	SelectedModels               []string                   `json:"selected_models"`
+	ModelBilling                 ModelBillingConfig         `json:"model_billing"`
+	ExcelBPS                     ExcelBPSDefaults           `json:"excel_bps"`
+	UpdatedAt                    time.Time                  `json:"updated_at"`
+	Enabled                      bool                       `json:"enabled"`
+	Platform                     string                     `json:"platform"`
+	Priority                     int                        `json:"priority"`
+	LoadFactor                   int                        `json:"load_factor"`
+	Concurrency                  int                        `json:"concurrency"`
+	GroupIDs                     []int64                    `json:"group_ids"`
+	UpgradeEnabled               bool                       `json:"upgrade_enabled"`
+	UpgradeGroupIDs              []int64                    `json:"upgrade_group_ids"`
+	SuccessesPerStep             int                        `json:"successes_per_step"`
+	UpgradeStep                  int                        `json:"upgrade_step"`
+	MaxConcurrency               int                        `json:"max_concurrency"`
+	CooldownSeconds              int                        `json:"cooldown_seconds"`
+	CostMultiplier               float64                    `json:"cost_multiplier"`
+	Revision                     string                     `json:"revision"`
 }
 
 func DefaultOAuthAutoConfig() OAuthAutoConfig {
@@ -195,6 +196,7 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 	input.Extra[AccountCostMultiplierExtraKey] = c.CostMultiplier
 	if input.Platform == PlatformOpenAI {
 		input.Extra[OpenAITOTPRotateOn429ExtraKey] = c.OpenAITOTPRotateOn429
+		input.Extra[OpenAIDisableSchedulingOn429ExtraKey] = c.OpenAIDisableSchedulingOn429
 	}
 	return nil
 }

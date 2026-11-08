@@ -10,6 +10,7 @@ export type OAuthInitialQualityRule = Pick<ScheduledTestPlan, 'model_id' | 'cron
 export interface AutoConfig {
  openai_two_fa_admission?: OpenAITwoFAAdmissionConfig
  openai_totp_rotate_on_429?: boolean
+ openai_disable_scheduling_on_429?: boolean
  quality_rule?: OAuthInitialQualityRule | null
  model_billing?: ModelBillingConfig
  selected_models?: string[] | null
