@@ -99,9 +99,20 @@ jobs:
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_ws_agent_recovery.go)
+          # The exact original gateway struct predates analysis admission state.
+          # Pin this unrelated leaf to its pre-admission version, preserving all
+          # Issue715 business-chain blobs and the retained handler regressions.
+          analysis_compat=e395038e98fbc5a0c44944f0edcfbfe714570f71
+          analysis_leaf=backend/internal/service/priority_analysis.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}"; git diff --exit-code' EXIT
+          git fetch --no-tags --depth=1 origin "$analysis_compat"
+          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
+          git restore --source="$analysis_compat" -- "$analysis_leaf"
+          expected=$(git rev-parse "$analysis_compat:$analysis_leaf")
+          actual=$(git hash-object "$analysis_leaf")
+          echo "compatibility_leaf_baseline=$analysis_compat path=$analysis_leaf expected_blob=$expected tested_blob=$actual"
+          test "$expected" = "$actual"
           rm -- "${added[@]}"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")
