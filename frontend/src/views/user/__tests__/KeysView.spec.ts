@@ -50,10 +50,13 @@ const messages: Record<string, string> = {
   'keys.allGroups': 'All Groups',
   'keys.allStatus': 'All Status',
   'keys.columnSettings': 'Column Settings',
+  'keys.clickToChangeGroup': 'Change group',
   'keys.createKey': 'Create API Key',
   'keys.created': 'Created',
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
+  'keys.selectGroup': 'Select group',
+  'keys.multiGroupCount': '{count} groups',
   'keys.id': 'ID',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.concurrencyAndWaiting': 'Concurrency / Waiting',
@@ -80,6 +83,9 @@ const messages: Record<string, string> = {
   'keys.status.inactive': 'Inactive',
   'keys.status.quota_exhausted': 'Quota exhausted',
   'keys.usage': 'Usage',
+  'keys.today': 'Today',
+  'keys.total': 'Last 30 days',
+  'keys.quota': 'Quota',
 }
 
 vi.mock('@/api', () => ({
@@ -250,7 +256,7 @@ const IconStub = {
   template: '<span data-test="icon">{{ name }}</span>',
 }
 
-const mountView = async () => {
+const mountView = async (realTable = false) => {
   const wrapper = mount(KeysView, {
     global: {
       plugins: [createPinia()],
@@ -258,7 +264,7 @@ const mountView = async () => {
         UserKeyRiskNotices: true,
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,
-        DataTable: DataTableStub,
+        DataTable: realTable ? false : DataTableStub,
         Pagination: PaginationStub,
         BaseDialog: {
           props: ['show', 'title'],
@@ -274,7 +280,7 @@ const mountView = async () => {
         BulkEditKeysModal: true,
         ApiKeyModelPolicyDialog: true,
         EndpointPopover: true,
-        GroupBadge: {
+        GroupBadge: realTable ? false : {
           name: 'GroupBadge',
           props: ['name', 'rateMultiplier', 'userRateMultiplier'],
           template: '<span>{{ name }} {{ userRateMultiplier ?? rateMultiplier }}x</span>',
@@ -323,6 +329,7 @@ describe('user KeysView column settings', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   beforeEach(() => {
@@ -360,6 +367,80 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     isCurrentStep.mockReturnValue(false)
+  })
+
+  it('keeps usage available alongside risk notices', async () => {
+    const wrapper = await mountView()
+    expect(wrapper.find('user-key-risk-notices-stub').exists()).toBe(true)
+    expect(wrapper.get('[data-test="columns"]').text()).toContain('usage')
+  })
+
+  it.each([false, true])('keeps long group names, usage and group editing available in mobile cards (multiple groups: %s)', async (multiple) => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })))
+    const group = {
+      id: 42,
+      name: '【演示分组】团队统一接口-多语言超长分组名称-Mobile-Preview-Alpha',
+      platform: 'openai',
+      subscription_type: 'standard',
+      rate_multiplier: 0.7,
+    } as Group
+    const additionalGroup = { ...group, id: 43, name: 'Additional group' }
+    const key = {
+      ...createApiKey(),
+      group_id: group.id,
+      group_ids: multiple ? [group.id, additionalGroup.id] : [group.id],
+      group,
+      quota: 100,
+      quota_used: 42,
+    }
+    setKeys(key)
+    getAvailableGroups.mockResolvedValue([group, additionalGroup])
+    getDashboardApiKeysUsage.mockResolvedValue({
+      stats: { 1: { api_key_id: 1, today_actual_cost: 1.2345, total_actual_cost: 31.5678 } },
+    })
+
+    const wrapper = await mountView(true)
+    const groupField = wrapper.get('[data-field="group"]')
+    expect(groupField.text()).toContain(group.name)
+    expect(groupField.get('.key-group-hint').text()).toBe(multiple ? '2 groups' : 'Select group')
+    const usage = wrapper.get('[data-field="usage"]').text().replace(/\s+/g, '')
+    expect(usage).toContain('Today:$1.2345')
+    expect(usage).toContain('Last30days:$31.5678')
+    expect(usage).toContain('Quota:$42.00/$100.00')
+    expect(wrapper.get('.key-quota-values').findAll('.key-usage-amount').map(amount => amount.text())).toEqual(['$42.00', '$100.00'])
+    expect(getDashboardApiKeysUsage).toHaveBeenCalledWith([key.id], expect.objectContaining({ signal: expect.any(AbortSignal) }))
+
+    await groupField.get('.key-group-control').trigger('click')
+    await flushPromises()
+    if (multiple) {
+      expect(wrapper.get('[role="dialog"]').exists()).toBe(true)
+      expect(wrapper.getComponent('[data-tour="key-form-group"]').props('modelValue')).toBe(group.id)
+      expect(wrapper.get<HTMLInputElement>(`[data-testid="key-additional-groups"] input[value="${additionalGroup.id}"]`).element.checked).toBe(true)
+    } else {
+      expect(wrapper.get('input[placeholder="keys.searchGroup"]').exists()).toBe(true)
+    }
+  })
+
+  it('preserves large quota values in independently wrapping amount units', async () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: false, media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    })))
+    setKeys({ ...createApiKey(), quota: 999999999999.99, quota_used: 888888888888.88 })
+    const wrapper = await mountView(true)
+    const quota = wrapper.get('[data-field="usage"] .key-quota-values')
+    expect(quota.findAll('.key-usage-amount').map(amount => amount.text())).toEqual(['$888888888888.88', '$999999999999.99'])
+    expect(quota.text().replace(/\s+/g, '')).toBe('$888888888888.88/$999999999999.99')
+    expect(quota.classes()).toContain('text-yellow-500')
   })
 
   it('shows model policy editing only to administrators', async () => {

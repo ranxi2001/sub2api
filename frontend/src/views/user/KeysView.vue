@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <TablePageLayout>
+    <TablePageLayout class="keys-page-layout">
       <template #filters>
         <div class="flex flex-col gap-3">
           <UserKeyRiskNotices />
@@ -156,15 +156,17 @@
           </template>
 
           <template #cell-group="{ row }">
-            <div class="group/dropdown relative">
+            <div class="key-group-cell group/dropdown relative">
               <button
                 :ref="(el) => setGroupButtonRef(row.id, el)"
                 @click="(row.group_ids?.length ?? 0) > 1 ? editKey(row) : openGroupSelector(row)"
-                class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
+                class="key-group-control -mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
                 :title="t('keys.clickToChangeGroup')"
               >
                 <GroupBadge
                   v-if="row.group"
+                  class="key-group-badge"
+                  :truncate="false"
                   :name="row.group.name"
                   :platform="row.group.platform"
                   :subscription-type="row.group.subscription_type"
@@ -178,8 +180,8 @@
                 <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
                   t('keys.noGroup')
                 }}</span>
-                <span v-if="(row.group_ids?.length ?? 0) > 1" class="text-xs text-primary-600">{{ t('keys.multiGroupCount', { count: row.group_ids.length }) }}</span>
-                <span v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
+                <span v-if="(row.group_ids?.length ?? 0) > 1" class="key-group-hint text-xs text-primary-600">{{ t('keys.multiGroupCount', { count: row.group_ids.length }) }}</span>
+                <span v-else class="key-group-hint text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
                 <svg
                   class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
                   fill="none"
@@ -256,31 +258,33 @@
           </template>
 
           <template #cell-usage="{ row }">
-            <div class="text-sm">
+            <div class="key-usage-cell text-sm">
               <div class="flex items-center gap-1.5">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
-                <span class="font-medium text-gray-900 dark:text-white">
+                <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
+                <span class="key-usage-amount font-medium text-gray-900 dark:text-white">
                   ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
                 </span>
               </div>
               <div class="mt-0.5 flex items-center gap-1.5">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
-                <span class="font-medium text-gray-900 dark:text-white">
+                <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
+                <span class="key-usage-amount font-medium text-gray-900 dark:text-white">
                   ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
                 </span>
               </div>
               <!-- Quota progress (if quota is set) -->
               <div v-if="row.quota > 0" class="mt-1.5">
                 <div class="flex items-center gap-1.5">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('keys.quota') }}:</span>
-                  <span :class="[
-                    'font-medium',
+                  <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.quota') }}:</span>
+                  <div :class="[
+                    'key-quota-values flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1 font-medium',
                     row.quota_used >= row.quota ? 'text-red-500' :
                     row.quota_used >= row.quota * 0.8 ? 'text-yellow-500' :
                     'text-gray-900 dark:text-white'
                   ]">
-                    ${{ row.quota_used?.toFixed(2) || '0.00' }} / ${{ row.quota?.toFixed(2) }}
-                  </span>
+                    <span class="key-usage-amount">${{ row.quota_used?.toFixed(2) || '0.00' }}</span>
+                    <span>/</span>
+                    <span class="key-usage-amount">${{ row.quota?.toFixed(2) }}</span>
+                  </div>
                 </div>
                 <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
                   <div
@@ -438,7 +442,7 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-1 max-lg:flex-wrap">
               <button
                 v-if="isCodexQuickConfigPlatform(row.group?.platform)"
                 @click="openCodexQuickConfigModal(row)"
@@ -2395,6 +2399,64 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@media (min-width: 1024px) {
+  .keys-page-layout :deep(.layout-section-scrollable) {
+    min-height: 14rem;
+  }
+}
+
+@media (max-width: 1023px) {
+  :deep([data-field='group']),
+  :deep([data-field='usage']) {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  :deep([data-field='group'] > span),
+  :deep([data-field='usage'] > span) {
+    white-space: nowrap;
+  }
+
+  :deep([data-field='group'] > div),
+  :deep([data-field='usage'] > div) {
+    width: 100%;
+    text-align: left;
+  }
+
+  .key-group-control {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    flex-wrap: wrap;
+    text-align: left;
+  }
+
+  .key-group-badge {
+    max-width: 100%;
+  }
+
+  .key-group-hint,
+  .key-group-control > svg {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .key-usage-cell > .flex,
+  .key-usage-cell > div > .flex {
+    flex-wrap: wrap;
+  }
+
+  .key-usage-label {
+    white-space: nowrap;
+  }
+
+  .key-usage-amount {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}
+
 :deep([data-field='current_concurrency']) {
   flex-wrap: wrap;
 }
