@@ -28,8 +28,8 @@ const requireBrowser = createRequire(path.join(process.env.PLAYWRIGHT_ROOT, 'pac
 const { chromium } = requireBrowser('playwright')
 const modules = {
   auth: `import {reactive} from 'vue'; export const auth=reactive({user:{id:1,role:'admin'}});window.fixtureAuth=auth;export const useAuthStore=()=>auth;`,
-  layout: `export default {template:'<main class="mx-auto max-w-7xl p-4 sm:p-6"><slot /></main>'}`,
-  nav: `export default {template:'<nav class="text-sm text-gray-500">Offline UI fixture · Synthetic accounts only</nav>'}`,
+  layout: `import {h} from 'vue';export default {setup(_,{slots}){return()=>h('main',{class:'mx-auto max-w-7xl p-4 sm:p-6'},slots.default?.())}}`,
+  nav: `import {h} from 'vue';export default {setup(){return()=>h('nav',{class:'text-sm text-gray-500'},'Offline UI fixture · Synthetic accounts only')}}`,
   client: `async function request(method,url,data,options){const query=new URLSearchParams(options?.params??{});const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{method,headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});if(!response.ok)throw Error('fixture '+response.status);return {data:await response.json()}}export const apiClient={get:(url,options)=>request('GET',url,null,options),put:(url,data)=>request('PUT',url,data),post:(url,data)=>request('POST',url,data)};`,
 }
 function html() {
