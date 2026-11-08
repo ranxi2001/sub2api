@@ -209,6 +209,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		CacheCreationTokens:  cacheCreationTokens,
 		CacheReadTokens:      result.Usage.CacheReadInputTokens,
 		ImageOutputTokens:    result.Usage.ImageOutputTokens,
+		CacheCreation30mTokens: result.Usage.CacheCreation30mInputTokens,
+		CacheCreation12hTokens: result.Usage.CacheCreation12hInputTokens,
 	}
 
 	// Keep candidate fallback, response-model selection and Free Fast on one policy snapshot.
@@ -450,6 +452,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		InputTokens:              actualInputTokens,
 		OutputTokens:             result.Usage.OutputTokens,
 		CacheCreationTokens:      cacheCreationTokens,
+		CacheCreation30mTokens:   result.Usage.CacheCreation30mInputTokens,
+		CacheCreation12hTokens:   result.Usage.CacheCreation12hInputTokens,
 		CacheReadTokens:          result.Usage.CacheReadInputTokens,
 		ImageInputTokens:         result.Usage.ImageInputTokens,
 		ImageOutputTokens:        result.Usage.ImageOutputTokens,
