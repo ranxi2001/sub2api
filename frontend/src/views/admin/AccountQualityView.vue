@@ -198,6 +198,11 @@
           <label v-if="form.pelican_config.quality.action === 'remove_models'" class="block space-y-1 pl-6"><span>{{ t('qualityOps.removeModelsInput') }}</span><input :value="removeModelsInput" class="input" data-testid="quality-remove-models-input" placeholder="gpt-6-astra, gpt-5.6-sol" @input="updateRemoveModelsInput" /><span class="block text-xs text-gray-500">{{ t('qualityOps.cooldownRecoveryHint') }}</span></label>
           <p v-if="form.pelican_config.quality.action === 'remove_models'" class="pl-6 text-sm text-gray-500" data-testid="quality-model-independence">{{ t('qualityOps.cooldownPerModelHint') }}</p>
           <label v-if="form.pelican_config.quality.action === 'remove_models'" class="block space-y-1 pl-6"><span>{{ t('qualityOps.recoveryConcurrency') }}</span><input v-model.number="form.pelican_config.quality.recovery_concurrency" type="number" min="1" max="10000" class="input" data-testid="quality-recovery-concurrency" /></label>
+          <div v-if="qualityUsesRetestRest(form.pelican_config.quality.action)" class="space-y-1" data-testid="quality-retest-rest-setting">
+            <div class="flex items-center gap-2"><label for="quality-retest-rest">{{ t('qualityOps.retestRest') }}</label><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.qualityRetestRest" :user-id="auth.user?.id" /></div>
+            <input id="quality-retest-rest" v-model.number="form.pelican_config.quality.retest_rest_minutes" type="number" min="0" max="10080" step="1" required class="input" data-testid="quality-retest-rest" />
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('qualityOps.retestRestHint') }}</p>
+          </div>
           <template v-if="isProbe">
             <label class="flex items-center gap-2"><input v-model="form.pelican_config.quality.action" type="radio" value="enable_bps" data-testid="quality-action-enable-bps" />{{ t('qualityOps.enableBPS') }}</label>
             <QualityBPSSettings v-if="form.pelican_config.quality.action === 'enable_bps'" v-model:bps="form.pelican_config.quality.bps" v-model:auto-restore="form.pelican_config.quality.auto_restore" class="pl-6" :target-groups="bpsTargetGroups" :show-auto-restore="editsField('restore')" />
@@ -284,6 +289,8 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import QualityAccountSelector from '@/components/admin/operations/QualityAccountSelector.vue'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -296,7 +303,7 @@ import scheduledTests from '@/api/admin/scheduledTests'
 import * as accountsAPI from '@/api/admin/accounts'
 import * as groupsAPI from '@/api/admin/groups'
 import { CANDY_PROMPT, STATE_PROBE_QUESTION, stateProbeVerdict, type StateProbeVerdict } from '@/utils/intelligenceTest'
-import { buildQualityRulePatch, copyQualityRuleConfig, qualityRuleFieldValue, qualityActionPayload, qualityUsesGroups, qualityUsesModelResults, defaultQualityBPS, qualityBPSError, qualityBPSForm, qualityJudgeConfigured, qualityRuleFields, type QualityRuleField } from '@/utils/qualityRulePatch'
+import { buildQualityRulePatch, copyQualityRuleConfig, qualityRuleFieldValue, qualityActionPayload, qualityUsesGroups, qualityUsesModelResults, qualityUsesRetestRest, defaultQualityBPS, qualityBPSError, qualityBPSForm, qualityJudgeConfigured, qualityRuleFields, type QualityRuleField } from '@/utils/qualityRulePatch'
 import { DEFAULT_STATE_PROBE_CRON } from '@/utils/intelligenceTest'
 import QualityOwnershipReview from '@/components/admin/operations/QualityOwnershipReview.vue'
 import QualityProbeSchedule from '@/components/admin/operations/QualityProbeSchedule.vue'
@@ -623,7 +630,7 @@ function resultContent(result: ScheduledTestResult) {
 function defaults() {
   return { model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, auto_recover: false,
     pelican_config: { rule_name: '', question_kind: 'candy' as 'candy' | 'random_reasoning' | typeof STATE_PROBE_QUESTION, test_channel: 'account' as 'account' | 'bps', prompt: CANDY_PROMPT, reasoning_effort: 'high', parallel_count: 1, model_ids: [] as string[],
-      quality: { trigger_on_upstream_5xx: false, expected_answer: '21', action: 'remove_groups' as QualityPolicy['action'], remove_group_ids: [] as number[], remove_models: [] as string[], recovery_concurrency: 5, auto_restore: false, judge: { group_id: 0, model_id: '', prompt: t('qualityOps.defaultJudgePrompt') } as QualityJudgeConfig, bps: defaultQualityBPS() } } }
+      quality: { trigger_on_upstream_5xx: false, expected_answer: '21', action: 'remove_groups' as QualityPolicy['action'], remove_group_ids: [] as number[], remove_models: [] as string[], recovery_concurrency: 5, retest_rest_minutes: 0, auto_restore: false, judge: { group_id: 0, model_id: '', prompt: t('qualityOps.defaultJudgePrompt') } as QualityJudgeConfig, bps: defaultQualityBPS() } } }
 }
 const form = ref(defaults())
 const removeModelsInput = ref('')
@@ -793,6 +800,7 @@ function edit(plan: ScheduledTestPlan) {
   form.value = { ...defaults(), model_id: plan.model_id, cron_expression: plan.cron_expression, enabled: plan.enabled, max_results: plan.max_results, pelican_config: { ...defaults().pelican_config, ...JSON.parse(JSON.stringify(plan.pelican_config || {})) } }
   form.value.pelican_config.model_ids = (form.value.pelican_config.model_ids || []).filter(model => model !== form.value.model_id)
   form.value.pelican_config.quality.trigger_on_upstream_5xx ??= false
+  form.value.pelican_config.quality.retest_rest_minutes ??= 0
   form.value.pelican_config.quality.judge ||= defaults().pelican_config.quality.judge
   form.value.pelican_config.quality.bps = qualityBPSForm(form.value.pelican_config.quality.bps)
   showForm.value = true; initialForm.value = formSnapshot(); void loadJudgeModels()

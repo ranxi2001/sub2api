@@ -1,4 +1,7 @@
 export default {
+  "retestRest": "Rest before retesting a degraded account (minutes)",
+  "retestRestHint": "0 keeps the existing schedule. After confirmed degradation and quarantine, this rule waits before testing again, including manual and 5xx triggers. It retests after the deadline and restores only when the test passes and auto-restore is enabled. Rest applies to all models in this rule, up to 7 days; it does not guarantee recovery.",
+  "invalidRetestRest": "Rest must be an integer from 0 to 10080 minutes.",
   "copy": "Copy existing account rule",
   "ruleName": "Rule name (optional)",
   "maxResults": "Results to retain (1–200)",
