@@ -1,0 +1,79 @@
+name: Issue730 re-login identity
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_oauth_reauth*.go'
+      - 'tools/openai_oauth_reauth_worker.py'
+      - 'tools/test_openai_oauth_reauth_engines.py'
+      - 'frontend/src/utils/credentialOperationFailure.ts'
+      - '.github/workflows/issue730-reauth-identity.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Record exact head
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head.txt
+      - name: Original application must reject explicit access identity before the fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          source=backend/internal/service/openai_oauth_reauth.go
+          cp "$source" "$RUNNER_TEMP/issue730-current.go"
+          trap 'cp "$RUNNER_TEMP/issue730-current.go" "$source"' EXIT
+          git fetch --no-tags --depth=1 origin 6df0cd5bb0ce4d774d34004008f9dd661d236468
+          git show "6df0cd5bb0ce4d774d34004008f9dd661d236468:$source" > "$source"
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestIssue730ExplicitAccessIdentityPrecedesSessionFallback$' -count=1 -v) > evidence/red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red.log
+          test "$result" -ne 0
+          if grep -Eq '\[build failed\]|\[setup failed\]|undefined:|syntax error:|no tests to run|panic:' evidence/red.log; then exit 1; fi
+          grep -F 'the explicit access-token workspace must override a session ID' evidence/red.log
+          grep -F -- '--- FAIL: TestIssue730ExplicitAccessIdentityPrecedesSessionFallback' evidence/red.log
+      - name: Identity, callbacks, budget and retained CAS boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          (cd backend && go test -race -tags=unit ./internal/service ./internal/repository -run '^Test(Issue730|OpenAIOAuthReauth|ReloginBudget|ExhaustedRelogin|RestoredBudget|AccountRepositoryApplyOpenAIOAuthReauth)' -count=1 -v -timeout=15m) 2>&1 | tee evidence/green.log
+          if grep -Eq -- '--- SKIP:|no tests to run' evidence/green.log; then exit 1; fi
+          grep -F -- '--- PASS: TestIssue730ExplicitAccessIdentityPrecedesSessionFallback' evidence/green.log
+      - name: Offline remote request contract and no-retry boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest tools.test_openai_oauth_reauth_engines -v 2>&1 | tee evidence/worker.log
+      - name: PostgreSQL budget persistence and fresh-probe gating
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestReloginBudget' -count=1 -v -timeout=15m) 2>&1 | tee evidence/budget-storage.log
+          if grep -Eq -- '--- SKIP:|no tests to run' evidence/budget-storage.log; then exit 1; fi
+          grep -F -- '--- PASS: TestReloginBudgetSavedCredentialsMustPassASeparateFreshProbe' evidence/budget-storage.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue730-identity-${{ github.event.pull_request.head.sha }}
+          path: evidence/
+          if-no-files-found: error

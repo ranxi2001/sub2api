@@ -378,6 +378,21 @@ class ReauthEngineTests(unittest.TestCase):
                 with self.assertRaises(worker.WorkerError):
                     worker.process_password_claim(self.api(),dict(self.claim(),**overrides))
                 opener.assert_not_called();local.assert_not_called()
+    def test_session_engine_receives_exact_workspace_without_forwarding_internal_claim(self):
+        claim = dict(self.claim(), expected_workspace='workspace-original',
+                     expected_credentials_hash='internal-snapshot-not-for-provider',
+                     oauth_profile='codex')
+        api = self.api()
+        response = ChunkResponse([json.dumps({'credential': self.credentials()}).encode()])
+        with patch.object(worker.NO_REDIRECT_OPENER, 'open', return_value=response) as opener:
+            worker.process_password_claim(api, claim)
+        request = opener.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(payload['expected_workspace'], 'workspace-original')
+        self.assertEqual(set(payload), {'action', 'auth_mode', 'email', 'password', 'mfa_secret', 'expected_workspace'})
+        self.assertNotIn('internal-snapshot-not-for-provider', request.data.decode())
+        opener.assert_called_once()
+        api.credentials.assert_called_once_with(7, self.credentials(), {})
     def test_provider_failures_do_not_expose_secrets_or_switch_engine(self):
         for response in ({'error':{'code':'synthetic-password','message':'synthetic-totp'}},{'credential':{'access_token':'synthetic-access'}}):
             api=self.api()

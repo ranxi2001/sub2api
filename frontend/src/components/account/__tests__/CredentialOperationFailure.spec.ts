@@ -4,9 +4,17 @@ import { createI18n } from 'vue-i18n'
 import View from '../CredentialOperationFailure.vue'
 import zh from '@/i18n/locales/zh/tokenGuardV2'
 import en from '@/i18n/locales/en/tokenGuardV2'
-import { safeOperationFailure } from '@/utils/credentialOperationFailure'
+import { safeOperationFailure, safeDiagnosticToken } from '@/utils/credentialOperationFailure'
 
 describe('credential operation failure display', () => {
+  it('preserves fixed identity validation reasons and drops arbitrary identity text', () => {
+    for (const reason of ['account_id_missing', 'account_id_mismatch', 'user_id_missing', 'email_missing', 'token_account_conflict', 'id_token_invalid']) {
+      expect(safeDiagnosticToken(reason)).toBe(reason)
+    }
+    for (const text of ['user@example.test', 'account_id_mismatch user@example.test', 'token private', 'workspace-actual-id']) {
+      expect(safeDiagnosticToken(text)).toBe('unknown')
+    }
+  })
   it.each(Object.keys(zh.operationFailure.reasons))('shows %s with its manual action and original time', code => {
     const failure = safeOperationFailure({ code, stage: 'web_login', occurred_at: '2026-10-01T01:02:03Z' })
     const view = mount(View, { props: { failure }, global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh: { tokenGuardV2: zh } } })] } })

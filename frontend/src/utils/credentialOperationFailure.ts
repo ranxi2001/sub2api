@@ -36,6 +36,9 @@ export function probeOperationFailure(item: TokenGuardV2Account): CredentialOper
 }
 
 const legacyReasons = new Set(['protocol_error', 'password_rejected', 'totp_rejected', 'interaction_required', 'security_check',
+  'candidate_missing', 'stored_identity_missing', 'id_token_invalid', 'access_token_invalid',
+  'token_account_conflict', 'token_user_conflict', 'token_email_conflict', 'account_id_missing', 'account_id_mismatch',
+  'user_id_missing', 'user_id_mismatch', 'email_missing', 'email_mismatch',
   'session_unavailable', 'workspace_mismatch', 'callback_missing', 'callback_invalid', 'callback_state_mismatch',
   'pkce_invalid', 'token_exchange_failed', 'credentials_incomplete', 'transport_error', 'runtime_error', 'process_failed',
   'timeout', 'diagnostic_invalid', 'output_invalid', 'http_rejected', 'duplicate_field', 'invalid_json', 'unsupported_event',

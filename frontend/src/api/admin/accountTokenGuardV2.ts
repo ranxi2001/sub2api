@@ -28,7 +28,8 @@ export interface TokenGuardV2LoginConfig {
 
 export interface TokenGuardV2Task {
   failure?: CredentialOperationFailure
-  diagnostic?: { engine?: TokenGuardV2Engine; stage: string; reason: string; elapsed_ms: number; exit_code?: number; http_status?: number }
+  diagnostic?: { engine?: TokenGuardV2Engine; stage: string; reason: string; elapsed_ms: number; exit_code?: number; http_status?: number
+    identity?: Record<'account' | 'user' | 'email', { stored_present: boolean; present: boolean; matches: boolean }> }
   id: number
   account_id: number
   status: string

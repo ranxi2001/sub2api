@@ -1035,7 +1035,11 @@ func (s *OpenAIOAuthReauthService) SubmitCredentials(ctx context.Context, taskID
 	}
 	tokenInfo, extra, err := directReauthTokenInfo(credentials, workerExtra)
 	if err != nil {
-		return s.failCallback(ctx, taskID, "worker returned invalid OpenAI OAuth credentials", err)
+		reason := "id_token_invalid"
+		if reauthMapString(credentials, "access_token") == "" || reauthMapString(credentials, "refresh_token") == "" || reauthMapString(credentials, "id_token") == "" {
+			reason = "credentials_incomplete"
+		}
+		return s.failCallback(ctx, taskID, reauthIdentityError(reason, reauthIdentityChecks(account, nil)), err)
 	}
 	return s.applyReauthTokenInfo(ctx, record, account, tokenInfo, extra)
 }
@@ -1113,8 +1117,13 @@ func firstNonEmptyReauth(values ...string) string {
 
 func (s *OpenAIOAuthReauthService) applyReauthTokenInfo(ctx context.Context, record *OpenAIOAuthReauthTaskRecord, account *Account, tokenInfo *OpenAITokenInfo, workerExtra map[string]any) (*OpenAIOAuthReauthTask, error) {
 	taskID := record.ID
+	if reason := resolveReauthIdentity(tokenInfo); reason != "" {
+		return s.failCallback(ctx, taskID, reauthIdentityError(reason, reauthIdentityChecks(account, tokenInfo)),
+			infraerrors.Conflict("OPENAI_REAUTH_IDENTITY_MISMATCH", "OAuth token claims are invalid or inconsistent"))
+	}
 	if err := validateReauthToken(account, tokenInfo); err != nil {
-		return s.failCallback(ctx, taskID, "new OAuth identity does not match the account", err)
+		checks := reauthIdentityChecks(account, tokenInfo)
+		return s.failCallback(ctx, taskID, reauthIdentityError(reauthIdentityReason(checks), checks), err)
 	}
 	if strings.TrimSpace(tokenInfo.RefreshToken) == "" || strings.TrimSpace(tokenInfo.AccessToken) == "" {
 		return s.failCallback(ctx, taskID, "OpenAI did not return a usable OAuth token", errors.New("missing token"))
@@ -1270,6 +1279,9 @@ func safeReauthTask(record *OpenAIOAuthReauthTaskRecord) *OpenAIOAuthReauthTask 
 	if diagnostic == nil {
 		_, diagnostic, _ = sessionStudioError(record.Error)
 	}
+	if diagnostic == nil {
+		_, diagnostic, _ = parseReauthIdentityError(record.Error)
+	}
 	return &OpenAIOAuthReauthTask{
 		Failure:    reauthOperationFailure(record, diagnostic),
 		Diagnostic: diagnostic,
@@ -1280,6 +1292,9 @@ func safeReauthTask(record *OpenAIOAuthReauthTaskRecord) *OpenAIOAuthReauthTask 
 }
 
 func sanitizeReauthError(raw string) string {
+	if safe, _, handled := parseReauthIdentityError(raw); handled {
+		return safe
+	}
 	if safe, _, handled := sessionStudioError(raw); handled {
 		return safe
 	}
