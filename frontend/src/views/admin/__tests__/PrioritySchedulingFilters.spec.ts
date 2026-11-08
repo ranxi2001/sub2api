@@ -106,10 +106,10 @@ describe('priority explicit scope filters', () => {
     expect((wrapper!.vm as any).snapshot.window_minutes).toBe(15)
   })
 
-  it('rejects inconsistent revision, group or measurement without mixing the two tables', async () => {
+  it.each([{ config_revision: 'old-revision' }, { group_id: 17 }, { latency_percentile: 50 }, { latency_measurement: 'attributed_v1' }])('rejects inconsistent response semantics %o without mixing the two tables', async change => {
     render(); await flushPromises()
     const bad = analysis({ model: 'fixture-model', group_id: 11, minutes: 60 }, 'new-revision')
-    bad.latency.config_revision = 'old-revision'
+    Object.assign(bad.latency, change)
     vi.mocked(apiClient.get).mockResolvedValueOnce({ data: bad })
     await (wrapper!.vm as any).refresh(); await flushPromises()
     expect((wrapper!.vm as any).snapshot.config_revision).toBe('fixture-v1')
@@ -128,5 +128,42 @@ describe('priority explicit scope filters', () => {
     wrapper!.unmount(); wrapper = undefined
     await vi.advanceTimersByTimeAsync(30000)
     expect(vi.mocked(apiClient.get)).toHaveBeenCalledTimes(count)
+  })
+
+  it('finishes a group catalog read after a window change without changing the selected model', async () => {
+    render(); await flushPromises()
+    const pending = deferred<any>(), original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options) => String(url).includes('/groups/17/model-allowlist-candidates') ? pending.promise : original(url, options))
+    await choose('priority-group-filter', 'Other group (#17)')
+    await wrapper!.get('[data-testid="latency-window"]').setValue('15'); await flushPromises()
+    pending.resolve({ data: { models: ['only-in-group-17'] } }); await flushPromises()
+    expect((wrapper!.vm as any).selectedModel).toBe('fixture-model')
+    await choose('priority-model-filter', 'only-in-group-17')
+    expect(reads().at(-1)?.[1]).toEqual({ params: { model: 'only-in-group-17', group_id: 17, minutes: 15 } })
+  })
+
+  it('waits for initialization before an early refresh and starts the saved group scope once', async () => {
+    const pending = deferred<any>()
+    vi.mocked(apiClient.get).mockReturnValueOnce(pending.promise)
+    render(); await flushPromises()
+    await (wrapper!.vm as any).refresh(); await flushPromises()
+    expect(reads()).toHaveLength(0)
+    pending.resolve({ data: { ...config } }); await flushPromises()
+    expect(reads()).toHaveLength(1)
+    expect(reads()[0][1]).toEqual({ params: { model: 'fixture-model', group_id: 11, minutes: 60 } })
+  })
+
+  it.each([{ history_status: 'error', history_error: 'fixture failure' }, { history_refreshing: true }, { config_revision: 'new' }])('refuses changed sticky cleanup when the latest exact snapshot becomes unsafe: %o', async change => {
+    render(); await flushPromises()
+    const latest = { ...analysis({ model: 'latest-selection', group_id: 17, minutes: 60 }).snapshot, candidates: [] }
+    const original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/snapshot' ? { data: { snapshot: latest } } : original(url, options))
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { before: latest, after: latest, timed_out: false, diff: [{ account_id: 42, changed: true, old_score: 1, new_score: 2, old_weight: 1, new_weight: 2, reasons: [] }] } })
+    await wrapper!.get('[data-testid="recompute"]').trigger('click'); await flushPromises()
+    expect(wrapper!.find('[data-testid="clear-changed-sticky"]').exists()).toBe(true)
+    expect((wrapper!.vm as any).snapshot.model).toBe('fixture-model')
+    Object.assign(latest, change)
+    await wrapper!.get('[data-testid="clear-changed-sticky"]').trigger('click'); await flushPromises()
+    expect(vi.mocked(apiClient.post).mock.calls.filter(([url]) => String(url).endsWith('/clear'))).toHaveLength(0)
   })
 })

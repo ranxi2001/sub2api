@@ -44,7 +44,7 @@
         <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.model') }}</span><Select v-model="selectedModel" data-testid="priority-model-filter" :options="modelOptions" :searchable="true" :aria-label="t('priorityScheduling.model')" /></label>
         <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.group') }}</span><Select v-model="selectedGroup" data-testid="priority-group-filter" :options="groupOptions" :searchable="true" :aria-label="t('priorityScheduling.group')" /></label>
         <label><span class="field-title">{{ t('priorityScheduling.window_minutes') }}</span><select id="priority-latency-window" v-model.number="latencyMinutes" class="input w-full" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select></label>
-        <div class="flex items-end"><button class="btn btn-secondary w-full" :disabled="refreshing || catalogLoading" data-testid="latency-refresh" @click="refresh">{{ t('priorityScheduling.refresh') }}</button></div>
+        <div class="flex items-end"><button class="btn btn-secondary w-full" :disabled="refreshing || catalogLoading" data-testid="latency-refresh" @click="loadLatency">{{ t('priorityScheduling.refresh') }}</button></div>
         <p v-if="catalogError" class="text-sm text-red-600 sm:col-span-2 lg:col-span-4" role="alert">{{ t('priorityScheduling.filters.catalogError') }}</p>
       </section>
       <section class="card latency-panel overflow-hidden" data-testid="latency-panel">
@@ -86,7 +86,7 @@
       <section class="card p-5">
         <header class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('priorityScheduling.filters.candidates') }}</h2><div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary" :disabled="recomputeLoading" data-testid="recompute" @click="recompute">{{ t(recomputeLoading ? 'priorityScheduling.recompute.running' : 'priorityScheduling.recompute.action') }}</button><button class="btn btn-secondary" :disabled="refreshing" @click="refresh">{{ t('priorityScheduling.refresh') }}</button></div></header>
         <p v-if="recomputeError" role="alert" class="mt-3 text-red-600">{{ recomputeError }}</p>
-        <details class="my-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.snapshotHint') }}</p></details>
+        <details class="my-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.filters.analysisHint') }}</p></details>
         <p v-if="snapshotError" role="alert" class="text-red-600">{{ snapshotError }}</p>
         <p v-if="!snapshot" data-testid="snapshot-initial-state" role="status" class="py-8 text-center text-sm text-gray-500">{{ t(refreshing ? 'priorityScheduling.loading' : 'priorityScheduling.empty') }}</p>
         <template v-else>
@@ -234,6 +234,7 @@ const fields = [
   { key: 'min_samples', min: 1, max: 1000 }, { key: 'quality_max_age_hours', min: 1, max: 168 }
 ] as const
 let alive = true, generation = 0, recomputeRequestGeneration = 0, stickyRequestGeneration = 0, snapshotRequestGeneration = 0, latencyRequestGeneration = 0
+let catalogRequestGeneration = 0
 let historyTimer: ReturnType<typeof setTimeout> | undefined
 function stopHistoryRefresh() { clearTimeout(historyTimer); historyTimer = undefined }
 const active = (version: number) => alive && generation === version
@@ -388,19 +389,19 @@ async function save() {
 }
 async function loadCatalog(initial = false) {
   if (!canRead()) return
-  const version = generation, request = scopeKey()
+  const version = generation, request = ++catalogRequestGeneration, group = selectedGroup.value
   catalogLoading.value = true; catalogError.value = false
   try {
     const [catalogGroups, catalogModels] = await Promise.all([getGroups('openai'), getModelAllowlistCandidates(selectedGroup.value, 'openai')])
-    if (!active(version) || request !== scopeKey()) return
+    if (!active(version) || request !== catalogRequestGeneration || group !== selectedGroup.value) return
     availableGroups.value = catalogGroups
     availableModels.value = catalogModels
     if (initial && !selectedModel.value) selectedModel.value = draft.value?.models?.find(model => catalogModels.includes(model)) ?? catalogModels[0] ?? ''
-  } catch { if (active(version) && request === scopeKey()) catalogError.value = true }
-  finally { if (active(version)) catalogLoading.value = false }
+  } catch { if (active(version) && request === catalogRequestGeneration) catalogError.value = true }
+  finally { if (active(version) && request === catalogRequestGeneration) catalogLoading.value = false }
 }
 async function refresh() {
-  if (!canRead()) return
+  if (!canRead() || !initialized) return
   stopHistoryRefresh()
   recomputeRequestGeneration++; recomputeResult.value = null
   if (!selectedModel.value || catalogError.value) await loadCatalog(!selectedModel.value)
@@ -449,7 +450,7 @@ function scheduleHistoryRefresh(version: number, delay: number, attempt: number)
 }
 async function loadLatency() {
   // One backend read captures the same scope/config/window for both tables.
-  await loadSnapshot(0)
+  await refresh()
 }
 async function loadSticky(requestedGroupID?: number) {
   if (!canRead()) return
@@ -521,10 +522,11 @@ async function clearChangedSticky() {
   if (!recomputeCanClearSticky.value || !changedDiffRows.value.length || result?.after?.group_id == null) return
   try {
     const latest = await getPrioritySnapshot()
-    if (!active(version) || request !== snapshotRequestGeneration || result !== recomputeResult.value || snapshotScope(latest) !== snapshotScope(result.after)) { recomputeResult.value = null; return }
+    if (!active(version) || request !== snapshotRequestGeneration || result !== recomputeResult.value) return
+    if (snapshotScope(latest) !== snapshotScope(result.after) || latest?.history_status !== 'ready' || !latest.history_ready || latest.history_error || latest.history_refreshing) { recomputeResult.value = null; return }
     mutationSnapshot.value = latest
     if (recomputeCanClearSticky.value) await clearSticky(changedDiffRows.value.map(row => row.account_id), result.after.group_id)
-  } catch { if (active(version)) recomputeError.value = t('priorityScheduling.recompute.error') }
+  } catch { if (active(version) && request === snapshotRequestGeneration && result === recomputeResult.value) recomputeError.value = t('priorityScheduling.recompute.error') }
 }
 watch(stickyGroupID, () => {
   stickyRequestGeneration++

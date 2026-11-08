@@ -13,7 +13,7 @@ assert(out && process.env.CI, 'This browser harness runs only on remote CI')
 await fs.mkdir(out, { recursive: true })
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 assert.equal(head, process.env.ISSUE733_EXPECTED_HEAD)
-const baseline = '8889aee65d908c2458becb86d4fe54f4359dc61d'
+const baseline = '8a203b43231c1192cee17f854633a23308d73e7e'
 const file = 'frontend/src/views/admin/PrioritySchedulingView.vue'
 const baselineBytes = execFileSync('git', ['show', `${baseline}:${file}`])
 const baselinePath = path.join(out, 'BaselinePrioritySchedulingView.vue')
@@ -72,7 +72,16 @@ async function routeBackend(page) {
     const url = new URL(route.request().url()), endpoint = url.pathname.split('/').at(-1)
     requests.push({ endpoint, query: url.search, method: route.request().method() })
     let body, status = 200
-    if (endpoint === 'config') body = config
+    if (url.pathname === '/fixture/admin/groups/all') body = [{id:11,name:'Demo group'},{id:17,name:'Archive group'}]
+    else if (endpoint === 'model-allowlist-candidates') body = {models:['demo-model','archive-model','not-in-latest-pool']}
+    else if (endpoint === 'config') body = config
+    else if (endpoint === 'analysis') {
+      const model=url.searchParams.get('model'), group=Number(url.searchParams.get('group_id'))||null, minutes=Number(url.searchParams.get('minutes'))
+      assert(['demo-model','archive-model','not-in-latest-pool'].includes(model)); assert([null,11,17].includes(group)); assert([15,60,180].includes(minutes))
+      body={snapshot:{...snap(),model,group_id:group,window_minutes:minutes},latency:{...latency(minutes),model,group_id:group}}
+      if(state.latencyError||state.snapshotError)status=503
+      if(heldLatency){const hold=heldLatency;heldLatency=null;hold.started();await hold.promise}
+    }
     else if (endpoint === 'snapshot') { body = { snapshot: snap() }; if (state.snapshotError) status = 503 }
     else if (endpoint === 'latency') {
       assert.equal(url.searchParams.get('bucket_minutes'), '5')
@@ -97,7 +106,7 @@ async function newPage(viewport = { width: 1440, height: 1000 }) {
 async function screenshot(page, name, scope) {
   await page.evaluate(() => document.fonts.ready)
   await page.screenshot({ path: path.join(out, name), fullPage: false })
-  shots.push({ name, head: scope === 'baseline' ? baseline : head, viewport: page.viewportSize(), scope, synthetic: true, source: process.env.GITHUB_RUN_ID })
+  shots.push({ sha256: createHash('sha256').update(await fs.readFile(path.join(out,name))).digest('hex'), name, head: scope === 'baseline' ? baseline : head, viewport: page.viewportSize(), scope, synthetic: true, source: process.env.GITHUB_RUN_ID })
 }
 async function refresh(page) { await page.evaluate(() => window.fixtureView().refresh()); await page.waitForFunction(() => !window.fixtureView().latencyLoading) }
 async function setPager(page, name, pageSize, pageNumber) {
@@ -119,30 +128,27 @@ async function geometry(page) {
 try {
   const old = await newPage()
   await old.goto('http://127.0.0.1:4183/.issue733-fixture/index.html?baseline=1', { waitUntil: 'networkidle' })
+  await old.getByTestId('latency-toggle').click()
   await old.getByTestId('latency-panel').getByText('Demo account 001', { exact: true }).first().waitFor()
-  // Validate representative project utilities and the real computed table style before measuring.
-  const cssProof = await old.evaluate(() => {
-    const card = document.querySelector('[data-testid="latency-panel"]'), scroll = card.querySelector('.overflow-x-auto'), table = scroll.querySelector('table')
-    return { padding: getComputedStyle(card).paddingTop, whiteSpace: getComputedStyle(table).whiteSpace, overflow: getComputedStyle(scroll).overflowX, radius: getComputedStyle(card).borderRadius }
-  })
-  assert.equal(cssProof.padding, '20px'); assert.equal(cssProof.whiteSpace, 'nowrap'); assert.equal(cssProof.overflow, 'auto'); assert.equal(cssProof.radius, '16px')
-  await old.getByTestId('latency-panel').scrollIntoViewIfNeeded()
-  await screenshot(old, 'before-desktop.png', 'baseline')
-  const oldHeight = await old.getByTestId('latency-panel').evaluate(el => el.getBoundingClientRect().height)
+  assert.equal(await old.getByTestId('priority-model-filter').count(),0,'pinned baseline has no model filter')
+  assert.equal(await old.getByTestId('priority-group-filter').count(),0,'pinned baseline has no group filter')
+  const cssProof=await old.getByTestId('candidate-table').evaluate(el=>({overflow:getComputedStyle(el).overflowY,whiteSpace:getComputedStyle(el.querySelector('table')).whiteSpace,radius:getComputedStyle(el.closest('section')).borderRadius,headerPadding:getComputedStyle(document.querySelector('[data-testid="latency-panel"] header')).paddingTop}))
+  assert.equal(cssProof.overflow,'auto');assert.equal(cssProof.whiteSpace,'nowrap');assert.equal(cssProof.radius,'16px');assert.equal(cssProof.headerPadding,'20px')
+  await screenshot(old,'before-desktop.png','baseline')
+  measurements.push({phase:'baseline-filter-red',baselineByteEqual:true,modelFilterCount:0,groupFilterCount:0,cssProof})
+  await old.close()
   let release, started
-  const began = new Promise(resolve => { started = resolve })
-  heldLatency = { started, promise: new Promise(resolve => { release = resolve }) }
-  await old.getByTestId('latency-refresh').click(); await began
-  assert.equal(await old.getByTestId('latency-panel').locator('tbody tr').count(), 0, 'baseline RED must lose real account rows')
-  const pendingHeight = await old.getByTestId('latency-panel').evaluate(el => el.getBoundingClientRect().height)
-  assert(pendingHeight < oldHeight / 2)
-  await screenshot(old, 'before-refresh-empty.png', 'baseline')
-  measurements.push({ phase: 'baseline-red', cssProof, oldHeight, pendingHeight, rowsDuringRefresh: 0, baselineByteEqual: true })
-  release(); await old.close()
 
   const page = await newPage()
   await page.goto('http://127.0.0.1:4183/.issue733-fixture/index.html', { waitUntil: 'networkidle' })
   await page.getByTestId('candidate-table').waitFor()
+  await page.getByTestId('priority-model-filter').locator('button').first().click()
+  await page.getByRole('option',{name:'archive-model',exact:true}).click()
+  await page.waitForFunction(()=>window.fixtureView().snapshot?.model==='archive-model'&&!window.fixtureView().refreshing)
+  await page.getByTestId('priority-group-filter').locator('button').first().click()
+  await page.getByRole('option',{name:'Archive group (#17)',exact:true}).click()
+  await page.waitForFunction(()=>window.fixtureView().snapshot?.group_id===17&&!window.fixtureView().refreshing)
+
   assert.equal(await page.getByTestId('latency-toggle').getAttribute('aria-expanded'), 'false')
   assert.equal(await page.locator('#priority-latency-content').isVisible(), false)
   const candidateCSS = await page.getByTestId('candidate-table').evaluate(el => ({ overflow: getComputedStyle(el).overflowY, maxHeight: parseFloat(getComputedStyle(el).maxHeight), height: el.clientHeight, tableWidth: el.querySelector('table').getBoundingClientRect().width, firstColumn: getComputedStyle(el.querySelector('tbody td')).position }))
@@ -173,11 +179,13 @@ try {
   const before = await geometry(page)
   assert(before.filter(item => item.name !== 'buckets').every(item => item.scrollHeight > item.height)); assert(before.every(item => item.scrollWidth > item.width && item.left > 0), JSON.stringify(before))
   // Real 5-second timers, multiple polls, changing at/metrics and backend order.
-  const startingReads = requests.filter(r => r.endpoint === 'snapshot').length
+  const startingReads = requests.filter(r => r.endpoint === 'analysis').length
+  state.model='unrelated-recent-model';state.group=99;
   state.reverse = true; state.tick++; state.endpoint='/v1/'+'synthetic-path-'.repeat(30)
   await page.waitForFunction(() => window.fixtureView().snapshot.at.endsWith('09:01:00.000Z'))
   for (let i = 0; i < 2; i++) { state.tick++; const at = now(); await page.waitForFunction(at => window.fixtureView().snapshot.at === at && !window.fixtureView().latencyLoading, at) }
-  assert(requests.filter(r => r.endpoint === 'snapshot').length >= startingReads + 3)
+  assert(requests.filter(r => r.endpoint === 'analysis').length >= startingReads + 3)
+  assert.equal(await page.getByTestId('priority-model-filter').innerText(),'archive-model');assert.match(await page.getByTestId('priority-group-filter').innerText(),/Archive group/);assert.equal(await page.getByTestId('latency-window').inputValue(),'180')
   const after = await geometry(page)
   for (const item of before) {
     const next = after.find(row => row.name === item.name)
@@ -244,7 +252,8 @@ try {
   await page.waitForTimeout(5500)
   assert.equal(requests.length, requestCount)
   assert.deepEqual(errors, [])
-  await fs.writeFile(path.join(out, 'verification.json'), JSON.stringify({ head, baseline, baselineSha256: createHash('sha256').update(baselineBytes).digest('hex'), run: process.env.GITHUB_RUN_ID, source: `https://github.com/ranxi2001/sub2api/actions/runs/${process.env.GITHUB_RUN_ID}`, synthetic: true, actualComponents: ['PrioritySchedulingView', 'DataTable', 'Pagination'], mocks: ['backend', 'auth', 'layout', 'navigation'], productionCalls: 0, paidCalls: 0, shots, measurements, requests, errors }, null, 2))
+  assert(requests.filter(r=>r.endpoint==='analysis').some(r=>new URLSearchParams(r.query).get('model')==='archive-model'&&new URLSearchParams(r.query).get('group_id')==='17'&&new URLSearchParams(r.query).get('minutes')==='180'))
+  await fs.writeFile(path.join(out, 'verification.json'), JSON.stringify({ head, baseline, baselineSha256: createHash('sha256').update(baselineBytes).digest('hex'), run: process.env.GITHUB_RUN_ID, source: `https://github.com/ranxi2001/sub2api/actions/runs/${process.env.GITHUB_RUN_ID}`, synthetic: true, actualComponents: ['PrioritySchedulingView', 'Select', 'DataTable', 'Pagination'], mocks: ['backend', 'auth', 'layout', 'navigation'], productionCalls: 0, paidCalls: 0, shots, measurements, requests, errors }, null, 2))
 } catch (error) {
   for (const [index, page] of browser.contexts().flatMap(context => context.pages()).entries()) {
     await page.screenshot({ path: path.join(out, `failure-${index}.png`), fullPage: false }).catch(() => {})

@@ -12,9 +12,10 @@ import (
 // PriorityAnalysisQuery is a display scope, never a scheduling configuration or
 // a mutation identity. Nil GroupID means ungrouped accounts, not all groups.
 type PriorityAnalysisQuery struct {
-	Model   string
-	GroupID *int64
-	Minutes int
+	Model      string
+	RouteModel string `json:"-"` // Resolved server-side; never bound from HTTP.
+	GroupID    *int64
+	Minutes    int
 }
 
 type PriorityAnalysis struct {
@@ -31,6 +32,15 @@ func (s *OpenAIGatewayService) PriorityAnalysis(ctx context.Context, q PriorityA
 	cfg, err := s.settingService.GetPrioritySchedulingConfig(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if s.channelService != nil && q.GroupID != nil {
+		lookup, err := s.channelService.lookupGroupChannel(ctx, *q.GroupID)
+		if err != nil {
+			return nil, fmt.Errorf("priority analysis mapping: %w", err)
+		}
+		if lookup != nil {
+			q.RouteModel = resolveMapping(lookup, *q.GroupID, q.Model).MappedModel
+		}
 	}
 	return ReadPriorityAnalysis(ctx, s.accountRepo, s.usageLogRepo, cfg, q)
 }
@@ -61,10 +71,14 @@ func ReadPriorityAnalysis(ctx context.Context, accounts AccountRepository, usage
 	if err != nil {
 		return nil, fmt.Errorf("priority analysis accounts: %w", err)
 	}
+	routeModel := strings.TrimSpace(q.RouteModel)
+	if routeModel == "" {
+		routeModel = q.Model
+	}
 	selected := make([]Account, 0, len(pool))
 	ids := make([]int64, 0, len(pool))
 	for _, a := range pool {
-		if a.IsModelSupported(q.Model) && a.IsModelAllowedInGroup(q.GroupID, q.Model) {
+		if a.IsModelSupported(routeModel) && a.IsModelAllowedInGroup(q.GroupID, routeModel) {
 			selected = append(selected, a)
 			ids = append(ids, a.ID)
 		}
@@ -79,7 +93,7 @@ func ReadPriorityAnalysis(ctx context.Context, accounts AccountRepository, usage
 	signals := map[int64]PrioritySchedulingSignal{}
 	var buckets []PriorityLatencyBucket
 	if len(ids) > 0 {
-		signals, err = reader.ReadPrioritySchedulingSignals(ctx, PrioritySchedulingQuery{AccountIDs: ids, Model: q.Model, QualityModel: q.Model, GroupID: q.GroupID, UsageSince: since, UsageUntil: now, QualitySince: now.Add(-time.Duration(cfg.QualityMaxAgeHours) * time.Hour), LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, TargetTTFTMs: cfg.TargetTTFTMs})
+		signals, err = reader.ReadPrioritySchedulingSignals(ctx, PrioritySchedulingQuery{AccountIDs: ids, Model: q.Model, QualityModel: routeModel, GroupID: q.GroupID, UsageSince: since, UsageUntil: now, QualitySince: now.Add(-time.Duration(cfg.QualityMaxAgeHours) * time.Hour), LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, TargetTTFTMs: cfg.TargetTTFTMs})
 		if err != nil {
 			return nil, fmt.Errorf("priority analysis history: %w", err)
 		}
@@ -97,8 +111,14 @@ func ReadPriorityAnalysis(ctx context.Context, accounts AccountRepository, usage
 	for i := range selected {
 		a := &selected[i]
 		item := openAIAccountCandidateScore{account: a}
-		score := applyPriorityCandidate(cfg, &item, signals[a.ID], now)
+		signal, present := signals[a.ID]
+		if !present {
+			return nil, errors.New("priority analysis incomplete history")
+		}
+		score := applyPriorityCandidate(cfg, &item, signal, now)
 		score.HistoryStatus = "ready"
+		score.CapacityBand = priorityCapacityBand(item)
+		score.SelectionWeight = prioritySelectionWeight(item, now)
 		score.BoundGroups = priorityAccountGroupCount(a)
 		snapshot.Candidates = append(snapshot.Candidates, score)
 		rows := byAccount[a.ID]

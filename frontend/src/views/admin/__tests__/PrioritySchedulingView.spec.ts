@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { reactive } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import PrioritySchedulingView from '../PrioritySchedulingView.vue'
-import { getPriorityConfig, getPrioritySnapshot, savePriorityConfig, getPriorityLatency, recomputePriorityScheduling, getPriorityStickyBindings, clearPriorityStickyBindings, type PrioritySchedulingConfig, type PriorityCandidate } from '@/api/admin/priorityScheduling'
+import { getPriorityAnalysis, getPriorityConfig, getPrioritySnapshot, savePriorityConfig, getPriorityLatency, recomputePriorityScheduling, getPriorityStickyBindings, clearPriorityStickyBindings, type PrioritySchedulingConfig, type PriorityCandidate } from '@/api/admin/priorityScheduling'
 const state = vi.hoisted(() => ({ auth: null as any }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => state.auth }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
@@ -10,12 +10,20 @@ vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { tem
 vi.mock('vue-i18n', () => ({ useI18n: () => ({
   t: (key: string, params?: Record<string, unknown>) => [key, ...Object.values(params ?? {})].join(' '),
 }) }))
-vi.mock('@/api/admin/priorityScheduling', () => ({ getPriorityConfig: vi.fn(), getPrioritySnapshot: vi.fn(), savePriorityConfig: vi.fn(), getPriorityLatency: vi.fn(), recomputePriorityScheduling: vi.fn(), getPriorityStickyBindings: vi.fn(), clearPriorityStickyBindings: vi.fn() }))
+vi.mock('@/api/admin/priorityScheduling', () => ({ getPriorityAnalysis: vi.fn(), getPriorityConfig: vi.fn(), getPrioritySnapshot: vi.fn(), savePriorityConfig: vi.fn(), getPriorityLatency: vi.fn(), recomputePriorityScheduling: vi.fn(), getPriorityStickyBindings: vi.fn(), clearPriorityStickyBindings: vi.fn() }))
 const config: PrioritySchedulingConfig = { error_rate_weight: 25, error_rate_window_minutes: 10, error_rate_prior_samples: 5, latency_percentile: 90, latency_measurement: 'legacy_forward', recovery_exploration_percent: 0, oauth_quota_priority: false, oauth_quota_threshold: 90, balance_protocols: true, enabled: false, mode: 'balanced', group_ids: [], models: [], window_minutes: 60, min_samples: 5, target_ttft_ms: 3000, latency_penalty_mode: 'deprioritize', latency_penalty_minutes: 10, max_load_percent: 80, min_quality_percent: 90, quality_max_age_hours: 24, quality_weight: 30, latency_weight: 25, load_weight: 25, cost_weight: 20 }
+vi.mock('@/api/admin/groups', () => ({ getAll: async () => ([{ id: 11, name: 'Fixture group' }, { id: 12, name: 'Other group' }]), getModelAllowlistCandidates: async () => (['gpt-test']) }))
 beforeEach(() => {
   vi.resetAllMocks()
   state.auth = reactive({ user: { id: 1, role: 'admin' } })
   vi.mocked(getPriorityConfig).mockResolvedValue({ ...config })
+  vi.mocked(getPriorityAnalysis).mockImplementation(async scope => {
+    const current = await getPrioritySnapshot()
+    if (current?.history_error) throw Error('fixture history read failed')
+    const snapshot = { at: '2026-10-30T00:00:00Z', mode: 'balanced', candidates: [], ...current, model: scope.model, group_id: scope.group_id ?? null, window_minutes: scope.minutes, history_ready: true, history_status: 'ready' as const }
+    const latency = await getPriorityLatency(scope.minutes, 5)
+    return { snapshot, latency: { ...latency, model: snapshot.model, group_id: snapshot.group_id, config_revision: snapshot.config_revision, latency_percentile: snapshot.latency_percentile, latency_measurement: snapshot.latency_measurement } }
+  })
   vi.mocked(getPrioritySnapshot).mockResolvedValue(null)
   vi.mocked(savePriorityConfig).mockImplementation(async c => c)
   vi.mocked(getPriorityLatency).mockResolvedValue({ at: '2026-10-30T00:00:00Z', model: 'gpt-test', group_id: 11, bucket_minutes: 5, accounts: [] })
@@ -237,7 +245,7 @@ describe('priority scheduling', () => {
     vi.mocked(getPrioritySnapshot).mockResolvedValue(oldSnapshot)
     vi.mocked(recomputePriorityScheduling).mockReturnValueOnce(new Promise(resolve => { resolveRecompute = resolve }))
     const wrapper = mount(PrioritySchedulingView); await flushPromises()
-    await wrapper.get('[data-testid="recompute"]').trigger('click')
+    await wrapper.get('[data-testid="recompute"]').trigger('click'); await flushPromises()
     vi.mocked(getPrioritySnapshot).mockResolvedValueOnce({ ...oldSnapshot, at: '2026-10-30T00:01:00Z', model: 'new-model', group_id: 12 })
     await (wrapper.vm as any).refresh(); await flushPromises()
     resolveRecompute({
@@ -246,7 +254,7 @@ describe('priority scheduling', () => {
     })
     await flushPromises()
     expect(wrapper.find('[data-testid="recompute-diff"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('new-model')
+    expect(wrapper.get('[data-testid="priority-snapshot-at"]').text()).toContain('gpt-test')
     wrapper.unmount()
   })
 
@@ -359,7 +367,7 @@ describe('priority history refresh', () => {
   it('distinguishes a failed refresh from an empty successful history', async () => {
     vi.mocked(getPrioritySnapshot).mockResolvedValue({ at: '2026-10-06T00:00:00Z', evaluated_at: '2026-10-06T00:01:00Z', model: 'test', group_id: 11, mode: 'balanced', history_ready: false, history_status: 'error', history_error: 'timeout', candidates: [] })
     const wrapper = mount(PrioritySchedulingView); await flushPromises()
-    expect(wrapper.text()).toContain('priorityScheduling.historyStates.error')
+    expect(wrapper.get('[role="alert"]').text()).toContain('priorityScheduling.error')
     expect(wrapper.text()).not.toContain('priorityScheduling.historyPending')
     vi.mocked(getPrioritySnapshot).mockResolvedValue({ at: '2026-10-06T00:00:00Z', model: 'test', group_id: 11, mode: 'balanced', history_ready: true, history_status: 'ready', candidates: [] })
     await (wrapper.vm as any).refresh()

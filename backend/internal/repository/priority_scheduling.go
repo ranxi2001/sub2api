@@ -135,7 +135,7 @@ func (r *usageLogRepository) ReadPrioritySchedulingSignals(ctx context.Context, 
   WHERE p.account_id=ANY($1) AND p.enabled
    AND COALESCE(NULLIF(r.pelican_config->>'model_id',''),p.model_id)=$10
    AND jsonb_typeof(p.pelican_config->'quality')='object' AND r.quality_round_id<>''
-   AND r.created_at >= $4 AND r.created_at >= p.updated_at AND r.created_at <= NOW()
+   AND r.created_at >= $4 AND r.created_at >= p.updated_at AND r.created_at <= $9
    AND r.quality_action NOT IN ('','stale_run','comparison_pending')
   GROUP BY p.account_id,p.id,r.quality_round_id
   HAVING bool_and((r.pelican_config->'parallel_count' IS NULL OR jsonb_typeof(r.pelican_config->'parallel_count')='number')

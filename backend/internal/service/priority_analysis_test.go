@@ -27,7 +27,11 @@ type analysisHistory struct {
 
 func (r *analysisHistory) ReadPrioritySchedulingSignals(_ context.Context, q PrioritySchedulingQuery) (map[int64]PrioritySchedulingSignal, error) {
 	r.signals = q
-	return map[int64]PrioritySchedulingSignal{}, r.err
+	rows := make(map[int64]PrioritySchedulingSignal)
+	for _, id := range q.AccountIDs {
+		rows[id] = PrioritySchedulingSignal{}
+	}
+	return rows, r.err
 }
 func (r *analysisHistory) ReadPriorityLatencySeries(_ context.Context, q PriorityLatencySeriesQuery) ([]PriorityLatencyBucket, error) {
 	r.buckets = q
@@ -53,6 +57,8 @@ func TestPriorityAnalysisCompleteExplicitScope(t *testing.T) {
 	require.Equal(t, history.signals.UsageUntil, history.buckets.Until)
 	require.Equal(t, history.signals.UsageSince, history.buckets.Since)
 	require.Nil(t, got.Snapshot.Candidates[0].LoadPercent, "unobserved live capacity is unknown, never invented zero")
+	require.Equal(t, 10, got.Snapshot.Candidates[0].CapacityBand)
+	require.Positive(t, got.Snapshot.Candidates[0].SelectionWeight)
 	require.Equal(t, "ready", got.Snapshot.HistoryStatus)
 }
 
@@ -61,4 +67,14 @@ func TestPriorityAnalysisReadErrorIsNotEmptyHistory(t *testing.T) {
 	got, err := ReadPriorityAnalysis(context.Background(), &analysisAccounts{accounts: []Account{{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}}}, history, DefaultPrioritySchedulingConfig(), PriorityAnalysisQuery{Model: "fixture", Minutes: 60})
 	require.Error(t, err)
 	require.Nil(t, got, "a failed history read must not appear as zero samples")
+}
+
+func TestPriorityAnalysisPublicHistoryAndRoutedQuality(t *testing.T) {
+	accounts := &analysisAccounts{accounts: []Account{{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"model_mapping": map[string]any{"route-model": "upstream-model"}}}}}
+	history := &analysisHistory{}
+	got, err := ReadPriorityAnalysis(context.Background(), accounts, history, DefaultPrioritySchedulingConfig(), PriorityAnalysisQuery{Model: "public-alias", RouteModel: "route-model", Minutes: 60})
+	require.NoError(t, err)
+	require.Len(t, got.Snapshot.Candidates, 1)
+	require.Equal(t, "public-alias", history.signals.Model)
+	require.Equal(t, "route-model", history.signals.QualityModel)
 }

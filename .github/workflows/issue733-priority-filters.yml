@@ -1,5 +1,6 @@
 name: Issue733 explicit priority filters
 on:
+  workflow_dispatch:
   push:
     branches: [fix/issue733-priority-filter-fix]
   pull_request:
@@ -50,7 +51,9 @@ jobs:
           test "$result" -ne 0
           python3 .github/scripts/issue733-filter-red.py "$RUNNER_TEMP/filters-evidence/red.json"
       - name: Candidate filter regression GREEN
-        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts --maxWorkers=1 --minWorkers=1
+        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts src/views/admin/__tests__/PrioritySchedulingReading.spec.ts src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/views/admin/__tests__/PrioritySchedulingQuantile.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1
+      - name: Lint frontend changes
+        run: pnpm --dir frontend exec eslint src/views/admin/PrioritySchedulingView.vue src/api/admin/priorityScheduling.ts src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts src/views/admin/__tests__/PrioritySchedulingReading.spec.ts src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/views/admin/__tests__/PrioritySchedulingQuantile.spec.ts
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -93,3 +96,38 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend run build
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated CI browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/issue733-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/issue733-browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Render pinned before and candidate with actual styles
+        env:
+          ISSUE733_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/issue733-browser/node_modules/playwright
+          ISSUE733_SCREENSHOT_DIR: ${{ runner.temp }}/issue733-screenshots
+        run: node .github/scripts/issue733-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue733-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue733-screenshots
+          if-no-files-found: error
