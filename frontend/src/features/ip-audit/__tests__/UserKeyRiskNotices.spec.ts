@@ -14,6 +14,10 @@ beforeEach(() => { vi.resetAllMocks(); vi.mocked(userKeyRiskApi.list).mockResolv
 describe('Customer risk acknowledgement', () => {
   it.each(['en', 'zh'])('renders the risk and confirmation boundary in %s', async locale => {
     const w = render(locale); await flushPromises()
+    expect(w.get('[data-test=toggle-risk-notices]').attributes('aria-expanded')).toBe('false')
+    expect(w.find('[data-test=risk-notices-details]').exists()).toBe(false)
+    expect(w.text()).not.toContain('<Production key>')
+    await w.get('[data-test=toggle-risk-notices]').trigger('click')
     expect(w.text()).not.toContain('ipAudit.')
     expect(w.text()).toContain('<Production key>#11')
     expect(w.find('production').exists()).toBe(false)
@@ -22,6 +26,7 @@ describe('Customer risk acknowledgement', () => {
   })
   it('requires confirmation and displays the server acknowledgement', async () => {
     const w = render(); await flushPromises()
+    await w.get('[data-test=toggle-risk-notices]').trigger('click')
     await w.findAll('button').find(b => b.text() === en.keyRisk.acknowledge)!.trigger('click')
     expect(userKeyRiskApi.acknowledge).not.toHaveBeenCalled()
     expect(w.get('[role=group]').text()).toContain(en.keyRisk.ackConfirm)
@@ -35,6 +40,7 @@ describe('Customer risk acknowledgement', () => {
   it('keeps an unsuccessful confirmation actionable', async () => {
     vi.mocked(userKeyRiskApi.acknowledge).mockRejectedValue(new Error('stale episode'))
     const w = render(); await flushPromises()
+    await w.get('[data-test=toggle-risk-notices]').trigger('click')
     await w.findAll('button').find(b => b.text() === en.keyRisk.acknowledge)!.trigger('click')
     await w.get('[data-test=confirm-risk]').trigger('click'); await flushPromises()
     expect(w.get('[role=alert]').text()).toBe(en.keyRisk.error)
@@ -45,8 +51,25 @@ describe('Customer risk acknowledgement', () => {
   it('permits acknowledgement after the reminder cap is reached', async () => {
     vi.mocked(userKeyRiskApi.list).mockResolvedValue({ items: [{ ...notice(), attempts: 3 }] })
     const w = render(); await flushPromises()
+    await w.get('[data-test=toggle-risk-notices]').trigger('click')
     expect(w.text()).toContain(en.keyRisk.limitReached)
     expect(w.findAll('button').some(b => b.text() === en.keyRisk.acknowledge)).toBe(true)
     w.unmount()
+  })
+  it('collapses details without acknowledging or fetching the notices again', async () => {
+    const w = render(); await flushPromises()
+    const toggle = w.get('[data-test=toggle-risk-notices]')
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(w.get('[data-test=risk-notices-details]').text()).toContain('<Production key>#11')
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(w.find('[data-test=risk-notices-details]').exists()).toBe(false)
+    expect(userKeyRiskApi.acknowledge).not.toHaveBeenCalled()
+    expect(userKeyRiskApi.list).toHaveBeenCalledTimes(1)
+    w.unmount()
+    const reopened = render(); await flushPromises()
+    expect(reopened.get('[data-test=toggle-risk-notices]').attributes('aria-expanded')).toBe('false')
+    reopened.unmount()
   })
 })
