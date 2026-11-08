@@ -221,7 +221,7 @@ try {
   const mobile = await geometry(page)
   for (const item of mobile) assert(item.height <= 640 * 0.55 + 1)
   await page.getByTestId('candidate-table').locator('details summary').first().click()
-  await page.getByTestId('candidate-table').evaluate(el=>{const name=el.querySelector('[data-reading-account]');const card=name.closest('[data-field]').parentElement.parentElement;el.scrollTop=card.offsetTop+card.offsetHeight+4})
+  await page.getByTestId('candidate-table').evaluate(el=>{const name=el.querySelector('[data-field="account"] [data-reading-account]');const card=name.closest('[data-field]').parentElement.parentElement;el.scrollTop=card.offsetTop+card.offsetHeight+4})
   const mobileBefore = await geometry(page)
   assert(mobileBefore.find(item=>item.name==='candidates').top>0)
   state.endpoint='/v1/'+'mobile-synthetic-'.repeat(60)
