@@ -283,16 +283,17 @@ func TestAIOpsCancelIsIdempotentAndDoesNotMutateAnAccount(t *testing.T) {
 			}
 			r := &accountRepository{sql: db}
 			got, err := r.CancelAIOpsProposal(context.Background(), p.ID, p.Digest, 9)
-			if status == "ready" || status == "blocked" {
+			switch status {
+			case "ready", "blocked":
 				require.NoError(t, err)
 				require.Equal(t, "cancelled", got.Status)
 				require.Equal(t, int64(9), got.CancelledBy)
 				require.NotNil(t, got.CancelledAt)
-			} else if status == "cancelled" {
+			case "cancelled":
 				require.NoError(t, err)
 				require.Equal(t, int64(41), got.CancelledBy, "retry preserves original audit actor")
 				require.WithinDuration(t, *p.CancelledAt, *got.CancelledAt, time.Microsecond)
-			} else {
+			default:
 				require.ErrorIs(t, err, service.ErrAIOpsConflict)
 			}
 			require.NoError(t, m.ExpectationsWereMet())
@@ -314,9 +315,10 @@ func TestAIOpsCancelRejectsAnotherDigestAndExistingAction(t *testing.T) {
 			m.ExpectQuery("SELECT EXISTS.*ai_ops_actions").WithArgs(p.ID).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 		}
 		m.ExpectRollback()
+		m.ExpectClose()
 		_, err = r.CancelAIOpsProposal(context.Background(), p.ID, digest, 9)
 		require.ErrorIs(t, err, service.ErrAIOpsConflict)
-		require.NoError(t, m.ExpectationsWereMet())
 		require.NoError(t, db.Close())
+		require.NoError(t, m.ExpectationsWereMet())
 	}
 }
