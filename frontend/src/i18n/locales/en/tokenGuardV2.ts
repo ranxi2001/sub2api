@@ -36,6 +36,22 @@ export default {
   }
 },
   reloginBudgetCount: 'Re-login failure budget: {count}/{limit}',
+  lastInspectionFailure: 'Last inspection failure (history)',
+  automationStates: {
+    paused: 'Automatic inspections paused',
+    disabled: 'Automatic re-login disabled; inspections continue',
+    configuration: 'Login configuration is incomplete; automatic re-login unavailable',
+    queued: 'Re-login task queued',
+    running: 'Re-login in progress; waiting for the task to finish',
+    verifying: 'New credentials saved; waiting for a later inspection to verify them',
+    cooldown: 'Automatic re-login cooling down until {until}',
+    blocked: 'Automatic recovery is unavailable; review the service status and failure details',
+    waiting: 'Authentication failure confirmation: {count}/{limit}; waiting for the next inspection',
+    scheduled: 'Re-login threshold reached; waiting for automatic processing',
+    healthy: 'Latest inspection accepted the credentials',
+    retryInspection: 'Waiting for the next inspection retry',
+    inspectionPending: 'Waiting for the first inspection'
+  },
   reloginBudgetExhausted: 'Automatic re-login exhausted; inspections continue',
   reloginBackoffUntil: 'Re-login cooldown until',
   resumeReloginBudget: 'Restore budget (no immediate login)',

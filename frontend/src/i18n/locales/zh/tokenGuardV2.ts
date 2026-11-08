@@ -36,6 +36,22 @@ export default {
   }
 },
   reloginBudgetCount: '重登失败预算：{count}/{limit}',
+  lastInspectionFailure: '上次巡检异常（历史记录）',
+  automationStates: {
+    paused: '自动巡检已暂停',
+    disabled: '自动重登已关闭，巡检继续',
+    configuration: '登录配置不完整，无法自动重登',
+    queued: '重登任务已排队',
+    running: '正在重登，等待任务完成',
+    verifying: '新凭据已保存，等待后续巡检验证',
+    cooldown: '自动重登冷却至 {until}',
+    blocked: '自动恢复暂不可用，请查看服务状态与异常详情',
+    waiting: '鉴权失败确认：{count}/{limit}，等待下一次巡检',
+    scheduled: '已达到重登阈值，等待自动处理',
+    healthy: '最近巡检鉴权通过',
+    retryInspection: '等待下一次巡检重试',
+    inspectionPending: '等待首次巡检'
+  },
   reloginBudgetExhausted: '自动重登预算已耗尽，巡检继续',
   reloginBackoffUntil: '重登冷却至',
   resumeReloginBudget: '恢复预算（不立即重登）',

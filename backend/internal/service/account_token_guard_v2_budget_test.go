@@ -12,6 +12,8 @@ import (
 )
 
 func (r *accountTokenGuardV2TestRepo) ReconcileReloginBudget(_ context.Context, _ int64, _ string, rules AccountTokenGuardV2Rules, at time.Time, state string) (*AccountTokenGuardV2Record, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.record == nil {
 		return nil, false, errors.New("missing record")
 	}
@@ -32,6 +34,8 @@ func (r *accountTokenGuardV2TestRepo) CreateAutomaticRelogin(ctx context.Context
 }
 
 func (r *accountTokenGuardV2TestRepo) ResumeReloginBudget(_ context.Context, _ int64, rules AccountTokenGuardV2Rules, now time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.record == nil {
 		return errors.New("missing record")
 	}
@@ -126,7 +130,7 @@ func TestExhaustedReloginStillProbesAndManualFailureDoesNotRestartAutomation(t *
 		AccountID: 42, Enabled: true, AutoReloginEnabled: true, ReloginFailStreak: 3, AutoReloginExhausted: true,
 	}}
 	svc := NewAccountTokenGuardV2Service(repo, nil, reader, accountTokenGuardV2TestProber{err: errors.New("invalid token")}, reauth)
-	svc.runProbe(context.Background(), *repo.record)
+	require.NoError(t, svc.runProbe(context.Background(), *repo.record))
 	require.NotNil(t, repo.completion)
 	require.Equal(t, AccountTokenGuardV2ProbeAuth, repo.completion.ProbeState)
 	require.Contains(t, repo.completion.BlockedReason, "exhausted")
@@ -135,7 +139,7 @@ func TestExhaustedReloginStillProbesAndManualFailureDoesNotRestartAutomation(t *
 	// A manually initiated failure is accounted too; observing it cannot resume.
 	now := time.Now()
 	repo.outcomes = []AccountReloginOutcome{{ID: 9, Status: OpenAIOAuthReauthStatusFailed, FinishedAt: &now}}
-	svc.runProbe(context.Background(), *repo.record)
+	require.NoError(t, svc.runProbe(context.Background(), *repo.record))
 	require.True(t, repo.record.AutoReloginExhausted)
 	require.Zero(t, tasks.createCalls)
 }
@@ -182,16 +186,16 @@ func TestRestoredBudgetPlainOKKeepsCooldownBeforeAnotherAuthProbe(t *testing.T) 
 	require.NoError(t, err)
 	until := now.Add(time.Minute)
 	now = now.Add(time.Second)
-	svc.runProbe(ctx, *repo.record)
+	require.NoError(t, svc.runProbe(ctx, *repo.record))
 	require.Equal(t, AccountTokenGuardV2ProbeOK, repo.completion.ProbeState)
 	require.Equal(t, &until, repo.completion.CooldownUntil)
 	prober.err = errors.New("invalid token")
 	now = until.Add(-time.Nanosecond)
-	svc.runProbe(ctx, *repo.record)
+	require.NoError(t, svc.runProbe(ctx, *repo.record))
 	require.Zero(t, tasks.createCalls)
 	require.Equal(t, &until, repo.completion.CooldownUntil)
 	now = until
-	svc.runProbe(ctx, *repo.record)
+	require.NoError(t, svc.runProbe(ctx, *repo.record))
 	require.Equal(t, 1, tasks.createCalls, "the explicit recovery cooldown opens only at its boundary")
 }
 

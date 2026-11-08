@@ -95,7 +95,7 @@ func (r *accountTokenGuardV2Repository) ListAccounts(ctx context.Context) ([]ser
 	return result, rows.Err()
 }
 
-func (r *accountTokenGuardV2Repository) ClaimDue(ctx context.Context, owner string, leaseDuration time.Duration, limit int) ([]service.AccountTokenGuardV2Record, error) {
+func (r *accountTokenGuardV2Repository) ClaimDue(ctx context.Context, owner string, leaseDuration time.Duration, limit int, dueBefore time.Time) ([]service.AccountTokenGuardV2Record, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -105,6 +105,7 @@ func (r *accountTokenGuardV2Repository) ClaimDue(ctx context.Context, owner stri
 			FROM account_token_guard_v2_accounts
 			WHERE enabled = TRUE
 				AND next_probe_at <= NOW()
+				AND next_probe_at <= $4
 				AND (lease_until IS NULL OR lease_until < NOW())
 			ORDER BY next_probe_at ASC, account_id ASC
 			LIMIT $1
@@ -122,7 +123,7 @@ func (r *accountTokenGuardV2Repository) ClaimDue(ctx context.Context, owner stri
 			guard.cooldown_until, guard.blocked_reason,
 			COALESCE(guard.lease_owner, ''), guard.lease_until,
 			guard.created_at, guard.updated_at, guard.refresh_failure_code, guard.last_refresh_failure_at
-	`, limit, owner, int64(leaseDuration.Seconds()))
+	`, limit, owner, int64(leaseDuration.Seconds()), dueBefore)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +172,7 @@ func (r *accountTokenGuardV2Repository) CompleteProbe(ctx context.Context, accou
 			lease_owner = NULL,
 			lease_until = NULL,
 			updated_at = NOW()
-		WHERE account_id = $1 AND lease_owner = $2
+		WHERE account_id = $1 AND lease_owner = $2 AND lease_until > NOW()
 	`, accountID, owner, result.ProbeState, result.ProbeDetail, result.FailStreak,
 		result.LastProbeAt, result.LastReauthAt, result.NextProbeAt,
 		result.CooldownUntil, result.BlockedReason)
@@ -186,6 +187,16 @@ func (r *accountTokenGuardV2Repository) CompleteProbe(ctx context.Context, accou
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// ReleaseProbe abandons a claim without advancing its schedule or inspection
+// history. Each claim has its own owner token, so a late release cannot clear a
+// replacement claim after this lease expires.
+func (r *accountTokenGuardV2Repository) ReleaseProbe(ctx context.Context, accountID int64, owner string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE account_token_guard_v2_accounts
+		SET lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+		WHERE account_id = $1 AND lease_owner = $2`, accountID, owner)
+	return err
 }
 
 func (r *accountTokenGuardV2Repository) MarkReauthRequested(ctx context.Context, accountID int64, requestedAt, cooldownUntil time.Time) error {
