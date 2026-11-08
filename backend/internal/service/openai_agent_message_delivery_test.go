@@ -80,3 +80,30 @@ func TestIssue715PendingLookupHonorsCancellationAndMissingFence(t *testing.T) {
 	_, _, err := svc.awaitOpenAIAgentRecovery(canceled, nil, &svc.agentMessageRecovery, key)
 	require.Error(t, err)
 }
+
+func TestIssue715ObservedPendingCannotDowngradeToMiss(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	var key [32]byte
+	key[0] = 71
+	cache := &issue715PendingThenMissing{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, found, err := svc.awaitOpenAIAgentRecovery(ctx, cache, &svc.agentMessageRecovery, key)
+	require.Error(t, err)
+	require.False(t, found, "an observed producer fence cannot become a first-seen task")
+	require.Equal(t, 2, cache.reads)
+}
+
+type issue715PendingThenMissing struct{ reads int }
+
+func (c *issue715PendingThenMissing) GetOpenAIAgentRecovery(context.Context, string) (string, error) {
+	c.reads++
+	if c.reads == 1 {
+		b := openAIAgentRecoveryBinding{accountID: 1}
+		return "pending:fixture:" + encodeOpenAIAgentRecoveryBinding(b), nil
+	}
+	return "", nil
+}
+func (c *issue715PendingThenMissing) PublishOpenAIAgentRecovery(context.Context, string, string, time.Duration) error {
+	return nil
+}

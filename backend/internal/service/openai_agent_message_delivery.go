@@ -54,6 +54,9 @@ func (s *OpenAIGatewayService) awaitOpenAIAgentRecovery(ctx context.Context, sha
 			found = found && time.Now().Before(b.expiresAt)
 		}
 		if err != nil {
+			if observedPending && ctx.Err() != nil {
+				return b, false, openAIAgentRecoveryError("delivery_pending")
+			}
 			return b, false, openAIAgentRecoveryError("store_unavailable")
 		}
 		if !found && !observedPending {
@@ -80,6 +83,9 @@ func (s *OpenAIGatewayService) awaitOpenAIAgentRecovery(ctx context.Context, sha
 }
 
 func (d *openAIAgentRecoveryDelivery) reserve(items [][32]byte) error {
+	if len(items) == 0 {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(d.ctx, 3*time.Second)
 	defer cancel()
 	for _, item := range items {

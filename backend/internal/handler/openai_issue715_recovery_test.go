@@ -80,6 +80,9 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 	}
 	if strings.HasPrefix(mode, "generated") && !strings.Contains(input, "fixture-task-reference-715") {
 		output = "[" + issue715Agent + "," + strings.TrimPrefix(output, "[")
+		if strings.Contains(mode, "two") {
+			output = "[" + strings.Replace(issue715Agent, "fixture-task-reference-715", "fixture-second-task", 1) + "," + strings.TrimPrefix(output, "[")
+		}
 	}
 	status := "completed"
 	if mode == "incomplete" {
@@ -101,7 +104,11 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 		if mode == "incomplete" {
 			event = "response.incomplete"
 		}
-		return response(200, "text/event-stream", fmt.Sprintf("event: %s\ndata: {\"type\":%q,\"response\":%s}\n\ndata: [DONE]\n\n", event, event, payload))
+		prefix := ""
+		if mode == "generated-stream-keepalive" {
+			prefix = "data:\n\n"
+		}
+		return response(200, "text/event-stream", prefix+fmt.Sprintf("event: %s\ndata: {\"type\":%q,\"response\":%s}\n\ndata: [DONE]\n\n", event, event, payload))
 	}
 	return response(200, "application/json", payload)
 }

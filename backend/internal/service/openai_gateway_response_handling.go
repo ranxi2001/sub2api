@@ -992,7 +992,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		if data, ok := extractOpenAISSEDataLine(line); ok {
-			if len(recoveryData) > 0 || (!json.Valid([]byte(data)) && strings.TrimSpace(data) != "[DONE]") {
+			if len(recoveryData) > 0 || (!json.Valid([]byte(data)) && (strings.HasPrefix(strings.TrimSpace(data), "{") || strings.HasPrefix(strings.TrimSpace(data), "[")) && strings.TrimSpace(data) != "[DONE]") {
 				recoveryBytes += len(data) + 1
 				if recoveryBytes > maxLineSize {
 					streamEarlyErr = fmt.Errorf("encrypted agent SSE event exceeds size limit")

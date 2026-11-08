@@ -292,11 +292,11 @@ jobs:
           fi
           # Docker absence/fixture failure/no tests must not become a diagnostic PASS.
           test "$issue715_diag_samples" -gt 0
-          test "$(rg -c '^=== RUN   TestOpsOutputTPSQueryDeadline$' "$issue715_diag_dir/test.log")" -eq 20
-          test "$(rg -c '^--- PASS: TestOpsOutputTPSQueryDeadline ' "$issue715_diag_dir/test.log")" -eq 20
-          ! rg -n '^--- (FAIL|SKIP):|panic:|\[build failed\]|\[no tests to run\]|skipping integration tests' "$issue715_diag_dir/test.log"
+          test "$(grep -c '^=== RUN   TestOpsOutputTPSQueryDeadline$' "$issue715_diag_dir/test.log")" -eq 20
+          test "$(grep -c '^--- PASS: TestOpsOutputTPSQueryDeadline ' "$issue715_diag_dir/test.log")" -eq 20
+          ! grep -En '^--- (FAIL|SKIP):|panic:|\[build failed\]|\[no tests to run\]|skipping integration tests' "$issue715_diag_dir/test.log"
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: issue715-deadline-diagnostic-${{ github.sha }}
+          name: issue715-deadline-diagnostic-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/issue715-deadline-diag/

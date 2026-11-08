@@ -408,6 +408,9 @@ func (r *openAIAgentRecoveryRequest) itemKey(item [32]byte) [32]byte {
 // output reconstruction and tool/name restoration. The attempt's completion
 // callback decides whether delivery succeeded; item.done alone grants nothing.
 func observeOpenAIAgentRecoveryOutput(c *gin.Context, body []byte, nested bool) error {
+	if !bytes.Contains(body, []byte("agent_message")) && !bytes.Contains(body, []byte(`\u`)) {
+		return nil
+	}
 	request := openAIAgentRecoveryFromContext(c.Request.Context())
 	if request == nil || request.delivery == nil {
 		return nil

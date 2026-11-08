@@ -27,6 +27,13 @@ type issue715DeliveryOwners interface {
 	PublishOpenAIAgentRecovery(context.Context, string, string, time.Duration) error
 }
 
+func issue715RequireDeliveryOwners(t *testing.T, base service.GatewayCache) issue715DeliveryOwners {
+	t.Helper()
+	owners, ok := base.(issue715DeliveryOwners)
+	require.True(t, ok)
+	return owners
+}
+
 type issue715SnapshotCache struct {
 	service.GatewayCache
 	issue715DeliveryOwners
@@ -71,11 +78,13 @@ type issue715BarrierWriter struct {
 	delivered, release chan struct{}
 	once               sync.Once
 	stream             bool
+	failure            string
+	cancel             context.CancelFunc
 }
 
 func (w *issue715BarrierWriter) Write(body []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(body)
-	w.body.Write(body[:n])
+	_, _ = w.body.Write(body[:n])
 	payload := w.body.String()
 	ready := strings.Contains(payload, "fixture-task-reference-715") && strings.Contains(payload, "update_ledger")
 	if w.stream {
@@ -83,6 +92,16 @@ func (w *issue715BarrierWriter) Write(body []byte) (int, error) {
 	}
 	if ready {
 		w.once.Do(func() { w.ResponseWriter.Flush(); close(w.delivered); <-w.release })
+	}
+	if ready {
+		switch w.failure {
+		case "error":
+			return 0, io.ErrClosedPipe
+		case "short":
+			return len(body) - 1, nil
+		case "cancel":
+			w.cancel()
+		}
 	}
 	return n, err
 }
@@ -99,8 +118,16 @@ func issue715Await(t *testing.T, ch <-chan struct{}) {
 
 func TestIssue715HTTPFirstDeliveryCrossNodeBarrier(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, format := range []string{"generated-json", "generated-stream", "generated-stream-items", "generated-stream-multiline"} {
-		t.Run(format, func(t *testing.T) {
+	for _, test := range []struct{ format, failure string }{
+		{format: "generated-json"}, {format: "generated-stream"}, {format: "generated-stream-items"}, {format: "generated-stream-multiline"}, {format: "generated-stream-keepalive"},
+		{format: "generated-json", failure: "error"}, {format: "generated-json", failure: "short"}, {format: "generated-json", failure: "cancel"}, {format: "generated-stream-items", failure: "cancel"},
+	} {
+		format := test.format
+		name := format
+		if test.failure != "" {
+			name += "-" + test.failure
+		}
+		t.Run(name, func(t *testing.T) {
 			mr := miniredis.RunT(t)
 			client := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
 			defer client.Close()
@@ -111,7 +138,10 @@ func TestIssue715HTTPFirstDeliveryCrossNodeBarrier(t *testing.T) {
 			first := strings.Replace(issue715Body(false, stream), issue715Agent+",", "", 1)
 			c, _ := newIssue715Context(t, first)
 			c.Request.Header.Set("session_id", "fixture-715-thread")
-			writer := &issue715BarrierWriter{ResponseWriter: c.Writer, delivered: make(chan struct{}), release: make(chan struct{}), stream: stream}
+			requestCtx, cancel := context.WithCancel(c.Request.Context())
+			defer cancel()
+			c.Request = c.Request.WithContext(requestCtx)
+			writer := &issue715BarrierWriter{ResponseWriter: c.Writer, delivered: make(chan struct{}), release: make(chan struct{}), stream: stream, failure: test.failure, cancel: cancel}
 			c.Writer = writer
 			var releaseOnce sync.Once
 			releaseProducer := func() { releaseOnce.Do(func() { close(writer.release) }) }
@@ -142,7 +172,7 @@ func TestIssue715HTTPFirstDeliveryCrossNodeBarrier(t *testing.T) {
 			}
 			require.Equal(t, 1, toolExecutions)
 			require.Equal(t, 18, balance)
-			cache := &issue715SnapshotCache{GatewayCache: base, issue715DeliveryOwners: base.(issue715DeliveryOwners), captured: make(chan struct{}), release: make(chan struct{})}
+			cache := &issue715SnapshotCache{GatewayCache: base, issue715DeliveryOwners: issue715RequireDeliveryOwners(t, base), captured: make(chan struct{}), release: make(chan struct{})}
 			var readOnce sync.Once
 			releaseReader := func() { readOnce.Do(func() { close(cache.release) }) }
 			defer releaseReader()
@@ -175,6 +205,15 @@ func TestIssue715HTTPFirstDeliveryCrossNodeBarrier(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				t.Fatal("consumer did not finish")
 			}
+			if test.failure != "" {
+				require.Equal(t, 409, got.status, got.body)
+				require.Contains(t, got.body, "encrypted_agent_recovery_owner_unavailable")
+				upstream.mu.Lock()
+				ids := append([]int64(nil), upstream.ids...)
+				upstream.mu.Unlock()
+				require.Equal(t, []int64{1}, ids, "failed first delivery must neither grant nor route to an unrelated account")
+				return
+			}
 			require.Contains(t, got.body, "Same task: ledger balance 18", "client-visible first delivery must not race shared ownership")
 			require.Equal(t, 200, got.status, got.body)
 			require.NotContains(t, got.body, `"type":"function_call"`)
@@ -203,46 +242,76 @@ var _ io.StringWriter = (*issue715BarrierWriter)(nil)
 type issue715FailingDeliveryCache struct {
 	service.GatewayCache
 	issue715DeliveryOwners
-	mode string
+	mode     string
+	reserves int
 }
 
 func (c *issue715FailingDeliveryCache) ReserveOpenAIAgentRecovery(ctx context.Context, key, route, pending string, ttl time.Duration) error {
 	if c.mode == "reserve" {
 		return io.ErrClosedPipe
 	}
-	adapter := c.issue715DeliveryOwners.(interface {
+	adapter, ok := c.issue715DeliveryOwners.(interface {
 		ReserveOpenAIAgentRecovery(context.Context, string, string, string, time.Duration) error
 	})
-	return adapter.ReserveOpenAIAgentRecovery(ctx, key, route, pending, ttl)
+	if !ok {
+		return fmt.Errorf("fixture old adapter has no pending support")
+	}
+	c.reserves++
+	if c.mode == "partial_reserve" && c.reserves == 2 {
+		return io.ErrClosedPipe
+	}
+	err := adapter.ReserveOpenAIAgentRecovery(ctx, key, route, pending, ttl)
+	if err == nil && c.mode == "reserve_applied" {
+		return io.ErrClosedPipe
+	}
+	return err
 }
 func (c *issue715FailingDeliveryCache) FinishOpenAIAgentRecovery(ctx context.Context, key, route, pending string, commit bool, ttl time.Duration) error {
 	if c.mode == "commit" && commit {
 		return io.ErrClosedPipe
 	}
-	adapter := c.issue715DeliveryOwners.(interface {
+	adapter, ok := c.issue715DeliveryOwners.(interface {
 		FinishOpenAIAgentRecovery(context.Context, string, string, string, bool, time.Duration) error
 	})
-	return adapter.FinishOpenAIAgentRecovery(ctx, key, route, pending, commit, ttl)
+	if !ok {
+		return fmt.Errorf("fixture old adapter has no pending support")
+	}
+	err := adapter.FinishOpenAIAgentRecovery(ctx, key, route, pending, commit, ttl)
+	if err == nil && commit && c.mode == "commit_applied" {
+		return io.ErrClosedPipe
+	}
+	return err
 }
 
 func TestIssue715HTTPDeliveryPublicationFailures(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, failure := range []string{"reserve", "commit"} {
+	for _, failure := range []string{"reserve", "commit", "reserve_applied", "commit_applied", "partial_reserve"} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprint(failure, "/", stream), func(t *testing.T) {
 				mr := miniredis.RunT(t)
 				client := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
 				defer client.Close()
 				base := repository.NewGatewayCache(client)
-				cache := &issue715FailingDeliveryCache{GatewayCache: base, issue715DeliveryOwners: base.(issue715DeliveryOwners), mode: failure}
-				upstream := &issue715Upstream{mode: "generated-json"}
+				cache := &issue715FailingDeliveryCache{GatewayCache: base, issue715DeliveryOwners: issue715RequireDeliveryOwners(t, base), mode: failure}
+				mode := "generated-json"
+				if failure == "partial_reserve" {
+					mode = "generated-json-two"
+				}
+				upstream := &issue715Upstream{mode: mode}
 				producer := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, cache, issue715Accounts()...)
 				first := strings.Replace(issue715Body(false, stream), issue715Agent+",", "", 1)
 				status, body := issue715Request(t, producer, first, 99, "fixture-715-thread", false)
 				require.Equal(t, []int64{1}, upstream.ids, "publication failure cannot replay a submitted generation")
-				if failure == "reserve" {
+				if failure == "reserve" || failure == "reserve_applied" || failure == "partial_reserve" {
 					require.NotContains(t, body, "fixture-task-reference-715", "reserve failure must withhold the unprotected generated task")
 					require.Contains(t, body, "encrypted_agent_recovery_store_unavailable")
+					for _, key := range mr.Keys() {
+						if strings.HasPrefix(key, "openai_agent_owner:") {
+							value, err := mr.Get(key)
+							require.NoError(t, err)
+							require.Equal(t, "failed", value, "partial/ambiguous reserve must clean up every applied fence")
+						}
+					}
 					return
 				}
 				require.Equal(t, 200, status, body)
@@ -251,6 +320,12 @@ func TestIssue715HTTPDeliveryPublicationFailures(t *testing.T) {
 				accounts[0].Priority, accounts[1].Priority = 100, 0
 				consumer := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, base, accounts...)
 				status, body = issue715Request(t, consumer, issue715Body(true, false), 99, "fixture-715-thread", false)
+				if failure == "commit_applied" {
+					require.Equal(t, 200, status, body)
+					require.Contains(t, body, "Same task: ledger balance 18")
+					require.Equal(t, []int64{1, 1}, upstream.ids, "ambiguous acknowledged commit must preserve its successful CAS")
+					return
+				}
 				require.Equal(t, 409, status, body)
 				require.Contains(t, body, "encrypted_agent_recovery_delivery_pending")
 				require.Equal(t, []int64{1}, upstream.ids, "failed commit must retain pending and never fall through to ordinary routing")
