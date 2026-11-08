@@ -6,7 +6,7 @@ report = json.load(open(sys.argv[1]))
 tests = [test for suite in report['testResults'] for test in suite['assertionResults']]
 expected = {
     'followup F1 offers Composite': 'real Select option Composite group (#23)',
-    'followup F2 fences a complete old R1 pair': 'successful save must start a fresh analysis immediately',
+    'followup F2 fences a complete old R1 pair': 'complete old R1 pair must not publish across successful save',
     'followup F3 aborts the real analysis transport on scope': 'AbortSignal',
     'followup F3 aborts the real analysis transport on logout': 'AbortSignal',
     'followup F3 aborts the real analysis transport on unmount': 'AbortSignal',

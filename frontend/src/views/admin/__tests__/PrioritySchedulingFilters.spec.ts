@@ -79,10 +79,10 @@ describe('priority explicit scope filters', () => {
     const original = vi.mocked(apiClient.get).getMockImplementation()!
     vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/analysis' ? fresh.promise : original(url, options))
     saved.resolve({ data: { ...config, target_ttft_ms: 4000 } }); await saving; await flushPromises()
-    expect(reads().length, 'successful save must start a fresh analysis immediately').toBe(5)
-    expect(oldSignal?.aborted, 'save barrier must cancel the old HTTP read').toBe(true)
     old.resolve({ data: analysis({ model: 'not-in-latest-pool', group_id: 11, minutes: 15 }, 'R1') }); await oldRead; await flushPromises()
     expect(vm.snapshot.config_revision, 'complete old R1 pair must not publish across successful save').not.toBe('R1')
+    expect(reads().length, 'successful save must start a fresh analysis immediately').toBe(5)
+    expect(oldSignal?.aborted, 'save barrier must cancel the old HTTP read').toBe(true)
     const freshPair = analysis({ model: 'not-in-latest-pool', group_id: 11, minutes: 15 }, 'R2')
     freshPair.latency.target_ttft_ms = 4000
     fresh.resolve({ data: freshPair }); await flushPromises()
@@ -108,6 +108,23 @@ describe('priority explicit scope filters', () => {
     expect(signal?.aborted).toBe(false); expect(reads()).toHaveLength(2)
     old.resolve({ data: analysis({ model: 'fixture-model', group_id: 11, minutes: 60 }, 'R1') }); await oldRead; await flushPromises()
     expect(vm.snapshot.config_revision).toBe('R1'); expect(vm.draft.target_ttft_ms).toBe(8000)
+  })
+
+  it('followup F2 keeps the model group and window selected while PUT is pending', async () => {
+    render(); await flushPromises()
+    const pending = deferred<any>()
+    vi.mocked(apiClient.put).mockReturnValueOnce(pending.promise)
+    const saving = (wrapper!.vm as any).save(); await flushPromises()
+    await choose('priority-model-filter', 'not-in-latest-pool')
+    await choose('priority-group-filter', 'Composite group (#23)')
+    await wrapper!.get('[data-testid="latency-window"]').setValue('15'); await flushPromises()
+    const count = reads().length
+    pending.resolve({ data: { ...config } }); await saving; await flushPromises()
+    expect(reads()).toHaveLength(count + 1)
+    expect(reads().at(-1)?.[1]).toMatchObject({ params: { model: 'not-in-latest-pool', group_id: 23, minutes: 15 } })
+    const vm = wrapper!.vm as any
+    expect(vm.selectedModel).toBe('not-in-latest-pool'); expect(vm.selectedGroup).toBe(23); expect(vm.latencyMinutes).toBe(15)
+    expect(vm.snapshot).toMatchObject({ model: 'not-in-latest-pool', group_id: 23, window_minutes: 15 })
   })
 
   it.each(['scope', 'logout', 'unmount'])('followup F3 aborts the real analysis transport on %s and rejects late results', async action => {
