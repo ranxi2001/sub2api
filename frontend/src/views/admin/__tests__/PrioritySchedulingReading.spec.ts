@@ -14,7 +14,7 @@ vi.mock('@/api/admin/priorityScheduling', () => ({ getPriorityConfig: vi.fn(), g
 
 const candidate = (id: number): api.PriorityCandidate => ({ account_id: id, account_name: `Fixture account ${id}`, score: 80, tier: 'eligible', reasons: [], priority: 1, concurrency: 10, load_factor: 10, load_percent: 20, waiting: 0, rate: 0.5, revenue: 1, theoretical_cost: 0.2, profit: 0.8, margin: 0.8, economics_source: 'usage', profit_samples: 20, samples: 20, p90_ttft_ms: 1500, quality_passed: 20, quality_samples: 20 })
 const snapshot = (count = 65): api.PrioritySnapshot => ({ at: '2026-11-08T00:00:00Z', model: 'fixture-model', group_id: 11, mode: 'balanced', history_status: 'ready', history_ready: true, config_revision: 'fixture-v1', candidates: Array.from({ length: count }, (_, i) => candidate(i + 1)) })
-const series = (count = 65): api.PriorityLatencySeries => ({ at: '2026-11-08T00:00:00Z', model: 'fixture-model', group_id: 11, bucket_minutes: 5, accounts: Array.from({ length: count }, (_, i) => ({ account_id: i + 1, account_name: `Fixture latency ${i + 1}`, samples: 20, p50_ttft_ms: 500, p90_ttft_ms: 1500 + i, p99_ttft_ms: 3000, error_samples: 1, slow_samples: 1, error_rate: 0.05, buckets: [{ account_id: i + 1, bucket: '2026-11-08T00:00:00Z', samples: 20, p50_ttft_ms: 500, p90_ttft_ms: 1500 + i, p99_ttft_ms: 3000, error_samples: 1, slow_samples: 1 }] })) })
+const series = (count = 65): api.PriorityLatencySeries => ({ at: '2026-11-08T00:00:00Z', model: 'fixture-model', group_id: 11, bucket_minutes: 5, config_revision: 'fixture-v1', accounts: Array.from({ length: count }, (_, i) => ({ account_id: i + 1, account_name: `Fixture latency ${i + 1}`, samples: 20, p50_ttft_ms: 500, p90_ttft_ms: 1500 + i, p99_ttft_ms: 3000, error_samples: 1, slow_samples: 1, error_rate: 0.05, buckets: [{ account_id: i + 1, bucket: '2026-11-08T00:00:00Z', samples: 20, p50_ttft_ms: 500, p90_ttft_ms: 1500 + i, p99_ttft_ms: 3000, error_samples: 1, slow_samples: 1 }] })) })
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason?: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 let wrapper: ReturnType<typeof mount> | undefined
 beforeEach(() => {
@@ -180,5 +180,17 @@ describe('slow latency polling', () => {
     expect((wrapper.vm as any).latency.accounts).toHaveLength(65)
     await vi.advanceTimersByTimeAsync(5000); await flushPromises()
     expect(api.getPriorityLatency).toHaveBeenCalledTimes(2)
+  })
+})
+
+
+describe('latency response semantic identity', () => {
+  it('rejects latency from a new configuration before the snapshot poll observes it', async () => {
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    const previous = (wrapper.vm as any).latency
+    vi.mocked(api.getPriorityLatency).mockResolvedValue({ ...series(), config_revision: 'fixture-v2', accounts: [] })
+    await (wrapper.vm as any).loadLatency(); await flushPromises()
+    expect((wrapper.vm as any).latency).toEqual(previous)
+    expect((wrapper.vm as any).latencyError).toBe('priorityScheduling.latencyPanel.error')
   })
 })
