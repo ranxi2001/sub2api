@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { reactive } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import PrioritySchedulingView from '../PrioritySchedulingView.vue'
+import DataTable from '@/components/common/DataTable.vue'
 import * as api from '@/api/admin/priorityScheduling'
 
 const state = vi.hoisted(() => ({ auth: null as any }))
@@ -38,5 +39,129 @@ describe('priority reading stability', () => {
     const read = (wrapper.vm as any).loadLatency(); await flushPromises()
     expect(panel.text(), 'same-scope refresh must retain readable latency accounts').toContain('Fixture latency 1')
     pending.resolve(series()); await read; await flushPromises()
+  })
+})
+
+
+describe('priority paginated reading and isolation', () => {
+  it('defaults latency collapsed and paginates both real tables with synchronized buckets', async () => {
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    expect(wrapper.get('[data-testid="latency-toggle"]').attributes('aria-expanded')).toBe('false')
+    await wrapper.get('[data-testid="latency-toggle"]').trigger('click')
+    const tables = wrapper.findAllComponents(DataTable)
+    expect(tables).toHaveLength(3)
+    const pager = (id: string) => wrapper!.getComponent(`[data-testid="${id}-pagination"]`)
+    for (const id of ['candidate', 'latency']) {
+      pager(id).vm.$emit('update:pageSize', 10); await flushPromises()
+      pager(id).vm.$emit('update:page', 3); await flushPromises()
+      expect(pager(id).props('page')).toBe(3)
+      expect(pager(id).props('pageSize')).toBe(10)
+    }
+    const latencyTable = wrapper.getComponent('[data-testid="latency-table"]')
+    const bucketTable = wrapper.getComponent('[data-testid="latency-buckets"]')
+    expect(latencyTable.props('data').map((r: any) => r.account_id)).toEqual(bucketTable.props('data').map((r: any) => r.account_id))
+    expect(latencyTable.props('data')).toHaveLength(10)
+    expect(wrapper.getComponent('[data-testid="candidate-table"]').props('data')[0].account_id).toBe(21)
+    vi.mocked(api.getPrioritySnapshot).mockResolvedValue({ ...snapshot(), at: '2026-11-08T00:01:00Z', candidates: [...snapshot().candidates].reverse().map(r => ({ ...r, score: 1 })) })
+    vi.mocked(api.getPriorityLatency).mockResolvedValue({ ...series(), accounts: [...series().accounts].reverse().map(r => ({ ...r, p90_ttft_ms: 99 })) })
+    await (wrapper.vm as any).refresh(); await flushPromises()
+    expect(pager('candidate').props('page')).toBe(3)
+    expect(pager('latency').props('pageSize')).toBe(10)
+    expect(wrapper.getComponent('[data-testid="candidate-table"]').props('data')[0].account_id).toBe(21)
+    expect(latencyTable.props('data')[0].account_id).toBe(21)
+    expect(wrapper.get('[data-testid="latency-toggle"]').attributes('aria-expanded')).toBe('true')
+    vi.mocked(api.getPrioritySnapshot).mockResolvedValue(snapshot(3))
+    vi.mocked(api.getPriorityLatency).mockResolvedValue(series(3))
+    await (wrapper.vm as any).refresh(); await flushPromises()
+    expect(pager('candidate').props('page')).toBe(1)
+    expect(pager('latency').props('page')).toBe(1)
+    expect(pager('latency').props('pageSize')).toBe(10)
+  })
+
+  it('keeps content on failure and recovers without overwriting an unsaved draft', async () => {
+    vi.mocked(api.getPriorityConfig).mockResolvedValue({ enabled: false, mode: 'balanced', group_ids: [], models: [] } as any)
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    await wrapper.get('[data-testid="enabled"]').setValue(true)
+    await wrapper.get('[data-testid="latency-toggle"]').trigger('click')
+    vi.mocked(api.getPriorityLatency).mockRejectedValueOnce(new Error('offline'))
+    await (wrapper.vm as any).loadLatency(); await flushPromises()
+    expect(wrapper.get('[data-testid="latency-table"]').text()).toContain('Fixture latency 1')
+    expect(wrapper.get('[data-testid="latency-status"]').text()).toContain('priorityScheduling.reading.stale')
+    vi.mocked(api.getPrioritySnapshot).mockRejectedValueOnce(new Error('offline'))
+    await (wrapper.vm as any).refresh(); await flushPromises()
+    expect(wrapper.get('[data-testid="candidate-table"]').text()).toContain('Fixture account 1')
+    await (wrapper.vm as any).refresh(); await flushPromises()
+    expect(wrapper.get('[data-testid="enabled"]').element).toHaveProperty('checked', true)
+    expect(api.getPriorityConfig).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="latency-status"]').text()).not.toContain('priorityScheduling.reading.stale')
+  })
+
+  it.each([
+    { model: 'other-model' }, { group_id: 12 }, { config_revision: 'fixture-v2' },
+    { latency_percentile: 50 }, { latency_measurement: 'attributed_v1' }, { window_minutes: 180 },
+  ])('isolates late latency when semantics change: %o', async change => {
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    const pending = deferred<api.PriorityLatencySeries>()
+    vi.mocked(api.getPriorityLatency).mockReturnValueOnce(pending.promise)
+    const old = (wrapper.vm as any).loadLatency(); await flushPromises()
+    vi.mocked(api.getPrioritySnapshot).mockResolvedValue({ ...snapshot(0), ...change })
+    const current = deferred<api.PriorityLatencySeries>()
+    vi.mocked(api.getPriorityLatency).mockReturnValueOnce(current.promise)
+    await (wrapper.vm as any).refresh(); await flushPromises()
+    expect((wrapper.vm as any).latency).toBeNull()
+    pending.resolve(series()); await old; await flushPromises()
+    expect((wrapper.vm as any).latency).toBeNull()
+    const next = { ...series(0), model: change.model ?? 'fixture-model', group_id: change.group_id ?? 11, ...change }
+    current.resolve(next); await flushPromises()
+    expect((wrapper.vm as any).latency?.accounts).toEqual([])
+  })
+
+  it('clears old window immediately and ignores its late response', async () => {
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    const old = deferred<api.PriorityLatencySeries>(), current = deferred<api.PriorityLatencySeries>()
+    vi.mocked(api.getPriorityLatency).mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    const read = (wrapper.vm as any).loadLatency(); await flushPromises()
+    await wrapper.get('[data-testid="latency-window"]').setValue(15)
+    expect((wrapper.vm as any).latency).toBeNull()
+    old.resolve(series()); await read; await flushPromises()
+    expect((wrapper.vm as any).latency).toBeNull()
+    current.resolve(series(0)); await flushPromises()
+    expect((wrapper.vm as any).latency?.accounts).toEqual([])
+  })
+
+  it('clears an empty snapshot and never accepts the prior latency response', async () => {
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    const old = deferred<api.PriorityLatencySeries>()
+    vi.mocked(api.getPriorityLatency).mockReturnValueOnce(old.promise)
+    const read = (wrapper.vm as any).loadLatency()
+    vi.mocked(api.getPrioritySnapshot).mockResolvedValue(null)
+    await (wrapper.vm as any).refresh(); await flushPromises()
+    old.resolve(series()); await read; await flushPromises()
+    expect((wrapper.vm as any).latency).toBeNull()
+    expect(wrapper.find('[data-testid="candidate-table"]').exists()).toBe(false)
+  })
+
+  it.each(['logout', 'unmount'])('does not restart requests after delayed config and %s', async action => {
+    vi.useFakeTimers()
+    const pending = deferred<api.PrioritySchedulingConfig>()
+    vi.mocked(api.getPriorityConfig).mockReturnValueOnce(pending.promise)
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    if (action === 'logout') state.auth.user = null
+    else { wrapper.unmount(); wrapper = undefined }
+    await flushPromises()
+    const reads = [vi.mocked(api.getPrioritySnapshot).mock.calls.length, vi.mocked(api.getPriorityLatency).mock.calls.length, vi.mocked(api.getPriorityStickyBindings).mock.calls.length]
+    pending.resolve({ group_ids: [11] } as any); await flushPromises()
+    await vi.advanceTimersByTimeAsync(30000); await flushPromises()
+    expect([vi.mocked(api.getPrioritySnapshot).mock.calls.length, vi.mocked(api.getPriorityLatency).mock.calls.length, vi.mocked(api.getPriorityStickyBindings).mock.calls.length]).toEqual(reads)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['at', 'config_revision', 'candidates'])('rejects recompute identity mismatch in %s', async field => {
+    wrapper = mount(PrioritySchedulingView); await flushPromises()
+    const before = snapshot(), after = { ...before, [field]: field === 'candidates' ? [candidate(999)] : 'changed' }
+    vi.mocked(api.recomputePriorityScheduling).mockResolvedValue({ before, after, diff: [], timed_out: false })
+    await (wrapper.vm as any).recompute(); await flushPromises()
+    expect(wrapper.find('[data-testid="recompute-diff"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="clear-changed-sticky"]').exists()).toBe(false)
   })
 })
