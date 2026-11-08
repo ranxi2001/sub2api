@@ -28,6 +28,20 @@ func TestProfitOperationsCostMultiplierSourcesAndIndependentValidation(t *testin
 }
 func profitPtr(v float64) *float64 { return &v }
 
+func TestProfitOperationsCalendarMonthWindow(t *testing.T) {
+	// October has 31 days plus a repeated hour in a UTC+2 to UTC+1 transition.
+	from := time.Date(2026, time.October, 1, 0, 0, 0, 0, time.FixedZone("summer", 2*3600))
+	until := time.Date(2026, time.November, 1, 0, 0, 0, 0, time.FixedZone("winter", 3600))
+	f := UpstreamOperationsFilter{From: from, Until: until, Dimension: "upstream", ModelScope: "public", Sort: "requests", Direction: "desc", Page: 1, PageSize: 20}
+	require.Equal(t, 31*24*time.Hour+time.Hour, until.Sub(from))
+	require.NoError(t, ValidateProfitOperationsFilter(f), "profit presets must accept a full local calendar month")
+	require.Error(t, ValidateUpstreamOperationsFilter(f), "the legacy upstream API keeps its existing 31-day limit")
+	f.From = f.Until.Add(-32 * 24 * time.Hour)
+	require.NoError(t, ValidateProfitOperationsFilter(f))
+	f.From = f.From.Add(-time.Nanosecond)
+	require.Error(t, ValidateProfitOperationsFilter(f), "profit queries remain bounded to 32 days")
+}
+
 type profitOperationsDeadlineRepo struct {
 	ChannelRepository
 	read func(context.Context, UpstreamOperationsFilter) (*ProfitOperationsSnapshot, error)

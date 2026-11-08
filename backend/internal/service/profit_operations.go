@@ -33,7 +33,8 @@ func ValidateProfitOperationsFilter(f UpstreamOperationsFilter) error {
 		f.Upstream = ""
 	}
 	f.Sort = "requests"
-	return ValidateUpstreamOperationsFilter(f)
+	// A complete local calendar month can exceed 31*24h when daylight saving ends.
+	return validateUpstreamOperationsFilter(f, 32*24*time.Hour)
 }
 
 func NormalizeProfitOperationsFilter(f *UpstreamOperationsFilter) error {

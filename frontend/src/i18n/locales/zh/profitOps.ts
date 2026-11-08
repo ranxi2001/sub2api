@@ -31,7 +31,13 @@ export default {
   "asc": "升序",
   "apply": "应用筛选",
   "today": "今天",
+  "yesterday": "昨天",
+  "thisWeek": "本周",
+  "lastWeek": "上周",
   "last24h": "近24小时",
+  "last48h": "近48小时",
+  "thisMonth": "本月",
+  "lastMonth": "上月",
   "loading": "正在汇总，请稍候；数据较多时可能需要几分钟。",
   "queried": "读取时间",
   "summary": "筛选范围合计",
@@ -77,5 +83,5 @@ export default {
   "errorRecords": "日志条数",
   "queryFailed": "查询失败，请重试；未将失败显示为零。",
   "queryTimeout": "本次统计耗时过长，未能完成，请稍后重试；未将失败显示为零。",
-  "invalidRange": "请选择不超过31天、结束晚于开始的有效时间范围。"
+  "invalidRange": "请选择不超过32天、结束晚于开始的有效时间范围。"
 }

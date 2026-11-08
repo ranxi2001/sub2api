@@ -69,6 +69,9 @@ describe('independent profit operations', () => {
   expect(w.get('[role="status"]').text()).toBe('profitOps.loading')
   expect(w.find('[role="alert"]').exists()).toBe(false)
   expect(w.find('[data-testid="profit-summary"]').exists()).toBe(false)
+  for (const preset of ['today', 'yesterday', 'thisWeek', 'lastWeek', 'last24h', 'last48h', 'thisMonth', 'lastMonth']) {
+   expect(w.get(`[data-testid="${preset}-filter"]`).attributes('disabled')).toBeDefined()
+  }
   const signal = vi.mocked(readProfitOperations).mock.calls[0]![1]!
   expect(signal.aborted).toBe(false)
   w.unmount()
@@ -128,6 +131,77 @@ it('keeps the last 24 hours shortcut as a rolling window', async () => {
  w.unmount()
 })
 
+it.each([
+ ['yesterday', new Date(2026, 10, 7), new Date(2026, 10, 8)],
+ ['thisWeek', new Date(2026, 10, 2), new Date(2026, 10, 8, 15, 8, 42)],
+ ['lastWeek', new Date(2026, 9, 26), new Date(2026, 10, 2)],
+ ['last48h', new Date(2026, 10, 6, 15, 8, 42), new Date(2026, 10, 8, 15, 8, 42)],
+ ['thisMonth', new Date(2026, 10, 1), new Date(2026, 10, 8, 15, 8, 42)],
+ ['lastMonth', new Date(2026, 9, 1), new Date(2026, 10, 1)],
+] as const)('applies %s at click time, retaining filters and freezing the half-open window for pagination', async (preset, start, end) => {
+ const w = mount(ProfitOperationsView); await flushPromises()
+ await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
+ const numeric = w.findAll('input[type="number"]')
+ await numeric[0]!.setValue(42)
+ await numeric[1]!.setValue(7)
+ await w.get('[data-testid="model-filter"]').setValue('fixture-model')
+ await w.get('[data-testid="model-scope"]').setValue('upstream')
+ await w.get('[data-testid="sort-filter"]').setValue('estimated_profit')
+ vi.setSystemTime(new Date(2026, 10, 8, 15, 8, 42))
+ await w.get(`[data-testid="${preset}-filter"]`).trigger('click'); await flushPromises()
+ const range = vi.mocked(readProfitOperations).mock.lastCall![0]
+ expect(range).toMatchObject({ from: start.toISOString(), until: end.toISOString(), account_id: 42, group_id: 7, model: 'fixture-model', model_scope: 'upstream', sort: 'estimated_profit', page: 1 })
+ const local = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+ const inputs = w.findAll('input[type="datetime-local"]')
+ expect(inputs[0]!.element).toHaveProperty('value', local(start))
+ expect(inputs[1]!.element).toHaveProperty('value', local(end))
+ vi.setSystemTime(new Date(2026, 10, 9, 1))
+ await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything())
+ w.unmount()
+})
+
+it.each([
+ ['yesterday', new Date(2027, 0, 1, 15, 8), new Date(2026, 11, 31), new Date(2027, 0, 1)],
+ ['thisWeek', new Date(2027, 0, 1, 15, 8), new Date(2026, 11, 28), new Date(2027, 0, 1, 15, 8)],
+ ['lastWeek', new Date(2026, 10, 9, 15, 8), new Date(2026, 10, 2), new Date(2026, 10, 9)],
+ ['lastMonth', new Date(2027, 0, 1, 15, 8), new Date(2026, 11, 1), new Date(2027, 0, 1)],
+ ['lastMonth', new Date(2024, 2, 31, 15, 8), new Date(2024, 1, 1), new Date(2024, 2, 1)],
+ ['lastMonth', new Date(2026, 2, 31, 15, 8), new Date(2026, 1, 1), new Date(2026, 2, 1)],
+ ['lastMonth', new Date(2026, 4, 31, 15, 8), new Date(2026, 3, 1), new Date(2026, 4, 1)],
+ ['lastMonth', new Date(2026, 10, 5, 15, 8), new Date(2026, 9, 1), new Date(2026, 10, 1)],
+] as const)('handles calendar boundaries for %s at %s', async (preset, now, start, end) => {
+ vi.setSystemTime(now)
+ const w = mount(ProfitOperationsView); await flushPromises()
+ await w.get(`[data-testid="${preset}-filter"]`).trigger('click'); await flushPromises()
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString(), page: 1 }), expect.anything())
+ // Reapplying the displayed month must also accept the repeated DST hour.
+ await w.get('[data-testid="profit-filters"]').trigger('submit'); await flushPromises()
+ expect(w.find('[role="alert"]').exists()).toBe(false)
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString() }), expect.anything())
+ w.unmount()
+})
+
+it.each([
+ ['yesterday', new Date(2026, 2, 30, 15, 8), new Date(2026, 2, 29), new Date(2026, 2, 30)],
+ ['yesterday', new Date(2026, 9, 26, 15, 8), new Date(2026, 9, 25), new Date(2026, 9, 26)],
+ ['last48h', new Date(2026, 2, 30, 15, 8)],
+ ['last48h', new Date(2026, 9, 26, 15, 8)],
+] as const)('keeps local calendar days and rolling hours distinct across DST: %s at %s', async (preset, now, ...bounds) => {
+ vi.setSystemTime(now)
+ const w = mount(ProfitOperationsView); await flushPromises()
+ await w.get(`[data-testid="${preset}-filter"]`).trigger('click'); await flushPromises()
+ const range = vi.mocked(readProfitOperations).mock.lastCall![0]
+ if (preset === 'yesterday') {
+  expect(range.from).toBe(bounds[0]!.toISOString())
+  expect(range.until).toBe(bounds[1]!.toISOString())
+ } else {
+  expect(Date.parse(range.until) - Date.parse(range.from)).toBe(48 * 3600000)
+  expect(range.until).toBe(now.toISOString())
+ }
+ w.unmount()
+})
+
 it('announces today independently and persists dismissal without applying filters', async () => {
  const notices = useNewFeatureNoticeStore()
  const previous = NEW_FEATURE_NOTICES.protocolFeatureSwitches
@@ -148,7 +222,14 @@ it('announces today independently and persists dismissal without applying filter
  expect(refreshed.isDismissed(41, current)).toBe(true)
  expect(refreshed.isDismissed(41, 'future-profit-feature-fixture')).toBe(false)
  const reopened = mount(ProfitOperationsView); await flushPromises()
- expect(reopened.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+ const oldBadge = reopened.findAllComponents(NewFeatureBadge).find(b => b.props('noticeId') === current)!
+ const rangeBadge = reopened.findAllComponents(NewFeatureBadge).find(b => b.props('noticeId') === NEW_FEATURE_NOTICES.profitOperationsTimeRanges)!
+ expect(oldBadge.find('button').exists()).toBe(false)
+ expect(rangeBadge.find('button').exists()).toBe(true)
  expect(reopened.find('[data-testid="today-filter"]').exists()).toBe(true)
+ const requestsAfterReopen = vi.mocked(readProfitOperations).mock.calls.length
+ await rangeBadge.get('button').trigger('click')
+ expect(readProfitOperations).toHaveBeenCalledTimes(requestsAfterReopen)
+ expect(useNewFeatureNoticeStore().isDismissed(41, NEW_FEATURE_NOTICES.profitOperationsTimeRanges)).toBe(true)
  reopened.unmount()
 })

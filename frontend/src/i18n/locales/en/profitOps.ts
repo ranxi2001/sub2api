@@ -31,7 +31,13 @@ export default {
   "asc": "Ascending",
   "apply": "Apply filters",
   "today": "Today",
+  "yesterday": "Yesterday",
+  "thisWeek": "This week",
+  "lastWeek": "Last week",
   "last24h": "Last 24 hours",
+  "last48h": "Last 48 hours",
+  "thisMonth": "This month",
+  "lastMonth": "Last month",
   "loading": "Aggregating; large ranges may take a few minutes. Please wait.",
   "queried": "Read at",
   "summary": "Filtered totals",
@@ -77,5 +83,5 @@ export default {
   "errorRecords": "Log records",
   "queryFailed": "Query failed; retry. Failure has not been displayed as zero.",
   "queryTimeout": "This aggregation took too long to complete. Please retry later; failure has not been displayed as zero.",
-  "invalidRange": "Choose a valid half-open range of at most 31 days."
+  "invalidRange": "Choose a valid half-open range of at most 32 days."
 }
