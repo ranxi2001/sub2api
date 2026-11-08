@@ -33,7 +33,7 @@ const modules = {
   layout: `import {h} from 'vue';export default {setup(_,{slots}){return()=>h('main',{class:'mx-auto max-w-7xl p-4 sm:p-6'},slots.default?.())}}`,
   nav: `import {h} from 'vue';export default {setup(){return()=>h('nav',{class:'text-sm text-gray-500'},'Offline UI fixture · Synthetic accounts only')}}`,
   auth: `import {reactive} from 'vue';const auth=reactive({user:{id:1,role:'admin'}});export const useAuthStore=()=>auth;`,
-  client: `async function request(method,url,data,options){const query=new URLSearchParams(options?.params??{});const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{method,headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});if(!response.ok)throw Error('offline fixture '+response.status);return {data:await response.json()}}export const apiClient=Object.fromEntries(['get','post','put','patch','delete'].map(method=>[method,(url,data)=>method==='get'?request('GET',url,null,data):request(method.toUpperCase(),url,data)]));export default apiClient;`,
+  client: `async function request(method,url,data,options){const query=new URLSearchParams(options?.params??{});const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{method,headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});if(!response.ok)throw Error('offline fixture '+response.status);return {data:await response.json()}}export const apiClient=Object.fromEntries(['get','post','put','patch','delete'].map(method=>[method,(url,data)=>method==='get'?request('GET',url,null,data):request(method.toUpperCase(),url,data)]));export const buildApiUrl=url=>'/fixture'+url;export const buildGatewayUrl=url=>'http://127.0.0.1:4187/fixture'+url;export default apiClient;`,
 }
 for (const [name, source] of Object.entries(modules)) await fs.writeFile(path.join(fixture, name + '.js'), source)
 const entry = path.join(fixture, 'index.html')
@@ -46,6 +46,7 @@ const params=new URLSearchParams(location.search);const app=createApp({render:()
 const server = await createServer({ root: frontend, configFile: false, plugins: [vue()],
   resolve: { alias: [
     { find: '../client', replacement: path.join(fixture, 'client.js') },
+    { find: '@/api/client', replacement: path.join(fixture, 'client.js') },
     { find: '@/stores/auth', replacement: path.join(fixture, 'auth.js') },
     { find: '@/components/layout/AppLayout.vue', replacement: path.join(fixture, 'layout.js') },
     { find: '@/components/admin/operations/SmartOpsNav.vue', replacement: path.join(fixture, 'nav.js') },
@@ -70,7 +71,7 @@ const initial = () => [account(42), account(43, { latest_task: task(43, 'queued'
   account(47, { latest_task: task(47, 'succeeded') }), account(48, { blocked_reason: 'automatic re-login could not be queued' })]
 const requests = [], errors = [], shots = [], checks = []
 let rows = initial(), holdNextRead = null
-const status = () => ({ accounts: structuredClone(rows), runtime_settings: { engine: 'local_worker', worker_concurrency: 3 }, worker: { state: 'ready', mode: 'managed' },
+const status = () => ({ accounts: structuredClone(rows), runtime_settings: { engine: 'local_worker', worker_concurrency: 3 }, worker: { state: 'running', mode: 'managed' },
   probe_interval_seconds: 1800, retry_interval_seconds: 300, relogin_cooldown_seconds: 1800, fail_streak_threshold: 2, relogin_backoff_max_seconds: 86400, relogin_max_failures: 3 })
 const guardPath = '/admin/account-ops/token-guard-v2/accounts'
 const guardReads = () => requests.filter(r => r.pathname === guardPath && r.method === 'GET').length
