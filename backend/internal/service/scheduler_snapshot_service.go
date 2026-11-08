@@ -1132,11 +1132,14 @@ func (s *SchedulerSnapshotService) rebuildBucketWithTokenPolicyAndQueryCache(
 	rebuildCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	rebuildStarted := time.Now()
 	accounts, err := s.loadAccountsForRebuild(rebuildCtx, bucket, queries)
+	loadDuration := time.Since(rebuildStarted)
 	if err != nil {
-		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild failed: bucket=%s reason=%s err=%v", bucket.String(), reason, err)
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild failed: bucket=%s reason=%s load_ms=%d err=%v", bucket.String(), reason, loadDuration.Milliseconds(), err)
 		return err
 	}
+	publicationStarted := time.Now()
 	if err := s.setRebuildSnapshot(rebuildCtx, task, accounts, queries); err != nil {
 		if errors.Is(err, ErrSchedulerBucketRetired) || errors.Is(err, ErrSchedulerBucketWriteFenced) {
 			slog.Debug("[Scheduler] rebuild fenced", "bucket", bucket.String(), "reason", reason)
@@ -1145,10 +1148,10 @@ func (s *SchedulerSnapshotService) rebuildBucketWithTokenPolicyAndQueryCache(
 			}
 			return nil
 		}
-		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild cache failed: bucket=%s reason=%s err=%v", bucket.String(), reason, err)
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild cache failed: bucket=%s reason=%s size=%d load_ms=%d publish_ms=%d elapsed_ms=%d err=%v", bucket.String(), reason, len(accounts), loadDuration.Milliseconds(), time.Since(publicationStarted).Milliseconds(), time.Since(rebuildStarted).Milliseconds(), err)
 		return err
 	}
-	slog.Debug("[Scheduler] rebuild ok", "bucket", bucket.String(), "reason", reason, "size", len(accounts))
+	slog.Debug("[Scheduler] rebuild ok", "bucket", bucket.String(), "reason", reason, "size", len(accounts), "load_ms", loadDuration.Milliseconds(), "publish_ms", time.Since(publicationStarted).Milliseconds(), "elapsed_ms", time.Since(rebuildStarted).Milliseconds())
 	return nil
 }
 
