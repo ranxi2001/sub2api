@@ -15,7 +15,7 @@
 
 同一会话在 HTTP / WebSocket 重连时应保持 ID 稳定。共用一个 API Key 的转发网关必须为不同下游用户的不同会话提供互不复用的 ID，例如由可信网关按用户与会话生成不透明标识。客户端声明的会话 ID 不是用户认证凭据；本机制用于抑制重复请求，不替代上游内容审核。
 
-`prompt_cache_key`、`X-Session-Affinity`、IP、User-Agent、历史相似度和条目数均不构成封锁身份。没有明确会话 ID 时，不写入或查询跨请求的会话封锁；上游真实策略拒绝仍正常透传并记录。同一 WebSocket 连接已有的命中后阻断语义保留。
+`prompt_cache_key`、`X-Session-Affinity`、IP、User-Agent、历史相似度和条目数均不构成封锁身份。没有明确会话 ID 时，仅按 API Key 命名空间内的精确请求指纹封锁已命中内容的相同重试；该指纹忽略模型、stream 和缓存提示，重试时补上会话 ID 仍可命中，内容发生变化则不视为同一请求。上游真实策略拒绝仍正常透传并记录。同一 WebSocket 连接已有的命中后阻断语义保留。
 
 ## 身份状态与可观测性
 
@@ -32,7 +32,7 @@
 
 `cyber_session_identity_strict_enabled` 默认关闭，并且只有 `cyber_session_block_enabled=true` 时才生效。开启后，`missing`、`conflict`、`invalid` 请求会在账号选择和上游转发前以客户端参数错误拒绝。后台界面会显示高风险提示；升级不会自动开启。
 
-建议先根据聚合日志确认所有客户端都稳定发送 `thread_id` 或 `session_id`，再考虑开启严格门控。关闭严格门控时保持兼容行为：身份不可信的请求仍会交给上游审核，但不会生成或查询跨请求封锁键。
+建议先根据聚合日志确认所有客户端都稳定发送 `thread_id` 或 `session_id`，再考虑开启严格门控。关闭严格门控时保持兼容行为：身份不可信的请求仍会交给上游审核，只有已命中内容的相同重试会由精确请求指纹在本地拒绝。
 
 ## WebSocket 连接身份
 
@@ -52,3 +52,17 @@ WebSocket 连接首次出现 `resolved` 身份时会把对应的单向哈希绑�
 滚动升级期间，旧实例仍执行旧逻辑；需要所有实例运行修复版本才能消除该误拦。本变更不自动解除下游网关已经记录的用户或会话限制。
 
 问题记录：[上游 issue #6831](https://github.com/Wei-Shaw/sub2api/issues/6831)。
+
+## 上游 #8519 长会话误拦修复的适配
+
+[上游 issue #8519](https://github.com/Wei-Shaw/sub2api/issues/8519) 由 [PR #8549](https://github.com/Wei-Shaw/sub2api/pull/8549) 修复，核心提交为 `7e3b6c72faded2427585a6d528b977943184e0e5`。上游旧路径在同来源 scope 激活时，会把超过 256 条历史的无关会话判为 `transcript_lookup_limit_exceeded`；新路径记录已屏蔽 transcript 的长度，再重算这些长度的前缀哈希。
+
+本 fork 已在 [PR #20](https://github.com/ranxi2001/sub2api/pull/20) 中移除 transcript 前缀匹配，随后由 [PR #39](https://github.com/ranxi2001/sub2api/pull/39) 完善显式身份、由 [PR #525](https://github.com/ranxi2001/sub2api/pull/525) 加入精确请求指纹。上游补丁不能直接覆盖这些行为：本 fork 不重新加入 transcript 长度索引或历史前缀封锁，而是保留既有会话隔离，并适配其 256 / 257 / 1000 条历史回归场景。
+
+`backend/internal/handler/openai_cyber_issue8519_test.go` 经由实际 HTTP 准入方法与 miniredis 上的实际 Redis repository 检查以下边界：
+
+- 旧来源 scope 已激活时，不同显式会话和无身份的未知长历史仍可通过；
+- 已屏蔽显式会话无论历史长度如何变化仍被拒绝，覆盖 Responses、Chat 和 Anthropic 错误格式；
+- 无身份长请求命中后，相同内容重试及补上身份的相同重试被拒绝，内容变化的请求不因长度被拒绝。
+
+这些是离线回归用例，执行结果以对应提交的 CI 为准，不代表线上请求已验证。无身份客户端修改或追加内容后不再是精确重试，本 fork 不承诺按 transcript 前缀封锁这类请求；严格门控可要求客户端提供稳定身份，默认仍关闭。上游 PR 附带的压缩库版本 `brotli v1.2.7`、`klauspost/compress v1.20.2` 已在本 fork [PR #691](https://github.com/ranxi2001/sub2api/pull/691) 中更新，本次无需重复应用依赖提交。
