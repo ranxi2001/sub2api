@@ -1,9 +1,8 @@
 <template>
   <AppLayout>
     <div ref="readingRoot" class="min-w-0 space-y-5">
-      <header><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('priorityScheduling.description') }}</p></header>
+      <header><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1></header>
       <SmartOpsNav />
-      <p class="rounded-xl bg-primary-50 p-4 text-sm leading-6 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200">{{ t('priorityScheduling.scopeNote') }}</p>
       <div v-if="error" role="alert" class="text-red-600">{{ error }} <button v-if="!draft" class="underline" @click="load">{{ t('priorityScheduling.retry') }}</button></div>
       <p v-if="notice" role="status" class="text-emerald-600">{{ notice }}</p>
       <p v-if="loading">{{ t('priorityScheduling.loading') }}</p>
@@ -41,17 +40,20 @@
         </fieldset>
       </form>
       </details>
+      <section class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="priority-filters">
+        <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.model') }}</span><Select v-model="selectedModel" data-testid="priority-model-filter" :options="modelOptions" :searchable="true" :aria-label="t('priorityScheduling.model')" /></label>
+        <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.group') }}</span><Select v-model="selectedGroup" data-testid="priority-group-filter" :options="groupOptions" :searchable="true" :aria-label="t('priorityScheduling.group')" /></label>
+        <label><span class="field-title">{{ t('priorityScheduling.window_minutes') }}</span><select id="priority-latency-window" v-model.number="latencyMinutes" class="input w-full" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select></label>
+        <div class="flex items-end"><button class="btn btn-secondary w-full" :disabled="refreshing || catalogLoading" data-testid="latency-refresh" @click="refresh">{{ t('priorityScheduling.refresh') }}</button></div>
+        <p v-if="catalogError" class="text-sm text-red-600 sm:col-span-2 lg:col-span-4" role="alert">{{ t('priorityScheduling.filters.catalogError') }}</p>
+      </section>
       <section class="card latency-panel overflow-hidden" data-testid="latency-panel">
         <header class="flex flex-wrap items-center justify-between gap-3 p-5">
           <button type="button" data-testid="latency-toggle" class="flex items-center gap-2 text-lg font-semibold" :aria-expanded="latencyExpanded" aria-controls="priority-latency-content" @click="latencyExpanded = !latencyExpanded">
             <Icon :name="latencyExpanded ? 'chevronDown' : 'chevronRight'" size="md" />{{ t('priorityScheduling.latencyPanel.title') }}
             <span class="text-sm font-normal text-gray-500">({{ latencyRows.length }})</span>
           </button>
-          <div class="flex flex-wrap items-center gap-2">
-            <label class="sr-only" for="priority-latency-window">{{ t('priorityScheduling.window_minutes') }}</label>
-            <select id="priority-latency-window" v-model.number="latencyMinutes" class="input w-auto" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select>
-            <button class="btn btn-secondary" :disabled="latencyLoading || !snapshot" data-testid="latency-refresh" @click="loadLatency">{{ t('priorityScheduling.latencyPanel.refresh') }}</button>
-          </div>
+
         </header>
         <p data-testid="latency-status" role="status" class="px-5 pb-3 text-xs text-gray-500">{{ t(latencyError ? 'priorityScheduling.reading.stale' : latencyLoading ? (latency ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.loading') : 'priorityScheduling.reading.stableOrder') }}</p>
         <p v-if="latencyError" role="alert" class="px-5 pb-3 text-sm text-red-600">{{ latencyError }}</p>
@@ -82,7 +84,7 @@
         </div>
       </section>
       <section class="card p-5">
-        <header class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('priorityScheduling.recent') }}</h2><div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary" :disabled="recomputeLoading" data-testid="recompute" @click="recompute">{{ t(recomputeLoading ? 'priorityScheduling.recompute.running' : 'priorityScheduling.recompute.action') }}</button><button class="btn btn-secondary" :disabled="refreshing" @click="refresh">{{ t('priorityScheduling.refresh') }}</button></div></header>
+        <header class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('priorityScheduling.filters.candidates') }}</h2><div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary" :disabled="recomputeLoading" data-testid="recompute" @click="recompute">{{ t(recomputeLoading ? 'priorityScheduling.recompute.running' : 'priorityScheduling.recompute.action') }}</button><button class="btn btn-secondary" :disabled="refreshing" @click="refresh">{{ t('priorityScheduling.refresh') }}</button></div></header>
         <p v-if="recomputeError" role="alert" class="mt-3 text-red-600">{{ recomputeError }}</p>
         <details class="my-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.snapshotHint') }}</p></details>
         <p v-if="snapshotError" role="alert" class="text-red-600">{{ snapshotError }}</p>
@@ -184,11 +186,13 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
+import Select from '@/components/common/Select.vue'
+import { getAll as getGroups, getModelAllowlistCandidates } from '@/api/admin/groups'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { getConfiguredTablePageSizeOptions } from '@/utils/tablePreferences'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
 import {
-  getPriorityConfig, savePriorityConfig, getPrioritySnapshot, getPriorityLatency,
+  getPriorityConfig, savePriorityConfig, getPrioritySnapshot, getPriorityAnalysis,
   recomputePriorityScheduling, getPriorityStickyBindings, clearPriorityStickyBindings,
   type PrioritySchedulingConfig, type PrioritySnapshot, type PriorityCandidate,
   type PriorityLatencySeries, type PriorityLatencyAccount,
@@ -205,6 +209,14 @@ function errorSamplesLow(row: PriorityCandidate) {
 const tailSampleFloor = (q: number) => Math.max(20, Math.ceil(500 / (100 - q)))
 const { t } = useI18n(), auth = useAuthStore()
 const draft = ref<PrioritySchedulingConfig | null>(null), snapshot = ref<PrioritySnapshot | null>(null)
+const mutationSnapshot = ref<PrioritySnapshot | null>(null)
+const selectedModel = ref(''), selectedGroup = ref(0)
+const catalogLoading = ref(false), catalogError = ref(false)
+const availableModels = ref<string[]>([]), availableGroups = ref<{ id: number; name: string }[]>([])
+const modelOptions = computed(() => [...new Set([...availableModels.value, ...(selectedModel.value ? [selectedModel.value] : [])])].sort().map(value => ({ value, label: value })))
+const groupOptions = computed(() => [{ value: 0, label: t('priorityScheduling.filters.ungrouped') }, ...availableGroups.value.map(group => ({ value: group.id, label: `${group.name} (#${group.id})` }))])
+const scopeQuery = () => ({ model: selectedModel.value, ...(selectedGroup.value > 0 ? { group_id: selectedGroup.value } : {}), minutes: latencyMinutes.value })
+const scopeKey = () => JSON.stringify([auth.user?.id, auth.user?.role, selectedModel.value, selectedGroup.value, latencyMinutes.value])
 const groups = ref(''), modelsText = ref(''), error = ref(''), snapshotError = ref(''), notice = ref('')
 const loading = ref(false), saving = ref(false), refreshing = ref(false)
 const latency = ref<PriorityLatencySeries | null>(null), latencyMinutes = ref(60), latencyLoading = ref(false), latencyError = ref('')
@@ -306,7 +318,7 @@ const recomputeCanClearSticky = computed(() => {
   const result = recomputeResult.value
   return !!result && !result.timed_out && !!result.before && !!result.after &&
     result.after.group_id != null && result.after.group_id > 0 &&
-    snapshotScope(result.before) === snapshotScope(result.after) && snapshotScope(result.after) === snapshotScope(snapshot.value) &&
+    snapshotScope(result.before) === snapshotScope(result.after) && snapshotScope(result.after) === snapshotScope(mutationSnapshot.value) &&
     result.after.history_status === 'ready' && result.after.history_ready && !result.after.history_refreshing && !result.after.history_error
 })
 function metricValue(item: { selected_ttft_ms?: number; p50_ttft_ms: number; p70_ttft_ms?: number; p90_ttft_ms: number; p95_ttft_ms?: number; p99_ttft_ms: number }, percentile: number) {
@@ -374,46 +386,57 @@ async function save() {
   } catch { if (active(version)) error.value = t('priorityScheduling.error') }
   finally { if (active(version)) saving.value = false }
 }
+async function loadCatalog(initial = false) {
+  if (!canRead()) return
+  const version = generation, request = scopeKey()
+  catalogLoading.value = true; catalogError.value = false
+  try {
+    const [catalogGroups, catalogModels] = await Promise.all([getGroups('openai'), getModelAllowlistCandidates(selectedGroup.value, 'openai')])
+    if (!active(version) || request !== scopeKey()) return
+    availableGroups.value = catalogGroups
+    availableModels.value = catalogModels
+    if (initial && !selectedModel.value) selectedModel.value = draft.value?.models?.find(model => catalogModels.includes(model)) ?? catalogModels[0] ?? ''
+  } catch { if (active(version) && request === scopeKey()) catalogError.value = true }
+  finally { if (active(version)) catalogLoading.value = false }
+}
 async function refresh() {
   if (!canRead()) return
   stopHistoryRefresh()
-  recomputeRequestGeneration++
-  recomputeResult.value = null
+  recomputeRequestGeneration++; recomputeResult.value = null
+  if (!selectedModel.value || catalogError.value) await loadCatalog(!selectedModel.value)
   await loadSnapshot(0)
 }
+function validAnalysis(value: Awaited<ReturnType<typeof getPriorityAnalysis>>, query: ReturnType<typeof scopeQuery>) {
+  const current = value?.snapshot, series = value?.latency
+  return !!current && !!series && current.model === query.model && current.group_id === (query.group_id ?? null) && current.window_minutes === query.minutes &&
+    series.model === current.model && series.group_id === current.group_id && series.config_revision === current.config_revision &&
+    series.latency_percentile === current.latency_percentile && series.latency_measurement === current.latency_measurement &&
+    current.history_ready && !current.history_error && current.history_status === 'ready'
+}
 async function loadSnapshot(attempt: number) {
-  if (!canRead() || refreshing.value) return
-  const request = ++snapshotRequestGeneration
+  if (!canRead() || !selectedModel.value || refreshing.value) return
+  const request = ++snapshotRequestGeneration, key = scopeKey(), query = scopeQuery()
   const priorScope = displayScope(snapshot.value)
-  const priorIdentity = snapshotScope(snapshot.value)
-  recomputeRequestGeneration++
-  recomputeLoading.value = false
-  const version = generation; refreshing.value = true; snapshotError.value = ''
+  recomputeRequestGeneration++; recomputeLoading.value = false
+  const version = generation; refreshing.value = true; snapshotError.value = ''; latencyLoading.value = true
   try {
-    const value = await getPrioritySnapshot()
-    if (active(version) && request === snapshotRequestGeneration) {
-      const restore = readingRestore()
-      const nextScope = displayScope(value)
-      if (nextScope !== priorScope) {
-        clearLatency(); candidateOrder.value = []; candidatePage.value = 1
-      }
-      if (snapshotScope(value) !== priorIdentity) recomputeResult.value = null
-      snapshot.value = value
-      candidateOrder.value = reconcileOrder(candidateOrder.value, value?.candidates ?? [])
-      if (value) void loadLatency()
-      else clearLatency()
-      void restore()
-      // Short follow-ups collect an in-flight query; subsequent polling sees
-      // usage committed after a successful empty read. Only one timer/request
-      // exists, and hidden tabs pause reads. Backend cache bounds SQL work.
-      const pending = value?.history_refreshing || value?.history_status === 'loading' || value?.history_status === 'partial'
-      // Also discover the first selection when this page opened before any pool
-      // existed. A null snapshot schedules no history SQL on the server.
-      scheduleHistoryRefresh(version, pending && attempt < 3 ? 1000 : 5000, pending ? attempt + 1 : 0)
+    const result = await getPriorityAnalysis(query)
+    if (!active(version) || request !== snapshotRequestGeneration || key !== scopeKey()) return
+    if (!validAnalysis(result, query)) throw new Error('invalid analysis scope')
+    const restore = readingRestore()
+    if (displayScope(result.snapshot) !== priorScope) { clearLatency(); candidateOrder.value = []; candidatePage.value = 1 }
+    snapshot.value = result.snapshot
+    candidateOrder.value = reconcileOrder(candidateOrder.value, result.snapshot.candidates)
+    latencyOrder.value = reconcileOrder(latencyOrder.value, result.latency.accounts)
+    latency.value = result.latency; latencyError.value = ''
+    void restore()
+    scheduleHistoryRefresh(version, 5000, attempt)
+  } catch {
+    if (active(version) && request === snapshotRequestGeneration && key === scopeKey()) {
+      snapshotError.value = t('priorityScheduling.error'); latencyError.value = t('priorityScheduling.latencyPanel.error')
+      scheduleHistoryRefresh(version, 15000, 0)
     }
-  }
-  catch { if (active(version) && request === snapshotRequestGeneration) { snapshotError.value = t('priorityScheduling.error'); scheduleHistoryRefresh(version, 15000, 0) } }
-  finally { if (active(version) && request === snapshotRequestGeneration) refreshing.value = false }
+  } finally { if (active(version) && request === snapshotRequestGeneration) { refreshing.value = false; latencyLoading.value = false } }
 }
 function scheduleHistoryRefresh(version: number, delay: number, attempt: number) {
   stopHistoryRefresh()
@@ -425,25 +448,8 @@ function scheduleHistoryRefresh(version: number, delay: number, attempt: number)
   }, delay)
 }
 async function loadLatency() {
-  if (!canRead() || !snapshot.value || latencyLoading.value) return
-  const version = generation, request = ++latencyRequestGeneration, scope = displayScope(snapshot.value), minutes = latencyMinutes.value
-  latencyLoading.value = true; latencyError.value = ''
-  try {
-    const value = await getPriorityLatency(minutes, 5)
-    if (!active(version) || request !== latencyRequestGeneration || minutes !== latencyMinutes.value || scope !== displayScope(snapshot.value)) return
-    const current = snapshot.value!
-    if ((current.config_revision != null && value.config_revision !== current.config_revision) || value.model !== current.model || value.group_id !== current.group_id ||
-      (current.latency_percentile != null && value.latency_percentile !== current.latency_percentile) ||
-      (current.latency_measurement != null && value.latency_measurement !== current.latency_measurement)) {
-      latencyError.value = t('priorityScheduling.latencyPanel.error')
-      return
-    }
-    const restore = readingRestore()
-    latencyOrder.value = reconcileOrder(latencyOrder.value, value.accounts ?? [])
-    latency.value = value
-    void restore()
-  } catch { if (active(version) && request === latencyRequestGeneration && scope === displayScope(snapshot.value)) latencyError.value = t('priorityScheduling.latencyPanel.error') }
-  finally { if (active(version) && request === latencyRequestGeneration) latencyLoading.value = false }
+  // One backend read captures the same scope/config/window for both tables.
+  await loadSnapshot(0)
 }
 async function loadSticky(requestedGroupID?: number) {
   if (!canRead()) return
@@ -463,9 +469,13 @@ async function loadSticky(requestedGroupID?: number) {
 }
 async function recompute() {
   if (!canRead() || recomputeLoading.value) return
-  const version = generation, request = ++recomputeRequestGeneration, snapshotRequest = snapshotRequestGeneration, scope = snapshotScope(snapshot.value)
+  const version = generation, request = ++recomputeRequestGeneration, snapshotRequest = snapshotRequestGeneration
   recomputeResult.value = null; recomputeLoading.value = true; recomputeError.value = ''
   try {
+    const captured = await getPrioritySnapshot()
+    if (!active(version) || request !== recomputeRequestGeneration || snapshotRequest !== snapshotRequestGeneration) return
+    mutationSnapshot.value = captured
+    const scope = snapshotScope(captured)
     const result = await recomputePriorityScheduling()
     if (!active(version) || request !== recomputeRequestGeneration || snapshotRequest !== snapshotRequestGeneration) return
     const resultScope = snapshotScope(result.before)
@@ -475,10 +485,8 @@ async function recompute() {
     }
     recomputeResult.value = result
     const restore = readingRestore()
-    snapshot.value = result.after
-    candidateOrder.value = reconcileOrder(candidateOrder.value, result.after.candidates)
+    mutationSnapshot.value = result.after
     void restore()
-    void loadLatency()
     if (result.after.group_id != null && result.after.group_id > 0) void loadSticky(result.after.group_id)
   } catch { if (active(version) && request === recomputeRequestGeneration && snapshotRequest === snapshotRequestGeneration) recomputeError.value = t('priorityScheduling.recompute.error') }
   finally { if (active(version) && request === recomputeRequestGeneration && snapshotRequest === snapshotRequestGeneration) recomputeLoading.value = false }
@@ -508,17 +516,31 @@ async function clearSticky(accountIDs: number[], requestedGroupID?: number) {
 }
 function clearDisplayedSticky() { const value = stickyVisible.value; if (value) void clearSticky([], value.group_id) }
 function clearStickyAccount(accountID: number) { const value = stickyVisible.value; if (value) void clearSticky([accountID], value.group_id) }
-function clearChangedSticky() {
-  const result = recomputeResult.value
-  if (recomputeCanClearSticky.value && changedDiffRows.value.length && result?.after?.group_id != null) void clearSticky(changedDiffRows.value.map(row => row.account_id), result.after.group_id)
+async function clearChangedSticky() {
+  const result = recomputeResult.value, version = generation, request = snapshotRequestGeneration
+  if (!recomputeCanClearSticky.value || !changedDiffRows.value.length || result?.after?.group_id == null) return
+  try {
+    const latest = await getPrioritySnapshot()
+    if (!active(version) || request !== snapshotRequestGeneration || result !== recomputeResult.value || snapshotScope(latest) !== snapshotScope(result.after)) { recomputeResult.value = null; return }
+    mutationSnapshot.value = latest
+    if (recomputeCanClearSticky.value) await clearSticky(changedDiffRows.value.map(row => row.account_id), result.after.group_id)
+  } catch { if (active(version)) recomputeError.value = t('priorityScheduling.recompute.error') }
 }
 watch(stickyGroupID, () => {
   stickyRequestGeneration++
   sticky.value = null; stickyError.value = ''; stickyNotice.value = ''; stickyLoading.value = false
 }, { flush: 'sync' })
-watch(latencyMinutes, () => { clearLatency(); void loadLatency() }, { flush: 'sync' })
+let initialized = false
+watch([selectedModel, selectedGroup, latencyMinutes], () => {
+  if (!initialized) return
+  stopHistoryRefresh(); snapshotRequestGeneration++; refreshing.value = false
+  recomputeRequestGeneration++; recomputeResult.value = null; recomputeLoading.value = false
+  clearLatency(); snapshot.value = null; candidateOrder.value = []; candidatePage.value = 1; snapshotError.value = ''
+  void loadSnapshot(0)
+}, { flush: 'sync' })
+watch(selectedGroup, () => { if (initialized) void loadCatalog() })
 watch(() => auth.user ? `${auth.user.id}:${auth.user.role}` : '', () => {
-  stopHistoryRefresh(); generation++; draft.value = null; snapshot.value = null
+  stopHistoryRefresh(); generation++; initialized = false; draft.value = null; snapshot.value = null; mutationSnapshot.value = null; selectedModel.value = ''; selectedGroup.value = 0; availableModels.value = []; availableGroups.value = []; catalogLoading.value = false; catalogError.value = false
   groups.value = modelsText.value = error.value = notice.value = snapshotError.value = ''
   clearLatency(); candidateOrder.value = []; candidatePage.value = 1; latencyExpanded.value = false
   recomputeResult.value = null; recomputeError.value = ''; recomputeLoading.value = false
@@ -526,7 +548,16 @@ watch(() => auth.user ? `${auth.user.id}:${auth.user.role}` : '', () => {
   sticky.value = null; stickyError.value = ''; stickyNotice.value = ''; stickyLoading.value = false; stickyGroupID.value = 2
   loading.value = saving.value = refreshing.value = false
 }, { flush: 'sync' })
-onMounted(() => { const version = generation; void load().then(() => { if (active(version) && canRead()) void loadSticky() }); void refresh() })
+onMounted(async () => {
+  const version = generation
+  await load()
+  if (!active(version) || !canRead()) return
+  selectedGroup.value = draft.value?.group_ids?.[0] ?? 0
+  await loadCatalog(true)
+  if (!active(version) || !canRead()) return
+  initialized = true
+  void loadSticky(); void refresh()
+})
 onBeforeUnmount(() => { stopHistoryRefresh(); alive = false; generation++ })
 </script>
 <style scoped>

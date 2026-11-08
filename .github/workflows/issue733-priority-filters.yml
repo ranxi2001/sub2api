@@ -56,3 +56,40 @@ jobs:
         with:
           name: issue733-filters-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/filters-evidence
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Real adapters and read-only scope unit regressions
+        run: cd backend && go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^(TestPriorityAnalysis|TestPriorityRecompute|TestPriorityLatencySeries)' -count=1 -v -timeout=10m
+      - name: Real PostgreSQL scope regressions
+        run: cd backend && go test -tags=integration ./internal/repository -run '^TestPriorityAnalysis' -count=1 -v -timeout=10m
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run build

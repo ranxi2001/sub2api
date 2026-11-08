@@ -14,6 +14,7 @@ type PriorityLatencySeriesQuery struct {
 	Model              string
 	GroupID            *int64
 	Since              time.Time
+	Until              time.Time
 	BucketMinutes      int
 	LatencyPercentile  int
 	LatencyMeasurement string

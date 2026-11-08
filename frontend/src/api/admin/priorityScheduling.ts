@@ -197,6 +197,11 @@ export async function savePriorityConfig(config: PrioritySchedulingConfig): Prom
 export async function getPrioritySnapshot(): Promise<PrioritySnapshot | null> {
   return (await apiClient.get('/admin/priority-scheduling/snapshot')).data.snapshot
 }
+export interface PriorityAnalysisScope { model: string; group_id?: number; minutes: number }
+export interface PriorityAnalysis { snapshot: PrioritySnapshot; latency: PriorityLatencySeries }
+export async function getPriorityAnalysis(scope: PriorityAnalysisScope): Promise<PriorityAnalysis> {
+  return (await apiClient.get('/admin/priority-scheduling/analysis', { params: scope })).data
+}
 export async function getPriorityLatency(minutes = 60, bucketMinutes = 5): Promise<PriorityLatencySeries> {
   return (await apiClient.get('/admin/priority-scheduling/latency', { params: { minutes, bucket_minutes: bucketMinutes } })).data
 }
