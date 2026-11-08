@@ -460,7 +460,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil, denyOpenAITurn("http_session_requires_storage")
 	}
 
-	body, err := prepareOpenAIWSHTTPBridgeSessionBody(account, payload, statefulSession)
+	// Native opaque tasks keep their response anchor. The recovery send gate
+	// below verifies its account binding and intact input before any HTTP write.
+	// Do not enable storage or change another adapter's continuation policy.
+	preserveAgentPrevious := openAIWSAgentRecoveryFromContext(ctx) != nil && account.IsOpenAI() && len(openAIAgentRecoveryItemDigests(payload)) > 0
+	body, err := prepareOpenAIWSHTTPBridgeSessionBody(account, payload, statefulSession || preserveAgentPrevious)
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
@@ -601,6 +605,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if forwardStart.IsZero() {
 			forwardStart = requesttiming.Now(ctx)
 		}
+		if recovery := openAIWSAgentRecoveryFromContext(ctx); recovery != nil {
+			source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
+			if err := recovery.begin(latest, source, body, upstreamReq, "http_bridge"); err != nil {
+				return nil, openAIWSAgentRecoveryClose(err)
+			}
+		}
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
 			var phaseTimeout *openAIHTTPPhaseTimeout
@@ -647,7 +657,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if retryErr != nil {
 			return nil, fmt.Errorf("normalize websocket http bridge rejected field retry: %w", retryErr)
 		}
-		if !strictSession && changed && rejectedFieldRetryState.Allow(retryBody) {
+		if !strictSession && OpenAIWSAgentRecoveryCanRetry(ctx) && changed && rejectedFieldRetryState.Allow(retryBody) {
 			logOpenAIWSModeInfo(
 				"ingress_ws_http_bridge_rejected_field_retry account_id=%d turn=%d reason=%s",
 				account.ID,

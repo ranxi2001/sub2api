@@ -197,10 +197,14 @@ func TestRejectIfCyberSessionBlocked_FailOpen(t *testing.T) {
 }
 
 func newCyberIdentityAdmissionTestHandler(settings map[string]string) *OpenAIGatewayHandler {
+	return newCyberIdentityAdmissionTestHandlerWithCache(settings, nil)
+}
+
+func newCyberIdentityAdmissionTestHandlerWithCache(settings map[string]string, cache service.GatewayCache) *OpenAIGatewayHandler {
 	settingSvc := service.NewSettingService(&contentModerationHandlerSettingRepo{values: settings}, nil)
 	cfg := &config.Config{}
 	gatewaySvc := service.NewOpenAIGatewayService(
-		nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil,
 		service.NewBillingService(cfg, nil), nil, nil, nil, &service.DeferredService{},
 		nil, nil, nil, nil, nil, settingSvc, nil,
 	)

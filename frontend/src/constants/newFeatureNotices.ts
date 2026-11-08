@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  qualityRetestRest: 'quality-retest-rest-initial-announcement',
   keyRisk: 'key-risk-notices-acknowledgement-initial-announcement',
   mistralBudgetUsage: 'mistral-budget-usage-initial-announcement',
   deepSeekSearch: 'deepseek-search-provider-initial-announcement',

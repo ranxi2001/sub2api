@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildQualityRulePatch, copyQualityRuleConfig, qualityBPSError, qualityBPSForm, qualityBPSPayload, qualityJudgeConfigured, qualityRuleFieldValue, type QualityRuleDraft } from '../qualityRulePatch'
+import { buildQualityRulePatch, copyQualityRuleConfig, qualityActionPayload, qualityBPSError, qualityBPSForm, qualityBPSPayload, qualityJudgeConfigured, qualityRuleFieldValue, type QualityRuleDraft } from '../qualityRulePatch'
 import type { QualityBPSPolicy, ScheduledTestPlan } from '@/types'
 
 const draft = (): QualityRuleDraft => ({
@@ -29,6 +29,20 @@ const probePlan = () => {
 }
 
 describe('quality rule copy inputs', () => {
+  it('preserves quality rest in copies and changes it only with the bulk action field', () => {
+    const current = plan(), source = draft()
+    current.pelican_config!.quality!.retest_rest_minutes = 30
+    source.pelican_config.quality.retest_rest_minutes = 90
+    expect(copyQualityRuleConfig(source.pelican_config).quality.retest_rest_minutes).toBe(90)
+    expect(buildQualityRulePatch(current, source, ['restore']).pelican_config!.quality!.retest_rest_minutes).toBe(30)
+    expect(buildQualityRulePatch(current, source, ['action']).pelican_config!.quality!.retest_rest_minutes).toBe(90)
+    expect(qualityRuleFieldValue(current, 'action')).not.toEqual(qualityRuleFieldValue({ ...current, pelican_config: source.pelican_config }, 'action'))
+    expect(qualityActionPayload({ ...source.pelican_config.quality, action: 'observe_only' }).retest_rest_minutes).toBeUndefined()
+    expect(qualityActionPayload({ ...source.pelican_config.quality, retest_rest_minutes: 0 }).retest_rest_minutes).toBeUndefined()
+    for (const value of [-1, 1.5, 10081, NaN]) {
+      expect(() => qualityActionPayload({ ...source.pelican_config.quality, retest_rest_minutes: value })).toThrow('qualityOps.invalidRetestRest')
+    }
+  })
   it('retains Jev choice in copy and bulk patches without importing arbitrary fields', () => {
     const source = draft()
     source.pelican_config.quality.judge = { kind: 'jev', group_id: 0, model_id: '', prompt: 'Compare values' }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
+	"io"
 	"math"
 	"net/http"
 	"sort"
@@ -29,6 +30,7 @@ import (
 
 // openaiStreamingResult streaming response result
 type openaiStreamingResult struct {
+	agentCompleted   bool
 	clientDisconnect bool
 	usage            *OpenAIUsage
 	firstTokenMs     *int
@@ -39,6 +41,7 @@ type openaiStreamingResult struct {
 }
 
 type openaiNonStreamingResult struct {
+	agentCompleted bool
 	*OpenAIUsage
 	usage            *OpenAIUsage
 	responseID       string
@@ -268,6 +271,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	sawResponseFailed := false
 	terminalEventType := ""
 	terminalSuccessful := false
+	agentCompleted := false
 	protectionTerminalSuccessful := false
 	responsesSemanticOutputSeen := false
 	capacityFailoverSuppressedLogged := false
@@ -426,6 +430,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			markPriorityDownstreamDisconnect(ctx)
 		}
 		return &openaiStreamingResult{
+			agentCompleted:   agentCompleted && !sawFailedEvent && !clientDisconnected,
 			usage:            usage,
 			clientDisconnect: clientDisconnected,
 			firstTokenMs:     firstTokenMs,
@@ -563,7 +568,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		sendErrorEvent(code, message)
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
-	processSSELine := func(line string, queueDrained bool) {
+	processSSELineRaw := func(line string, queueDrained bool) {
 		if streamEarlyErr != nil {
 			return
 		}
@@ -600,6 +605,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if openAIStreamEventIsTerminalWithType(data, eventType) {
 				sawTerminalEvent = true
 				terminalSuccessful = IsSuccessfulStreamTerminal(dataBytes)
+				switch eventType {
+				case "response.completed":
+					agentCompleted = openAIAgentCompletedResponse(dataBytes, true)
+				case "error", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+					agentCompleted = false
+				}
 				protectionTerminalSuccessful = openAIProtectionSuccessfulTerminal(dataBytes, eventType)
 				terminalEventType = eventType
 				if strings.TrimSpace(data) == "[DONE]" {
@@ -795,6 +806,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				data = string(stampedData)
 				line = "data: " + data
 			}
+			if err := observeOpenAIAgentRecoveryOutput(c, dataBytes, true); err != nil {
+				s.parseSSEUsageBytesWithType(dataBytes, eventType, usage)
+				streamEarlyErr = err
+				return
+			}
 			// Replace model in response if needed.
 			if needModelReplace {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -962,6 +978,41 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				failureDelivered = true
 			}
 		}
+	}
+
+	// A legal SSE event can split JSON over several data lines. Hold partial
+	// JSON before the buffered writer can expose an opaque item, then feed one
+	// complete JSON document through the same reconstruction/ownership gate.
+	var recoveryData []string
+	recoveryBytes := 0
+	processSSELine := func(line string, queueDrained bool) {
+		r := openAIAgentRecoveryFromContext(ctx)
+		if r == nil || r.delivery == nil {
+			processSSELineRaw(line, queueDrained)
+			return
+		}
+		if data, ok := extractOpenAISSEDataLine(line); ok {
+			if len(recoveryData) > 0 || (!json.Valid([]byte(data)) && (strings.HasPrefix(strings.TrimSpace(data), "{") || strings.HasPrefix(strings.TrimSpace(data), "[")) && strings.TrimSpace(data) != "[DONE]") {
+				recoveryBytes += len(data) + 1
+				if recoveryBytes > maxLineSize {
+					streamEarlyErr = fmt.Errorf("encrypted agent SSE event exceeds size limit")
+					return
+				}
+				recoveryData = append(recoveryData, data)
+				return
+			}
+		}
+		if line == "" && len(recoveryData) > 0 {
+			var compact bytes.Buffer
+			if err := json.Compact(&compact, []byte(strings.Join(recoveryData, "\n"))); err != nil {
+				streamEarlyErr = fmt.Errorf("invalid multiline Responses SSE JSON")
+				return
+			}
+			recoveryData = nil
+			recoveryBytes = 0
+			processSSELineRaw("data: "+compact.String(), false)
+		}
+		processSSELineRaw(line, queueDrained)
 	}
 
 	// 无超时/无 keepalive 的常见路径走同步扫描，减少 goroutine 与 channel 开销。
@@ -1923,18 +1974,25 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
-		c.Data(resp.StatusCode, contentType, body)
+	deliveryErr := observeOpenAIAgentRecoveryOutput(c, body, false)
+	if deliveryErr == nil && !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
+		deliveryErr = writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body)
 	}
 
-	return &openaiNonStreamingResult{
+	result := &openaiNonStreamingResult{
+		agentCompleted:   openAIAgentCompletedResponse(body, false),
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
 		imageCount:       countOpenAIResponseImageOutputsFromJSONBytes(body),
 		imageOutputSizes: collectOpenAIResponseImageOutputSizesFromJSONBytes(body),
 		searchCount:      countGrokNativeSearchCallsFromJSONBytes(body),
-	}, nil
+	}
+	if deliveryErr != nil {
+		result.agentCompleted = false
+		return result, &openAINonStreamingDeliveryError{err: deliveryErr}
+	}
+	return result, nil
 }
 
 func isEventStreamResponse(header http.Header) bool {
@@ -2044,21 +2102,45 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			contentType = "text/event-stream"
 		}
 	}
-	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
+	deliveryErr := observeOpenAIAgentRecoveryOutput(c, body, false)
+	if deliveryErr == nil && !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		// 上游的 Content-Type（text/event-stream）已复制到响应头，而 c.Data
 		// 不会覆盖已存在的 Content-Type，这里需显式设置为聚合后的类型。
-		c.Writer.Header().Set("Content-Type", contentType)
-		c.Data(resp.StatusCode, contentType, body)
+		deliveryErr = writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body)
 	}
 
-	return &openaiNonStreamingResult{
+	result := &openaiNonStreamingResult{
+		agentCompleted:   terminalOK && terminalType == "response.completed" && openAIAgentCompletedResponse(terminalPayload, true),
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
 		imageCount:       countOpenAIImageOutputsFromSSEBody(bodyText),
 		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
 		searchCount:      countGrokNativeSearchCallsFromSSEBody(bodyText),
-	}, nil
+	}
+	if deliveryErr != nil {
+		result.agentCompleted = false
+		return result, &openAINonStreamingDeliveryError{err: deliveryErr}
+	}
+	return result, nil
+}
+
+// Gin's Data renderer discards the downstream Write error. A completed upstream
+// payload alone must not publish compatibility evidence after failed delivery.
+func writeOpenAINonStreamingBody(c *gin.Context, status int, contentType string, body []byte) error {
+	if err := c.Request.Context().Err(); err != nil {
+		return err
+	}
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.WriteHeader(status)
+	n, err := c.Writer.Write(body)
+	if err != nil {
+		return fmt.Errorf("write OpenAI response: %w", err)
+	}
+	if n != len(body) {
+		return io.ErrShortWrite
+	}
+	return c.Request.Context().Err()
 }
 
 func extractOpenAISSETerminalEvent(body string) (string, []byte, bool) {

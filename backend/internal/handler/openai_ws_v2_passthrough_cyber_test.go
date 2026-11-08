@@ -47,6 +47,11 @@ func newOpenAIWSPassthroughHandlerHarnessWithOptions(t *testing.T, upstreamURL s
 
 func newOpenAIWSPassthroughHandlerHarnessWithCache(t *testing.T, upstreamURL string, clientHeaders http.Header, extraSettings map[string]string, gatewayCache service.GatewayCache, configure ...func(*service.Account, *config.Config, *service.HTTPUpstream, *service.AccountRepository)) *openAIWSPassthroughHandlerHarness {
 	t.Helper()
+	return newOpenAIWSPassthroughHandlerHarnessWithKey(t, upstreamURL, clientHeaders, extraSettings, gatewayCache, nil, configure...)
+}
+
+func newOpenAIWSPassthroughHandlerHarnessWithKey(t *testing.T, upstreamURL string, clientHeaders http.Header, extraSettings map[string]string, gatewayCache service.GatewayCache, configureKey func(*service.APIKey), configure ...func(*service.Account, *config.Config, *service.HTTPUpstream, *service.AccountRepository)) *openAIWSPassthroughHandlerHarness {
+	t.Helper()
 	if gatewayCache == nil {
 		gatewayCache = testutil.NewRedisGatewayCache(t)
 	}
@@ -133,6 +138,9 @@ func newOpenAIWSPassthroughHandlerHarnessWithCache(t *testing.T, upstreamURL str
 		Key:     "sk-handler-cyber-test",
 		GroupID: &groupID,
 		User:    &service.User{ID: 1751, Status: service.StatusActive},
+	}
+	if configureKey != nil {
+		configureKey(apiKey)
 	}
 	finalHeaders := make(chan http.Header, 4)
 	handlerDone := make(chan struct{}, 4)

@@ -34,6 +34,7 @@ type openAIWSClientFrameConn struct {
 	// model identifier they supplied for the current turn.
 	restoreResponseModel func([]byte) []byte
 	restoreToolNames     func([]byte) []byte
+	agentRecovery        *openAIWSAgentRecovery
 }
 
 // openAIWSPolicyEnforcingFrameConn wraps a client-side FrameConn and runs
@@ -697,7 +698,9 @@ func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderw
 			payload = c.restoreToolNames(payload)
 		}
 	}
-	return WriteCapturedWSClient(ctx, c.conn, msgType, payload)
+	return c.agentRecovery.write(payload, func() error {
+		return WriteCapturedWSClient(ctx, c.conn, msgType, payload)
+	})
 }
 
 func (c *openAIWSClientFrameConn) Close() error {
@@ -743,6 +746,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = liteFirstMessage
 	}
 	originalFirstClientMessage := firstClientMessage
+	agentRecovery := openAIWSAgentRecoveryFromContext(ctx)
+	pendingAgentSource := originalFirstClientMessage
 	if next, policyErr := applyOpenAIWSReasoningEffortPolicy(firstClientMessage, hooks, hooks.forcedReasoningEffort()); policyErr != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 	} else {
@@ -1048,6 +1053,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	var acceptedTurnForwardAt atomic.Pointer[time.Time]
 	var acceptedQueueArrival atomic.Pointer[time.Time]
 	clientFrameConn := &openAIWSClientFrameConn{
+		agentRecovery:        agentRecovery,
 		conn:                 clientConn,
 		reader:               openAIWSGetIngressReader(c, clientConn),
 		controlCtx:           ctx,
@@ -1315,6 +1321,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				acceptedTurn = true
 			}
 			if acceptedTurn {
+				pendingAgentSource = clientPayload
 				// The frame is cleared for the upstream write that follows the
 				// relay's read; from here a terminal settles this turn again.
 				pendingUpstreamTurn.Store(false)
@@ -1374,6 +1381,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		acceptedQueueArrival.Store(&arrival)
 	}
+	if err := agentRecovery.beginSocket(latest, pendingAgentSource, firstClientMessage, wsURL, headers, "passthrough"); err != nil {
+		cancelFirstWrite()
+		return openAIWSAgentRecoveryClose(err)
+	}
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()
 	if firstWriteErr != nil {
@@ -1432,7 +1443,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					s.invalidateOpenAIWSTurnStateAfterAdmissionFailureForRequest(ctx, c, payload, account.ID, err)
 					return err
 				}
-				return s.priorityLatencyBeforeSend(pendingLatencyCtx, account)
+				if err := s.priorityLatencyBeforeSend(pendingLatencyCtx, account); err != nil {
+					return err
+				}
+				if err := agentRecovery.beginSocket(latest, pendingAgentSource, payload, wsURL, headers, "passthrough"); err != nil {
+					return openAIWSAgentRecoveryClose(err)
+				}
+				return nil
 			},
 			FirstTurnStartedAt: firstTurnStartedAt,
 			TakeNextTurnStartedAt: func() time.Time {
@@ -1578,6 +1595,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return nil
 				}
 				if wroteDownstream || !isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
+					return nil
+				}
+				if !OpenAIWSAgentRecoveryCanRetry(ctx) {
 					return nil
 				}
 				s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw, *activePolicyModel.Load())

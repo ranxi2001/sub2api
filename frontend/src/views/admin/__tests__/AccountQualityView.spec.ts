@@ -48,6 +48,23 @@ describe('quality operations', () => {
     pelican_config: { question_kind: 'state_probe', test_channel: 'account', prompt: '', reasoning_effort: 'high', parallel_count: 1,
       quality: { action: 'observe_only', expected_answer: '', remove_group_ids: [], auto_restore: false } }, created_at: '', updated_at: '' })
 
+  it('edits quality rest on group rules and keeps legacy account rules at zero', async () => {
+    const plan = rules()[0]
+    vi.mocked(listQualityPlans).mockResolvedValue([plan])
+    vi.mocked(listQualityTemplates).mockResolvedValue([groupRule()])
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-plan-id="1"] .rule-actions button:nth-child(2)').trigger('click'); await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="quality-retest-rest"]').element.value).toBe('0')
+    await wrapper.get('[data-testid="quality-retest-rest"]').setValue('90')
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(vi.mocked(scheduledTests.update).mock.calls[0][1].pelican_config!.quality!.retest_rest_minutes).toBe(90)
+    await wrapper.get('[data-testid="quality-template-edit"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="quality-retest-rest"]').setValue('120')
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(vi.mocked(updateQualityTemplate).mock.calls[0][1].pelican_config!.quality!.retest_rest_minutes).toBe(120)
+    wrapper.unmount()
+  })
+
   it.each([',', '，'])('preserves typed %s delimiters and saves distinct cooldown targets', async separator => {
     const plan = rules()[0]
     plan.pelican_config!.quality!.action = 'remove_models'
