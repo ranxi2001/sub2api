@@ -92,7 +92,14 @@ func isOpenAIAccount(account *Account) bool {
 
 // handleOpenAIAccountUpstreamError expects canonicalModel to be the model used
 // for scheduling after applying account mapping exactly once.
-func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, canonicalModel ...string) bool {
+func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, canonicalModel ...string) (shouldDisable bool) {
+	if s != nil {
+		var disabledOn429 bool
+		ctx, disabledOn429 = s.rateLimitService.maybeDisableOpenAISchedulingOn429(ctx, account, statusCode)
+		if disabledOn429 {
+			defer func() { shouldDisable = true }()
+		}
+	}
 	if isOpenAIUpstreamSessionBlocked(responseBody) {
 		return false
 	}
@@ -206,7 +213,7 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if s.rateLimitService == nil {
 		return false
 	}
-	shouldDisable := s.rateLimitService.handleUpstreamErrorAfterStreakReset(stateCtx, account, statusCode, headers, responseBody)
+	shouldDisable = s.rateLimitService.handleUpstreamErrorAfterStreakReset(stateCtx, account, statusCode, headers, responseBody)
 	tempModel := tempUnschedulableModel(stateCtx, nil)
 	modelTempMatched := tempModel != "" && tempUnschedRulesApply(account, statusCode, responseBody, tempModel) &&
 		len(matchTempUnschedulableRules(account, statusCode, responseBody)) > 0
