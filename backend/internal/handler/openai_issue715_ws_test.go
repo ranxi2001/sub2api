@@ -6,8 +6,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -156,9 +158,15 @@ func issue715WSSend(t *testing.T, conn *coderws.Conn, body string) {
 	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(body)))
 }
 
+type issue715WSDeliveryCache interface {
+	issue715DeliveryOwners
+	ReserveOpenAIAgentRecovery(context.Context, string, string, string, time.Duration) error
+	FinishOpenAIAgentRecovery(context.Context, string, string, string, bool, time.Duration) error
+}
+
 type issue715WSBarrierCache struct {
 	service.GatewayCache
-	service.OpenAIAgentRecoveryDeliveryCache
+	issue715WSDeliveryCache
 	entered, release, observed chan struct{}
 	once, readOnce             sync.Once
 }
@@ -173,11 +181,11 @@ func (c *issue715WSBarrierCache) FinishOpenAIAgentRecovery(ctx context.Context, 
 			}
 		})
 	}
-	return c.OpenAIAgentRecoveryDeliveryCache.FinishOpenAIAgentRecovery(ctx, key, route, token, commit, ttl)
+	return c.issue715WSDeliveryCache.FinishOpenAIAgentRecovery(ctx, key, route, token, commit, ttl)
 }
 
 func (c *issue715WSBarrierCache) GetOpenAIAgentRecovery(ctx context.Context, key string) (string, error) {
-	raw, err := c.OpenAIAgentRecoveryDeliveryCache.GetOpenAIAgentRecovery(ctx, key)
+	raw, err := c.issue715WSDeliveryCache.GetOpenAIAgentRecovery(ctx, key)
 	if strings.HasPrefix(raw, "pending:") {
 		c.readOnce.Do(func() { close(c.observed) })
 	}
@@ -197,16 +205,39 @@ func issue715WSContinuation(t *testing.T, useBarrier bool) {
 		t.Run(mode, func(t *testing.T) {
 			for _, crossNode := range []bool{false, true} {
 				t.Run(fmt.Sprint("cross-node=", crossNode), func(t *testing.T) {
-					redisServer := miniredis.RunT(t)
+					addr, db := os.Getenv("ISSUE715_REDIS_ADDR"), 0
+					if addr == "" {
+						addr = miniredis.RunT(t).Addr()
+						t.Log("ownership adapter: production Lua on miniredis")
+					} else {
+						host, _, err := net.SplitHostPort(addr)
+						require.NoError(t, err)
+						require.Contains(t, []string{"127.0.0.1", "::1", "localhost"}, host)
+						db = 15
+						probe := redis.NewClient(&redis.Options{Addr: addr, DB: db})
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						info, err := probe.Info(ctx, "server").Result()
+						require.NoError(t, err)
+						require.Contains(t, info, "redis_version:", "real Redis required")
+						require.NoError(t, probe.FlushDB(ctx).Err())
+						t.Cleanup(func() {
+							ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							defer cancel()
+							_ = probe.FlushDB(ctx).Err()
+							_ = probe.Close()
+						})
+						t.Log("ownership adapter: production Lua on real disposable Redis DB15")
+					}
 					newCache := func() service.GatewayCache {
-						client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+						client := redis.NewClient(&redis.Options{Addr: addr, DB: db})
 						t.Cleanup(func() { _ = client.Close() })
 						return repository.NewGatewayCache(client)
 					}
 					base := newCache()
-					transactional, ok := base.(service.OpenAIAgentRecoveryDeliveryCache)
+					transactional, ok := base.(issue715WSDeliveryCache)
 					require.True(t, ok)
-					barrier := &issue715WSBarrierCache{GatewayCache: base, OpenAIAgentRecoveryDeliveryCache: transactional, entered: make(chan struct{}), release: make(chan struct{}), observed: make(chan struct{})}
+					barrier := &issue715WSBarrierCache{GatewayCache: base, issue715WSDeliveryCache: transactional, entered: make(chan struct{}), release: make(chan struct{}), observed: make(chan struct{})}
 					var releaseOnce sync.Once
 					release := func() { releaseOnce.Do(func() { close(barrier.release) }) }
 					defer release()
@@ -222,9 +253,9 @@ func issue715WSContinuation(t *testing.T, useBarrier bool) {
 						// A separate gateway, account repository, state store, pool and
 						// Redis adapter; ordinary preference explicitly chooses account 2.
 						consumerCache := newCache()
-						consumerTransactional, ok := consumerCache.(service.OpenAIAgentRecoveryDeliveryCache)
+						consumerTransactional, ok := consumerCache.(issue715WSDeliveryCache)
 						require.True(t, ok)
-						observing := &issue715WSBarrierCache{GatewayCache: consumerCache, OpenAIAgentRecoveryDeliveryCache: consumerTransactional, entered: make(chan struct{}), release: barrier.release, observed: barrier.observed}
+						observing := &issue715WSBarrierCache{GatewayCache: consumerCache, issue715WSDeliveryCache: consumerTransactional, entered: make(chan struct{}), release: barrier.release, observed: barrier.observed}
 						if useBarrier {
 							consumerCache = observing
 						}

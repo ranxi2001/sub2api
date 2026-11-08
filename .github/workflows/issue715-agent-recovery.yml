@@ -239,6 +239,36 @@ jobs:
           done
           grep -q 'client-visible first delivery must not race shared ownership' "$RUNNER_TEMP/issue715-first-delivery-red.log"
 
+  ws-real-redis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      redis:
+        image: redis:8.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact-head WS socket chain using real Redis adapters
+        env:
+          ISSUE715_REDIS_ADDR: 127.0.0.1:6379
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          test -z "$(git status --porcelain)"
+          cd backend
+          go test -race -tags=unit ./internal/handler -run '^TestIssue715WS' -count=1 -v -timeout=5m
+
   red-ws:
     runs-on: ubuntu-latest
     timeout-minutes: 25
