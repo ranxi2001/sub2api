@@ -1194,10 +1194,19 @@ def process_session_studio_claim(api: WorkerAPI, claim: dict[str, Any]) -> None:
                 or name.lower() in reserved or "\r" in value or "\n" in value):
             raise WorkerError("Session Studio headers are invalid")
         headers[name] = value.replace("{{uuid}}", str(uuid.uuid4()))
-    request = Request(endpoint, method="POST", headers=headers, data=json.dumps({
+    request_payload = {
         "action": "start", "auth_mode": "password_2fa", "email": email,
         "password": password, "mfa_secret": str(claim.get("totp_secret") or ""),
-    }).encode("utf-8"))
+    }
+    # Same target as the local worker. A remote service may reject or ignore
+    # this hint, so the backend still checks the actual returned token identity.
+    expected_workspace = claim.get("expected_workspace")
+    if expected_workspace:
+        if not isinstance(expected_workspace, str) or len(expected_workspace) > 256:
+            raise WorkerError("Session Studio workspace target is invalid")
+        request_payload["expected_workspace"] = expected_workspace
+    request = Request(endpoint, method="POST", headers=headers,
+                      data=json.dumps(request_payload).encode("utf-8"))
     LOGGER.info("task=%s account=%s started (session_studio)", task_id, account_id)
     started = time.monotonic()
     _best_effort_progress(api, task_id, "starting")

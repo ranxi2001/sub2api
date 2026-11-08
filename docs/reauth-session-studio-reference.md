@@ -2,6 +2,8 @@
 
 本文基线为 v2.17.1 / `cc9e57a93`。本次修复客户端确定的合同缺口与 403 分类；**没有证明 #504 / #532 的远端登录失败已经恢复**。#518 的 `credential accepted` 是探测结果，不能代替本次重登 task、原子保存及其后的新鲜鉴权复验。
 
+#730 的后续双 token 身份解析、脱敏校验诊断及 Session Studio 可选 workspace 请求扩充见[队列重登身份校验与诊断](reauth-identity-validation.md)。下文保留历史基线合同，不将旧阶段的验收状态当成新变更通过证据。
+
 ## 公开参考及许可
 
 2026-10-24 只读核实 [poxiao33/toSub2 main](https://github.com/poxiao33/toSub2/tree/8548397e89bf80e508eda64a87e0d556d43abc84) 仍为历史固定 `8548397e89bf80e508eda64a87e0d556d43abc84`；不是升级依赖。许可证为 [MIT / Copyright (c) 2026 poxiao33](https://github.com/poxiao33/toSub2/blob/8548397e89bf80e508eda64a87e0d556d43abc84/LICENSE)，LICENSE blob `a05ee217b1decba7f26a503ce5a4573c6139b02f`，protocol-login blob `ff2db2507e401c29fa78705e44f5b40a3108a8c6`。没有复制该项目实现；运行包原有 `tosub2/LICENSE` 及版权保留。
