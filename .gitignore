@@ -138,6 +138,7 @@ docs/*
 !docs/ai-ops-codex.md
 !docs/reauth-identity-validation.md
 !docs/openai-context-limit-errors.md
+!docs/openai-agent-continuation.md
 !docs/stream-timing.md
 !docs/openai-sse-delivery.md
 !docs/user-traffic.md
