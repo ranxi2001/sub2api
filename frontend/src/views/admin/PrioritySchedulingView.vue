@@ -86,7 +86,7 @@
         <p v-if="recomputeError" role="alert" class="mt-3 text-red-600">{{ recomputeError }}</p>
         <details class="my-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.snapshotHint') }}</p></details>
         <p v-if="snapshotError" role="alert" class="text-red-600">{{ snapshotError }}</p>
-        <p v-if="!snapshot" class="py-8 text-center text-sm text-gray-500">{{ t('priorityScheduling.empty') }}</p>
+        <p v-if="!snapshot" data-testid="snapshot-initial-state" role="status" class="py-8 text-center text-sm text-gray-500">{{ t(refreshing ? 'priorityScheduling.loading' : 'priorityScheduling.empty') }}</p>
         <template v-else>
           <p data-testid="priority-snapshot-at" class="mb-4 text-sm text-gray-500">{{ new Date(snapshot.at).toLocaleString() }} · {{ t('priorityScheduling.model') }}: {{ snapshot.model }} · {{ t('priorityScheduling.group') }}: {{ snapshot.group_id ?? '—' }} · {{ t(`priorityScheduling.modes.${snapshot.mode}`) }} · {{ t('priorityScheduling.latencyPenaltyMode') }}: {{ t(`priorityScheduling.latencyPenaltyModes.${snapshot.latency_penalty_mode || 'deprioritize'}`) }}</p>
           <p v-if="snapshot.history_status && snapshot.history_status !== 'ready'" role="status" class="text-sm text-amber-600">{{ t(`priorityScheduling.historyStates.${snapshot.history_status}`) }}</p>
