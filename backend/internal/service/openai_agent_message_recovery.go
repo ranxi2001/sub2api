@@ -145,12 +145,25 @@ func sameOpenAIAgentRecoveryRoute(a, b openAIAgentRecoveryBinding) bool {
 }
 
 func openAIAgentRecoveryConfig(account *Account, model string) [32]byte {
-	// Exact credential/config identity fails closed on rotation or route edits.
+	// Exact routing/auth identity fails closed on rotation or route edits.
 	// No credential or digest is logged, serialized externally or decrypted.
-	value, _ := json.Marshal([]any{account.ID, account.Type, account.Credentials,
+	value, _ := json.Marshal([]any{account.ID, account.Type, account.GetMappedModel(model),
+		account.GetOpenAIBaseURL(), account.GetAPIProtocol(), account.GetChatGPTAccountID(),
+		account.GetCredential("api_key"), account.GetCredential("access_token"),
 		account.IsExcelBPSEnabledForModel(model), account.IsPrismBrowserEnabledForModel(model),
 		account.IsOpenAIPassthroughEnabled(), account.IsCopilotSDKEnabled(), account.IsSIWCEnabled()})
 	return sha256.Sum256(value)
+}
+
+func openAIAgentCompletedResponse(body []byte, nested bool) bool {
+	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
+		return false
+	}
+	response := gjson.ParseBytes(body)
+	if nested {
+		response = response.Get("response")
+	}
+	return response.Get("status").String() == "completed" && response.Get("error").Type == gjson.Null
 }
 
 func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryAccount(ctx context.Context, account *Account) error {
@@ -240,6 +253,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	}
 	wire, _ := json.Marshal([]any{req.URL.String(), req.Header.Get("Authorization"),
 		req.Header.Get("ChatGPT-Account-Id"), req.Header.Get("OpenAI-Organization"), req.Header.Get("OpenAI-Project"),
+		req.Header.Values("OpenAI-Beta"), req.Header.Values("x-codex-beta-features"), req.Header.Values(responsesLiteHeader),
 		gjson.GetBytes(body, "model").String()})
 	binding := openAIAgentRecoveryBinding{accountID: account.ID, config: openAIAgentRecoveryConfig(account, request.model), wire: sha256.Sum256(wire), expiresAt: time.Now().Add(s.openAIWSSessionStickyTTL())}
 	if request.owner != nil && !sameOpenAIAgentRecoveryRoute(*request.owner, binding) {

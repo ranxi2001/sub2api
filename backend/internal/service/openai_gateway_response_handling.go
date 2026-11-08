@@ -604,8 +604,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if openAIStreamEventIsTerminalWithType(data, eventType) {
 				sawTerminalEvent = true
 				terminalSuccessful = IsSuccessfulStreamTerminal(dataBytes)
-				if eventType == "response.completed" && gjson.GetBytes(dataBytes, "response.status").String() == "completed" && gjson.GetBytes(dataBytes, "response.error").Type == gjson.Null {
-					agentCompleted = true
+				if eventType == "response.completed" {
+					agentCompleted = openAIAgentCompletedResponse(dataBytes, true)
 				} else if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" || eventType == "response.cancelled" || eventType == "response.canceled" {
 					agentCompleted = false
 				}
@@ -1937,7 +1937,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 
 	return &openaiNonStreamingResult{
-		agentCompleted:   gjson.GetBytes(body, "status").String() == "completed" && gjson.GetBytes(body, "error").Type == gjson.Null,
+		agentCompleted:   openAIAgentCompletedResponse(body, false),
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),
@@ -2062,7 +2062,7 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 
 	return &openaiNonStreamingResult{
-		agentCompleted:   terminalOK && terminalType == "response.completed" && gjson.GetBytes(terminalPayload, "response.status").String() == "completed" && gjson.GetBytes(terminalPayload, "response.error").Type == gjson.Null,
+		agentCompleted:   terminalOK && terminalType == "response.completed" && openAIAgentCompletedResponse(terminalPayload, true),
 		OpenAIUsage:      usage,
 		usage:            usage,
 		responseID:       extractOpenAIResponseIDFromJSONBytes(body),

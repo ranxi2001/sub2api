@@ -91,6 +91,34 @@ func TestIssue715RecoveryRejectsAmbiguousTask(t *testing.T) {
 	}
 }
 
+func TestIssue715CompletionEvidenceIsUnambiguous(t *testing.T) {
+	for _, sample := range []struct {
+		raw              string
+		nested, accepted bool
+	}{
+		{`{"status":"completed","error":null}`, false, true},
+		{`{"status":"completed"}`, false, true},
+		{`{"status":"incomplete","error":null}`, false, false},
+		{`{"status":"completed","error":{"code":"failure"}}`, false, false},
+		{`{"status":"completed","status":"failed","error":null}`, false, false},
+		{`{"response":{"status":"completed","error":null}}`, true, true},
+		{`{"response":{"status":"completed","error":null,"error":{"code":"failure"}}}`, true, false},
+	} {
+		require.Equal(t, sample.accepted, openAIAgentCompletedResponse([]byte(sample.raw), sample.nested))
+	}
+}
+
+func TestIssue715RecoveryIgnoresUnrelatedCredentialMetadata(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture", "model_mapping": map[string]any{"gpt-6-astra": "gpt-6-astra"}}}
+	before := openAIAgentRecoveryConfig(account, "gpt-6-astra")
+	account.Credentials["plan_type"] = "fixture-plan"
+	account.Credentials["expires_at"] = "fixture-expiry"
+	account.Credentials["model_mapping"].(map[string]any)["unrelated"] = "other"
+	require.Equal(t, before, openAIAgentRecoveryConfig(account, "gpt-6-astra"))
+	account.Credentials["api_key"] = "fixture-rotated-identity"
+	require.NotEqual(t, before, openAIAgentRecoveryConfig(account, "gpt-6-astra"))
+}
+
 func TestIssue715RecoveryConflictingConcurrentCompletionAndExpiry(t *testing.T) {
 	svc := &OpenAIGatewayService{cfg: &config.Config{}}
 	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
