@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -399,4 +400,16 @@ func TestIssue715WSPreviousResponseMustBelongToTaskOwner(t *testing.T) {
 			require.Equal(t, []int64{1}, ids, "foreign previous-response binding must reject before upstream write")
 		})
 	}
+}
+
+func TestIssue715WSRecoveryRefusalDoesNotPenalizeAccount(t *testing.T) {
+	for _, reason := range []string{"owner_unavailable", "owner_conflict", "route_changed", "wire_changed", "store_unavailable", "delivery_pending"} {
+		t.Run(reason, func(t *testing.T) {
+			err := &service.OpenAIAgentRecoveryError{Reason: reason}
+			require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+			closeErr := service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "fixture local refusal", err)
+			require.False(t, shouldReportOpenAIWSProxyAccountFailure(fmt.Errorf("fixture adapter: %w", closeErr)), "local compatibility/store failures cannot damage account health")
+		})
+	}
+	require.True(t, shouldReportOpenAIWSProxyAccountFailure(errors.New("fixture genuine upstream failure")))
 }
