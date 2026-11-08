@@ -252,7 +252,7 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryDispatch(ctx context.Cont
 // transformation, account revalidation and final credential/header selection.
 // It captures the exact admitted route; success publication never re-reads a
 // possibly changed account or reconstructs a task from an envelope.
-func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Context, account *Account, req *http.Request, body []byte) (func(bool), error) {
+func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Context, account *Account, req *http.Request) (func(bool), error) {
 	noop := func(bool) {}
 	if ctx.Err() != nil {
 		return noop, ctx.Err()
@@ -289,7 +289,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		}
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
-	body, err = io.ReadAll(reader)
+	body, err := io.ReadAll(reader)
 	_ = reader.Close()
 	if err != nil {
 		if len(request.items) == 0 && request.owner == nil {

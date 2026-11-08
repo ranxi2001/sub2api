@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -88,7 +89,8 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 	if gjson.GetBytes(body, "stream").Bool() || mode == "aggregate" || strings.HasPrefix(mode, "generated-stream") {
 		if mode == "generated-stream-items" && !strings.Contains(input, "fixture-task-reference-715") {
 			payload = strings.Replace(payload, output, `[]`, 1)
-			return response(200, "text/event-stream", fmt.Sprintf("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":%s}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\ndata: [DONE]\n\n", issue715Agent, payload))
+			tool := gjson.Parse(output).Array()[1].Raw
+			return response(200, "text/event-stream", fmt.Sprintf("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":%s}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":%s}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\ndata: [DONE]\n\n", issue715Agent, tool, payload))
 		}
 		event := "response.completed"
 		if mode == "incomplete" {
@@ -367,14 +369,35 @@ func TestIssue715HTTPGeneratedTaskReturnsToItsProducer(t *testing.T) {
 			status, answer := issue715Request(t, handler, firstBody, 99, "fixture-715-thread", false)
 			require.Equal(t, 200, status, answer)
 			require.Contains(t, answer, "fixture-task-reference-715", "the task must be generated before its first consumption")
+			firstPayload := answer
+			if stream {
+				for _, line := range strings.Split(answer, "\n") {
+					if strings.HasPrefix(line, "data: ") && gjson.Get(strings.TrimPrefix(line, "data: "), "type").String() == "response.completed" {
+						firstPayload = gjson.Get(strings.TrimPrefix(line, "data: "), "response").Raw
+					}
+				}
+			}
+			toolExecutions, balance := 0, 11
+			for _, item := range gjson.Get(firstPayload, "output").Array() {
+				if item.Get("type").String() == "function_call" {
+					require.Equal(t, "fc_715_once", item.Get("call_id").String())
+					balance += int(gjson.Get(item.Get("arguments").String(), "add").Int())
+					toolExecutions++
+				}
+			}
+			require.Equal(t, 1, toolExecutions, "generated task must actually execute the delegated tool once")
+			require.Equal(t, 18, balance)
 			accounts[0].Priority, accounts[1].Priority = 100, 0
 			upstream.mode = ""
 			for turn := 0; turn < 2; turn++ {
 				status, answer = issue715Request(t, handler, issue715Body(true, stream), 99, "fixture-715-thread", false)
 				require.Contains(t, answer, "Same task: ledger balance 18", "newly generated task must return to its producer before any prior successful input")
+				require.NotContains(t, answer, `"type":"function_call"`, "completed generated task must not request its tool again")
 				require.Equal(t, 200, status, answer)
 			}
 			require.Equal(t, []int64{1, 1, 1}, upstream.ids)
+			require.Equal(t, 1, toolExecutions)
+			require.Equal(t, 18, balance)
 		})
 	}
 }
@@ -474,6 +497,10 @@ func TestIssue715HTTPGeneratedOwnerSurvivesApplicationRestart(t *testing.T) {
 	for node := 0; node < 2; node++ {
 		cache := repository.NewGatewayCache(client)
 		resumed := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, cache, accounts...)
+		probe, _ := newIssue715Context(t, issue715Body(true, false))
+		probe.Request.Header.Set("session_id", "fixture-715-thread")
+		sessionHash := resumed.gatewayService.GenerateSessionHash(probe, []byte(issue715Body(true, false)))
+		require.NoError(t, cache.SetSessionAccountID(context.Background(), 3132, "openai:"+sessionHash, 2, time.Minute))
 		status, answer = issue715Request(t, resumed, issue715Body(true, false), 99, "fixture-715-thread", false)
 		require.Equal(t, 200, status, answer)
 		require.Contains(t, answer, "Same task: ledger balance 18")
@@ -485,7 +512,12 @@ func TestIssue715HTTPGeneratedOwnerSurvivesApplicationRestart(t *testing.T) {
 			mr.Del(key)
 		}
 	}
-	fresh := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, repository.NewGatewayCache(client), accounts...)
+	cache := repository.NewGatewayCache(client)
+	fresh := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, cache, accounts...)
+	probe, _ := newIssue715Context(t, issue715Body(true, false))
+	probe.Request.Header.Set("session_id", "fixture-715-thread")
+	sessionHash := fresh.gatewayService.GenerateSessionHash(probe, []byte(issue715Body(true, false)))
+	require.NoError(t, cache.SetSessionAccountID(context.Background(), 3132, "openai:"+sessionHash, 2, time.Minute))
 	issue715Request(t, fresh, issue715Body(true, false), 99, "fixture-715-thread", false)
 	require.Equal(t, int64(2), upstream.ids[3], "lost shared evidence cannot grant the prior owner")
 }
@@ -542,7 +574,7 @@ func TestIssue715HTTPFailedDeliveryKeepsCompletedUsage(t *testing.T) {
 				c.Request.Header.Set("session_id", "fixture-715-thread")
 				ctx, cancel := context.WithCancel(c.Request.Context())
 				defer cancel()
-				c.Request = c.Request.WithContext(handler.gatewayService.WithOpenAIAgentMessageRecovery(ctx, c, []byte(body), "fixture-715-thread", "gpt-5.1"))
+				c.Request = c.Request.WithContext(ctx)
 				c.Writer = &issue715DeliveryWriter{ResponseWriter: c.Writer, mode: failure, cancel: cancel}
 				result, err := handler.gatewayService.Forward(c.Request.Context(), c, &accounts[0], []byte(body))
 				require.Error(t, err)

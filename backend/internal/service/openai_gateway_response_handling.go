@@ -605,9 +605,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if openAIStreamEventIsTerminalWithType(data, eventType) {
 				sawTerminalEvent = true
 				terminalSuccessful = IsSuccessfulStreamTerminal(dataBytes)
-				if eventType == "response.completed" {
+				switch eventType {
+				case "response.completed":
 					agentCompleted = openAIAgentCompletedResponse(dataBytes, true)
-				} else if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" || eventType == "response.cancelled" || eventType == "response.canceled" {
+				case "error", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 					agentCompleted = false
 				}
 				protectionTerminalSuccessful = openAIProtectionSuccessfulTerminal(dataBytes, eventType)

@@ -23,7 +23,7 @@ func issue715LearnRoute(t *testing.T, svc *OpenAIGatewayService, account *Accoun
 	req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(body))
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer fixture")
-	complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(body))
+	complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
 	require.NoError(t, err)
 	complete(true)
 }
@@ -68,13 +68,13 @@ func TestIssue715RecoveryDoesNotLearnUncompletedOrChangedWire(t *testing.T) {
 	ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(issue715OpaqueBody), "fixture-session", "gpt-6-astra")
 	req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(issue715OpaqueBody))
 	require.NoError(t, err)
-	complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(issue715OpaqueBody))
+	complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
 	require.NoError(t, err)
 	complete(false)
 	require.Empty(t, svc.agentMessageRecovery.bindings, "HTTP 200, EOF, cancellation and incomplete are not completion evidence")
 	req, err = http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(`{"input":[]}`))
 	require.NoError(t, err)
-	complete, err = svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(issue715OpaqueBody))
+	complete, err = svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
 	require.NoError(t, err)
 	complete(true)
 	require.Empty(t, svc.agentMessageRecovery.bindings, "a transformed-away task must never earn a compatibility grant")
@@ -114,7 +114,9 @@ func TestIssue715RecoveryIgnoresUnrelatedCredentialMetadata(t *testing.T) {
 	before := openAIAgentRecoveryConfig(account, "gpt-6-astra")
 	account.Credentials["plan_type"] = "fixture-plan"
 	account.Credentials["expires_at"] = "fixture-expiry"
-	account.Credentials["model_mapping"].(map[string]any)["unrelated"] = "other"
+	mapping, ok := account.Credentials["model_mapping"].(map[string]any)
+	require.True(t, ok)
+	mapping["unrelated"] = "other"
 	require.Equal(t, before, openAIAgentRecoveryConfig(account, "gpt-6-astra"))
 	account.Credentials["api_key"] = "fixture-rotated-identity"
 	require.NotEqual(t, before, openAIAgentRecoveryConfig(account, "gpt-6-astra"))
@@ -130,7 +132,7 @@ func TestIssue715RecoveryConflictingConcurrentCompletionAndExpiry(t *testing.T) 
 		account := &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 		req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(issue715OpaqueBody))
 		require.NoError(t, err)
-		complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(issue715OpaqueBody))
+		complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
 		require.NoError(t, err)
 		finishes = append(finishes, complete)
 	}
@@ -235,7 +237,7 @@ func TestIssue715SharedOwnershipIsAuthoritativeAndMixedTasksRemainIntact(t *test
 	req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(mixed))
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer fixture")
-	complete, err := reader.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(mixed))
+	complete, err := reader.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
 	require.NoError(t, err, "unknown new task alongside proven history must remain sendable to that owner")
 	complete(true)
 	require.Len(t, cache.values, 2, "successful intact consumption can learn the additional new item")
@@ -262,7 +264,7 @@ func TestIssue715PlainRequestsWithoutSafeCaptureKeepOriginalBehavior(t *testing.
 		if !bytes.Contains([]byte(body), []byte("metadata")) {
 			req.GetBody = nil
 		}
-		complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(body))
+		complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
 		require.NoError(t, err, "best effort output capture must not reject ordinary requests")
 		complete(true)
 		require.Empty(t, svc.agentMessageRecovery.bindings)
@@ -278,12 +280,12 @@ func TestIssue715RecoveryIncludesActualWireHeaderCasing(t *testing.T) {
 	require.NoError(t, err)
 	req.Header["openai-organization"] = []string{"fixture-org-one"}
 	ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(issue715OpaqueBody), "fixture-session", "gpt-6-astra")
-	complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(issue715OpaqueBody))
+	complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
 	require.NoError(t, err)
 	complete(true)
 	ctx = svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(issue715OpaqueBody), "fixture-session", "gpt-6-astra")
 	req.Header["openai-organization"] = []string{"fixture-org-two"}
-	_, err = svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(issue715OpaqueBody))
+	_, err = svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
 	var recovery *OpenAIAgentRecoveryError
 	require.ErrorAs(t, err, &recovery, "a raw-cased wire identity change must not hide behind Header.Get")
 	require.Equal(t, "wire_changed", recovery.Reason)

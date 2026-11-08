@@ -1393,7 +1393,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return nil, err
 		}
-		completeAgentRecovery, recoveryErr := s.prepareOpenAIAgentRecoveryAttempt(ctx, account, upstreamReq, body)
+		completeAgentRecovery, recoveryErr := s.prepareOpenAIAgentRecoveryAttempt(ctx, account, upstreamReq)
 		if recoveryErr != nil {
 			if headerGuard != nil {
 				headerGuard.close()
