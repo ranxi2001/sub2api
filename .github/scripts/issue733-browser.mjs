@@ -32,21 +32,23 @@ const modules = {
   nav: `export default {template:'<nav class="text-sm text-gray-500">Offline UI fixture · Synthetic accounts only</nav>'}`,
   client: `async function request(method,url,data,options){const query=new URLSearchParams(options?.params??{});const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{method,headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});if(!response.ok)throw Error('fixture '+response.status);return {data:await response.json()}}export const apiClient={get:(url,options)=>request('GET',url,null,options),put:(url,data)=>request('PUT',url,data),post:(url,data)=>request('POST',url,data)};`,
 }
-function html(isBaseline, locale) {
-  return `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="app"></div><script type="module">
+function html() {
+  return `<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="app"></div><script type="module">
 import {createApp,h} from 'vue';import {createI18n} from 'vue-i18n';
-import View from '${isBaseline ? '/@fs/' + baselinePath : '/src/views/admin/PrioritySchedulingView.vue'}';
+import Candidate from '/src/views/admin/PrioritySchedulingView.vue';import Baseline from '/@fs/${baselinePath}';const params=new URLSearchParams(location.search);const View=params.has('baseline')?Baseline:Candidate;
 import zh from '/src/i18n/locales/zh/index.ts';import en from '/src/i18n/locales/en/index.ts';import '/src/style.css';
-const app=createApp({render:()=>h(View)});app.use(createI18n({legacy:false,locale:'${locale}',messages:{zh,en}}));app.mount('#app');window.fixtureView=()=>app._instance.subTree.component.setupState;window.fixtureUnmount=()=>app.unmount();</script></html>`
+const app=createApp({render:()=>h(View)});app.use(createI18n({legacy:false,locale:params.get('locale')||'zh',messages:{zh,en}}));app.mount('#app');window.fixtureView=()=>app._instance.subTree.component.setupState;window.fixtureUnmount=()=>app.unmount();</script></html>`
 }
+const fixtureHTML = path.join(frontend, '.issue733-fixture/index.html')
+await fs.mkdir(path.dirname(fixtureHTML), {recursive:true})
+await fs.writeFile(fixtureHTML, html())
 const server = await createServer({ root: frontend, configFile: false,
   plugins: [vue(), { name: 'issue733-offline-fixture',
     resolveId(id, importer) {
-      if (id.startsWith('virtual:issue733-')) return '\0' + id.slice('virtual:issue733-'.length)
-      if (id === '../client' && importer?.endsWith('/api/admin/priorityScheduling.ts')) return '\0client'
+      if (id.startsWith('virtual:issue733-')) return '\0issue733-' + id.slice('virtual:issue733-'.length) + '.js'
+      if (id === '../client' && importer?.endsWith('/api/admin/priorityScheduling.ts')) return '\0issue733-client.js'
     },
-    load(id) { return modules[id.slice(1)] },
-    configureServer(vite) { vite.middlewares.use((req, res, next) => { const url = new URL(req.url, 'http://fixture'); if (url.pathname === '/') { res.setHeader('Content-Type', 'text/html'); void vite.transformIndexHtml('/', html(url.searchParams.has('baseline'), url.searchParams.get('locale') || 'zh')).then(value => res.end(value)); return } next() }) },
+    load(id) { if (id.startsWith('\0issue733-')) return modules[id.slice('\0issue733-'.length, -3)] },
   }],
   resolve: { alias: [
     { find: '@/stores/auth', replacement: 'virtual:issue733-auth' },
@@ -57,11 +59,11 @@ const server = await createServer({ root: frontend, configFile: false,
   css: { postcss: { plugins: [tailwind({ ...theme, content: [path.join(frontend, 'index.html'), path.join(frontend, 'src/**/*.{vue,js,ts,jsx,tsx}'), baselinePath, path.join(root, '.github/scripts/issue733-browser.mjs')] }), autoprefixer()] } },
   define: { __INTLIFY_JIT_COMPILATION__: true },
   server: { host: '127.0.0.1', port: 4183, strictPort: true, fs: { allow: [root, out] } },
-  optimizeDeps: { include: ['vue', 'vue-i18n', '@tanstack/vue-virtual'] },
+  optimizeDeps: { entries: [fixtureHTML], include: ['vue', 'vue-i18n', '@tanstack/vue-virtual'] },
 })
 await server.listen()
 const browser = await chromium.launch({ headless: true })
-const shots = [], measurements = [], errors = [], requests = []
+const shots = [], measurements = [], errors = [], requests = [], networkFailures = []
 const state = { count: 75, tick: 0, reverse: false, latencyError: false, snapshotError: false, model: 'demo-model', group: 11, revision: 'demo-v1', delay: 0 }
 const config = { enabled: true, mode: 'balanced', group_ids: [11], models: ['demo-model'], window_minutes: 60, min_samples: 5, target_ttft_ms: 3000, latency_penalty_minutes: 10, latency_penalty_mode: 'deprioritize', max_load_percent: 80, min_quality_percent: 90, quality_max_age_hours: 24, quality_weight: 30, latency_weight: 25, load_weight: 25, cost_weight: 20, latency_percentile: 90, latency_measurement: 'legacy_forward', balance_protocols: true, oauth_quota_priority: false, oauth_quota_threshold: 90, error_rate_weight: 0, error_rate_window_minutes: 10, error_rate_prior_samples: 5, recovery_exploration_percent: 0 }
 const now = () => new Date(Date.UTC(2026, 10, 8, 9, state.tick)).toISOString()
@@ -90,6 +92,8 @@ async function routeBackend(page) {
 }
 async function newPage(viewport = { width: 1440, height: 1000 }) {
   const page = await browser.newPage({ viewport })
+  page.on('requestfailed', request => networkFailures.push({url:request.url(), error:request.failure()?.errorText}))
+  page.on('response', response => {if(response.status() >= 400 && !response.url().includes('/fixture/')) networkFailures.push({url:response.url(),status:response.status()})})
   page.on('pageerror', error => errors.push(error.message))
   await routeBackend(page)
   return page
@@ -115,7 +119,7 @@ async function geometry(page) {
 }
 try {
   const old = await newPage()
-  await old.goto('http://127.0.0.1:4183/?baseline=1', { waitUntil: 'networkidle' })
+  await old.goto('http://127.0.0.1:4183/.issue733-fixture/index.html?baseline=1', { waitUntil: 'networkidle' })
   await old.getByTestId('latency-panel').getByText('Demo account 001', { exact: true }).first().waitFor()
   // Validate representative project utilities and the real computed table style before measuring.
   const cssProof = await old.evaluate(() => {
@@ -138,7 +142,7 @@ try {
   release(); await old.close()
 
   const page = await newPage()
-  await page.goto('http://127.0.0.1:4183/', { waitUntil: 'networkidle' })
+  await page.goto('http://127.0.0.1:4183/.issue733-fixture/index.html', { waitUntil: 'networkidle' })
   await page.getByTestId('candidate-table').waitFor()
   assert.equal(await page.getByTestId('latency-toggle').getAttribute('aria-expanded'), 'false')
   assert.equal(await page.locator('#priority-latency-content').isVisible(), false)
@@ -213,7 +217,7 @@ try {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
   // English copy, same real page. Dark state uses the existing project theme.
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('http://127.0.0.1:4183/?locale=en', { waitUntil: 'networkidle' })
+  await page.goto('http://127.0.0.1:4183/.issue733-fixture/index.html?locale=en', { waitUntil: 'networkidle' })
   assert.match(await page.getByTestId('latency-status').innerText(), /Stable account ID/)
   await page.evaluate(() => document.documentElement.classList.add('dark'))
   await screenshot(page, 'after-english-dark.png', 'candidate')
@@ -229,6 +233,6 @@ try {
     await page.screenshot({ path: path.join(out, `failure-${index}.png`), fullPage: false }).catch(() => {})
     await fs.writeFile(path.join(out, `failure-${index}.txt`), await page.locator('body').innerText()).catch(() => {})
   }
-  await fs.writeFile(path.join(out, 'failure.json'), JSON.stringify({ head, message: String(error), stack: error.stack, errors, measurements, shots, requests }, null, 2))
+  await fs.writeFile(path.join(out, 'failure.json'), JSON.stringify({ head, message: String(error), stack: error.stack, errors, networkFailures, measurements, shots, requests }, null, 2))
   throw error
 } finally { await browser.close(); await server.close() }
