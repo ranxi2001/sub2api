@@ -171,7 +171,9 @@ func newOpenAIWSLocalAdmissionCloseError(reason string) error {
 }
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
+	var recovery *service.OpenAIAgentRecoveryError
 	return err != nil &&
+		!errors.As(err, &recovery) &&
 		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
 		!errors.Is(err, errOpenAIWSLocalAdmissionRejected) &&
 		!errors.Is(err, service.ErrOpenAIWSNodeOwner) &&
@@ -970,6 +972,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// token 计费部分仍受利润门保护，独立图片/视频端点才在门外。
 	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(service.WithOpenAIEncryptedReasoningAffinity(pricingCtx, body))
+	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIAgentMessageRecovery(c.Request.Context(), c, body, sessionHash, forwardModel))
 
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
@@ -995,6 +998,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			requestPlatform,
 		)
 		if err != nil {
+			if h.handleOpenAIAgentRecoveryError(c, err, streamStarted) {
+				return
+			}
 			if errors.Is(err, service.ErrPriorityLatencyUnavailable) {
 				h.handleTurnAdmissionError(c, err, streamStarted)
 				return
@@ -1200,6 +1206,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			})
 		}
 		if err != nil {
+			if h.handleOpenAIAgentRecoveryError(c, err, streamStarted) {
+				submitResponsesUsage(result)
+				return
+			}
 			if service.IsOpenAITurnAdmissionError(err) {
 				h.handleTurnAdmissionError(c, err, streamStarted)
 				return
@@ -1255,6 +1265,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					}
 					if failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), false, nil, err)
+					}
+					if service.OpenAIAgentToolResultContinuation(c.Request.Context()) {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
 					}
 					if !forbiddenBudget.canRetry(failoverErr, switchCount) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
@@ -3206,6 +3220,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),
 	)
+	ctx = h.gatewayService.WithOpenAIWSAgentRecovery(ctx, c, firstMessage, sessionHash, wsForwardModel)
 	ctx = service.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -3218,6 +3233,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	wsAttemptMessage := append([]byte(nil), firstMessage...)
 	waitForWSSameAccountRetry := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
+		if !service.OpenAIWSAgentRecoveryCanRetry(ctx) {
+			return false
+		}
 		if !service.OpenAIWSIngressCanFailover(ctx, c) {
 			return false
 		}
@@ -3244,6 +3262,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		}
 	}
 	handleWSFailover := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
+		if !service.OpenAIWSAgentRecoveryCanRetry(ctx) {
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "agent task was not replayed; original context was preserved")
+			return false
+		}
 		if ctx.Err() != nil {
 			return false
 		}
@@ -3863,7 +3885,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// 说明该会话链不属于本次调度到的账号，原样转发会触发上游会话链鉴权失败（“鉴权失败，请检查 API Key”）。
 		// 故剥离首包里的 previous_response_id，改用首包内 input 重建上下文；带 function_call_output 的
 		// 工具续链无法重建，保持原样。仅作用于首轮首包，后续 turn 的续链由 WS 转发层既有逻辑处理。
-		if previousResponseID != "" && !scheduleDecision.StickyPreviousHit && previousResponseCanMove && !h.gatewayService.ProtectsWSNodeContinuation(account, wsFirstMessage) {
+		if previousResponseID != "" && !scheduleDecision.StickyPreviousHit && previousResponseCanMove && !service.OpenAIWSAgentRecoveryBound(ctx) && !h.gatewayService.ProtectsWSNodeContinuation(account, wsFirstMessage) {
 			wsFirstMessage = service.RemovePreviousResponseIDFromBody(wsFirstMessage)
 			reqLog.Debug("openai.websocket_previous_response_id_stripped_cross_group",
 				zap.Int64("account_id", account.ID),

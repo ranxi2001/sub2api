@@ -421,6 +421,24 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	recovery := openAIAgentRecoveryFromContext(ctx)
+	if recovery != nil && recovery.lookupErr != nil {
+		return nil, decision, recovery.lookupErr
+	}
+	if recovery != nil && recovery.conflict {
+		return nil, decision, openAIAgentRecoveryError("owner_conflict")
+	}
+	if recovery != nil && recovery.owner != nil {
+		if req.Platform != PlatformOpenAI || req.SessionHash != recovery.session ||
+			derefGroupID(req.GroupID) != recovery.groupID || req.RequestedModel != recovery.model {
+			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+		}
+		req.StickyAccountID = recovery.owner.accountID
+		req.StickyWeighted = false
+		req.PreserveStickyBinding = true
+		req.DisableStickyEscape = true
+		req.PreviousResponseCanMove = false
+	}
 	if s != nil && s.service != nil && s.service.openAIGroupRequiresPrivacySet(ctx, req.GroupID) {
 		req.RequirePrivacySet = true
 	}
@@ -431,6 +449,9 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	defer func() {
 		if err == nil && selection != nil && selection.Account != nil {
 			denied := s.service.priorityLatencyAdmission(req, selection.Account)
+			if recoveryErr := s.service.checkOpenAIAgentRecoveryAccount(ctx, selection.Account); recoveryErr != nil {
+				denied = recoveryErr
+			}
 			if latencyOwnerID > 0 && selection.Account.ID != latencyOwnerID {
 				denied = priorityLatencyAdmissionError(false)
 			}
@@ -519,6 +540,29 @@ func (s *defaultOpenAIAccountScheduler) Select(
 				return nil, decision, denied
 			}
 		}
+	}
+	if recovery != nil && recovery.owner != nil {
+		if req.GuardianParentAccountID > 0 && req.GuardianParentAccountID != recovery.owner.accountID {
+			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+		}
+		if previousResponseID != "" {
+			ownerID, readErr := s.service.getOpenAIWSStateStore().GetResponseAccount(ctx, derefGroupID(req.GroupID), previousResponseID)
+			if readErr != nil || ownerID != recovery.owner.accountID {
+				return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+			}
+		}
+		selection, _, err = s.selectBySessionHash(ctx, req)
+		if err != nil {
+			return nil, decision, err
+		}
+		if selection == nil || selection.Account == nil {
+			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+		}
+		decision.Layer = openAIAccountScheduleLayerSessionSticky
+		decision.StickySessionHit = true
+		decision.SelectedAccountID = selection.Account.ID
+		decision.SelectedAccountType = selection.Account.Type
+		return selection, decision, nil
 	}
 	if previousResponseID != "" && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI &&
 		(!req.StickyWeighted || !req.PreviousResponseCanMove) {
@@ -648,7 +692,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, bool, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
-	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
+	if sessionHash == "" || s == nil || s.service == nil || (s.service.cache == nil && req.StickyAccountID <= 0) {
 		return nil, false, nil
 	}
 
@@ -698,7 +742,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	// A sticky binding created before BPS was enabled may still point at a
 	// native account. Do not let that old binding bypass the explicit BPS route
 	// while an eligible BPS account is available for this model.
-	if req.Platform == PlatformOpenAI && strings.TrimSpace(req.RequestedModel) != "" && !account.IsExcelBPSEnabledForModel(req.RequestedModel) && !s.service.balancesPriorityProtocols(req) {
+	if !openAIAgentRecoveryBound(ctx) && req.Platform == PlatformOpenAI && strings.TrimSpace(req.RequestedModel) != "" && !account.IsExcelBPSEnabledForModel(req.RequestedModel) && !s.service.balancesPriorityProtocols(req) {
 		if candidates, listErr := s.service.listSchedulableAccountsForRequest(ctx, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.ExcludedIDs); listErr == nil {
 			for i := range candidates {
 				if candidates[i].ID != account.ID && candidates[i].IsExcelBPSEnabledForModel(req.RequestedModel) {
@@ -2779,7 +2823,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 	priority := s.prioritySchedulingRuntimeConfig()
 	observation := priorityObservationFromContext(ctx, requestedModel)
-	scheduler := s.getOpenAIAccountScheduler(ctx, platform == PlatformOpenAI && requiredImageCapability == "" && useUpstreamTokenCost && priorityApplies(priority, OpenAIAccountScheduleRequest{GroupID: groupID, RequestedModel: requestedModel, HistoryModel: observation.model}))
+	scheduler := s.getOpenAIAccountScheduler(ctx, openAIAgentRecoveryBound(ctx) || (platform == PlatformOpenAI && requiredImageCapability == "" && useUpstreamTokenCost && priorityApplies(priority, OpenAIAccountScheduleRequest{GroupID: groupID, RequestedModel: requestedModel, HistoryModel: observation.model})))
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if selection, hit, err := s.selectLegacyAccountByPreviousResponse(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform); err != nil {
