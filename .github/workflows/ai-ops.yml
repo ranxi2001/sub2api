@@ -39,7 +39,7 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - name: AI operations component and API boundaries
         working-directory: frontend
-        run: pnpm exec vitest run src/views/admin/__tests__/AIOpsView.spec.ts src/components/admin/operations/__tests__/AIOpsControls.spec.ts src/components/admin/operations/__tests__/AIOpsRecoveryProbes.spec.ts src/api/admin/__tests__/aiOps.spec.ts src/api/admin/__tests__/aiOpsControl.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+        run: pnpm exec vitest run src/views/admin/__tests__/AIOpsView.spec.ts src/components/admin/operations/__tests__/AIOpsControls.spec.ts src/components/admin/operations/__tests__/AIOpsRecoveryProbes.spec.ts src/api/admin/__tests__/aiOps.spec.ts src/api/admin/__tests__/aiOpsControl.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - name: Frontend typecheck
         run: pnpm --dir frontend run typecheck
       - name: Install isolated synthetic browser
@@ -57,3 +57,67 @@ jobs:
           name: ai-ops-ui-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/ai-ops-screenshots
           if-no-files-found: warn
+  proposal-cancellation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Cancellation authorization and ledger boundaries
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/repository ./internal/handler/admin -run '^TestAIOpsCancel' -count=1 -v -timeout=5m
+      - name: PostgreSQL cancellation, replay and concurrent execution
+        working-directory: backend
+        env:
+          CI: 'true'
+          GOTRACEBACK: crash
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../evidence
+          uname -a > ../evidence/kernel.txt
+          go version > ../evidence/toolchain.txt
+          go env GOOS GOARCH CGO_ENABLED GOTOOLCHAIN >> ../evidence/toolchain.txt
+          docker version > ../evidence/docker-version.txt
+          docker info > ../evidence/docker-info.txt
+          if ! command -v gdb >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdb
+          fi
+          ulimit -c unlimited
+          sudo sysctl -w "kernel.core_pattern=$RUNNER_TEMP/ai-ops-cancel.core.%p" > ../evidence/core-pattern.txt
+          export GORACE="log_path=$PWD/../evidence/race history_size=4"
+          binary="$RUNNER_TEMP/ai-ops-cancel.test"
+          go test -c -race -tags=integration ./internal/repository -o "$binary"
+          set +e
+          "$binary" -test.run '^TestAIOpsPostgres(Cancel|ConcurrentCancel)' -test.count=1 -test.v=true -test.timeout=10m > ../evidence/integration.log 2>&1
+          result=$?
+          set -e
+          cat ../evidence/integration.log
+          printf '%s\n' "$result" > ../evidence/exit.txt
+          if [ "$result" -ne 0 ]; then
+            for core in "$RUNNER_TEMP"/ai-ops-cancel.core.*; do
+              [ -f "$core" ] || continue
+              # Never upload raw core files or argument/local values.
+              gdb -batch -ex 'set print frame-arguments none' -ex 'thread apply all bt' \
+                "$binary" "$core" > "../evidence/backtrace-$(basename "$core").txt" 2>&1 || true
+            done
+            exit "$result"
+          fi
+          ! grep -Eq 'no tests to run|--- SKIP:|WARNING: DATA RACE|race detected during execution' ../evidence/integration.log
+          for regression in CancelledProposalCannotBeRevivedOrApplied CancellationCannotUndoAnAppliedAction ConcurrentCancelAndApplyHaveOneWinner; do
+            grep -q -- "=== RUN   TestAIOpsPostgres$regression$" ../evidence/integration.log
+            grep -q -- "--- PASS: TestAIOpsPostgres$regression " ../evidence/integration.log
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ai-ops-cancellation-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 14

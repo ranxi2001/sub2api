@@ -30,6 +30,7 @@ describe('NewFeatureBadge', () => {
     ['image header timeout groups', NEW_FEATURE_NOTICES.openaiImageHeaderTimeoutGroups],
     ['profit operations time ranges', NEW_FEATURE_NOTICES.profitOperationsTimeRanges],
     ['quality retest rest', NEW_FEATURE_NOTICES.qualityRetestRest],
+    ['AI operations proposal cancellation', NEW_FEATURE_NOTICES.aiOpsProposalCancel],
   ])('keeps %s dismissal shared and persistent across feature announcements', async (_feature, noticeId) => {
     const pinia = createPinia()
     setActivePinia(pinia)

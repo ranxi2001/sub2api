@@ -41,7 +41,8 @@ export const aiOpsControlAPI = {
  async actions(){record('actions',[]);return {items:copy(records),total:records.length};},
  async probes(){record('probes',[]);return {items:[],total:0};},
  async preview(id,index){record('preview',[id,index]);if(id!==run.id||index!==0)throw new Error('wrong_candidate');return copy(proposal);},
- async apply(id,digest){if(id!==proposal.id||digest!==proposal.digest)throw new Error('wrong_digest');globalThis.__aiOpsFixture.mutations.push({kind:'apply',id,digest});const action={id:'synthetic-action-a',proposal_id:id,run_id:run.id,action:'set_concurrency',account_id:3,before_value:10,after_value:9,status:'propagation_pending',created_at:now,updated_at:now,observe_until:until,owner_revision:9,target_revision:8,reason_code:'',auto:false};records.push(action);return copy(action);},
+ async cancel(id,digest){if(id!==proposal.id||digest!==proposal.digest)throw new Error('wrong_digest');proposal.status='cancelled';globalThis.__aiOpsFixture.mutations.push({kind:'cancel',id,digest});return copy(proposal);},
+ async apply(id,digest){if(proposal.status!=='ready'||id!==proposal.id||digest!==proposal.digest)throw new Error('wrong_digest');globalThis.__aiOpsFixture.mutations.push({kind:'apply',id,digest});const action={id:'synthetic-action-a',proposal_id:id,run_id:run.id,action:'set_concurrency',account_id:3,before_value:10,after_value:9,status:'propagation_pending',created_at:now,updated_at:now,observe_until:until,owner_revision:9,target_revision:8,reason_code:'',auto:false};records.push(action);return copy(action);},
  async savePolicy(){globalThis.__aiOpsFixture.mutations.push({kind:'save'});throw new Error('unexpected_policy_write');},
  async halt(){globalThis.__aiOpsFixture.mutations.push({kind:'halt'});return {...copy(policy),halted:true,revision:6};},
  async rollback(){globalThis.__aiOpsFixture.mutations.push({kind:'rollback'});throw new Error('unexpected_rollback');},
@@ -168,12 +169,30 @@ try {
   const verification = await page.evaluate(() => globalThis.__aiOpsFixture)
   if (verification.mutations.length !== 1 || verification.mutations[0].kind !== 'apply' || verification.mutations[0].digest !== 'd'.repeat(64)) throw new Error('invalid_explicit_approval')
   if (verification.paidCalls.length || blocked.length || errors.length) throw new Error('unexpected_paid_or_network_calls_or_browser_error')
+  await page.goto('http://127.0.0.1:4185/admin/ai-ops?scenario=cancel', { waitUntil: 'networkidle' })
+  await page.getByTestId('ai-ops-summary').waitFor()
+  await page.getByTestId('ai-control-advanced').locator(':scope > summary').click()
+  await page.getByTestId('ai-control-preview-0').click()
+  await page.getByTestId('ai-control-frozen').waitFor()
+  await page.getByTestId('ai-control-cancel').click()
+  await page.getByTestId('ai-control-cancel').waitFor({ state: 'hidden' })
+  if (!(await page.getByTestId('ai-control-apply').isDisabled())) throw new Error('cancelled_proposal_can_apply')
+  await page.screenshot({ path: path.join(output, 'cancelled-mobile-synthetic.png'), fullPage: true })
+  await recordMobileWidth(page)
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await page.screenshot({ path: path.join(output, 'cancelled-desktop-synthetic.png'), fullPage: true })
+  await page.getByTestId('ai-control-preview-0').click()
+  await page.getByTestId('ai-control-frozen').waitFor()
+  if (await page.getByTestId('ai-control-cancel').count() || !(await page.getByTestId('ai-control-apply').isDisabled())) throw new Error('repreview_revived_cancelled_proposal')
+  const cancellation = await page.evaluate(() => globalThis.__aiOpsFixture)
+  if (cancellation.mutations.length !== 1 || cancellation.mutations[0].kind !== 'cancel' || cancellation.mutations[0].digest !== 'd'.repeat(64) || cancellation.paidCalls.length) throw new Error('invalid_proposal_cancellation')
+  if (blocked.length || errors.length) throw new Error('unexpected_cancellation_network_or_browser_error')
   await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({
     commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), synthetic: true,
     actualComponents: ['AIOpsView.vue', 'AIOpsReport.vue', 'AIOpsControls.vue', 'AIOpsRecoveryProbes.vue', 'SmartOpsNav.vue'],
     defaultDetailsCollapsed: ['ai-ops-history', 'ai-control-advanced', 'ai-ops-report-details'],
     activeEmergencyHaltVisible: true, disabledExecutionHaltHidden: true, cooldownBlocksConsentedSubmission: true,
-    frozenPreviewPreservedAcrossCollapse: true,
+    frozenPreviewPreservedAcrossCollapse: true, cancelledProposalCannotApplyOrRevive: true, cancellationMutations: cancellation.mutations,
     disabledSideEffects: 0, observeSideEffects: 0, cooldownSideEffects: 0, unapprovedWrites: 0, confirmedSyntheticMutations: verification.mutations,
     paidRequests: 0, productionApiCalls: 0, browserErrors: errors, blockedRequests: blocked, mobileWidths: widths,
   }, null, 2))

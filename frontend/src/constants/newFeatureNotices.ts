@@ -24,6 +24,7 @@ export const NEW_FEATURE_NOTICES = {
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
   oauthInitialTOTPRotation429: 'oauth-initial-totp-rotation-on-429-initial-announcement',
   aiOpsCodex: 'ai-ops-codex-observe-initial-announcement',
+  aiOpsProposalCancel: 'ai-ops-proposal-cancel-initial-announcement',
   bepusdtPayment: 'bepusdt-embedded-payment-initial-announcement',
   accountDailyScheduling: 'account-daily-schedulable-timers-initial-announcement',
   accountAutoRefreshUpstreamModels: 'account-auto-refresh-upstream-models-initial-announcement',

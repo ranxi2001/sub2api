@@ -266,6 +266,7 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		ops.POST("/ai/halt", h.Admin.Ops.HaltAIOps)
 		ops.POST("/ai/proposals/preview", h.Admin.Ops.PreviewAIOpsProposal)
 		ops.POST("/ai/proposals/:id/apply", h.Admin.Ops.ApplyAIOpsProposal)
+		ops.POST("/ai/proposals/:id/cancel", h.Admin.Ops.CancelAIOpsProposal)
 		ops.GET("/ai/actions", h.Admin.Ops.ListAIOpsActions)
 		ops.POST("/ai/actions/:id/rollback", h.Admin.Ops.RollbackAIOpsAction)
 		ops.GET("/ai/probes", h.Admin.Ops.ListAIOpsProbes)

@@ -11,7 +11,7 @@ import enOps from '@/i18n/locales/en/aiOps'
 import zhOps from '@/i18n/locales/zh/aiOps'
 
 const { api, auth } = vi.hoisted(() => ({
-  api: { policy: vi.fn(), savePolicy: vi.fn(), actions: vi.fn(), halt: vi.fn(), preview: vi.fn(), apply: vi.fn(), rollback: vi.fn() },
+  api: { policy: vi.fn(), savePolicy: vi.fn(), actions: vi.fn(), halt: vi.fn(), preview: vi.fn(), cancel: vi.fn(), apply: vi.fn(), rollback: vi.fn() },
   auth: { isAdmin: true, user: { id: 41 } },
 }))
 vi.mock('@/api/admin/aiOpsControl', () => ({ aiOpsControlAPI: api }))
@@ -51,6 +51,7 @@ beforeEach(() => {
   api.actions.mockResolvedValue({ items: [], total: 0 })
   api.savePolicy.mockImplementation(async (value: AIOpsPolicy) => ({ ...value, revision: value.revision + 1 }))
   api.preview.mockResolvedValue(frozen())
+  api.cancel.mockResolvedValue({ ...frozen(), status: 'cancelled' })
   api.apply.mockResolvedValue(action())
   api.rollback.mockResolvedValue({ ...action(), status: 'rolled_back' })
   api.halt.mockResolvedValue({ ...policy(), halted: true, revision: 6 })
@@ -154,6 +155,30 @@ describe('AI operations controlled execution', () => {
     expect(api.apply).toHaveBeenCalledWith('proposal-1', 'd'.repeat(64), expect.any(AbortSignal))
     expect(wrapper.find('[data-testid="ai-control-frozen"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="ai-control-action"]').text()).toContain(en.status.propagation_pending)
+  })
+
+  it.each(['en', 'zh'] as const)('cancels the exact frozen proposal and blocks later approval in %s', async locale => {
+    wrapper = mountControls(locale); await flushPromises()
+    await wrapper.get('[data-testid="ai-control-preview-0"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="ai-control-apply-consent"]').setValue(true)
+    await wrapper.get('[data-testid="ai-control-cancel"]').trigger('click'); await flushPromises()
+    expect(api.cancel).toHaveBeenCalledWith('proposal-1', 'd'.repeat(64), expect.any(AbortSignal))
+    expect(api.cancel).toHaveBeenCalledOnce()
+    expect(api.apply).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="ai-control-cancel"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="ai-control-apply"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain((locale === 'zh' ? zh : en).proposalCancelled)
+  })
+
+  it('does not replay cancellation when its response is unknown', async () => {
+    api.cancel.mockRejectedValue(new Error('unknown outcome'))
+    wrapper = mountControls(); await flushPromises()
+    await wrapper.get('[data-testid="ai-control-preview-0"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="ai-control-cancel"]').trigger('click'); await flushPromises()
+    expect(api.cancel).toHaveBeenCalledOnce()
+    expect(wrapper.find('[data-testid="ai-control-frozen"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="ai-control-preview-0"]').attributes('disabled')).toBeDefined()
+    expect(api.apply).not.toHaveBeenCalled()
   })
 
   it('expires a preview and clears it when the selected diagnostic changes', async () => {

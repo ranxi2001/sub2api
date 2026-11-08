@@ -92,6 +92,8 @@ type AIOpsProposal struct {
 	ExpiresAt      time.Time             `json:"expires_at"`
 	CreatedAt      time.Time             `json:"created_at"`
 	Status         string                `json:"status"`
+	CancelledAt    *time.Time            `json:"cancelled_at,omitempty"`
+	CancelledBy    int64                 `json:"cancelled_by,omitempty"`
 	BlockedReasons []string              `json:"blocked_reasons"`
 	Evidence       AIOpsEvidenceSnapshot `json:"evidence"`
 	ImpactGroupIDs []int64               `json:"impact_group_ids"`
@@ -144,6 +146,7 @@ type AIOpsRepository interface {
 	HaltAIOps(context.Context, int64) (AIOpsPolicy, error)
 	PreviewAIOps(context.Context, AIOpsPreviewInput, int64) (AIOpsProposal, error)
 	ApplyAIOps(context.Context, string, string, int64, bool) (AIOpsAction, error)
+	CancelAIOpsProposal(context.Context, string, string, int64) (AIOpsProposal, error)
 	RollbackAIOps(context.Context, string, int64, int64) (AIOpsAction, error)
 	ListAIOpsActions(context.Context) ([]AIOpsAction, error)
 	ReconcileAIOps(context.Context) error

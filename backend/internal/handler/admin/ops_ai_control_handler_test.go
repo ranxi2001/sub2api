@@ -40,6 +40,7 @@ func newAIOpsControlRouter(repo *aiOpsControlRepoStub) (*gin.Engine, *OpsHandler
 	router := aiOpsTestRouter(h, "admin", nil)
 	router.POST("/preview", h.PreviewAIOpsProposal)
 	router.POST("/apply/:id", h.ApplyAIOpsProposal)
+	router.POST("/cancel/:id", h.CancelAIOpsProposal)
 	return router, h
 }
 
@@ -113,5 +114,36 @@ func TestAIOpsControlRoutesRequireFullAdmin(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Fatal("non-admin reached control handler")
 		}
+	}
+}
+
+func (r *aiOpsControlRepoStub) CancelAIOpsProposal(context.Context, string, string, int64) (service.AIOpsProposal, error) {
+	r.calls++
+	return service.AIOpsProposal{ID: aiOpsTestID, Status: "cancelled"}, nil
+}
+
+func TestAIOpsCancelNeedsFullAdminAndExactDigestButNotExecutionGate(t *testing.T) {
+	t.Setenv("SUB2API_AI_OPS_CONTROL_ENABLED", "false")
+	repo := &aiOpsControlRepoStub{}
+	router, h := newAIOpsControlRouter(repo)
+	for _, body := range []string{`{}`, `{"digest":"bad"}`, `{"digest":"` + strings.Repeat("a", 64) + `","account_id":1}`} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/cancel/"+aiOpsTestID, strings.NewReader(body)))
+		if w.Code != http.StatusBadRequest || repo.calls != 0 {
+			t.Fatal("malformed cancellation reached repository")
+		}
+	}
+	body := `{"digest":"` + strings.Repeat("a", 64) + `"}`
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/cancel/"+aiOpsTestID, strings.NewReader(body)))
+	if w.Code != http.StatusOK || repo.calls != 1 {
+		t.Fatal("execution gate blocked safe proposal cancellation")
+	}
+	observer := aiOpsTestRouter(h, "observer", nil)
+	observer.POST("/cancel/:id", h.CancelAIOpsProposal)
+	w = httptest.NewRecorder()
+	observer.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/cancel/"+aiOpsTestID, strings.NewReader(body)))
+	if w.Code != http.StatusForbidden || repo.calls != 1 {
+		t.Fatal("observer cancelled a proposal")
 	}
 }

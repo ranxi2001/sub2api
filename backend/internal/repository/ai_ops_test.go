@@ -257,3 +257,68 @@ func TestAIOpsEligibilityRejectsTransportsRecoveryCannotProbe(t *testing.T) {
 		require.NoError(t, m.ExpectationsWereMet())
 	}
 }
+
+func TestAIOpsCancelIsIdempotentAndDoesNotMutateAnAccount(t *testing.T) {
+	for _, status := range []string{"ready", "blocked", "cancelled", "applied", "expired", "conflict"} {
+		t.Run(status, func(t *testing.T) {
+			db, m, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+			p := service.AIOpsProposal{ID: "4447dc20-c3eb-4f5a-87ba-adfc91509b8c", Digest: "fixed", Status: status}
+			if status == "cancelled" {
+				now := time.Now().UTC()
+				p.CancelledAt, p.CancelledBy = &now, 41
+			}
+			aiOpsExpectTx(m)
+			m.ExpectQuery("SELECT data FROM ai_ops_proposals.*FOR UPDATE").WithArgs(p.ID).WillReturnRows(sqlmock.NewRows([]string{"data"}).AddRow(aiOpsJSON(p)))
+			switch status {
+			case "ready", "blocked":
+				m.ExpectQuery("SELECT EXISTS.*ai_ops_actions").WithArgs(p.ID).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+				m.ExpectExec("UPDATE ai_ops_proposals SET status='cancelled'").WithArgs(p.ID, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+				m.ExpectCommit()
+			case "cancelled":
+				m.ExpectCommit()
+			default:
+				m.ExpectRollback()
+			}
+			r := &accountRepository{sql: db}
+			got, err := r.CancelAIOpsProposal(context.Background(), p.ID, p.Digest, 9)
+			switch status {
+			case "ready", "blocked":
+				require.NoError(t, err)
+				require.Equal(t, "cancelled", got.Status)
+				require.Equal(t, int64(9), got.CancelledBy)
+				require.NotNil(t, got.CancelledAt)
+			case "cancelled":
+				require.NoError(t, err)
+				require.Equal(t, int64(41), got.CancelledBy, "retry preserves original audit actor")
+				require.WithinDuration(t, *p.CancelledAt, *got.CancelledAt, time.Microsecond)
+			default:
+				require.ErrorIs(t, err, service.ErrAIOpsConflict)
+			}
+			require.NoError(t, m.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestAIOpsCancelRejectsAnotherDigestAndExistingAction(t *testing.T) {
+	for _, wrongDigest := range []bool{true, false} {
+		db, m, err := sqlmock.New()
+		require.NoError(t, err)
+		r := &accountRepository{sql: db}
+		p := service.AIOpsProposal{ID: "4447dc20-c3eb-4f5a-87ba-adfc91509b8c", Digest: "fixed", Status: "ready"}
+		aiOpsExpectTx(m)
+		m.ExpectQuery("SELECT data FROM ai_ops_proposals.*FOR UPDATE").WithArgs(p.ID).WillReturnRows(sqlmock.NewRows([]string{"data"}).AddRow(aiOpsJSON(p)))
+		digest := "other"
+		if !wrongDigest {
+			digest = p.Digest
+			m.ExpectQuery("SELECT EXISTS.*ai_ops_actions").WithArgs(p.ID).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+		}
+		m.ExpectRollback()
+		m.ExpectClose()
+		_, err = r.CancelAIOpsProposal(context.Background(), p.ID, digest, 9)
+		require.ErrorIs(t, err, service.ErrAIOpsConflict)
+		require.NoError(t, db.Close())
+		require.NoError(t, m.ExpectationsWereMet())
+	}
+}

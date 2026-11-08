@@ -207,6 +207,36 @@ func (h *OpsHandler) ApplyAIOpsProposal(c *gin.Context) {
 	response.Success(c, action)
 }
 
+func (h *OpsHandler) CancelAIOpsProposal(c *gin.Context) {
+	// Revoking an unapplied proposal remains available while execution is disabled.
+	repo, ok := h.aiOpsControl(c, false)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil || id.String() != c.Param("id") {
+		response.BadRequest(c, "Invalid proposal ID")
+		return
+	}
+	var input struct {
+		Digest string `json:"digest"`
+	}
+	if !aiOpsDecode(c, &input, 1024) {
+		return
+	}
+	if !aiOpsDigestPattern.MatchString(input.Digest) {
+		response.BadRequest(c, "Confirm the exact frozen proposal digest")
+		return
+	}
+	proposal, err := repo.CancelAIOpsProposal(c.Request.Context(), id.String(), input.Digest, aiOpsActor(c))
+	if err != nil {
+		aiOpsControlError(c, err)
+		return
+	}
+	middleware.SetAuditExtra(c, map[string]any{"source": "human_cancelled_ai_ops", "event_id": proposal.ID})
+	response.Success(c, proposal)
+}
+
 func (h *OpsHandler) ListAIOpsActions(c *gin.Context) {
 	repo, ok := h.aiOpsControl(c, false)
 	if !ok {
