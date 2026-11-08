@@ -35,14 +35,22 @@ jobs:
           trap 'cp "$RUNNER_TEMP/upstream-current-service.go" "$target"' EXIT
           git fetch --no-tags --depth=1 origin ecf63af98587c151fe40893f3e3c322a777b17df
           git show ecf63af98587c151fe40893f3e3c322a777b17df:backend/internal/service/upstream_operations.go > "$target"
-          # Preserve the independent entity filter DTO while reverting only
-          # the endpoint-attribution implementation under test. Cost metadata
-          # moved to profit_operations.go; don't restore its former duplicate.
+          # Preserve the independent filter DTO and validation while reverting
+          # only endpoint attribution. Profit validation also calls the shared
+          # window validator; restoring the old file alone would not compile.
+          # Cost metadata moved to profit_operations.go; omit its old duplicate.
           python3 - <<'PYCOMPAT'
           from pathlib import Path
+          import os
           import re
           p=Path('internal/service/upstream_operations.go')
           s=p.read_text()
+          current=Path(os.environ['RUNNER_TEMP'], 'upstream-current-service.go').read_text()
+          begin='func ValidateUpstreamOperationsFilter('
+          end='func (s *ChannelService) UpstreamOperations('
+          s=s[:s.index(begin)]+current[current.index(begin):current.index(end)]+s[s.index(end):]
+          if '"strconv"' not in s:
+              s=s.replace('import (\n', 'import (\n "strconv"\n', 1)
           if '`json:"channel_id,omitempty"`' not in s:
               s=s.replace('Upstream   string    `json:"upstream"`', 'Upstream   string    `json:"upstream"`\n ChannelID int64 `json:"channel_id,omitempty"`')
           s=re.sub(r'\n// OperationsCostMultiplier distinguishes.*?\n}\s*$', '\n', s, flags=re.S)
