@@ -1,11 +1,11 @@
 <template>
-  <section class="min-w-0 rounded-lg border border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/20" aria-labelledby="key-risk-notices-title">
-    <h2 id="key-risk-notices-title">
+  <section class="min-w-0 rounded-lg border border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/20" :aria-labelledby="titleId">
+    <h2 :id="titleId">
       <button
         type="button"
         class="flex w-full min-w-0 items-center justify-between gap-3 rounded-lg px-4 py-2 text-left text-sm"
         :aria-expanded="expanded"
-        aria-controls="key-risk-notices-details"
+        :aria-controls="detailsId"
         data-test="toggle-risk-notices"
         @click="expanded = !expanded"
       >
@@ -18,8 +18,8 @@
       </button>
     </h2>
     <div
-      v-if="expanded"
-      id="key-risk-notices-details"
+      v-show="expanded"
+      :id="detailsId"
       data-test="risk-notices-details"
       class="max-h-[min(24vh,16rem)] overflow-y-auto overscroll-contain px-4 pb-4"
     >
@@ -58,11 +58,14 @@
   </section>
 </template>
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, useId } from 'vue'
 import RiskIdentity from './RiskIdentity.vue'
 import { useI18n } from 'vue-i18n'
 import { userKeyRiskApi, type UserKeyRiskNotice } from './keyRiskApi'
 const { t } = useI18n()
+const noticeId = useId()
+const titleId = `key-risk-notices-title-${noticeId}`
+const detailsId = `key-risk-notices-details-${noticeId}`
 const items = ref<UserKeyRiskNotice[]>([])
 const expanded = ref(false)
 const busy = ref(false), error = ref(false), message = ref(''), before = ref(0)

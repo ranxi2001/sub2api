@@ -260,29 +260,31 @@
           <template #cell-usage="{ row }">
             <div class="key-usage-cell text-sm">
               <div class="flex items-center gap-1.5">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
-                <span class="font-medium text-gray-900 dark:text-white">
+                <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
+                <span class="key-usage-amount font-medium text-gray-900 dark:text-white">
                   ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
                 </span>
               </div>
               <div class="mt-0.5 flex items-center gap-1.5">
-                <span class="text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
-                <span class="font-medium text-gray-900 dark:text-white">
+                <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
+                <span class="key-usage-amount font-medium text-gray-900 dark:text-white">
                   ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
                 </span>
               </div>
               <!-- Quota progress (if quota is set) -->
               <div v-if="row.quota > 0" class="mt-1.5">
                 <div class="flex items-center gap-1.5">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('keys.quota') }}:</span>
-                  <span :class="[
-                    'font-medium',
+                  <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.quota') }}:</span>
+                  <div :class="[
+                    'key-quota-values flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1 font-medium',
                     row.quota_used >= row.quota ? 'text-red-500' :
                     row.quota_used >= row.quota * 0.8 ? 'text-yellow-500' :
                     'text-gray-900 dark:text-white'
                   ]">
-                    ${{ row.quota_used?.toFixed(2) || '0.00' }} / ${{ row.quota?.toFixed(2) }}
-                  </span>
+                    <span class="key-usage-amount">${{ row.quota_used?.toFixed(2) || '0.00' }}</span>
+                    <span>/</span>
+                    <span class="key-usage-amount">${{ row.quota?.toFixed(2) }}</span>
+                  </div>
                 </div>
                 <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
                   <div
@@ -2444,8 +2446,14 @@ onUnmounted(() => {
     flex-wrap: wrap;
   }
 
-  .key-usage-cell span {
+  .key-usage-label {
     white-space: nowrap;
+  }
+
+  .key-usage-amount {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 }
 

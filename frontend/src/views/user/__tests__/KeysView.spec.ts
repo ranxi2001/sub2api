@@ -416,6 +416,7 @@ describe('user KeysView column settings', () => {
     expect(usage).toContain('Today:$1.2345')
     expect(usage).toContain('Last30days:$31.5678')
     expect(usage).toContain('Quota:$42.00/$100.00')
+    expect(wrapper.get('.key-quota-values').findAll('.key-usage-amount').map(amount => amount.text())).toEqual(['$42.00', '$100.00'])
     expect(getDashboardApiKeysUsage).toHaveBeenCalledWith([key.id], expect.objectContaining({ signal: expect.any(AbortSignal) }))
 
     await groupField.get('.key-group-control').trigger('click')
@@ -427,6 +428,19 @@ describe('user KeysView column settings', () => {
     } else {
       expect(wrapper.get('input[placeholder="keys.searchGroup"]').exists()).toBe(true)
     }
+  })
+
+  it('preserves large quota values in independently wrapping amount units', async () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: false, media: query, onchange: null, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+      addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+    })))
+    setKeys({ ...createApiKey(), quota: 999999999999.99, quota_used: 888888888888.88 })
+    const wrapper = await mountView(true)
+    const quota = wrapper.get('[data-field="usage"] .key-quota-values')
+    expect(quota.findAll('.key-usage-amount').map(amount => amount.text())).toEqual(['$888888888888.88', '$999999999999.99'])
+    expect(quota.text().replace(/\s+/g, '')).toBe('$888888888888.88/$999999999999.99')
+    expect(quota.classes()).toContain('text-yellow-500')
   })
 
   it('shows model policy editing only to administrators', async () => {

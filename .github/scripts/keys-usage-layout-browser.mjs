@@ -39,6 +39,7 @@ const modules = {
   dialog: `export default {render:()=>null};`,
   layout: `import {h} from 'vue';export default {setup(_,{slots}){return()=>h('div',{class:'min-h-screen bg-gray-50 dark:bg-dark-950'},[h('header',{class:'h-16 border-b px-4 py-5 text-sm'},'Offline Keys UI · synthetic data'),h('main',{class:'p-4 md:p-6 lg:ml-64 lg:p-8'},slots.default?.())])}};`,
   api: `const keys=${JSON.stringify(keys)},group=${JSON.stringify(group)};
+    if(new URLSearchParams(location.search).get('amounts')==='large')for(const key of keys){key.quota=999999999999.99;key.quota_used=888888888888.88;}
     export const keysAPI={list:async()=>({items:keys,total:4,pages:1}),getConcurrency:async()=>({queue_policy:{max_waiting:0,timeout_seconds:0},items:keys.map(k=>({id:k.id,current_concurrency:0,current_waiting:0}))})};
     export const usageAPI={getDashboardApiKeysUsage:async()=>({stats:Object.fromEntries(keys.map(k=>[k.id,{today_actual_cost:12.3456,total_actual_cost:456.789}]))})};
     export const authAPI={getPublicSettings:async()=>({api_base_url:'https://example.invalid/',custom_endpoints:[]})};
@@ -51,6 +52,7 @@ import {createApp,h} from 'vue';import {createI18n} from 'vue-i18n';
 import Candidate from '/src/views/user/KeysView.vue';import Baseline from '/@fs/${baselinePath}';
 import zh from '/src/i18n/locales/zh/index.ts';import en from '/src/i18n/locales/en/index.ts';import '/src/style.css';
 const params=new URLSearchParams(location.search);window.riskReads=0;
+if(params.get('font')==='200'){const style=document.createElement('style');style.textContent='.key-usage-cell { font-size:200% !important; line-height:1.5 !important; }';document.head.append(style);}
 createApp({render:()=>h(params.has('baseline')?Baseline:Candidate)}).use(createI18n({legacy:false,locale:params.get('locale')||'zh',messages:{zh,en}})).mount('#app');</script></html>`)
 
 const requireFrontend = createRequire(path.join(frontend, 'package.json'))
@@ -98,13 +100,20 @@ async function screenshot(page, name, scope) {
 }
 async function checkRiskSummary(page) {
   const toggle = page.locator('[data-test="toggle-risk-notices"]')
+  const details = page.locator('[data-test="risk-notices-details"]')
   assert(await toggle.isVisible())
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
-  assert.equal(await page.locator('[data-test="risk-notices-details"]').count(), 0)
+  assert.equal(await details.count(), 1)
+  assert(await details.isHidden())
+  const detailsId = await details.getAttribute('id')
+  assert(detailsId)
+  assert.equal(await toggle.getAttribute('aria-controls'), detailsId)
   assert.equal(await page.evaluate(() => window.riskReads), 1)
-  await toggle.click()
+  await toggle.focus()
+  await page.keyboard.press('Enter')
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true')
-  const details = page.locator('[data-test="risk-notices-details"]')
+  assert(await details.isVisible())
+  assert.equal(await toggle.getAttribute('aria-controls'), await details.getAttribute('id'))
   const bounded = await details.evaluate(el => ({ height: el.getBoundingClientRect().height, overflow: getComputedStyle(el).overflowY, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }))
   assert(bounded.height <= Math.min(page.viewportSize().height * 0.24, 256) + 1, JSON.stringify(bounded))
   assert.equal(bounded.overflow, 'auto')
@@ -130,7 +139,8 @@ try {
   await screenshot(desktop, 'after-desktop-expanded', 'candidate')
   await toggle.click()
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
-  assert.equal(await desktop.locator('[data-test="risk-notices-details"]').count(), 0)
+  assert.equal(await desktop.locator('[data-test="risk-notices-details"]').count(), 1)
+  assert(await desktop.locator('[data-test="risk-notices-details"]').isHidden())
   const height = await table.evaluate(el => el.getBoundingClientRect().height)
   assert(height > 150, `Key table must retain readable space, got ${height}px`)
   await desktop.getByRole('columnheader', { name: '用量', exact: true }).scrollIntoViewIfNeeded()
@@ -187,6 +197,33 @@ try {
     await groupField.scrollIntoViewIfNeeded()
     await screenshot(mobile, `after-mobile-${width}`, 'candidate')
     measurements.push({ viewport: mobile.viewportSize(), riskDetails: bounded, ...geometry })
+    await mobile.close()
+  }
+  // Text scaling is intentionally limited to the real usage cell. This is not
+  // an assertion about full-page browser zoom or unrelated fixed-width filters.
+  for (const textScalePercent of [100, 200]) {
+    const mobile = await open({ width: 320, height: 844 }, `?amounts=large&font=${textScalePercent}`)
+    const usageField = mobile.locator('[data-field="usage"]').first()
+    await usageField.scrollIntoViewIfNeeded()
+    assert.deepEqual((await usageField.locator('.key-quota-values .key-usage-amount').allTextContents()).map(value => value.replace(/\s+/g, '')), ['$888888888888.88', '$999999999999.99'])
+    const geometry = await usageField.evaluate(el => {
+      const rect = node => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width, height: r.height } }
+      const amounts = [...el.querySelectorAll('.key-quota-values .key-usage-amount')]
+      const nodes = [el, ...el.querySelectorAll('*')]
+      return {
+        usage: rect(el), amounts: amounts.map(rect),
+        fontSize: parseFloat(getComputedStyle(el.querySelector('.key-usage-cell')).fontSize),
+        overflowing: nodes.filter(node => node.clientWidth > 0 && node.scrollWidth > node.clientWidth + 1).map(node => node.className),
+        documentWidth: document.documentElement.scrollWidth
+      }
+    })
+    assert.equal(geometry.fontSize, 14 * textScalePercent / 100)
+    assert.deepEqual(geometry.overflowing, [], JSON.stringify(geometry))
+    assert(geometry.documentWidth <= 320, JSON.stringify(geometry))
+    assert(geometry.usage.left >= 0 && geometry.usage.right <= 320, JSON.stringify(geometry))
+    assert(geometry.amounts.every(amount => amount.left >= geometry.usage.left - 1 && amount.right <= geometry.usage.right + 1), JSON.stringify(geometry))
+    await screenshot(mobile, `after-mobile-320-large-quota-font-${textScalePercent}`, 'candidate')
+    measurements.push({ viewport: mobile.viewportSize(), scenario: 'large-quota', textScalePercent, textScaleScope: 'usage-text', ...geometry })
     await mobile.close()
   }
   assert.deepEqual(errors, [])
