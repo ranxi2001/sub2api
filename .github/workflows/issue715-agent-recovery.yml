@@ -53,16 +53,18 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
-          target=backend/internal/service/openai_codex_model_metadata.go
+          targets=(backend/internal/service/openai_codex_model_metadata.go backend/internal/service/openai_codex_models_service.go backend/internal/service/openai_excel_bps_models_manifest.go)
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "$target"; git diff --exit-code' EXIT
-          git restore --source="$original" -- "$target"
-          expected=$(git rev-parse "$original:$target")
-          actual=$(git hash-object "$target")
-          echo "baseline=$original expected_blob=$expected tested_blob=$actual"
-          test "$expected" = "$actual"
+          trap 'git restore --source=HEAD -- "${targets[@]}"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "${targets[@]}"
+          for target in "${targets[@]}"; do
+            expected=$(git rev-parse "$original:$target")
+            actual=$(git hash-object "$target")
+            echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
+            test "$expected" = "$actual"
+          done
           set +e
-          (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715BridgeDoesNotAdvertiseEncryptedAgent$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-red.log" 2>&1
+          (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715(BridgeDoesNotAdvertiseEncryptedAgent|FetchedAndPinnedBridgeCapabilities|LiveBridgeCapabilityCannotOverrideWire)$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue715-red.log"
@@ -70,3 +72,7 @@ jobs:
           ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-red.log"
           grep -q -- '--- FAIL: TestIssue715BridgeDoesNotAdvertiseEncryptedAgent' "$RUNNER_TEMP/issue715-red.log"
           grep -q 'bridge must not create unreadable encrypted tasks' "$RUNNER_TEMP/issue715-red.log"
+          grep -q -- '--- FAIL: TestIssue715FetchedAndPinnedBridgeCapabilities' "$RUNNER_TEMP/issue715-red.log"
+          grep -q 'bridge capability repair must invalidate the native ETag' "$RUNNER_TEMP/issue715-red.log"
+          grep -q -- '--- FAIL: TestIssue715LiveBridgeCapabilityCannotOverrideWire' "$RUNNER_TEMP/issue715-red.log"
+          grep -q 'live bridge manifest must not restore v2' "$RUNNER_TEMP/issue715-red.log"

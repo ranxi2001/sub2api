@@ -2288,6 +2288,10 @@ func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Accou
 		metadataModels[id] = capabilityModel
 		capabilities := accountCodexToolCapabilities(account, capabilityModel)
 		applyCodexToolCapabilities(capabilities, entry, true)
+		if account != nil && account.IsOpenAI() && shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+			capabilities["multi_agent_version"] = json.RawMessage("null")
+			capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
+		}
 		modelMetadata[id] = codexModelMetadataOverride{UpstreamModelMetadata: UpstreamModelMetadata{
 			CodexToolCapabilities: capabilities,
 		}}
@@ -2538,6 +2542,11 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, ac
 		}
 		capabilities := accountCodexToolCapabilities(account, capabilityModel)
 		modelChanged := applyCodexToolCapabilities(model, capabilities, false)
+		if account != nil && account.IsOpenAI() && shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+			modelChanged = applyCodexToolCapabilities(model, map[string]json.RawMessage{
+				"multi_agent_version": json.RawMessage("null"), "multi_agent_reasoning_effort": json.RawMessage("null"),
+			}, true) || modelChanged
+		}
 		if completeDescriptor {
 			merged, err := mergeMissingCodexModelFields(model, defaults)
 			if err != nil {
