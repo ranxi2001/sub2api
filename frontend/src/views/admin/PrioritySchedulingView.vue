@@ -41,9 +41,9 @@
       </form>
       </details>
       <section class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="priority-filters">
-        <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.model') }}</span><Select v-model="selectedModel" data-testid="priority-model-filter" :options="modelOptions" :searchable="true" :creatable="true" :aria-label="t('priorityScheduling.model')" /></label>
-        <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.group') }}</span><Select v-model="selectedGroup" data-testid="priority-group-filter" :options="groupOptions" :searchable="true" :aria-label="t('priorityScheduling.group')" /></label>
-        <label><span class="field-title">{{ t('priorityScheduling.window_minutes') }}</span><select id="priority-latency-window" v-model.number="latencyMinutes" class="input w-full" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select></label>
+        <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.model') }}</span><Select v-model="selectedModel" data-testid="priority-model-filter" :disabled="!initialized" :options="modelOptions" :searchable="true" :creatable="true" :aria-label="t('priorityScheduling.model')" /></label>
+        <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.group') }}</span><Select v-model="selectedGroup" data-testid="priority-group-filter" :disabled="!initialized" :options="groupOptions" :searchable="true" :aria-label="t('priorityScheduling.group')" /></label>
+        <label><span class="field-title">{{ t('priorityScheduling.window_minutes') }}</span><select id="priority-latency-window" v-model.number="latencyMinutes" :disabled="!initialized" class="input w-full" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select></label>
         <div class="flex items-end"><button class="btn btn-secondary w-full" :disabled="refreshing || catalogLoading" data-testid="latency-refresh" @click="loadLatency">{{ t('priorityScheduling.refresh') }}</button></div>
         <p v-if="catalogError" class="text-sm text-red-600 sm:col-span-2 lg:col-span-4" role="alert">{{ t('priorityScheduling.filters.catalogError') }}</p>
       </section>
@@ -94,7 +94,7 @@
           <p v-if="snapshot.history_status && snapshot.history_status !== 'ready'" role="status" class="text-sm text-amber-600">{{ t(`priorityScheduling.historyStates.${snapshot.history_status}`) }}</p>
           <p v-else-if="!snapshot.history_ready" class="text-sm text-amber-600">{{ t('priorityScheduling.historyPending') }}</p>
           <p v-if="snapshot.history_error && snapshot.history_ready" class="text-sm text-amber-600">{{ t('priorityScheduling.historyRetry') }}</p>
-          <p v-if="snapshot.evaluated_at" data-testid="priority-evaluated-at" class="mb-3 text-xs text-gray-500">{{ t('priorityScheduling.evaluatedAt') }}: {{ new Date(snapshot.evaluated_at).toLocaleString() }}<template v-if="snapshot.history_observed_at"> · {{ t('priorityScheduling.historyObservedAt') }}: {{ new Date(snapshot.history_observed_at).toLocaleString() }}</template></p>
+          <p v-if="snapshot.evaluated_at && snapshot.evaluated_at !== snapshot.at" data-testid="priority-evaluated-at" class="mb-3 text-xs text-gray-500">{{ t('priorityScheduling.evaluatedAt') }}: {{ new Date(snapshot.evaluated_at).toLocaleString() }}<template v-if="snapshot.history_observed_at"> · {{ t('priorityScheduling.historyObservedAt') }}: {{ new Date(snapshot.history_observed_at).toLocaleString() }}</template></p>
           <p v-if="snapshot.latency_fallback" role="status" class="mb-3 text-sm text-amber-600" data-testid="priority-latency-fallback">{{ t('priorityScheduling.latencyFallback') }}</p>
           <p class="mb-3 text-xs text-gray-500">P{{ snapshot.latency_percentile ?? 90 }} · {{ snapshot.latency_measurement ?? 'legacy_forward' }} · {{ t('priorityScheduling.window_minutes') }}: {{ snapshot.window_minutes ?? '—' }} · {{ t('priorityScheduling.configRevision') }}: {{ snapshot.config_revision ?? '—' }}<template v-if="snapshot.history_window_end"> · {{ t('priorityScheduling.windowEnd') }}: {{ new Date(snapshot.history_window_end).toLocaleString() }}</template></p>
           <p data-testid="candidate-status" role="status" class="mb-3 text-xs text-gray-500">{{ t(snapshotError ? 'priorityScheduling.reading.stale' : refreshing ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.filters.updated') }}</p>
@@ -233,7 +233,7 @@ const fields = [
   { key: 'min_quality_percent', min: 0, max: 100 }, { key: 'window_minutes', min: 5, max: 1440 },
   { key: 'min_samples', min: 1, max: 1000 }, { key: 'quality_max_age_hours', min: 1, max: 168 }
 ] as const
-let alive = true, generation = 0, recomputeRequestGeneration = 0, stickyRequestGeneration = 0, snapshotRequestGeneration = 0, latencyRequestGeneration = 0
+let alive = true, generation = 0, recomputeRequestGeneration = 0, stickyRequestGeneration = 0, snapshotRequestGeneration = 0
 let catalogRequestGeneration = 0
 let historyTimer: ReturnType<typeof setTimeout> | undefined
 function stopHistoryRefresh() { clearTimeout(historyTimer); historyTimer = undefined }
@@ -298,7 +298,7 @@ function displayScope(value: PrioritySnapshot | null | undefined) {
   return JSON.stringify([auth.user?.id, auth.user?.role, value.model, value.group_id, value.config_revision, value.mode, value.selection_policy, value.window_minutes, value.min_samples, value.latency_percentile, value.latency_measurement, value.latency_penalty_mode])
 }
 function clearLatency() {
-  latencyRequestGeneration++; latency.value = null; latencyOrder.value = []
+  latency.value = null; latencyOrder.value = []
   latencyLoading.value = false; latencyError.value = ''; latencyPage.value = 1
 }
 const canRead = () => alive && auth.user?.role === 'admin'
@@ -401,7 +401,7 @@ async function loadCatalog(initial = false) {
   finally { if (active(version) && request === catalogRequestGeneration) catalogLoading.value = false }
 }
 async function refresh() {
-  if (!canRead() || !initialized) return
+  if (!canRead() || !initialized.value) return
   stopHistoryRefresh()
   recomputeRequestGeneration++; recomputeResult.value = null
   if (!selectedModel.value || catalogError.value) await loadCatalog(!selectedModel.value)
@@ -532,21 +532,21 @@ watch(stickyGroupID, () => {
   stickyRequestGeneration++
   sticky.value = null; stickyError.value = ''; stickyNotice.value = ''; stickyLoading.value = false
 }, { flush: 'sync' })
-let initialized = false
+const initialized = ref(false)
 watch([selectedModel, selectedGroup, latencyMinutes], () => {
-  if (!initialized) return
+  if (!initialized.value) return
   stopHistoryRefresh(); snapshotRequestGeneration++; refreshing.value = false
   recomputeRequestGeneration++; recomputeResult.value = null; recomputeLoading.value = false
   clearLatency(); snapshot.value = null; candidateOrder.value = []; candidatePage.value = 1; snapshotError.value = ''
   void loadSnapshot(0)
 }, { flush: 'sync' })
-watch(selectedGroup, () => { if (initialized) void loadCatalog() })
+watch(selectedGroup, () => { if (initialized.value) void loadCatalog() })
 watch(() => auth.user ? `${auth.user.id}:${auth.user.role}` : '', () => {
-  stopHistoryRefresh(); generation++; initialized = false; draft.value = null; snapshot.value = null; mutationSnapshot.value = null; selectedModel.value = ''; selectedGroup.value = 0; availableModels.value = []; availableGroups.value = []; catalogLoading.value = false; catalogError.value = false
+  stopHistoryRefresh(); generation++; initialized.value = false; draft.value = null; snapshot.value = null; mutationSnapshot.value = null; selectedModel.value = ''; selectedGroup.value = 0; availableModels.value = []; availableGroups.value = []; catalogLoading.value = false; catalogError.value = false
   groups.value = modelsText.value = error.value = notice.value = snapshotError.value = ''
   clearLatency(); candidateOrder.value = []; candidatePage.value = 1; latencyExpanded.value = false
   recomputeResult.value = null; recomputeError.value = ''; recomputeLoading.value = false
-  recomputeRequestGeneration++; stickyRequestGeneration++; snapshotRequestGeneration++; latencyRequestGeneration++
+  recomputeRequestGeneration++; stickyRequestGeneration++; snapshotRequestGeneration++
   sticky.value = null; stickyError.value = ''; stickyNotice.value = ''; stickyLoading.value = false; stickyGroupID.value = 2
   loading.value = saving.value = refreshing.value = false
 }, { flush: 'sync' })
@@ -557,7 +557,7 @@ onMounted(async () => {
   selectedGroup.value = draft.value?.group_ids?.[0] ?? 0
   await loadCatalog(true)
   if (!active(version) || !canRead()) return
-  initialized = true
+  initialized.value = true
   void loadSticky(); void refresh()
 })
 onBeforeUnmount(() => { stopHistoryRefresh(); alive = false; generation++ })

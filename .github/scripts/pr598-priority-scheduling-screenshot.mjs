@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 
 const root = process.cwd()
 const frontend = path.join(root, 'frontend')
@@ -12,6 +13,7 @@ const vueModule = requireFrontend('@vitejs/plugin-vue')
 const vue = vueModule.default || vueModule
 const tailwind = requireFrontend('tailwindcss')
 const autoprefixer = requireFrontend('autoprefixer')
+const { default: theme } = await import(pathToFileURL(path.join(frontend, 'tailwind.config.js')))
 const { chromium } = createRequire(path.join(process.env.PLAYWRIGHT_ROOT, 'package.json'))('playwright')
 const output = process.env.PR598_SCREENSHOT_DIR
 await fs.mkdir(output, { recursive: true })
@@ -24,7 +26,7 @@ const candidate={account_id:701,account_name:'Synthetic OAuth account',score:81,
 const snapshot={at:now,evaluated_at:now,model:'fixture-model',group_id:11,mode:'balanced',latency_percentile:50,latency_measurement:'attributed_v1',min_samples:5,window_minutes:60,config_revision:'synthetic',history_ready:true,history_status:'ready',history_refreshing:false,candidates:[candidate]}
 const bucket=(time,selected,p50,p90)=>({account_id:701,bucket:time,samples:6,p50_ttft_ms:p50,p70_ttft_ms:Math.round((p50+p90)/2),p90_ttft_ms:p90,p95_ttft_ms:p90,p99_ttft_ms:p90,mean_ttft_ms:Math.round((p50+p90)/2),selected_ttft_ms:selected,slow_samples:0,error_samples:0})
 const latency={config_revision:'synthetic',at:now,model:'fixture-model',group_id:11,bucket_minutes:5,latency_percentile:50,latency_measurement:'attributed_v1',accounts:[{account_id:701,account_name:candidate.account_name,samples:12,p50_ttft_ms:480,p70_ttft_ms:650,p90_ttft_ms:1450,p95_ttft_ms:2100,p99_ttft_ms:2900,selected_ttft_ms:480,latency_percentile:50,latency_measurement:'attributed_v1',slow_samples:1,error_samples:1,error_rate:.08,buckets:[bucket('2026-10-30T00:00:00Z',480,480,1450),bucket('2026-10-30T00:05:00Z',620,620,1600)]}]}
-apiClient.defaults.adapter=async request=>{const url=request.url;let data=[];if(url.endsWith('/config'))data=config;else if(url.endsWith('/snapshot'))data={snapshot};else if(url.endsWith('/latency'))data=latency;else if(url.endsWith('/sticky-bindings'))data={group_id:11,total:3,by_account:[{account_id:701,count:3}]};else if(url.endsWith('/settings'))data={run_mode:'simple'};else if(url.endsWith('/groups'))data=[];return {data:{code:0,message:'success',data},status:200,statusText:'OK',headers:{},config:request}}
+apiClient.defaults.adapter=async request=>{const url=request.url;let data=[];if(url.endsWith('/config'))data=config;else if(url.endsWith('/models'))data={models:['fixture-model']};else if(url.endsWith('/groups/all'))data=[{id:11,name:'Synthetic group'}];else if(url.endsWith('/analysis')){if(request.params.model!=='fixture-model'||request.params.group_id!==11)throw Error('Unexpected analysis scope');data={snapshot:{...snapshot,window_minutes:request.params.minutes},latency}}else if(url.endsWith('/snapshot'))data={snapshot};else if(url.endsWith('/latency'))data=latency;else if(url.endsWith('/sticky-bindings'))data={group_id:11,total:3,by_account:[{account_id:701,count:3}]};else if(url.endsWith('/settings'))data={run_mode:'simple'};else if(url.endsWith('/groups'))data=[];return {data:{code:0,message:'success',data},status:200,statusText:'OK',headers:{},config:request}}
 globalThis.__pr598Fixture={config,snapshot,latency}
 `
 const shell = `import { h } from 'vue'; export default {setup(_,ctx){return()=>h('main',{class:'mx-auto max-w-7xl p-4'},ctx.slots.default?.())}}`
@@ -56,7 +58,7 @@ const server = await createServer({
     { find: '@/components/admin/operations/SmartOpsNav.vue', replacement: 'virtual:pr598-shell' },
     { find: '@', replacement: path.join(frontend, 'src') }
   ] },
-  css: { postcss: { plugins: [tailwind({ config: path.join(frontend, 'tailwind.config.js') }), autoprefixer()] } },
+  css: { postcss: { plugins: [tailwind({ ...theme, content: [path.join(frontend,'index.html'),path.join(frontend,'src/**/*.{vue,js,ts,jsx,tsx}'),path.join(root,'.github/scripts/pr598-priority-scheduling-screenshot.mjs')] }), autoprefixer()] } },
   server: { host: '127.0.0.1', port: 4186, strictPort: true },
   optimizeDeps: { noDiscovery: true, include: ['vue','vue-i18n','pinia','vue-router','axios','@vueuse/core','@tanstack/vue-virtual','chart.js','vue-chartjs','dompurify','qrcode','driver.js'] }
 })
@@ -75,6 +77,8 @@ try {
   await page.getByTestId('latency-panel').waitFor()
   await page.getByTestId('sticky-scope').waitFor()
   await page.getByTestId('priority-snapshot-at').waitFor()
+  const css = await page.getByTestId('candidate-table').evaluate(el => ({ overflow: getComputedStyle(el).overflowX, whiteSpace: getComputedStyle(el.querySelector('tbody td')).whiteSpace, width: el.querySelector('table').getBoundingClientRect().width }))
+  if (css.overflow !== 'auto' || css.whiteSpace !== 'nowrap' || css.width < 1200) throw Error('Actual project styles were not generated: '+JSON.stringify(css))
   await page.getByTestId('latency-toggle').click()
   await page.getByTestId('bucket-details').locator('summary').click()
   const selectedHeatmapCell = await page.getByTestId('latency-buckets').locator('tbody tr').first().locator('td').nth(1).innerText()

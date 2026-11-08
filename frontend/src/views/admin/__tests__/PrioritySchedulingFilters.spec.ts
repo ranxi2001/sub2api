@@ -39,7 +39,7 @@ beforeEach(() => {
     throw Error(`Unexpected fixture read ${url}`)
   })
 })
-afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); document.body.innerHTML = '' })
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.restoreAllMocks(); document.body.innerHTML = '' })
 
 describe('priority explicit scope filters', () => {
   it('offers explicit model and group filters independently of the latest pool', async () => {
@@ -57,6 +57,17 @@ describe('priority explicit scope filters', () => {
     expect(wrapper!.get('[data-testid="priority-snapshot-at"]').text()).toContain('not-in-latest-pool')
     expect(vi.mocked(apiClient.put)).not.toHaveBeenCalled()
     expect(vi.mocked(apiClient.post)).not.toHaveBeenCalled()
+  })
+
+  it('accepts a concrete model covered by a wildcard using the real searchable Select', async () => {
+    render(); await flushPromises()
+    await wrapper!.get('[data-testid="priority-model-filter"] button').trigger('click')
+    const search = document.querySelector<HTMLInputElement>('.select-search-input')!
+    search.value = 'custom-via-wildcard'
+    search.dispatchEvent(new Event('input', { bubbles: true })); await flushPromises()
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent?.includes('custom-via-wildcard'))!
+    expect(option).toBeTruthy(); option.click(); await flushPromises()
+    expect(reads().at(-1)?.[1]).toEqual({ params: { model: 'custom-via-wildcard', group_id: 11, minutes: 60 } })
   })
 
   it('polls the chosen scope without reading the recent pool and retains pagination, expansion and draft', async () => {
@@ -167,6 +178,7 @@ describe('priority explicit scope filters', () => {
   })
 
   it.each([{ history_status: 'error', history_error: 'fixture failure' }, { history_refreshing: true }, { config_revision: 'new' }])('refuses changed sticky cleanup when the latest exact snapshot becomes unsafe: %o', async change => {
+    const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(); await flushPromises()
     const latest = { ...analysis({ model: 'latest-selection', group_id: 17, minutes: 60 }).snapshot, candidates: [] }
     const original = vi.mocked(apiClient.get).getMockImplementation()!
@@ -177,6 +189,25 @@ describe('priority explicit scope filters', () => {
     expect((wrapper!.vm as any).snapshot.model).toBe('fixture-model')
     Object.assign(latest, change)
     await wrapper!.get('[data-testid="clear-changed-sticky"]').trigger('click'); await flushPromises()
+    expect(confirmation).not.toHaveBeenCalled()
+    expect(vi.mocked(apiClient.post).mock.calls.filter(([url]) => String(url).endsWith('/clear'))).toHaveLength(0)
+  })
+
+  it.each(['logout', 'unmount'])('discards a pending sticky preflight after %s', async action => {
+    const confirmation = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(); await flushPromises()
+    const latest = { ...analysis({ model: 'latest-selection', group_id: 17, minutes: 60 }).snapshot, candidates: [] }
+    const original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/snapshot' ? { data: { snapshot: structuredClone(latest) } } : original(url, options))
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { before: structuredClone(latest), after: structuredClone(latest), timed_out: false, diff: [{ account_id: 42, changed: true, old_score: 1, new_score: 2, old_weight: 1, new_weight: 2, reasons: [] }] } })
+    await wrapper!.get('[data-testid="recompute"]').trigger('click'); await flushPromises()
+    const pending = deferred<any>()
+    vi.mocked(apiClient.get).mockReturnValueOnce(pending.promise)
+    await wrapper!.get('[data-testid="clear-changed-sticky"]').trigger('click'); await flushPromises()
+    if (action === 'logout') fixture.auth.user = null
+    else { wrapper!.unmount(); wrapper = undefined }
+    pending.resolve({ data: { snapshot: latest } }); await flushPromises()
+    expect(confirmation).not.toHaveBeenCalled()
     expect(vi.mocked(apiClient.post).mock.calls.filter(([url]) => String(url).endsWith('/clear'))).toHaveLength(0)
   })
 })
