@@ -15,6 +15,13 @@ describe('AI operations control API boundary', () => {
       ['/admin/ops/ai/proposals/proposal%2Fwith%3Fsegments/apply', { digest: 'digest', confirm: true }, { signal }],
     ])
   })
+  it('cancels only an exact frozen proposal without submitting an action', async () => {
+    const signal = new AbortController().signal
+    await aiOpsControlAPI.cancel('proposal/1', 'frozen-digest', signal)
+    expect(client.post.mock.calls).toEqual([
+      ['/admin/ops/ai/proposals/proposal%2F1/cancel', { digest: 'frozen-digest' }, { signal }],
+    ])
+  })
   it('binds rollback to ownership revision and keeps halt body empty', async () => {
     const signal = new AbortController().signal
     await aiOpsControlAPI.rollback('action/1', 9, signal)

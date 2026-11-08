@@ -1,4 +1,7 @@
 export default {
+  cancelProposal: '取消冻结提案',
+  cancelHint: '仅取消本次冻结提案；已执行动作需单独回滚，自动策略和未来提案继续按原规则运行。',
+  proposalCancelled: '提案已取消，不能再执行本提案。',
   title: '受控执行',
   description: '诊断报告保留为建议。生产变更须符合已保存策略和新鲜证据，并逐次审批，或另行授权自动规则执行。',
   compactDescription: '生产变更须另行授权，只读诊断可独立使用。',

@@ -476,3 +476,90 @@ func TestAIOpsPostgresApprovalRejectsChangedRequestBuckets(t *testing.T) {
 		})
 	}
 }
+
+func TestAIOpsPostgresCancelledProposalCannotBeRevivedOrApplied(t *testing.T) {
+	f := aiOpsFullPGFixture(t)
+	ctx := context.Background()
+	in := service.AIOpsPreviewInput{RunID: uuid.NewString(), Action: "set_concurrency", AccountID: f.target, ProposedValue: aiOpsFloat(18), EvidenceObservedAt: time.Now().UTC()}
+	p, err := f.repo.PreviewAIOps(ctx, in, f.actor)
+	require.NoError(t, err)
+	require.Equal(t, "ready", p.Status)
+	cancelled, err := f.repo.CancelAIOpsProposal(ctx, p.ID, p.Digest, f.actor)
+	require.NoError(t, err)
+	require.Equal(t, "cancelled", cancelled.Status)
+	require.NotNil(t, cancelled.CancelledAt)
+	_, err = f.repo.ApplyAIOps(ctx, p.ID, p.Digest, f.actor, false)
+	require.ErrorIs(t, err, service.ErrAIOpsConflict)
+	_, err = f.repo.ApplyAIOps(ctx, p.ID, p.Digest, 0, true)
+	require.ErrorIs(t, err, service.ErrAIOpsConflict)
+	repeated, err := f.repo.CancelAIOpsProposal(ctx, p.ID, p.Digest, f.actor+1)
+	require.NoError(t, err)
+	require.Equal(t, cancelled.CancelledBy, repeated.CancelledBy)
+	require.Equal(t, cancelled.CancelledAt, repeated.CancelledAt)
+	repreview, err := f.repo.PreviewAIOps(ctx, in, f.actor)
+	require.NoError(t, err)
+	require.Equal(t, p.ID, repreview.ID)
+	require.Equal(t, "cancelled", repreview.Status)
+	var concurrency, actions int
+	require.NoError(t, integrationDB.QueryRow(`SELECT concurrency FROM accounts WHERE id=$1`, f.target).Scan(&concurrency))
+	require.Equal(t, 20, concurrency)
+	require.NoError(t, integrationDB.QueryRow(`SELECT count(*) FROM ai_ops_actions WHERE proposal_id=$1`, p.ID).Scan(&actions))
+	require.Zero(t, actions)
+}
+
+func TestAIOpsPostgresCancellationCannotUndoAnAppliedAction(t *testing.T) {
+	f := aiOpsFullPGFixture(t)
+	ctx := context.Background()
+	p, err := f.repo.PreviewAIOps(ctx, service.AIOpsPreviewInput{RunID: uuid.NewString(), Action: "set_concurrency", AccountID: f.target, ProposedValue: aiOpsFloat(18), EvidenceObservedAt: time.Now().UTC()}, f.actor)
+	require.NoError(t, err)
+	action, err := f.repo.ApplyAIOps(ctx, p.ID, p.Digest, f.actor, false)
+	require.NoError(t, err)
+	_, err = f.repo.CancelAIOpsProposal(ctx, p.ID, p.Digest, f.actor)
+	require.ErrorIs(t, err, service.ErrAIOpsConflict)
+	var concurrency int
+	require.NoError(t, integrationDB.QueryRow(`SELECT concurrency FROM accounts WHERE id=$1`, f.target).Scan(&concurrency))
+	require.Equal(t, 18, concurrency)
+	repeated, err := f.repo.ApplyAIOps(ctx, p.ID, p.Digest, f.actor, false)
+	require.NoError(t, err)
+	require.Equal(t, action.ID, repeated.ID)
+}
+
+func TestAIOpsPostgresConcurrentCancelAndApplyHaveOneWinner(t *testing.T) {
+	f := aiOpsFullPGFixture(t)
+	ctx := context.Background()
+	p, err := f.repo.PreviewAIOps(ctx, service.AIOpsPreviewInput{RunID: uuid.NewString(), Action: "set_concurrency", AccountID: f.target, ProposedValue: aiOpsFloat(18), EvidenceObservedAt: time.Now().UTC()}, f.actor)
+	require.NoError(t, err)
+	require.Equal(t, "ready", p.Status)
+	// Separate repositories have no in-process synchronization; the shared SQL
+	// transaction/row locks must decide which operation can persist.
+	other := &accountRepository{sql: integrationDB}
+	start := make(chan struct{})
+	cancelResult, applyResult := make(chan error, 1), make(chan error, 1)
+	go func() {
+		<-start
+		_, cancelErr := f.repo.CancelAIOpsProposal(ctx, p.ID, p.Digest, f.actor)
+		cancelResult <- cancelErr
+	}()
+	go func() {
+		<-start
+		_, applyErr := other.ApplyAIOps(ctx, p.ID, p.Digest, f.actor, false)
+		applyResult <- applyErr
+	}()
+	close(start)
+	cancelErr, applyErr := <-cancelResult, <-applyResult
+	require.NotEqual(t, cancelErr == nil, applyErr == nil, "exactly one operation must commit: cancel=%v apply=%v", cancelErr, applyErr)
+	var status string
+	var count, concurrency int
+	require.NoError(t, integrationDB.QueryRow(`SELECT status FROM ai_ops_proposals WHERE id=$1`, p.ID).Scan(&status))
+	require.NoError(t, integrationDB.QueryRow(`SELECT count(*) FROM ai_ops_actions WHERE proposal_id=$1`, p.ID).Scan(&count))
+	require.NoError(t, integrationDB.QueryRow(`SELECT concurrency FROM accounts WHERE id=$1`, f.target).Scan(&concurrency))
+	if cancelErr == nil {
+		require.Equal(t, "cancelled", status)
+		require.Zero(t, count)
+		require.Equal(t, 20, concurrency)
+	} else {
+		require.Equal(t, "applied", status)
+		require.Equal(t, 1, count)
+		require.Equal(t, 18, concurrency)
+	}
+}

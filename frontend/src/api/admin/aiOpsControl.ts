@@ -38,7 +38,9 @@ export interface AIOpsFrozenProposal {
   digest: string
   expires_at: string
   created_at: string
-  status: 'ready' | 'blocked' | 'applied' | 'expired' | 'conflict'
+  status: 'ready' | 'blocked' | 'applied' | 'expired' | 'conflict' | 'cancelled'
+  cancelled_at?: string
+  cancelled_by?: number
   blocked_reasons: string[]
   evidence: {
     observed_at: string
@@ -114,6 +116,9 @@ export const aiOpsControlAPI = {
   },
   async apply(id: string, digest: string, signal?: AbortSignal): Promise<AIOpsActionRecord> {
     return (await apiClient.post<AIOpsActionRecord>(`${root}/proposals/${encodeURIComponent(id)}/apply`, { digest, confirm: true }, { signal })).data
+  },
+  async cancel(id: string, digest: string, signal?: AbortSignal): Promise<AIOpsFrozenProposal> {
+    return (await apiClient.post<AIOpsFrozenProposal>(`${root}/proposals/${encodeURIComponent(id)}/cancel`, { digest }, { signal })).data
   },
   async rollback(id: string, revision: number, signal?: AbortSignal): Promise<AIOpsActionRecord> {
     return (await apiClient.post<AIOpsActionRecord>(`${root}/actions/${encodeURIComponent(id)}/rollback`, { expected_revision: revision, confirm: true }, { signal })).data

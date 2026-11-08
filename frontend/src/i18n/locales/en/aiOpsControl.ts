@@ -1,4 +1,7 @@
 export default {
+  cancelProposal: 'Cancel frozen proposal',
+  cancelHint: 'Cancels only this frozen proposal. Existing actions require rollback; automatic policy and future proposals remain unchanged.',
+  proposalCancelled: 'Proposal cancelled. This proposal can no longer be applied.',
   title: 'Controlled execution',
   description: 'Diagnostic reports remain suggestions. Production changes use a saved policy, fresh evidence and an explicit approval, or separately authorized automatic rules.',
   compactDescription: 'Production changes require separate authorization. Read-only diagnosis works independently.',

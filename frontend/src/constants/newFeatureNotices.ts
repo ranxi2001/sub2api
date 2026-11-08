@@ -23,6 +23,7 @@ export const NEW_FEATURE_NOTICES = {
   profitOperationsTimeRanges: 'profit-operations-time-ranges-initial-announcement',
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
   oauthInitialTOTPRotation429: 'oauth-initial-totp-rotation-on-429-initial-announcement',
+  aiOpsProposalCancel: 'ai-ops-proposal-cancel-initial-announcement',
   aiOpsCodex: 'ai-ops-codex-observe-initial-announcement',
   bepusdtPayment: 'bepusdt-embedded-payment-initial-announcement',
   accountDailyScheduling: 'account-daily-schedulable-timers-initial-announcement',
