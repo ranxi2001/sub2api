@@ -328,3 +328,75 @@ func issue715WSContinuation(t *testing.T, useBarrier bool) {
 		})
 	}
 }
+
+func TestIssue715WSAmbiguousToolSubmissionIsNotReplayed(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeHTTPBridge} {
+		t.Run(mode, func(t *testing.T) {
+			u := &issue715WSOracle{}
+			srv := u.server(t)
+			server := miniredis.RunT(t)
+			client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+			t.Cleanup(func() { _ = client.Close() })
+			h := issue715WSNode(t, mode, srv.URL, repository.NewGatewayCache(client), false)
+			issue715WSSend(t, h.clientConn, issue715WSCreate("", false))
+			first := issue715WSRead(t, h.clientConn)
+			require.Contains(t, string(first), "update_ledger")
+			// The client has performed the synthetic ledger effect once. The
+			// next submission reaches the provider before it closes the socket.
+			u.mu.Lock()
+			u.fail = true
+			u.mu.Unlock()
+			issue715WSSend(t, h.clientConn, issue715WSCreate("", true))
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			for {
+				_, event, err := h.clientConn.Read(ctx)
+				if err != nil {
+					require.NotErrorIs(t, err, context.DeadlineExceeded, "failed turn must release the handler")
+					break
+				}
+				require.NotEqual(t, "response.completed", gjson.GetBytes(event, "type").String(), "ambiguous tool result must never become fabricated success")
+			}
+			issue600Finish(t, h, http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}})
+			u.mu.Lock()
+			ids := append([]int64(nil), u.ids...)
+			u.mu.Unlock()
+			require.Equal(t, []int64{1, 1}, ids, "one generation plus one possibly executed result submission; no automatic replay")
+		})
+	}
+}
+
+func TestIssue715WSPreviousResponseMustBelongToTaskOwner(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeHTTPBridge} {
+		t.Run(mode, func(t *testing.T) {
+			u := &issue715WSOracle{}
+			srv := u.server(t)
+			server := miniredis.RunT(t)
+			client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+			t.Cleanup(func() { _ = client.Close() })
+			cache := repository.NewGatewayCache(client)
+			h := issue715WSNode(t, mode, srv.URL, cache, false)
+			issue715WSSend(t, h.clientConn, issue715WSCreate("", false))
+			first := issue715WSRead(t, h.clientConn)
+			require.Contains(t, string(first), "fixture-task-reference-715")
+			foreignStore := service.NewOpenAIWSStateStore(cache)
+			require.NoError(t, foreignStore.BindResponseAccount(context.Background(), 4301, "resp_foreign715", 2, time.Minute))
+			issue715WSSend(t, h.clientConn, issue715WSCreate("resp_foreign715", true))
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			for {
+				_, event, err := h.clientConn.Read(ctx)
+				if err != nil {
+					require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
+					break
+				}
+				require.Equal(t, "error", gjson.GetBytes(event, "type").String(), "foreign previous response cannot start a generation")
+			}
+			issue600Finish(t, h, http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}})
+			u.mu.Lock()
+			ids := append([]int64(nil), u.ids...)
+			u.mu.Unlock()
+			require.Equal(t, []int64{1}, ids, "foreign previous-response binding must reject before upstream write")
+		})
+	}
+}
