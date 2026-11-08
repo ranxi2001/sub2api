@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -130,4 +131,26 @@ func TestIssue715WSFinalSendRechecksBinding(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIssue715WSBridgeValidatesBuiltPayload(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	manager, _, account := issue715WSManager(t, svc, context.Background())
+	defer manager.abort()
+	pure := `{"model":"gpt-6-astra","input":[]}`
+	newRequest := func(body string) *http.Request {
+		req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(body))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer fixture")
+		return req
+	}
+	require.NoError(t, manager.begin(account, []byte(pure), []byte(pure), newRequest(pure), "http_bridge"))
+	item := gjson.Get(issue715OpaqueBody, "input.0").Raw
+	require.NoError(t, manager.write([]byte(`{"type":"response.completed","response":{"id":"resp_built715","status":"completed","output":[`+item+`]}}`), func() error { return nil }))
+	// The bridge's pre-builder payload is intact; the actual request builder
+	// has changed an item field. A real provider must never receive this change
+	// under an ownership grant for the original client representation.
+	built := strings.Replace(issue715OpaqueBody, "fixture envelope", "fixture rewritten envelope", 1)
+	err := manager.begin(account, []byte(issue715OpaqueBody), []byte(issue715OpaqueBody), newRequest(built), "http_bridge")
+	require.Error(t, err, "bridge must validate actual built HTTP body before granting opaque task admission")
 }

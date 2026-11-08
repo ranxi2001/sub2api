@@ -99,6 +99,21 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		r.finish = nil
 	}
 	r.itemDone = nil
+	if req.GetBody != nil {
+		// HTTP builders can still normalize the prepared body. Validate the
+		// built request's bytes, rather than replacing them with the earlier
+		// bridge payload and accidentally granting a transformed opaque item.
+		reader, err := req.GetBody()
+		if err != nil {
+			return openAIAgentRecoveryError("wire_changed")
+		}
+		actual, err := io.ReadAll(reader)
+		_ = reader.Close()
+		if err != nil {
+			return openAIAgentRecoveryError("wire_changed")
+		}
+		payload = actual
+	}
 	model := gjson.GetBytes(payload, "model").String()
 	// Lookup scope follows the channel's forward model, while the wire digest
 	// below includes the final account-mapped model.
