@@ -30,7 +30,7 @@ const modules = {
   auth: `import {reactive} from 'vue'; export const auth=reactive({user:{id:1,role:'admin'}});window.fixtureAuth=auth;export const useAuthStore=()=>auth;`,
   layout: `import {h} from 'vue';export default {setup(_,{slots}){return()=>h('main',{class:'mx-auto max-w-7xl p-4 sm:p-6'},slots.default?.())}}`,
   nav: `import {h} from 'vue';export default {setup(){return()=>h('nav',{class:'text-sm text-gray-500'},'Offline UI fixture · Synthetic accounts only')}}`,
-  client: `async function request(method,url,data,options){const query=new URLSearchParams(options?.params??{});const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{method,headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});if(!response.ok)throw Error('fixture '+response.status);return {data:await response.json()}}export const apiClient={get:(url,options)=>request('GET',url,null,options),put:(url,data)=>request('PUT',url,data),post:(url,data)=>request('POST',url,data)};`,
+  client: `async function request(method,url,data,options){const query=new URLSearchParams(options?.params??{});const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{method,signal:options?.signal,headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});if(!response.ok)throw Error('fixture '+response.status);return {data:await response.json()}}export const apiClient={get:(url,options)=>request('GET',url,null,options),put:(url,data)=>request('PUT',url,data),post:(url,data)=>request('POST',url,data)};`,
 }
 function html() {
   return `<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="app"></div><script type="module">
@@ -72,7 +72,7 @@ async function routeBackend(page) {
     const url = new URL(route.request().url()), endpoint = url.pathname.split('/').at(-1)
     requests.push({ endpoint, query: url.search, method: route.request().method() })
     let body, status = 200
-    if (url.pathname === '/fixture/admin/groups/all') body = [{id:11,name:'Demo group'},{id:17,name:'Archive group'}]
+    if (url.pathname === '/fixture/admin/groups/all') body = [{id:11,name:'Demo group',platform:'openai'},{id:17,name:'Archive group',platform:'openai'},{id:23,name:'Composite group',platform:'composite'},{id:29,name:'Anthropic group',platform:'anthropic'}].filter(group=>!url.searchParams.get('platform')||group.platform===url.searchParams.get('platform'))
     else if (endpoint === 'models') body = {models:['demo-model','archive-model','not-in-latest-pool']}
     else if (endpoint === 'config') body = config
     else if (endpoint === 'analysis') {

@@ -234,7 +234,13 @@ const fields = [
 let alive = true, generation = 0, recomputeRequestGeneration = 0, stickyRequestGeneration = 0, snapshotRequestGeneration = 0
 let catalogRequestGeneration = 0
 let historyTimer: ReturnType<typeof setTimeout> | undefined
+let analysisController: AbortController | undefined
 function stopHistoryRefresh() { clearTimeout(historyTimer); historyTimer = undefined }
+function invalidateAnalysis() {
+  stopHistoryRefresh(); snapshotRequestGeneration++
+  analysisController?.abort(); analysisController = undefined
+  refreshing.value = false; latencyLoading.value = false
+}
 const active = (version: number) => alive && generation === version
 const readingRoot = ref<HTMLElement | null>(null)
 const latencyExpanded = ref(false)
@@ -379,9 +385,21 @@ async function save() {
   const ids = groups.value.trim() ? groups.value.split(/[,，]/).map(v => Number(v.trim())) : []
   if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) { error.value = t('priorityScheduling.invalid'); return }
   const version = generation; saving.value = true; error.value = ''; notice.value = ''
+  const submitted = JSON.parse(JSON.stringify(draft.value)) as PrioritySchedulingConfig
+  const submittedGroups = groups.value, submittedModels = modelsText.value
   try {
-    const config = await savePriorityConfig({ ...draft.value, group_ids: [...new Set(ids)], models: [...new Set(modelsText.value.split('\n').map(v => v.trim()).filter(Boolean))] })
-    if (active(version)) { draft.value = config; notice.value = t('priorityScheduling.saved') }
+    const config = await savePriorityConfig({ ...submitted, group_ids: [...new Set(ids)], models: [...new Set(submittedModels.split('\n').map(v => v.trim()).filter(Boolean))] })
+    if (active(version) && draft.value) {
+      // Apply normalization only to fields the user has not edited since PUT.
+      const newer = Object.fromEntries(Object.entries(draft.value).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(submitted[key as keyof PrioritySchedulingConfig])))
+      draft.value = { ...config, ...newer }
+      if (groups.value === submittedGroups) groups.value = (config.group_ids ?? []).join(', ')
+      if (modelsText.value === submittedModels) modelsText.value = (config.models ?? []).join('\n')
+      invalidateAnalysis()
+      recomputeRequestGeneration++; recomputeResult.value = null; mutationSnapshot.value = null
+      notice.value = t('priorityScheduling.saved')
+      void loadSnapshot(0)
+    }
   } catch { if (active(version)) error.value = t('priorityScheduling.error') }
   finally { if (active(version)) saving.value = false }
 }
@@ -390,9 +408,9 @@ async function loadCatalog(initial = false) {
   const version = generation, request = ++catalogRequestGeneration, group = selectedGroup.value
   catalogLoading.value = true; catalogError.value = false
   try {
-    const [catalogGroups, catalogModels] = await Promise.all([getGroups('openai'), getPriorityModels(selectedGroup.value || undefined)])
+    const [openaiGroups, compositeGroups, catalogModels] = await Promise.all([getGroups('openai'), getGroups('composite'), getPriorityModels(selectedGroup.value || undefined)])
     if (!active(version) || request !== catalogRequestGeneration || group !== selectedGroup.value) return
-    availableGroups.value = catalogGroups
+    availableGroups.value = [...new Map([...openaiGroups, ...compositeGroups].map(group => [group.id, group])).values()]
     availableModels.value = catalogModels
     if (initial && !selectedModel.value) selectedModel.value = draft.value?.models?.find(model => catalogModels.includes(model)) ?? catalogModels[0] ?? ''
   } catch { if (active(version) && request === catalogRequestGeneration) catalogError.value = true }
@@ -418,8 +436,9 @@ async function loadSnapshot(attempt: number) {
   const priorScope = displayScope(snapshot.value)
   recomputeRequestGeneration++; recomputeLoading.value = false
   const version = generation; refreshing.value = true; snapshotError.value = ''; latencyLoading.value = true
+  const controller = new AbortController(); analysisController = controller
   try {
-    const result = await getPriorityAnalysis(query)
+    const result = await getPriorityAnalysis(query, controller.signal)
     if (!active(version) || request !== snapshotRequestGeneration || key !== scopeKey()) return
     if (!validAnalysis(result, query)) throw new Error('invalid analysis scope')
     const restore = readingRestore()
@@ -435,7 +454,10 @@ async function loadSnapshot(attempt: number) {
       snapshotError.value = t('priorityScheduling.error'); latencyError.value = t('priorityScheduling.latencyPanel.error')
       scheduleHistoryRefresh(version, 15000, 0)
     }
-  } finally { if (active(version) && request === snapshotRequestGeneration) { refreshing.value = false; latencyLoading.value = false } }
+  } finally {
+    if (analysisController === controller) analysisController = undefined
+    if (active(version) && request === snapshotRequestGeneration) { refreshing.value = false; latencyLoading.value = false }
+  }
 }
 function scheduleHistoryRefresh(version: number, delay: number, attempt: number) {
   stopHistoryRefresh()
@@ -533,14 +555,14 @@ watch(stickyGroupID, () => {
 const initialized = ref(false)
 watch([selectedModel, selectedGroup, latencyMinutes], () => {
   if (!initialized.value) return
-  stopHistoryRefresh(); snapshotRequestGeneration++; refreshing.value = false
+  invalidateAnalysis()
   recomputeRequestGeneration++; recomputeResult.value = null; recomputeLoading.value = false
   clearLatency(); snapshot.value = null; candidateOrder.value = []; candidatePage.value = 1; snapshotError.value = ''
   void loadSnapshot(0)
 }, { flush: 'sync' })
 watch(selectedGroup, () => { if (initialized.value) void loadCatalog() })
 watch(() => auth.user ? `${auth.user.id}:${auth.user.role}` : '', () => {
-  stopHistoryRefresh(); generation++; initialized.value = false; draft.value = null; snapshot.value = null; mutationSnapshot.value = null; selectedModel.value = ''; selectedGroup.value = 0; availableModels.value = []; availableGroups.value = []; catalogLoading.value = false; catalogError.value = false
+  invalidateAnalysis(); generation++; initialized.value = false; draft.value = null; snapshot.value = null; mutationSnapshot.value = null; selectedModel.value = ''; selectedGroup.value = 0; availableModels.value = []; availableGroups.value = []; catalogLoading.value = false; catalogError.value = false
   groups.value = modelsText.value = error.value = notice.value = snapshotError.value = ''
   clearLatency(); candidateOrder.value = []; candidatePage.value = 1; latencyExpanded.value = false
   recomputeResult.value = null; recomputeError.value = ''; recomputeLoading.value = false
@@ -558,7 +580,7 @@ onMounted(async () => {
   initialized.value = true
   void loadSticky(); void refresh()
 })
-onBeforeUnmount(() => { stopHistoryRefresh(); alive = false; generation++ })
+onBeforeUnmount(() => { invalidateAnalysis(); alive = false; generation++ })
 </script>
 <style scoped>
 .card { @apply rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900; }

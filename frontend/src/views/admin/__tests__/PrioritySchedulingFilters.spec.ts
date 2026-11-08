@@ -17,7 +17,9 @@ function analysis(params: any, revision = 'fixture-v1'): PriorityAnalysis {
   const rows = Array.from({ length: 65 }, (_, i) => ({ account_id: i + 1, account_name: `Fixture ${params.model} ${i + 1}`, score: 80, tier: 'insufficient', reasons: [], priority: 1, samples: 0, p90_ttft_ms: 0, quality_samples: 0 }))
   return { snapshot: { ...common, mode: 'balanced', history_status: 'ready', history_ready: true, window_minutes: params.minutes, candidates: rows as any }, latency: { ...common, bucket_minutes: 5, accounts: rows.map(row => ({ ...row, p50_ttft_ms: 0, p99_ttft_ms: 0, slow_samples: 0, error_samples: 0, error_rate: 0, buckets: [] })) as any } }
 }
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }
+function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason?: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
+// Mirror /groups/all: active-only, strict platform equality, never a union.
+const directory = [{ id: 11, name: 'Fixture group', platform: 'openai' }, { id: 17, name: 'Other group', platform: 'openai' }, { id: 23, name: 'Composite group', platform: 'composite' }, { id: 29, name: 'Anthropic group', platform: 'anthropic' }]
 let wrapper: ReturnType<typeof mount> | undefined
 function render() { wrapper = mount(PrioritySchedulingView, { attachTo: document.body }); return wrapper }
 async function choose(id: string, label: string) {
@@ -31,7 +33,7 @@ beforeEach(() => {
   fixture.auth = reactive({ user: { id: 1, role: 'admin' } })
   vi.mocked(apiClient.get).mockImplementation(async (url, options: any) => {
     if (url === '/admin/priority-scheduling/config') return { data: { ...config } }
-    if (url === '/admin/groups/all') return { data: [{ id: 11, name: 'Fixture group' }, { id: 17, name: 'Other group' }] }
+    if (url === '/admin/groups/all') return { data: directory.filter(group => !options?.params?.platform || group.platform === options.params.platform) }
     if (url === '/admin/priority-scheduling/models') return { data: { models: ['fixture-model', 'not-in-latest-pool'] } }
     if (url === '/admin/priority-scheduling/analysis') return { data: analysis(options.params) }
     if (url === '/admin/priority-scheduling/snapshot') return { data: { snapshot: null } }
@@ -42,6 +44,83 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.restoreAllMocks(); document.body.innerHTML = '' })
 
 describe('priority explicit scope filters', () => {
+  it('followup F1 offers Composite through the real strict platform catalog and retains public alias across switches', async () => {
+    render(); await flushPromises()
+    const catalogReads = vi.mocked(apiClient.get).mock.calls.filter(([url]) => url === '/admin/groups/all')
+    expect(catalogReads.every(([, options]: any) => ['openai', 'composite'].includes(options?.params?.platform)), 'catalog must retain explicit platform admission').toBe(true)
+    await wrapper!.get('[data-testid="priority-group-filter"] button').trigger('click')
+    expect(document.querySelector('[role="listbox"]')?.textContent).not.toContain('Anthropic group')
+    await wrapper!.get('[data-testid="priority-group-filter"] button').trigger('click')
+    await choose('priority-group-filter', 'Composite group (#23)')
+    await wrapper!.get('[data-testid="priority-model-filter"] button').trigger('click')
+    const search = document.querySelector<HTMLInputElement>('.select-search-input')!
+    search.value = 'public-alias'; search.dispatchEvent(new Event('input', { bubbles: true })); await flushPromises()
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent?.includes('public-alias'))!
+    expect(option).toBeTruthy(); option.click(); await flushPromises()
+    await choose('priority-group-filter', 'Other group (#17)')
+    await choose('priority-group-filter', 'Composite group (#23)')
+    expect(reads().at(-1)?.[1]).toMatchObject({ params: { model: 'public-alias', group_id: 23, minutes: 60 } })
+    expect((wrapper!.vm as any).snapshot.model).toBe('public-alias')
+  })
+
+  it('followup F2 fences a complete old R1 pair after successful save and immediately reads R2 without replacing newer edits or scope', async () => {
+    render(); await flushPromises()
+    await choose('priority-model-filter', 'not-in-latest-pool')
+    await wrapper!.get('[data-testid="latency-window"]').setValue('15'); await flushPromises()
+    const old = deferred<any>(), saved = deferred<any>(), fresh = deferred<any>()
+    vi.mocked(apiClient.get).mockReturnValueOnce(old.promise)
+    const oldRead = (wrapper!.vm as any).refresh(); await flushPromises()
+    const oldSignal = (reads().at(-1)?.[1] as any)?.signal
+    const vm = wrapper!.vm as any
+    vm.draft.target_ttft_ms = 4000
+    vi.mocked(apiClient.put).mockReturnValueOnce(saved.promise)
+    const saving = vm.save(); await flushPromises()
+    vm.draft.target_ttft_ms = 9000; vm.groups = '17'; vm.modelsText = 'new-unsaved-model'
+    const original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/analysis' ? fresh.promise : original(url, options))
+    saved.resolve({ data: { ...config, target_ttft_ms: 4000 } }); await saving; await flushPromises()
+    expect(reads().length, 'successful save must start a fresh analysis immediately').toBe(5)
+    expect(oldSignal?.aborted, 'save barrier must cancel the old HTTP read').toBe(true)
+    old.resolve({ data: analysis({ model: 'not-in-latest-pool', group_id: 11, minutes: 15 }, 'R1') }); await oldRead; await flushPromises()
+    expect(vm.snapshot.config_revision, 'complete old R1 pair must not publish across successful save').not.toBe('R1')
+    fresh.resolve({ data: analysis({ model: 'not-in-latest-pool', group_id: 11, minutes: 15 }, 'R2') }); await flushPromises()
+    expect(vm.snapshot.config_revision).toBe('R2'); expect(vm.latency.config_revision).toBe('R2')
+    expect(vm.draft.target_ttft_ms).toBe(9000); expect(vm.groups).toBe('17'); expect(vm.modelsText).toBe('new-unsaved-model')
+    expect(reads().at(-1)?.[1]).toMatchObject({ params: { model: 'not-in-latest-pool', group_id: 11, minutes: 15 } })
+    await vm.refresh(); await flushPromises()
+    expect(vm.draft.target_ttft_ms).toBe(9000)
+  })
+
+  it('followup F2 failed save leaves the current read valid and preserves the draft', async () => {
+    render(); await flushPromises()
+    const old = deferred<any>(), saved = deferred<any>()
+    vi.mocked(apiClient.get).mockReturnValueOnce(old.promise)
+    const oldRead = (wrapper!.vm as any).refresh(); await flushPromises()
+    const signal = (reads().at(-1)?.[1] as any)?.signal
+    vi.mocked(apiClient.put).mockReturnValueOnce(saved.promise)
+    const vm = wrapper!.vm as any
+    vm.draft.target_ttft_ms = 8000
+    const saving = vm.save(); await flushPromises()
+    saved.reject(Error('fixture save rejected')); await saving; await flushPromises()
+    expect(signal?.aborted).toBe(false); expect(reads()).toHaveLength(2)
+    old.resolve({ data: analysis({ model: 'fixture-model', group_id: 11, minutes: 60 }, 'R1') }); await oldRead; await flushPromises()
+    expect(vm.snapshot.config_revision).toBe('R1'); expect(vm.draft.target_ttft_ms).toBe(8000)
+  })
+
+  it.each(['scope', 'logout', 'unmount'])('followup F3 aborts the real analysis transport on %s and rejects late results', async action => {
+    render(); await flushPromises()
+    const old = deferred<any>()
+    vi.mocked(apiClient.get).mockReturnValueOnce(old.promise)
+    const read = (wrapper!.vm as any).refresh(); await flushPromises()
+    const signal = (reads().at(-1)?.[1] as any)?.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    if (action === 'scope') { await wrapper!.get('[data-testid="latency-window"]').setValue('15'); await flushPromises() }
+    else if (action === 'logout') fixture.auth.user = null
+    else { wrapper!.unmount(); wrapper = undefined }
+    expect(signal.aborted).toBe(true)
+    old.resolve({ data: analysis({ model: 'fixture-model', group_id: 11, minutes: 60 }, 'old') }); await read; await flushPromises()
+    if (action === 'scope') expect((wrapper!.vm as any).snapshot.window_minutes).toBe(15)
+  })
   it('offers explicit model and group filters independently of the latest pool', async () => {
     render(); await flushPromises()
     expect(wrapper!.find('[data-testid="priority-model-filter"]').exists(), 'administrators must be able to select the analysis model').toBe(true)
@@ -53,7 +132,7 @@ describe('priority explicit scope filters', () => {
     await choose('priority-model-filter', 'not-in-latest-pool')
     await choose('priority-group-filter', 'Other group (#17)')
     await wrapper!.get('[data-testid="latency-window"]').setValue('15'); await flushPromises()
-    expect(reads().at(-1)?.[1]).toEqual({ params: { model: 'not-in-latest-pool', group_id: 17, minutes: 15 } })
+    expect(reads().at(-1)?.[1]).toMatchObject({ params: { model: 'not-in-latest-pool', group_id: 17, minutes: 15 } })
     expect(wrapper!.get('[data-testid="priority-snapshot-at"]').text()).toContain('not-in-latest-pool')
     expect(vi.mocked(apiClient.put)).not.toHaveBeenCalled()
     expect(vi.mocked(apiClient.post)).not.toHaveBeenCalled()
@@ -67,7 +146,7 @@ describe('priority explicit scope filters', () => {
     search.dispatchEvent(new Event('input', { bubbles: true })); await flushPromises()
     const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(el => el.textContent?.includes('custom-via-wildcard'))!
     expect(option).toBeTruthy(); option.click(); await flushPromises()
-    expect(reads().at(-1)?.[1]).toEqual({ params: { model: 'custom-via-wildcard', group_id: 11, minutes: 60 } })
+    expect(reads().at(-1)?.[1]).toMatchObject({ params: { model: 'custom-via-wildcard', group_id: 11, minutes: 60 } })
   })
 
   it('polls the chosen scope without reading the recent pool and retains pagination, expansion and draft', async () => {
@@ -163,7 +242,7 @@ describe('priority explicit scope filters', () => {
     pending.resolve({ data: { models: ['only-in-group-17'] } }); await flushPromises()
     expect((wrapper!.vm as any).selectedModel).toBe('fixture-model')
     await choose('priority-model-filter', 'only-in-group-17')
-    expect(reads().at(-1)?.[1]).toEqual({ params: { model: 'only-in-group-17', group_id: 17, minutes: 15 } })
+    expect(reads().at(-1)?.[1]).toMatchObject({ params: { model: 'only-in-group-17', group_id: 17, minutes: 15 } })
   })
 
   it('waits for initialization before an early refresh and starts the saved group scope once', async () => {
@@ -174,7 +253,7 @@ describe('priority explicit scope filters', () => {
     expect(reads()).toHaveLength(0)
     pending.resolve({ data: { ...config } }); await flushPromises()
     expect(reads()).toHaveLength(1)
-    expect(reads()[0][1]).toEqual({ params: { model: 'fixture-model', group_id: 11, minutes: 60 } })
+    expect(reads()[0][1]).toMatchObject({ params: { model: 'fixture-model', group_id: 11, minutes: 60 } })
   })
 
   it.each([{ history_status: 'error', history_error: 'fixture failure' }, { history_refreshing: true }, { config_revision: 'new' }])('refuses changed sticky cleanup when the latest exact snapshot becomes unsafe: %o', async change => {
