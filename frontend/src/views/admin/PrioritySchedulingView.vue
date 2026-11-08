@@ -49,7 +49,7 @@
           </button>
           <div class="flex flex-wrap items-center gap-2">
             <label class="sr-only" for="priority-latency-window">{{ t('priorityScheduling.window_minutes') }}</label>
-            <select id="priority-latency-window" v-model.number="latencyMinutes" class="input" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select>
+            <select id="priority-latency-window" v-model.number="latencyMinutes" class="input w-auto" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select>
             <button class="btn btn-secondary" :disabled="latencyLoading || !snapshot" data-testid="latency-refresh" @click="loadLatency">{{ t('priorityScheduling.latencyPanel.refresh') }}</button>
           </div>
         </header>
