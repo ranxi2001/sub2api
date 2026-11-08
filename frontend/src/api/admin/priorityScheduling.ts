@@ -216,6 +216,6 @@ export async function clearPriorityStickyBindings(payload: { group_id: number; a
   return (await apiClient.post('/admin/priority-scheduling/sticky-bindings/clear', payload)).data
 }
 
-export async function getPriorityModels(groupID?: number): Promise<string[]> {
-  return (await apiClient.get('/admin/priority-scheduling/models', { params: groupID ? { group_id: groupID } : {} })).data.models
+export async function getPriorityModels(groupID?: number, signal?: AbortSignal): Promise<string[]> {
+  return (await apiClient.get('/admin/priority-scheduling/models', { params: groupID ? { group_id: groupID } : {}, signal })).data.models
 }

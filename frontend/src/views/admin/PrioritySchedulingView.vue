@@ -235,6 +235,11 @@ let alive = true, generation = 0, recomputeRequestGeneration = 0, stickyRequestG
 let catalogRequestGeneration = 0
 let historyTimer: ReturnType<typeof setTimeout> | undefined
 let analysisController: AbortController | undefined
+let catalogController: AbortController | undefined
+function invalidateCatalog() {
+  catalogRequestGeneration++
+  catalogController?.abort(); catalogController = undefined
+}
 function stopHistoryRefresh() { clearTimeout(historyTimer); historyTimer = undefined }
 function invalidateAnalysis() {
   stopHistoryRefresh(); snapshotRequestGeneration++
@@ -396,6 +401,7 @@ async function save() {
       if (groups.value === submittedGroups) groups.value = (config.group_ids ?? []).join(', ')
       if (modelsText.value === submittedModels) modelsText.value = (config.models ?? []).join('\n')
       invalidateAnalysis()
+      invalidateCatalog(); void loadCatalog()
       recomputeRequestGeneration++; recomputeResult.value = null; mutationSnapshot.value = null
       notice.value = t('priorityScheduling.saved')
       void loadSnapshot(0)
@@ -405,16 +411,21 @@ async function save() {
 }
 async function loadCatalog(initial = false) {
   if (!canRead()) return
+  invalidateCatalog()
   const version = generation, request = ++catalogRequestGeneration, group = selectedGroup.value
+  const controller = new AbortController(); catalogController = controller
   catalogLoading.value = true; catalogError.value = false
   try {
-    const [openaiGroups, compositeGroups, catalogModels] = await Promise.all([getGroups('openai'), getGroups('composite'), getPriorityModels(selectedGroup.value || undefined)])
+    const [openaiGroups, compositeGroups, catalogModels] = await Promise.all([getGroups('openai', controller.signal), getGroups('composite', controller.signal), getPriorityModels(selectedGroup.value || undefined, controller.signal)])
     if (!active(version) || request !== catalogRequestGeneration || group !== selectedGroup.value) return
     availableGroups.value = [...new Map([...openaiGroups, ...compositeGroups].map(group => [group.id, group])).values()]
     availableModels.value = catalogModels
     if (initial && !selectedModel.value) selectedModel.value = draft.value?.models?.find(model => catalogModels.includes(model)) ?? catalogModels[0] ?? ''
   } catch { if (active(version) && request === catalogRequestGeneration) catalogError.value = true }
-  finally { if (active(version) && request === catalogRequestGeneration) catalogLoading.value = false }
+  finally {
+    if (catalogController === controller) catalogController = undefined
+    if (active(version) && request === catalogRequestGeneration) catalogLoading.value = false
+  }
 }
 async function refresh() {
   if (!canRead() || !initialized.value) return
@@ -562,7 +573,7 @@ watch([selectedModel, selectedGroup, latencyMinutes], () => {
 }, { flush: 'sync' })
 watch(selectedGroup, () => { if (initialized.value) void loadCatalog() })
 watch(() => auth.user ? `${auth.user.id}:${auth.user.role}` : '', () => {
-  invalidateAnalysis(); generation++; initialized.value = false; draft.value = null; snapshot.value = null; mutationSnapshot.value = null; selectedModel.value = ''; selectedGroup.value = 0; availableModels.value = []; availableGroups.value = []; catalogLoading.value = false; catalogError.value = false
+  invalidateAnalysis(); invalidateCatalog(); generation++; initialized.value = false; draft.value = null; snapshot.value = null; mutationSnapshot.value = null; selectedModel.value = ''; selectedGroup.value = 0; availableModels.value = []; availableGroups.value = []; catalogLoading.value = false; catalogError.value = false
   groups.value = modelsText.value = error.value = notice.value = snapshotError.value = ''
   clearLatency(); candidateOrder.value = []; candidatePage.value = 1; latencyExpanded.value = false
   recomputeResult.value = null; recomputeError.value = ''; recomputeLoading.value = false
@@ -580,7 +591,7 @@ onMounted(async () => {
   initialized.value = true
   void loadSticky(); void refresh()
 })
-onBeforeUnmount(() => { invalidateAnalysis(); alive = false; generation++ })
+onBeforeUnmount(() => { invalidateAnalysis(); invalidateCatalog(); alive = false; generation++ })
 </script>
 <style scoped>
 .card { @apply rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900; }

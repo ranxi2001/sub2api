@@ -75,9 +75,10 @@ export async function list(
  * @param platform - Optional platform filter
  * @returns List of all active groups
  */
-export async function getAll(platform?: GroupPlatform): Promise<AdminGroup[]> {
+export async function getAll(platform?: GroupPlatform, signal?: AbortSignal): Promise<AdminGroup[]> {
   const { data } = await apiClient.get<AdminGroup[]>('/admin/groups/all', {
-    params: platform ? { platform } : undefined
+    params: platform ? { platform } : undefined,
+    ...(signal ? { signal } : {})
   })
   return data
 }

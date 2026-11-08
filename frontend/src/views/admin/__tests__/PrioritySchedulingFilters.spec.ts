@@ -124,6 +124,28 @@ describe('priority explicit scope filters', () => {
     old.resolve({ data: analysis({ model: 'fixture-model', group_id: 11, minutes: 60 }, 'old') }); await read; await flushPromises()
     if (action === 'scope') expect((wrapper!.vm as any).snapshot.window_minutes).toBe(15)
   })
+
+  it.each(['group', 'logout', 'unmount', 'save'])('followup F3 cancels the old group catalog on %s without accepting its late models', async action => {
+    render(); await flushPromises()
+    const pending = deferred<any>(), original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/models' && (options as any)?.params?.group_id === 17 ? pending.promise : original(url, options))
+    await choose('priority-group-filter', 'Other group (#17)')
+    const catalog = vi.mocked(apiClient.get).mock.calls.filter(([url]) => url === '/admin/priority-scheduling/models').at(-1)!
+    const signal = (catalog[1] as any)?.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    if (action === 'group') await choose('priority-group-filter', 'Fixture group (#11)')
+    else if (action === 'logout') fixture.auth.user = null
+    else if (action === 'unmount') { wrapper!.unmount(); wrapper = undefined }
+    else {
+      vi.mocked(apiClient.put).mockResolvedValueOnce({ data: { ...config } })
+      // The subsequent catalog is a distinct read after the save barrier.
+      vi.mocked(apiClient.get).mockImplementation(original)
+      await (wrapper!.vm as any).save(); await flushPromises()
+    }
+    expect(signal.aborted).toBe(true)
+    pending.resolve({ data: { models: ['late-stale-model'] } }); await flushPromises()
+    if (wrapper && action !== 'logout') expect((wrapper.vm as any).availableModels).not.toContain('late-stale-model')
+  })
   it('offers explicit model and group filters independently of the latest pool', async () => {
     render(); await flushPromises()
     expect(wrapper!.find('[data-testid="priority-model-filter"]').exists(), 'administrators must be able to select the analysis model').toBe(true)

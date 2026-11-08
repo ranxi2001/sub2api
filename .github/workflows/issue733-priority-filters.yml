@@ -216,7 +216,7 @@ jobs:
           test -z "$(git status --porcelain)"
           git rev-parse HEAD | tee "$RUNNER_TEMP/analysis-race-head.txt"
           (cd backend && go test -race -tags=unit ./internal/service -run '^TestPriorityAnalysis' -count=1 -v -timeout=10m) 2>&1 | tee "$RUNNER_TEMP/analysis-race.log"
-          for name in ConcurrentScopesHaveBoundedSQLReaders CoalescesAndOwnsMutableResponses FirstWaiterCancellationKeepsOtherReadersAlive LastCancellationHoldsSlotUntilRepositoryExit DifferentPrincipalsAndScopesNeverMerge ErrorsAndShutdownReleaseLifecycle BudgetTimeoutReleasesLifecycle PreparationIsBoundedAndCancelled CancelledWorkCannotPublishSuccess; do
+          for name in ConcurrentScopesHaveBoundedSQLReaders CoalescesAndOwnsMutableResponses FirstWaiterCancellationKeepsOtherReadersAlive LastCancellationHoldsSlotUntilRepositoryExit DifferentPrincipalsAndScopesNeverMerge ErrorsAndShutdownReleaseLifecycle BudgetTimeoutReleasesLifecycle PreparationIsBoundedAndCancelled CancelledWorkCannotPublishSuccess CatalogSharesPreparationBudgetAndCancels; do
             grep -q -- "--- PASS: TestPriorityAnalysis$name " "$RUNNER_TEMP/analysis-race.log"
           done
           ! grep -q -- '--- SKIP: TestPriorityAnalysis' "$RUNNER_TEMP/analysis-race.log"

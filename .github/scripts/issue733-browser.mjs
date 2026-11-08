@@ -139,6 +139,26 @@ try {
   await old.close()
   let release, started
 
+  // Drive real fetch cancellation, holding server responses until after abort.
+  for(const action of ['scope','logout','unmount']) {
+    const cancellationPage=await newPage()
+    await cancellationPage.goto('http://127.0.0.1:4183/.issue733-fixture/index.html',{waitUntil:'networkidle'})
+    const began=new Promise(resolve=>{started=resolve})
+    heldLatency={started,promise:new Promise(resolve=>{release=resolve})}
+    await cancellationPage.evaluate(()=>{void window.fixtureView().refresh()})
+    await began
+    const aborted=cancellationPage.waitForEvent('requestfailed',{predicate:request=>new URL(request.url()).pathname==='/fixture/admin/priority-scheduling/analysis'})
+    if(action==='scope')await cancellationPage.getByTestId('latency-window').selectOption('15')
+    else if(action==='logout')await cancellationPage.evaluate(()=>{window.fixtureAuth.user=null})
+    else await cancellationPage.evaluate(()=>window.fixtureUnmount())
+    const failed=await aborted
+    assert.match(failed.failure().errorText,/ABORTED|CANCELLED/i)
+    release()
+    if(action==='scope')await cancellationPage.waitForFunction(()=>window.fixtureView().snapshot?.window_minutes===15&&!window.fixtureView().refreshing)
+    measurements.push({phase:'followup-http-abort',action,error:failed.failure().errorText})
+    await cancellationPage.close()
+  }
+
   const page = await newPage()
   await page.goto('http://127.0.0.1:4183/.issue733-fixture/index.html', { waitUntil: 'networkidle' })
   await page.getByTestId('candidate-table').waitFor()

@@ -184,6 +184,11 @@ func (s *OpenAIGatewayService) PriorityAnalysisModels(ctx context.Context, group
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	ctx, release, err := s.priorityAnalysis.prepare(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, []string{PlatformOpenAI}, false)
 	if err != nil {
 		return nil, err

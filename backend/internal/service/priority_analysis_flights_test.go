@@ -293,3 +293,50 @@ func TestPriorityAnalysisCancelledWorkCannotPublishSuccess(t *testing.T) {
 	budget.close()
 	require.ErrorIs(t, <-done, context.Canceled, "cancelled work cannot publish a late successful result")
 }
+
+type analysisCatalogAccounts struct {
+	AccountRepository
+	entered chan context.Context
+	active  atomic.Int32
+	peak    atomic.Int32
+}
+
+func (r *analysisCatalogAccounts) ListModelAvailabilityCandidates(ctx context.Context, _ *int64, _ []string, _ bool) ([]Account, error) {
+	n := r.active.Add(1)
+	defer r.active.Add(-1)
+	for peak := r.peak.Load(); n > peak && !r.peak.CompareAndSwap(peak, n); peak = r.peak.Load() {
+	}
+	r.entered <- ctx
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func TestPriorityAnalysisCatalogSharesPreparationBudgetAndCancels(t *testing.T) {
+	svc, _ := newAnalysisBarrierService()
+	accounts := &analysisCatalogAccounts{entered: make(chan context.Context, 5)}
+	svc.accountRepo = accounts
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 5)
+	for i := 0; i < 5; i++ {
+		go func() { _, err := svc.PriorityAnalysisModels(ctx, nil); done <- err }()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-accounts.entered:
+		case <-time.After(time.Second):
+			t.Fatal("catalog did not enter")
+		}
+	}
+	require.EqualValues(t, 2, accounts.active.Load())
+	cancel()
+	for i := 0; i < 5; i++ {
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("catalog cancellation leaked")
+		}
+	}
+	require.LessOrEqual(t, accounts.peak.Load(), int32(2))
+	require.Zero(t, accounts.active.Load())
+}
