@@ -379,10 +379,13 @@ const selectableAccounts = computed(() => {
 })
 
 const manualErrors: Record<string, string> = {
-  TOKEN_GUARD_V2_PROBE_BUSY: 'busy', OPENAI_REAUTH_TASK_ACTIVE: 'busy',
+  TOKEN_GUARD_V2_PROBE_BUSY: 'busy',
+  OPENAI_REAUTH_TASK_ACTIVE: 'taskBusy', OPENAI_REAUTH_TASK_ALREADY_ACTIVE: 'taskBusy',
+  TOTP_ACCOUNT_BUSY: 'totpBusy', TOKEN_GUARD_V2_BUDGET_BUSY: 'budgetBusy',
   OPENAI_REAUTH_WORKER_UNAVAILABLE: 'worker', OPENAI_REAUTH_UNAVAILABLE: 'worker',
   OPENAI_REAUTH_CONFIG_REQUIRED: 'configuration', OPENAI_REAUTH_ENCRYPTION_KEY_REQUIRED: 'encryption',
-  OPENAI_REAUTH_ACCOUNT_CHANGED: 'changed', OPENAI_REAUTH_IDENTITY_MISMATCH: 'changed',
+  OPENAI_REAUTH_ACCOUNT_CHANGED: 'changed', OPENAI_REAUTH_CONFIG_CHANGED: 'changed',
+  OPENAI_REAUTH_IDENTITY_MISMATCH: 'changed',
   OPENAI_REAUTH_TASK_NOT_ACTIVE: 'changed'
 }
 const message = (value: unknown) => {

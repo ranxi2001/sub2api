@@ -1,6 +1,15 @@
 export default {
   operationFailure: {
-  manual: {"busy": "An operation is already active; wait and review the existing task.", "worker": "Re-login service is unavailable; check the worker status.", "configuration": "Save a complete login configuration first.", "encryption": "Enable credential encryption first.", "changed": "Credentials or task ownership changed; refresh the list and review manually."},
+  manual: {
+    busy: 'An inspection is already running; wait for its result.',
+    taskBusy: 'This account already has a re-login, authorization, or unresolved 2FA task. Review the existing task; for 2FA, open 2FA management to check its status and complete recovery.',
+    totpBusy: 'This account has an unresolved 2FA task. Complete verification or recovery in 2FA management before editing the login configuration.',
+    budgetBusy: 'The re-login budget or inspection state changed, or a task is still active. Refresh and review the existing task; for 2FA, complete recovery in 2FA management before restoring the budget.',
+    worker: 'Re-login service is unavailable; check the worker status.',
+    configuration: 'Save a complete login configuration first.',
+    encryption: 'Enable credential encryption first.',
+    changed: 'Credentials or task ownership changed; refresh the list and review manually.'
+  },
   refreshAttempt: 'Last failed refresh attempt (a later retry may have recovered)',
   "details": "View failure details",
   "code": "Safe code",

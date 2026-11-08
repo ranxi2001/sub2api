@@ -488,6 +488,73 @@ async function mountControls() {
   return wrapper
 }
 
+describe('manual operation conflicts', () => {
+  it.each(['OPENAI_REAUTH_TASK_ALREADY_ACTIVE', 'OPENAI_REAUTH_TASK_ACTIVE'])(
+    'explains an occupied login task for %s without exposing raw errors', async reason => {
+      const view = await mountControls()
+      api.reloginGuard.mockRejectedValueOnce({ status: 409, reason, message: 'synthetic-private' })
+
+      await view.findAll('button').find(button => button.text() === 'tokenGuardV2.reloginNow')!.trigger('click')
+      await flushPromises()
+
+      expect(api.reloginGuard).toHaveBeenCalledWith(42)
+      expect(view.text()).toContain(`tokenGuardV2.operationFailure.manual.taskBusy (${reason})`)
+      expect(view.text()).not.toContain('tokenGuardV2.reloginQueued')
+      expect(view.text()).not.toContain('synthetic-private')
+    }
+  )
+
+  it('keeps an inspection lease conflict separate from login and 2FA tasks', async () => {
+    const view = await mountControls()
+    api.probeGuard.mockRejectedValueOnce({ status: 409, reason: 'TOKEN_GUARD_V2_PROBE_BUSY' })
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.inspectNow')!.trigger('click')
+    await flushPromises()
+    expect(view.text()).toContain('tokenGuardV2.operationFailure.manual.busy (TOKEN_GUARD_V2_PROBE_BUSY)')
+    expect(view.text()).not.toContain('tokenGuardV2.operationFailure.manual.taskBusy')
+  })
+
+  it.each([
+    ['TOTP_ACCOUNT_BUSY', 'totpBusy'],
+    ['OPENAI_REAUTH_CONFIG_CHANGED', 'changed']
+  ])('explains why login configuration cannot be saved for %s', async (reason, category) => {
+    const view = await mountControls()
+    api.updateGuard.mockRejectedValueOnce({ status: 409, reason, message: 'synthetic-private' })
+    await view.findAll('button').find(button => button.text() === 'tokenGuardV2.edit')!.trigger('click')
+    await view.get('#token-guard-v2-editor').trigger('submit')
+    await flushPromises()
+    expect(api.updateGuard).toHaveBeenCalledWith(42, expect.any(Object))
+    expect(view.text()).toContain(`tokenGuardV2.operationFailure.manual.${category} (${reason})`)
+    expect(view.text()).not.toContain('synthetic-private')
+  })
+
+  it('explains a budget recovery conflict without starting another login', async () => {
+    const data = await api.listGuard()
+    api.listGuard.mockResolvedValue({ ...data, accounts: [{ ...data.accounts[0], auto_relogin_exhausted: true }] })
+    api.resumeBudget.mockRejectedValueOnce({ status: 409, reason: 'TOKEN_GUARD_V2_BUDGET_BUSY' })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    restoreConfirmation = () => confirm.mockRestore()
+    const view = await mountControls()
+    await view.get('[data-testid="resume-budget-42"]').trigger('click')
+    await flushPromises()
+    expect(api.resumeBudget).toHaveBeenCalledWith(42)
+    expect(view.text()).toContain('tokenGuardV2.operationFailure.manual.budgetBusy (TOKEN_GUARD_V2_BUDGET_BUSY)')
+    expect(api.reloginGuard).not.toHaveBeenCalled()
+  })
+
+  it.each(['UNKNOWN_PRIVATE_REASON', '__proto__', 'toString', undefined])(
+    'does not display unrecognized reason %s or raw response data', async reason => {
+      const view = await mountControls()
+      api.reloginGuard.mockRejectedValueOnce({ status: 409, reason, message: 'synthetic-private', metadata: { token: 'synthetic-token' } })
+      await view.findAll('button').find(button => button.text() === 'tokenGuardV2.reloginNow')!.trigger('click')
+      await flushPromises()
+      expect(view.text()).toContain('tokenGuardV2.error')
+      if (reason) expect(view.text()).not.toContain(reason)
+      expect(view.text()).not.toContain('synthetic-private')
+      expect(view.text()).not.toContain('synthetic-token')
+    }
+  )
+})
+
 it('loads the configured encryption fixture before allowing account editing', async () => {
   const view = await mountControls()
   const add = view.findAll('button').find(button => button.text() === 'tokenGuardV2.addAccount')!

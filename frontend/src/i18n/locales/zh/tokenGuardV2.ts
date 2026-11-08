@@ -1,6 +1,15 @@
 export default {
   operationFailure: {
-  manual: {"busy": "已有操作正在进行，请等待完成后查看原任务。", "worker": "重登服务不可用，请检查 Worker 状态。", "configuration": "请先保存完整登录配置。", "encryption": "请先启用凭据加密。", "changed": "账号凭据或任务已变化，请刷新列表并人工核对。"},
+  manual: {
+    busy: '已有巡检正在进行，请等待完成后查看结果。',
+    taskBusy: '该账号已有重登、授权或未完成的 2FA 任务，请查看原任务；涉及 2FA 时，到「2FA 管理」确认状态并完成恢复。',
+    totpBusy: '该账号有未完成的 2FA 任务，请先到「2FA 管理」完成验证或恢复，再编辑登录配置。',
+    budgetBusy: '重登预算或巡检状态已变化，或仍有任务未完成。请刷新并查看原任务；涉及 2FA 时，到「2FA 管理」完成恢复后再恢复预算。',
+    worker: '重登服务不可用，请检查 Worker 状态。',
+    configuration: '请先保存完整登录配置。',
+    encryption: '请先启用凭据加密。',
+    changed: '账号凭据或任务已变化，请刷新列表并人工核对。'
+  },
   refreshAttempt: '最近刷新失败尝试（可能已被后续重试恢复）',
   "details": "查看本次异常详情",
   "code": "安全短码",
