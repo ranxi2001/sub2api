@@ -50,6 +50,21 @@ func (b *Bridge) functionCodeTransportEnvelope(arguments object) (object, bool, 
 		return nil, true, fmt.Errorf("basispoints function code transport must not duplicate code in extended_summary")
 	}
 	args["code"] = code
+	// Older catalog instructions selected FUNCTION_CODE for the whole tool,
+	// including branches that forbid code. An empty native slot may represent
+	// such a branch, but never discard a valid empty code argument or nonempty
+	// executable text. Both decisions use the complete original schema.
+	if code == "" && info.Schema != nil {
+		if err := validateToolNumberBudget(args); err != nil {
+			return nil, true, toolArgumentsSchemaError{}
+		}
+		if info.Schema.Validate(args) != nil {
+			delete(args, "code")
+			if info.Schema.Validate(args) != nil {
+				args["code"] = code
+			}
+		}
+	}
 	encoded, err := json.Marshal(args)
 	if err != nil || len(encoded) > maxEnvelopeBytes {
 		return nil, true, fmt.Errorf("basispoints function code transport arguments exceed the size limit")
