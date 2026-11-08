@@ -75,7 +75,7 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 		status = "incomplete"
 	}
 	payload := fmt.Sprintf(`{"id":"resp_715","status":%q,"error":null,"model":"gpt-5.1","output":%s,"usage":{"input_tokens":5,"output_tokens":3}}`, status, output)
-	if gjson.GetBytes(body, "stream").Bool() {
+	if gjson.GetBytes(body, "stream").Bool() || mode == "aggregate" {
 		event := "response.completed"
 		if mode == "incomplete" {
 			event = "response.incomplete"
@@ -223,4 +223,105 @@ func TestIssue715HTTPIncompleteNeverGrantsCompatibility(t *testing.T) {
 	issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
 	require.GreaterOrEqual(t, len(upstream.ids), 2)
 	require.Equal(t, int64(2), upstream.ids[1], "incomplete is not a successful compatibility observation")
+}
+
+// Exercise the actual Responses -> Forward -> JSON/SSE aggregation write chain.
+// Failure happens during delivery, after the upstream has fully completed.
+type issue715DeliveryWriter struct {
+	gin.ResponseWriter
+	mode   string
+	cancel context.CancelFunc
+	writes int
+}
+
+func (w *issue715DeliveryWriter) Write(body []byte) (int, error) {
+	w.writes++
+	switch w.mode {
+	case "error":
+		return 0, io.ErrClosedPipe
+	case "short":
+		return len(body) - 1, nil
+	default:
+		n, err := w.ResponseWriter.Write(body)
+		w.cancel()
+		return n, err
+	}
+}
+
+func TestIssue715HTTPFailedDeliveryNeverGrantsOwner(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, format := range []string{"json", "aggregate"} {
+		for _, failure := range []string{"error", "short", "cancel"} {
+			t.Run(format+"/"+failure, func(t *testing.T) {
+				accounts := issue715Accounts()
+				upstream := &issue715Upstream{}
+				if format == "aggregate" {
+					upstream.mode = "aggregate"
+				}
+				handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+				c, _ := newAstraProFailoverContext(t, issue715Body(false, false))
+				c.Request.Header.Set("session_id", "fixture-715-thread")
+				key, _ := c.Get(string(middleware.ContextKeyAPIKey))
+				key.(*service.APIKey).ID = 99
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				defer cancel()
+				c.Request = c.Request.WithContext(ctx)
+				writer := &issue715DeliveryWriter{ResponseWriter: c.Writer, mode: failure, cancel: cancel}
+				c.Writer = writer
+				handler.Responses(c)
+				require.Positive(t, writer.writes, "must fail inside actual downstream delivery")
+				require.Equal(t, []int64{1}, upstream.ids, "a downstream failure cannot replay the request")
+				accounts[0].Priority, accounts[1].Priority = 100, 0
+				issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
+				require.GreaterOrEqual(t, len(upstream.ids), 2)
+				require.Equal(t, int64(2), upstream.ids[1], "failed downstream delivery must not grant a successful owner")
+			})
+		}
+	}
+}
+
+func TestIssue715HTTPRecoveryErrorsIdentifyCompatibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, stream := range []bool{false, true} {
+		for _, change := range []string{"disabled", "credentials"} {
+			t.Run(fmt.Sprint(stream)+"/"+change, func(t *testing.T) {
+				accounts := issue715Accounts()
+				upstream := &issue715Upstream{}
+				handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+				status, _ := issue715Request(t, handler, issue715Body(false, stream), 99, "fixture-715-thread", false)
+				require.Equal(t, 200, status)
+				code := "encrypted_agent_recovery_owner_unavailable"
+				if change == "disabled" {
+					accounts[0].Schedulable = false
+				} else {
+					accounts[0].Credentials = map[string]any{"access_token": "fixture-rotated"}
+					code = "encrypted_agent_recovery_route_changed"
+				}
+				status, answer := issue715Request(t, handler, issue715Body(true, stream), 99, "fixture-715-thread", false)
+				require.Equal(t, http.StatusConflict, status, "compatibility refusal must not be a generic empty-pool response")
+				require.Equal(t, code, gjson.Get(answer, "error.code").String())
+				require.Equal(t, "invalid_request_error", gjson.Get(answer, "error.type").String())
+				require.Contains(t, gjson.Get(answer, "error.message").String(), "Preserve this task and context")
+				require.Equal(t, []int64{1}, upstream.ids)
+			})
+		}
+	}
+}
+
+func TestIssue715RecoveryErrorCommittedSSEEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &OpenAIGatewayHandler{}
+	c, rec := newAstraProFailoverContext(t, issue715Body(true, true))
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.WriteHeaderNow()
+	require.True(t, handler.handleOpenAIAgentRecoveryError(c, &service.OpenAIAgentRecoveryError{Reason: "wire_changed"}, false))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "event: response.failed")
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if strings.HasPrefix(line, "data: ") {
+			payload := strings.TrimPrefix(line, "data: ")
+			require.Equal(t, "encrypted_agent_recovery_wire_changed", gjson.Get(payload, "response.error.code").String())
+			require.Equal(t, "failed", gjson.Get(payload, "response.status").String())
+		}
+	}
 }

@@ -423,12 +423,12 @@ func (s *defaultOpenAIAccountScheduler) Select(
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	recovery := openAIAgentRecoveryFromContext(ctx)
 	if recovery != nil && recovery.conflict {
-		return nil, decision, errOpenAIAgentRecoveryUnavailable
+		return nil, decision, openAIAgentRecoveryError("owner_conflict")
 	}
 	if recovery != nil && recovery.owner != nil {
 		if req.Platform != PlatformOpenAI || req.SessionHash != recovery.session ||
 			derefGroupID(req.GroupID) != recovery.groupID || req.RequestedModel != recovery.model {
-			return nil, decision, errOpenAIAgentRecoveryUnavailable
+			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
 		}
 		req.StickyAccountID = recovery.owner.accountID
 		req.StickyWeighted = false
@@ -540,12 +540,12 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	}
 	if recovery != nil && recovery.owner != nil {
 		if req.GuardianParentAccountID > 0 && req.GuardianParentAccountID != recovery.owner.accountID {
-			return nil, decision, errOpenAIAgentRecoveryUnavailable
+			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
 		}
 		if previousResponseID != "" {
 			ownerID, readErr := s.service.getOpenAIWSStateStore().GetResponseAccount(ctx, derefGroupID(req.GroupID), previousResponseID)
 			if readErr != nil || ownerID != recovery.owner.accountID {
-				return nil, decision, errOpenAIAgentRecoveryUnavailable
+				return nil, decision, openAIAgentRecoveryError("owner_unavailable")
 			}
 		}
 		selection, _, err = s.selectBySessionHash(ctx, req)
@@ -553,7 +553,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			return nil, decision, err
 		}
 		if selection == nil || selection.Account == nil {
-			return nil, decision, errOpenAIAgentRecoveryUnavailable
+			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
 		}
 		decision.Layer = openAIAccountScheduleLayerSessionSticky
 		decision.StickySessionHit = true

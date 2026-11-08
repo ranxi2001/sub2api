@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
+	"io"
 	"math"
 	"net/http"
 	"sort"
@@ -1933,7 +1934,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
-		c.Data(resp.StatusCode, contentType, body)
+		if err := writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body); err != nil {
+			return nil, err
+		}
 	}
 
 	return &openaiNonStreamingResult{
@@ -2057,8 +2060,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		// 上游的 Content-Type（text/event-stream）已复制到响应头，而 c.Data
 		// 不会覆盖已存在的 Content-Type，这里需显式设置为聚合后的类型。
-		c.Writer.Header().Set("Content-Type", contentType)
-		c.Data(resp.StatusCode, contentType, body)
+		if err := writeOpenAINonStreamingBody(c, resp.StatusCode, contentType, body); err != nil {
+			return nil, err
+		}
 	}
 
 	return &openaiNonStreamingResult{
@@ -2070,6 +2074,24 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		imageOutputSizes: collectOpenAIImageOutputSizesFromSSEBody(bodyText),
 		searchCount:      countGrokNativeSearchCallsFromSSEBody(bodyText),
 	}, nil
+}
+
+// Gin's Data renderer discards the downstream Write error. A completed upstream
+// payload alone must not publish compatibility evidence after failed delivery.
+func writeOpenAINonStreamingBody(c *gin.Context, status int, contentType string, body []byte) error {
+	if err := c.Request.Context().Err(); err != nil {
+		return err
+	}
+	c.Writer.Header().Set("Content-Type", contentType)
+	c.Writer.WriteHeader(status)
+	n, err := c.Writer.Write(body)
+	if err != nil {
+		return fmt.Errorf("write OpenAI response: %w", err)
+	}
+	if n != len(body) {
+		return io.ErrShortWrite
+	}
+	return c.Request.Context().Err()
 }
 
 func extractOpenAISSETerminalEvent(body string) (string, []byte, bool) {

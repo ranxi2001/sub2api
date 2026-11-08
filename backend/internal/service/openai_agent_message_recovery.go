@@ -25,6 +25,38 @@ const openAIAgentRecoveryMaxEntries = 65536
 
 var errOpenAIAgentRecoveryUnavailable = errors.New("encrypted agent continuation has no unchanged compatible route")
 
+// OpenAIAgentRecoveryError is a local compatibility refusal, not a failure of
+// the entire account pool. Reasons contain no route IDs, credentials or input.
+type OpenAIAgentRecoveryError struct {
+	Reason string
+}
+
+func (e *OpenAIAgentRecoveryError) Error() string { return e.ClientMessage() }
+func (e *OpenAIAgentRecoveryError) Unwrap() error { return errOpenAIAgentRecoveryUnavailable }
+func (e *OpenAIAgentRecoveryError) ClientCode() string {
+	return "encrypted_agent_recovery_" + e.Reason
+}
+func (e *OpenAIAgentRecoveryError) ClientMessage() string {
+	var reason string
+	switch e.Reason {
+	case "owner_conflict":
+		reason = "The encrypted agent items have conflicting compatible owners."
+	case "route_changed":
+		reason = "The proven encrypted agent route or credentials changed."
+	case "wire_changed":
+		reason = "The proven encrypted agent HTTP transport changed."
+	case "store_unavailable":
+		reason = "Encrypted agent compatibility records are temporarily unavailable."
+	default:
+		reason = "The proven encrypted agent owner is currently unavailable."
+	}
+	return reason + " Preserve this task and context; restore the original compatible route before continuing."
+}
+
+func openAIAgentRecoveryError(reason string) error {
+	return &OpenAIAgentRecoveryError{Reason: reason}
+}
+
 type openAIAgentRecoveryContextKey struct{}
 
 type openAIAgentRecoveryBinding struct {
@@ -171,9 +203,14 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryAccount(ctx context.Conte
 	if request == nil || (!request.conflict && request.owner == nil) {
 		return nil
 	}
-	if request.conflict || account == nil || account.ID != request.owner.accountID ||
-		openAIAgentRecoveryConfig(account, request.model) != request.owner.config {
-		return errOpenAIAgentRecoveryUnavailable
+	if request.conflict {
+		return openAIAgentRecoveryError("owner_conflict")
+	}
+	if account == nil || account.ID != request.owner.accountID {
+		return openAIAgentRecoveryError("owner_unavailable")
+	}
+	if openAIAgentRecoveryConfig(account, request.model) != request.owner.config {
+		return openAIAgentRecoveryError("route_changed")
 	}
 	return nil
 }
@@ -192,7 +229,7 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryDispatch(ctx context.Cont
 		isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c) ||
 		shouldForwardDeepSeekResponsesLiteViaChatCompletions(account, body) ||
 		s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, upstreamRoutingModel(account, body, "")) != APIProtocolResponses {
-		return errOpenAIAgentRecoveryUnavailable
+		return openAIAgentRecoveryError("route_changed")
 	}
 	return nil
 }
@@ -217,36 +254,36 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	if !account.IsOpenAI() || account.HasManagedOpenAIConnections() || account.AuthConnectionID != "" ||
 		account.IsOpenAIPassthroughEnabled() || account.IsCopilotSDKEnabled() || account.IsSIWCEnabled() {
 		if request.owner != nil {
-			return noop, errOpenAIAgentRecoveryUnavailable
+			return noop, openAIAgentRecoveryError("wire_changed")
 		}
 		return noop, nil
 	}
 	if req.GetBody == nil {
-		return noop, errOpenAIAgentRecoveryUnavailable
+		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	reader, err := req.GetBody()
 	if err != nil {
-		return noop, errOpenAIAgentRecoveryUnavailable
+		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	body, err = io.ReadAll(reader)
 	_ = reader.Close()
 	if err != nil {
-		return noop, errOpenAIAgentRecoveryUnavailable
+		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
-		return noop, errOpenAIAgentRecoveryUnavailable
+		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	items := openAIAgentRecoveryItemDigests(body)
 	if len(items) != len(request.items) {
 		if request.owner != nil {
-			return noop, errOpenAIAgentRecoveryUnavailable
+			return noop, openAIAgentRecoveryError("wire_changed")
 		}
 		return noop, nil
 	}
 	for i := range items {
 		if items[i] != request.items[i] {
 			if request.owner != nil {
-				return noop, errOpenAIAgentRecoveryUnavailable
+				return noop, openAIAgentRecoveryError("wire_changed")
 			}
 			return noop, nil
 		}
@@ -257,7 +294,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		gjson.GetBytes(body, "model").String()})
 	binding := openAIAgentRecoveryBinding{accountID: account.ID, config: openAIAgentRecoveryConfig(account, request.model), wire: sha256.Sum256(wire), expiresAt: time.Now().Add(s.openAIWSSessionStickyTTL())}
 	if request.owner != nil && !sameOpenAIAgentRecoveryRoute(*request.owner, binding) {
-		return noop, errOpenAIAgentRecoveryUnavailable
+		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	state := &s.agentMessageRecovery
 	state.mu.Lock()
@@ -265,7 +302,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		if old, exists := state.bindings[key]; exists && time.Now().Before(old.expiresAt) &&
 			(old.conflicted || !sameOpenAIAgentRecoveryRoute(old, binding)) {
 			state.mu.Unlock()
-			return noop, errOpenAIAgentRecoveryUnavailable
+			return noop, openAIAgentRecoveryError("owner_conflict")
 		}
 	}
 	state.mu.Unlock()
