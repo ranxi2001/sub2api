@@ -2,9 +2,10 @@ package handler
 
 import (
 	"errors"
+	"net/http"
+
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
-	"net/http"
 )
 
 func (h *OpenAIGatewayHandler) handleOpenAIAgentRecoveryError(c *gin.Context, err error, streamStarted bool) bool {

@@ -13,8 +13,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // These are compatibility observations, not plaintext history or a substitute
@@ -56,8 +58,10 @@ type openAIAgentRecoveryRequest struct {
 
 // WithOpenAIAgentMessageRecovery observes only opaque item identities. A route
 // becomes eligible for transparent continuation only after this same key,
-// group, session and model successfully sent the intact items through native
-// HTTP Responses. Ordinary sticky writes, HTTP 200 and reasoning are not proof.
+// group, session and model consumed or generated the intact items on native
+// HTTP Responses. Generated ownership routes the first consumption back to its
+// producer; it cannot prove a provider will accept its own output in the future.
+// Ordinary sticky writes, HTTP 200 and reasoning are not proof.
 func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Context, c *gin.Context, body []byte, sessionHash, model string) context.Context {
 	request := &openAIAgentRecoveryRequest{groupID: getOpenAIGroupIDFromContext(c), model: model, session: sessionHash}
 	keyID := getAPIKeyIDFromContext(c)
@@ -364,7 +368,10 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 			for _, key := range keys {
 				// After delivery a failed publication cannot be undone. It loses
 				// future availability; it never authorizes an unproven owner.
-				_ = shared.PublishOpenAIAgentRecovery(storeCtx, hex.EncodeToString(key[:]), encodeOpenAIAgentRecoveryBinding(binding), time.Until(binding.expiresAt))
+				if err := shared.PublishOpenAIAgentRecovery(storeCtx, hex.EncodeToString(key[:]), encodeOpenAIAgentRecoveryBinding(binding), time.Until(binding.expiresAt)); err != nil {
+					logger.L().Warn("openai.agent_recovery_publish_failed", zap.Int64("account_id", binding.accountID), zap.Error(err))
+					break
+				}
 			}
 			return
 		}
@@ -406,6 +413,9 @@ func (r *openAIAgentRecoveryRequest) itemKey(item [32]byte) [32]byte {
 // output reconstruction and tool/name restoration. The attempt's completion
 // callback decides whether delivery succeeded; item.done alone grants nothing.
 func observeOpenAIAgentRecoveryOutput(c *gin.Context, body []byte, nested bool) {
+	if !bytes.Contains(body, []byte("agent_message")) && !bytes.Contains(body, []byte(`\u`)) {
+		return
+	}
 	request := openAIAgentRecoveryFromContext(c.Request.Context())
 	if request == nil || !openAIAgentCompletedResponse(body, nested) {
 		return

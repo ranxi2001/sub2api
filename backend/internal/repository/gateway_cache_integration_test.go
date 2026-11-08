@@ -4,6 +4,7 @@ package repository
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,4 +152,28 @@ func (s *GatewayCacheSuite) TestGetSessionAccountID_CorruptedValue() {
 
 func TestGatewayCacheSuite(t *testing.T) {
 	suite.Run(t, new(GatewayCacheSuite))
+}
+
+func (s *GatewayCacheSuite) TestIssue715AgentOwnership() {
+	cache := &gatewayCache{rdb: s.rdb}
+	other := &gatewayCache{rdb: s.rdb}
+	key := strings.Repeat("7", 64)
+	require.NoError(s.T(), cache.PublishOpenAIAgentRecovery(s.ctx, key, "route-a", time.Minute))
+	value, err := other.GetOpenAIAgentRecovery(s.ctx, key)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "route-a", value)
+	require.NoError(s.T(), other.PublishOpenAIAgentRecovery(s.ctx, key, "route-b", 2*time.Minute))
+	require.NoError(s.T(), cache.PublishOpenAIAgentRecovery(s.ctx, key, "route-a", time.Second))
+	value, err = other.GetOpenAIAgentRecovery(s.ctx, key)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "conflict", value, "real Redis must retain a conflict after further successes")
+	redisKey, err := openAIAgentRecoveryKey(key)
+	require.NoError(s.T(), err)
+	ttl, err := s.rdb.PTTL(s.ctx, redisKey).Result()
+	require.NoError(s.T(), err)
+	require.Greater(s.T(), ttl, time.Minute, "a shorter refresh must not truncate conflict retention")
+	require.NoError(s.T(), s.rdb.Del(s.ctx, redisKey).Err())
+	value, err = cache.GetOpenAIAgentRecovery(s.ctx, key)
+	require.NoError(s.T(), err)
+	require.Empty(s.T(), value)
 }

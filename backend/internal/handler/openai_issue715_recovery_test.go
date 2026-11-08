@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -30,7 +31,7 @@ const issue715Agent = `{"type":"agent_message","author":"/root","recipient":"/ro
 func issue715Body(followup bool, stream bool) string {
 	input := issue715Agent + `,{"type":"message","role":"user","content":"Keep ledger balance 11; add 7 exactly once"}`
 	if followup {
-		input += `,{"type":"function_call","name":"update_ledger","call_id":"call_715_once","arguments":"{\"add\":7}"},{"type":"function_call_output","call_id":"call_715_once","output":"ledger balance 18; applied once"},{"type":"message","role":"user","content":"Continue the same task and confirm the existing balance"}`
+		input += `,{"type":"function_call","name":"update_ledger","call_id":"fc_715_once","arguments":"{\"add\":7}"},{"type":"function_call_output","call_id":"fc_715_once","output":"ledger balance 18; applied once"},{"type":"message","role":"user","content":"Continue the same task and confirm the existing balance"}`
 	}
 	return fmt.Sprintf(`{"model":"gpt-5.1","stream":%t,"input":[%s]}`, stream, input)
 }
@@ -72,7 +73,7 @@ func (u *issue715Upstream) Do(req *http.Request, _ string, accountID int64, _ in
 	if mode == "partial" {
 		return response(200, "text/event-stream", "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"started existing task\"}\n\nevent: error\ndata: {\"type\":\"error\",\"code\":\"unsupported_encrypted_agent_message\",\"message\":\"fixture failure after output\"}\n\n")
 	}
-	output := `[{"type":"function_call","call_id":"call_715_once","name":"update_ledger","arguments":"{\"add\":7}"}]`
+	output := `[{"type":"function_call","call_id":"fc_715_once","name":"update_ledger","arguments":"{\"add\":7}"}]`
 	if gjson.GetBytes(body, "input.#(type==function_call_output).output").String() == "ledger balance 18; applied once" {
 		output = `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Same task: ledger balance 18; update already applied once"}]}]`
 	}
@@ -105,9 +106,17 @@ func issue715Accounts() []service.Account {
 	}
 }
 
-func issue715Request(t *testing.T, handler *OpenAIGatewayHandler, body string, keyID int64, session string, canceled bool) (int, string) {
+func newIssue715Context(t *testing.T, body string) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	c, rec := newAstraProFailoverContext(t, body)
+	key, _ := c.Get(string(middleware.ContextKeyAPIKey))
+	key.(*service.APIKey).AllowLongContext = true
+	return c, rec
+}
+
+func issue715Request(t *testing.T, handler *OpenAIGatewayHandler, body string, keyID int64, session string, canceled bool) (int, string) {
+	t.Helper()
+	c, rec := newIssue715Context(t, body)
 	c.Request.Header.Set("session_id", session)
 	key, _ := c.Get(string(middleware.ContextKeyAPIKey))
 	key.(*service.APIKey).ID = keyID
@@ -134,7 +143,7 @@ func TestIssue715HTTPResumesSameTaskAcrossTwoTurns(t *testing.T) {
 			require.Equal(t, 200, status, first)
 			require.Contains(t, first, "update_ledger")
 			// Execute actual function-call outputs in a fake client. Replay of
-			// call_715_once is a test failure, not silently deduplicated here.
+			// fc_715_once is a test failure, not silently deduplicated here.
 			toolExecutions, ledgerBalance := 0, 11
 			executeTools := func(answer string) {
 				payload := answer
@@ -147,7 +156,7 @@ func TestIssue715HTTPResumesSameTaskAcrossTwoTurns(t *testing.T) {
 				}
 				for _, output := range gjson.Get(payload, "output").Array() {
 					if output.Get("type").String() == "function_call" {
-						require.Equal(t, "call_715_once", output.Get("call_id").String())
+						require.Equal(t, "fc_715_once", output.Get("call_id").String())
 						require.Equal(t, int64(7), gjson.Get(output.Get("arguments").String(), "add").Int())
 						toolExecutions++
 						ledgerBalance += 7
@@ -266,16 +275,20 @@ func (w *issue715DeliveryWriter) Write(body []byte) (int, error) {
 
 func TestIssue715HTTPFailedDeliveryNeverGrantsOwner(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, format := range []string{"json", "aggregate"} {
+	for _, format := range []string{"json", "aggregate", "generated-json", "generated-stream"} {
 		for _, failure := range []string{"error", "short", "cancel"} {
 			t.Run(format+"/"+failure, func(t *testing.T) {
 				accounts := issue715Accounts()
 				upstream := &issue715Upstream{}
-				if format == "aggregate" {
-					upstream.mode = "aggregate"
+				if format != "json" {
+					upstream.mode = format
 				}
 				handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
-				c, _ := newAstraProFailoverContext(t, issue715Body(false, false))
+				firstBody := issue715Body(false, false)
+				if strings.HasPrefix(format, "generated") {
+					firstBody = strings.Replace(firstBody, issue715Agent+",", "", 1)
+				}
+				c, _ := newIssue715Context(t, firstBody)
 				c.Request.Header.Set("session_id", "fixture-715-thread")
 				key, _ := c.Get(string(middleware.ContextKeyAPIKey))
 				key.(*service.APIKey).ID = 99
@@ -327,7 +340,7 @@ func TestIssue715HTTPRecoveryErrorsIdentifyCompatibility(t *testing.T) {
 func TestIssue715RecoveryErrorCommittedSSEEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := &OpenAIGatewayHandler{}
-	c, rec := newAstraProFailoverContext(t, issue715Body(true, true))
+	c, rec := newIssue715Context(t, issue715Body(true, true))
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.WriteHeaderNow()
 	require.True(t, handler.handleOpenAIAgentRecoveryError(c, &service.OpenAIAgentRecoveryError{Reason: "wire_changed"}, false))
@@ -394,7 +407,7 @@ func TestIssue715HTTPConcurrentToolResultsKeepContextWithoutReplay(t *testing.T)
 	for _, body := range upstream.bodies[1:] {
 		require.Contains(t, string(body), "fixture-task-reference-715")
 		require.Contains(t, string(body), "ledger balance 18; applied once")
-		require.Equal(t, "call_715_once", gjson.GetBytes(body, "input.#(type==function_call_output).call_id").String())
+		require.Equal(t, "fc_715_once", gjson.GetBytes(body, "input.#(type==function_call_output).call_id").String())
 	}
 }
 
@@ -421,7 +434,7 @@ func TestIssue715HTTPInterruptedToolResultDoesNotReplay(t *testing.T) {
 				upstream.mode = "pool_failure"
 				issue715Request(t, handler, issue715Body(true, false), 99, "fixture-715-thread", false)
 			} else {
-				c, _ := newAstraProFailoverContext(t, issue715Body(true, false))
+				c, _ := newIssue715Context(t, issue715Body(true, false))
 				c.Request.Header.Set("session_id", "fixture-715-thread")
 				ctx, cancel := context.WithCancel(c.Request.Context())
 				defer cancel()
@@ -475,4 +488,21 @@ func TestIssue715HTTPGeneratedOwnerSurvivesApplicationRestart(t *testing.T) {
 	fresh := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, repository.NewGatewayCache(client), accounts...)
 	issue715Request(t, fresh, issue715Body(true, false), 99, "fixture-715-thread", false)
 	require.Equal(t, int64(2), upstream.ids[3], "lost shared evidence cannot grant the prior owner")
+}
+
+func TestIssue715HTTPRecoveryCannotBypassLongContextPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	accounts := issue715Accounts()
+	upstream := &issue715Upstream{}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+	status, answer := issue715Request(t, handler, issue715Body(false, false), 99, "fixture-715-thread", false)
+	require.Equal(t, 200, status, answer)
+	c, rec := newIssue715Context(t, issue715Body(true, false))
+	c.Request.Header.Set("session_id", "fixture-715-thread")
+	key, _ := c.Get(string(middleware.ContextKeyAPIKey))
+	key.(*service.APIKey).AllowLongContext = false
+	handler.Responses(c)
+	require.Equal(t, 400, rec.Code)
+	require.Equal(t, "context_unverifiable", gjson.Get(rec.Body.String(), "error.code").String())
+	require.Equal(t, []int64{1}, upstream.ids, "compatibility ownership must not override API-key permissions")
 }

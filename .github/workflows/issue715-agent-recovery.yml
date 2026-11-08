@@ -8,6 +8,7 @@ on:
       - 'backend/internal/service/openai_*'
       - 'backend/internal/handler/openai_*'
       - 'backend/internal/repository/gateway_cache_agent_recovery*'
+      - 'backend/internal/repository/gateway_cache_integration_test.go'
   workflow_dispatch:
 
 permissions:
@@ -36,6 +37,7 @@ jobs:
           test -z "$(git status --porcelain)"
           cd backend
           go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository -run '^Test(Issue715|AstraCodexToolCapabilities|EncryptedSticky|EncryptedPrioritySticky|OpenAIGatewayService_SelectAccountWithScheduler_Encrypted)' -count=1 -v -timeout=10m
+          go test -tags=integration ./internal/repository -run '^TestGatewayCacheSuite$' -testify.m '^TestIssue715AgentOwnership$' -count=1 -v -timeout=5m
 
   red:
     runs-on: ubuntu-latest

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"testing"
@@ -193,4 +194,77 @@ func TestIssue715RecoveryCannotBypassRPM(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, selection)
 	require.Empty(t, acquired, "compatibility cannot bypass the hard per-minute admission gate")
+}
+
+type issue715SharedOwners struct {
+	GatewayCache
+	mu      sync.Mutex
+	values  map[string]string
+	readErr error
+}
+
+func (c *issue715SharedOwners) GetOpenAIAgentRecovery(ctx context.Context, key string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.values[key], c.readErr
+}
+func (c *issue715SharedOwners) PublishOpenAIAgentRecovery(ctx context.Context, key, value string, ttl time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.values == nil {
+		c.values = make(map[string]string)
+	}
+	if old := c.values[key]; old != "" && old != value {
+		value = "conflict"
+	}
+	c.values[key] = value
+	return nil
+}
+func TestIssue715SharedOwnershipIsAuthoritativeAndMixedTasksRemainIntact(t *testing.T) {
+	cache := &issue715SharedOwners{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	producer := &OpenAIGatewayService{cache: cache, cfg: &config.Config{}}
+	issue715LearnRoute(t, producer, account, issue715OpaqueBody)
+	reader := &OpenAIGatewayService{cache: cache, cfg: &config.Config{}}
+	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+	c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+	mixed := issue715OpaqueBody[:len(issue715OpaqueBody)-2] + `,{"type":"agent_message","encrypted_content":"fixture-new-task"}]}`
+	ctx := reader.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(mixed), "fixture-session", "gpt-6-astra")
+	require.True(t, openAIAgentRecoveryBound(ctx))
+	require.Len(t, openAIAgentRecoveryFromContext(ctx).keys, 2)
+	req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(mixed))
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer fixture")
+	complete, err := reader.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(mixed))
+	require.NoError(t, err, "unknown new task alongside proven history must remain sendable to that owner")
+	complete(true)
+	require.Len(t, cache.values, 2, "successful intact consumption can learn the additional new item")
+	cache.readErr = errors.New("fixture Redis unavailable")
+	ctx = reader.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(mixed), "fixture-session", "gpt-6-astra")
+	var recovery *OpenAIAgentRecoveryError
+	require.ErrorAs(t, openAIAgentRecoveryFromContext(ctx).lookupErr, &recovery)
+	require.Equal(t, "store_unavailable", recovery.Reason)
+	cache.readErr = nil
+	cache.values = make(map[string]string)
+	ctx = producer.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(issue715OpaqueBody), "fixture-session", "gpt-6-astra")
+	require.False(t, openAIAgentRecoveryBound(ctx), "shared miss cannot resurrect process-local ownership")
+}
+
+func TestIssue715PlainRequestsWithoutSafeCaptureKeepOriginalBehavior(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+	c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+	for _, body := range []string{`{"model":"gpt-6-astra","input":"fixture","metadata":{"x":1,"x":2}}`, `{"model":"gpt-6-astra","input":"fixture"}`} {
+		ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(body), "fixture-session", "gpt-6-astra")
+		req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewBufferString(body))
+		require.NoError(t, err)
+		if !bytes.Contains([]byte(body), []byte("metadata")) {
+			req.GetBody = nil
+		}
+		complete, err := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req, []byte(body))
+		require.NoError(t, err, "best effort output capture must not reject ordinary requests")
+		complete(true)
+		require.Empty(t, svc.agentMessageRecovery.bindings)
+	}
 }
