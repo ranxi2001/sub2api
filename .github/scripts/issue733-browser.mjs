@@ -251,6 +251,12 @@ try {
   await page.goto('http://127.0.0.1:4183/.issue733-fixture/index.html?locale=en', { waitUntil: 'networkidle' })
   assert.match(await page.getByTestId('latency-status').innerText(), /Updated/)
   await page.evaluate(() => document.documentElement.classList.add('dark'))
+  // The project's cards transition background colors for 300ms. Wait for the
+  // actual theme instead of accepting a white card with dark-mode foreground.
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-testid="latency-panel"]')).backgroundColor === 'rgb(15, 23, 42)')
+  const darkCSS=await page.getByTestId('latency-panel').evaluate(el=>({background:getComputedStyle(el).backgroundColor,color:getComputedStyle(el.querySelector('button')).color}))
+  assert.equal(darkCSS.background,'rgb(15, 23, 42)');assert.notEqual(darkCSS.color,'rgb(17, 24, 39)')
+  measurements.push({phase:'settled-dark-theme',...darkCSS})
   await screenshot(page, 'after-english-dark.png', 'candidate')
   // Unmount then wait longer than a real scheduled poll; no timer restart.
   const requestCount = requests.length
