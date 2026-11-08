@@ -263,5 +263,5 @@ func (s *OpenAIGatewayService) priorityAnalysisChannel(ctx context.Context, grou
 	if owned == nil {
 		return nil, errors.New("priority analysis channel binding changed")
 	}
-	return &channelLookup{cache: cache, channel: owned, platform: channelLookupPlatform(ctx, platform)}, nil
+	return &channelLookup{cache: cache, channel: owned, platform: PlatformOpenAI}, nil
 }

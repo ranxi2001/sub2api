@@ -62,7 +62,7 @@ jobs:
 
   backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       GOMAXPROCS: '2'
       GOFLAGS: '-p=2'
@@ -94,6 +94,22 @@ jobs:
           grep -q -- '--- FAIL: TestPriorityAnalysisMappingErrorCannotBecomeEmptySuccess' "$RUNNER_TEMP/filters-pg/mapping-red.log"
           grep -q -- 'a failed mapping read must never become an empty successful catalog' "$RUNNER_TEMP/filters-pg/mapping-red.log"
           ! grep -Eq 'build failed|undefined:|no tests to run|panic:' "$RUNNER_TEMP/filters-pg/mapping-red.log"
+      - name: Fixed composite-alias behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin 256266c405ebceb4198576da08a3fbf0aa69c493
+          git worktree add --detach "$RUNNER_TEMP/filters-platform-baseline" 256266c405ebceb4198576da08a3fbf0aa69c493
+          cp backend/internal/service/priority_analysis_platform_test.go "$RUNNER_TEMP/filters-platform-baseline/backend/internal/service/"
+          set +e
+          (cd "$RUNNER_TEMP/filters-platform-baseline/backend" && go test -tags=unit ./internal/service -run '^TestPriorityAnalysisCompositeAliasStaysInOpenAIScope$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/filters-pg/platform-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/filters-pg/platform-red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestPriorityAnalysisCompositeAliasStaysInOpenAIScope' "$RUNNER_TEMP/filters-pg/platform-red.log"
+          grep -q -- 'OpenAI analysis must not resolve an Anthropic alias' "$RUNNER_TEMP/filters-pg/platform-red.log"
+          ! grep -Eq 'build failed|undefined:|no tests to run|panic:' "$RUNNER_TEMP/filters-pg/platform-red.log"
       - name: Real adapters and read-only scope unit regressions
         run: cd backend && go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^(TestPriorityAnalysis|TestPriorityRecompute|TestPriorityLatencySeries)' -count=1 -v -timeout=10m
       - name: Fixed baseline real PostgreSQL upper-bound RED
