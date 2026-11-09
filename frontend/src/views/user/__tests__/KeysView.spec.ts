@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
 import { createPinia } from 'pinia'
 
 import type { ApiKey, ApiKeyConcurrencySnapshot, Group } from '@/types'
@@ -140,6 +140,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
+      locale: ref('en'),
       t: (key: string, params: Record<string, unknown> = {}) =>
         (messages[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? name)),
     }),
@@ -260,7 +261,7 @@ const IconStub = {
   template: '<span data-test="icon">{{ name }}</span>',
 }
 
-const mountView = async (realTable = false) => {
+const mountView = async (realTable = false, realDatePicker = false) => {
   const wrapper = mount(KeysView, {
     global: {
       plugins: [createPinia()],
@@ -279,7 +280,7 @@ const mountView = async (realTable = false) => {
         EmptyState: true,
         Select: SelectStub,
         SearchInput: SearchInputStub,
-        DateRangePicker: true,
+        DateRangePicker: !realDatePicker,
         Icon: IconStub,
         UseKeyModal: true,
         BulkEditKeysModal: true,
@@ -941,6 +942,29 @@ describe('user KeysView column settings', () => {
     expect(getDashboardApiKeysUsage).toHaveBeenLastCalledWith([1], expect.objectContaining({
       start_date: '2026-10-01', end_date: '2026-10-31', timezone: getBrowserTimeZone(),
     }))
+  })
+
+  it('offers calendar ranges without a 24-hour shortcut in the actual usage picker', async () => {
+    vi.useRealTimers()
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    vi.setSystemTime(new Date(2026, 10, 9, 15))
+    const wrapper = await mountView(false, true)
+    const picker = wrapper.findComponent(DateRangePicker)
+    await picker.get('.date-picker-trigger').trigger('click')
+    expect(picker.findAll('.date-picker-preset').map(button => button.text())).not.toContain('dates.last24Hours')
+
+    const inputs = picker.findAll<HTMLInputElement>('input[type="date"]')
+    await inputs[0].setValue('2026-11-08')
+    await inputs[1].setValue('2026-11-09')
+    await picker.get('.date-picker-apply').trigger('click')
+    await flushPromises()
+    expect(getDashboardApiKeysUsage).toHaveBeenLastCalledWith([1], expect.objectContaining({
+      start_date: '2026-11-08', end_date: '2026-11-09', timezone: getBrowserTimeZone()
+    }))
+    expect(picker.emitted('change')?.[0]).toEqual([{
+      startDate: '2026-11-08', endDate: '2026-11-09', preset: null
+    }])
+    expect(picker.get('.date-picker-trigger').text()).not.toContain('dates.last24Hours')
   })
 
   it('updates each key amount, ignores an older range response and shows failed usage as unavailable', async () => {

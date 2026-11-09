@@ -1,8 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 
 import DateRangePicker from '../DateRangePicker.vue'
+
+enableAutoUnmount(afterEach)
+afterEach(() => vi.useRealTimers())
 
 const messages: Record<string, string> = {
   'dates.today': 'Today',
@@ -92,5 +95,56 @@ describe('DateRangePicker', () => {
         preset: 'last24Hours'
       }
     ])
+  })
+
+  it('keeps yesterday through today as calendar dates when the 24-hour shortcut is hidden', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 9, 15))
+    const wrapper = mount(DateRangePicker, {
+      props: { startDate: '2026-11-08', endDate: '2026-11-09', showLast24Hours: false },
+      global: { stubs: { Icon: true } }
+    })
+
+    expect(wrapper.get('.date-picker-trigger').text()).not.toContain('Last 24 Hours')
+    await wrapper.get('.date-picker-trigger').trigger('click')
+    expect(wrapper.findAll('.date-picker-preset').map(button => button.text())).not.toContain('Last 24 Hours')
+    expect(wrapper.findAll('.date-picker-preset').map(button => button.text())).toContain('Last 7 Days')
+
+    const inputs = wrapper.findAll<HTMLInputElement>('input[type="date"]')
+    await inputs[0].setValue('2026-11-06')
+    await inputs[0].setValue('2026-11-08')
+    expect(wrapper.get('.date-picker-trigger').text()).not.toContain('Last 24 Hours')
+    await wrapper.get('.date-picker-apply').trigger('click')
+    expect(wrapper.emitted('change')?.[0]).toEqual([{
+      startDate: '2026-11-08', endDate: '2026-11-09', preset: null
+    }])
+  })
+
+  it.each([false, true])('preserves an unapplied range when hiding its 24-hour shortcut (rolling: %s)', async (rolling24Hours) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const now = new Date(2026, 10, 9, 15)
+    vi.setSystemTime(now)
+    const start = new Date(now.getTime() - 86_400_000)
+    const startDate = rolling24Hours ? start.toISOString() : formatLocalDate(start)
+    const endDate = rolling24Hours ? now.toISOString() : formatLocalDate(now)
+    const wrapper = mount(DateRangePicker, {
+      props: { startDate: '2026-10-01', endDate: '2026-10-07', rolling24Hours },
+      global: { stubs: { Icon: true } }
+    })
+
+    await wrapper.get('.date-picker-trigger').trigger('click')
+    await wrapper.findAll('.date-picker-preset').find(button => button.text() === 'Last 24 Hours')!.trigger('click')
+    await wrapper.setProps({ showLast24Hours: false })
+    expect(wrapper.get('.date-picker-trigger').text()).not.toContain('Last 24 Hours')
+    expect(wrapper.findAll('.date-picker-preset').map(button => button.text())).not.toContain('Last 24 Hours')
+    expect(wrapper.findAll<HTMLInputElement>('input[type="date"]').map(input => input.element.value)).toEqual([
+      formatLocalDate(start), formatLocalDate(now)
+    ])
+
+    await wrapper.setProps({ showLast24Hours: true })
+    expect(wrapper.get('.date-picker-trigger').text()).toContain('Last 24 Hours')
+    await wrapper.setProps({ showLast24Hours: false })
+    await wrapper.get('.date-picker-apply').trigger('click')
+    expect(wrapper.emitted('change')?.[0]).toEqual([{ startDate, endDate, preset: null }])
   })
 })

@@ -29,6 +29,7 @@
                 class="key-usage-range-picker"
                 :start-date="usageStartDate"
                 :end-date="usageEndDate"
+                :show-last24-hours="false"
                 @change="onUsageDateRangeChange"
               />
               <NewFeatureBadge

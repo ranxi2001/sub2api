@@ -41,7 +41,10 @@ const modules = {
   api: `const keys=${JSON.stringify(keys)},group=${JSON.stringify(group)};
     if(new URLSearchParams(location.search).get('amounts')==='large')for(const key of keys){key.quota=999999999999.99;key.quota_used=888888888888.88;}
     export const keysAPI={list:async()=>({items:keys,total:4,pages:1}),getConcurrency:async()=>({queue_policy:{max_waiting:0,timeout_seconds:0},items:keys.map(k=>({id:k.id,current_concurrency:0,current_waiting:0}))})};
-    export const usageAPI={getDashboardApiKeysUsage:async()=>({stats:Object.fromEntries(keys.map(k=>[k.id,{today_actual_cost:12.3456,total_actual_cost:456.789}]))})};
+    export const usageAPI={getDashboardApiKeysUsage:async(apiKeyIds,options)=>{
+      (window.keyUsageQueries||=[]).push({apiKeyIds,start_date:options?.start_date,end_date:options?.end_date,timezone:options?.timezone});
+      return {stats:Object.fromEntries(keys.map(k=>[k.id,{today_actual_cost:12.3456,total_actual_cost:456.789}]))};
+    }};
     export const authAPI={getPublicSettings:async()=>({api_base_url:'https://example.invalid/',custom_endpoints:[]})};
     export const userGroupsAPI={getAvailable:async()=>[group],getUserGroupRates:async()=>({})};`,
   client: `export const apiClient={get:async url=>{if(url!=='/user/key-risks')throw Error('Unexpected fixture API: '+url);window.riskReads=(window.riskReads||0)+1;return {data:{items:${JSON.stringify(notices)}}}},post:async()=>{throw Error('Unexpected mutation')}};`,
@@ -226,8 +229,40 @@ try {
     measurements.push({ viewport: mobile.viewportSize(), scenario: 'large-quota', textScalePercent, textScaleScope: 'usage-text', ...geometry })
     await mobile.close()
   }
+  for (const [locale, width] of [['zh', 1366], ['en', 320]]) {
+    const page = await open({ width, height: 844 }, `?locale=${locale}`)
+    const range = page.locator('[data-test="key-usage-date-range"]')
+    const last24Hours = locale === 'zh' ? '近24小时' : 'Last 24 Hours'
+    await range.locator('.date-picker-trigger').click()
+    assert.equal(await range.getByRole('button', { name: last24Hours, exact: true }).count(), 0)
+    const dates = await page.evaluate(() => {
+      const end = new Date(), start = new Date(end)
+      start.setDate(start.getDate() - 1)
+      const format = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      return { start: format(start), end: format(end), timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+    })
+    const inputs = range.locator('input[type="date"]')
+    await inputs.nth(0).fill(dates.start)
+    await inputs.nth(1).fill(dates.end)
+    await range.locator('.date-picker-apply').click()
+    await page.waitForFunction(({ start, end }) => {
+      const query = window.keyUsageQueries?.at(-1)
+      return query?.start_date === start && query?.end_date === end
+    }, dates)
+    const query = await page.evaluate(() => window.keyUsageQueries.at(-1))
+    assert.deepEqual(query, { apiKeyIds: keys.map(key => key.id), start_date: dates.start, end_date: dates.end, timezone: dates.timezone })
+    assert(!(await range.locator('.date-picker-trigger').innerText()).includes(last24Hours))
+    await range.locator('.date-picker-trigger').click()
+    const dropdown = range.locator('.date-picker-dropdown')
+    await dropdown.waitFor({ state: 'visible' })
+    const bounds = await dropdown.boundingBox()
+    assert(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1, JSON.stringify(bounds))
+    await screenshot(page, `after-calendar-range-${locale}-${width}`, 'candidate')
+    measurements.push({ viewport: page.viewportSize(), scenario: 'calendar-only-date-range', locale, query, dropdown: bounds })
+    await page.close()
+  }
   assert.deepEqual(errors, [])
-  await fs.writeFile(path.join(out, 'verification.json'), JSON.stringify({ head, baseline, synthetic: true, actualComponents: ['KeysView', 'TablePageLayout', 'DataTable', 'GroupBadge', 'Pagination'], mocked: ['API data', 'authentication', 'shell', 'unopened dialogs'], productionRequests: 0, shots, measurements }, null, 2))
+  await fs.writeFile(path.join(out, 'verification.json'), JSON.stringify({ head, baseline, synthetic: true, actualComponents: ['KeysView', 'DateRangePicker', 'TablePageLayout', 'DataTable', 'GroupBadge', 'Pagination'], mocked: ['API data', 'authentication', 'shell', 'unopened dialogs'], productionRequests: 0, shots, measurements }, null, 2))
 } catch (error) {
   for (const [i, page] of browser.contexts().flatMap(context => context.pages()).entries()) await page.screenshot({ path: path.join(out, `failure-${i}.png`), fullPage: false }).catch(() => {})
   await fs.writeFile(path.join(out, 'failure.json'), JSON.stringify({ head, error: String(error), stack: error.stack, errors, measurements }, null, 2))
