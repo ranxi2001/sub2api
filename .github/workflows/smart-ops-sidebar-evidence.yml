@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/smart-ops-base"
-          git archive "$SOURCE_BASE" frontend | tar -x -C "$RUNNER_TEMP/smart-ops-base"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/smart-ops-base"
           cmp frontend/package.json "$RUNNER_TEMP/smart-ops-base/frontend/package.json"
           cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/smart-ops-base/frontend/pnpm-lock.yaml"
           ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/smart-ops-base/frontend/node_modules"
