@@ -6,10 +6,11 @@ import type { DashboardStats } from '@/types'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import DashboardView from '../DashboardView.vue'
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getConcurrencySummary } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
-  getUserSpendingRanking: vi.fn()
+  getUserSpendingRanking: vi.fn(),
+  getConcurrencySummary: vi.fn()
 }))
 
 vi.mock('vue-chartjs', () => ({
@@ -18,6 +19,7 @@ vi.mock('vue-chartjs', () => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    accounts: { getConcurrencySummary },
     dashboard: {
       getSnapshotV2,
       getUserUsageTrend,
@@ -132,6 +134,8 @@ describe('admin DashboardView', () => {
     getSnapshotV2.mockReset()
     getUserUsageTrend.mockReset()
     getUserSpendingRanking.mockReset()
+    getConcurrencySummary.mockReset()
+    getConcurrencySummary.mockResolvedValue({ current_concurrency: 42 })
 
     getSnapshotV2.mockResolvedValue({
       stats: createDashboardStats(),
@@ -156,6 +160,54 @@ describe('admin DashboardView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('shows total current account concurrency and refreshes it independently of the date range', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-concurrency"]').get('span').text()).toBe('42')
+    expect(getConcurrencySummary).toHaveBeenCalledWith()
+
+    getConcurrencySummary.mockResolvedValueOnce({ current_concurrency: 0 })
+    await wrapper.findAll('button').find(button => button.text() === 'common.refresh')!.trigger('click')
+    await flushPromises()
+    expect(getConcurrencySummary).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="account-concurrency"]').get('span').text()).toBe('0')
+
+    await wrapper.getComponent(DateRangePicker).vm.$emit('change', {
+      startDate: '2026-01-01', endDate: '2026-01-02', preset: 'custom'
+    })
+    await flushPromises()
+    expect(getConcurrencySummary).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the dashboard available and replaces an old concurrency count with unknown on failure', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-concurrency"]').get('span').text()).toBe('42')
+
+    getConcurrencySummary.mockRejectedValueOnce(new Error('Unavailable'))
+    await wrapper.findAll('button').find(button => button.text() === 'common.refresh')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-concurrency"]').get('span').text()).toBe('—')
+    expect(wrapper.text()).toContain('RPM')
+    expect(wrapper.text()).toContain('TPM')
+  })
+
+  it('ignores a stale concurrency response after a newer refresh', async () => {
+    let resolveOld!: (value: { current_concurrency: number }) => void
+    getConcurrencySummary.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-concurrency"]').get('span').text()).toBe('—')
+
+    getConcurrencySummary.mockResolvedValueOnce({ current_concurrency: 7 })
+    await wrapper.findAll('button').find(button => button.text() === 'common.refresh')!.trigger('click')
+    await flushPromises()
+    resolveOld({ current_concurrency: 999 })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="account-concurrency"]').get('span').text()).toBe('7')
+    expect(wrapper.get('[data-testid="account-concurrency"]').get('span').text()).not.toBe('999')
   })
 
   it('switches metrics and ignores a stale tokens response', async () => {
