@@ -138,6 +138,7 @@ export interface PriorityLatencyAccount {
 }
 export interface PriorityLatencySeries {
   config_revision?: string
+  target_ttft_ms?: number
   at: string
   model: string
   group_id: number | null
@@ -197,6 +198,11 @@ export async function savePriorityConfig(config: PrioritySchedulingConfig): Prom
 export async function getPrioritySnapshot(): Promise<PrioritySnapshot | null> {
   return (await apiClient.get('/admin/priority-scheduling/snapshot')).data.snapshot
 }
+export interface PriorityAnalysisScope { model: string; group_id?: number; minutes: number }
+export interface PriorityAnalysis { snapshot: PrioritySnapshot; latency: PriorityLatencySeries }
+export async function getPriorityAnalysis(scope: PriorityAnalysisScope, signal?: AbortSignal): Promise<PriorityAnalysis> {
+  return (await apiClient.get('/admin/priority-scheduling/analysis', { params: scope, signal })).data
+}
 export async function getPriorityLatency(minutes = 60, bucketMinutes = 5): Promise<PriorityLatencySeries> {
   return (await apiClient.get('/admin/priority-scheduling/latency', { params: { minutes, bucket_minutes: bucketMinutes } })).data
 }
@@ -208,4 +214,8 @@ export async function getPriorityStickyBindings(groupID: number): Promise<Priori
 }
 export async function clearPriorityStickyBindings(payload: { group_id: number; account_ids: number[]; dry_run?: boolean }): Promise<PriorityStickyClearResult> {
   return (await apiClient.post('/admin/priority-scheduling/sticky-bindings/clear', payload)).data
+}
+
+export async function getPriorityModels(groupID?: number, signal?: AbortSignal): Promise<string[]> {
+  return (await apiClient.get('/admin/priority-scheduling/models', { params: groupID ? { group_id: groupID } : {}, signal })).data.models
 }

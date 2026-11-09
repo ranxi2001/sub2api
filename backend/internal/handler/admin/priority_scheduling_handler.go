@@ -1,11 +1,14 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -110,6 +113,42 @@ func (h *AccountHandler) PrioritySchedulingSnapshot(c *gin.Context) {
 	response.Success(c, gin.H{"snapshot": h.openAIGatewayService.PrioritySchedulingSnapshot()})
 }
 
+func (h *AccountHandler) PrioritySchedulingAnalysis(c *gin.Context) {
+	q := service.PriorityAnalysisQuery{Model: strings.TrimSpace(c.Query("model")), Minutes: 60}
+	if raw, exists := c.GetQuery("minutes"); exists {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 5 || value > 1440 {
+			response.BadRequest(c, "minutes must be between 5 and 1440")
+			return
+		}
+		q.Minutes = value
+	}
+	if raw, exists := c.GetQuery("group_id"); exists {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			response.BadRequest(c, "group_id must be a positive integer")
+			return
+		}
+		q.GroupID = &value
+	}
+	if q.Model == "" || len(q.Model) > 200 {
+		response.BadRequest(c, "model is required (maximum 200 bytes)")
+		return
+	}
+	ctx := c.Request.Context()
+	if subject, ok := middleware.GetAuthSubjectFromContext(c); ok {
+		role, _ := middleware.GetUserRoleFromContext(c)
+		identity, _ := json.Marshal([]any{subject.UserID, role, c.GetString("auth_method"), adminaccess.FromContext(ctx)})
+		ctx = service.WithPriorityAnalysisPrincipal(ctx, string(identity))
+	}
+	result, err := h.openAIGatewayService.PriorityAnalysis(ctx, q)
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "Priority analysis read failed")
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *AccountHandler) PrioritySchedulingLatency(c *gin.Context) {
 	minutes := 60
 	if raw := strings.TrimSpace(c.Query("minutes")); raw != "" {
@@ -144,4 +183,22 @@ func (h *AccountHandler) RecomputePriorityScheduling(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *AccountHandler) PrioritySchedulingModels(c *gin.Context) {
+	var group *int64
+	if raw, exists := c.GetQuery("group_id"); exists {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			response.BadRequest(c, "group_id must be a positive integer")
+			return
+		}
+		group = &value
+	}
+	models, err := h.openAIGatewayService.PriorityAnalysisModels(c.Request.Context(), group)
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "Priority model catalog read failed")
+		return
+	}
+	response.Success(c, gin.H{"models": models})
 }

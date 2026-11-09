@@ -1,4 +1,5 @@
 export default {
+  filters: { updated: 'Updated', choose: 'Select a model and group', recomputeLatest: 'Recompute latest selection', analysisHint: 'Preference weight is not a global probability. Reads history for the selected model, group and window. Live capacity and process attempt estimates are unknown. Recompute and sticky cleanup target the latest actual selection using its exact identity.', candidates: 'Candidate scores', ungrouped: 'Ungrouped', catalogError: 'Unable to read model or group catalog. Refresh to retry.' },
   reading: { configuration: 'Scheduling configuration', diagnostics: 'Diagnostics', buckets: 'Time buckets for this account page', pageSize: 'Rows per page', refreshing: 'Updating in background; current data retained', stale: 'Update failed; showing the last successful data. Retrying automatically.', stableOrder: 'Stable account ID order; additions append and deletions are removed. Live metrics do not reorder rows.' },
   errorRate: "Attempt error rate",
   error_rate_weight: "Error penalty weight (%)",
@@ -71,7 +72,7 @@ export default {
   tiers: { eligible: 'Targets met', insufficient: 'Insufficient data', degraded: 'Targets missed' },
   reasons: { latency_recovery: 'Latency penalty expired, P90 still above target (recovery: fallback/exploration only)', quality_below_target: 'Quality below target', quality_unknown: 'No fresh quality result', latency_above_target: 'Latency above target', latency_insufficient: 'Insufficient latency samples', busy: 'High concurrency or queueing', load_unknown: 'Concurrency unknown', cost_unknown: 'Cost unknown', recent_errors: 'Elevated recent errors', historical_loss: 'Recent charges below theoretical cost', profit_insufficient: 'Insufficient profit samples' },
   latencyPanel: {
-    title: 'Latency analysis', refresh: 'Refresh', hint: 'Uses the last observed candidate pool. P50/P90/P99 are first-token milliseconds; errors are deduplicated upstream error events; slow requests exceed the target first-token threshold. Summary uses the priority history window; heat cells use the selected window above, in 5-minute buckets.',
+    title: 'Latency analysis', refresh: 'Refresh', hint: 'Reads the selected model, group and window. Summary and five-minute buckets share one cutoff. First-token latency is in milliseconds; errors are deduplicated upstream events and slow samples exceed the saved target.',
     account: 'Account', samples: 'Samples', p50: 'P50 first token', p90: 'P90 first token', p99: 'P99 first token', errors: 'Errors', slow: 'Slow', errorRate: 'Error rate',
     empty: 'No latency samples', error: 'Could not load latency analysis. Please retry.', window: 'Window'
   },

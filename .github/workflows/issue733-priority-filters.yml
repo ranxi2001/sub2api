@@ -1,0 +1,279 @@
+name: Issue733 explicit priority filters
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/issue733-priority-filter-fix]
+  pull_request:
+    paths:
+      - 'frontend/src/**/PriorityScheduling*'
+      - 'frontend/src/api/admin/priorityScheduling.ts'
+      - 'backend/internal/**/priority*'
+      - '.github/scripts/issue733-filter*'
+      - '.github/workflows/issue733-priority-filters.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue733-filters-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  filters:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Review F1 F2 F3 checkpoint behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/filters-evidence"
+          defect=e395038e98fbc5a0c44944f0edcfbfe714570f71
+          git worktree add --detach "$RUNNER_TEMP/followup-red" "$defect"
+          for file in frontend/src/views/admin/PrioritySchedulingView.vue frontend/src/api/admin/priorityScheduling.ts frontend/src/api/admin/groups.ts; do
+            expected=$(git rev-parse "$defect:$file")
+            actual=$(git hash-object "$RUNNER_TEMP/followup-red/$file")
+            test "$actual" = "$expected"
+            echo "$file $expected $actual" >> "$RUNNER_TEMP/filters-evidence/followup-red-blobs.txt"
+          done
+          regression=frontend/src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts
+          cp "$regression" "$RUNNER_TEMP/followup-red/$regression"
+          cmp "$regression" "$RUNNER_TEMP/followup-red/$regression"
+          git hash-object "$regression" >> "$RUNNER_TEMP/filters-evidence/followup-red-blobs.txt"
+          git rev-parse HEAD >> "$RUNNER_TEMP/filters-evidence/followup-red-blobs.txt"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/followup-red/frontend/node_modules"
+          set +e
+          (cd "$RUNNER_TEMP/followup-red/frontend" && pnpm exec vitest run src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts -t 'followup' --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/filters-evidence/followup-red.json") > "$RUNNER_TEMP/filters-evidence/followup-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/filters-evidence/followup-red.log"
+          test "$result" -ne 0
+          python3 .github/scripts/issue733-followup-red.py "$RUNNER_TEMP/filters-evidence/followup-red.json"
+      - name: Fixed production baseline behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/filters-evidence"
+          git worktree add --detach "$RUNNER_TEMP/filters-baseline" 8a203b43231c1192cee17f854633a23308d73e7e
+          cp frontend/src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts "$RUNNER_TEMP/filters-baseline/frontend/src/views/admin/__tests__/"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/filters-baseline/frontend/node_modules"
+          git show 8a203b43231c1192cee17f854633a23308d73e7e:frontend/src/views/admin/PrioritySchedulingView.vue > "$RUNNER_TEMP/filters-evidence/baseline.vue"
+          cmp "$RUNNER_TEMP/filters-evidence/baseline.vue" "$RUNNER_TEMP/filters-baseline/frontend/src/views/admin/PrioritySchedulingView.vue"
+          set +e
+          (cd "$RUNNER_TEMP/filters-baseline/frontend" && pnpm exec vitest run src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts -t 'offers explicit model and group filters' --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/filters-evidence/red.json") > "$RUNNER_TEMP/filters-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/filters-evidence/red.log"
+          test "$result" -ne 0
+          python3 .github/scripts/issue733-filter-red.py "$RUNNER_TEMP/filters-evidence/red.json"
+      - name: Candidate filter regression GREEN
+        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts src/views/admin/__tests__/PrioritySchedulingReading.spec.ts src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/views/admin/__tests__/PrioritySchedulingQuantile.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1
+      - name: Lint frontend changes
+        run: pnpm --dir frontend run lint:check
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue733-filters-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/filters-evidence
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Review F3 bounded readers checkpoint behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/filters-pg"
+          defect=e395038e98fbc5a0c44944f0edcfbfe714570f71
+          git fetch origin "$defect"
+          git worktree add --detach "$RUNNER_TEMP/analysis-budget-red" "$defect"
+          for file in backend/internal/service/priority_analysis.go backend/internal/service/openai_gateway_service.go backend/internal/handler/admin/priority_scheduling_handler.go backend/internal/repository/account_repo.go backend/internal/repository/priority_scheduling.go backend/internal/repository/priority_latency_series.go; do
+            expected=$(git rev-parse "$defect:$file")
+            actual=$(git hash-object "$RUNNER_TEMP/analysis-budget-red/$file")
+            test "$actual" = "$expected"
+            echo "$file $expected $actual" >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
+          done
+          regression=backend/internal/service/priority_analysis_admission_regression_test.go
+          cp "$regression" "$RUNNER_TEMP/analysis-budget-red/$regression"
+          cmp "$regression" "$RUNNER_TEMP/analysis-budget-red/$regression"
+          git hash-object "$regression" >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
+          git rev-parse HEAD >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
+          set +e
+          (cd "$RUNNER_TEMP/analysis-budget-red/backend" && go test -tags=unit ./internal/service -run '^TestPriorityAnalysisConcurrentScopesHaveBoundedSQLReaders$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/filters-pg/followup-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/filters-pg/followup-red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestPriorityAnalysisConcurrentScopesHaveBoundedSQLReaders' "$RUNNER_TEMP/filters-pg/followup-red.log"
+          grep -q -- 'diagnostic SQL readers must never exceed two active scopes' "$RUNNER_TEMP/filters-pg/followup-red.log"
+          ! grep -Eq 'build failed|undefined:|no tests to run|panic:|--- SKIP' "$RUNNER_TEMP/filters-pg/followup-red.log"
+      - name: Fixed mapped-catalog error-cache behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/filters-pg"
+          git fetch origin 82e27a58c9b49c42c0afc6aa22ee8b536e5a2958
+          git worktree add --detach "$RUNNER_TEMP/filters-mapping-baseline" 82e27a58c9b49c42c0afc6aa22ee8b536e5a2958
+          cp backend/internal/service/priority_analysis_channel_regression_test.go "$RUNNER_TEMP/filters-mapping-baseline/backend/internal/service/"
+          git show 82e27a58c9b49c42c0afc6aa22ee8b536e5a2958:backend/internal/service/priority_analysis.go > "$RUNNER_TEMP/filters-pg/mapping-baseline.go"
+          cmp "$RUNNER_TEMP/filters-pg/mapping-baseline.go" "$RUNNER_TEMP/filters-mapping-baseline/backend/internal/service/priority_analysis.go"
+          set +e
+          (cd "$RUNNER_TEMP/filters-mapping-baseline/backend" && go test -tags=unit ./internal/service -run '^TestPriorityAnalysisMappingErrorCannotBecomeEmptySuccess$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/filters-pg/mapping-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/filters-pg/mapping-red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestPriorityAnalysisMappingErrorCannotBecomeEmptySuccess' "$RUNNER_TEMP/filters-pg/mapping-red.log"
+          grep -q -- 'a failed mapping read must never become an empty successful catalog' "$RUNNER_TEMP/filters-pg/mapping-red.log"
+          ! grep -Eq 'build failed|undefined:|no tests to run|panic:' "$RUNNER_TEMP/filters-pg/mapping-red.log"
+      - name: Fixed composite-alias behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin 256266c405ebceb4198576da08a3fbf0aa69c493
+          git worktree add --detach "$RUNNER_TEMP/filters-platform-baseline" 256266c405ebceb4198576da08a3fbf0aa69c493
+          cp backend/internal/service/priority_analysis_platform_test.go "$RUNNER_TEMP/filters-platform-baseline/backend/internal/service/"
+          set +e
+          (cd "$RUNNER_TEMP/filters-platform-baseline/backend" && go test -tags=unit ./internal/service -run '^TestPriorityAnalysisCompositeAliasStaysInOpenAIScope$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/filters-pg/platform-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/filters-pg/platform-red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestPriorityAnalysisCompositeAliasStaysInOpenAIScope' "$RUNNER_TEMP/filters-pg/platform-red.log"
+          grep -q -- 'OpenAI analysis must not resolve an Anthropic alias' "$RUNNER_TEMP/filters-pg/platform-red.log"
+          ! grep -Eq 'build failed|undefined:|no tests to run|panic:' "$RUNNER_TEMP/filters-pg/platform-red.log"
+      - name: Real adapters and read-only scope unit regressions
+        run: |
+          set -euo pipefail
+          (cd backend && go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^(TestPriorityAnalysis|TestPriorityRecompute|TestPriorityLatencySeries)' -count=1 -v -timeout=10m) 2>&1 | tee "$RUNNER_TEMP/filters-pg/unit-green.log"
+      - name: Fixed baseline real PostgreSQL upper-bound RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/filters-pg"
+          git fetch origin 8a203b43231c1192cee17f854633a23308d73e7e
+          git worktree add --detach "$RUNNER_TEMP/filters-pg-baseline" 8a203b43231c1192cee17f854633a23308d73e7e
+          cp backend/internal/repository/priority_analysis_window_integration_test.go "$RUNNER_TEMP/filters-pg-baseline/backend/internal/repository/"
+          git show 8a203b43231c1192cee17f854633a23308d73e7e:backend/internal/repository/priority_latency_series.go > "$RUNNER_TEMP/filters-pg/baseline.go"
+          cmp "$RUNNER_TEMP/filters-pg/baseline.go" "$RUNNER_TEMP/filters-pg-baseline/backend/internal/repository/priority_latency_series.go"
+          set +e
+          (cd "$RUNNER_TEMP/filters-pg-baseline/backend" && go test -tags=integration ./internal/repository -run '^TestPriorityAnalysisLatencyCapturedUpperBound$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/filters-pg/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/filters-pg/red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestPriorityAnalysisLatencyCapturedUpperBound' "$RUNNER_TEMP/filters-pg/red.log"
+          grep -q -- 'analysis latency must honor the captured window end' "$RUNNER_TEMP/filters-pg/red.log"
+          ! grep -Eq 'build failed|undefined:|no tests to run|panic:' "$RUNNER_TEMP/filters-pg/red.log"
+      - name: Real PostgreSQL scope regressions
+        run: |
+          set -euo pipefail
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestPriorityAnalysis' -count=1 -v -timeout=10m) 2>&1 | tee "$RUNNER_TEMP/filters-pg/green.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue733-pg-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/filters-pg
+  analysis-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact candidate analysis race and lifecycle regressions
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/analysis-race-head.txt"
+          (cd backend && go test -race -tags=unit ./internal/service -run '^TestPriorityAnalysis' -count=1 -v -timeout=10m) 2>&1 | tee "$RUNNER_TEMP/analysis-race.log"
+          for name in ConcurrentScopesHaveBoundedSQLReaders CoalescesAndOwnsMutableResponses FirstWaiterCancellationKeepsOtherReadersAlive LastCancellationHoldsSlotUntilRepositoryExit DifferentPrincipalsAndScopesNeverMerge ErrorsAndShutdownReleaseLifecycle BudgetTimeoutReleasesLifecycle PreparationIsBoundedAndCancelled CancelledWorkCannotPublishSuccess CatalogSharesPreparationBudgetAndCancels; do
+            grep -q -- "--- PASS: TestPriorityAnalysis$name " "$RUNNER_TEMP/analysis-race.log"
+          done
+          ! grep -q -- '--- SKIP: TestPriorityAnalysis' "$RUNNER_TEMP/analysis-race.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue733-analysis-race-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/analysis-race*
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run build
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated CI browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/issue733-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/issue733-browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Render pinned before and candidate with actual styles
+        env:
+          ISSUE733_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/issue733-browser/node_modules/playwright
+          ISSUE733_SCREENSHOT_DIR: ${{ runner.temp }}/issue733-screenshots
+        run: node .github/scripts/issue733-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue733-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue733-screenshots
+          if-no-files-found: error

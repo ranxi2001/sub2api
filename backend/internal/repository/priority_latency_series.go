@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -10,6 +11,9 @@ import (
 // ReadPriorityLatencySeries returns the configured latency population and the
 // matching upstream error events. A bucket may contain errors without usage.
 func (r *usageLogRepository) ReadPriorityLatencySeries(ctx context.Context, query service.PriorityLatencySeriesQuery) ([]service.PriorityLatencyBucket, error) {
+	if query.Until.IsZero() {
+		query.Until = time.Now()
+	}
 	slowTTFTMs := query.SlowTTFTMs
 	if slowTTFTMs <= 0 {
 		slowTTFTMs = 10000
@@ -31,7 +35,7 @@ func (r *usageLogRepository) ReadPriorityLatencySeries(ctx context.Context, quer
   SELECT id, account_id, created_at, stream, first_token_ms, actual_cost, total_cost,
    account_stats_cost, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
   FROM usage_logs
-  WHERE account_id=ANY($1) AND created_at >= $2 AND created_at <= NOW()
+  WHERE account_id=ANY($1) AND created_at >= $2 AND created_at <= $9
    AND COALESCE(NULLIF(requested_model,''),model)=$3
    AND group_id IS NOT DISTINCT FROM $4::bigint
    AND (actual_cost>0 OR total_cost>0 OR account_stats_cost>0
@@ -93,7 +97,7 @@ func (r *usageLogRepository) ReadPriorityLatencySeries(ctx context.Context, quer
    date_bin(make_interval(mins => $5), created_at, TIMESTAMPTZ '2026-01-01') AS bucket,
    COUNT(DISTINCT COALESCE(NULLIF(client_request_id,''), NULLIF(request_id,''), id::text)) AS error_samples
   FROM ops_error_logs
-  WHERE account_id=ANY($1) AND created_at >= $2 AND created_at <= NOW()
+  WHERE account_id=ANY($1) AND created_at >= $2 AND created_at <= $9
    AND COALESCE(NULLIF(requested_model,''),model)=$3
    AND group_id IS NOT DISTINCT FROM $4::bigint
    AND error_phase='upstream'
@@ -112,7 +116,7 @@ func (r *usageLogRepository) ReadPriorityLatencySeries(ctx context.Context, quer
  LEFT JOIN usage_buckets u ON u.account_id=k.account_id AND u.bucket=k.bucket
  LEFT JOIN errors e ON e.account_id=k.account_id AND e.bucket=k.bucket
  ORDER BY k.account_id,k.bucket
- `, pq.Array(query.AccountIDs), query.Since, query.Model, query.GroupID, bucketMinutes, slowTTFTMs, measurement, percentile)
+ `, pq.Array(query.AccountIDs), query.Since, query.Model, query.GroupID, bucketMinutes, slowTTFTMs, measurement, percentile, query.Until)
 	if err != nil {
 		return nil, err
 	}
