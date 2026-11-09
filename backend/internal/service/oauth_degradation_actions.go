@@ -25,8 +25,7 @@ type OAuthDegradationConfig struct {
 }
 
 func DefaultOAuthDegradationConfig() OAuthDegradationConfig {
-	// Bare "luna" is unresolved. Never silently choose a version for it.
-	return OAuthDegradationConfig{TargetConcurrency: 10, Models: []string{"gpt-5.6-terra", "gpt-6.1-terra", "gpt-6-luna"}}
+	return OAuthDegradationConfig{TargetConcurrency: 10, Models: []string{"gpt-5.6-luna", "gpt-5.6-terra", "gpt-6-luna", "gpt-6.1-terra"}}
 }
 
 // Missing action flags retain the original policy for existing settings.
