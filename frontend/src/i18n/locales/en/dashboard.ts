@@ -401,6 +401,7 @@ export default {
     resetPending: 'Pending refresh',
     accountMultiplier: 'Account rate',
     avgDuration: 'Avg server duration',
+    rateCardHint: 'Per-minute averages over the selected range: RPM = total requests ÷ minutes, TPM = total tokens ÷ minutes; a range that includes now counts only up to now',
     inSelectedRange: 'in selected range',
     perRequest: 'per request',
     apiKeyFilter: 'API Key',
