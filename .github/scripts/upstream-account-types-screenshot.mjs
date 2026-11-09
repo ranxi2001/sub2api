@@ -80,6 +80,15 @@ try {
       const opener = () => page.getByTitle('自动刷新', { exact: true })
       const oauth = () => page.getByTestId('auto-refresh-upstream-models-oauth')
       const apikey = () => page.getByTestId('auto-refresh-upstream-models-apikey')
+      const assertMenuVisible = async () => {
+        const bounds = await page.getByTestId('auto-refresh-menu').evaluate(element => {
+          const rect = element.getBoundingClientRect()
+          return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: innerWidth, height: innerHeight }
+        })
+        assert.ok(bounds.left >= 0 && bounds.right <= bounds.width, `Menu outside horizontal viewport: ${JSON.stringify(bounds)}`)
+        assert.ok(bounds.top >= 0 && bounds.bottom <= bounds.height, `Menu outside vertical viewport: ${JSON.stringify(bounds)}`)
+        return bounds
+      }
       const screenshot = async name => { await page.screenshot({ path: join(output, name), animations: 'disabled' });manifest.screenshots.push(name) }
       const open = async scenario => {
         await page.goto(`${url}?scenario=${scenario}`);await page.getByText('虚构账号 41', { exact: true }).first().waitFor();await opener().click()
@@ -94,6 +103,7 @@ try {
         manifest.results.push({ mode, single_control: true })
       } else {
         assert.equal(await oauth().isChecked(), false);assert.equal(await apikey().isChecked(), false)
+        await assertMenuVisible()
         await screenshot('after.png')
         await oauth().check();await screenshot('after-oauth-only.png');await opener().click()
         await page.waitForFunction(() => window.__accountTypesFixture.syncs.length >= 3)
@@ -113,7 +123,16 @@ try {
         assert.equal(await oauth().isChecked(), false);assert.equal(await apikey().isChecked(), true)
         await screenshot('after-explicit-false.png')
         await page.evaluate(() => document.documentElement.classList.add('dark'));await screenshot('after-dark.png')
-        await page.setViewportSize({ width: 430, height: 1000 });await screenshot('after-mobile.png')
+        await page.setViewportSize({ width: 430, height: 1000 })
+        await page.waitForFunction(() => {
+          const rect = document.querySelector('[data-testid="auto-refresh-menu"]').getBoundingClientRect()
+          return rect.left >= 0 && rect.right <= innerWidth
+        })
+        const mobileBounds = await assertMenuVisible()
+        await oauth().check();await apikey().uncheck()
+        assert.equal(await oauth().isChecked(), true);assert.equal(await apikey().isChecked(), false)
+        await screenshot('after-mobile.png')
+        manifest.results.push({ mobile_menu_bounds: mobileBounds, mobile_checkboxes_clickable: true })
         manifest.results.push({ legacy_true_migrates_both: true, explicit_false_takes_precedence: true })
       }
       const unexpected = await page.evaluate(() => window.__accountTypesFixture.unexpected)
