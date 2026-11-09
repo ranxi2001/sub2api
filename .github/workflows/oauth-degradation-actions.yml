@@ -1,7 +1,5 @@
 name: OAuth degradation actions
 on:
-  push:
-    branches: [feat/oauth-degradation-actions-20261109]
   pull_request:
     paths:
       - 'backend/internal/**/*degradation*'
@@ -38,7 +36,7 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git -C baseline rev-parse HEAD > evidence/red-head.txt
-          cp candidate/backend/internal/service/oauth_degradation_actions_test.go baseline/backend/internal/service/
+          cp candidate/backend/internal/service/oauth_degradation_actions_test.go candidate/backend/internal/service/oauth_degradation_scope_test.go baseline/backend/internal/service/
           set +e
           (cd baseline/backend && go test -tags=unit ./internal/service -run '^TestOAuthDegradation(Hold|Requires)' -count=1 -v) > evidence/red.log 2>&1
           result=$?

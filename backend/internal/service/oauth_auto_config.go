@@ -18,6 +18,7 @@ const AutoConfigConcurrencyExtraKey = "auto_config_concurrency"
 
 // Initial account fields, BPS defaults, model billing and concurrency upgrades are independent.
 type OAuthAutoConfig struct {
+	DegradationAction            OAuthDegradationConfig     `json:"degradation_action"`
 	OpenAITwoFAAdmission         OpenAITwoFAAdmissionConfig `json:"openai_two_fa_admission"`
 	OpenAITOTPRotateOn429        bool                       `json:"openai_totp_rotate_on_429"`
 	OpenAIDisableSchedulingOn429 bool                       `json:"openai_disable_scheduling_on_429"`
@@ -44,9 +45,12 @@ type OAuthAutoConfig struct {
 }
 
 func DefaultOAuthAutoConfig() OAuthAutoConfig {
-	return OAuthAutoConfig{OpenAITwoFAAdmission: DefaultOpenAITwoFAAdmissionConfig(), ModelMappings: defaultOAuthModelMappings(PlatformOpenAI), ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, CostMultiplier: 0.07, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
+	return OAuthAutoConfig{DegradationAction: DefaultOAuthDegradationConfig(), OpenAITwoFAAdmission: DefaultOpenAITwoFAAdmissionConfig(), ModelMappings: defaultOAuthModelMappings(PlatformOpenAI), ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, CostMultiplier: 0.07, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
 }
 func ValidateOAuthAutoConfig(c OAuthAutoConfig) error {
+	if err := c.DegradationAction.Validate(); err != nil {
+		return err
+	}
 	if err := c.OpenAITwoFAAdmission.Validate(); err != nil {
 		return infraerrors.BadRequest("AUTO_CONFIG_ADMISSION_INVALID", err.Error())
 	}
@@ -268,13 +272,28 @@ func (s *AccountOpsService) SaveOAuthAutoConfig(ctx context.Context, c OAuthAuto
 			return c, err
 		}
 	}
+	expectedRevision := c.Revision
 	c.Revision = uuid.NewString()
 	c.UpdatedAt = time.Now().UTC()
 	raw, err := json.Marshal(c)
 	if err != nil {
 		return c, err
 	}
-	if err = s.settings.Set(ctx, SettingKeyOAuthAutoConfig, string(raw)); err != nil {
+	if cas, ok := s.settings.(interface {
+		CompareAndSetOAuthAutoConfig(context.Context, string, string) error
+	}); ok {
+		err = cas.CompareAndSetOAuthAutoConfig(ctx, string(raw), expectedRevision)
+	} else {
+		current, readErr := GetOAuthAutoConfig(ctx, s.settings)
+		if readErr != nil {
+			return c, readErr
+		}
+		if current.Revision != expectedRevision {
+			return c, infraerrors.Conflict("AUTO_CONFIG_CONFLICT", "automatic configuration changed; reload before saving")
+		}
+		err = s.settings.Set(ctx, SettingKeyOAuthAutoConfig, string(raw))
+	}
+	if err != nil {
 		return c, err
 	}
 	s.autoConfig.Store(c)
@@ -327,15 +346,16 @@ type AccountConcurrencyRepository interface {
 	RecordConcurrencyResult(context.Context, AccountConcurrencyResult, OAuthAutoConfig) error
 }
 type AutoConfigConcurrencyState struct {
-	Revision      string     `json:"revision"`
-	Concurrency   int        `json:"concurrency"`
-	Successes     int        `json:"successes"`
-	Required      int        `json:"required"`
-	Maximum       int        `json:"maximum"`
-	Step          int        `json:"step"`
-	PausedUntil   time.Time  `json:"paused_until"`
-	LastUpgradeAt *time.Time `json:"last_upgrade_at,omitempty"`
-	LastFailureAt *time.Time `json:"last_failure_at,omitempty"`
+	DegradationHold bool       `json:"degradation_hold,omitempty"`
+	Revision        string     `json:"revision"`
+	Concurrency     int        `json:"concurrency"`
+	Successes       int        `json:"successes"`
+	Required        int        `json:"required"`
+	Maximum         int        `json:"maximum"`
+	Step            int        `json:"step"`
+	PausedUntil     time.Time  `json:"paused_until"`
+	LastUpgradeAt   *time.Time `json:"last_upgrade_at,omitempty"`
+	LastFailureAt   *time.Time `json:"last_failure_at,omitempty"`
 	// RecoveryTarget is a quality-rule-owned ceiling. Native success ramping
 	// may advance only up to this captured pre-quarantine value.
 	RecoveryTarget int `json:"recovery_target,omitempty"`
@@ -343,6 +363,9 @@ type AutoConfigConcurrencyState struct {
 
 // AdvanceConcurrency is pure. A fresh cycle starts after a rule/manual change.
 func AdvanceConcurrency(state AutoConfigConcurrencyState, current int, c OAuthAutoConfig, result AccountConcurrencyResult, now time.Time) (AutoConfigConcurrencyState, int) {
+	if state.DegradationHold {
+		return state, current
+	}
 	if state.Revision != c.Revision || state.Concurrency != current {
 		state = AutoConfigConcurrencyState{Revision: c.Revision, Concurrency: current}
 	}
@@ -442,6 +465,7 @@ func (s *AccountOpsService) AutoConfigBlocked() bool { return s.autoBlocked.Load
 func (s *AccountOpsService) runAutoConfig(ctx context.Context) {
 	defer s.wg.Done()
 	s.refreshAutoConfig(ctx)
+	s.evaluateOAuthDegradation(ctx)
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -452,6 +476,7 @@ func (s *AccountOpsService) runAutoConfig(ctx context.Context) {
 			s.processConcurrencyResult(r)
 		case <-ticker.C:
 			s.refreshAutoConfig(ctx)
+			s.evaluateOAuthDegradation(ctx)
 		}
 	}
 }

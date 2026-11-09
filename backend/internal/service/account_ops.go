@@ -101,33 +101,34 @@ type AccountOpsService struct {
 	newAPIGroupReader      interface {
 		GetBinding(context.Context, int64) (*NewAPIAccountBinding, error)
 	}
-	newAPIGroupCache sync.Map
-	accounts         AccountRepository
-	usageCache       *UsageCache
-	encryptor        SecretEncryptor
-	fixedKey         bool
-	timezone         *time.Location
-	robotClient      *http.Client
-	robotMu          sync.Mutex
-	robotLast        map[string]time.Time
-	autoSeen         map[int64]bool
-	autoConfigMu     sync.Mutex
-	autoGroups       GroupRepository
-	autoAccounts     AccountConcurrencyRepository
-	autoConfig       atomic.Value
-	autoBlocked      atomic.Bool
-	autoResults      chan AccountConcurrencyResult
-	settings         SettingRepository
-	repo             AccountOpsRepository
-	email            accountOpsEmailSender
-	config           atomic.Value
-	queue            chan AccountOpsEvent
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	lifecycle        sync.Mutex
-	settingsMu       sync.Mutex
-	dropped          atomic.Uint64
-	failures         atomic.Uint64
+	newAPIGroupCache  sync.Map
+	accounts          AccountRepository
+	usageCache        *UsageCache
+	encryptor         SecretEncryptor
+	fixedKey          bool
+	timezone          *time.Location
+	robotClient       *http.Client
+	robotMu           sync.Mutex
+	robotLast         map[string]time.Time
+	degradationCursor int64
+	autoSeen          map[int64]bool
+	autoConfigMu      sync.Mutex
+	autoGroups        GroupRepository
+	autoAccounts      AccountConcurrencyRepository
+	autoConfig        atomic.Value
+	autoBlocked       atomic.Bool
+	autoResults       chan AccountConcurrencyResult
+	settings          SettingRepository
+	repo              AccountOpsRepository
+	email             accountOpsEmailSender
+	config            atomic.Value
+	queue             chan AccountOpsEvent
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
+	lifecycle         sync.Mutex
+	settingsMu        sync.Mutex
+	dropped           atomic.Uint64
+	failures          atomic.Uint64
 }
 
 func NewAccountOpsService(settings SettingRepository, repo AccountOpsRepository, email accountOpsEmailSender) *AccountOpsService {

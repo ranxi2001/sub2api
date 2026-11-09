@@ -8,22 +8,24 @@ import (
 )
 
 const (
-	AutoConfigEventSaved    = "config_saved"
-	AutoConfigEventInitial  = "initial_applied"
-	AutoConfigEventUpgrade  = "concurrency_upgraded"
-	AutoConfigEventCooldown = "failure_cooldown"
+	AutoConfigEventDegradation = "degradation_applied"
+	AutoConfigEventSaved       = "config_saved"
+	AutoConfigEventInitial     = "initial_applied"
+	AutoConfigEventUpgrade     = "concurrency_upgraded"
+	AutoConfigEventCooldown    = "failure_cooldown"
 )
 
 // Explicit fields keep credentials, raw upstream responses and request bodies out of history.
 type AutoConfigEventDetails struct {
-	ModelMapping        map[string]string `json:"model_mapping,omitempty"`
-	Config              *OAuthAutoConfig  `json:"config,omitempty"`
-	Priority            int               `json:"priority"`
-	LoadFactor          int               `json:"load_factor"`
-	Concurrency         int               `json:"concurrency"`
-	PreviousConcurrency int               `json:"previous_concurrency"`
-	GroupIDs            []int64           `json:"group_ids,omitempty"`
-	CooldownSeconds     int               `json:"cooldown_seconds"`
+	Degradation         *OAuthDegradationState `json:"degradation,omitempty"`
+	ModelMapping        map[string]string      `json:"model_mapping,omitempty"`
+	Config              *OAuthAutoConfig       `json:"config,omitempty"`
+	Priority            int                    `json:"priority"`
+	LoadFactor          int                    `json:"load_factor"`
+	Concurrency         int                    `json:"concurrency"`
+	PreviousConcurrency int                    `json:"previous_concurrency"`
+	GroupIDs            []int64                `json:"group_ids,omitempty"`
+	CooldownSeconds     int                    `json:"cooldown_seconds"`
 }
 type AutoConfigEvent struct {
 	ID          int64                  `json:"id"`
@@ -42,7 +44,7 @@ type autoConfigInitialRecorder interface {
 }
 
 func ValidAutoConfigEventKind(kind string) bool {
-	return kind == "" || kind == AutoConfigEventSaved || kind == AutoConfigEventInitial || kind == AutoConfigEventUpgrade || kind == AutoConfigEventCooldown
+	return kind == "" || kind == AutoConfigEventDegradation || kind == AutoConfigEventSaved || kind == AutoConfigEventInitial || kind == AutoConfigEventUpgrade || kind == AutoConfigEventCooldown
 }
 func (s *AccountOpsService) ListAutoConfigEvents(ctx context.Context, before int64, kind string, limit int) ([]AutoConfigEvent, error) {
 	repo, ok := s.repo.(AutoConfigEventRepository)

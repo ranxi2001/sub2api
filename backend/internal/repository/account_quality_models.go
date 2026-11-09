@@ -278,7 +278,7 @@ func transitionQualityModelsScoped(account *service.Account, state *qualityState
 				state.RecoveryTarget = &target
 				state.PreviousConcurrency, state.AppliedConcurrency = nil, nil
 			} else {
-				account.Concurrency = *state.PreviousConcurrency
+				account.Concurrency = account.LimitOAuthDegradationConcurrency(*state.PreviousConcurrency)
 				state.PreviousConcurrency, state.AppliedConcurrency = nil, nil
 			}
 		} else {
