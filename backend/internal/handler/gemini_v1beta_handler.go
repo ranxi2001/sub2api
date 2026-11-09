@@ -40,6 +40,10 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		googleError(c, http.StatusUnauthorized, "Invalid API key")
 		return
 	}
+	if !GeminiInboundUsesNativeUpstream(c) {
+		h.writeBridgedGeminiModelList(c, apiKey)
+		return
+	}
 	// 检查平台：优先使用强制平台（/antigravity 路由），否则要求 gemini 分组（composite 分组允许路由到 antigravity）
 	forcePlatform, hasForcePlatform := middleware.GetForcePlatformFromContext(c)
 	effectivePlatform := effectiveAPIKeyPlatform(c, apiKey)
@@ -254,6 +258,11 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 		googleError(c, http.StatusUnauthorized, "Invalid API key")
 		return
 	}
+	modelName := strings.TrimSpace(c.Param("model"))
+	if !GeminiInboundUsesNativeUpstream(c) {
+		h.writeBridgedGeminiModel(c, modelName)
+		return
+	}
 	// 检查平台：优先使用强制平台（/antigravity 路由），否则要求 gemini 分组（composite 分组允许路由到 antigravity）
 	forcePlatform, hasForcePlatform := middleware.GetForcePlatformFromContext(c)
 	effectivePlatform := effectiveAPIKeyPlatform(c, apiKey)
@@ -263,7 +272,6 @@ func (h *GatewayHandler) GeminiV1BetaGetModel(c *gin.Context) {
 		return
 	}
 
-	modelName := strings.TrimSpace(c.Param("model"))
 	if modelName == "" {
 		googleError(c, http.StatusBadRequest, "Missing model in URL")
 		return
