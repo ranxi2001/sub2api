@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -84,7 +83,7 @@ func TestUsageTrendAggregateTimezoneRealBuckets(t *testing.T) {
 		{"dst_half_hour_shift", "Australia/Lord_Howe", "2026-10-03T00:00:00Z", "2026-10-05T00:00:00Z", "hour"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			setUsageTrendTestTimezone(t, tc.zone)
+			tz := useGroupUsageRepositoryTestTimezone(t, tc.zone)
 			ctx := context.Background()
 			tx := testEntTx(t)
 			client := tx.Client()
@@ -99,6 +98,7 @@ func TestUsageTrendAggregateTimezoneRealBuckets(t *testing.T) {
 			_, err = tx.ExecContext(ctx, "SELECT set_config('TimeZone', $1, true)", tc.zone)
 			require.NoError(t, err)
 			repo := newUsageLogRepositoryWithSQL(client, tx)
+			repo.configuredTimezone = tz
 			user := mustCreateUser(t, client, &service.User{Email: "local-buckets@example.test"})
 			key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "local-buckets-fixture", Name: "buckets"})
 			account := mustCreateAccount(t, client, &service.Account{Name: "local-buckets"})
@@ -121,10 +121,11 @@ func TestUsageTrendAggregateTimezoneRealBuckets(t *testing.T) {
 				})
 				require.NoError(t, err)
 				if !instant.Before(start) && instant.Before(end) {
-					wantRequests[instant.In(timezone.Location()).Format(format)]++
+					wantRequests[instant.In(tz.timezoneLocation()).Format(format)]++
 				}
 			}
 			writer := newDashboardAggregationRepositoryWithSQL(tx)
+			writer.configuredTimezone = tz
 			// A wide interval gives the real writers all boundary records, including
 			// records just outside the requested window in the same local bucket.
 			aggregateStart, aggregateEnd := start.Add(-48*time.Hour), end.Add(48*time.Hour)

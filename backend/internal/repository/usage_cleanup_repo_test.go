@@ -21,9 +21,9 @@ func newSQLMock(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
 	return db, mock
 }
 
-func setUsageCleanupRollupTestTimezone(t *testing.T) {
+func setUsageCleanupRollupTestTimezone(t *testing.T) configuredTimezone {
 	t.Helper()
-	useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	return useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
 }
 
 func TestNewUsageCleanupRepository(t *testing.T) {
@@ -403,9 +403,10 @@ func TestUsageCleanupRepositoryDeleteUsageLogsBatchMissingRange(t *testing.T) {
 }
 
 func TestUsageCleanupRepositoryDeleteUsageLogsBatch(t *testing.T) {
-	setUsageCleanupRollupTestTimezone(t)
+	tz := setUsageCleanupRollupTestTimezone(t)
 	db, mock := newSQLMock(t)
 	repo := &usageCleanupRepository{sql: db}
+	repo.configuredTimezone = tz
 
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
@@ -436,9 +437,10 @@ func TestUsageCleanupRepositoryDeleteUsageLogsBatch(t *testing.T) {
 }
 
 func TestUsageCleanupRepositoryDeleteUsageLogsBatchAtomicallyInvalidatesGroupRollups(t *testing.T) {
-	setUsageCleanupRollupTestTimezone(t)
+	tz := setUsageCleanupRollupTestTimezone(t)
 	db, mock := newSQLMock(t)
 	repo := &usageCleanupRepository{sql: db}
+	repo.configuredTimezone = tz
 
 	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
@@ -466,9 +468,10 @@ func TestUsageCleanupRepositoryDeleteUsageLogsBatchAtomicallyInvalidatesGroupRol
 }
 
 func TestUsageCleanupRepositoryDeleteUsageLogsBatchRollsBackWhenInvalidationFails(t *testing.T) {
-	setUsageCleanupRollupTestTimezone(t)
+	tz := setUsageCleanupRollupTestTimezone(t)
 	db, mock := newSQLMock(t)
 	repo := &usageCleanupRepository{sql: db}
+	repo.configuredTimezone = tz
 
 	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)

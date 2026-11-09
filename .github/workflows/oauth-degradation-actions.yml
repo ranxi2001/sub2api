@@ -52,6 +52,66 @@ jobs:
         with:
           name: oauth-degradation-unit-${{ github.event_name }}-${{ github.run_id }}
           path: evidence/
+  timezone-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+      - uses: actions/checkout@v6
+        with:
+          ref: 0c038c595c771c38f4e7d94b5022272b512662ac
+          path: timezone-baseline
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Check changed Go formatting remotely
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C candidate fetch --no-tags --depth=1 origin 0c038c595c771c38f4e7d94b5022272b512662ac
+          (cd candidate && git diff --name-only --diff-filter=ACM 0c038c595c771c38f4e7d94b5022272b512662ac HEAD -- '*.go' | xargs -r gofmt -d) > evidence/timezone-gofmt.diff
+          cat evidence/timezone-gofmt.diff
+          test ! -s evidence/timezone-gofmt.diff
+      - name: Original time.Local race on isolated pre-fix checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C timezone-baseline rev-parse HEAD > evidence/timezone-red-head.txt
+          git -C candidate rev-parse HEAD > evidence/timezone-green-head.txt
+          cp candidate/backend/internal/repository/custom_timezone_isolation_test.go timezone-baseline/backend/internal/repository/
+          set +e
+          (cd timezone-baseline/backend && go test -race -tags=unit ./internal/repository -run '^TestRepositoryTimezoneIsolation$' -count=1 -v) > evidence/timezone-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/timezone-red.log
+          printf '%s\n' "$result" > evidence/timezone-red-exit.txt
+          test "$result" -ne 0
+          ! grep -Eq -- 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|signal:|SIGSEGV|--- SKIP:' evidence/timezone-red.log
+          grep -F 'WARNING: DATA RACE' evidence/timezone-red.log
+          grep -F 'internal/pkg/timezone.Init()' evidence/timezone-red.log
+          grep -F 'time.Now()' evidence/timezone-red.log
+          grep -F 'repository.useGroupUsageRepositoryTestTimezone()' evidence/timezone-red.log
+      - name: Exact head isolated clocks and all repository timezone unit assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd candidate/backend && go test -race -tags=unit ./internal/repository -run '^TestRepositoryTimezoneIsolation$|^TestUsageTrend|^TestUsageLogRepositoryGetAllGroupUsageSummary|^TestDashboardAggregationRepository|^TestUsageCleanupRepository' -count=1 -v) 2>&1 | tee evidence/timezone-green.log
+          ! grep -Eq -- 'WARNING: DATA RACE|--- SKIP:|no tests to run' evidence/timezone-green.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-timezone-race-${{ github.run_id }}
+          path: evidence/
   postgres:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -171,6 +231,8 @@ jobs:
           set -euo pipefail
           (cd candidate/backend && go list -deps -test -race -tags=integration ./internal/repository) > evidence/instrumented-dependencies.txt
           bash candidate/.github/scripts/oauth-degradation-integration-race.sh integration-race "$GITHUB_WORKSPACE/candidate" '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres' 15m
+          bash candidate/.github/scripts/oauth-degradation-integration-race.sh timezone-integration-race "$GITHUB_WORKSPACE/candidate" '^TestGroupUsage|^TestUsageTrendAggregateTimezoneRealBuckets$|^TestUsageLogRolling24HoursHalfOpenBoundaries$|^TestPelicanGroupTestRepo_CostsSurviveRetentionAndPlanDeletion$' 15m
+          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/timezone-integration-race.log
           ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/integration-race.log
       - uses: actions/upload-artifact@v7
         if: always()

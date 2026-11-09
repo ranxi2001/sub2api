@@ -260,7 +260,7 @@ func TestGroupUsageRollupTriggerUsesSessionTimezoneAcrossDST(t *testing.T) {
 
 func TestGroupUsageSummaryIncludesYesterdayAcrossWatermark(t *testing.T) {
 	ctx := context.Background()
-	useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	tz := useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
 	todayStart := time.Date(2026, 8, 13, 16, 0, 0, 0, time.UTC)
 
 	tests := []struct {
@@ -305,6 +305,7 @@ func TestGroupUsageSummaryIncludesYesterdayAcrossWatermark(t *testing.T) {
 			require.NoError(t, err)
 
 			repo := newUsageLogRepositoryWithSQL(nil, tx)
+			repo.configuredTimezone = tz
 			result, err := repo.GetAllGroupUsageSummary(ctx, todayStart)
 			require.NoError(t, err)
 			require.Len(t, result, 1)
@@ -317,7 +318,7 @@ func TestGroupUsageSummaryIncludesYesterdayAcrossWatermark(t *testing.T) {
 
 func TestGroupUsageRollupSyncRebuildsAfterTimezoneChange(t *testing.T) {
 	ctx := context.Background()
-	useGroupUsageRepositoryTestTimezone(t, "America/New_York")
+	tz := useGroupUsageRepositoryTestTimezone(t, "America/New_York")
 	todayStart := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
 	tx := beginGroupUsageRollupTriggerTestTx(t, ctx, schema)
@@ -341,6 +342,7 @@ func TestGroupUsageRollupSyncRebuildsAfterTimezoneChange(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := newDashboardAggregationRepositoryWithSQL(tx)
+	repo.configuredTimezone = tz
 	require.NoError(t, repo.SyncGroupUsageRollups(ctx, todayStart))
 
 	var stateTimezone string
@@ -362,6 +364,7 @@ func TestGroupUsageRollupSyncRebuildsAfterTimezoneChange(t *testing.T) {
 	require.InDelta(t, 3, rollupCost, 0.0000001)
 
 	usageRepo := newUsageLogRepositoryWithSQL(nil, tx)
+	usageRepo.configuredTimezone = tz
 	result, err := usageRepo.GetAllGroupUsageSummary(ctx, todayStart)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
@@ -372,7 +375,7 @@ func TestGroupUsageRollupSyncRebuildsAfterTimezoneChange(t *testing.T) {
 
 func TestGroupUsageSummaryUsesConfiguredDSTBoundaries(t *testing.T) {
 	ctx := context.Background()
-	useGroupUsageRepositoryTestTimezone(t, "America/New_York")
+	tz := useGroupUsageRepositoryTestTimezone(t, "America/New_York")
 	todayStart := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
 	tx := beginGroupUsageRollupTriggerTestTx(t, ctx, schema)
@@ -396,6 +399,7 @@ func TestGroupUsageSummaryUsesConfiguredDSTBoundaries(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := newUsageLogRepositoryWithSQL(nil, tx)
+	repo.configuredTimezone = tz
 	result, err := repo.GetAllGroupUsageSummary(ctx, todayStart)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
