@@ -1,0 +1,61 @@
+name: Upstream account types rendered evidence
+on:
+  push:
+    branches: [feat/upstream-model-sync-account-types-20261109]
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/workflows/upstream-account-types-evidence.yml'
+      - '.github/scripts/upstream-account-types-screenshot.mjs'
+      - 'frontend/src/views/admin/AccountsView.vue'
+permissions:
+  contents: read
+jobs:
+  rendered-before-after:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Preserve the complete pre-change frontend
+        env:
+          SOURCE_BASE: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/account-types-base"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/account-types-base"
+          cmp frontend/package.json "$RUNNER_TEMP/account-types-base/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/account-types-base/frontend/pnpm-lock.yaml"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/account-types-base/frontend/node_modules"
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/account-types-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/account-types-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render originals and exercise account type filtering
+        env:
+          SOURCE_BASE: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+          BASELINE_ROOT: ${{ runner.temp }}/account-types-base/frontend
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/account-types-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/account-types-evidence
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCREENSHOT_DIR"
+          node .github/scripts/upstream-account-types-screenshot.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: upstream-account-types-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.event_name }}
+          path: ${{ runner.temp }}/account-types-evidence
+          if-no-files-found: error
