@@ -130,6 +130,12 @@ func TestOAuthDegradationPostgresMatrix(t *testing.T) {
 	got, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.False(t, got.HasOAuthDegradationAction())
+	_, err = integrationDB.ExecContext(ctx, "UPDATE settings SET value='60' WHERE key=$1", service.SettingKeyAccountPerformanceWindowMinutes)
+	require.NoError(t, err)
+	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	got, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.True(t, got.HasOAuthDegradationAction(), "live 60-minute window includes the unchanged 16-minute-old probe")
 }
 
 func TestOAuthDegradationSettingsCASAndDisableFence(t *testing.T) {
