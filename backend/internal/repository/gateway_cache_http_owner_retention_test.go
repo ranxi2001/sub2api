@@ -14,7 +14,8 @@ func TestIssue758RedisHTTPOwnerRetentionSurvivesQuotaWait(t *testing.T) {
 	ctx := context.Background()
 	const responseID = "resp_fixture_http_758"
 	store := service.NewOpenAIWSStateStore(cache)
-	retention := store.(service.OpenAIHTTPResponseOwnerRetentionStore)
+	retention, ok := store.(service.OpenAIHTTPResponseOwnerRetentionStore)
+	require.True(t, ok)
 	require.NoError(t, store.BindHTTPResponseOwner(ctx, 7, responseID, 101, 201, time.Minute))
 	refreshed, err := retention.RefreshHTTPResponseOwner(ctx, 7, responseID, 101, 301, 6*time.Hour)
 	require.NoError(t, err)

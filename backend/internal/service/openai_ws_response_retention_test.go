@@ -10,7 +10,8 @@ import (
 )
 
 func TestIssue758ResponseOwnerLocalRetention(t *testing.T) {
-	store := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+	store, ok := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+	require.True(t, ok)
 	ctx := context.Background()
 	const groupID, accountID = int64(7), int64(101)
 	const responseID = "resp_fixture_758"
@@ -81,7 +82,8 @@ func TestIssue758ResponseOwnerSharedRetentionFailsClosed(t *testing.T) {
 			if outcome == "unsupported" {
 				adapter = &stubGatewayCache{}
 			}
-			store := NewOpenAIWSStateStore(adapter).(*defaultOpenAIWSStateStore)
+			store, ok := NewOpenAIWSStateStore(adapter).(*defaultOpenAIWSStateStore)
+			require.True(t, ok)
 			require.NoError(t, store.BindResponseAccount(ctx, 7, "resp_fixture_758", 101, time.Minute))
 			key := openAIWSResponseAccountMapKey(7, "resp_fixture_758")
 			before := store.responseToAccount[key]
@@ -114,7 +116,8 @@ func TestIssue758ResponseOwnerSharedRetentionFailsClosed(t *testing.T) {
 }
 
 func TestIssue758ResponseOwnerRetentionRejectsCanceledOrInvalidRequests(t *testing.T) {
-	store := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+	store, ok := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+	require.True(t, ok)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	refreshed, err := store.RefreshResponseAccount(ctx, 7, "resp_fixture_758", 101, time.Hour)

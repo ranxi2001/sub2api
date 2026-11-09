@@ -27,7 +27,9 @@ func issue758Request(t *testing.T, handler *OpenAIGatewayHandler, body string) *
 	c, recorder := newIssue715Context(t, body)
 	c.Request.Header.Set("session_id", "fixture-758-thread")
 	key, _ := c.Get(string(middleware.ContextKeyAPIKey))
-	key.(*service.APIKey).ID = 99
+	apiKey, ok := key.(*service.APIKey)
+	require.True(t, ok)
+	apiKey.ID = 99
 	handler.Responses(c)
 	return recorder
 }

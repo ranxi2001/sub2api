@@ -14,7 +14,8 @@ func TestIssue758RedisResponseOwnerRetentionSurvivesQuotaWait(t *testing.T) {
 	cache, mr := newHTTPResponseOwnerTestCache(t)
 	ctx := context.Background()
 	writer := service.NewOpenAIWSStateStore(cache)
-	retention := writer.(service.OpenAIWSResponseAccountRetentionStore)
+	retention, ok := writer.(service.OpenAIWSResponseAccountRetentionStore)
+	require.True(t, ok)
 	const responseID = "resp_fixture_758"
 	require.NoError(t, writer.BindResponseAccount(ctx, 7, responseID, 101, time.Minute))
 	keys := mr.Keys()
