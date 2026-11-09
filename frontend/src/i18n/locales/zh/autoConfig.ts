@@ -1,4 +1,17 @@
 export default {
+ degradation: {
+  "title": "降智后处置",
+  "hint": "独立适用于所有 OAuth 账号。使用账号性能相同的统一滚动窗口：仅统计完整、可明确判定的质量探针轮次，探针失败比例达到或超过阈值时处置；不是全部请求的降智率。无需开启账号性能停调监控。",
+  "threshold": "降智率阈值（%）",
+  "concurrency": "目标并发数（默认 10）",
+  "thresholdRequired": "请先设置阈值；未设置时不能启用。",
+  "defaultsPending": "默认模型原文：5.6terra、luna、6.1terra、6luna。已勾选可确认的三个 ID；裸 luna 版本尚待确认，请先核对模型选择再启用。",
+  "models": "处置后模型范围（与账号已有授权取交集）",
+  "empty": "当前全不选：被处置账号将不支持任何模型。",
+  "scope": "并发仅降至当前值与目标值中的较小值；模型源与最终目标均须在授权交集内。处置只执行一次并永久保留，不因指标改善、关闭开关或修改模板自动恢复。保留手工配置与其他隔离，成功请求不能自动升档。",
+  "invalid": "请设置 0–100 的阈值及 1–10000 的整数目标并发。",
+  "event": "探针降智 {percent}% ≥ {threshold}% · {samples} 个明确轮次 · 并发 {before} → {after} · 模型：{models} · 窗口 {start} — {end}"
+},
   selection: {
     "accountHint": "此账号保留首次模型范围（空范围表示禁用全部）。普通保存和重新授权会保留；更改模型映射会转为手动配置。",
     "takeOver": "保存时由手动模型配置接管（解除首次范围；空映射将恢复默认支持）",
@@ -159,6 +172,7 @@ export default {
     "upgradeDetail": "并发 {before} → {after}，进入 {seconds} 秒冷却。",
     "cooldownDetail": "请求失败，成功进度已清零，冷却 {seconds} 秒；并发保持 {concurrency}。",
     "kinds": {
+ "degradation_applied": "降智后处置",
       "config_saved": "配置已保存",
       "initial_applied": "首次配置已应用",
       "concurrency_upgraded": "并发已升级",

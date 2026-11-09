@@ -78,7 +78,7 @@ import { getAutoConfigEvents, type AutoConfigEvent, type AutoConfigEventKind } f
 const props = defineProps<{ refreshKey: number }>()
 const { t } = useI18n()
 const auth = useAuthStore()
-const kinds: AutoConfigEventKind[] = ['config_saved', 'initial_applied', 'concurrency_upgraded', 'failure_cooldown']
+const kinds: AutoConfigEventKind[] = ['config_saved', 'initial_applied', 'concurrency_upgraded', 'failure_cooldown', 'degradation_applied']
 const kind = ref<AutoConfigEventKind | ''>('')
 const events = ref<AutoConfigEvent[]>([])
 const hasMore = ref(false), loading = ref(false), error = ref(''), retryMore = ref(false)
@@ -120,6 +120,10 @@ function badgeClass(value: AutoConfigEventKind) {
 }
 function details(event: AutoConfigEvent) {
   const d = event.details
+  if (event.kind === 'degradation_applied' && d.degradation) {
+    const e = d.degradation
+    return t('autoConfig.degradation.event', { percent: e.degradation_percent, threshold: e.threshold_percent, samples: e.quality_samples, before: d.previous_concurrency, after: d.concurrency, models: e.models.join(', ') || '∅', start: formatDateTime(e.window_start), end: formatDateTime(e.window_end) })
+  }
   if (event.kind === 'config_saved' && d.config) return t('autoConfig.logs.savedDetail', { initial: t(d.config.enabled ? 'autoConfig.logs.on' : 'autoConfig.logs.off'), upgrade: t(d.config.upgrade_enabled ? 'autoConfig.logs.on' : 'autoConfig.logs.off'), priority: d.config.priority, load: d.config.load_factor, concurrency: d.config.concurrency })
   if (event.kind === 'initial_applied') return t('autoConfig.logs.initialDetail', { priority: d.priority, load: d.load_factor, concurrency: d.concurrency, groups: groupIDs(d.group_ids) })
   if (event.kind === 'concurrency_upgraded') return t('autoConfig.logs.upgradeDetail', { before: d.previous_concurrency, after: d.concurrency, seconds: d.cooldown_seconds })

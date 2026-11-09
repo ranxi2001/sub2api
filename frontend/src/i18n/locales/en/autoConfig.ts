@@ -1,4 +1,17 @@
 export default {
+ degradation: {
+  "title": "Degradation actions",
+  "hint": "Independent policy for all OAuth accounts. Uses the same rolling window and complete, conclusive quality probe rounds as Account performance. Applies when the failed-probe percentage meets or exceeds the threshold, not the percentage of all customer requests. A performance pause monitor is not required.",
+  "threshold": "Degradation threshold (%)",
+  "concurrency": "Target concurrency (default 10)",
+  "thresholdRequired": "Set a threshold before enabling.",
+  "defaultsPending": "Requested defaults: 5.6terra, luna, 6.1terra, 6luna. Three confirmed IDs are selected. The version of bare luna is pending confirmation; review models before enabling.",
+  "models": "Model scope after action (intersected with existing authorization)",
+  "empty": "No models selected: affected accounts will support no models.",
+  "scope": "Concurrency becomes the smaller of its current value and the target. Both source and final target must be in the authorized intersection. Applied once and retained permanently; better metrics, disabling or editing the template never restore limits. Manual configuration and other isolation remain. Successful requests cannot ramp concurrency.",
+  "invalid": "Set a threshold from 0 to 100 and an integer target concurrency from 1 to 10000.",
+  "event": "Probe degradation {percent}% ≥ {threshold}% · {samples} conclusive rounds · concurrency {before} → {after} · models: {models} · window {start} — {end}"
+},
   selection: {
     "accountHint": "This account retains its initial model scope (an empty scope disables every model). Normal saves and reauthorization preserve it; changing model mappings takes ownership.",
     "takeOver": "Use manual model settings when saving (release the initial scope; empty mappings restore default support)",
@@ -159,6 +172,7 @@ export default {
     "upgradeDetail": "Concurrency {before} → {after}; {seconds}-second cooldown started.",
     "cooldownDetail": "Request failed; success progress reset and a {seconds}-second cooldown started. Concurrency remains {concurrency}.",
     "kinds": {
+ "degradation_applied": "Degradation applied",
       "config_saved": "Configuration saved",
       "initial_applied": "Initial setup applied",
       "concurrency_upgraded": "Concurrency upgraded",
