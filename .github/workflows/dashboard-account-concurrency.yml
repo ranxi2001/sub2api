@@ -1,0 +1,62 @@
+name: Dashboard account concurrency
+
+on:
+  pull_request:
+    paths:
+      - '.github/scripts/dashboard-account-concurrency-preview.mjs'
+      - '.github/workflows/dashboard-account-concurrency.yml'
+      - 'backend/internal/handler/admin/account_concurrency_summary*'
+      - 'backend/internal/handler/admin/account_data.go'
+      - 'backend/internal/service/account_concurrency_snapshot.go'
+      - 'backend/internal/server/routes/admin.go'
+      - 'frontend/src/api/admin/accounts.ts'
+      - 'frontend/src/views/admin/DashboardView.vue'
+      - 'frontend/src/views/admin/__tests__/DashboardView.spec.ts'
+      - 'frontend/src/components/common/NewFeatureBadge.vue'
+      - 'frontend/src/components/common/__tests__/NewFeatureBadge.spec.ts'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/i18n/locales/*/admin/overview.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-account-concurrency-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Account concurrency summary regressions
+        working-directory: backend
+        run: go test -tags=unit ./internal/handler/admin -run '^TestAccountConcurrencySummary' -count=1 -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Dashboard and feature notice regressions
+        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/DashboardView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
+      - name: Build and typecheck frontend
+        run: pnpm --dir frontend run build
