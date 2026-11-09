@@ -248,7 +248,7 @@ func (w *geminiChatResponseWriter) Write(p []byte) (int, error) {
 		}
 		return len(p), nil
 	}
-	w.buf.Write(p)
+	_, _ = w.buf.Write(p)
 	w.sawWrite = true
 	return len(p), nil
 }

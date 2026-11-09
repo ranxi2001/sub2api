@@ -48,7 +48,12 @@ func GeminiGenerateContentToChatCompletions(model string, body []byte, stream bo
 		messages = append(messages, geminiContentToChatMessages(role, content.Get("parts"), &pending)...)
 		return true
 	})
-	if len(messages) == 0 || (len(messages) == 1 && messages[0].(map[string]any)["role"] == "system") {
+	onlySystem := false
+	if len(messages) == 1 {
+		msg, ok := messages[0].(map[string]any)
+		onlySystem = ok && msg["role"] == "system"
+	}
+	if len(messages) == 0 || onlySystem {
 		return nil, fmt.Errorf("contents is required")
 	}
 
@@ -119,7 +124,7 @@ func (t *GeminiSSETranslator) Push(p []byte) []byte {
 	if t == nil || len(p) == 0 {
 		return nil
 	}
-	t.buf.Write(p)
+	_, _ = t.buf.Write(p)
 	var out bytes.Buffer
 	for {
 		data := t.buf.Bytes()
@@ -130,7 +135,7 @@ func (t *GeminiSSETranslator) Push(p []byte) []byte {
 		line := strings.TrimRight(string(data[:idx]), "\r")
 		t.buf.Next(idx + 1)
 		if converted := t.translateLine(line); len(converted) > 0 {
-			out.Write(converted)
+			_, _ = out.Write(converted)
 		}
 	}
 	return out.Bytes()
@@ -158,9 +163,9 @@ func EstimateGeminiTotalTokens(body []byte) (tokens int, characters int) {
 			return
 		}
 		if b.Len() > 0 {
-			b.WriteByte('\n')
+			_ = b.WriteByte('\n')
 		}
-		b.WriteString(text)
+		_, _ = b.WriteString(text)
 	}
 	appendText(geminiInstructionText(body, "systemInstruction", "system_instruction"))
 	gjson.GetBytes(body, "contents").ForEach(func(_, content gjson.Result) bool {
@@ -548,12 +553,11 @@ func (t *GeminiSSETranslator) translateLine(line string) []byte {
 	if line == "" || strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") {
 		return nil
 	}
-	payload := line
-	if rest, ok := strings.CutPrefix(line, "data:"); ok {
-		payload = strings.TrimSpace(rest)
-	} else {
+	rest, ok := strings.CutPrefix(line, "data:")
+	if !ok {
 		return nil
 	}
+	payload := strings.TrimSpace(rest)
 	if payload == "" || payload == "[DONE]" {
 		return nil
 	}
@@ -645,7 +649,7 @@ func (t *GeminiSSETranslator) translateLine(line string) []byte {
 	}
 	var out bytes.Buffer
 	for _, event := range events {
-		out.Write(geminiSSEData(event))
+		_, _ = out.Write(geminiSSEData(event))
 	}
 	return out.Bytes()
 }
@@ -756,9 +760,9 @@ func sanitizeToolID(name string) string {
 	for _, r := range name {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_' || r == '-':
-			b.WriteRune(r)
+			_, _ = b.WriteRune(r)
 		default:
-			b.WriteByte('_')
+			_ = b.WriteByte('_')
 		}
 	}
 	if b.Len() == 0 {
