@@ -124,6 +124,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/moderation/__tests__/ModerationUserQuickEnable.spec.ts \
 	src/api/__tests__/admin.users.spec.ts \
 	src/views/user/__tests__/KeysView.spec.ts \
+	src/api/__tests__/usage.apiKeysRange.spec.ts \
 	src/api/__tests__/channelMonitorV2.spec.ts \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
 	src/views/auth/__tests__/WechatCallbackView.spec.ts \
