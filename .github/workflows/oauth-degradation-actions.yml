@@ -59,3 +59,30 @@ jobs:
         with:
           name: oauth-degradation-unit-${{ github.event_name }}-${{ github.run_id }}
           path: evidence/
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Migrated disposable PostgreSQL and Redis
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/integration-head.txt
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres' -count=1 -v -timeout=15m) 2>&1 | tee evidence/postgres.log
+          ! grep -Eq -- '--- SKIP:|no tests to run' evidence/postgres.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-postgres-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
