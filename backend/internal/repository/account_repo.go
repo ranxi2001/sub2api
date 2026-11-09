@@ -103,12 +103,13 @@ func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]a
 	}
 	_, seedExists := extra["codex_fingerprint_seed"]
 	_, admissionExists := extra[service.OpenAITwoFAAdmissionExtraKey]
-	if !seedExists && !admissionExists {
+	_, degradationExists := extra[service.OAuthDegradationActionExtraKey]
+	if !seedExists && !admissionExists && !degradationExists {
 		return extra
 	}
 	stripped := make(map[string]any, len(extra)-1)
 	for key, value := range extra {
-		if key == "codex_fingerprint_seed" || key == service.OpenAITwoFAAdmissionExtraKey {
+		if key == "codex_fingerprint_seed" || key == service.OpenAITwoFAAdmissionExtraKey || key == service.OAuthDegradationActionExtraKey {
 			continue
 		}
 		stripped[key] = value
@@ -170,6 +171,8 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return service.ErrAccountNilInput
 	}
 
+	account.Extra = copyJSONMap(account.Extra)
+	delete(account.Extra, service.OAuthDegradationActionExtraKey)
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -635,6 +638,7 @@ func (r *accountRepository) updateLockedAccount(
 		return nil, err
 	}
 	account.Extra = extra
+	account.Concurrency = account.LimitOAuthDegradationConcurrency(account.Concurrency)
 	// lockAndMergeAccountProbeExtra holds the account row lock in this transaction.
 	if err := accounttimer.CancelPending(ctx, client, account.ID, time.Now().UTC()); err != nil {
 		return nil, err
@@ -786,7 +790,7 @@ func lockAndMergeAccountProbeExtra(
 			),
 			extra -> 'opencode_go_usage_auto_refresh',
 			extra -> 'opencode_go_usage_snapshot',
-			COALESCE(extra, '{}'::jsonb)
+			COALESCE(extra, '{}'::jsonb),concurrency
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
@@ -816,6 +820,7 @@ func lockAndMergeAccountProbeExtra(
 		currentOpenCodeAutoRefresh     []byte
 		currentOpenCodeSnapshot        []byte
 		currentExtraJSON               []byte
+		currentConcurrency             int
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
@@ -830,7 +835,7 @@ func lockAndMergeAccountProbeExtra(
 		&opencodeGroupIdentityUnchanged,
 		&currentOpenCodeAutoRefresh,
 		&currentOpenCodeSnapshot,
-		&currentExtraJSON,
+		&currentExtraJSON, &currentConcurrency,
 	); err != nil {
 		return nil, err
 	}
@@ -853,6 +858,8 @@ func lockAndMergeAccountProbeExtra(
 			currentExtra = nil
 		}
 	}
+	live := service.Account{Concurrency: currentConcurrency, Extra: currentExtra}
+	account.Concurrency = live.LimitOAuthDegradationConcurrency(account.Concurrency)
 	validNewAPIBinding := false
 	if currentExtra[service.UpstreamBillingProviderExtraKey] == "new_api" {
 		var fingerprint string
@@ -888,6 +895,13 @@ func lockAndMergeAccountProbeExtra(
 	// Isolation is server-owned. A normal save must use the latest value read
 	// under this row lock, including absence after a legitimate restoration.
 	// Never revive, erase or replace it from a client/service snapshot.
+	delete(extra, service.OAuthDegradationActionExtraKey)
+	if state, exists := currentExtra[service.OAuthDegradationActionExtraKey]; exists {
+		if extra == nil {
+			extra = make(map[string]any)
+		}
+		extra[service.OAuthDegradationActionExtraKey] = state
+	}
 	delete(extra, service.QualityModelIsolationKey)
 	if isolation, exists := currentExtra[service.QualityModelIsolationKey]; exists {
 		if extra == nil {
@@ -1198,6 +1212,7 @@ func (r *accountRepository) ApplyOpenAIOAuthReauth(
 	}
 	extra = copyJSONMap(extra)
 	delete(extra, service.OpenAITwoFAAdmissionExtraKey)
+	delete(extra, service.OAuthDegradationActionExtraKey)
 	extraJSON, err := json.Marshal(normalizeJSONMap(extra))
 	if err != nil {
 		return false, err
@@ -2209,6 +2224,13 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 	if err := lockLiveGroups(ctx, client, []int64{groupID}); err != nil {
 		return err
 	}
+	allowed, err := lockOAuthDegradationGroupBindings(ctx, client, accountID, []int64{groupID})
+	if err != nil {
+		return err
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
 	_, err = client.AccountGroup.Create().
 		SetAccountID(accountID).
 		SetGroupID(groupID).
@@ -2273,10 +2295,6 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	if adminaccess.FromContext(ctx) != nil {
 		return r.scopedAdminBindGroups(ctx, accountID, groupIDs)
 	}
-	existingGroupIDs, err := r.loadAccountGroupIDs(ctx, accountID)
-	if err != nil {
-		return err
-	}
 	// 使用事务保证删除旧绑定与创建新绑定的原子性
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -2295,6 +2313,15 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		return err
 	}
 
+	groupIDs, err = lockOAuthDegradationGroupBindings(ctx, txClient, accountID, groupIDs)
+	if err != nil {
+		return err
+	}
+	existingGroupIDs, err := loadAccountGroupIDsWithClient(ctx, txClient, accountID)
+	if err != nil {
+		return err
+	}
+
 	// 绑定关系是整体删除重建的；仍保留的分组要沿用原有的模型限制，否则每次改分组都会把它清掉。
 	existingAllowedModels, err := loadAccountGroupAllowedModels(ctx, txClient, accountID)
 	if err != nil {
@@ -2309,13 +2336,6 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		return err
 	}
 
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
-		}
-		return nil
-	}
-
 	builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
 	for i, groupID := range groupIDs {
 		builder := txClient.AccountGroup.Create().
@@ -2328,18 +2348,21 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		builders = append(builders, builder)
 	}
 
-	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
-		return err
+	if len(builders) > 0 {
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
 	}
 
+	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
+	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
+		return err
+	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-	}
-	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
+		r.syncSchedulerAccountSnapshotDetached(ctx, accountID)
 	}
 	return nil
 }
@@ -2407,6 +2430,18 @@ func (r *accountRepository) SetGroupAllowedModels(ctx context.Context, accountID
 }
 
 // loadAccountGroupAllowedModels 读取账号各分组绑定上已设置的模型限制，只返回有限制的分组。
+func loadAccountGroupIDsWithClient(ctx context.Context, client *dbent.Client, accountID int64) ([]int64, error) {
+	entries, err := client.AccountGroup.Query().Where(dbaccountgroup.AccountIDEQ(accountID)).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(entries))
+	for _, entry := range entries {
+		ids = append(ids, entry.GroupID)
+	}
+	return ids, nil
+}
+
 func loadAccountGroupAllowedModels(ctx context.Context, client *dbent.Client, accountID int64) (map[int64][]string, error) {
 	entries, err := client.AccountGroup.Query().
 		Where(dbaccountgroup.AccountIDEQ(accountID)).
@@ -3523,7 +3558,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if updates.Concurrency != nil {
-		setClauses = append(setClauses, "concurrency = $"+itoa(idx))
+		setClauses = append(setClauses, "concurrency = "+oauthDegradationConcurrencySQL("$"+itoa(idx)))
 		args = append(args, *updates.Concurrency)
 		idx++
 	}

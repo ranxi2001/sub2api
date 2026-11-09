@@ -26,12 +26,16 @@ func TestOAuthAutoConfigWSDefaultsLegacyAndRoundTrip(t *testing.T) {
 		for _, accelerate := range []bool{false, true} {
 			t.Run(mode+map[bool]string{false: "/SSE-off", true: "/SSE-on"}[accelerate], func(t *testing.T) {
 				cfg.OpenAIWSMode, cfg.OpenAIWSSSEAcceleration = &mode, &accelerate
-				_, err := svc.SaveOAuthAutoConfig(t.Context(), cfg)
+				saved, err := svc.SaveOAuthAutoConfig(t.Context(), cfg)
 				require.NoError(t, err)
+				require.NotEmpty(t, saved.Revision)
+				require.NotEqual(t, cfg.Revision, saved.Revision)
 				loaded, err := GetOAuthAutoConfig(t.Context(), repo)
 				require.NoError(t, err)
 				require.Equal(t, cfg.OpenAIWSMode, loaded.OpenAIWSMode)
 				require.Equal(t, cfg.OpenAIWSSSEAcceleration, loaded.OpenAIWSSSEAcceleration)
+				require.Equal(t, saved.Revision, loaded.Revision)
+				cfg = loaded
 			})
 		}
 	}

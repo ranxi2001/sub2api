@@ -9,6 +9,7 @@
       <button v-if="!draft && !loading" class="btn btn-secondary" @click="load">{{ t('autoConfig.retry') }}</button>
       <form v-if="draft" class="space-y-5" @submit.prevent="save">
         <p v-if="draft.runtime_blocked" role="alert" class="rounded-xl bg-amber-50 p-4 text-amber-800">{{ t('autoConfig.blocked') }}</p>
+        <fieldset :disabled="saving" class="min-w-0"><OAuthDegradationCard v-model="draft.degradation_action" :groups="groups" :user-id="auth.user?.id" /></fieldset>
         <fieldset :disabled="saving" class="min-w-0"><BPSDefaultsCard v-model="draft.excel_bps" :groups="groups" /></fieldset>
         <fieldset :disabled="saving" class="min-w-0">
           <section class="card space-y-5" data-testid="model-billing">
@@ -128,6 +129,8 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
+import OAuthDegradationCard from '@/components/admin/operations/OAuthDegradationCard.vue'
+import { oauthDegradationPayload, oauthDegradationError, type OAuthDegradationConfig } from '@/utils/oauthDegradation'
 import BPSDefaultsCard from '@/components/admin/operations/BPSDefaultsCard.vue'
 import OpenAITwoFAAdmissionCard from '@/components/admin/operations/OpenAITwoFAAdmissionCard.vue'
 import { defaultOpenAITwoFAAdmissionConfig, openaiTwoFAAdmissionError, type OpenAITwoFAAdmissionConfig } from '@/utils/openaiTwoFAAdmission'
@@ -144,7 +147,7 @@ import type { ScheduledTestPlan } from '@/types'
 import type { Group } from '@/types'
 import { defaultModelBillingConfig, modelBillingConfigError, modelBillingPayload, type ModelBillingConfig, type ModelBillingRule } from '@/utils/modelBilling'
 const { t } = useI18n(), auth = useAuthStore()
-const draft = ref<(AutoConfig & { openai_ws_mode: OpenAIWSMode; openai_ws_sse_acceleration: boolean; openai_two_fa_admission: OpenAITwoFAAdmissionConfig; excel_bps: ExcelBPSDefaults; model_billing: ModelBillingConfig; model_mappings: OAuthModelMappingRule[] }) | null>(null), groups = ref<Group[]>([])
+const draft = ref<(AutoConfig & { degradation_action: OAuthDegradationConfig; openai_ws_mode: OpenAIWSMode; openai_ws_sse_acceleration: boolean; openai_two_fa_admission: OpenAITwoFAAdmissionConfig; excel_bps: ExcelBPSDefaults; model_billing: ModelBillingConfig; model_mappings: OAuthModelMappingRule[] }) | null>(null), groups = ref<Group[]>([])
 const modelBillingGroups = ref<Group[]>([]), modelBillingGroupsLoading = ref(true), modelBillingGroupsFailed = ref(false)
 const loading = ref(false), saving = ref(false), error = ref(''), notice = ref('')
 const qualityPlans = ref<ScheduledTestPlan[]>([]), selectedQualityRule = ref(''), qualityLoadFailed = ref(false)
@@ -192,13 +195,14 @@ function unavailableModelBillingGroups(rule: ModelBillingRule) {
 
 async function load() {
  const v = generation; loading.value = true; error.value = ''
- try { const [config, available] = await Promise.all([getAutoConfig(), getAll()]); if (validGeneration(v)) { draft.value = { ...config, openai_ws_mode: config.openai_ws_mode ?? OPENAI_WS_MODE_CTX_POOL, openai_ws_sse_acceleration: config.openai_ws_sse_acceleration ?? false, openai_totp_rotate_on_429: config.openai_totp_rotate_on_429 ?? false, openai_disable_scheduling_on_429: config.openai_disable_scheduling_on_429 ?? false, openai_two_fa_admission: config.openai_two_fa_admission ?? defaultOpenAITwoFAAdmissionConfig(), cost_multiplier: config.cost_multiplier ?? 0.07, model_mappings: config.model_mappings ?? defaultOAuthModelMappings(config.platform), model_billing: modelBillingPayload(config.model_billing ?? defaultModelBillingConfig()), excel_bps: config.excel_bps ?? defaultExcelBPSDefaults() }; selectedQualityRule.value = config.quality_rule ? 'saved' : ''; groups.value = available.filter(g => g.status === 'active') } }
+ try { const [config, available] = await Promise.all([getAutoConfig(), getAll()]); if (validGeneration(v)) { draft.value = { ...config, degradation_action: oauthDegradationPayload(config.degradation_action), openai_ws_mode: config.openai_ws_mode ?? OPENAI_WS_MODE_CTX_POOL, openai_ws_sse_acceleration: config.openai_ws_sse_acceleration ?? false, openai_totp_rotate_on_429: config.openai_totp_rotate_on_429 ?? false, openai_disable_scheduling_on_429: config.openai_disable_scheduling_on_429 ?? false, openai_two_fa_admission: config.openai_two_fa_admission ?? defaultOpenAITwoFAAdmissionConfig(), cost_multiplier: config.cost_multiplier ?? 0.07, model_mappings: config.model_mappings ?? defaultOAuthModelMappings(config.platform), model_billing: modelBillingPayload(config.model_billing ?? defaultModelBillingConfig()), excel_bps: config.excel_bps ?? defaultExcelBPSDefaults() }; selectedQualityRule.value = config.quality_rule ? 'saved' : ''; groups.value = available.filter(g => g.status === 'active') } }
  catch { if (validGeneration(v)) error.value = t('autoConfig.loadFailed') }
  finally { if (validGeneration(v)) loading.value = false }
 }
 async function save() {
  if (!draft.value || saving.value) return
  const c = draft.value
+ if (oauthDegradationError(c.degradation_action)) { error.value = t('autoConfig.degradation.invalid'); return }
  const admissionError = openaiTwoFAAdmissionError(c.openai_two_fa_admission)
  if (admissionError || c.openai_two_fa_admission.enabled && !groups.value.some(g => g.id === c.openai_two_fa_admission.isolation_group_id && g.platform === 'openai' && g.status === 'active')) { error.value = t(admissionError ?? 'autoConfig.admission.invalid'); return }
  const modelError = modelBillingConfigError(c.model_billing)
@@ -210,7 +214,7 @@ async function save() {
  const costMultiplier = c.cost_multiplier ?? 0.07
  if (c.enabled && !c.group_ids.length || c.upgrade_enabled && !c.upgrade_group_ids.length || !Number.isFinite(costMultiplier) || costMultiplier < 0 || costMultiplier > 1000000 || [...initialFields, ...upgradeFields].some(f => !Number.isInteger(c[f.key]) || c[f.key] < ('min' in f ? f.min : 1) || c[f.key] > ('max' in f ? f.max : 10000))) { error.value = t('autoConfig.invalid'); return }
  const v = generation; saving.value = true; error.value = ''; notice.value = ''
- try { const { runtime_blocked: _blocked, ...payload } = c; const result = await saveAutoConfig({ ...payload, cost_multiplier: costMultiplier, model_mappings: oauthModelMappingsPayload(c.model_mappings), model_billing: modelBillingPayload(c.model_billing), excel_bps: excelBPSDefaultsPayload(c.excel_bps) }); if (validGeneration(v)) { draft.value = { ...result, openai_ws_mode: result.openai_ws_mode ?? OPENAI_WS_MODE_CTX_POOL, openai_ws_sse_acceleration: result.openai_ws_sse_acceleration ?? false, openai_totp_rotate_on_429: result.openai_totp_rotate_on_429 ?? false, openai_disable_scheduling_on_429: result.openai_disable_scheduling_on_429 ?? false, openai_two_fa_admission: result.openai_two_fa_admission ?? defaultOpenAITwoFAAdmissionConfig(), cost_multiplier: result.cost_multiplier ?? 0.07, model_mappings: result.model_mappings ?? defaultOAuthModelMappings(result.platform), model_billing: modelBillingPayload(result.model_billing ?? defaultModelBillingConfig()), excel_bps: result.excel_bps ?? defaultExcelBPSDefaults() }; selectedQualityRule.value = result.quality_rule ? 'saved' : ''; notice.value = t('autoConfig.saved'); historyRefreshKey.value++ } }
+ try { const { runtime_blocked: _blocked, ...payload } = c; const result = await saveAutoConfig({ ...payload, cost_multiplier: costMultiplier, model_mappings: oauthModelMappingsPayload(c.model_mappings), model_billing: modelBillingPayload(c.model_billing), excel_bps: excelBPSDefaultsPayload(c.excel_bps) }); if (validGeneration(v)) { draft.value = { ...result, degradation_action: oauthDegradationPayload(result.degradation_action), openai_ws_mode: result.openai_ws_mode ?? OPENAI_WS_MODE_CTX_POOL, openai_ws_sse_acceleration: result.openai_ws_sse_acceleration ?? false, openai_totp_rotate_on_429: result.openai_totp_rotate_on_429 ?? false, openai_disable_scheduling_on_429: result.openai_disable_scheduling_on_429 ?? false, openai_two_fa_admission: result.openai_two_fa_admission ?? defaultOpenAITwoFAAdmissionConfig(), cost_multiplier: result.cost_multiplier ?? 0.07, model_mappings: result.model_mappings ?? defaultOAuthModelMappings(result.platform), model_billing: modelBillingPayload(result.model_billing ?? defaultModelBillingConfig()), excel_bps: result.excel_bps ?? defaultExcelBPSDefaults() }; selectedQualityRule.value = result.quality_rule ? 'saved' : ''; notice.value = t('autoConfig.saved'); historyRefreshKey.value++ } }
  catch { if (validGeneration(v)) error.value = t('autoConfig.saveFailed') }
  finally { if (validGeneration(v)) saving.value = false }
 }

@@ -17,13 +17,13 @@ func TestOAuthModelMappingLegacyAndRoundTrip(t *testing.T) {
 	c.ModelMappings = []OAuthModelMappingRule{{From: "custom", To: "custom-upstream"}}
 	svc := NewAccountOpsService(repo, nil, nil)
 	svc.autoGroups = autoConfigGroups{}
-	_, err = svc.SaveOAuthAutoConfig(t.Context(), c)
+	c, err = svc.SaveOAuthAutoConfig(t.Context(), c)
 	require.NoError(t, err)
 	loaded, err := GetOAuthAutoConfig(t.Context(), repo)
 	require.NoError(t, err)
 	require.Equal(t, c.ModelMappings, loaded.ModelMappings, "removed example rules must not reappear")
 	c.ModelMappings = []OAuthModelMappingRule{}
-	_, err = svc.SaveOAuthAutoConfig(t.Context(), c)
+	c, err = svc.SaveOAuthAutoConfig(t.Context(), c)
 	require.NoError(t, err)
 	loaded, err = GetOAuthAutoConfig(t.Context(), repo)
 	require.NoError(t, err)

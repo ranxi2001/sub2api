@@ -81,6 +81,15 @@ FOR UPDATE`, account.ID, string(credentials), strconv.FormatInt(target, 10))
 	if err != nil || !found {
 		return false, err
 	}
+	if target > 0 {
+		allowedGroups, err := lockOAuthDegradationGroupBindings(ctx, client, account.ID, []int64{target})
+		if err != nil {
+			return false, err
+		}
+		if len(allowedGroups) == 0 {
+			return false, nil
+		}
+	}
 	rows, err = client.QueryContext(ctx, `SELECT group_id FROM account_groups WHERE account_id = $1 ORDER BY group_id FOR UPDATE`, account.ID)
 	if err != nil {
 		return false, err

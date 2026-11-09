@@ -31,6 +31,20 @@ beforeEach(() => {
 })
 afterEach(() => { wrapper?.unmount(); wrapper = undefined })
 describe('AutoConfigHistory', () => {
+  it('shows only the applied degradation actions and reads legacy events as concurrency plus models', async () => {
+    const legacy = event(13, 'degradation_applied')
+    legacy.details.degradation = { revision:'legacy',models:['gpt-6-luna'],threshold_percent:50,degradation_percent:60,quality_samples:10,window_start:'start',window_end:'end',concurrency_cap:6 }
+    const groupsOnly = event(14, 'degradation_applied')
+    groupsOnly.details.degradation = { ...legacy.details.degradation,limit_concurrency:false,limit_models:false,limit_groups:true,models:null,group_ids:[5,6],removed_group_ids:[5] }
+    vi.mocked(getAutoConfigEvents).mockResolvedValue({ items:[groupsOnly,legacy],has_more:false })
+    const w = render(); await flushPromises()
+    const rows = w.findAll('[data-testid=history-row]')
+    expect(rows[0].text()).toContain('禁用分组绑定：#5 / #6；实际移出：#5')
+    expect(rows[0].text()).not.toContain('并发 5 → 6')
+    expect(rows[0].text()).not.toContain('模型：')
+    expect(rows[1].text()).toContain('并发 5 → 6')
+    expect(rows[1].text()).toContain('模型：gpt-6-luna')
+  })
   it('renders initial mappings and the saved mapping template', async () => {
     const initial = event(11, 'initial_applied')
     initial.details.model_mapping = { 'gpt-5.4': 'gpt-5.5' }

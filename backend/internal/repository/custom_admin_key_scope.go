@@ -91,6 +91,10 @@ func (r *accountRepository) scopedAdminBindGroups(ctx context.Context, accountID
 	if dbent.TxFromContext(ctx) == nil {
 		return fmt.Errorf("受限分组写入需要数据库事务")
 	}
+	groupIDs, err := lockOAuthDegradationGroupBindings(ctx, r.client, accountID, groupIDs)
+	if err != nil {
+		return err
+	}
 	existing, err := r.loadAccountGroupIDs(ctx, accountID)
 	if err != nil {
 		return err

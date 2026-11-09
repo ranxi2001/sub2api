@@ -1140,6 +1140,22 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		return err
 	}
 
+	// Account locks serialize bulk binding with a concurrently committed
+	// degradation action. Use a stable order for overlapping bulk operations.
+	accountIDs = uniquePositiveInt64s(accountIDs)
+	sort.Slice(accountIDs, func(i, j int) bool { return accountIDs[i] < accountIDs[j] })
+	allowedAccounts := make([]int64, 0, len(accountIDs))
+	for _, id := range accountIDs {
+		allowed, err := lockOAuthDegradationGroupBindings(ctx, exec, id, []int64{groupID})
+		if err != nil {
+			return err
+		}
+		if len(allowed) > 0 {
+			allowedAccounts = append(allowedAccounts, id)
+		}
+	}
+	accountIDs = allowedAccounts
+
 	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
 	_, err = exec.ExecContext(
 		ctx,

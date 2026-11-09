@@ -70,7 +70,7 @@ func TestOAuthAutoConfigDisableSchedulingOn429LegacyAndRoundTrip(t *testing.T) {
 	for _, rotate := range []bool{false, true} {
 		for _, disable := range []bool{false, true} {
 			cfg.OpenAITOTPRotateOn429, cfg.OpenAIDisableSchedulingOn429 = rotate, disable
-			_, err = svc.SaveOAuthAutoConfig(t.Context(), cfg)
+			cfg, err = svc.SaveOAuthAutoConfig(t.Context(), cfg)
 			require.NoError(t, err)
 			loaded, err := GetOAuthAutoConfig(t.Context(), repo)
 			require.NoError(t, err)

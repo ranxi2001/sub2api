@@ -96,6 +96,9 @@ func filterRetiredOpenAIPublicModelsBody(body []byte, accounts []Account, codex 
 // Compact-only administrator mappings are evaluated against their actual
 // target, without treating an old client-visible name as a retired target.
 func supportsOpenAIRequestModel(account *Account, requestedModel string, requireCompact bool) bool {
+	if account.Platform == PlatformOpenAI && account.HasOAuthDegradationAction() && !account.oauthDegradationAllows(resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact)) {
+		return false
+	}
 	if account.Platform == PlatformOpenAI && !account.oauthInitialSelectionAllows(resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact)) {
 		return false
 	}

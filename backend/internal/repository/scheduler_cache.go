@@ -1401,6 +1401,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	keys := []string{
+		service.OAuthDegradationActionExtraKey,
 		"openai_connections_managed", "openai_auth_connections",
 		// Usage settlement can receive an account from this projection. Preserve
 		// the explicit response-tier billing contract through scheduler caches.

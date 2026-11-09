@@ -29,6 +29,8 @@ func TestAutoConfigHistorySaveIsAtomic(t *testing.T) {
 			raw, err := json.Marshal(config)
 			require.NoError(t, err)
 			mock.ExpectBegin()
+			mock.ExpectExec("SELECT pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery("SELECT value FROM settings").WithArgs(service.SettingKeyOAuthAutoConfig).WillReturnRows(sqlmock.NewRows([]string{"value"}))
 			mock.ExpectExec("INSERT INTO settings").WithArgs(service.SettingKeyOAuthAutoConfig, string(raw)).WillReturnResult(sqlmock.NewResult(1, 1))
 			insert := mock.ExpectExec("INSERT INTO account_auto_config_events").WithArgs(int64(0), "", "openai", service.AutoConfigEventSaved, sqlmock.AnyArg())
 			if fail {

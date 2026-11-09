@@ -53,7 +53,7 @@ func TestAccountTimerRepositoryOrdinaryEditDoesNotWriteSchedulingBit(t *testing.
 			})
 			repo, m := timerContractRepository(t, matcher)
 			m.ExpectBegin()
-			m.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"identity", "ollama_group", "ollama_proxy", "enabled", "rate_sync", "snapshot", "session", "auto", "ollama_snapshot", "opencode_group", "opencode_auto", "opencode_snapshot", "current_extra"}).AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, []byte(`{}`)))
+			m.ExpectQuery(`(?s)SELECT.*FOR NO KEY UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"identity", "ollama_group", "ollama_proxy", "enabled", "rate_sync", "snapshot", "session", "auto", "ollama_snapshot", "opencode_group", "opencode_auto", "opencode_snapshot", "current_extra", "concurrency"}).AddRow(true, false, true, nil, nil, nil, nil, nil, nil, false, nil, nil, []byte(`{}`), 3))
 			m.ExpectExec("ordinary edit SQL").WillReturnResult(sqlmock.NewResult(0, 1))
 			storedScheduling := status != service.StatusError
 			m.ExpectQuery(`SELECT .* FROM "accounts" WHERE "id" = \$1`).WithArgs(int64(7)).WillReturnRows(timerContractAccountRows(status, storedScheduling))

@@ -139,6 +139,7 @@ func appendUsageLogModelQueryFilter(query string, args []any, model string, sour
 }
 
 type usageLogRepository struct {
+	configuredTimezone
 	connectionOnce  sync.Once
 	connectionQueue chan service.ConnectionTrace
 	timingOnce      sync.Once

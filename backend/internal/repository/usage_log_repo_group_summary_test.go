@@ -14,7 +14,7 @@ import (
 func TestUsageLogRepositoryGetAllGroupUsageSummaryUsesRollupTail(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := newUsageLogRepositoryWithSQL(nil, db)
-	useGroupUsageRepositoryTestTimezone(t, "America/New_York")
+	repo.configuredTimezone = useGroupUsageRepositoryTestTimezone(t, "America/New_York")
 	todayStart := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
 	yesterdayStart := time.Date(2026, 3, 8, 5, 0, 0, 0, time.UTC)
 
@@ -80,7 +80,7 @@ func TestUsageLogRepositoryGetAllGroupUsageSummaryFallsBackWhenWatermarkInvalid(
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock := newSQLMock(t)
 			repo := newUsageLogRepositoryWithSQL(nil, db)
-			useGroupUsageRepositoryTestTimezone(t, "America/New_York")
+			repo.configuredTimezone = useGroupUsageRepositoryTestTimezone(t, "America/New_York")
 
 			mock.ExpectQuery(`(?s)COUNT\(\*\).*usage_group_rollup_state.*WHERE id = 1`).
 				WillReturnRows(tc.rows)

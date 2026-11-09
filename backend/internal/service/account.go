@@ -1065,6 +1065,9 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 }
 
 func (a *Account) isModelMappingSupported(requestedModel string) bool {
+	if a.HasOAuthDegradationAction() && (!a.oauthDegradationAllows(requestedModel) || !a.oauthDegradationAllows(a.GetMappedModel(requestedModel))) {
+		return false
+	}
 	if !a.oauthInitialSelectionAllows(requestedModel) || !a.oauthInitialSelectionAllows(a.GetMappedModel(requestedModel)) {
 		return false
 	}

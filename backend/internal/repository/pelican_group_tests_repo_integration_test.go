@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/lib/pq"
@@ -273,10 +272,8 @@ const pelicanGroupTestsMigration = "253_pelican_group_tests.sql"
 // they stay on the gallery after the upgrade.
 func TestPelicanGroupTestRepo_CostsSurviveRetentionAndPlanDeletion(t *testing.T) {
 	ctx := context.Background()
-	originalTZ := timezone.Name()
-	require.NoError(t, timezone.Init("Asia/Shanghai"))
-	t.Cleanup(func() { require.NoError(t, timezone.Init(originalTZ)) })
-	repo := NewPelicanGroupTestRepository(integrationDB)
+	tz := useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	repo := &pelicanGroupTestRepository{db: integrationDB, configuredTimezone: tz}
 	groups := createPelicanGroupTestGroups(t, "costs", "isolated")
 	a, err := repo.CreatePlan(ctx, newPelicanGroupTestPlan(groups[0].ID, true, time.Now()))
 	require.NoError(t, err)
@@ -284,7 +281,7 @@ func TestPelicanGroupTestRepo_CostsSurviveRetentionAndPlanDeletion(t *testing.T)
 	require.NoError(t, err)
 	other, err := repo.CreatePlan(ctx, newPelicanGroupTestPlan(groups[1].ID, true, time.Now()))
 	require.NoError(t, err)
-	today := timezone.Today()
+	today := tz.startOfDay(time.Now())
 	// Local 00:30 is still yesterday in the database's UTC session.
 	finished := today.Add(30 * time.Minute).UTC()
 	save := func(planID int64, cost *float64, at time.Time, partial bool) *service.PelicanGroupTestResult {

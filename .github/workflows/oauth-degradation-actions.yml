@@ -1,0 +1,303 @@
+name: OAuth degradation actions
+on:
+  push:
+    branches: [production, feat/oauth-degradation-actions-20261109]
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+      - uses: actions/checkout@v6
+        with:
+          ref: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+          path: baseline
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Baseline behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C baseline rev-parse HEAD > evidence/red-head.txt
+          cp candidate/backend/internal/service/oauth_degradation_actions_test.go candidate/backend/internal/service/oauth_degradation_scope_test.go baseline/backend/internal/service/
+          set +e
+          (cd baseline/backend && go test -tags=unit ./internal/service -run '^TestOAuthDegradation' -count=1 -v) > evidence/red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red.log
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:' evidence/red.log
+          grep -F 'degradation hold must prevent' evidence/red.log
+          grep -F 'enabling degradation action requires' evidence/red.log
+      - name: Exact candidate GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C candidate rev-parse HEAD | tee evidence/green-head.txt
+          (cd candidate/backend && go test -race -tags=unit ./internal/service ./internal/handler/admin -run 'TestOAuthAutoConfig|TestOAuthInitial|TestOAuthModelMapping|TestModelBilling|TestOAuthDegradation|TestAutoConfig|TestAdvanceConcurrency|TestOpenAITwoFAAdmission|TestQualityModel|TestAccountIsModelSupported|TestGPT55Retirement' -count=1 -v) 2>&1 | tee evidence/green.log
+          (cd candidate/backend && go test -race -tags=unit ./internal/repository -count=1 -v) 2>&1 | tee evidence/repository-unit.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-unit-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
+  timezone-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+      - uses: actions/checkout@v6
+        with:
+          ref: 0c038c595c771c38f4e7d94b5022272b512662ac
+          path: timezone-baseline
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Check changed Go formatting remotely
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C candidate fetch --no-tags --depth=1 origin 0c038c595c771c38f4e7d94b5022272b512662ac
+          (cd candidate && git diff --name-only --diff-filter=ACM 0c038c595c771c38f4e7d94b5022272b512662ac HEAD -- '*.go' | xargs -r gofmt -d) > evidence/timezone-gofmt.diff
+          cat evidence/timezone-gofmt.diff
+          test ! -s evidence/timezone-gofmt.diff
+      - name: Original time.Local race on isolated pre-fix checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C timezone-baseline rev-parse HEAD > evidence/timezone-red-head.txt
+          git -C candidate rev-parse HEAD > evidence/timezone-green-head.txt
+          cp candidate/backend/internal/repository/custom_timezone_isolation_test.go timezone-baseline/backend/internal/repository/
+          set +e
+          (cd timezone-baseline/backend && go test -race -tags=unit ./internal/repository -run '^TestRepositoryTimezoneIsolation$' -count=1 -v) > evidence/timezone-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/timezone-red.log
+          printf '%s\n' "$result" > evidence/timezone-red-exit.txt
+          test "$result" -ne 0
+          ! grep -Eq -- 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|signal:|SIGSEGV|--- SKIP:' evidence/timezone-red.log
+          grep -F 'WARNING: DATA RACE' evidence/timezone-red.log
+          grep -F 'internal/pkg/timezone.Init()' evidence/timezone-red.log
+          grep -F 'time.Now()' evidence/timezone-red.log
+          grep -F 'repository.useGroupUsageRepositoryTestTimezone()' evidence/timezone-red.log
+      - name: Exact head isolated clocks and all repository timezone unit assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd candidate/backend && go test -race -tags=unit ./internal/repository -run '^TestRepositoryTimezoneIsolation$|^TestUsageTrend|^TestUsageLogRepositoryGetAllGroupUsageSummary|^TestDashboardAggregationRepository|^TestUsageCleanupRepository' -count=1 -v) 2>&1 | tee evidence/timezone-green.log
+          ! grep -Eq -- 'WARNING: DATA RACE|--- SKIP:|no tests to run' evidence/timezone-green.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-timezone-race-${{ github.run_id }}
+          path: evidence/
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/checkout@v6
+        with:
+          ref: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+          path: baseline
+      - name: PostgreSQL baseline behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          cp backend/internal/repository/oauth_degradation_actions_integration_test.go backend/internal/repository/oauth_degradation_edit_integration_test.go backend/internal/repository/oauth_degradation_recovery_integration_test.go baseline/backend/internal/repository/
+          set +e
+          (cd baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuthDegradation' -count=1 -v -timeout=15m) > evidence/postgres-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/postgres-red.log
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' evidence/postgres-red.log
+          grep -F 'OAuth degradation startup must apply' evidence/postgres-red.log
+          grep -F 'stale editor must not erase' evidence/postgres-red.log
+      - name: Migrated disposable PostgreSQL and Redis
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/integration-head.txt
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres|^TestAstraGroups|^TestAstraSchedulingModes|^TestOpenAITwoFAAdmission|^TestQualityActionsRestore|^TestQualityIsolation|^TestQualityBPSAndQuarantineCoexist|^TestQualityCoexist' -count=1 -v -timeout=15m) 2>&1 | tee evidence/postgres.log
+          ! grep -Eq -- '--- SKIP:|no tests to run' evidence/postgres.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-postgres-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
+  integration-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CI: 'true'
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      GORACE: 'history_size=4 halt_on_error=1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+      - uses: actions/checkout@v6
+        with:
+          ref: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+          path: baseline
+      - uses: actions/checkout@v6
+        with:
+          ref: cf1612fb550404d5a468d9d7114dea4efd6e62cd
+          path: reviewed
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Record exact sources and remote toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C candidate rev-parse HEAD > evidence/candidate-head.txt
+          git -C baseline rev-parse HEAD > evidence/baseline-head.txt
+          git -C reviewed rev-parse HEAD > evidence/reviewed-head.txt
+          go version > evidence/toolchain.txt
+          go env GOOS GOARCH CGO_ENABLED GOFLAGS >> evidence/toolchain.txt
+          uname -a > evidence/kernel.txt
+          docker version > evidence/docker.txt
+          docker info > evidence/docker-info.txt
+          if ! command -v gdb >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdb
+          fi
+          bash -n candidate/.github/scripts/oauth-degradation-integration-race.sh
+          gofmt -d candidate/backend/internal/repository/oauth_degradation_chain_integration_test.go candidate/backend/internal/repository/oauth_degradation_race_integration_test.go > evidence/gofmt.diff
+          test ! -s evidence/gofmt.diff
+      - name: New full-chain regression on isolated production checkout (behavioral RED)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp candidate/backend/internal/repository/oauth_degradation_chain_integration_test.go baseline/backend/internal/repository/
+          set +e
+          bash candidate/.github/scripts/oauth-degradation-integration-race.sh chain-red "$GITHUB_WORKSPACE/baseline" '^TestOAuthDegradationOutboxSchedulerChain$' 10m
+          result=$?
+          set -e
+          cat evidence/chain-red.log
+          printf '%s\n' "$result" > evidence/chain-red-exit.txt
+          test "$result" -ne 0
+          ! grep -Eq -- 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|signal:|SIGSEGV|fatal error:|WARNING: DATA RACE|--- SKIP:' evidence/chain-red.log
+          grep -F 'real degradation worker must commit treatment before cache compensation' evidence/chain-red.log
+          grep -F -- '--- FAIL: TestOAuthDegradationOutboxSchedulerChain' evidence/chain-red.log
+      - name: Reviewed implementation control (coverage gap versus new defect)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp candidate/backend/internal/repository/oauth_degradation_chain_integration_test.go candidate/backend/internal/repository/oauth_degradation_race_integration_test.go reviewed/backend/internal/repository/
+          bash candidate/.github/scripts/oauth-degradation-integration-race.sh reviewed-integration-race "$GITHUB_WORKSPACE/reviewed" '^TestOAuthDegradationOutboxSchedulerChain$|^TestOAuthDegradationDeterministic|^TestOAuthDegradationTransactionFailures$' 15m
+          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/reviewed-integration-race.log
+      - name: Exact head real PostgreSQL Redis evaluator outbox and scheduler race GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd candidate/backend && go list -deps -test -race -tags=integration ./internal/repository) > evidence/instrumented-dependencies.txt
+          bash candidate/.github/scripts/oauth-degradation-integration-race.sh integration-race "$GITHUB_WORKSPACE/candidate" '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres|^TestAstraGroups|^TestAstraSchedulingModes|^TestOpenAITwoFAAdmission|^TestQualityActionsRestore|^TestQualityIsolation|^TestQualityBPSAndQuarantineCoexist|^TestQualityCoexist' 15m
+          bash candidate/.github/scripts/oauth-degradation-integration-race.sh timezone-integration-race "$GITHUB_WORKSPACE/candidate" '^TestGroupUsage|^TestUsageTrendAggregateTimezoneRealBuckets$|^TestUsageLogRolling24HoursHalfOpenBoundaries$|^TestPelicanGroupTestRepo_CostsSurviveRetentionAndPlanDeletion$' 15m
+          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/timezone-integration-race.log
+          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/integration-race.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-integration-race-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: git fetch --no-tags --depth=1 origin 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+      - name: Vue baseline behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          source=frontend/src/views/admin/AutoConfigView.vue
+          cp "$source" "$RUNNER_TEMP/auto-config-candidate.vue"
+          trap 'cp "$RUNNER_TEMP/auto-config-candidate.vue" "$source"' EXIT
+          git show 1411d0fc6e1fca51d4b657c21837cd74c87bf84e:"$source" > "$source"
+          set +e
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts --maxWorkers=1 --minWorkers=1 > evidence/ui-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/ui-red.log
+          test "$result" -ne 0
+          grep -F 'missing degradation action business controls' evidence/ui-red.log
+          ! grep -Eq 'Failed to resolve|Transform failed|No test files found' evidence/ui-red.log
+      - name: Actual Vue settings and notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/ui-head.txt
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts src/views/admin/__tests__/AutoConfigView.spec.ts src/components/admin/operations/__tests__/AutoConfigHistory.spec.ts src/stores/__tests__/newFeatureNotices.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee evidence/ui.log
+      - name: Frontend types and changed-file lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend typecheck 2>&1 | tee evidence/typecheck.log
+          pnpm --dir frontend exec eslint src/components/admin/operations/OAuthDegradationCard.vue src/utils/oauthDegradation.ts src/views/admin/AutoConfigView.vue src/api/admin/autoConfig.ts src/components/admin/operations/AutoConfigHistory.vue 2>&1 | tee evidence/lint.log
+      - name: Isolated browser dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/oauth-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/oauth-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - run: git fetch --no-tags --depth=1 origin 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+      - name: Real Vue and project CSS before and after (fixture only)
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/oauth-browser/node_modules/playwright
+          OAUTH_DEGRADATION_SCREENSHOT_DIR: ${{ github.workspace }}/evidence/screenshots
+        run: node .github/scripts/oauth-degradation-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-ui-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/

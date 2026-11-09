@@ -46,6 +46,7 @@ func TestQualityRestoreConflictRepeatedManualMembership(t *testing.T) {
 		mock.ExpectQuery("SELECT state FROM account_quality_states").WithArgs(plan.ID).WillReturnRows(sqlmock.NewRows([]string{"state"}).AddRow(state))
 		mock.ExpectQuery("SELECT updated_at, schedulable, status FROM accounts").WithArgs(plan.AccountID).WillReturnRows(sqlmock.NewRows([]string{"updated_at", "schedulable", "status"}).AddRow(now, true, "active"))
 		mock.ExpectQuery("SELECT COALESCE\\(jsonb_agg").WithArgs(plan.AccountID).WillReturnRows(sqlmock.NewRows([]string{"groups"}).AddRow(`[{"account_id":8,"group_id":21,"priority":50}]`))
+		expectOAuthDegradationGroupBindingsAccount(mock, plan.AccountID, `{}`)
 		mock.ExpectQuery("SELECT EXISTS\\(SELECT 1 FROM groups").WithArgs(int64(21), plan.AccountID).WillReturnRows(sqlmock.NewRows([]string{"exists", "replaced"}).AddRow(true, true))
 		mock.ExpectRollback()
 		action, err := NewScheduledTestPlanRepository(db).ApplyQualityOutcome(context.Background(), plan, until, "passed")
@@ -89,6 +90,7 @@ func TestQualityRestoreDiagnosticsGroupEvidenceAndNoWrites(t *testing.T) {
 			require.NoError(t, err)
 			state := qualityState{Action: "remove_groups", Removed: []qualityGroup{{AccountID: 8, GroupID: 21, Priority: 7}, {AccountID: 8, GroupID: 22, Priority: 9}}}
 			before := mustJSON(t, state)
+			expectOAuthDegradationGroupBindingsAccount(mock, int64(8), `{}`)
 			for i, group := range state.Removed {
 				mock.ExpectQuery("SELECT EXISTS\\(SELECT 1 FROM groups").WithArgs(group.GroupID, int64(8)).WillReturnRows(sqlmock.NewRows([]string{"exists", "replaced"}).AddRow(tc.live[i], tc.bound[i]))
 			}
@@ -131,6 +133,7 @@ func TestQualityRestoreDiagnosticsIgnoreUnrelatedAccountVersion(t *testing.T) {
 			expectQualityDiagnosticAccount(mock, plan, until, string(mustJSON(t, state)), "active")
 			mock.ExpectQuery("SELECT COALESCE\\(jsonb_agg").WithArgs(plan.AccountID).WillReturnRows(sqlmock.NewRows([]string{"groups"}).AddRow(`[]`))
 			if action == "remove_groups" {
+				expectOAuthDegradationGroupBindingsAccount(mock, plan.AccountID, `{}`)
 				mock.ExpectQuery("SELECT EXISTS\\(SELECT 1 FROM groups").WithArgs(int64(21), plan.AccountID).WillReturnRows(sqlmock.NewRows([]string{"exists", "replaced"}).AddRow(true, false))
 				mock.ExpectExec("INSERT INTO account_groups").WithArgs(plan.AccountID, int64(21), 7, state.Removed[0].CreatedAt, nil).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectExec("UPDATE accounts SET updated_at").WithArgs(plan.AccountID).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -259,6 +262,7 @@ func TestQualityRestoreDiagnosticsConcurrentRulesCannotTakeOwnership(t *testing.
 	}
 	mock.ExpectQuery("SELECT EXISTS\\( SELECT 1 FROM account_quality_states").WithArgs(int64(8), int64(9), false).WillReturnRows(sqlmock.NewRows([]string{"owned"}).AddRow(true))
 	mock.ExpectQuery("SELECT COALESCE\\(jsonb_agg").WithArgs(int64(8)).WillReturnRows(sqlmock.NewRows([]string{"groups"}).AddRow(`[]`))
+	expectOAuthDegradationGroupBindingsAccount(mock, int64(8), `{}`)
 	mock.ExpectQuery("SELECT EXISTS\\(SELECT 1 FROM groups").WithArgs(int64(21), int64(8)).WillReturnRows(sqlmock.NewRows([]string{"exists", "replaced"}).AddRow(true, true))
 	var wg sync.WaitGroup
 	actions, errs := make([]string, 2), make([]error, 2)
@@ -327,6 +331,7 @@ func TestQualityRestoreDiagnosticsIsolationCannotClaimExternalGroups(t *testing.
 			mock.ExpectQuery("SELECT credentials,COALESCE").WithArgs(plan.AccountID).WillReturnRows(sqlmock.NewRows([]string{"credentials", "extra"}).AddRow(`{}`, string(mustJSON(t, account.Extra))))
 			mock.ExpectQuery("SELECT COALESCE\\(jsonb_agg").WithArgs(plan.AccountID).WillReturnRows(sqlmock.NewRows([]string{"groups"}).AddRow(`[{"account_id":8,"group_id":21}]`))
 			if !changedModel {
+				expectOAuthDegradationGroupBindingsAccount(mock, plan.AccountID, string(mustJSON(t, account.Extra)))
 				mock.ExpectQuery("SELECT EXISTS\\(SELECT 1 FROM groups").WithArgs(int64(21), plan.AccountID).WillReturnRows(sqlmock.NewRows([]string{"exists", "replaced"}).AddRow(true, true))
 			}
 			mock.ExpectRollback()

@@ -1,4 +1,29 @@
 export default {
+ degradation: {
+  "title": "降智后处置",
+  "hint": "独立适用于所有 OAuth 账号。使用账号性能相同的统一滚动窗口：仅统计完整、可明确判定的质量探针轮次，探针失败比例达到或超过阈值时处置；不是全部请求的降智率。无需开启账号性能停调监控。",
+  "threshold": "降智率阈值（%）",
+  "actions": "达到阈值后执行（可多选）",
+  "limitConcurrency": "限制并发",
+  "limitModels": "限制模型",
+  "limitGroups": "限制分组",
+  "actionsRequired": "启用时至少勾选一项处置。",
+  "concurrency": "目标并发数（默认 10）",
+  "thresholdRequired": "请先设置阈值；未设置时不能启用。",
+  "defaultsPending": "默认模型原文：5.6terra、luna、6.1terra、6luna。已勾选可确认的三个 ID；裸 luna 版本尚待确认，请先核对模型选择再启用。",
+  "models": "处置后模型范围（与账号已有授权取交集）",
+  "empty": "当前全不选：被处置账号将不支持任何模型。",
+  "groups": "关闭这些分组的账号绑定",
+  "groupsHint": "选择最多 100 个分组。被处置账号会移出这些分组，后续编辑也不能重新绑定；保留其他分组，不会关闭分组本身或影响组内其他账号。",
+  "groupsRequired": "请至少勾选一个要关闭绑定的分组。",
+  "unavailableGroup": "分组不可用，已保留选择；取消勾选可移除此 ID",
+  "scope": "仅执行勾选的处置：并发取当前值与目标值中的较小值；模型与已有授权取交集；分组移除所选绑定。处置只执行一次，不因指标改善、关闭开关或修改模板自动恢复。限制并发时，成功请求不能自动升档。",
+  "invalid": "请设置 0–100 的阈值并至少勾选一项处置；检查已勾选项的目标并发（1–10000 的整数）、精确模型 ID（最多 500 个）或分组选择（1–100 个）。",
+  "event": "探针降智 {percent}% ≥ {threshold}% · {samples} 个明确轮次 · {actions} · 窗口 {start} — {end}",
+  "concurrencyEvent": "并发 {before} → {after}",
+  "modelsEvent": "模型：{models}",
+  "groupsEvent": "禁用分组绑定：{groups}；实际移出：{removed}"
+},
   selection: {
     "accountHint": "此账号保留首次模型范围（空范围表示禁用全部）。普通保存和重新授权会保留；更改模型映射会转为手动配置。",
     "takeOver": "保存时由手动模型配置接管（解除首次范围；空映射将恢复默认支持）",
@@ -163,6 +188,7 @@ export default {
     "upgradeDetail": "并发 {before} → {after}，进入 {seconds} 秒冷却。",
     "cooldownDetail": "请求失败，成功进度已清零，冷却 {seconds} 秒；并发保持 {concurrency}。",
     "kinds": {
+ "degradation_applied": "降智后处置",
       "config_saved": "配置已保存",
       "initial_applied": "首次配置已应用",
       "concurrency_upgraded": "并发已升级",

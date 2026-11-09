@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -60,6 +61,12 @@ func (r *accountRepository) RecordAutoConfigInitial(ctx context.Context, account
 
 // Persist the save and its snapshot in the same transaction; failed saves have no history.
 func (r *settingRepository) saveAutoConfigWithEvent(ctx context.Context, value string) error {
+	return r.saveOAuthAutoConfig(ctx, value, nil)
+}
+func (r *settingRepository) CompareAndSetOAuthAutoConfig(ctx context.Context, value, expected string) error {
+	return r.saveOAuthAutoConfig(ctx, value, &expected)
+}
+func (r *settingRepository) saveOAuthAutoConfig(ctx context.Context, value string, expected *string) error {
 	var config service.OAuthAutoConfig
 	if err := json.Unmarshal([]byte(value), &config); err != nil {
 		return err
@@ -69,6 +76,32 @@ func (r *settingRepository) saveAutoConfigWithEvent(ctx context.Context, value s
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Serialize the absent-row case too; existing readers use the row lock.
+	if _, err = tx.Client().ExecContext(ctx, "SELECT pg_advisory_xact_lock(681705431)"); err != nil {
+		return err
+	}
+	rows, err := tx.Client().QueryContext(ctx, "SELECT value FROM settings WHERE key=$1 FOR UPDATE", service.SettingKeyOAuthAutoConfig)
+	if err != nil {
+		return err
+	}
+	var prior service.OAuthAutoConfig
+	if rows.Next() {
+		var raw string
+		if err = rows.Scan(&raw); err == nil {
+			err = json.Unmarshal([]byte(raw), &prior)
+		}
+	}
+	rowErr := rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	if rowErr != nil {
+		return rowErr
+	}
+	if expected != nil && prior.Revision != *expected {
+		return infraerrors.Conflict("AUTO_CONFIG_CONFLICT", "automatic configuration changed; reload before saving")
+	}
 	_, err = tx.Client().ExecContext(ctx, `INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW())
  ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=EXCLUDED.updated_at`, service.SettingKeyOAuthAutoConfig, value)
 	if err != nil {

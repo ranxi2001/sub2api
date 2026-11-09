@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
-	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // groupUsageRollupSnapshot 是一次汇总水位的快照。
@@ -53,7 +52,7 @@ func (r *usageLogRepository) readGroupUsageRollupSnapshot(ctx context.Context, t
 		return invalid, nil
 	}
 
-	tailStart, err := service.ParseGroupUsageDate(closedBefore.String)
+	tailStart, err := r.parseGroupUsageDate(closedBefore.String)
 	if err != nil {
 		// 水位值解析不出来，按无效处理：宁可多扫一次，也不要算错钱。
 		return invalid, nil //nolint:nilerr // 与上面的 valid 判定同语义，均降级为全量重算
@@ -61,17 +60,17 @@ func (r *usageLogRepository) readGroupUsageRollupSnapshot(ctx context.Context, t
 	return groupUsageRollupSnapshot{
 		valid:        true,
 		closedBefore: closedBefore.String,
-		retainedDate: service.GroupUsageDate(retainedFrom.Time),
+		retainedDate: r.groupUsageDate(retainedFrom.Time),
 		tailStart:    tailStart.UTC(),
 	}, nil
 }
 
 func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Context, todayStart time.Time) (results []usagestats.GroupUsageSummary, err error) {
-	todayStart = service.GroupUsageTodayStart(todayStart)
-	yesterdayStart := service.GroupUsageYesterdayStart(todayStart)
-	timezoneName := service.GroupUsageTimezoneName()
-	todayDate := service.GroupUsageDate(todayStart)
-	yesterdayDate := service.GroupUsageDate(yesterdayStart)
+	todayStart = r.groupUsageTodayStart(todayStart)
+	yesterdayStart := r.groupUsageYesterdayStart(todayStart)
+	timezoneName := r.timezoneLocation().String()
+	todayDate := r.groupUsageDate(todayStart)
+	yesterdayDate := r.groupUsageDate(yesterdayStart)
 
 	state, err := r.readGroupUsageRollupSnapshot(ctx, timezoneName, todayDate)
 	if err != nil {
@@ -167,13 +166,13 @@ func (r *dashboardAggregationRepository) SyncGroupUsageRollups(ctx context.Conte
 	if r == nil || r.sql == nil {
 		return nil
 	}
-	todayStart = service.GroupUsageTodayStart(todayStart)
+	todayStart = r.groupUsageTodayStart(todayStart)
 	if db, ok := r.sql.(*sql.DB); ok {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
-		txRepo := newDashboardAggregationRepositoryWithSQL(tx)
+		txRepo := r.withSQL(tx)
 		if err := txRepo.syncGroupUsageRollupsInTx(ctx, todayStart); err != nil {
 			_ = tx.Rollback()
 			return err
@@ -196,17 +195,17 @@ func (r *dashboardAggregationRepository) syncGroupUsageRollupsInTx(ctx context.C
 		return fmt.Errorf("读取分组用量汇总水位: %w", err)
 	}
 
-	todayDate := service.GroupUsageDate(todayStart)
-	timezoneName := service.GroupUsageTimezoneName()
+	todayDate := r.groupUsageDate(todayStart)
+	timezoneName := r.timezoneLocation().String()
 	timezoneChanged := stateTimezoneName != timezoneName
 	var closedTime time.Time
 	if !timezoneChanged {
 		var err error
-		closedTime, err = service.ParseGroupUsageDate(closedBefore)
+		closedTime, err = r.parseGroupUsageDate(closedBefore)
 		if err != nil {
 			return fmt.Errorf("解析分组用量汇总水位 %q: %w", closedBefore, err)
 		}
-		todayDateTime, err := service.ParseGroupUsageDate(todayDate)
+		todayDateTime, err := r.parseGroupUsageDate(todayDate)
 		if err != nil {
 			return err
 		}
@@ -226,8 +225,8 @@ func (r *dashboardAggregationRepository) syncGroupUsageRollupsInTx(ctx context.C
 	if earliest.Valid {
 		retainedFrom = earliest.Time.UTC()
 	}
-	retainedDate := service.GroupUsageDate(retainedFrom)
-	retainedDateTime, err := service.ParseGroupUsageDate(retainedDate)
+	retainedDate := r.groupUsageDate(retainedFrom)
+	retainedDateTime, err := r.parseGroupUsageDate(retainedDate)
 	if err != nil {
 		return err
 	}
@@ -235,7 +234,7 @@ func (r *dashboardAggregationRepository) syncGroupUsageRollupsInTx(ctx context.C
 	if !timezoneChanged && closedTime.After(retainedDateTime) {
 		rebuildStartDate = closedBefore
 	}
-	rebuildStart, err := service.ParseGroupUsageDate(rebuildStartDate)
+	rebuildStart, err := r.parseGroupUsageDate(rebuildStartDate)
 	if err != nil {
 		return err
 	}
@@ -295,8 +294,7 @@ func lockGroupUsageRollupState(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func invalidateGroupUsageRollupsAt(ctx context.Context, tx *sql.Tx, affectedAt time.Time) error {
-	timezoneName := service.GroupUsageTimezoneName()
+func invalidateGroupUsageRollupsAt(ctx context.Context, tx *sql.Tx, affectedAt time.Time, timezoneName string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE usage_group_rollup_state
 		SET closed_before = LEAST(

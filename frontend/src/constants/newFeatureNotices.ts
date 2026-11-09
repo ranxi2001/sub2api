@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  oauthDegradationActions: 'oauth-degradation-actions-initial-announcement',
   dashboardAccountConcurrency: 'dashboard-account-concurrency-initial-announcement',
   qualityRetestRest: 'quality-retest-rest-initial-announcement',
   keyRisk: 'key-risk-notices-acknowledgement-initial-announcement',

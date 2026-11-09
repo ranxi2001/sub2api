@@ -13,6 +13,7 @@ import type { Group } from '@/types'
 import { defaultModelBillingConfig } from '@/utils/modelBilling'
 import { defaultExcelBPSDefaults } from '@/utils/excelBPSDefaults'
 import { defaultOAuthModelMappings } from '@/utils/oauthModelMappings'
+import { defaultOAuthDegradationConfig } from '@/utils/oauthDegradation'
 import { defaultOpenAITwoFAAdmissionConfig } from '@/utils/openaiTwoFAAdmission'
 vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { props: ['modelValue'], template: '<div data-testid="model-selection">{{ modelValue.join(", ") }}</div>' } }))
 const state = vi.hoisted(() => ({ auth: null as any }))
@@ -25,7 +26,7 @@ vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('@/api/admin/autoConfig', async importOriginal => ({ ...await importOriginal<typeof import('@/api/admin/autoConfig')>(), getAutoConfig: vi.fn(), saveAutoConfig: vi.fn() }))
 vi.mock('@/api/admin/accountQuality', () => ({ listQualityPlans: vi.fn() }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn(), list: vi.fn() }))
-const config: AutoConfig = { openai_ws_mode: 'ctx_pool', openai_ws_sse_acceleration: false, openai_totp_rotate_on_429: false, openai_disable_scheduling_on_429: false, openai_two_fa_admission: defaultOpenAITwoFAAdmissionConfig(), model_billing: defaultModelBillingConfig(), model_mappings: defaultOAuthModelMappings('openai'), excel_bps: defaultExcelBPSDefaults(), enabled: false, platform: 'openai', priority: 50, load_factor: 1, concurrency: 3, cost_multiplier: 0.07, group_ids: [], upgrade_enabled: false, upgrade_group_ids: [], successes_per_step: 20, upgrade_step: 1, max_concurrency: 100, cooldown_seconds: 60, revision: '' }
+const config: AutoConfig = { degradation_action: defaultOAuthDegradationConfig(), openai_ws_mode: 'ctx_pool', openai_ws_sse_acceleration: false, openai_totp_rotate_on_429: false, openai_disable_scheduling_on_429: false, openai_two_fa_admission: defaultOpenAITwoFAAdmissionConfig(), model_billing: defaultModelBillingConfig(), model_mappings: defaultOAuthModelMappings('openai'), excel_bps: defaultExcelBPSDefaults(), enabled: false, platform: 'openai', priority: 50, load_factor: 1, concurrency: 3, cost_multiplier: 0.07, group_ids: [], upgrade_enabled: false, upgrade_group_ids: [], successes_per_step: 20, upgrade_step: 1, max_concurrency: 100, cooldown_seconds: 60, revision: '' }
 beforeEach(() => {
  localStorage.clear(); setActivePinia(createPinia())
  vi.resetAllMocks(); vi.mocked(listQualityPlans).mockResolvedValue([]); state.auth = reactive({ user: { id: 1, role: 'admin' } })
@@ -34,6 +35,42 @@ beforeEach(() => {
  vi.mocked(getAll).mockResolvedValue([{ id: 5, name: 'OpenAI test', platform: 'openai', status: 'active' }, { id: 6, name: 'Anthropic test', platform: 'anthropic', status: 'active' }] as Group[])
 })
 describe('AutoConfigView', () => {
+ it('preserves degradation actions when saving WS settings and preserves WS settings when saving degradation actions', async () => {
+  const degradation = { ...defaultOAuthDegradationConfig(), enabled: true, threshold_percent: 42, limit_concurrency: false, limit_models: false, limit_groups: true, group_ids: [5] }
+  const initial: AutoConfig = { ...config, openai_ws_mode: 'off', degradation_action: degradation }
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(initial)
+  const w = mount(AutoConfigView); await flushPromises()
+  await w.get('[data-testid="initial-ws-mode-select"]').setValue('http_bridge')
+  await w.get('[data-testid="initial-ws-sse-acceleration-enabled"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  const wsSaved = JSON.parse(JSON.stringify(vi.mocked(saveAutoConfig).mock.lastCall![0])) as AutoConfig
+  expect(wsSaved).toEqual({ ...initial, openai_ws_mode: 'http_bridge', openai_ws_sse_acceleration: true })
+  w.unmount()
+
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(structuredClone(wsSaved))
+  const actions = mount(AutoConfigView); await flushPromises()
+  expect(actions.get<HTMLInputElement>('[data-testid="degradation-limit-groups"]').element.checked).toBe(true)
+  expect(actions.get<HTMLInputElement>('[data-testid="degradation-group-5"]').element.checked).toBe(true)
+  await actions.get('[data-testid="degradation-limit-concurrency"]').setValue(true)
+  await actions.get('[data-testid="degradation-limit-groups"]').setValue(false)
+  await actions.get('[data-testid="degradation-concurrency"]').setValue('7')
+  await actions.get('[data-testid="degradation-threshold"]').setValue('63.5')
+  await actions.get('form').trigger('submit'); await flushPromises()
+  const actionsSaved = JSON.parse(JSON.stringify(vi.mocked(saveAutoConfig).mock.lastCall![0])) as AutoConfig
+  expect(actionsSaved).toEqual({ ...wsSaved, degradation_action: { ...degradation, limit_concurrency: true, limit_groups: false, target_concurrency: 7, threshold_percent: 63.5 } })
+  actions.unmount()
+
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(structuredClone(actionsSaved))
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(reloaded.get<HTMLSelectElement>('[data-testid="initial-ws-mode-select"]').element.value).toBe('http_bridge')
+  expect(reloaded.get<HTMLInputElement>('[data-testid="initial-ws-sse-acceleration-enabled"]').element.checked).toBe(true)
+  expect(reloaded.get<HTMLInputElement>('[data-testid="degradation-limit-concurrency"]').element.checked).toBe(true)
+  expect(reloaded.get<HTMLInputElement>('[data-testid="degradation-limit-models"]').element.checked).toBe(false)
+  expect(reloaded.get<HTMLInputElement>('[data-testid="degradation-limit-groups"]').element.checked).toBe(false)
+  expect(reloaded.get<HTMLInputElement>('[data-testid="degradation-concurrency"]').element.value).toBe('7')
+  expect(reloaded.get<HTMLInputElement>('[data-testid="degradation-threshold"]').element.value).toBe('63.5')
+  reloaded.unmount()
+ })
  it('defaults missing initial WS settings to context pool and unchecked acceleration before explicitly saving them', async () => {
   const { openai_ws_mode: _mode, openai_ws_sse_acceleration: _acceleration, ...legacy } = config
   vi.mocked(getAutoConfig).mockResolvedValueOnce(legacy)
