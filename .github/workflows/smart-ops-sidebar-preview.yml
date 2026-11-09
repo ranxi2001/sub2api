@@ -1,0 +1,48 @@
+name: Smart operations sidebar preview
+on:
+  pull_request:
+    paths:
+      - 'frontend/src/components/settings/SmartOpsSidebarSettings.vue'
+      - 'frontend/src/constants/smartOpsMenu.ts'
+      - 'frontend/src/stores/adminSettings.ts'
+      - 'frontend/src/views/admin/SettingsView.vue'
+      - '.github/workflows/smart-ops-sidebar-preview.yml'
+      - '.github/scripts/prmerge-ui-preview.mjs'
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pr-ui-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/pr-ui-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Fetch immutable before baseline
+        run: git fetch --no-tags --depth=1 origin 1c3882e935a01b376f9aefdf844863125fff7c2b
+      - name: Capture actual Vue components with fictional local data
+        env:
+          NODE_OPTIONS: --max-old-space-size=1536
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/pr-ui-browser/node_modules/playwright/index.mjs
+        run: |
+          node .github/scripts/prmerge-ui-preview.mjs "$GITHUB_WORKSPACE" sidebar "$RUNNER_TEMP/smart-ops-sidebar-preview" 1c3882e935a01b376f9aefdf844863125fff7c2b
+          node .github/scripts/prmerge-ui-preview.mjs "$GITHUB_WORKSPACE" sidebar "$RUNNER_TEMP/smart-ops-sidebar-preview"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smart-ops-sidebar-preview-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/smart-ops-sidebar-preview
+          if-no-files-found: error

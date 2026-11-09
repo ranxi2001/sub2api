@@ -1,0 +1,63 @@
+name: Smart ops sidebar rendered evidence
+on:
+  push:
+    branches: [fix/smart-ops-default-six-20261109]
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/workflows/smart-ops-sidebar-evidence.yml'
+      - '.github/scripts/smart-ops-sidebar-screenshot.mjs'
+      - 'frontend/src/constants/smartOpsMenu.ts'
+      - 'frontend/src/stores/adminSettings.ts'
+      - 'frontend/src/components/settings/SmartOpsSidebarSettings.vue'
+permissions:
+  contents: read
+jobs:
+  rendered-before-after:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Preserve the complete pre-change frontend
+        env:
+          SOURCE_BASE: 1c3882e935a01b376f9aefdf844863125fff7c2b
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/smart-ops-base"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/smart-ops-base"
+          cmp frontend/package.json "$RUNNER_TEMP/smart-ops-base/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/smart-ops-base/frontend/pnpm-lock.yaml"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/smart-ops-base/frontend/node_modules"
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/smart-ops-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/smart-ops-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render originals and exercise defaults and explicit preferences
+        env:
+          SOURCE_BASE: 1c3882e935a01b376f9aefdf844863125fff7c2b
+          BASELINE_ROOT: ${{ runner.temp }}/smart-ops-base/frontend
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/smart-ops-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/smart-ops-evidence
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCREENSHOT_DIR"
+          node .github/scripts/smart-ops-sidebar-screenshot.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smart-ops-sidebar-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.event_name }}
+          path: ${{ runner.temp }}/smart-ops-evidence
+          if-no-files-found: error

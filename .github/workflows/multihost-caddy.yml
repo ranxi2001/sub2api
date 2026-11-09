@@ -23,6 +23,7 @@ jobs:
           proxy_fixture_dir="$RUNNER_TEMP/sub2api-caddy-contract"
           mkdir -p "$proxy_fixture_dir"
           curl --fail --location --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-max-time 120 \
             --connect-timeout 10 --max-time 90 \
             https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz \
             --output "$proxy_fixture_dir/caddy.tar.gz"
