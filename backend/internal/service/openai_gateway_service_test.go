@@ -771,7 +771,7 @@ func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int6
 	if id, ok := c.sessionBindings[sessionHash]; ok {
 		return id, nil
 	}
-	return 0, errors.New("not found")
+	return 0, ErrStickySessionNotFound
 }
 
 func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
@@ -1264,7 +1264,7 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyWaitPlan(t *testing.T) {
 	}
 }
 
-func TestOpenAISelectAccountWithLoadAwareness_StickyCapacitySpilloverKeepsBinding(t *testing.T) {
+func TestOpenAISelectAccountWithLoadAwareness_StickyCapacitySpilloverRebindsReplacement(t *testing.T) {
 	sessionHash := "sticky-spillover"
 	groupID := int64(1)
 	repo := stubOpenAIAccountRepo{
@@ -1299,9 +1299,21 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyCapacitySpilloverKeepsBindin
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(2), selection.Account.ID, "capacity spillover should use the other account for this request")
+	require.Equal(t, int64(2), selection.Account.ID, "capacity spillover should use the available peer")
 	require.True(t, selection.Acquired)
-	require.Equal(t, int64(1), cache.sessionBindings["openai:"+sessionHash], "capacity spillover must not migrate the durable sticky binding")
+	require.Equal(t, int64(2), cache.sessionBindings["openai:"+sessionHash], "successful spillover should migrate the durable sticky binding")
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+
+	concurrencyCache.acquireResults[1] = true
+	concurrencyCache.waitCounts[1] = 0
+	concurrencyCache.loadMap[1].LoadRate = 0
+	selection, err = svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, sessionHash, "gpt-4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, int64(2), selection.Account.ID, "original account recovery must not undo a completed migration")
+	require.True(t, selection.stickySessionHit)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}

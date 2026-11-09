@@ -43,32 +43,29 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED"
           test -z "$(git status --porcelain)"
           go version
-      - name: Restore and verify original production blobs in isolated RED checkout
+      - name: Restore full production baseline and exact candidate test for RED
         if: matrix.mode == 'RED'
         working-directory: candidate
         run: |
           set -euo pipefail
           baseline=7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
+          target=backend/internal/server/routes/gateway_models_union_test.go
+          saved_test="$RUNNER_TEMP/catalogue-candidate-union-test.go"
+          expected_test_blob=$(git rev-parse "HEAD:$target")
+          git show "HEAD:$target" > "$saved_test"
+          test "$(git hash-object "$saved_test")" = "$expected_test_blob"
           git fetch --no-tags --depth=1 origin "$baseline"
-          # Keep both auth middlewares on the same baseline: Google auth can
-          # depend on helpers introduced later in api_key_auth.go.
-          for target in \
-            backend/internal/handler/gateway_handler.go \
-            backend/internal/service/gateway_service.go \
-            backend/internal/service/api_key_groups.go \
-            backend/internal/server/middleware/api_key_auth.go \
-            backend/internal/server/middleware/api_key_auth_google.go \
-            backend/internal/server/middleware/api_key_groups.go \
-            backend/internal/server/routes/gateway.go; do
-            git show "$baseline:$target" > "$target"
-            expected=$(git rev-parse "$baseline:$target")
-            actual=$(git hash-object "$target")
-            echo "$target baseline=$expected restored=$actual"
-            test "$actual" = "$expected"
-          done
-          rm backend/internal/handler/gateway_models_union.go backend/internal/service/gateway_model_catalog.go
-          test -f backend/internal/server/routes/gateway_models_union_test.go
-          git diff --stat
+          # Restore the whole tree so later service types cannot be mixed with
+          # older callers. Only the exact candidate regression test is added.
+          git checkout --detach "$baseline"
+          test "$(git rev-parse HEAD)" = "$baseline"
+          test -z "$(git status --porcelain)"
+          cp "$saved_test" "$target"
+          actual_test_blob=$(git hash-object "$target")
+          echo "$target candidate=$expected_test_blob restored=$actual_test_blob"
+          test "$actual_test_blob" = "$expected_test_blob"
+          git diff --exit-code "$baseline"
+          test "$(git status --porcelain --untracked-files=all)" = "?? $target"
       - name: RED must fail at the precise union behavior assertion
         if: matrix.mode == 'RED'
         working-directory: candidate/backend
@@ -76,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          go test -tags=unit ./internal/server/routes -run '^TestMultiGroupModelsUnionTextAndCheapImage$' -count=1 -v > "$RUNNER_TEMP/catalogue-red.log" 2>&1
+          go test -tags=unit -p=2 ./internal/server/routes -run '^TestMultiGroupModelsUnionTextAndCheapImage$' -count=1 -v -timeout=180s > "$RUNNER_TEMP/catalogue-red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/catalogue-red.log"

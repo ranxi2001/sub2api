@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -14,6 +15,39 @@ import (
 )
 
 type openAILegacySessionHashContextKey struct{}
+
+type openAIStickyBindingSnapshotContextKey struct{}
+
+type openAIStickyBindingSnapshot struct {
+	groupID   int64
+	session   string
+	accountID int64
+	known     bool
+}
+
+func withOpenAIStickyBindingSnapshot(ctx context.Context, groupID *int64, sessionHash string, accountID int64, known bool) context.Context {
+	if strings.TrimSpace(sessionHash) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, openAIStickyBindingSnapshotContextKey{}, &openAIStickyBindingSnapshot{
+		groupID: derefGroupID(groupID), session: strings.TrimSpace(sessionHash), accountID: accountID, known: known,
+	})
+}
+
+func openAIStickyBindingSnapshotFromContext(ctx context.Context, groupID *int64, sessionHash string) *openAIStickyBindingSnapshot {
+	snapshot, _ := ctx.Value(openAIStickyBindingSnapshotContextKey{}).(*openAIStickyBindingSnapshot)
+	if snapshot == nil || snapshot.groupID != derefGroupID(groupID) || snapshot.session != strings.TrimSpace(sessionHash) {
+		return nil
+	}
+	return snapshot
+}
+
+func observeOpenAIStickyBinding(ctx context.Context, groupID *int64, sessionHash string, accountID int64, err error) {
+	if snapshot := openAIStickyBindingSnapshotFromContext(ctx, groupID, sessionHash); snapshot != nil {
+		snapshot.accountID = accountID
+		snapshot.known = err == nil || errors.Is(err, ErrStickySessionNotFound)
+	}
+}
 
 var openAILegacySessionHashKey = openAILegacySessionHashContextKey{}
 
@@ -148,6 +182,9 @@ func (s *OpenAIGatewayService) getStickySessionAccountID(ctx context.Context, gr
 		openAIStickyLegacyReadFallbackHit.Add(1)
 		return legacyAccountID, nil
 	}
+	if errors.Is(err, ErrStickySessionNotFound) && legacyErr != nil && !errors.Is(legacyErr, ErrStickySessionNotFound) {
+		return 0, legacyErr
+	}
 	return accountID, err
 }
 
@@ -175,6 +212,49 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 		return err
 	}
 	openAIStickyLegacyDualWriteTotal.Add(1)
+	return nil
+}
+
+// Slot admission can finish after a later request has already moved the same
+// session. Compare against the selection's original observation, never a fresh
+// baseline read after the wait. Production Redis updates both hash formats in
+// one script; older cache implementations retain a best-effort compatibility
+// path rather than requiring every GatewayCache implementation to add a method.
+func (s *OpenAIGatewayService) setStickySessionAccountIDIfUnchanged(ctx context.Context, groupID *int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	snapshot := openAIStickyBindingSnapshotFromContext(ctx, groupID, sessionHash)
+	if snapshot == nil {
+		return s.setStickySessionAccountID(ctx, groupID, sessionHash, accountID, ttl)
+	}
+	if s == nil || s.cache == nil || accountID <= 0 || !snapshot.known {
+		return nil
+	}
+	swap := SessionAccountBindingSwap{
+		SessionHash: s.openAISessionCacheKey(sessionHash), LegacySessionHash: s.openAILegacySessionCacheKey(ctx, sessionHash),
+		ExpectedAccountID: snapshot.accountID, AccountID: accountID, TTL: ttl, LegacyTTL: s.openAIStickyLegacyTTL(ttl),
+		ReadLegacy: s.openAISessionHashReadOldFallbackEnabled(), WriteLegacy: s.openAISessionHashDualWriteOldEnabled(),
+	}
+	if cache, ok := s.cache.(interface {
+		CompareAndSwapSessionAccountID(context.Context, int64, SessionAccountBindingSwap) (bool, error)
+	}); ok {
+		applied, err := cache.CompareAndSwapSessionAccountID(ctx, derefGroupID(groupID), swap)
+		if err == nil && applied && swap.WriteLegacy && swap.LegacySessionHash != "" {
+			openAIStickyLegacyDualWriteTotal.Add(1)
+		}
+		return err
+	}
+	current, err := s.getStickySessionAccountID(ctx, groupID, sessionHash)
+	if err != nil && !errors.Is(err, ErrStickySessionNotFound) {
+		return err
+	}
+	if current > 0 && current != snapshot.accountID && current != accountID {
+		return nil
+	}
+	if err := s.setStickySessionAccountID(ctx, groupID, sessionHash, accountID, ttl); err != nil {
+		return err
+	}
+	if swap.LegacySessionHash != "" && !swap.WriteLegacy {
+		return s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), swap.LegacySessionHash)
+	}
 	return nil
 }
 
