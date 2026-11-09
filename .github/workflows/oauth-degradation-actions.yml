@@ -86,3 +86,31 @@ jobs:
         with:
           name: oauth-degradation-postgres-${{ github.event_name }}-${{ github.run_id }}
           path: evidence/
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Actual Vue settings and notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/ui-head.txt
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts src/views/admin/__tests__/AutoConfigView.spec.ts src/components/admin/operations/__tests__/AutoConfigHistory.spec.ts src/stores/__tests__/newFeatureNotices.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee evidence/ui.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-ui-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
