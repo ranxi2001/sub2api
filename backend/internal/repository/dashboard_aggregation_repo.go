@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 )
@@ -688,10 +687,6 @@ func (r *dashboardAggregationRepository) createUsageLogsPartition(ctx context.Co
 	)
 	_, err := r.sql.ExecContext(ctx, query)
 	return err
-}
-
-func truncateToDay(t time.Time) time.Time {
-	return timezone.StartOfDay(t)
 }
 
 func truncateToMonthUTC(t time.Time) time.Time {
