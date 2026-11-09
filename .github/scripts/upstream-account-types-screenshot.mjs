@@ -11,7 +11,7 @@ if (!output || !process.env.SOURCE_BASE || !process.env.BASELINE_ROOT || !proces
 mkdirSync(output, { recursive: true })
 const manifest = {
   base_commit: process.env.SOURCE_BASE, head_commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-  boundary: 'Original complete base/head frontend trees and locales, actual AccountsView/table/refresh controls and real timer. Synthetic admin and six fictional accounts, in-browser API adapter (sync calls recorded, no actual upstream discovery). Layout and unrelated closed dialogs stubbed using existing component-test convention. No login, real backend, credentials or production/paid calls.',
+  boundary: 'Original complete base/head frontend trees and locales, actual AccountsView/table/refresh controls and real timer. Synthetic admin and six fictional accounts, in-browser API adapter (sync calls recorded, no actual upstream discovery). Only AppLayout replaced with an isolated layout shell; unrelated dialogs remain closed and untested. No login, real backend, credentials or production/paid calls.',
   results: [], screenshots: [], errors: [],
 }
 const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_ROOT, 'index.mjs')).href)
@@ -27,9 +27,10 @@ try {
     const create = (path, text) => { writeFileSync(path, text, { flag: 'wx' }); files.push(path); return path }
     let page, server
     try {
+      const shell = create(join(root, suffix + '-layout.js'), `import {h} from 'vue';export default {setup(_,ctx){return()=>h('main',{class:'p-6 bg-gray-50 min-h-screen dark:bg-dark-900'},ctx.slots.default?.())}}`)
       const html = create(join(root, suffix + '.html'), `<html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="./${suffix}.js"></script></html>`)
-      create(join(root, suffix + '.js'), `
-        import {h} from 'vue';import {createPinia} from 'pinia';import {mount} from '@vue/test-utils';import {createRouter,createMemoryHistory} from 'vue-router';
+      const entry = create(join(root, suffix + '.js'), `
+        import {createApp} from 'vue';import {createPinia} from 'pinia';import {createRouter,createMemoryHistory} from 'vue-router';
         import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';import {apiClient} from '/src/api/client.ts';import {useAuthStore} from '/src/stores/auth.ts';
         import View from '/src/views/admin/AccountsView.vue';import '/src/style.css';
         await loadLocaleMessages('zh');i18n.global.locale.value='zh';
@@ -60,14 +61,11 @@ try {
         };
         const pinia=createPinia();useAuthStore(pinia).user={id:41,role:'admin',status:'active',email:'admin@example.invalid'};
         const router=createRouter({history:createMemoryHistory(),routes:[{path:'/:pathMatch(.*)*',component:{render:()=>null}}]});await router.push('/admin/accounts');await router.isReady();
-        window.__accountTypesFixture.wrapper=mount(View,{attachTo:'#app',global:{plugins:[pinia,i18n,router],stubs:{
-          AppLayout:{setup(_,ctx){return()=>h('main',{class:'p-6 bg-gray-50 min-h-screen dark:bg-dark-900'},ctx.slots.default?.())}},CreateAccountModal:true,EditAccountModal:true,BulkEditAccountModal:true,
-          SyncFromCrsModal:true,TempUnschedStatusModal:true,ImportDataModal:true,ReAuthAccountModal:true,AccountTestModal:true,AccountStatsModal:true,IQTestModal:true,ScheduledTestsPanel:true,
-          ErrorPassthroughRulesModal:true,TLSFingerprintProfilesModal:true,NewAPIUpstreamConfigDialog:true,BulkExport2FADialog:true,TotpStepUpDialog:true
-        }}});
+        createApp(View).use(pinia).use(i18n).use(router).mount('#app');
       `)
-      await build({ root, configFile: false, cacheDir: join(output, `${mode}-cache`), resolve: { alias: { '@': join(root, 'src') } }, plugins: [vue()],
-        css: { postcss: { plugins: [tailwindcss({ ...tailwindConfig, content: [html, join(root, 'src/**/*.{vue,js,ts}')] }), autoprefixer()] } },
+      await build({ root, configFile: false, cacheDir: join(output, `${mode}-cache`),
+        resolve: { alias: [{ find: '@/components/layout/AppLayout.vue', replacement: shell }, { find: '@', replacement: join(root, 'src') }] }, plugins: [vue()],
+        css: { postcss: { plugins: [tailwindcss({ ...tailwindConfig, content: [html, entry, shell, join(root, 'src/**/*.{vue,js,ts}')] }), autoprefixer()] } },
         build: { outDir: buildDir, emptyOutDir: true, minify: false, target: 'esnext', rollupOptions: { input: html } },
       })
       server = await preview({ root, configFile: false, build: { outDir: buildDir }, preview: { host: '127.0.0.1', port: 4198, strictPort: true } })
@@ -85,6 +83,9 @@ try {
       const screenshot = async name => { await page.screenshot({ path: join(output, name), animations: 'disabled' });manifest.screenshots.push(name) }
       const open = async scenario => {
         await page.goto(`${url}?scenario=${scenario}`);await page.getByText('虚构账号 41', { exact: true }).first().waitFor();await opener().click()
+        const observed = await page.evaluate(() => ({ requests: window.__accountTypesFixture.requests, unexpected: window.__accountTypesFixture.unexpected }))
+        manifest.results.push({ mode, scenario, observed })
+        assert.deepEqual(observed.unexpected, [])
       }
       await open('default')
       if (mode === 'before') {
