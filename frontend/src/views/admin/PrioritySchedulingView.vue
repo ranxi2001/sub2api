@@ -88,6 +88,7 @@
         <details class="my-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.filters.analysisHint') }}</p></details>
         <p v-if="!snapshot" data-testid="snapshot-initial-state" :role="snapshotError ? 'alert' : 'status'" class="py-8 text-center text-sm text-gray-500">{{ t(snapshotError ? 'priorityScheduling.error' : refreshing ? 'priorityScheduling.loading' : 'priorityScheduling.filters.choose') }}</p>
         <template v-else>
+          <p v-if="isHistoricalAnalysis" data-testid="priority-analysis-notice" class="mb-3 text-sm text-gray-500">{{ t('priorityScheduling.analysis.notice') }}</p>
           <p data-testid="priority-snapshot-at" class="mb-4 text-sm text-gray-500">{{ new Date(snapshot.at).toLocaleString() }} · {{ t('priorityScheduling.model') }}: {{ snapshot.model }} · {{ t('priorityScheduling.group') }}: {{ snapshot.group_id ?? '—' }} · {{ t(`priorityScheduling.modes.${snapshot.mode}`) }} · {{ t('priorityScheduling.latencyPenaltyMode') }}: {{ t(`priorityScheduling.latencyPenaltyModes.${snapshot.latency_penalty_mode || 'deprioritize'}`) }}</p>
           <p v-if="snapshot.history_status && snapshot.history_status !== 'ready'" role="status" class="text-sm text-amber-600">{{ t(`priorityScheduling.historyStates.${snapshot.history_status}`) }}</p>
           <p v-else-if="!snapshot.history_ready" class="text-sm text-amber-600">{{ t('priorityScheduling.historyPending') }}</p>
@@ -100,16 +101,50 @@
           <div v-if="candidateRows.length" data-testid="priority-candidate-scroll" class="overflow-x-auto">
           <DataTable :key="displayScope(snapshot)" data-testid="candidate-table" data-reading-scroll="candidates" class="reading-table candidate-table" :columns="candidateColumns" :data="candidatePageRows" row-key="account_id">
             <template #cell-account="{ row }"><div class="account-cell" :data-reading-account="row.account_id"><strong class="font-medium" :title="row.account_name">{{ row.account_name }}</strong><small class="block text-gray-400">#{{ row.account_id }}</small></div></template>
-            <template #cell-tier="{ row }"><div><span :class="row.tier === 'eligible' ? 'text-emerald-600' : row.tier === 'degraded' ? 'text-amber-600' : 'text-gray-500'">{{ t(`priorityScheduling.tiers.${row.tier}`) }}</span></div></template>
+            <template #cell-tier="{ row }"><div><span :class="candidateTier(row) === 'eligible' ? 'text-emerald-600' : ['degraded', 'recovery'].includes(candidateTier(row)) ? 'text-amber-600' : 'text-gray-500'">{{ candidateTierLabel(row) }}</span></div></template>
             <template #cell-priority="{ row }"><div>{{ row.priority }}</div></template>
             <template #cell-score="{ row }"><div>{{ row.score.toFixed(1) }}</div></template>
-            <template #cell-errorRate="{ row }"><div><span v-if="row.error_rate == null">{{ t('priorityScheduling.errorNoSamples') }}</span><span v-else>{{ (row.error_rate * 100).toFixed(1) }}%</span></div></template>
+            <template #cell-errorRate="{ row }"><div><span v-if="isHistoricalAnalysis">{{ t('priorityScheduling.analysis.notCollected') }}</span><span v-else-if="row.error_rate == null">{{ t('priorityScheduling.errorNoSamples') }}</span><span v-else>{{ (row.error_rate * 100).toFixed(1) }}%</span></div></template>
             <template #cell-quality="{ row }"><div>{{ row.quality_samples ? `${row.quality_passed}/${row.quality_samples}` : '—' }}</div></template>
             <template #cell-latency="{ row }"><div>P{{ row.latency_percentile ?? 90 }}: {{ row.samples && selectedLatency(row) != null ? `${Math.round(selectedLatency(row)!)} ms` : t('priorityScheduling.unknown') }}</div></template>
-            <template #cell-load="{ row }"><div>{{ row.load_percent == null ? '—' : `${row.load_percent}%` }}</div></template>
+            <template #cell-load="{ row }"><div>{{ isHistoricalAnalysis ? t('priorityScheduling.analysis.notCollected') : row.load_percent == null ? '—' : `${row.load_percent}%` }}</div></template>
             <template #cell-rate="{ row }"><div>{{ row.rate == null ? '—' : `${row.rate.toFixed(3)}×` }}</div></template>
             <template #cell-profit="{ row }"><div><template v-if="row.economics_source === 'usage'"><span :class="(row.profit ?? 0) < 0 ? 'text-red-600' : 'text-emerald-600'">${{ row.profit?.toFixed(4) }} · {{ row.margin == null ? '—' : `${(row.margin * 100).toFixed(1)}%` }}</span></template><span v-else class="text-xs text-gray-500">{{ t(`priorityScheduling.economics.${row.economics_source || 'unknown'}`) }}</span></div></template>
-            <template #cell-details="{ row }"><details class="text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><div class="diagnostic-copy mt-2 space-y-2"><small v-if="row.bound_groups != null" class="block text-gray-400">{{ t('priorityScheduling.boundGroups') }}: {{ row.bound_groups }}</small><small v-if="row.oauth_quota_role" class="block font-medium text-primary-600">{{ t(`priorityScheduling.oauthQuotaRoles.${row.oauth_quota_role}`) }}</small><small v-if="row.history_status && row.history_status !== 'ready'" class="block text-amber-600">{{ t(`priorityScheduling.historyStates.${row.history_status}`) }}</small><small v-if="row.latency_stopped" class="block font-medium text-red-600">{{ t('priorityScheduling.latencyPenaltyModes.stop') }}</small><small v-if="row.reasons.includes('latency_above_target') && snapshot.latency_penalty_mode !== 'stop'" class="block font-medium text-amber-600">{{ t('priorityScheduling.softPenalty') }}</small><small v-if="row.latency_recovery" class="block font-medium text-amber-600">{{ t('priorityScheduling.recoveryNote') }}</small><small v-if="row.latency_penalty_until && !row.latency_recovery" class="block text-gray-400">{{ t('priorityScheduling.latencyPenaltyUntil') }}: {{ new Date(row.latency_penalty_until).toLocaleString() }}</small><small v-for="reason in row.reasons" :key="reason" class="block text-gray-400">{{ t(`priorityScheduling.reasons.${reason}`) }}</small><small v-if="row.selection_weight != null" class="block text-gray-400">{{ t('priorityScheduling.selectionWeight') }}: {{ row.selection_weight.toFixed(2) }}</small><small v-if="row.exploration_eligible" class="block text-gray-400">{{ t('priorityScheduling.explorationEligible') }}</small><div :data-testid="`error-rate-${row.account_id}`" :title="t('priorityScheduling.errorRateHint')"><span v-if="row.error_rate == null">{{ t('priorityScheduling.errorNoSamples') }}</span><span v-else>{{ (row.error_rate * 100).toFixed(1) }}%</span><small v-if="(row.error_successes ?? 0) + (row.error_failures ?? 0) > 0" class="block text-gray-400">{{ t('priorityScheduling.errorAttempts') }}: {{ row.error_failures ?? 0 }} / {{ (row.error_successes ?? 0) + (row.error_failures ?? 0) }}</small><small v-if="errorSamplesLow(row)" class="block text-amber-600">{{ t('priorityScheduling.errorInsufficientSamples') }}</small><small v-if="row.error_observed_at" class="block text-gray-400">{{ t('priorityScheduling.errorObservedAt') }}: {{ new Date(row.error_observed_at).toLocaleString() }}</small><small class="block text-gray-400">{{ t('priorityScheduling.errorWindow') }}: {{ row.error_window_minutes ?? '—' }} min · {{ row.error_endpoint ?? '—' }}</small><small v-if="row.error_penalty != null" class="block text-gray-400">{{ t('priorityScheduling.errorPenalty') }}: {{ row.error_penalty.toFixed(3) }} · {{ t('priorityScheduling.baseScore') }}: {{ row.base_score?.toFixed(1) ?? '—' }}</small><small class="block text-gray-400">{{ t('priorityScheduling.errorLocalScope') }}</small></div><small class="block text-gray-400">{{ row.samples }} {{ t('priorityScheduling.samples') }}</small><small v-if="row.samples < (snapshot.min_samples ?? 5) || row.samples < tailSampleFloor(row.latency_percentile ?? 90)" class="block text-amber-600">{{ t('priorityScheduling.lowSamples') }}</small><small class="block text-gray-400">{{ t('priorityScheduling.unknown') }}: {{ row.latency_unknown_samples ?? '—' }}</small><small class="block text-gray-400">P90: {{ row.samples ? `${Math.round(row.p90_ttft_ms)} ms` : '—' }}</small><small class="block text-gray-400">{{ t('priorityScheduling.experienceP90') }}: {{ row.experience_samples ? `${Math.round(row.experience_p90_ms ?? 0)} ms (${row.experience_samples})` : '—' }}</small><div v-if="row.economics_source === 'usage'"><small class="block text-gray-400">${{ row.revenue.toFixed(4) }} − ${{ row.theoretical_cost.toFixed(4) }}</small></div></div></details></template>
+            <template #cell-details="{ row }">
+              <details class="text-xs text-gray-500">
+                <summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary>
+                <div class="diagnostic-copy mt-2 space-y-2">
+                  <small v-if="row.bound_groups != null" class="block text-gray-400">{{ t('priorityScheduling.boundGroups') }}: {{ row.bound_groups }}</small>
+                  <small v-if="row.oauth_quota_role" class="block font-medium text-primary-600">{{ t(`priorityScheduling.oauthQuotaRoles.${row.oauth_quota_role}`) }}</small>
+                  <small v-if="row.history_status && row.history_status !== 'ready'" class="block text-amber-600">{{ t(`priorityScheduling.historyStates.${row.history_status}`) }}</small>
+                  <small v-if="row.latency_stopped" class="block font-medium text-red-600">{{ t('priorityScheduling.latencyPenaltyModes.stop') }}</small>
+                  <small v-if="row.reasons.includes('latency_above_target') && snapshot.latency_penalty_mode !== 'stop'" class="block font-medium text-amber-600">{{ t('priorityScheduling.softPenalty') }}</small>
+                  <small v-if="row.latency_recovery" class="block font-medium text-amber-600">{{ t('priorityScheduling.recoveryNote') }}</small>
+                  <small v-if="row.latency_penalty_until && !row.latency_recovery" class="block text-gray-400">{{ t('priorityScheduling.latencyPenaltyUntil') }}: {{ new Date(row.latency_penalty_until).toLocaleString() }}</small>
+                  <small v-for="reason in row.reasons" :key="reason" class="block text-gray-400">{{ t(isHistoricalAnalysis && reason === 'load_unknown' ? 'priorityScheduling.analysis.loadNotCollected' : `priorityScheduling.reasons.${reason}`) }}</small>
+                  <small v-if="row.selection_weight != null" class="block text-gray-400">{{ t(isHistoricalAnalysis ? 'priorityScheduling.analysis.estimatedWeight' : 'priorityScheduling.selectionWeight') }}: {{ row.selection_weight.toFixed(2) }}</small>
+                  <small v-if="row.exploration_eligible" class="block text-gray-400">{{ t('priorityScheduling.explorationEligible') }}</small>
+                  <div :data-testid="`error-rate-${row.account_id}`" :title="t('priorityScheduling.errorRateHint')">
+                    <span v-if="isHistoricalAnalysis">{{ t('priorityScheduling.analysis.notCollected') }}</span>
+                    <template v-else>
+                      <span v-if="row.error_rate == null">{{ t('priorityScheduling.errorNoSamples') }}</span><span v-else>{{ (row.error_rate * 100).toFixed(1) }}%</span>
+                      <small v-if="(row.error_successes ?? 0) + (row.error_failures ?? 0) > 0" class="block text-gray-400">{{ t('priorityScheduling.errorAttempts') }}: {{ row.error_failures ?? 0 }} / {{ (row.error_successes ?? 0) + (row.error_failures ?? 0) }}</small>
+                      <small v-if="errorSamplesLow(row)" class="block text-amber-600">{{ t('priorityScheduling.errorInsufficientSamples') }}</small>
+                      <small v-if="validObservationTime(row.error_observed_at)" class="block text-gray-400">{{ t('priorityScheduling.errorObservedAt') }}: {{ new Date(row.error_observed_at!).toLocaleString() }}</small>
+                      <small class="block text-gray-400">{{ t('priorityScheduling.errorWindow') }}: {{ row.error_window_minutes && row.error_window_minutes > 0 ? row.error_window_minutes : '—' }} min · {{ row.error_endpoint || '—' }}</small>
+                      <small v-if="row.error_penalty != null" class="block text-gray-400">{{ t('priorityScheduling.errorPenalty') }}: {{ row.error_penalty.toFixed(3) }} · {{ t('priorityScheduling.baseScore') }}: {{ row.base_score?.toFixed(1) ?? '—' }}</small>
+                      <small class="block text-gray-400">{{ t('priorityScheduling.errorLocalScope') }}</small>
+                    </template>
+                  </div>
+                  <small class="block text-gray-400">{{ row.samples }} {{ t('priorityScheduling.samples') }}</small>
+                  <small v-if="row.samples < (snapshot.min_samples ?? 5) || row.samples < tailSampleFloor(row.latency_percentile ?? 90)" class="block text-amber-600">{{ t('priorityScheduling.lowSamples') }}</small>
+                  <small class="block text-gray-400">{{ t('priorityScheduling.unknown') }}: {{ row.latency_unknown_samples ?? '—' }}</small>
+                  <small class="block text-gray-400">P90: {{ row.samples ? `${Math.round(row.p90_ttft_ms)} ms` : '—' }}</small>
+                  <small class="block text-gray-400">{{ t('priorityScheduling.experienceP90') }}: {{ row.experience_samples ? `${Math.round(row.experience_p90_ms ?? 0)} ms (${row.experience_samples})` : '—' }}</small>
+                  <div v-if="row.economics_source === 'usage'"><small class="block text-gray-400">${{ row.revenue.toFixed(4) }} − ${{ row.theoretical_cost.toFixed(4) }}</small></div>
+                </div>
+              </details>
+            </template>
           </DataTable>
           </div><p v-else class="py-4 text-sm text-gray-500" data-testid="priority-no-candidates">{{ t('priorityScheduling.noCandidates') }}</p>
           <Pagination v-if="candidateRows.length" data-testid="candidate-pagination" :total="candidateRows.length" v-model:page="candidatePage" v-model:page-size="candidatePageSize" />
@@ -208,6 +243,26 @@ const tailSampleFloor = (q: number) => Math.max(20, Math.ceil(500 / (100 - q)))
 const { t } = useI18n(), auth = useAuthStore()
 const draft = ref<PrioritySchedulingConfig | null>(null), snapshot = ref<PrioritySnapshot | null>(null)
 const mutationSnapshot = ref<PrioritySnapshot | null>(null)
+// Historical analysis deliberately omits live capacity and process-local attempts.
+// Translate that coverage here without changing scheduler tiers or recompute data.
+const isHistoricalAnalysis = computed(() => snapshot.value?.selection_policy === 'read_only_analysis')
+function candidateTier(row: PriorityCandidate) {
+  if (!isHistoricalAnalysis.value) return row.tier
+  if (row.tier === 'degraded') return 'degraded'
+  if (row.latency_recovery || row.reasons.includes('latency_recovery')) return 'recovery'
+  if (!snapshot.value?.history_ready ||
+      (snapshot.value.history_status && snapshot.value.history_status !== 'ready') ||
+      (row.history_status && row.history_status !== 'ready')) return 'insufficient'
+  if (row.tier === 'eligible' ||
+      (row.tier === 'insufficient' && row.reasons.length === 1 && row.reasons[0] === 'load_unknown')) return 'eligible'
+  return 'insufficient'
+}
+function candidateTierLabel(row: PriorityCandidate) {
+  return t(`priorityScheduling.${isHistoricalAnalysis.value ? 'analysis' : 'tiers'}.${candidateTier(row)}`)
+}
+function validObservationTime(value?: string) {
+  return !!value && !value.startsWith('0001-01-01') && Number.isFinite(Date.parse(value))
+}
 const selectedModel = ref(''), selectedGroup = ref(0)
 const catalogLoading = ref(false), catalogError = ref(false)
 const availableModels = ref<string[]>([]), availableGroups = ref<{ id: number; name: string }[]>([])

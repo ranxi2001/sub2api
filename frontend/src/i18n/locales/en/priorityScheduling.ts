@@ -1,4 +1,14 @@
 export default {
+  analysis: {
+    notice: 'Status reflects historical metrics and does not establish current routing availability. Live concurrency and HTTP attempts are not collected; scores use neutral load and omit the live error penalty.',
+    eligible: 'Historical targets met',
+    insufficient: 'Insufficient historical data',
+    degraded: 'Historical targets missed',
+    recovery: 'Latency recovery',
+    notCollected: 'Not collected',
+    loadNotCollected: 'Live concurrency not collected',
+    estimatedWeight: 'Estimated selection weight',
+  },
   filters: { updated: 'Updated', choose: 'Select a model and group', recomputeLatest: 'Recompute latest selection', analysisHint: 'Preference weight is not a global probability. Reads history for the selected model, group and window. Live capacity and process attempt estimates are unknown. Recompute and sticky cleanup target the latest actual selection using its exact identity.', candidates: 'Candidate scores', ungrouped: 'Ungrouped', catalogError: 'Unable to read model or group catalog. Refresh to retry.' },
   reading: { configuration: 'Scheduling configuration', diagnostics: 'Diagnostics', buckets: 'Time buckets for this account page', pageSize: 'Rows per page', refreshing: 'Updating in background; current data retained', stale: 'Update failed; showing the last successful data. Retrying automatically.', stableOrder: 'Stable account ID order; additions append and deletions are removed. Live metrics do not reorder rows.' },
   errorRate: "Attempt error rate",
@@ -14,7 +24,7 @@ export default {
   baseScore: "Base score",
   errorNoSamples: "No attempt samples",
   errorLocalScope: "This instance · HTTP attempts",
-  errorRateHint: "Recent attempts are scoped to account, routing model and endpoint. Score = base score × max(0.1, 1 − weight/100 × failures/(successes + failures + prior)). A prior softens small samples; minute buckets expire. No samples are neutral. Positive weight replaces the legacy account-wide error penalty; zero retains legacy behavior. Each HTTP retry counts once; client cancellation, invalid input, auth, balance and quota rejections are excluded. Independent instances, restarts, evictions and unsupported transports can show different or unknown evidence. The candidate error column is live evidence read during snapshot refresh (its read time is shown); candidates, configuration and load still come from the selection snapshot, so re-evaluation does not reconstruct the original routing decision.",
+  errorRateHint: "Recent attempts are scoped to account, routing model and endpoint. Score = base score × max(0.1, 1 − weight/100 × failures/(successes + failures + prior)). A prior softens small samples; minute buckets expire. No samples are neutral. Positive weight replaces the legacy account-wide error penalty; zero retains legacy behavior. Each HTTP retry counts once; client cancellation, invalid input, auth, balance and quota rejections are excluded. Independent instances, restarts, evictions and unsupported transports can show different or unknown evidence. Historical candidate analysis does not collect live attempts and shows “Not collected”. The latest actual selection snapshot provides this instance’s attempt evidence and its read time; re-evaluation does not reconstruct the original routing decision.",
 
   experienceP90: 'Experience P90',
   recovery_exploration_percent: "Recovery exploration (%)",
