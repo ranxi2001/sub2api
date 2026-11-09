@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           git -C candidate rev-parse HEAD | tee evidence/green-head.txt
-          (cd candidate/backend && go test -race -tags=unit ./internal/service ./internal/handler/admin -run 'TestOAuthDegradation|TestAutoConfig|TestAdvanceConcurrency|TestOpenAITwoFAAdmission|TestQualityModel|TestAccountIsModelSupported|TestGPT55Retirement' -count=1 -v) 2>&1 | tee evidence/green.log
+          (cd candidate/backend && go test -race -tags=unit ./internal/service ./internal/handler/admin -run 'TestOAuthAutoConfig|TestOAuthInitial|TestOAuthModelMapping|TestModelBilling|TestOAuthDegradation|TestAutoConfig|TestAdvanceConcurrency|TestOpenAITwoFAAdmission|TestQualityModel|TestAccountIsModelSupported|TestGPT55Retirement' -count=1 -v) 2>&1 | tee evidence/green.log
           (cd candidate/backend && go test -race -tags=unit ./internal/repository -count=1 -v) 2>&1 | tee evidence/repository-unit.log
       - uses: actions/upload-artifact@v7
         if: always()
