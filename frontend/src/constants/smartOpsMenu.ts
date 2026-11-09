@@ -14,3 +14,15 @@ export const SMART_OPS_MENU_ITEMS = [
   { path: '/admin/request-captures', label: 'admin.requestCapture.title' },
   { path: '/admin/harvest-flow', label: 'nav.harvestFlow' },
 ] as const
+
+// Used only when no visibility preferences are saved; an explicit [] shows all entries.
+export const DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS: readonly string[] = [
+  '/admin/lottery',
+  '/admin/channel-operations',
+  '/admin/controlled-experiments',
+  '/admin/account-ops',
+  '/admin/token-guard',
+  '/admin/group-cache-tests',
+  '/admin/request-captures',
+  '/admin/harvest-flow',
+]

@@ -21,8 +21,14 @@ func TestSmartOpsSidebarSettingsRoundTripAndOmission(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		return gjson.Get(rec.Body.String(), "data.smart_ops_hidden_menu_items").Raw
 	}
-	require.JSONEq(t, `[]`, get(), "old installations display every eligible entry")
-	rec := doUpdateSettings(t, h, map[string]any{"smart_ops_hidden_menu_items": []string{"/admin/token-guard", "/admin/token-guard", "/admin/harvest-flow"}}, nil)
+	defaults := get()
+	require.JSONEq(t, `["/admin/lottery","/admin/channel-operations","/admin/controlled-experiments","/admin/account-ops","/admin/token-guard","/admin/group-cache-tests","/admin/request-captures","/admin/harvest-flow"]`, defaults, "unconfigured installations display only the six default entries")
+	rec := doUpdateSettings(t, h, map[string]any{"site_name": "example"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotContains(t, repo.values, service.SettingKeySmartOpsHiddenMenuItems, "omitted fields remain unconfigured")
+	require.JSONEq(t, defaults, get(), "older clients retain the defaults when saving other settings")
+	require.JSONEq(t, defaults, gjson.Get(rec.Body.String(), "data.smart_ops_hidden_menu_items").Raw)
+	rec = doUpdateSettings(t, h, map[string]any{"smart_ops_hidden_menu_items": []string{"/admin/token-guard", "/admin/token-guard", "/admin/harvest-flow"}}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.JSONEq(t, `["/admin/token-guard","/admin/harvest-flow"]`, get())
 	require.JSONEq(t, get(), gjson.Get(rec.Body.String(), "data.smart_ops_hidden_menu_items").Raw)
@@ -33,4 +39,7 @@ func TestSmartOpsSidebarSettingsRoundTripAndOmission(t *testing.T) {
 	rec = doUpdateSettings(t, h, map[string]any{"smart_ops_hidden_menu_items": []string{}}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.JSONEq(t, `[]`, get(), "explicit empty array restores all entries")
+	rec = doUpdateSettings(t, h, map[string]any{"site_name": "example"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.JSONEq(t, `[]`, get(), "older clients retain an explicit choice to show all entries")
 }

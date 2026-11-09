@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAdminSettingsStore } from '../adminSettings'
+import { DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS } from '@/constants/smartOpsMenu'
 
 const mocks = vi.hoisted(() => ({ getSettings: vi.fn(), getConfig: vi.fn() }))
 vi.mock('@/api', () => ({ adminAPI: { settings: { getSettings: mocks.getSettings }, payment: { getConfig: mocks.getConfig } } }))
@@ -66,11 +67,13 @@ describe('request capture setting', () => {
 })
 
 describe('smart operations menu preferences', () => {
-  it('defaults to showing all entries and loads persisted choices on refresh', async () => {
+  it('uses the six-entry default for missing preferences and preserves saved choices on refresh', async () => {
     const store = useAdminSettingsStore()
-    expect(store.smartOpsHiddenMenuItems).toEqual([])
-    mocks.getSettings.mockResolvedValueOnce({ smart_ops_hidden_menu_items: ['/admin/token-guard'] })
+    expect(store.smartOpsHiddenMenuItems).toEqual(DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS)
     await store.fetch()
+    expect(store.smartOpsHiddenMenuItems).toEqual(DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS)
+    mocks.getSettings.mockResolvedValueOnce({ smart_ops_hidden_menu_items: ['/admin/token-guard'] })
+    await store.fetch(true)
     expect(store.smartOpsHiddenMenuItems).toEqual(['/admin/token-guard'])
     mocks.getSettings.mockRejectedValueOnce(new Error('Offline'))
     await store.fetch(true)
