@@ -213,6 +213,8 @@ func TestOpenAIStickyEscapeDoesNotMoveProviderContinuationOwner(t *testing.T) {
 			if !existingSession {
 				delete(f.cache.sessionBindings, "openai:rebind-session")
 			}
+			f.accounts[0].Extra = map[string]any{"openai_oauth_responses_websockets_v2_enabled": true}
+			require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, f.service.getOpenAIWSProtocolResolver().Resolve(&f.accounts[0]).Transport, "OAuth continuation ownership requires a WSv2-capable account")
 			f.concurrency.acquireResults[947101] = true
 			f.request.PreviousResponseID = "resp-rebind-owner"
 			f.request.PreviousResponseCanMove = false
@@ -224,6 +226,7 @@ func TestOpenAIStickyEscapeDoesNotMoveProviderContinuationOwner(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, selected)
 			require.Equal(t, int64(947101), selected.Account.ID)
+			require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
 			require.True(t, decision.StickyPreviousHit)
 			require.Equal(t, int64(947101), f.cache.sessionBindings["openai:rebind-session"])
 			releaseStickyEscapeRebindSelection(selected)
