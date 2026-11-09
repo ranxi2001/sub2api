@@ -83,6 +83,9 @@ it.each([
  [true, false, false],
  [false, true, false],
  [false, false, true],
+ [true, true, false],
+ [true, false, true],
+ [false, true, true],
  [true, true, true],
 ])('saves and reloads independent actions: concurrency=%s models=%s groups=%s', async (limitConcurrency, limitModels, limitGroups) => {
  const w = mount(AutoConfigView); await flushPromises()

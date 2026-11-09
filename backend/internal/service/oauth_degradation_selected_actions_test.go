@@ -43,6 +43,9 @@ func TestOAuthDegradationSelectedActionsAreIndependent(t *testing.T) {
 		{"concurrency only", true, false, false},
 		{"models only", false, true, false},
 		{"groups only", false, false, true},
+		{"concurrency and models", true, true, false},
+		{"concurrency and groups", true, false, true},
+		{"models and groups", false, true, true},
 		{"all", true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
