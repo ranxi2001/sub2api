@@ -229,6 +229,78 @@ func TestGeminiResponseSchemaRejectsUnknownType(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestGeminiSchemaIntegerConstraintsConvertRecursively(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type":"OBJECT", "minProperties":"0", "maxProperties":"9223372036854775807",
+		"properties":{"tags":{
+			"type":"ARRAY", "minItems":"1", "maxItems":2,
+			"items":{"type":"STRING", "minLength":0, "maxLength":9223372036854775807}
+		}}
+	}`)
+	for _, target := range []string{"response", "tool"} {
+		t.Run(target, func(t *testing.T) {
+			body := geminiIntegerSchemaRequest(t, target, schema)
+			got, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+			require.NoError(t, err)
+			path := "response_format.json_schema.schema"
+			if target == "tool" {
+				path = "tools.0.function.parameters"
+			}
+			converted := gjson.GetBytes(got, path)
+			for key, expected := range map[string]string{
+				"minProperties":                   "0",
+				"maxProperties":                   "9223372036854775807",
+				"properties.tags.minItems":        "1",
+				"properties.tags.maxItems":        "2",
+				"properties.tags.items.minLength": "0",
+				"properties.tags.items.maxLength": "9223372036854775807",
+			} {
+				value := converted.Get(key)
+				require.Equal(t, gjson.Number, value.Type, key)
+				require.Equal(t, expected, value.Raw, key)
+			}
+		})
+	}
+}
+
+func TestGeminiSchemaIntegerConstraintsRejectInvalidValues(t *testing.T) {
+	for _, target := range []string{"response", "tool"} {
+		for _, key := range []string{"minItems", "maxItems", "minProperties", "maxProperties", "minLength", "maxLength"} {
+			schemaType := "ARRAY"
+			switch key {
+			case "minProperties", "maxProperties":
+				schemaType = "OBJECT"
+			case "minLength", "maxLength":
+				schemaType = "STRING"
+			}
+			for _, raw := range []string{`""`, `"abc"`, `"1.5"`, `"-1"`, `"9223372036854775808"`, `-1`, `1.5`, `9223372036854775808`, `true`, `null`, `[]`, `{}`} {
+				t.Run(target+"/"+key+"/"+raw, func(t *testing.T) {
+					schema := json.RawMessage(`{"type":"OBJECT","properties":{"nested":{"type":"` + schemaType + `","` + key + `":` + raw + `}}}`)
+					body := geminiIntegerSchemaRequest(t, target, schema)
+					got, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+					require.ErrorContains(t, err, key+": must be a non-negative int64")
+					require.Nil(t, got, "invalid schema must fail before an upstream request can be built")
+				})
+			}
+		}
+	}
+}
+
+func geminiIntegerSchemaRequest(t *testing.T, target string, schema json.RawMessage) []byte {
+	t.Helper()
+	body := map[string]any{
+		"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]any{"text": "hi"}}}},
+	}
+	if target == "tool" {
+		body["tools"] = []any{map[string]any{"functionDeclarations": []any{map[string]any{"name": "lookup", "parameters": schema}}}}
+	} else {
+		body["generationConfig"] = map[string]any{"responseMimeType": "application/json", "responseSchema": schema}
+	}
+	encoded, err := json.Marshal(body)
+	require.NoError(t, err)
+	return encoded
+}
+
 func TestGeminiToolSchemaRejectsUnknownType(t *testing.T) {
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"lookup","parameters":{"type":"OBJECT","properties":{"q":{"type":"FOO"}}}}]}]}`)
 	_, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)

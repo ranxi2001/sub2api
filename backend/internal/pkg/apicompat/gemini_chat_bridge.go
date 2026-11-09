@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -573,6 +574,12 @@ func convertGeminiSchemaObject(obj map[string]any) (any, error) {
 				return nil, err
 			}
 			out["type"] = converted
+		case "minItems", "maxItems", "minProperties", "maxProperties", "minLength", "maxLength":
+			converted, err := convertGeminiSchemaInteger(value)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", key, err)
+			}
+			out[key] = converted
 		case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas":
 			converted, err := convertGeminiSchemaMap(value)
 			if err != nil {
@@ -601,6 +608,25 @@ func convertGeminiSchemaObject(obj map[string]any) (any, error) {
 		}
 	}
 	return out, nil
+}
+
+// Gemini REST encodes these int64 constraints as strings; JSON Schema requires
+// non-negative integers. Parse without floating point to preserve int64 limits.
+func convertGeminiSchemaInteger(value any) (int64, error) {
+	var raw string
+	switch typed := value.(type) {
+	case string:
+		raw = typed
+	case json.Number:
+		raw = typed.String()
+	default:
+		return 0, fmt.Errorf("must be a non-negative int64")
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("must be a non-negative int64")
+	}
+	return n, nil
 }
 
 func convertGeminiSchemaType(value any, nullable bool) (any, error) {
