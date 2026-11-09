@@ -70,23 +70,27 @@
                     </button>
                     <template v-if="authStore.isAdmin">
                       <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
-                      <div class="flex items-center gap-1 pr-3">
-                        <button
-                          type="button"
-                          role="switch"
-                          data-testid="auto-refresh-upstream-models"
-                          :aria-checked="autoRefreshUpstreamModels"
-                          @click="setAutoRefreshUpstreamModels(!autoRefreshUpstreamModels)"
-                          class="flex min-w-0 flex-1 items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
-                        >
-                          <span>{{ t('admin.accounts.autoRefreshUpstreamModels') }}</span>
-                          <Icon v-if="autoRefreshUpstreamModels" name="check" size="sm" class="text-primary-500" />
-                        </button>
+                      <div class="flex items-center gap-1 px-3 py-2 text-sm text-gray-700 dark:text-gray-200">
+                        <span>{{ t('admin.accounts.autoRefreshUpstreamModels') }}</span>
                         <NewFeatureBadge
                           :notice-id="NEW_FEATURE_NOTICES.accountAutoRefreshUpstreamModels"
                           :user-id="authStore.user?.id"
                         />
                       </div>
+                      <label
+                        v-for="accountType in upstreamModelSyncAccountTypes"
+                        :key="accountType"
+                        class="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
+                      >
+                        <input
+                          type="checkbox"
+                          :data-testid="`auto-refresh-upstream-models-${accountType}`"
+                          :checked="autoRefreshUpstreamModels[accountType]"
+                          @change="setAutoRefreshUpstreamModels(accountType, ($event.target as HTMLInputElement).checked)"
+                          class="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
+                        />
+                        <span>{{ t(`admin.accounts.autoRefreshUpstreamModelsAccountTypes.${accountType}`) }}</span>
+                      </label>
                       <p class="px-3 pb-2 text-xs text-gray-500 dark:text-gray-400">
                         {{ t('admin.accounts.autoRefreshUpstreamModelsHint') }}
                       </p>
@@ -815,7 +819,8 @@ const autoRefreshDropdownRef = ref<HTMLElement | null>(null)
 const AUTO_REFRESH_STORAGE_KEY = 'account-auto-refresh'
 const autoRefreshIntervals = [5, 10, 15, 30] as const
 const autoRefreshEnabled = ref(false)
-const autoRefreshUpstreamModels = ref(false)
+const upstreamModelSyncAccountTypes = ['oauth', 'apikey'] as const
+const autoRefreshUpstreamModels = reactive({ oauth: false, apikey: false })
 const upstreamModelSyncSummary = ref<UpstreamModelSyncSummary | null>(null)
 const upstreamModelAutoSync = createAccountUpstreamModelAutoSync({
   sync: (id, signal) => adminAPI.accounts.syncUpstreamModels(id, { apply: true, automatic: true }, { signal })
@@ -1125,9 +1130,20 @@ const loadSavedAutoRefresh = () => {
   try {
     const saved = localStorage.getItem(AUTO_REFRESH_STORAGE_KEY)
     if (!saved) return
-    const parsed = JSON.parse(saved) as { enabled?: boolean; interval_seconds?: number; sync_upstream_models?: boolean }
+    const parsed = JSON.parse(saved) as {
+      enabled?: boolean
+      interval_seconds?: number
+      sync_upstream_models?: boolean
+      sync_upstream_models_oauth?: boolean
+      sync_upstream_models_apikey?: boolean
+    }
     autoRefreshEnabled.value = parsed.enabled === true
-    autoRefreshUpstreamModels.value = parsed.sync_upstream_models === true
+    for (const accountType of upstreamModelSyncAccountTypes) {
+      const enabled = parsed[`sync_upstream_models_${accountType}`]
+      autoRefreshUpstreamModels[accountType] = typeof enabled === 'boolean'
+        ? enabled
+        : parsed.sync_upstream_models === true
+    }
     const interval = Number(parsed.interval_seconds)
     if (autoRefreshIntervals.includes(interval as any)) {
       autoRefreshIntervalSeconds.value = interval as any
@@ -1144,7 +1160,8 @@ const saveAutoRefreshToStorage = () => {
       JSON.stringify({
         enabled: autoRefreshEnabled.value,
         interval_seconds: autoRefreshIntervalSeconds.value,
-        sync_upstream_models: autoRefreshUpstreamModels.value
+        sync_upstream_models_oauth: autoRefreshUpstreamModels.oauth,
+        sync_upstream_models_apikey: autoRefreshUpstreamModels.apikey
       })
     )
   } catch (e) {
@@ -1178,10 +1195,11 @@ const setAutoRefreshInterval = (seconds: (typeof autoRefreshIntervals)[number]) 
   }
 }
 
-const setAutoRefreshUpstreamModels = (enabled: boolean) => {
-  autoRefreshUpstreamModels.value = enabled
+const setAutoRefreshUpstreamModels = (accountType: (typeof upstreamModelSyncAccountTypes)[number], enabled: boolean) => {
+  autoRefreshUpstreamModels[accountType] = enabled
   saveAutoRefreshToStorage()
-  if (!enabled) upstreamModelAutoSync.cancel()
+  upstreamModelAutoSync.cancel()
+  upstreamModelSyncSummary.value = null
 }
 
 const toggleColumn = (key: string) => {
@@ -1804,11 +1822,14 @@ const syncPendingListChanges = async () => {
 
 const refreshCurrentPageUpstreamModels = async () => {
   const contextVersion = accountListContextVersion
-  const canContinue = () => authStore.isAdmin && autoRefreshEnabled.value && autoRefreshUpstreamModels.value &&
+  const canContinue = () => authStore.isAdmin && autoRefreshEnabled.value &&
+    (autoRefreshUpstreamModels.oauth || autoRefreshUpstreamModels.apikey) &&
     !accountViewDisposed && contextVersion === accountListContextVersion && !document.hidden &&
     !loading.value && !isAnyModalOpen.value && !menu.show && !showAccountToolsDropdown.value &&
     !showAutoRefreshDropdown.value && !inAutoRefreshSilentWindow()
-  const summary = await upstreamModelAutoSync.run([...accounts.value], canContinue)
+  const candidates = accounts.value.filter(account =>
+    autoRefreshUpstreamModels[account.type === 'apikey' ? 'apikey' : 'oauth'])
+  const summary = await upstreamModelAutoSync.run(candidates, canContinue)
   if (!summary || !canContinue()) return
   upstreamModelSyncSummary.value = summary
   if (summary.changed) {
