@@ -48,7 +48,7 @@ func TestIssue758WSInitialRecoveryErrorCarriesWaitGuidance(t *testing.T) {
 					done <- serverResult{err: err}
 					return
 				}
-				defer conn.CloseNow()
+				defer func() { _ = conn.CloseNow() }()
 				done <- serverResult{handled: handler.handleOpenAIWSAgentRecoveryError(r.Context(), conn, fmt.Errorf("fixture wrapped recovery: %w", recovery))}
 			}))
 			defer server.Close()
@@ -56,7 +56,7 @@ func TestIssue758WSInitialRecoveryErrorCarriesWaitGuidance(t *testing.T) {
 			defer cancel()
 			conn, response, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 			require.NoError(t, err)
-			defer conn.CloseNow()
+			defer func() { _ = conn.CloseNow() }()
 			require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
 			kind, payload, err := conn.Read(ctx)
 			require.NoError(t, err)
