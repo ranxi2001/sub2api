@@ -1,5 +1,7 @@
 name: OAuth degradation actions
 on:
+  push:
+    branches: [production, feat/oauth-degradation-actions-20261109]
   pull_request:
     paths:
       - 'backend/internal/**/*degradation*'
