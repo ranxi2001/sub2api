@@ -702,6 +702,9 @@ func parseBoolQueryWithDefault(c *gin.Context, key string, fallback bool) (bool,
 // BatchAPIKeysUsageRequest represents the request for batch API keys usage
 type BatchAPIKeysUsageRequest struct {
 	APIKeyIDs []int64 `json:"api_key_ids" binding:"required"`
+	StartDate string  `json:"start_date"`
+	EndDate   string  `json:"end_date"`
+	Timezone  string  `json:"timezone"`
 }
 
 // DashboardAPIKeysUsage handles getting usage stats for user's own API keys
@@ -717,6 +720,32 @@ func (h *UsageHandler) DashboardAPIKeysUsage(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+
+	// Omitted dates preserve the existing rolling 30-day total. Explicit dates
+	// include both calendar days in the caller's timezone, including DST changes.
+	var startTime, endTime time.Time
+	if req.StartDate != "" || req.EndDate != "" {
+		if req.StartDate == "" || req.EndDate == "" {
+			response.BadRequest(c, "start_date and end_date must be provided together")
+			return
+		}
+		var err error
+		startTime, err = timezone.ParseInUserLocation("2006-01-02", req.StartDate, req.Timezone)
+		if err != nil {
+			response.BadRequest(c, "Invalid start_date, use YYYY-MM-DD")
+			return
+		}
+		endTime, err = timezone.ParseInUserLocation("2006-01-02", req.EndDate, req.Timezone)
+		if err != nil {
+			response.BadRequest(c, "Invalid end_date, use YYYY-MM-DD")
+			return
+		}
+		if startTime.After(endTime) {
+			response.BadRequest(c, "start_date must be on or before end_date")
+			return
+		}
+		endTime = endTime.AddDate(0, 0, 1)
 	}
 
 	if len(req.APIKeyIDs) == 0 {
@@ -741,7 +770,7 @@ func (h *UsageHandler) DashboardAPIKeysUsage(c *gin.Context) {
 		return
 	}
 
-	stats, err := h.usageService.GetBatchAPIKeyUsageStats(c.Request.Context(), validAPIKeyIDs, time.Time{}, time.Time{})
+	stats, err := h.usageService.GetBatchAPIKeyUsageStats(c.Request.Context(), validAPIKeyIDs, startTime, endTime)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

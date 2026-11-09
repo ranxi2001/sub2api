@@ -23,6 +23,21 @@
               :options="statusFilterOptions"
               @update:model-value="onStatusFilterChange"
             />
+            <div class="relative flex flex-wrap items-center gap-2" data-test="key-usage-date-range">
+              <span class="text-sm text-gray-600 dark:text-gray-300">{{ t('keys.usageDateRange') }}</span>
+              <DateRangePicker
+                class="key-usage-range-picker"
+                :start-date="usageStartDate"
+                :end-date="usageEndDate"
+                :show-last24-hours="false"
+                @change="onUsageDateRangeChange"
+              />
+              <NewFeatureBadge
+                v-if="authStore.isAdmin"
+                :notice-id="NEW_FEATURE_NOTICES.apiKeyUsageDateRange"
+                :user-id="authStore.user?.id"
+              />
+            </div>
           </div>
           <EndpointPopover
             v-if="publicSettings?.api_base_url || (publicSettings?.custom_endpoints?.length ?? 0) > 0"
@@ -262,13 +277,13 @@
               <div class="flex items-center gap-1.5">
                 <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.today') }}:</span>
                 <span class="key-usage-amount font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.today_actual_cost ?? 0).toFixed(4) }}
+                  {{ formatUsageCost(row.id, 'today_actual_cost') }}
                 </span>
               </div>
               <div class="mt-0.5 flex items-center gap-1.5">
-                <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t('keys.total') }}:</span>
-                <span class="key-usage-amount font-medium text-gray-900 dark:text-white">
-                  ${{ (usageStats[row.id]?.total_actual_cost ?? 0).toFixed(4) }}
+                <span class="key-usage-label text-gray-500 dark:text-gray-400">{{ t(usagePreset === '30days' ? 'keys.total' : 'keys.selectedPeriod') }}:</span>
+                <span class="key-usage-amount font-medium text-gray-900 dark:text-white" :title="`${usageStartDate} ~ ${usageEndDate}`">
+                  {{ formatUsageCost(row.id, 'total_actual_cost') }}
                 </span>
               </div>
               <!-- Quota progress (if quota is set) -->
@@ -1340,6 +1355,7 @@ import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
 import ApiKeyModelPolicyDialog from '@/components/admin/user/ApiKeyModelPolicyDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 	import DataTable from '@/components/common/DataTable.vue'
 	import Pagination from '@/components/common/Pagination.vue'
@@ -1357,7 +1373,7 @@ import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 	import type { ApiKey, ApiKeyConcurrencySnapshot, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, formatDateLocalInput, getBrowserTimeZone } from '@/utils/format'
 import { maskApiKey } from '@/utils/maskApiKey'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import { platformBadgeLightClass } from '@/utils/platformColors'
@@ -1511,6 +1527,28 @@ const submitting = ref(false)
 const now = ref(new Date())
 let resetTimer: ReturnType<typeof setInterval> | null = null
 const usageStats = ref<Record<string, BatchApiKeyUsageStats>>({})
+const defaultUsageEnd = new Date()
+const defaultUsageStart = new Date(defaultUsageEnd)
+defaultUsageStart.setDate(defaultUsageStart.getDate() - 29)
+const usageEndDate = ref(formatDateLocalInput(defaultUsageEnd))
+const usageStartDate = ref(formatDateLocalInput(defaultUsageStart))
+const usagePreset = ref<string | null>('30days')
+const usageLoading = ref(false)
+const usageFailed = ref(false)
+const formatUsageCost = (keyID: number, field: 'today_actual_cost' | 'total_actual_cost') => {
+  if (usageLoading.value || usageFailed.value) return '—'
+  return `$${(usageStats.value[keyID]?.[field] ?? 0).toFixed(4)}`
+}
+const onUsageDateRangeChange = (range: { startDate: string; endDate: string; preset: string | null }) => {
+  if (!range.startDate || !range.endDate || range.startDate > range.endDate) {
+    appStore.showError(t('keys.invalidUsageDateRange'))
+    return
+  }
+  usageStartDate.value = range.startDate
+  usageEndDate.value = range.endDate
+  usagePreset.value = range.preset
+  void loadApiKeys()
+}
 const userGroupRates = ref<Record<number, number>>({})
 
 // Policy and counts always belong to one completed refresh, never to editable key data.
@@ -1832,6 +1870,9 @@ const loadApiKeys = async () => {
   abortController = controller
   const { signal } = controller
   loading.value = true
+  usageLoading.value = true
+  usageFailed.value = false
+  usageStats.value = {}
   try {
     // Build filters
     const filters: {
@@ -1860,23 +1901,33 @@ const loadApiKeys = async () => {
     if (response.items.length > 0) {
       const keyIds = response.items.map((k) => k.id)
       try {
-        const usageResponse = await usageAPI.getDashboardApiKeysUsage(keyIds, { signal })
+        const usageResponse = await usageAPI.getDashboardApiKeysUsage(keyIds, {
+          signal,
+          start_date: usageStartDate.value,
+          end_date: usageEndDate.value,
+          timezone: getBrowserTimeZone()
+        })
         if (signal.aborted) return
         usageStats.value = usageResponse.stats
       } catch (e) {
+        if (signal.aborted) return
         if (!isAbortError(e)) {
+          usageFailed.value = true
+          appStore.showError(t('keys.failedToLoadUsage'))
           console.error('Failed to load usage stats:', e)
         }
       }
     }
   } catch (error) {
-    if (isAbortError(error)) {
+    if (signal.aborted || isAbortError(error)) {
       return
     }
+    usageFailed.value = true
     appStore.showError(t('keys.failedToLoad'))
   } finally {
     if (abortController === controller) {
       loading.value = false
+      usageLoading.value = false
       concurrencyPageReady = true
       void refreshConcurrency()
     }
@@ -2399,6 +2450,23 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@media (max-width: 639px) {
+  .key-usage-range-picker {
+    position: static;
+  }
+
+  .key-usage-range-picker :deep(.date-picker-dropdown) {
+    left: 0;
+    min-width: 0;
+    width: min(320px, calc(100vw - 2rem));
+  }
+
+  .key-usage-range-picker :deep(.date-picker-field),
+  .key-usage-range-picker :deep(.date-picker-input) {
+    min-width: 0;
+  }
+}
+
 @media (min-width: 1024px) {
   .keys-page-layout :deep(.layout-section-scrollable) {
     min-height: 14rem;

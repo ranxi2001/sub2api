@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
 import { createPinia } from 'pinia'
 
 import type { ApiKey, ApiKeyConcurrencySnapshot, Group } from '@/types'
 import { keysAPI } from '@/api'
 import KeysView from '../KeysView.vue'
+import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { formatDateLocalInput, getBrowserTimeZone } from '@/utils/format'
 
 enableAutoUnmount(afterEach)
 
@@ -85,6 +88,7 @@ const messages: Record<string, string> = {
   'keys.usage': 'Usage',
   'keys.today': 'Today',
   'keys.total': 'Last 30 days',
+  'keys.selectedPeriod': 'Selected period',
   'keys.quota': 'Quota',
 }
 
@@ -136,6 +140,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
+      locale: ref('en'),
       t: (key: string, params: Record<string, unknown> = {}) =>
         (messages[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? name)),
     }),
@@ -256,7 +261,7 @@ const IconStub = {
   template: '<span data-test="icon">{{ name }}</span>',
 }
 
-const mountView = async (realTable = false) => {
+const mountView = async (realTable = false, realDatePicker = false) => {
   const wrapper = mount(KeysView, {
     global: {
       plugins: [createPinia()],
@@ -275,6 +280,7 @@ const mountView = async (realTable = false) => {
         EmptyState: true,
         Select: SelectStub,
         SearchInput: SearchInputStub,
+        DateRangePicker: !realDatePicker,
         Icon: IconStub,
         UseKeyModal: true,
         BulkEditKeysModal: true,
@@ -917,6 +923,114 @@ describe('user KeysView column settings', () => {
     expect(getConcurrency).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(1)
     expect(getConcurrency).toHaveBeenCalledTimes(3)
+  })
+
+  it('queries the default 30 calendar days and keeps the selected range through paging', async () => {
+    const wrapper = await mountView()
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - 29)
+    expect(getDashboardApiKeysUsage).toHaveBeenLastCalledWith([1], expect.objectContaining({
+      start_date: formatDateLocalInput(start), end_date: formatDateLocalInput(end), timezone: getBrowserTimeZone(),
+    }))
+    wrapper.findComponent(DateRangePicker).vm.$emit('change', {
+      startDate: '2026-10-01', endDate: '2026-10-31', preset: null,
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="page-2"]').trigger('click')
+    await flushPromises()
+    expect(getDashboardApiKeysUsage).toHaveBeenLastCalledWith([1], expect.objectContaining({
+      start_date: '2026-10-01', end_date: '2026-10-31', timezone: getBrowserTimeZone(),
+    }))
+  })
+
+  it('offers calendar ranges without a 24-hour shortcut in the actual usage picker', async () => {
+    vi.useRealTimers()
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    vi.setSystemTime(new Date(2026, 10, 9, 15))
+    const wrapper = await mountView(false, true)
+    const picker = wrapper.findComponent(DateRangePicker)
+    await picker.get('.date-picker-trigger').trigger('click')
+    expect(picker.findAll('.date-picker-preset').map(button => button.text())).not.toContain('dates.last24Hours')
+
+    const inputs = picker.findAll<HTMLInputElement>('input[type="date"]')
+    await inputs[0].setValue('2026-11-08')
+    await inputs[1].setValue('2026-11-09')
+    await picker.get('.date-picker-apply').trigger('click')
+    await flushPromises()
+    expect(getDashboardApiKeysUsage).toHaveBeenLastCalledWith([1], expect.objectContaining({
+      start_date: '2026-11-08', end_date: '2026-11-09', timezone: getBrowserTimeZone()
+    }))
+    expect(picker.emitted('change')?.[0]).toEqual([{
+      startDate: '2026-11-08', endDate: '2026-11-09', preset: null
+    }])
+    expect(picker.get('.date-picker-trigger').text()).not.toContain('dates.last24Hours')
+  })
+
+  it('updates each key amount, ignores an older range response and shows failed usage as unavailable', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const key2 = { ...createApiKey(), id: 2, name: 'second-key' }
+    setKeys(createApiKey(), key2)
+    getDashboardApiKeysUsage.mockResolvedValue({ stats: {
+      1: { api_key_id: 1, today_actual_cost: 1, total_actual_cost: 30 },
+      2: { api_key_id: 2, today_actual_cost: 2, total_actual_cost: 60 },
+    } })
+    const wrapper = await mountView(true)
+    const picker = wrapper.findComponent(DateRangePicker)
+    const old = deferred<{ stats: Record<string, { api_key_id: number; today_actual_cost: number; total_actual_cost: number }> }>()
+    getDashboardApiKeysUsage.mockReturnValueOnce(old.promise)
+    picker.vm.$emit('change', { startDate: '2026-10-01', endDate: '2026-10-02', preset: null })
+    await flushPromises()
+    const oldSignal = getDashboardApiKeysUsage.mock.lastCall?.[1].signal as AbortSignal
+    expect(wrapper.text()).not.toContain('$30.0000')
+
+    getDashboardApiKeysUsage.mockResolvedValueOnce({ stats: {
+      1: { api_key_id: 1, today_actual_cost: 1, total_actual_cost: 4.5 },
+      2: { api_key_id: 2, today_actual_cost: 2, total_actual_cost: 9 },
+    } })
+    picker.vm.$emit('change', { startDate: '2026-10-05', endDate: '2026-10-06', preset: null })
+    await flushPromises()
+    expect(oldSignal.aborted).toBe(true)
+    old.resolve({ stats: { 1: { api_key_id: 1, today_actual_cost: 1, total_actual_cost: 999 } } })
+    await flushPromises()
+    const cells = wrapper.findAll('.key-usage-cell')
+    expect(cells[0].text().replace(/\s+/g, '')).toContain('Selectedperiod:$4.5000')
+    expect(cells[1].text().replace(/\s+/g, '')).toContain('Selectedperiod:$9.0000')
+    expect(cells[0].text()).not.toContain('999')
+
+    getDashboardApiKeysUsage.mockRejectedValueOnce(new Error('offline'))
+    picker.vm.$emit('change', { startDate: '2026-10-10', endDate: '2026-10-11', preset: null })
+    await flushPromises()
+    expect(wrapper.findAll('.key-usage-cell')[0].text()).not.toContain('$4.5000')
+    expect(wrapper.findAll('.key-usage-cell')[0].text()).toContain('—')
+    expect(showError).toHaveBeenCalledWith('keys.failedToLoadUsage')
+  })
+
+  it('rejects incomplete and reversed date ranges before fetching', async () => {
+    const wrapper = await mountView()
+    for (const range of [
+      { startDate: '', endDate: '2026-10-01', preset: null },
+      { startDate: '2026-10-05', endDate: '2026-10-01', preset: null },
+    ]) {
+      wrapper.findComponent(DateRangePicker).vm.$emit('change', range)
+      await flushPromises()
+    }
+    expect(getDashboardApiKeysUsage).toHaveBeenCalledTimes(1)
+    expect(showError).toHaveBeenCalledWith('keys.invalidUsageDateRange')
+  })
+
+  it('persists the admin date-range notice dismissal while older notices stay dismissed', async () => {
+    auth.isAdmin = true
+    localStorage.setItem('sub2api:new-feature-notices:v1:41', JSON.stringify([NEW_FEATURE_NOTICES.apiKeyModelPolicy]))
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="key-usage-date-range"] [data-testid="new-feature-badge"]').trigger('click')
+    expect(wrapper.find('[data-test="key-usage-date-range"] [data-testid="new-feature-badge"]').exists()).toBe(false)
+    wrapper.unmount()
+    const reloaded = await mountView()
+    expect(reloaded.find('[data-test="key-usage-date-range"] [data-testid="new-feature-badge"]').exists()).toBe(false)
+    expect(JSON.parse(localStorage.getItem('sub2api:new-feature-notices:v1:41') ?? '[]')).toEqual([
+      NEW_FEATURE_NOTICES.apiKeyModelPolicy, NEW_FEATURE_NOTICES.apiKeyUsageDateRange,
+    ])
   })
 
   it('marks old counts and policy stale on failure and removes the full marker until recovery', async () => {
