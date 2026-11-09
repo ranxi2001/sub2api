@@ -133,7 +133,14 @@ jobs:
           git -C reviewed rev-parse HEAD > evidence/reviewed-head.txt
           go version > evidence/toolchain.txt
           go env GOOS GOARCH CGO_ENABLED GOFLAGS >> evidence/toolchain.txt
+          uname -a > evidence/kernel.txt
           docker version > evidence/docker.txt
+          docker info > evidence/docker-info.txt
+          if ! command -v gdb >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdb
+          fi
+          bash -n candidate/.github/scripts/oauth-degradation-integration-race.sh
           gofmt -d candidate/backend/internal/repository/oauth_degradation_chain_integration_test.go candidate/backend/internal/repository/oauth_degradation_race_integration_test.go > evidence/gofmt.diff
           test ! -s evidence/gofmt.diff
       - name: New full-chain regression on isolated production checkout (behavioral RED)
@@ -142,13 +149,13 @@ jobs:
           set -euo pipefail
           cp candidate/backend/internal/repository/oauth_degradation_chain_integration_test.go baseline/backend/internal/repository/
           set +e
-          (cd baseline/backend && go test -race -tags=integration ./internal/repository -run '^TestOAuthDegradationOutboxSchedulerChain$' -count=1 -v -timeout=10m) > evidence/chain-red.log 2>&1
+          bash candidate/.github/scripts/oauth-degradation-integration-race.sh chain-red "$GITHUB_WORKSPACE/baseline" '^TestOAuthDegradationOutboxSchedulerChain$' 10m
           result=$?
           set -e
           cat evidence/chain-red.log
           printf '%s\n' "$result" > evidence/chain-red-exit.txt
           test "$result" -ne 0
-          ! grep -Eq -- 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|WARNING: DATA RACE|--- SKIP:' evidence/chain-red.log
+          ! grep -Eq -- 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|signal:|SIGSEGV|fatal error:|WARNING: DATA RACE|--- SKIP:' evidence/chain-red.log
           grep -F 'real degradation worker must commit treatment before cache compensation' evidence/chain-red.log
           grep -F -- '--- FAIL: TestOAuthDegradationOutboxSchedulerChain' evidence/chain-red.log
       - name: Reviewed implementation control (coverage gap versus new defect)
@@ -156,14 +163,14 @@ jobs:
         run: |
           set -euo pipefail
           cp candidate/backend/internal/repository/oauth_degradation_chain_integration_test.go candidate/backend/internal/repository/oauth_degradation_race_integration_test.go reviewed/backend/internal/repository/
-          (cd reviewed/backend && go test -race -tags=integration ./internal/repository -run '^TestOAuthDegradationOutboxSchedulerChain$|^TestOAuthDegradationDeterministic|^TestOAuthDegradationTransactionFailures$' -count=1 -v -timeout=15m) 2>&1 | tee evidence/reviewed-integration-race.log
+          bash candidate/.github/scripts/oauth-degradation-integration-race.sh reviewed-integration-race "$GITHUB_WORKSPACE/reviewed" '^TestOAuthDegradationOutboxSchedulerChain$|^TestOAuthDegradationDeterministic|^TestOAuthDegradationTransactionFailures$' 15m
           ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/reviewed-integration-race.log
       - name: Exact head real PostgreSQL Redis evaluator outbox and scheduler race GREEN
         shell: bash
         run: |
           set -euo pipefail
           (cd candidate/backend && go list -deps -test -race -tags=integration ./internal/repository) > evidence/instrumented-dependencies.txt
-          (cd candidate/backend && go test -race -tags=integration ./internal/repository -run '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres' -count=1 -v -timeout=15m) 2>&1 | tee evidence/integration-race.log
+          bash candidate/.github/scripts/oauth-degradation-integration-race.sh integration-race "$GITHUB_WORKSPACE/candidate" '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres' 15m
           ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/integration-race.log
       - uses: actions/upload-artifact@v7
         if: always()
