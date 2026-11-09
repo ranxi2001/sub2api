@@ -21,10 +21,13 @@ func TestSmartOpsSidebarSettingsRoundTripAndOmission(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		return gjson.Get(rec.Body.String(), "data.smart_ops_hidden_menu_items").Raw
 	}
-	require.JSONEq(t, `["/admin/lottery","/admin/channel-operations","/admin/controlled-experiments","/admin/account-ops","/admin/token-guard","/admin/group-cache-tests","/admin/request-captures","/admin/harvest-flow"]`, get(), "unconfigured installations display only the six default entries")
+	defaults := get()
+	require.JSONEq(t, `["/admin/lottery","/admin/channel-operations","/admin/controlled-experiments","/admin/account-ops","/admin/token-guard","/admin/group-cache-tests","/admin/request-captures","/admin/harvest-flow"]`, defaults, "unconfigured installations display only the six default entries")
 	rec := doUpdateSettings(t, h, map[string]any{"site_name": "example"}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.JSONEq(t, get(), repo.values[service.SettingKeySmartOpsHiddenMenuItems], "older clients retain the defaults when saving other settings")
+	require.NotContains(t, repo.values, service.SettingKeySmartOpsHiddenMenuItems, "omitted fields remain unconfigured")
+	require.JSONEq(t, defaults, get(), "older clients retain the defaults when saving other settings")
+	require.JSONEq(t, defaults, gjson.Get(rec.Body.String(), "data.smart_ops_hidden_menu_items").Raw)
 	rec = doUpdateSettings(t, h, map[string]any{"smart_ops_hidden_menu_items": []string{"/admin/token-guard", "/admin/token-guard", "/admin/harvest-flow"}}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.JSONEq(t, `["/admin/token-guard","/admin/harvest-flow"]`, get())
