@@ -320,8 +320,13 @@ async function runPriority(phase) {
       await page.waitForFunction(() => !!document.querySelector('[data-testid="candidate-table"] table'))
       for (const [scenario, expected] of [['insufficient', '历史数据不足'], ['degraded', '历史指标未达标'], ['recovery', '延迟恢复期'], ['live-insufficient', '数据不足'], ['live-eligible', '体验达标'], ['live-degraded', '体验未达标']]) {
         state.scenario = scenario
-        const response = page.waitForResponse(res => new URL(res.url()).pathname === '/fixture/admin/priority-scheduling/analysis')
-        await page.getByRole('button', { name: '刷新评分', exact: true }).click(); await response
+        const refresh = page.getByTestId('latency-refresh')
+        assert.equal(await refresh.count(), 1)
+        assert(await refresh.isEnabled(), 'Production analysis refresh button must be enabled')
+        await Promise.all([
+          page.waitForResponse(res => new URL(res.url()).pathname === '/fixture/admin/priority-scheduling/analysis'),
+          refresh.click(),
+        ])
         await page.waitForFunction(expected => document.querySelector('[data-row-id="901"]')?.children[1]?.textContent.trim() === expected, expected)
         if (!scenario.startsWith('live-')) observe(`760 ${scenario}`, await historicalAssertions(page, expected))
         else {
