@@ -154,9 +154,9 @@ func TestPriorityObservationStickyPenaltyAndExpiry(t *testing.T) {
 	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, GroupID: &group, RequestedModel: "gpt-test", HistoryModel: "public-alias", InboundEndpoint: "/v1/responses", UseUpstreamTokenCost: true}
 	require.Eventually(t, func() bool { return svc.priorityHistory(req, cfg, pool).ready() }, time.Second, time.Millisecond)
 	ctx := WithPrioritySchedulingObservation(context.Background(), &group, "public-alias", "/v1/responses")
-	selectTurn := func(previous string, excluded map[int64]struct{}) (*AccountSelectionResult, OpenAIAccountScheduleDecision) {
+	selectTurn := func(session, previous string, excluded map[int64]struct{}) (*AccountSelectionResult, OpenAIAccountScheduleDecision) {
 		t.Helper()
-		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(ctx, &group, previous, "sticky-penalty", "gpt-test", excluded, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true, PlatformOpenAI)
+		selection, decision, err := svc.SelectAccountWithSchedulerForCapability(ctx, &group, previous, session, "gpt-test", excluded, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityChatCompletions, false, false, true, PlatformOpenAI)
 		require.NoError(t, err)
 		require.NotNil(t, selection)
 		if selection.ReleaseFunc != nil {
@@ -164,15 +164,15 @@ func TestPriorityObservationStickyPenaltyAndExpiry(t *testing.T) {
 		}
 		return selection, decision
 	}
-	selected, decision := selectTurn("", nil)
+	selected, decision := selectTurn("sticky-penalty", "", nil)
 	require.Equal(t, int64(2), selected.Account.ID, "ordinary sticky cannot bypass measured penalty even with EWMA escape disabled")
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.Equal(t, int64(1), cache.sessionBindings["openai:sticky-penalty"], "one turn does not erase durable affinity")
+	require.Equal(t, int64(2), cache.sessionBindings["openai:sticky-penalty"], "an admitted replacement becomes the session's durable affinity")
 	// A separate weighted shortcut must not undo the scored selection policy.
 	weightedReq := req
 	weightedReq.StickyWeighted = true
 	weightedReq.StickyAccountID = 1
-	weightedReq.SessionHash = "sticky-penalty"
+	weightedReq.SessionHash = "weighted-penalty"
 	scheduler := &defaultOpenAIAccountScheduler{service: svc, stats: svc.openaiAccountStats}
 	fallback, fallbackErr := scheduler.tryFallbackToWeightedSticky(ctx, weightedReq)
 	require.NoError(t, fallbackErr)
@@ -186,11 +186,11 @@ func TestPriorityObservationStickyPenaltyAndExpiry(t *testing.T) {
 		require.False(t, scheduler.shouldYieldPriorityLatencySticky(ownerReq, pool[0].account))
 	}
 	// No global ban: the same slow account remains fallback capacity.
-	selected, _ = selectTurn("", map[int64]struct{}{2: {}})
+	selected, _ = selectTurn("penalty-fallback", "", map[int64]struct{}{2: {}})
 	require.Equal(t, int64(1), selected.Account.ID)
 	// Provider response ownership wins, even during the measured penalty.
 	require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, group, "resp_penalty_owner", 1, time.Hour))
-	selected, decision = selectTurn("resp_penalty_owner", nil)
+	selected, decision = selectTurn("penalty-owner", "resp_penalty_owner", nil)
 	require.Equal(t, int64(1), selected.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
 	// Re-reading old data does not renew its ten-minute duration.
@@ -201,12 +201,18 @@ func TestPriorityObservationStickyPenaltyAndExpiry(t *testing.T) {
 	signal.LatestBadLatencyAt = &expired
 	entry.signals[1] = signal
 	svc.priorityScheduling.mu.Unlock()
-	selected, decision = selectTurn("", nil)
-	require.Equal(t, int64(1), selected.Account.ID)
+	selected, decision = selectTurn("sticky-penalty", "", nil)
+	require.Equal(t, int64(2), selected.Account.ID, "expiry must not move the escaped session back to its previous account")
 	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.Equal(t, int64(2), cache.sessionBindings["openai:sticky-penalty"])
+	selected, _ = selectTurn("penalty-recovered", "", map[int64]struct{}{2: {}})
+	require.Equal(t, int64(1), selected.Account.ID, "the recovered account remains available to a new session")
 	fallback, fallbackErr = scheduler.tryFallbackToWeightedSticky(ctx, weightedReq)
 	require.NoError(t, fallbackErr)
 	require.NotNil(t, fallback, "expiry also restores the weighted sticky fallback")
+	require.Equal(t, int64(1), fallback.Account.ID)
+	require.Equal(t, int64(1), cache.sessionBindings["openai:weighted-penalty"])
+	require.Equal(t, int64(2), cache.sessionBindings["openai:sticky-penalty"], "recovery in another session must not undo the replacement binding")
 	if fallback.ReleaseFunc != nil {
 		fallback.ReleaseFunc()
 	}
