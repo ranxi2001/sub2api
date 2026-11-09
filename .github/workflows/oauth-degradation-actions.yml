@@ -1,0 +1,61 @@
+name: OAuth degradation actions
+on:
+  push:
+    branches: [feat/oauth-degradation-actions-20261109]
+  pull_request:
+    paths:
+      - 'backend/internal/**/*degradation*'
+      - 'backend/internal/**/*auto_config*'
+      - 'frontend/src/**/*Degradation*'
+      - 'frontend/src/**/AutoConfigView*'
+      - '.github/workflows/oauth-degradation-actions.yml'
+      - '.github/scripts/oauth-degradation*'
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+      - uses: actions/checkout@v6
+        with:
+          ref: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+          path: baseline
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Baseline behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C baseline rev-parse HEAD > evidence/red-head.txt
+          cp candidate/backend/internal/service/oauth_degradation_actions_test.go baseline/backend/internal/service/
+          set +e
+          (cd baseline/backend && go test -tags=unit ./internal/service -run '^TestOAuthDegradation(Hold|Requires)' -count=1 -v) > evidence/red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red.log
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:' evidence/red.log
+          grep -F 'degradation hold must prevent' evidence/red.log
+          grep -F 'enabling degradation action requires' evidence/red.log
+      - name: Exact candidate GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C candidate rev-parse HEAD | tee evidence/green-head.txt
+          (cd candidate/backend && go test -race -tags=unit ./internal/service ./internal/repository ./internal/handler/admin -run 'TestOAuthDegradation|TestAutoConfig|TestAdvanceConcurrency' -count=1 -v) 2>&1 | tee evidence/green.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-degradation-unit-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
