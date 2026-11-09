@@ -455,6 +455,19 @@ var ErrStickySessionNotFound = errors.New("sticky session not found")
 // when no cached reasoning content exists for the reasoning item ID.
 var ErrReasoningContentNotFound = errors.New("reasoning content not found")
 
+// SessionAccountBindingSwap advances affinity only while the binding observed
+// by the selection is still current. A missing/expired binding can be rebuilt.
+type SessionAccountBindingSwap struct {
+	SessionHash       string
+	LegacySessionHash string
+	ExpectedAccountID int64
+	AccountID         int64
+	TTL               time.Duration
+	LegacyTTL         time.Duration
+	ReadLegacy        bool
+	WriteLegacy       bool
+}
+
 // GatewayCache 定义网关服务的缓存操作接口。
 // 提供粘性会话（Sticky Session）的存储、查询、刷新和删除功能。
 //
@@ -583,6 +596,9 @@ type AccountSelectionResult struct {
 	WaitPlan         *AccountWaitPlan // nil means no wait allowed
 	// stickySessionHit 标记账号来自会话粘性绑定命中，供非高级调度路径回填决策标签。
 	stickySessionHit bool
+	// stickyBindingSnapshot survives slot waits so an older admission cannot
+	// overwrite affinity advanced by a newer selection.
+	stickyBindingSnapshot *openAIStickyBindingSnapshot
 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。

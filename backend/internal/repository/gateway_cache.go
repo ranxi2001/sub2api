@@ -53,6 +53,54 @@ func (c *gatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, s
 	return c.rdb.Set(ctx, key, accountID, ttl).Err()
 }
 
+var compareAndSwapSessionAccountScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if not current and ARGV[5] == '1' and #KEYS > 1 then
+  current = redis.call('GET', KEYS[2])
+end
+if current then
+  if not string.match(current, '^[1-9]%d*$') then
+    return redis.error_reply('invalid sticky account binding')
+  end
+  if current ~= ARGV[1] and current ~= ARGV[2] then
+    return 0
+  end
+end
+redis.call('SET', KEYS[1], ARGV[2], 'PX', ARGV[3])
+if #KEYS > 1 then
+  if ARGV[6] == '1' then
+    redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[4])
+  else
+    redis.call('DEL', KEYS[2])
+  end
+end
+return 1
+`)
+
+// CompareAndSwapSessionAccountID advances both sticky hash formats atomically.
+// A stale waiter cannot replace a newer binding, and disabling legacy writes
+// removes the old fallback instead of allowing it to revive after primary TTL.
+func (c *gatewayCache) CompareAndSwapSessionAccountID(ctx context.Context, groupID int64, swap service.SessionAccountBindingSwap) (bool, error) {
+	if strings.TrimSpace(swap.SessionHash) == "" || swap.AccountID <= 0 || swap.ExpectedAccountID < 0 || swap.TTL.Milliseconds() <= 0 ||
+		(swap.WriteLegacy && swap.LegacySessionHash != "" && swap.LegacyTTL.Milliseconds() <= 0) {
+		return false, errors.New("invalid sticky account binding swap")
+	}
+	keys := []string{buildSessionKey(groupID, swap.SessionHash)}
+	if swap.LegacySessionHash != "" && swap.LegacySessionHash != swap.SessionHash {
+		keys = append(keys, buildSessionKey(groupID, swap.LegacySessionHash))
+	}
+	flag := func(enabled bool) string {
+		if enabled {
+			return "1"
+		}
+		return "0"
+	}
+	result, err := compareAndSwapSessionAccountScript.Run(ctx, c.rdb, keys,
+		swap.ExpectedAccountID, swap.AccountID, swap.TTL.Milliseconds(), swap.LegacyTTL.Milliseconds(),
+		flag(swap.ReadLegacy), flag(swap.WriteLegacy)).Int()
+	return result == 1, err
+}
+
 func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Expire(ctx, key, ttl).Err()
