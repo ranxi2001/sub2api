@@ -2909,17 +2909,21 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		if preserveGuardianParentBinding {
 			legacySessionHash = ""
 		}
+		acceptLegacyAccount := func(account *Account) bool {
+			return s.isOpenAIAccountTransportCompatible(account, requiredTransport, requestedModel) &&
+				accountSupportsOpenAICapabilitiesForRequest(ctx, account, requestedModel, requiredCapability, requiredImageCapability)
+		}
 		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 			effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 			for {
-				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, acceptLegacyAccount)
 				if err != nil {
 					return nil, decision, err
 				}
 				if selection == nil || selection.Account == nil {
 					return selection, decision, nil
 				}
-				if accountSupportsOpenAICapabilitiesForRequest(ctx, selection.Account, requestedModel, requiredCapability, requiredImageCapability) {
+				if acceptLegacyAccount(selection.Account) {
 					applyLegacySelectionDecision(&decision, selection)
 					return selection, decision, nil
 				}
@@ -2938,15 +2942,14 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 
 		effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 		for {
-			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, legacySessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, acceptLegacyAccount)
 			if err != nil {
 				return nil, decision, err
 			}
 			if selection == nil || selection.Account == nil {
 				return selection, decision, nil
 			}
-			if s.isOpenAIAccountTransportCompatible(selection.Account, requiredTransport, requestedModel) &&
-				accountSupportsOpenAICapabilitiesForRequest(ctx, selection.Account, requestedModel, requiredCapability, requiredImageCapability) {
+			if acceptLegacyAccount(selection.Account) {
 				applyLegacySelectionDecision(&decision, selection)
 				return selection, decision, nil
 			}
