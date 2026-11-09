@@ -137,7 +137,7 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 		if checkBilling && !group.IsSubscriptionType() && groupBalanceNeedsRecovery(candidate.User.Balance, cfg) && !canRecoverBalance {
 			return false
 		}
-		if google && group.Platform != service.PlatformGemini && group.Platform != service.PlatformAntigravity && group.Platform != service.PlatformComposite {
+		if google && !groupAllowsGooglePlatform(path, group) {
 			return false
 		}
 		if strings.HasPrefix(path, "/antigravity/") && group.Platform != service.PlatformAntigravity {
@@ -221,4 +221,24 @@ func selectAPIKeyRequestGroup(c *gin.Context, keys *service.APIKeyService, subsc
 // authentication's <=0 threshold remains unchanged for ordinary single groups.
 func groupBalanceNeedsRecovery(balance float64, cfg *config.Config) bool {
 	return balance <= 0 || cfg != nil && cfg.Billing.MinimumBalanceReserve > 0 && balance < cfg.Billing.MinimumBalanceReserve
+}
+
+// groupAllowsGooglePlatform 决定 Google 入站（/v1beta）能否使用这个分组。
+// Gemini、Antigravity、Composite 维持原语义。其他分组只在 /v1beta/models 上放行，
+// 后续把请求转成该分组上游实际支持的协议，而不是一律打上游 /v1beta/models。
+func groupAllowsGooglePlatform(path string, group *service.Group) bool {
+	if group == nil {
+		return false
+	}
+	switch group.Platform {
+	case service.PlatformGemini, service.PlatformAntigravity, service.PlatformComposite:
+		return true
+	}
+	if strings.HasPrefix(path, "/antigravity/") {
+		return false
+	}
+	if path != "/v1beta/models" && !strings.HasPrefix(path, "/v1beta/models/") {
+		return false
+	}
+	return service.PlatformAcceptsGeminiInboundBridge(group.Platform)
 }
