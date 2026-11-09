@@ -189,16 +189,113 @@ func TestIssue758HTTPLimitedOwnerWaitsAndResumesIntactTask(t *testing.T) {
 	}
 }
 
+func TestIssue758HTTPOAuthPreviousResponseCannotPromiseRecovery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, stream := range []bool{false, true} {
+		for _, cooldown := range []string{"rate", "overload"} {
+			t.Run(fmt.Sprintf("stream=%v/%s", stream, cooldown), func(t *testing.T) {
+				mr := miniredis.RunT(t)
+				client := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
+				t.Cleanup(func() { _ = client.Close() })
+				cache := repository.NewGatewayCache(client)
+				accounts := issue715Accounts() // Keep OAuth, including the available alternative.
+				upstream := &issue715Upstream{mode: "generated-json"}
+				handler := newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, cache, accounts...)
+				first := issue758Request(t, handler, strings.Replace(issue715Body(false, stream), issue715Agent+",", "", 1))
+				require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+				require.JSONEq(t, issue715Agent, issue758CompletedResponse(t, first.Body.String(), stream).Get("output.#(type==agent_message)").Raw)
+				upstream.mode = ""
+				completed := issue758Request(t, handler, issue715Body(true, stream))
+				require.Equal(t, http.StatusOK, completed.Code, completed.Body.String())
+				responseID := issue758CompletedResponse(t, completed.Body.String(), stream).Get("id").String()
+				require.NotEmpty(t, responseID)
+				body, err := sjson.Set(issue715Body(true, stream), "previous_response_id", responseID)
+				require.NoError(t, err)
+
+				type evidence struct {
+					value string
+					ttl   time.Duration
+				}
+				before := make(map[string]evidence)
+				agents, anchors := 0, 0
+				for _, key := range mr.Keys() {
+					isAgent := strings.HasPrefix(key, "openai_agent_owner:")
+					isAnchor := strings.Contains(key, "openai:http-response-owner:") || strings.Contains(key, "openai:response:")
+					if !isAgent && !isAnchor {
+						continue
+					}
+					value, err := mr.Get(key)
+					require.NoError(t, err)
+					require.Positive(t, mr.TTL(key))
+					before[key] = evidence{value, mr.TTL(key)}
+					if isAgent {
+						agents++
+						require.True(t, gjson.Valid(value), "must have a proven route, not pending/failed/conflict")
+						require.EqualValues(t, 1, gjson.Get(value, "1").Int(), "the intact item belongs to OAuth account 1")
+					} else {
+						anchors++
+						switch {
+						case strings.Contains(key, "http-response-owner:v1:"):
+							require.Equal(t, "v1:100:99", value)
+						case strings.Contains(key, "http-response-owner:user:"):
+							require.Equal(t, "100", value)
+						case strings.Contains(key, "http-response-owner:key:"):
+							require.Equal(t, "99", value)
+						default:
+							require.Equal(t, "1", value)
+						}
+					}
+				}
+				require.Equal(t, 1, agents)
+				require.Equal(t, 4, anchors, "response account plus v1/user/key HTTP authorization must all exist")
+				// A fresh handler must resolve the proven item and all authorization
+				// anchors from the real shared adapter, without process-local history.
+				handler = newOpenAIResponsesFailoverTestHandlerWithCache(t, upstream, cache, accounts...)
+				for _, phase := range []string{"before", "during", "after"} {
+					resetAt := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
+					if phase != "during" {
+						resetAt = time.Now().Add(-time.Minute)
+					}
+					if cooldown == "rate" {
+						accounts[0].RateLimitResetAt = &resetAt
+					} else {
+						accounts[0].OverloadUntil = &resetAt
+					}
+					refused := issue758Request(t, handler, body)
+					require.Equal(t, http.StatusConflict, refused.Code, "%s: %s", phase, refused.Body.String())
+					require.Equal(t, "encrypted_agent_recovery_http_previous_response_unsupported", gjson.Get(refused.Body.String(), "error.code").String())
+					require.Equal(t, "invalid_request_error", gjson.Get(refused.Body.String(), "error.type").String())
+					message := gjson.Get(refused.Body.String(), "error.message").String()
+					require.Contains(t, message, "complete original history without previous_response_id")
+					require.Contains(t, message, "Waiting alone will not make this request supported")
+					require.NotContains(t, message, "Wait until")
+					require.Empty(t, refused.Header().Get("Retry-After"))
+					require.Equal(t, []int64{1, 1}, upstream.ids, "unsupported continuation must never dispatch")
+					for key, original := range before {
+						value, err := mr.Get(key)
+						require.NoError(t, err)
+						require.Equal(t, original.value, value)
+						require.Equal(t, original.ttl, mr.TTL(key), "refusal must not extend any evidence: %s", key)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestIssue758HTTPWaitingErrorAfterSSECommit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := &OpenAIGatewayHandler{}
-	for _, reason := range []string{"owner_rate_limited", "owner_overloaded"} {
+	for _, reason := range []string{"owner_rate_limited", "owner_overloaded", "http_previous_response_unsupported"} {
 		t.Run(reason, func(t *testing.T) {
 			c, recorder := newIssue715Context(t, issue715Body(true, true))
 			c.Writer.Header().Set("Content-Type", "text/event-stream")
 			c.Writer.WriteHeaderNow()
 			resetAt := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
 			err := &service.OpenAIAgentRecoveryError{Reason: reason, RetryAt: resetAt}
+			if reason == "http_previous_response_unsupported" {
+				err.RetryAt = time.Time{}
+			}
 			require.True(t, handler.handleOpenAIAgentRecoveryError(c, err, false))
 			require.Equal(t, http.StatusOK, recorder.Code, "committed SSE must report its failure in the terminal event")
 			require.Empty(t, c.Writer.Header().Get("Retry-After"), "headers cannot be changed after committing the stream")
@@ -218,7 +315,12 @@ func TestIssue758HTTPWaitingErrorAfterSSECommit(t *testing.T) {
 			// error envelope, which also carries an error.type classification.
 			require.Equal(t, "encrypted_agent_recovery_"+reason, events[0].Get("response.error.code").String())
 			message := events[0].Get("response.error.message").String()
-			require.Contains(t, message, resetAt.Format(time.RFC3339))
+			if reason == "http_previous_response_unsupported" {
+				require.Contains(t, message, "complete original history without previous_response_id")
+				require.NotContains(t, message, "Wait until")
+			} else {
+				require.Contains(t, message, resetAt.Format(time.RFC3339))
+			}
 			require.Contains(t, message, "Preserve this task and context")
 		})
 	}

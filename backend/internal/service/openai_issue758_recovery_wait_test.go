@@ -110,6 +110,38 @@ func TestIssue758CooldownCannotDisguiseAdmissionRestrictions(t *testing.T) {
 	}
 }
 
+func TestIssue758WSOAuthPreviousResponseStillWaits(t *testing.T) {
+	for _, reason := range []string{"owner_rate_limited", "owner_overloaded"} {
+		t.Run(reason, func(t *testing.T) {
+			accounts := []Account{{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, GroupIDs: []int64{715}, Credentials: map[string]any{"access_token": "fixture-oauth"}}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}}
+			issue715LearnRoute(t, svc, &accounts[0], issue715OpaqueBody)
+			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+			ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(issue715OpaqueBody), "fixture-session", "gpt-6-astra")
+			recovery := openAIAgentRecoveryFromContext(ctx)
+			require.NotNil(t, recovery.owner)
+			require.Zero(t, recovery.userID, "WS ingress has no HTTP authorization marker")
+			request := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, GroupID: int64Ptr(715), SessionHash: "fixture-session", RequestedModel: "gpt-6-astra", PreviousResponseID: "resp_ws758"}
+			require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(ctx, 715, request.PreviousResponseID, 1, time.Hour))
+			resetAt := time.Now().Add(5 * time.Hour)
+			if reason == "owner_rate_limited" {
+				accounts[0].RateLimitResetAt = &resetAt
+			} else {
+				accounts[0].OverloadUntil = &resetAt
+			}
+			var refused *OpenAIAgentRecoveryError
+			scheduler := &defaultOpenAIAccountScheduler{service: svc}
+			require.ErrorAs(t, scheduler.checkOpenAIAgentRecoveryCooldown(ctx, request, recovery), &refused)
+			require.Equal(t, reason, refused.Reason)
+			require.Equal(t, resetAt, refused.RetryAt)
+			for _, binding := range svc.agentMessageRecovery.bindings {
+				require.WithinDuration(t, resetAt.Add(svc.openAIWSSessionStickyTTL()), binding.expiresAt, time.Second)
+			}
+		})
+	}
+}
+
 type issue758RetainingOwners struct {
 	*issue715SharedOwners
 	err   error

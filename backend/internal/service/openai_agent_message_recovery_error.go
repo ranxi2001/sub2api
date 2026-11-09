@@ -43,6 +43,9 @@ func (e *OpenAIAgentRecoveryError) ClientType() string {
 func (e *OpenAIAgentRecoveryError) ClientMessage() string {
 	var reason, action string
 	switch e.Reason {
+	case "http_previous_response_unsupported":
+		reason = "HTTP previous_response_id continuation is unsupported for this encrypted agent owner."
+		action = "For HTTP continuation, send the complete original history without previous_response_id; current permissions and route compatibility still apply. Waiting alone will not make this request supported. Do not replay tool results while an earlier delivery is uncertain."
 	case "owner_rate_limited", "owner_overloaded":
 		reason = "The proven encrypted agent owner is temporarily rate limited."
 		if e.Reason == "owner_overloaded" {

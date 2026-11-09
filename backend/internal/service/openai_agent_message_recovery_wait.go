@@ -18,6 +18,12 @@ func (s *defaultOpenAIAccountScheduler) checkOpenAIAgentRecoveryCooldown(ctx con
 	if err != nil || account == nil {
 		return openAIAgentRecoveryError("owner_unavailable")
 	}
+	// HTTP continuation requires an API-key owner even when its authorization
+	// anchors exist. A quota reset cannot make OAuth previous_response_id valid.
+	// Check before retaining any evidence; WS OAuth continuation remains valid.
+	if recovery.userID > 0 && req.PreviousResponseID != "" && !account.IsOpenAIApiKey() {
+		return openAIAgentRecoveryError("http_previous_response_unsupported")
+	}
 	now := time.Now()
 	var retryAt time.Time
 	reason := "owner_rate_limited"
