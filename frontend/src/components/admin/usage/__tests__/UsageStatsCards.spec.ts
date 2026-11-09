@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import UsageStatsCards from '../UsageStatsCards.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 
 const messages: Record<string, string> = {
   'usage.totalRequests': 'Total Requests',
@@ -17,6 +18,7 @@ const messages: Record<string, string> = {
   'usage.accountCost': 'Cost',
   'usage.standardCost': 'Standard',
   'usage.avgDuration': 'Avg Duration',
+  'usage.rateCardHint': 'Per-minute averages over the selected range',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -97,5 +99,57 @@ describe('UsageStatsCards', () => {
     // narrow screens. `hidden` (display: none) takes it out of the flow.
     expect(tooltip?.classes()).toContain('hidden')
     expect(tooltip?.classes()).not.toContain('opacity-0')
+  })
+
+  describe('RPM/TPM card', () => {
+    const dayWindow = {
+      start: '2026-11-09T03:00:00.000Z',
+      end: '2026-11-10T03:00:00.000Z',
+      now: Date.parse('2026-11-10T03:00:00.000Z'),
+    }
+    const global = { stubs: { Icon: true, NewFeatureBadge: true } }
+
+    it('is hidden unless the page asks for it, keeping the four-card layout', () => {
+      const wrapper = mount(UsageStatsCards, { props: { stats }, global })
+      expect(wrapper.find('[data-testid="usage-rate-card"]').exists()).toBe(false)
+      expect(wrapper.classes()).toContain('lg:grid-cols-4')
+    })
+
+    it('sits between the token and cost cards with per-minute averages of the stats window', () => {
+      const wrapper = mount(UsageStatsCards, {
+        props: { stats: { ...stats, total_requests: 2880, total_tokens: 14_400_000 }, showRate: true, rateWindow: dayWindow },
+        global,
+      })
+      const cards = wrapper.findAll('.card')
+      expect(cards).toHaveLength(5)
+      expect(cards[1].text()).toContain('Total Tokens')
+      expect(cards[2].attributes('data-testid')).toBe('usage-rate-card')
+      expect(cards[3].text()).toContain('Total Cost')
+      expect(wrapper.get('[data-testid="usage-rpm"]').text()).toBe('2.00')
+      expect(wrapper.get('[data-testid="usage-tpm"]').text()).toBe('10.00K')
+      expect(cards[2].attributes('title')).toBe('Per-minute averages over the selected range')
+      expect(wrapper.classes()).not.toContain('lg:grid-cols-4')
+    })
+
+    it('shows placeholders until stats for a window arrive', () => {
+      const wrapper = mount(UsageStatsCards, { props: { stats: null, showRate: true, rateWindow: null }, global })
+      expect(wrapper.get('[data-testid="usage-rpm"]').text()).toBe('—')
+      expect(wrapper.get('[data-testid="usage-tpm"]').text()).toBe('—')
+    })
+
+    it('shows the new-feature badge only for the admin who can dismiss it', () => {
+      const withAdmin = mount(UsageStatsCards, {
+        props: { stats, showRate: true, rateWindow: dayWindow, noticeUserId: 7 },
+        global,
+      })
+      const badge = withAdmin.findComponent({ name: 'NewFeatureBadge' })
+      expect(badge.exists()).toBe(true)
+      expect(badge.props('noticeId')).toBe(NEW_FEATURE_NOTICES.usageRateCard)
+      expect(badge.props('userId')).toBe(7)
+      expect(badge.props('compact')).toBe(true)
+
+      const withoutAdmin = mount(UsageStatsCards, { props: { stats, showRate: true, rateWindow: dayWindow }, global })
+      expect(withoutAdmin.findComponent({ name: 'NewFeatureBadge' }).exists()).toBe(false)
+    })
   })
 })

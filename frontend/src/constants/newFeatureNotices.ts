@@ -36,4 +36,5 @@ export const NEW_FEATURE_NOTICES = {
   streamFirstEventTiming: 'stream-first-event-timing-initial-announcement',
   openaiImageHeaderTimeoutGroups: 'openai-image-header-timeout-groups-initial-announcement',
   oauthInitialModelSelection: 'oauth-initial-model-selection-initial-announcement',
+  usageRateCard: 'usage-rpm-tpm-card-initial-announcement',
 } as const

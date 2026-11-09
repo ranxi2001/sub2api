@@ -265,6 +265,28 @@ describe('admin UsageView route filters', () => {
     wrapper.unmount()
   })
 
+  it('gives the RPM/TPM card the range its stats were loaded for, not a newer pending range', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    const cards = () => wrapper.findComponent(UsageStatsCards)
+    const vm = wrapper.vm as any
+    expect(cards().props('showRate')).toBe(true)
+    expect(cards().props('rateWindow')).toMatchObject({ start: vm.filters.start_date, end: vm.filters.end_date, now: expect.any(Number) })
+
+    let resolveStats!: (value: unknown) => void
+    getStats.mockReturnValueOnce(new Promise((resolve) => { resolveStats = resolve }))
+    const previousWindow = cards().props('rateWindow')
+    vm.onDateRangeChange({ startDate: '2026-11-01', endDate: '2026-11-07', preset: null })
+    await flushPromises()
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({ start_date: '2026-11-01', end_date: '2026-11-07' }))
+    expect(cards().props('rateWindow')).toEqual(previousWindow)
+
+    resolveStats({ total_requests: 10_080, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0 })
+    await flushPromises()
+    expect(cards().props('rateWindow')).toMatchObject({ start: '2026-11-01', end: '2026-11-07' })
+    wrapper.unmount()
+  })
+
   it('shows the routed user while applying user_id to usage requests', async () => {
     routeQuery.user_id = '42'
     getById.mockResolvedValue({ id: 42, email: 'route-user@test.com' })
