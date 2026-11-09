@@ -82,7 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
-          cp backend/internal/repository/oauth_degradation_actions_integration_test.go backend/internal/repository/oauth_degradation_edit_integration_test.go baseline/backend/internal/repository/
+          cp backend/internal/repository/oauth_degradation_actions_integration_test.go backend/internal/repository/oauth_degradation_edit_integration_test.go backend/internal/repository/oauth_degradation_recovery_integration_test.go baseline/backend/internal/repository/
           set +e
           (cd baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuthDegradation' -count=1 -v -timeout=15m) > evidence/postgres-red.log 2>&1
           result=$?
