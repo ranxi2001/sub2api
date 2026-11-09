@@ -40,3 +40,9 @@ func TestOAuthDegradationThresholdEvidence(t *testing.T) {
 	require.Error(t, c.Validate())
 }
 func floatPtrDegradation(v float64) *float64 { return &v }
+
+func TestOAuthDegradationZeroConcurrencyRetainsModelScope(t *testing.T) {
+	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 0, Credentials: map[string]any{}, Extra: map[string]any{OAuthDegradationActionExtraKey: map[string]any{"models": []string{"gpt-6-luna"}, "concurrency_cap": 0}}}
+	require.True(t, a.IsModelSupported("gpt-6-luna"), "non-positive existing concurrency must not corrupt valid model scope")
+	require.False(t, a.IsModelSupported("gpt-6.1-sol"))
+}

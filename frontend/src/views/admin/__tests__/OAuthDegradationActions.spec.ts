@@ -13,6 +13,7 @@ vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { tem
 vi.mock('@/components/admin/operations/AutoConfigHistory.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('@/api/admin/autoConfig', () => ({ getAutoConfig: vi.fn(), saveAutoConfig: vi.fn(), getModelBillingGroups: vi.fn(async () => []) }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn(async () => []) }))
 vi.mock('@/api/admin/accountQuality', () => ({ listQualityPlans: vi.fn(async () => []) }))
