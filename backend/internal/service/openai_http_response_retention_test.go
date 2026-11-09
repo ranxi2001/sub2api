@@ -27,7 +27,8 @@ func TestIssue758RecoveryUserRequiresAuthenticatedHTTPMarker(t *testing.T) {
 }
 
 func TestIssue758HTTPOwnerLocalRetentionPreservesTenantAndOriginalKey(t *testing.T) {
-	store := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+	store, ok := NewOpenAIWSStateStore(nil).(*defaultOpenAIWSStateStore)
+	require.True(t, ok)
 	ctx := context.Background()
 	const responseID = "resp_fixture_http_758"
 	key := openAIWSResponseAccountMapKey(7, responseID)
@@ -72,11 +73,14 @@ func TestIssue758HTTPOwnerRetentionRejectsLegacyAdaptersAndInvalidRequests(t *te
 	ctx := context.Background()
 	store := NewOpenAIWSStateStore(&stubGatewayCache{})
 	require.NoError(t, store.BindHTTPResponseOwner(ctx, 7, "resp_fixture_http_758", 101, 201, time.Minute))
-	refreshed, err := store.(OpenAIHTTPResponseOwnerRetentionStore).RefreshHTTPResponseOwner(ctx, 7, "resp_fixture_http_758", 101, 201, 8*time.Hour)
+	retention, ok := store.(OpenAIHTTPResponseOwnerRetentionStore)
+	require.True(t, ok)
+	refreshed, err := retention.RefreshHTTPResponseOwner(ctx, 7, "resp_fixture_http_758", 101, 201, 8*time.Hour)
 	require.NoError(t, err)
 	require.False(t, refreshed, "legacy adapters cannot pretend that shared retention is atomic")
 
-	local := NewOpenAIWSStateStore(nil).(OpenAIHTTPResponseOwnerRetentionStore)
+	local, ok := NewOpenAIWSStateStore(nil).(OpenAIHTTPResponseOwnerRetentionStore)
+	require.True(t, ok)
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	refreshed, err = local.RefreshHTTPResponseOwner(canceled, 7, "resp_fixture_http_758", 101, 201, time.Hour)

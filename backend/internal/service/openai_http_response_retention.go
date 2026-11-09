@@ -55,7 +55,7 @@ func (s *defaultOpenAIWSStateStore) RefreshHTTPResponseOwner(ctx context.Context
 		if err != nil || !found {
 			return false, err
 		}
-		if ownerUserID != userID && !(ownerUserID <= 0 && ownerAPIKeyID == apiKeyID) {
+		if ownerUserID != userID && (ownerUserID > 0 || ownerAPIKeyID != apiKeyID) {
 			return false, nil
 		}
 		return retention.RefreshHTTPResponseOwner(cacheCtx, groupID, id, ownerUserID, ownerAPIKeyID, ttl)
@@ -67,7 +67,7 @@ func (s *defaultOpenAIWSStateStore) RefreshHTTPResponseOwner(ctx context.Context
 	binding, found := s.responseOwners[mapKey]
 	now := time.Now()
 	if !found || !now.Before(binding.expiresAt) ||
-		(binding.userID != userID && !(binding.userID <= 0 && binding.apiKeyID == apiKeyID)) {
+		(binding.userID != userID && (binding.userID > 0 || binding.apiKeyID != apiKeyID)) {
 		return false, nil
 	}
 	if expiresAt := now.Add(ttl); expiresAt.After(binding.expiresAt) {

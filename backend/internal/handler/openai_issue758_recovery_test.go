@@ -190,18 +190,13 @@ func TestIssue758HTTPLimitedOwnerWaitsAndResumesIntactTask(t *testing.T) {
 func TestIssue758HTTPWaitingErrorAfterSSECommit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := &OpenAIGatewayHandler{}
-	for _, test := range []struct {
-		reason, errorType string
-	}{
-		{"owner_rate_limited", "rate_limit_error"},
-		{"owner_overloaded", "server_error"},
-	} {
-		t.Run(test.reason, func(t *testing.T) {
+	for _, reason := range []string{"owner_rate_limited", "owner_overloaded"} {
+		t.Run(reason, func(t *testing.T) {
 			c, recorder := newIssue715Context(t, issue715Body(true, true))
 			c.Writer.Header().Set("Content-Type", "text/event-stream")
 			c.Writer.WriteHeaderNow()
 			resetAt := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
-			err := &service.OpenAIAgentRecoveryError{Reason: test.reason, RetryAt: resetAt}
+			err := &service.OpenAIAgentRecoveryError{Reason: reason, RetryAt: resetAt}
 			require.True(t, handler.handleOpenAIAgentRecoveryError(c, err, false))
 			require.Equal(t, http.StatusOK, recorder.Code, "committed SSE must report its failure in the terminal event")
 			require.Empty(t, c.Writer.Header().Get("Retry-After"), "headers cannot be changed after committing the stream")
@@ -215,9 +210,11 @@ func TestIssue758HTTPWaitingErrorAfterSSECommit(t *testing.T) {
 				}
 			}
 			require.Len(t, events, 1, "only one terminal failure may be emitted")
+			require.Equal(t, "response.failed", events[0].Get("type").String())
 			require.Equal(t, "failed", events[0].Get("response.status").String())
-			require.Equal(t, "encrypted_agent_recovery_"+test.reason, events[0].Get("response.error.code").String())
-			require.Equal(t, test.errorType, events[0].Get("response.error.type").String())
+			// Responses terminal errors carry code/message, unlike HTTP JSON's
+			// error envelope, which also carries an error.type classification.
+			require.Equal(t, "encrypted_agent_recovery_"+reason, events[0].Get("response.error.code").String())
 			message := events[0].Get("response.error.message").String()
 			require.Contains(t, message, resetAt.Format(time.RFC3339))
 			require.Contains(t, message, "Preserve this task and context")
