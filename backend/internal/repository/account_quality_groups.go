@@ -42,6 +42,19 @@ func restoreQualityGroups(ctx context.Context, tx *sql.Tx, accountID int64, stat
 	// Validate the entire restore before inserting anything. A manual membership
 	// replacement must never be silently claimed as a successful rule restore.
 	diagnostic := qualityRestoreConflict("membership_already_present")
+	proposed := make([]int64, 0, len(state.Removed))
+	for _, group := range state.Removed {
+		proposed = append(proposed, group.GroupID)
+	}
+	allowed, err := lockOAuthDegradationGroupBindings(ctx, tx, accountID, proposed)
+	if err != nil {
+		return false, err
+	}
+	if len(allowed) != len(proposed) {
+		diagnostic.Reason = "oauth_degradation_group_limited"
+		state.RestoreDiagnostic = diagnostic
+		return true, nil
+	}
 	conflict, allPresent := false, len(state.Removed) > 0
 	for _, group := range state.Removed {
 		var exists, replaced bool
@@ -73,7 +86,7 @@ func restoreQualityGroups(ctx context.Context, tx *sql.Tx, accountID int64, stat
 			return false, err
 		}
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE accounts SET updated_at=clock_timestamp() WHERE id=$1`, accountID)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET updated_at=clock_timestamp() WHERE id=$1`, accountID)
 	return false, err
 }
 

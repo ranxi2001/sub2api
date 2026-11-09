@@ -26,6 +26,10 @@ func applyOpenAITwoFAAdmissionOutcome(ctx context.Context, tx *sql.Tx, plan *ser
 	if err != nil {
 		return "", err
 	}
+	account := service.Account{Concurrency: concurrency}
+	if err := json.Unmarshal(extra, &account.Extra); err != nil {
+		return "", err
+	}
 	var state service.OpenAITwoFAAdmissionState
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return "", err
@@ -49,7 +53,7 @@ func applyOpenAITwoFAAdmissionOutcome(ctx context.Context, tx *sql.Tx, plan *ser
 		if groupErr != nil && groupErr != sql.ErrNoRows {
 			return "", groupErr
 		}
-		if !valid {
+		if !valid || len(account.FilterOAuthDegradationGroups([]int64{state.Policy.IsolationGroupID})) == 0 {
 			// Preserve the decision even if the target was disabled/deleted after
 			// enrollment. Keep customer traffic off and retry on later tests;
 			// a later answer of 21 cannot cancel this isolation decision.
@@ -73,10 +77,6 @@ func applyOpenAITwoFAAdmissionOutcome(ctx context.Context, tx *sql.Tx, plan *ser
 				return "", err
 			}
 		}
-	}
-	account := service.Account{Concurrency: concurrency}
-	if err := json.Unmarshal(extra, &account.Extra); err != nil {
-		return "", err
 	}
 	passedConcurrency := account.LimitOAuthDegradationConcurrency(state.Policy.PassedConcurrency)
 	encoded, err := json.Marshal(state)

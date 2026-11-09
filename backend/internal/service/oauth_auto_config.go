@@ -235,6 +235,9 @@ func (s *AccountOpsService) SaveOAuthAutoConfig(ctx context.Context, c OAuthAuto
 	if err := s.validateModelBillingGroupSelections(ctx, c.ModelBilling); err != nil {
 		return c, err
 	}
+	if err := s.validateDegradationGroupSelections(ctx, c.DegradationAction); err != nil {
+		return c, err
+	}
 
 	if c.Enabled {
 		for _, id := range c.GroupIDs {
@@ -300,6 +303,31 @@ func (s *AccountOpsService) SaveOAuthAutoConfig(ctx context.Context, c OAuthAuto
 	s.autoConfig.Store(c)
 	s.autoBlocked.Store(false)
 	return c, nil
+}
+
+func (s *AccountOpsService) validateDegradationGroupSelections(ctx context.Context, cfg OAuthDegradationConfig) error {
+	if !cfg.LimitGroups {
+		return nil
+	}
+	current, err := GetOAuthAutoConfig(ctx, s.settings)
+	if err != nil {
+		return err
+	}
+	for _, id := range cfg.GroupIDs {
+		// Keep saved IDs even if the group has since been disabled or removed.
+		// Removing it from this template must not restore an applied restriction.
+		if slices.Contains(current.DegradationAction.GroupIDs, id) {
+			continue
+		}
+		group, err := s.autoGroups.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if group == nil || group.Status != StatusActive {
+			return infraerrors.BadRequest("OAUTH_DEGRADATION_GROUP_INVALID", "select active groups to remove after degradation")
+		}
+	}
+	return nil
 }
 
 func (s *AccountOpsService) validateModelBillingGroupSelections(ctx context.Context, cfg ModelBillingConfig) error {

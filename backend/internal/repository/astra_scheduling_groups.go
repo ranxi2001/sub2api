@@ -95,6 +95,13 @@ func reconcileAstraGroups(ctx context.Context, tx *sql.Tx, id int64, state *astr
 				return false, false, err
 			}
 		} else {
+			allowedGroups, groupErr := lockOAuthDegradationGroupBindings(ctx, tx, id, []int64{m.GroupID})
+			if groupErr != nil {
+				return false, false, groupErr
+			}
+			if len(allowedGroups) == 0 {
+				return false, false, errors.New("astra_restore_conflict")
+			}
 			if err = lockLiveGroups(ctx, tx, []int64{m.GroupID}); err != nil {
 				return false, false, errors.New("astra_restore_conflict")
 			}

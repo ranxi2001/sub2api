@@ -9,7 +9,7 @@
       <button v-if="!draft && !loading" class="btn btn-secondary" @click="load">{{ t('autoConfig.retry') }}</button>
       <form v-if="draft" class="space-y-5" @submit.prevent="save">
         <p v-if="draft.runtime_blocked" role="alert" class="rounded-xl bg-amber-50 p-4 text-amber-800">{{ t('autoConfig.blocked') }}</p>
-        <fieldset :disabled="saving" class="min-w-0"><OAuthDegradationCard v-model="draft.degradation_action" :user-id="auth.user?.id" /></fieldset>
+        <fieldset :disabled="saving" class="min-w-0"><OAuthDegradationCard v-model="draft.degradation_action" :groups="groups" :user-id="auth.user?.id" /></fieldset>
         <fieldset :disabled="saving" class="min-w-0"><BPSDefaultsCard v-model="draft.excel_bps" :groups="groups" /></fieldset>
         <fieldset :disabled="saving" class="min-w-0">
           <section class="card space-y-5" data-testid="model-billing">

@@ -28,6 +28,7 @@ func TestMoveExcelBPSOn403RollsBackFailures(t *testing.T) {
 				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 			mock.ExpectQuery("(?s)SELECT id FROM accounts.*FOR UPDATE").WithArgs(int64(27), "{\"access_token\":\"test-token\"}", "7").
 				WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(27))
+			expectOAuthDegradationGroupBindingsAccount(mock, int64(27), `{}`)
 			mock.ExpectQuery("SELECT group_id FROM account_groups.*FOR UPDATE").WithArgs(int64(27)).
 				WillReturnRows(sqlmock.NewRows([]string{"group_id"}).AddRow(3))
 			for _, stage := range []struct{ name, query string }{
