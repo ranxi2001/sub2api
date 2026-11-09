@@ -63,6 +63,46 @@ afterEach(() => {
 })
 
 describe('daily schedulable timers', () => {
+  it.each([
+    ['zh', '一次性', '打开调度', '当前待执行任务', '剩余'],
+    ['en', 'One-shot', 'Enable scheduling', 'Pending tasks', 'in ']
+  ])('shows a one-shot task in %s before opening the task dialog', async (locale, once, action, status, remaining) => {
+    api.list.mockResolvedValue(snapshot([{ ...dailyOpen, recurrence: 'once', daily_time: '' }]))
+    const wrapper = await render(locale)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="timer-pending-summary"]').text()).toContain(status)
+    const summary = wrapper.get('[data-test="timer-summary-open"]').text()
+    for (const text of [once, action, '2026-11-07 08:00', 'Asia/Shanghai', 'UTC+08:00', remaining]) {
+      expect(summary).toContain(text)
+    }
+    expect(wrapper.find('[data-test="timer-edit-open"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="timer-cancel-open"]').exists()).toBe(false)
+    expect(api.save).not.toHaveBeenCalled()
+  })
+
+  it.each([dailyOpen, dailyClose])('shows a single daily $action task without requiring a paired window', async task => {
+    api.list.mockResolvedValue(snapshot([task]))
+    const wrapper = await render('zh')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="timer-daily-window"]').exists()).toBe(false)
+    const summary = wrapper.get(`[data-test="timer-summary-${task.action}"]`).text()
+    expect(summary).toContain(`每天 ${task.daily_time}`)
+    expect(summary).toContain(`${task.local_date} ${task.local_time}`)
+    expect(summary).toContain('Asia/Shanghai')
+  })
+
+  it('removes completed tasks from the row summary on refresh and hides cancelled tasks', async () => {
+    api.list.mockResolvedValue(snapshot([dailyOpen, { ...dailyClose, status: 'cancelled' }]))
+    const wrapper = await render()
+    expect(wrapper.find('[data-test="timer-summary-open"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="timer-summary-close"]').exists()).toBe(false)
+    api.list.mockResolvedValue(snapshot([{ ...dailyOpen, status: 'executed', actual_at: dailyOpen.execute_at }]))
+    await wrapper.setProps({ refreshKey: 1 })
+    await flushPromises()
+    expect(wrapper.find('[data-test="timer-pending-summary"]').exists()).toBe(false)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+
   it('previews and saves a repeating wall clock without a one-shot date or duration', async () => {
     const wrapper = await render()
     await wrapper.get('[data-test="timer-manage"]').trigger('click')
