@@ -29,7 +29,7 @@ try {
     try {
       const html = create(join(root, suffix + '.html'), `<html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="./${suffix}.js"></script></html>`)
       create(join(root, suffix + '.js'), `
-        import {createPinia} from 'pinia';import {mount} from '@vue/test-utils';import {createRouter,createMemoryHistory} from 'vue-router';
+        import {h} from 'vue';import {createPinia} from 'pinia';import {mount} from '@vue/test-utils';import {createRouter,createMemoryHistory} from 'vue-router';
         import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';import {apiClient} from '/src/api/client.ts';import {useAuthStore} from '/src/stores/auth.ts';
         import View from '/src/views/admin/AccountsView.vue';import '/src/style.css';
         await loadLocaleMessages('zh');i18n.global.locale.value='zh';
@@ -61,7 +61,7 @@ try {
         const pinia=createPinia();useAuthStore(pinia).user={id:41,role:'admin',status:'active',email:'admin@example.invalid'};
         const router=createRouter({history:createMemoryHistory(),routes:[{path:'/:pathMatch(.*)*',component:{render:()=>null}}]});await router.push('/admin/accounts');await router.isReady();
         window.__accountTypesFixture.wrapper=mount(View,{attachTo:'#app',global:{plugins:[pinia,i18n,router],stubs:{
-          AppLayout:{template:'<main class="p-6 bg-gray-50 min-h-screen dark:bg-dark-900"><slot /></main>'},CreateAccountModal:true,EditAccountModal:true,BulkEditAccountModal:true,
+          AppLayout:{setup(_,ctx){return()=>h('main',{class:'p-6 bg-gray-50 min-h-screen dark:bg-dark-900'},ctx.slots.default?.())}},CreateAccountModal:true,EditAccountModal:true,BulkEditAccountModal:true,
           SyncFromCrsModal:true,TempUnschedStatusModal:true,ImportDataModal:true,ReAuthAccountModal:true,AccountTestModal:true,AccountStatsModal:true,IQTestModal:true,ScheduledTestsPanel:true,
           ErrorPassthroughRulesModal:true,TLSFingerprintProfilesModal:true,NewAPIUpstreamConfigDialog:true,BulkExport2FADialog:true,TotpStepUpDialog:true
         }}});
