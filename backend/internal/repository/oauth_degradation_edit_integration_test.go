@@ -37,3 +37,27 @@ func TestOAuthDegradationStaleEditPreservesAction(t *testing.T) {
 	require.Contains(t, string(data), "gpt-6-luna")
 	require.NotContains(t, string(data), "gpt-6.1-sol")
 }
+
+func TestOAuthDegradationBulkAndRepeatedStaleEditRetainLowerManualLimit(t *testing.T) {
+	ctx := t.Context()
+	tx := testEntTx(t)
+	a := mustCreateAccount(t, tx.Client(), &service.Account{Name: "degradation-manual-fixture", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Concurrency: 20})
+	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	stale, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET concurrency=3,extra=jsonb_set(COALESCE(extra,'{}'::jsonb),'{oauth_degradation_action}','{"concurrency_cap":10,"models":["gpt-6-luna"]}') WHERE id=$1`, a.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.Update(ctx, stale))
+	got, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, 3, got.Concurrency, "stale save retains later manual reduction")
+	for _, proposed := range []int{0, -1, 20} {
+		_, err = repo.BulkUpdate(ctx, []int64{a.ID}, service.AccountBulkUpdate{Concurrency: &proposed, Extra: map[string]any{"oauth_degradation_action": nil, "manual": "bulk"}})
+		require.NoError(t, err)
+		got, err = repo.GetByID(ctx, a.ID)
+		require.NoError(t, err)
+		require.Equal(t, 3, got.Concurrency)
+		require.Contains(t, got.Extra, "oauth_degradation_action")
+		require.Equal(t, "bulk", got.Extra["manual"])
+	}
+}

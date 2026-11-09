@@ -171,6 +171,8 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		return service.ErrAccountNilInput
 	}
 
+	account.Extra = copyJSONMap(account.Extra)
+	delete(account.Extra, service.OAuthDegradationActionExtraKey)
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -788,7 +790,7 @@ func lockAndMergeAccountProbeExtra(
 			),
 			extra -> 'opencode_go_usage_auto_refresh',
 			extra -> 'opencode_go_usage_snapshot',
-			COALESCE(extra, '{}'::jsonb)
+			COALESCE(extra, '{}'::jsonb),concurrency
 		FROM accounts
 		WHERE id = $1 AND deleted_at IS NULL
 		FOR NO KEY UPDATE
@@ -818,6 +820,7 @@ func lockAndMergeAccountProbeExtra(
 		currentOpenCodeAutoRefresh     []byte
 		currentOpenCodeSnapshot        []byte
 		currentExtraJSON               []byte
+		currentConcurrency             int
 	)
 	if err := rows.Scan(
 		&identityUnchanged,
@@ -832,7 +835,7 @@ func lockAndMergeAccountProbeExtra(
 		&opencodeGroupIdentityUnchanged,
 		&currentOpenCodeAutoRefresh,
 		&currentOpenCodeSnapshot,
-		&currentExtraJSON,
+		&currentExtraJSON, &currentConcurrency,
 	); err != nil {
 		return nil, err
 	}
@@ -855,6 +858,8 @@ func lockAndMergeAccountProbeExtra(
 			currentExtra = nil
 		}
 	}
+	live := service.Account{Concurrency: currentConcurrency, Extra: currentExtra}
+	account.Concurrency = live.LimitOAuthDegradationConcurrency(account.Concurrency)
 	validNewAPIBinding := false
 	if currentExtra[service.UpstreamBillingProviderExtraKey] == "new_api" {
 		var fingerprint string
@@ -3533,7 +3538,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if updates.Concurrency != nil {
-		setClauses = append(setClauses, "concurrency = CASE WHEN extra ? 'oauth_degradation_action' THEN LEAST($"+itoa(idx)+",COALESCE((extra->'oauth_degradation_action'->>'concurrency_cap')::int,concurrency)) ELSE $"+itoa(idx)+" END")
+		setClauses = append(setClauses, "concurrency = "+oauthDegradationConcurrencySQL("$"+itoa(idx)))
 		args = append(args, *updates.Concurrency)
 		idx++
 	}

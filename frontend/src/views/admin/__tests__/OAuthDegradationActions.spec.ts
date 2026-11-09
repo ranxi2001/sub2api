@@ -57,3 +57,12 @@ it('OAuth degradation notice follows A to B to C with shared dismissal, refresh 
  expect(useNewFeatureNoticeStore().isDismissed(41,a)).toBe(true)
  login.unmount(); future.unmount()
 })
+
+it('reads a saved null model scope as deny-all and keeps it editable', async () => {
+ vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...baseline, degradation_action: { enabled: true, threshold_percent: 50, target_concurrency: 10, models: null as any } })
+ const w=mount(AutoConfigView); await flushPromises()
+ expect(w.get('[data-testid="degradation-action"]').text()).toContain('autoConfig.degradation.empty')
+ await w.get('form').trigger('submit'); await flushPromises()
+ expect(saveAutoConfig).toHaveBeenCalledWith(expect.objectContaining({degradation_action:expect.objectContaining({models:[]})}))
+ w.unmount()
+})

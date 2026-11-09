@@ -84,14 +84,24 @@ func (a *Account) LimitOAuthDegradationConcurrency(proposed int) int {
 	if !a.HasOAuthDegradationAction() {
 		return proposed
 	}
+	// Never turn a finite limit into the project's <=0 (unlimited) value,
+	// nor undo a later manual reduction while another policy recovers.
+	ceiling := a.Concurrency
 	state, ok := a.degradationState()
-	if !ok {
-		return min(proposed, a.Concurrency)
+	if ok && state.ConcurrencyCap > 0 {
+		if ceiling <= 0 {
+			ceiling = state.ConcurrencyCap
+		} else {
+			ceiling = min(ceiling, state.ConcurrencyCap)
+		}
 	}
-	if state.ConcurrencyCap <= 0 {
-		return min(proposed, a.Concurrency)
+	if ceiling <= 0 {
+		return ceiling
 	}
-	return min(proposed, state.ConcurrencyCap)
+	if proposed <= 0 {
+		return ceiling
+	}
+	return min(proposed, ceiling)
 }
 
 type oauthDegradationRepository interface {

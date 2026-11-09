@@ -434,6 +434,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		return nil, err
 	}
 	accountExtra = MergeOpenAICodexTicketExtra(accountExtra, nil)
+	delete(accountExtra, OAuthDegradationActionExtraKey)
 	if (input.Platform == PlatformTypeSafe || input.Platform == PlatformMistral) && input.Type != AccountTypeAPIKey {
 		return nil, fmt.Errorf("%s accounts only support apikey credentials", input.Platform)
 	}

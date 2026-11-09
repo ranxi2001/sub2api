@@ -120,7 +120,7 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET concurrency=$2,extra=jsonb_set(COALESCE(extra,'{}'::jsonb),'{oauth_degradation_action}',$3::jsonb),updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') WHERE id=$1`, id, next, string(encoded))
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET concurrency=$2,extra=jsonb_set(jsonb_set(COALESCE(extra,'{}'::jsonb),'{oauth_degradation_action}',$3::jsonb),'{auto_config_concurrency}',COALESCE(extra->'auto_config_concurrency','{}'::jsonb)||'{"degradation_hold":true}'::jsonb),updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') WHERE id=$1`, id, next, string(encoded))
 	if err != nil {
 		return err
 	}
@@ -135,4 +135,11 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	}
 	r.syncSchedulerAccountSnapshotDetached(ctx, id)
 	return nil
+}
+
+// A bulk update evaluates this expression against each locked live row.
+func oauthDegradationConcurrencySQL(proposed string) string {
+	cap := "(extra->'oauth_degradation_action'->>'concurrency_cap')::int"
+	ceiling := "(CASE WHEN " + cap + ">0 THEN CASE WHEN concurrency>0 THEN LEAST(concurrency," + cap + ") ELSE " + cap + " END ELSE concurrency END)"
+	return "CASE WHEN extra ? 'oauth_degradation_action' THEN CASE WHEN " + ceiling + "<=0 THEN " + ceiling + " WHEN " + proposed + "<=0 THEN " + ceiling + " ELSE LEAST(" + proposed + "," + ceiling + ") END ELSE " + proposed + " END"
 }

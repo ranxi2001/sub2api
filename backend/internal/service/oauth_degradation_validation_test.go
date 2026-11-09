@@ -46,3 +46,14 @@ func TestOAuthDegradationZeroConcurrencyRetainsModelScope(t *testing.T) {
 	require.True(t, a.IsModelSupported("gpt-6-luna"), "non-positive existing concurrency must not corrupt valid model scope")
 	require.False(t, a.IsModelSupported("gpt-6.1-sol"))
 }
+
+func TestOAuthDegradationFiniteConcurrencyCannotBecomeUnlimited(t *testing.T) {
+	for _, proposed := range []int{-1, 0, 3, 10, 20} {
+		a := &Account{Concurrency: 5, Extra: map[string]any{OAuthDegradationActionExtraKey: map[string]any{"models": []string{"gpt-6-luna"}, "concurrency_cap": 10}}}
+		expected := 5
+		if proposed > 0 {
+			expected = min(proposed, 5)
+		}
+		require.Equal(t, expected, a.LimitOAuthDegradationConcurrency(proposed))
+	}
+}
