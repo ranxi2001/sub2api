@@ -2,7 +2,7 @@ name: OpenAI legacy admission binding
 
 on:
   push:
-    branches: [fix/openai-sticky-escape-rebind-20261109]
+    branches: [fix/pr756-legacy-admission-followup-20261110]
     paths:
       - 'backend/internal/service/openai_account_scheduler.go'
       - 'backend/internal/service/openai_gateway_scheduling.go'
@@ -38,7 +38,6 @@ jobs:
       GOMAXPROCS: '2'
       GOFLAGS: '-p=2'
       EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
-      LOG_DIR: ${{ runner.temp }}/pr756-legacy-admission-logs
     steps:
       - uses: actions/checkout@v6
         with:
@@ -52,6 +51,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          LOG_DIR="$RUNNER_TEMP/pr756-legacy-admission-logs"
+          printf 'LOG_DIR=%s\n' "$LOG_DIR" >> "$GITHUB_ENV"
           mkdir -p "$LOG_DIR"
           test "$(git rev-parse HEAD)" = "$EXPECTED"
           test -z "$(git status --porcelain)"
