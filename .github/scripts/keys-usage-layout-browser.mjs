@@ -98,7 +98,7 @@ async function open(viewport, query = '') {
   return page
 }
 async function screenshot(page, name, scope) {
-  await page.screenshot({ path: path.join(out, `${name}.png`), fullPage: false })
+  await page.screenshot({ path: path.join(out, `${name}.png`), fullPage: false, animations: 'disabled' })
   shots.push({ name, scope, sha: scope === 'baseline' ? baseline : head, viewport: page.viewportSize() })
 }
 async function checkRiskSummary(page) {
