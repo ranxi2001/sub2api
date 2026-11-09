@@ -1,0 +1,90 @@
+name: Maintenance UI evidence for PR760 and PR763
+
+on:
+  push:
+    branches: [evidence/maintenance-ui-760-763-20261110]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintenance-ui-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      EVIDENCE_HEAD: ${{ github.sha }}
+      EVIDENCE_RUNTIME: ${{ runner.temp }}/maintenance-ui-runtime
+      EVIDENCE_OUTPUT: ${{ runner.temp }}/maintenance-ui-evidence
+      PLAYWRIGHT_ROOT: ${{ runner.temp }}/maintenance-ui-runtime/browser/node_modules/playwright
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert evidence head and archive exact sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_OUTPUT" "$EVIDENCE_RUNTIME/sources" "$EVIDENCE_RUNTIME/dependencies"
+          test "$GITHUB_REF" = refs/heads/evidence/maintenance-ui-760-763-20261110
+          test "$(git rev-parse HEAD)" = "$EVIDENCE_HEAD"
+          test -z "$(git status --porcelain)"
+          base=45e92f44470f91435bd261ea18111c271063c0ac
+          pr760=7aa315645d76c01f7afa2f3ee0de6af001cc97f2
+          pr763=8ff898117438587b5aad0fe5895745d010c6b6e4
+          git -c credential.helper= fetch --no-tags https://github.com/ranxi2001/sub2api.git "$base" "$pr760" "$pr763"
+          test "$(git merge-base "$pr760" "$pr763")" = "$base"
+          test "$(git rev-parse "$base:frontend/src/views/admin/PrioritySchedulingView.vue")" = 1fec8806cfa1986a1c0dd98f57db68105aa94110
+          test "$(git rev-parse "$pr760:frontend/src/views/admin/PrioritySchedulingView.vue")" = 566b5dc22bb7b0e8ba9edac76f8d3584533c4aa0
+          test "$(git rev-parse "$base:frontend/src/components/account/SchedulableTimerControl.vue")" = 00edd09ceeca1f2842eefa497ef1a9726aee2bba
+          test "$(git rev-parse "$pr763:frontend/src/components/account/SchedulableTimerControl.vue")" = e1da8708cb2c5558c1f2d59aeeb37fcc03f1978f
+          for label in base pr760 pr763; do
+            sha="${!label}"
+            test "$(git rev-parse "$sha^{commit}")" = "$sha"
+            mkdir "$EVIDENCE_RUNTIME/sources/$label"
+            git archive --format=tar "$sha" | tar -xf - -C "$EVIDENCE_RUNTIME/sources/$label"
+            for file in package.json pnpm-lock.yaml .npmrc; do
+              cmp "$EVIDENCE_RUNTIME/sources/base/frontend/$file" "$EVIDENCE_RUNTIME/sources/$label/frontend/$file"
+            done
+            printf '%s %s\n' "$label" "$sha" >> "$EVIDENCE_OUTPUT/archive-commits.txt"
+          done
+          cp "$EVIDENCE_RUNTIME/sources/base/frontend/"{package.json,pnpm-lock.yaml,.npmrc} "$EVIDENCE_RUNTIME/dependencies/"
+          chmod -R a-w "$EVIDENCE_RUNTIME/sources"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Frozen frontend dependencies outside immutable sources
+        run: |
+          set -euo pipefail
+          pnpm --dir "$EVIDENCE_RUNTIME/dependencies" install --frozen-lockfile
+          ln -s "$EVIDENCE_RUNTIME/dependencies/node_modules" "$EVIDENCE_RUNTIME/node_modules"
+      - name: Isolated Chromium and Chinese fonts
+        run: |
+          set -euo pipefail
+          npm install --prefix "$EVIDENCE_RUNTIME/browser" --no-save --ignore-scripts playwright@1.56.1
+          "$EVIDENCE_RUNTIME/browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk fonts-noto-core
+      - name: Real components, CSS gates, before and after, interactions
+        run: node .github/scripts/maintenance-ui-evidence.mjs
+      - name: Evidence checkout remains unchanged
+        if: always()
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EVIDENCE_HEAD"
+          git diff --check
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: maintenance-ui-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/maintenance-ui-evidence
+          if-no-files-found: error
+          retention-days: 14
