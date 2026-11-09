@@ -255,6 +255,16 @@ try {
     await range.locator('.date-picker-trigger').click()
     const dropdown = range.locator('.date-picker-dropdown')
     await dropdown.waitFor({ state: 'visible' })
+    await page.waitForFunction(() => {
+      const dropdown = document.querySelector('[data-test="key-usage-date-range"] .date-picker-dropdown')
+      return dropdown && getComputedStyle(dropdown).opacity === '1' &&
+        !dropdown.classList.contains('date-picker-dropdown-enter-from') &&
+        !dropdown.classList.contains('date-picker-dropdown-enter-active')
+    })
+    assert(await inputs.nth(0).evaluate(input => {
+      const rect = input.getBoundingClientRect()
+      return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === input
+    }), 'The open calendar must be visible above the key list')
     const bounds = await dropdown.boundingBox()
     assert(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1, JSON.stringify(bounds))
     await screenshot(page, `after-calendar-range-${locale}-${width}`, 'candidate')
