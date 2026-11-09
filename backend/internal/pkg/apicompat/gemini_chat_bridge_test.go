@@ -2,6 +2,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -97,10 +98,158 @@ func TestGeminiSSETranslator(t *testing.T) {
 	require.True(t, json.Valid([]byte(gjson.Get(firstSSEPayload(string(out)), "@this").Raw)))
 }
 
+func TestGeminiSSETranslatorForwardsKeepaliveComments(t *testing.T) {
+	translator := NewGeminiSSETranslator("gpt-4o")
+	out := translator.Push([]byte(": keepalive\n\n"))
+	require.Contains(t, string(out), ": keepalive\n\n")
+	out = append(out, translator.Push([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n"))...)
+	require.Contains(t, string(out), `"text":"hi"`)
+}
+
+func TestGeminiSSETranslatorIsolatesToolsByChoice(t *testing.T) {
+	translator := NewGeminiSSETranslator("gpt-4o")
+	var out []byte
+	out = append(out, translator.Push([]byte("data: {\"choices\":["+
+		"{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"alpha\",\"arguments\":\"{\\\"a\\\":\"}}]}},"+
+		"{\"index\":1,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"beta\",\"arguments\":\"{\\\"b\\\":\"}}]}}"+
+		"]}\n"))...)
+	out = append(out, translator.Push([]byte("data: {\"choices\":["+
+		"{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1}\"}}]},\"finish_reason\":\"tool_calls\"},"+
+		"{\"index\":1,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"2}\"}}]}}"+
+		"]}\n"))...)
+	out = append(out, translator.Push([]byte("data: {\"choices\":[{\"index\":1,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n"))...)
+
+	payloads := sseDataPayloads(string(out))
+	require.Len(t, payloads, 2)
+	require.Equal(t, int64(0), gjson.Get(payloads[0], "candidates.0.index").Int())
+	require.Equal(t, "alpha", gjson.Get(payloads[0], "candidates.0.content.parts.0.functionCall.name").String())
+	require.Equal(t, int64(1), gjson.Get(payloads[0], "candidates.0.content.parts.0.functionCall.args.a").Int())
+	require.False(t, gjson.Get(payloads[0], "candidates.1").Exists())
+	require.Equal(t, int64(1), gjson.Get(payloads[1], "candidates.0.index").Int())
+	require.Equal(t, "beta", gjson.Get(payloads[1], "candidates.0.content.parts.0.functionCall.name").String())
+	require.Equal(t, int64(2), gjson.Get(payloads[1], "candidates.0.content.parts.0.functionCall.args.b").Int())
+}
+
+func TestGeminiANYFiltersMultipleAllowedFunctionNames(t *testing.T) {
+	body := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"tools":[{"functionDeclarations":[
+			{"name":"lookup","parameters":{"type":"OBJECT","properties":{"q":{"type":"STRING"}}}},
+			{"name":"secret","parameters":{"type":"object"}},
+			{"name":"other","parameters":{"type":"object"}}
+		]}],
+		"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["lookup","other"]}}
+	}`)
+	got, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+	require.NoError(t, err)
+	require.Equal(t, "required", gjson.GetBytes(got, "tool_choice").String())
+	require.Equal(t, int64(2), gjson.GetBytes(got, "tools.#").Int())
+	require.Equal(t, "lookup", gjson.GetBytes(got, "tools.0.function.name").String())
+	require.Equal(t, "other", gjson.GetBytes(got, "tools.1.function.name").String())
+	require.NotContains(t, string(got), "secret")
+	require.Equal(t, "object", gjson.GetBytes(got, "tools.0.function.parameters.type").String())
+	require.Equal(t, "string", gjson.GetBytes(got, "tools.0.function.parameters.properties.q.type").String())
+}
+
+func TestGeminiANYDropsToolsOutsideAllowedNames(t *testing.T) {
+	body := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"tools":[{"functionDeclarations":[
+			{"name":"lookup","parameters":{"type":"object"}},
+			{"name":"other","parameters":{"type":"object"}}
+		]}],
+		"toolConfig":{"functionCallingConfig":{"mode":"ANY","allowedFunctionNames":["lookup"]}}
+	}`)
+	got, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+	require.NoError(t, err)
+	require.Equal(t, "lookup", gjson.GetBytes(got, "tool_choice.function.name").String())
+	require.Equal(t, int64(1), gjson.GetBytes(got, "tools.#").Int())
+	require.Equal(t, "lookup", gjson.GetBytes(got, "tools.0.function.name").String())
+}
+
+func TestGeminiAUTOSingleAllowedNameDoesNotForceCall(t *testing.T) {
+	body := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"tools":[{"functionDeclarations":[
+			{"name":"lookup","parameters":{"type":"object"}},
+			{"name":"other","parameters":{"type":"object"}}
+		]}],
+		"toolConfig":{"functionCallingConfig":{"mode":"AUTO","allowedFunctionNames":["lookup"]}}
+	}`)
+	got, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(got, "tool_choice").Exists())
+	require.Equal(t, int64(1), gjson.GetBytes(got, "tools.#").Int())
+	require.Equal(t, "lookup", gjson.GetBytes(got, "tools.0.function.name").String())
+}
+
+func TestGeminiAllowedNamesMustMatchADeclaredTool(t *testing.T) {
+	body := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"tools":[{"functionDeclarations":[{"name":"lookup","parameters":{"type":"object"}}]}],
+		"toolConfig":{"functionCallingConfig":{"mode":"AUTO","allowedFunctionNames":["missing"]}}
+	}`)
+	_, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+	require.Error(t, err)
+}
+
+func TestGeminiResponseSchemaConvertsUppercaseTypes(t *testing.T) {
+	body := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"hi"}]}],
+		"generationConfig":{
+			"responseMimeType":"application/json",
+			"responseSchema":{
+				"type":"OBJECT",
+				"propertyOrdering":["city"],
+				"properties":{
+					"city":{"type":"STRING"},
+					"n":{"type":"INTEGER","nullable":true},
+					"tags":{"type":"ARRAY","items":{"type":"STRING"}}
+				},
+				"required":["city"]
+			}
+		}
+	}`)
+	got, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+	require.NoError(t, err)
+	schema := gjson.GetBytes(got, "response_format.json_schema.schema")
+	require.Equal(t, "object", schema.Get("type").String())
+	require.Equal(t, "string", schema.Get("properties.city.type").String())
+	require.Equal(t, "integer", schema.Get("properties.n.type.0").String())
+	require.Equal(t, "null", schema.Get("properties.n.type.1").String())
+	require.Equal(t, "array", schema.Get("properties.tags.type").String())
+	require.Equal(t, "string", schema.Get("properties.tags.items.type").String())
+	require.False(t, schema.Get("propertyOrdering").Exists())
+	require.False(t, schema.Get("properties.n.nullable").Exists())
+}
+
+func TestGeminiResponseSchemaRejectsUnknownType(t *testing.T) {
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"generationConfig":{"responseMimeType":"application/json","responseSchema":{"type":"DATE"}}}`)
+	_, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+	require.Error(t, err)
+}
+
+func TestGeminiToolSchemaRejectsUnknownType(t *testing.T) {
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}],"tools":[{"functionDeclarations":[{"name":"lookup","parameters":{"type":"OBJECT","properties":{"q":{"type":"FOO"}}}}]}]}`)
+	_, err := GeminiGenerateContentToChatCompletions("gpt-4o", body, false)
+	require.Error(t, err)
+}
+
 func TestEstimateGeminiTotalTokens(t *testing.T) {
 	tokens, characters := EstimateGeminiTotalTokens([]byte(`{"systemInstruction":{"parts":[{"text":"abcd"}]},"contents":[{"parts":[{"text":"efgh"}]}]}`))
 	require.Equal(t, 9, characters)
 	require.Equal(t, 3, tokens)
+}
+
+func sseDataPayloads(body string) []string {
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		rest, ok := strings.CutPrefix(line, "data: ")
+		if ok && rest != "" {
+			out = append(out, rest)
+		}
+	}
+	return out
 }
 
 func firstSSEPayload(body string) string {

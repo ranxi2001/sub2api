@@ -65,16 +65,27 @@ func GeminiGenerateContentToChatCompletions(model string, body []byte, stream bo
 	if stream {
 		out["stream_options"] = map[string]any{"include_usage": true}
 	}
-	if tools := geminiToolsToChatTools(body); len(tools) > 0 {
-		out["tools"] = tools
-		if choice := geminiToolChoice(body, tools); len(choice) > 0 {
-			var decoded any
-			if err := json.Unmarshal(choice, &decoded); err == nil {
-				out["tool_choice"] = decoded
+	tools, err := geminiToolsToChatTools(body)
+	if err != nil {
+		return nil, err
+	}
+	if len(tools) > 0 {
+		mode, allowed := geminiFunctionCallingConfig(body)
+		// NONE 不调用工具，允许名单不必收窄。其余模式只把名单里的函数发给上游。
+		if len(allowed) > 0 && mode != "NONE" {
+			tools = filterGeminiChatTools(tools, allowed)
+			if len(tools) == 0 {
+				return nil, fmt.Errorf("allowedFunctionNames did not match any declared tool")
 			}
 		}
+		out["tools"] = tools
+		if choice := geminiToolChoiceValue(mode, allowed); choice != nil {
+			out["tool_choice"] = choice
+		}
 	}
-	applyGeminiGenerationConfig(body, out)
+	if err := applyGeminiGenerationConfig(body, out); err != nil {
+		return nil, err
+	}
 
 	encoded, err := json.Marshal(out)
 	if err != nil {
@@ -112,11 +123,18 @@ func ChatCompletionsJSONToGemini(body []byte, fallbackModel string) ([]byte, err
 type GeminiSSETranslator struct {
 	model string
 	buf   bytes.Buffer
-	tools map[int]*geminiToolAccum
+	// 工具增量按候选和 tool index 分开。两个候选都会从 index 0 开始，
+	// 混在一张表里会串参数，并且先结束的候选会清掉另一个的状态。
+	tools map[geminiToolKey]*geminiToolAccum
+}
+
+type geminiToolKey struct {
+	choice int
+	tool   int
 }
 
 func NewGeminiSSETranslator(model string) *GeminiSSETranslator {
-	return &GeminiSSETranslator{model: strings.TrimSpace(model), tools: map[int]*geminiToolAccum{}}
+	return &GeminiSSETranslator{model: strings.TrimSpace(model), tools: map[geminiToolKey]*geminiToolAccum{}}
 }
 
 // Push 吃进任意切分的上游字节，返回已经可以写给 Gemini 客户端的 SSE。
@@ -331,14 +349,21 @@ func geminiInlineDataToChatPart(part gjson.Result) (map[string]any, bool) {
 	}, true
 }
 
-func geminiToolsToChatTools(body []byte) []any {
+func geminiToolsToChatTools(body []byte) ([]any, error) {
 	var tools []any
+	var convErr error
 	gjson.GetBytes(body, "tools").ForEach(func(_, tool gjson.Result) bool {
+		if convErr != nil {
+			return false
+		}
 		decls := tool.Get("functionDeclarations")
 		if !decls.Exists() {
 			decls = tool.Get("function_declarations")
 		}
 		decls.ForEach(func(_, decl gjson.Result) bool {
+			if convErr != nil {
+				return false
+			}
 			name := strings.TrimSpace(decl.Get("name").String())
 			if name == "" {
 				return true
@@ -348,69 +373,99 @@ func geminiToolsToChatTools(body []byte) []any {
 				fn["description"] = desc
 			}
 			if params := decl.Get("parameters"); params.Exists() && params.Raw != "" && params.Raw != "null" {
-				fn["parameters"] = json.RawMessage(params.Raw)
+				converted, err := geminiSchemaToJSONSchema(params.Raw)
+				if err != nil {
+					convErr = fmt.Errorf("tool %s parameters: %w", name, err)
+					return false
+				}
+				fn["parameters"] = json.RawMessage(converted)
 			}
 			tools = append(tools, map[string]any{"type": "function", "function": fn})
 			return true
 		})
-		return true
+		return convErr == nil
 	})
-	return tools
+	if convErr != nil {
+		return nil, convErr
+	}
+	return tools, nil
 }
 
-func geminiToolChoice(body []byte, tools []any) json.RawMessage {
+func geminiFunctionCallingConfig(body []byte) (mode string, allowed []string) {
 	cfg := gjson.GetBytes(body, "toolConfig.functionCallingConfig")
 	if !cfg.Exists() {
 		cfg = gjson.GetBytes(body, "tool_config.function_calling_config")
 	}
 	if !cfg.Exists() {
-		return nil
+		return "", nil
 	}
-	mode := strings.ToUpper(strings.TrimSpace(cfg.Get("mode").String()))
+	mode = strings.ToUpper(strings.TrimSpace(cfg.Get("mode").String()))
 	names := cfg.Get("allowedFunctionNames")
 	if !names.Exists() {
 		names = cfg.Get("allowed_function_names")
 	}
-	var allowed []string
 	names.ForEach(func(_, name gjson.Result) bool {
 		if text := strings.TrimSpace(name.String()); text != "" {
 			allowed = append(allowed, text)
 		}
 		return true
 	})
+	return mode, allowed
+}
+
+func filterGeminiChatTools(tools []any, allowed []string) []any {
+	allow := make(map[string]struct{}, len(allowed))
+	for _, name := range allowed {
+		allow[name] = struct{}{}
+	}
+	filtered := make([]any, 0, len(allowed))
+	for _, tool := range tools {
+		item, ok := tool.(map[string]any)
+		if !ok {
+			continue
+		}
+		fn, ok := item["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		name, ok := fn["name"].(string)
+		if !ok {
+			continue
+		}
+		if _, ok := allow[name]; !ok {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
+// geminiToolChoiceValue 只在必须调用函数时设置 tool_choice。
+// AUTO 即使 allowedFunctionNames 只有一项，也只收窄工具集，不改成强制调用。
+func geminiToolChoiceValue(mode string, allowed []string) any {
 	switch mode {
 	case "NONE":
-		return json.RawMessage(`"none"`)
+		return "none"
 	case "ANY":
 		if len(allowed) == 1 {
-			encoded, _ := json.Marshal(map[string]any{
+			return map[string]any{
 				"type":     "function",
 				"function": map[string]any{"name": allowed[0]},
-			})
-			return encoded
+			}
 		}
-		return json.RawMessage(`"required"`)
-	case "AUTO", "":
-		if len(allowed) == 1 && len(tools) > 0 {
-			encoded, _ := json.Marshal(map[string]any{
-				"type":     "function",
-				"function": map[string]any{"name": allowed[0]},
-			})
-			return encoded
-		}
-		return nil
+		return "required"
 	default:
 		return nil
 	}
 }
 
-func applyGeminiGenerationConfig(body []byte, out map[string]any) {
+func applyGeminiGenerationConfig(body []byte, out map[string]any) error {
 	cfg := gjson.GetBytes(body, "generationConfig")
 	if !cfg.Exists() {
 		cfg = gjson.GetBytes(body, "generation_config")
 	}
 	if !cfg.Exists() {
-		return
+		return nil
 	}
 	if cfg.Get("temperature").Exists() {
 		out["temperature"] = cfg.Get("temperature").Float()
@@ -455,16 +510,219 @@ func applyGeminiGenerationConfig(body []byte, out map[string]any) {
 		schema = cfg.Get("response_schema")
 	}
 	if strings.EqualFold(mime, "application/json") && schema.Exists() && schema.Raw != "" && schema.Raw != "null" {
+		converted, err := geminiSchemaToJSONSchema(schema.Raw)
+		if err != nil {
+			return fmt.Errorf("responseSchema: %w", err)
+		}
 		out["response_format"] = map[string]any{
 			"type": "json_schema",
 			"json_schema": map[string]any{
 				"name":   "response",
-				"schema": json.RawMessage(schema.Raw),
+				"schema": json.RawMessage(converted),
 			},
 		}
-	} else if strings.EqualFold(mime, "application/json") {
+		return nil
+	}
+	if strings.EqualFold(mime, "application/json") {
 		out["response_format"] = map[string]any{"type": "json_object"}
 	}
+	return nil
+}
+
+// geminiSchemaToJSONSchema 把 Gemini Schema 的 OBJECT/STRING 等类型递归转成 JSON Schema。
+// 无法识别的 type 在发给上游前拒绝，避免原样进入 json_schema。
+func geminiSchemaToJSONSchema(raw string) (json.RawMessage, error) {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var node any
+	if err := dec.Decode(&node); err != nil {
+		return nil, fmt.Errorf("invalid schema JSON")
+	}
+	obj, ok := node.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("schema must be an object")
+	}
+	converted, err := convertGeminiSchemaObject(obj)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(converted)
+	if err != nil {
+		return nil, fmt.Errorf("marshal schema: %w", err)
+	}
+	return encoded, nil
+}
+
+func convertGeminiSchemaObject(obj map[string]any) (any, error) {
+	nullable := false
+	if raw, ok := obj["nullable"]; ok {
+		flag, ok := raw.(bool)
+		if !ok {
+			return nil, fmt.Errorf("nullable must be a boolean")
+		}
+		nullable = flag
+	}
+	out := make(map[string]any, len(obj))
+	for key, value := range obj {
+		switch key {
+		case "nullable", "propertyOrdering", "property_ordering":
+			continue
+		case "type":
+			converted, err := convertGeminiSchemaType(value, nullable)
+			if err != nil {
+				return nil, err
+			}
+			out["type"] = converted
+		case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas":
+			converted, err := convertGeminiSchemaMap(value)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", key, err)
+			}
+			out[key] = converted
+		case "items", "additionalProperties", "additionalItems", "contains", "not", "if", "then", "else", "propertyNames", "unevaluatedProperties", "unevaluatedItems":
+			converted, err := convertGeminiSchemaOrBool(key, value)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = converted
+		case "anyOf", "oneOf", "allOf", "prefixItems":
+			converted, err := convertGeminiSchemaArray(value)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", key, err)
+			}
+			out[key] = converted
+		default:
+			out[key] = value
+		}
+	}
+	if nullable {
+		if _, ok := out["type"]; !ok {
+			return nil, fmt.Errorf("nullable schema is missing type")
+		}
+	}
+	return out, nil
+}
+
+func convertGeminiSchemaType(value any, nullable bool) (any, error) {
+	switch typed := value.(type) {
+	case string:
+		mapped, ok := jsonSchemaTypeName(typed)
+		if !ok {
+			return nil, fmt.Errorf("unsupported schema type %q", typed)
+		}
+		if nullable && mapped != "null" {
+			return []any{mapped, "null"}, nil
+		}
+		return mapped, nil
+	case []any:
+		out := make([]any, 0, len(typed)+1)
+		seenNull := false
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("unsupported schema type entry")
+			}
+			mapped, ok := jsonSchemaTypeName(text)
+			if !ok {
+				return nil, fmt.Errorf("unsupported schema type %q", text)
+			}
+			if mapped == "null" {
+				seenNull = true
+			}
+			out = append(out, mapped)
+		}
+		if nullable && !seenNull {
+			out = append(out, "null")
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("unsupported schema type shape")
+	}
+}
+
+func jsonSchemaTypeName(raw string) (string, bool) {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "OBJECT":
+		return "object", true
+	case "STRING":
+		return "string", true
+	case "NUMBER":
+		return "number", true
+	case "INTEGER":
+		return "integer", true
+	case "BOOLEAN":
+		return "boolean", true
+	case "ARRAY":
+		return "array", true
+	case "NULL":
+		return "null", true
+	default:
+		return "", false
+	}
+}
+
+func convertGeminiSchemaMap(value any) (any, error) {
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("must be an object")
+	}
+	out := make(map[string]any, len(obj))
+	for key, item := range obj {
+		child, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s must be an object", key)
+		}
+		converted, err := convertGeminiSchemaObject(child)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", key, err)
+		}
+		out[key] = converted
+	}
+	return out, nil
+}
+
+func convertGeminiSchemaArray(value any) (any, error) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("must be an array")
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		child, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("must contain schema objects")
+		}
+		converted, err := convertGeminiSchemaObject(child)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, converted)
+	}
+	return out, nil
+}
+
+func convertGeminiSchemaOrBool(key string, value any) (any, error) {
+	if flag, ok := value.(bool); ok {
+		return flag, nil
+	}
+	if key == "items" {
+		if _, ok := value.([]any); ok {
+			converted, err := convertGeminiSchemaArray(value)
+			if err != nil {
+				return nil, fmt.Errorf("items: %w", err)
+			}
+			return converted, nil
+		}
+	}
+	child, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("%s has an unsupported schema shape", key)
+	}
+	converted, err := convertGeminiSchemaObject(child)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", key, err)
+	}
+	return converted, nil
 }
 
 func geminiCandidatesFromChoices(choices []ChatChoice) []any {
@@ -549,10 +807,18 @@ func geminiUsageFromChat(usage *ChatUsage) map[string]any {
 }
 
 func (t *GeminiSSETranslator) translateLine(line string) []byte {
-	line = strings.TrimSpace(line)
-	if line == "" || strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "event:") {
 		return nil
 	}
+	// 上游转发链用 `:` 注释做 SSE keepalive。丢掉后，长时间无内容时下游连接失去保活。
+	if strings.HasPrefix(trimmed, ":") {
+		out := make([]byte, 0, len(trimmed)+2)
+		out = append(out, trimmed...)
+		out = append(out, '\n', '\n')
+		return out
+	}
+	line = trimmed
 	rest, ok := strings.CutPrefix(line, "data:")
 	if !ok {
 		return nil
@@ -589,10 +855,11 @@ func (t *GeminiSSETranslator) translateLine(line string) []byte {
 			if call.Index != nil {
 				idx = *call.Index
 			}
-			acc := t.tools[idx]
+			key := geminiToolKey{choice: choice.Index, tool: idx}
+			acc := t.tools[key]
 			if acc == nil {
 				acc = &geminiToolAccum{}
-				t.tools[idx] = acc
+				t.tools[key] = acc
 			}
 			if name := strings.TrimSpace(call.Function.Name); name != "" {
 				acc.name = name
@@ -600,14 +867,18 @@ func (t *GeminiSSETranslator) translateLine(line string) []byte {
 			acc.args += call.Function.Arguments
 		}
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
-			parts := make([]any, 0, len(t.tools))
-			indexes := make([]int, 0, len(t.tools))
-			for idx := range t.tools {
-				indexes = append(indexes, idx)
+			indexes := make([]int, 0)
+			for key := range t.tools {
+				if key.choice == choice.Index {
+					indexes = append(indexes, key.tool)
+				}
 			}
 			sort.Ints(indexes)
+			parts := make([]any, 0, len(indexes))
 			for _, idx := range indexes {
-				acc := t.tools[idx]
+				key := geminiToolKey{choice: choice.Index, tool: idx}
+				acc := t.tools[key]
+				delete(t.tools, key)
 				if acc == nil || acc.name == "" {
 					continue
 				}
@@ -619,7 +890,6 @@ func (t *GeminiSSETranslator) translateLine(line string) []byte {
 				}
 				parts = append(parts, map[string]any{"functionCall": map[string]any{"name": acc.name, "args": args}})
 			}
-			t.tools = map[int]*geminiToolAccum{}
 			if len(parts) == 0 {
 				parts = append(parts, map[string]any{"text": ""})
 			}

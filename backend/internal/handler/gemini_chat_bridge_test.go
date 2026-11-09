@@ -101,6 +101,24 @@ func TestServeGeminiViaChatCompletionsStreamsGeminiSSE(t *testing.T) {
 	require.Contains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
 }
 
+func TestServeGeminiViaChatCompletionsForwardsSSEKeepalive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gpt-4o:streamGenerateContent", strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`))
+	c.Params = gin.Params{{Key: "modelAction", Value: "/gpt-4o:streamGenerateContent"}}
+
+	ServeGeminiViaChatCompletions(c, func(c *gin.Context) {
+		c.Header("Content-Type", "text/event-stream")
+		c.Status(http.StatusOK)
+		_, _ = c.Writer.Write([]byte(": keepalive\n\n"))
+		_, _ = c.Writer.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+	})
+
+	require.Contains(t, recorder.Body.String(), ": keepalive\n\n")
+	require.Contains(t, recorder.Body.String(), `"text":"hi"`)
+}
+
 func TestServeGeminiViaChatCompletionsConvertsUpstreamError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

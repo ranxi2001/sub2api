@@ -246,6 +246,9 @@ func (w *geminiChatResponseWriter) Write(p []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+		if bytes.HasPrefix(converted, []byte(":")) || bytes.Contains(converted, []byte("\n:")) {
+			w.ResponseWriter.Flush()
+		}
 		return len(p), nil
 	}
 	_, _ = w.buf.Write(p)
