@@ -152,6 +152,7 @@ docs/*
 !docs/openai-ws-sse-acceleration.md
 !docs/openai-ultrafast-billing.md
 !docs/openai-ws-mode.md
+!docs/oauth-initial-ws.md
 !docs/openai-outbound-identity.md
 !docs/openai-2fa-dual-oauth.md
 !docs/openai-siwc.md

@@ -21,6 +21,8 @@ type OAuthAutoConfig struct {
 	OpenAITwoFAAdmission         OpenAITwoFAAdmissionConfig `json:"openai_two_fa_admission"`
 	OpenAITOTPRotateOn429        bool                       `json:"openai_totp_rotate_on_429"`
 	OpenAIDisableSchedulingOn429 bool                       `json:"openai_disable_scheduling_on_429"`
+	OpenAIWSMode                 *string                    `json:"openai_ws_mode,omitempty"`
+	OpenAIWSSSEAcceleration      *bool                      `json:"openai_ws_sse_acceleration,omitempty"`
 	QualityRule                  *OAuthInitialQualityRule   `json:"quality_rule,omitempty"`
 	ModelMappings                []OAuthModelMappingRule    `json:"model_mappings"`
 	SelectedModels               []string                   `json:"selected_models"`
@@ -44,9 +46,13 @@ type OAuthAutoConfig struct {
 }
 
 func DefaultOAuthAutoConfig() OAuthAutoConfig {
-	return OAuthAutoConfig{OpenAITwoFAAdmission: DefaultOpenAITwoFAAdmissionConfig(), ModelMappings: defaultOAuthModelMappings(PlatformOpenAI), ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, CostMultiplier: 0.07, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
+	wsMode, wsSSEAcceleration := OpenAIWSIngressModeCtxPool, false
+	return OAuthAutoConfig{OpenAIWSMode: &wsMode, OpenAIWSSSEAcceleration: &wsSSEAcceleration, OpenAITwoFAAdmission: DefaultOpenAITwoFAAdmissionConfig(), ModelMappings: defaultOAuthModelMappings(PlatformOpenAI), ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, CostMultiplier: 0.07, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
 }
 func ValidateOAuthAutoConfig(c OAuthAutoConfig) error {
+	if err := validateOAuthInitialWSMode(c.OpenAIWSMode); err != nil {
+		return err
+	}
 	if err := c.OpenAITwoFAAdmission.Validate(); err != nil {
 		return infraerrors.BadRequest("AUTO_CONFIG_ADMISSION_INVALID", err.Error())
 	}
@@ -113,6 +119,8 @@ func GetOAuthAutoConfig(ctx context.Context, repo SettingRepository) (OAuthAutoC
 	if raw != "" {
 		// Legacy settings keep their routing until mappings are explicitly saved.
 		c.ModelMappings = nil
+		// Absent WS fields leave imported transport settings unchanged until saved.
+		c.OpenAIWSMode, c.OpenAIWSSSEAcceleration = nil, nil
 		if err = json.Unmarshal([]byte(raw), &c); err != nil {
 			return c, err
 		}
@@ -197,6 +205,7 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 	if input.Platform == PlatformOpenAI {
 		input.Extra[OpenAITOTPRotateOn429ExtraKey] = c.OpenAITOTPRotateOn429
 		input.Extra[OpenAIDisableSchedulingOn429ExtraKey] = c.OpenAIDisableSchedulingOn429
+		applyOAuthInitialWS(input.Extra, c)
 	}
 	return nil
 }

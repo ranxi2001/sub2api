@@ -96,7 +96,11 @@ export default {
   },
   "initial": "Initial OAuth configuration",
   "enable": "Enable",
-  "initialHint": "Applies to new OAuth accounts on the selected platform. These four values override import values. Existing accounts, reauthorization and manual edits do not trigger initial configuration.",
+  "initialHint": "Applies to new OAuth accounts on the selected platform. Template field and switch values override import values. Existing accounts, reauthorization and manual edits do not trigger initial configuration.",
+  ws: {
+    modeHint: 'Set the WS mode for new OpenAI OAuth accounts through initial configuration. Defaults to Context Pool; Off disables WS. Global WS gates still apply. Other modes use the selected method only when gateway.openai_ws.mode_router_v2_enabled=true; otherwise, they use the context pool.',
+    accelerationHint: 'Set the acceleration switch for new OpenAI OAuth accounts through initial configuration. Unchecked by default. Existing accounts, reauthorization and manual edits are unaffected.'
+  },
   "platform": "OAuth platform",
   "priority": "Priority",
   "load_factor": "Load factor",
