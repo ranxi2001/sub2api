@@ -99,7 +99,9 @@ func TestOAuthDegradationGroupTransactionFailures(t *testing.T) {
 			repo, policy := degradationPolicyFixture(t)
 			a := degradationAccountFixture(t, 20, nil, []string{"incorrect"}, time.Minute)
 			group := mustCreateGroup(t, integrationEntClient, &service.Group{Name: fmt.Sprintf("group-rollback-%d", a.ID), Platform: service.PlatformOpenAI})
-			t.Cleanup(func() { require.NoError(t, integrationEntClient.Group.DeleteOneID(group.ID).Exec(context.Background())) })
+			t.Cleanup(func() {
+				require.NoError(t, integrationEntClient.Group.DeleteOneID(group.ID).Exec(context.Background()))
+			})
 			require.NoError(t, repo.BindGroups(t.Context(), a.ID, []int64{group.ID}))
 			require.NoError(t, repo.SetGroupAllowedModels(t.Context(), a.ID, map[int64][]string{group.ID: {"gpt-6-luna"}}))
 			policy.DegradationAction.LimitGroups, policy.DegradationAction.GroupIDs = true, []int64{group.ID}
