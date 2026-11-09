@@ -1,0 +1,48 @@
+name: OAuth initial WS screenshots
+
+on:
+  push:
+    branches: [feat/oauth-initial-ws-settings-20261109]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oauth-initial-ws-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Prepare isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/oauth-ws-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/oauth-ws-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Capture actual component with fictional data
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/oauth-initial-ws-${{ github.sha }}
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/oauth-ws-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/oauth-initial-ws-preview.mjs "$GITHUB_WORKSPACE" "$EVIDENCE_DIR"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-initial-ws-${{ github.sha }}
+          path: ${{ runner.temp }}/oauth-initial-ws-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
