@@ -13,6 +13,33 @@ export interface UsageRateWindow {
 
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/
 
+const localDate = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+/** Resolve the stats endpoint's defaults once, for both the request and card. */
+export const resolveUsageStatsWindow = (
+  window: UsageRateWindow,
+  endpoint: 'admin' | 'observer'
+): UsageRateWindow & { start: string; end: string } => {
+  const now = new Date(window.now)
+  if (endpoint === 'observer') {
+    // /usage/stats fills each absent date independently. Its inclusive end
+    // date is today, so the backend's exclusive boundary is tomorrow midnight.
+    return {
+      start: window.start?.trim() || localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7)),
+      end: window.end?.trim() || localDate(now),
+      now: window.now,
+    }
+  }
+  if (window.start && window.end) return { ...window, start: window.start, end: window.end }
+  // /admin/usage/stats defaults to today so far when either date is absent.
+  return {
+    start: new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString(),
+    end: now.toISOString(),
+    now: window.now,
+  }
+}
+
 // Mirrors the backend's parseUsageDateBoundary: an RFC3339 value is an exact
 // instant; a calendar date is local midnight, and an end date covers its whole
 // day. The API client sends the browser timezone, so local time matches.
@@ -27,21 +54,13 @@ const parseBoundary = (value: string, end: boolean): number | null => {
 }
 
 /**
- * Minutes of the window that have already elapsed. Without both dates the API
- * falls back to today so far. Returns null for an empty or unparsable window.
+ * Minutes already elapsed in an explicit stats window. Endpoint defaults must
+ * be resolved before requesting stats. Returns null for a missing/invalid range.
  */
 export const usageRateWindowMinutes = (window: UsageRateWindow | null | undefined): number | null => {
-  if (!window || !Number.isFinite(window.now)) return null
-  let startMs: number | null
-  let endMs: number | null
-  if (window.start && window.end) {
-    startMs = parseBoundary(window.start, false)
-    endMs = parseBoundary(window.end, true)
-  } else {
-    const today = new Date(window.now)
-    startMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()
-    endMs = window.now
-  }
+  if (!window || !Number.isFinite(window.now) || !window.start || !window.end) return null
+  const startMs = parseBoundary(window.start, false)
+  const endMs = parseBoundary(window.end, true)
   if (startMs == null || endMs == null) return null
   const minutes = (Math.min(endMs, window.now) - startMs) / 60_000
   return Number.isFinite(minutes) && minutes > 0 ? minutes : null

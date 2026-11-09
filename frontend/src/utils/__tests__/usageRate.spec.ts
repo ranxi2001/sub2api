@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatUsageRate, usagePerMinute, usageRateWindowMinutes } from '../usageRate'
+import { formatUsageRate, resolveUsageStatsWindow, usagePerMinute, usageRateWindowMinutes } from '../usageRate'
 
 const localMs = (year: number, month: number, day: number, hour = 0, minute = 0) =>
   new Date(year, month - 1, day, hour, minute).getTime()
@@ -23,15 +23,49 @@ describe('usageRate', () => {
     expect(usagePerMinute(780, { start: '2026-11-10', end: '2026-11-10', now })).toBe(2)
   })
 
-  it('falls back to today so far when a date is missing, as the API does', () => {
+  it.each([
+    { start: undefined, end: '2026-11-07' },
+    { start: '2026-11-01', end: undefined },
+    { start: '', end: '' },
+  ])('preserves the admin today-so-far default when either date is missing: %j', (dates) => {
     const now = localMs(2026, 11, 10, 1)
-    expect(usageRateWindowMinutes({ start: undefined, end: '2026-11-10', now })).toBe(60)
+    const window = resolveUsageStatsWindow({ ...dates, now }, 'admin')
+    expect(window).toEqual({ start: new Date(localMs(2026, 11, 10)).toISOString(), end: new Date(now).toISOString(), now })
+    expect(usageRateWindowMinutes(window)).toBe(60)
+    expect(usagePerMinute(120, window)).toBe(2)
+  })
+
+  it.each([
+    { start: '', end: '2026-11-05', expectedStart: '2026-11-03', expectedEnd: '2026-11-05' },
+    { start: '2026-11-04', end: '', expectedStart: '2026-11-04', expectedEnd: '2026-11-10' },
+    { start: '', end: '', expectedStart: '2026-11-03', expectedEnd: '2026-11-10' },
+  ])('fills observer boundaries independently: %j', ({ start, end, expectedStart, expectedEnd }) => {
+    const now = localMs(2026, 11, 10, 6, 30)
+    const window = resolveUsageStatsWindow({ start, end, now }, 'observer')
+    expect(window).toEqual({ start: expectedStart, end: expectedEnd, now })
+    const startMs = expectedStart === '2026-11-04' ? localMs(2026, 11, 4) : localMs(2026, 11, 3)
+    const endMs = expectedEnd === '2026-11-05' ? localMs(2026, 11, 6) : now
+    const minutes = (endMs - startMs) / 60_000
+    expect(usageRateWindowMinutes(window)).toBe(minutes)
+    expect(usagePerMinute(minutes, window)).toBe(1)
+    expect(usagePerMinute(minutes * 100, window)).toBe(100)
+  })
+
+  it('keeps explicit calendar and instant windows unchanged for their endpoint', () => {
+    const now = localMs(2026, 11, 20, 12)
+    const calendar = { start: '2026-11-01', end: '2026-11-07', now }
+    expect(resolveUsageStatsWindow(calendar, 'observer')).toEqual(calendar)
+    expect(resolveUsageStatsWindow(calendar, 'admin')).toEqual(calendar)
+    const rolling = { start: '2026-11-09T03:00:00Z', end: '2026-11-10T03:00:00Z', now }
+    expect(resolveUsageStatsWindow(rolling, 'admin')).toEqual(rolling)
   })
 
   it.each([
     { start: '2026-11-11', end: '2026-11-12', now: localMs(2026, 11, 10) },
     { start: 'not-a-date', end: '2026-11-10', now: localMs(2026, 11, 10, 12) },
     { start: '2026-11-10T00:00:00Z', end: '2026-11-10T00:00:00Z', now: Date.parse('2026-11-10T01:00:00Z') },
+    { start: undefined, end: '2026-11-10', now: localMs(2026, 11, 10, 12) },
+    { start: '2026-11-09', end: undefined, now: localMs(2026, 11, 10, 12) },
   ])('has no rate for an empty or invalid window %#', (window) => {
     expect(usageRateWindowMinutes(window)).toBeNull()
     expect(usagePerMinute(100, window)).toBeNull()
