@@ -17,7 +17,7 @@ const baselinePath = path.join(frontend, 'src/views/admin/OAuthDegradationBaseli
 await fs.writeFile(baselinePath, execFileSync('git', ['show', baselineSHA + ':frontend/src/views/admin/AutoConfigView.vue'], { cwd: root }))
 const virtual = {
  'fixture:auth': `export const useAuthStore=()=>({user:{id:41,role:'admin'}})`,
- 'fixture:layout': `import {h} from 'vue';export default {setup:(_,ctx)=>()=>h('main',{class:'mx-auto max-w-6xl p-5'},ctx.slots.default?.())}`,
+ 'fixture:layout': `import {h} from 'vue';export default {setup:(_,ctx)=>()=>h('main',{class:'mx-auto max-w-6xl p-5'},[h('p',{class:'mb-4 text-sm text-amber-700'},'CI fixture · 虚构数据 · 非生产'),ctx.slots.default?.()])}`,
  'fixture:nav': `export default {render:()=>null}`,
  'fixture:whitelist': `export default {render:()=>null}`
 }
@@ -92,6 +92,7 @@ try {
  await page.screenshot({ path: path.join(output, 'before-zh.png'), fullPage: true })
  await open()
  const card=page.getByTestId('degradation-action')
+ await page.addStyleTag({content:'[data-testid=degradation-action]::before{content:"CI fixture · 虚构数据 · 非生产";display:block;color:#92400e;font-size:12px}'})
  assert.equal(await page.getByTestId('degradation-enabled').isChecked(),false)
  assert.equal(await page.getByTestId('degradation-threshold').inputValue(),'')
  assert.equal(await page.getByTestId('degradation-concurrency').inputValue(),'10')

@@ -120,7 +120,7 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET concurrency=$2,extra=jsonb_set(COALESCE(extra,'{}'::jsonb),'{oauth_degradation_action}',$3::jsonb),updated_at=NOW() WHERE id=$1`, id, next, string(encoded))
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET concurrency=$2,extra=jsonb_set(COALESCE(extra,'{}'::jsonb),'{oauth_degradation_action}',$3::jsonb),updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') WHERE id=$1`, id, next, string(encoded))
 	if err != nil {
 		return err
 	}

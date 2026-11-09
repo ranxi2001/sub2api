@@ -13,12 +13,13 @@ import (
 // The caller holds the plan lease lock. Locking the account serializes these
 // transitions with customer-driven concurrency upgrades and ordinary edits.
 func applyOpenAITwoFAAdmissionOutcome(ctx context.Context, tx *sql.Tx, plan *service.ScheduledTestPlan, until time.Time, outcome string) (string, error) {
-	var raw []byte
+	var raw, extra []byte
+	var concurrency int
 	var status, platform, kind string
 	var schedulable bool
 	var parent sql.NullInt64
-	err := tx.QueryRowContext(ctx, `SELECT COALESCE(extra->'openai_two_fa_admission','null'::jsonb),status,platform,type,parent_account_id,schedulable
- FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, plan.AccountID).Scan(&raw, &status, &platform, &kind, &parent, &schedulable)
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(extra->'openai_two_fa_admission','null'::jsonb),status,platform,type,parent_account_id,schedulable,concurrency,COALESCE(extra,'{}'::jsonb)
+ FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, plan.AccountID).Scan(&raw, &status, &platform, &kind, &parent, &schedulable, &concurrency, &extra)
 	if err == sql.ErrNoRows {
 		return "account_deleted", nil
 	}
@@ -73,6 +74,11 @@ func applyOpenAITwoFAAdmissionOutcome(ctx context.Context, tx *sql.Tx, plan *ser
 			}
 		}
 	}
+	account := service.Account{Concurrency: concurrency}
+	if err := json.Unmarshal(extra, &account.Extra); err != nil {
+		return "", err
+	}
+	passedConcurrency := account.LimitOAuthDegradationConcurrency(state.Policy.PassedConcurrency)
 	encoded, err := json.Marshal(state)
 	if err != nil {
 		return "", err
@@ -82,7 +88,7 @@ func applyOpenAITwoFAAdmissionOutcome(ctx context.Context, tx *sql.Tx, plan *ser
  concurrency=CASE WHEN $3 THEN $4 ELSE concurrency END,
  schedulable=CASE WHEN $3 THEN true WHEN $6 THEN false WHEN $5 AND $7::boolean IS NOT NULL THEN $7 ELSE schedulable END,
  updated_at=CASE WHEN $3 OR $5 OR $6 THEN clock_timestamp() ELSE updated_at END
- WHERE id=$1`, plan.AccountID, string(encoded), action == "admission_passed", state.Policy.PassedConcurrency, action == "admission_isolated", action == "admission_isolation_pending", state.IsolationSchedulable)
+ WHERE id=$1`, plan.AccountID, string(encoded), action == "admission_passed", passedConcurrency, action == "admission_isolated", action == "admission_isolation_pending", state.IsolationSchedulable)
 	if err != nil {
 		return "", err
 	}

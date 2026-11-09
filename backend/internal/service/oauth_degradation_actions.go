@@ -66,7 +66,7 @@ func (a *Account) HasOAuthDegradationAction() bool {
 func (a *Account) degradationState() (OAuthDegradationState, bool) {
 	var state OAuthDegradationState
 	raw, err := json.Marshal(a.Extra[OAuthDegradationActionExtraKey])
-	if err != nil || json.Unmarshal(raw, &state) != nil || state.ConcurrencyCap < 1 {
+	if err != nil || json.Unmarshal(raw, &state) != nil || state.Models == nil {
 		return state, false
 	}
 	return state, true
@@ -86,6 +86,9 @@ func (a *Account) LimitOAuthDegradationConcurrency(proposed int) int {
 	}
 	state, ok := a.degradationState()
 	if !ok {
+		return min(proposed, a.Concurrency)
+	}
+	if state.ConcurrencyCap <= 0 {
 		return min(proposed, a.Concurrency)
 	}
 	return min(proposed, state.ConcurrencyCap)

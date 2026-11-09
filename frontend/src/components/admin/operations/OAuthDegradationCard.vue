@@ -33,7 +33,7 @@ const { t } = useI18n()
 const config = computed(() => props.modelValue)
 const custom = ref('')
 const options = computed(() => [...new Set([...getModelsByPlatform('openai'), ...getModelsByPlatform('anthropic'), ...getModelsByPlatform('gemini'), ...getModelsByPlatform('antigravity'), ...getModelsByPlatform('grok'), ...config.value.models])])
-const validCustom = computed(() => !!custom.value.trim() && !/[\s*\x00-\x1f\x7f-\x9f]/.test(custom.value.trim()) && new TextEncoder().encode(custom.value.trim()).length <= 256)
+const validCustom = computed(() => !!custom.value.trim() && !/[\s*]/.test(custom.value.trim()) && [...custom.value.trim()].every(char => char.charCodeAt(0) >= 32 && !(char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159)) && new TextEncoder().encode(custom.value.trim()).length <= 256)
 function addModel() { if (validCustom.value) { config.value.models = [...new Set([...config.value.models, custom.value.trim()])]; custom.value = '' } }
 function setThreshold(event: Event) { const text = (event.target as HTMLInputElement).value; config.value.threshold_percent = text === '' ? null : Number(text) }
 </script>

@@ -103,12 +103,13 @@ func stripCodexFingerprintSeedFromExtraUpdate(extra map[string]any) map[string]a
 	}
 	_, seedExists := extra["codex_fingerprint_seed"]
 	_, admissionExists := extra[service.OpenAITwoFAAdmissionExtraKey]
-	if !seedExists && !admissionExists {
+	_, degradationExists := extra[service.OAuthDegradationActionExtraKey]
+	if !seedExists && !admissionExists && !degradationExists {
 		return extra
 	}
 	stripped := make(map[string]any, len(extra)-1)
 	for key, value := range extra {
-		if key == "codex_fingerprint_seed" || key == service.OpenAITwoFAAdmissionExtraKey {
+		if key == "codex_fingerprint_seed" || key == service.OpenAITwoFAAdmissionExtraKey || key == service.OAuthDegradationActionExtraKey {
 			continue
 		}
 		stripped[key] = value
@@ -635,6 +636,7 @@ func (r *accountRepository) updateLockedAccount(
 		return nil, err
 	}
 	account.Extra = extra
+	account.Concurrency = account.LimitOAuthDegradationConcurrency(account.Concurrency)
 	// lockAndMergeAccountProbeExtra holds the account row lock in this transaction.
 	if err := accounttimer.CancelPending(ctx, client, account.ID, time.Now().UTC()); err != nil {
 		return nil, err
@@ -888,6 +890,13 @@ func lockAndMergeAccountProbeExtra(
 	// Isolation is server-owned. A normal save must use the latest value read
 	// under this row lock, including absence after a legitimate restoration.
 	// Never revive, erase or replace it from a client/service snapshot.
+	delete(extra, service.OAuthDegradationActionExtraKey)
+	if state, exists := currentExtra[service.OAuthDegradationActionExtraKey]; exists {
+		if extra == nil {
+			extra = make(map[string]any)
+		}
+		extra[service.OAuthDegradationActionExtraKey] = state
+	}
 	delete(extra, service.QualityModelIsolationKey)
 	if isolation, exists := currentExtra[service.QualityModelIsolationKey]; exists {
 		if extra == nil {
@@ -1198,6 +1207,7 @@ func (r *accountRepository) ApplyOpenAIOAuthReauth(
 	}
 	extra = copyJSONMap(extra)
 	delete(extra, service.OpenAITwoFAAdmissionExtraKey)
+	delete(extra, service.OAuthDegradationActionExtraKey)
 	extraJSON, err := json.Marshal(normalizeJSONMap(extra))
 	if err != nil {
 		return false, err
@@ -3523,7 +3533,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if updates.Concurrency != nil {
-		setClauses = append(setClauses, "concurrency = $"+itoa(idx))
+		setClauses = append(setClauses, "concurrency = CASE WHEN extra ? 'oauth_degradation_action' THEN LEAST($"+itoa(idx)+",COALESCE((extra->'oauth_degradation_action'->>'concurrency_cap')::int,concurrency)) ELSE $"+itoa(idx)+" END")
 		args = append(args, *updates.Concurrency)
 		idx++
 	}

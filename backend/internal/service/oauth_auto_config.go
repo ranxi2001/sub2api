@@ -152,6 +152,7 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 	input.Extra = maps.Clone(input.Extra)
 	delete(input.Extra, "auto_config_initial_revision")
 	delete(input.Extra, OpenAITwoFAAdmissionExtraKey)
+	delete(input.Extra, OAuthDegradationActionExtraKey)
 	// Global initialization is an administrator policy. Observers explicitly
 	// choose their own groups and must not inherit global groups or field overrides.
 	if _, observer := ObserverGroupIDs(ctx); observer {

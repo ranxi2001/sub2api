@@ -10,3 +10,8 @@ export function defaultOAuthDegradationConfig(): OAuthDegradationConfig {
 export function oauthDegradationError(c: OAuthDegradationConfig): boolean {
  return c.enabled && c.threshold_percent == null || c.threshold_percent != null && (!Number.isFinite(c.threshold_percent) || c.threshold_percent < 0 || c.threshold_percent > 100) || !Number.isInteger(c.target_concurrency) || c.target_concurrency < 1 || c.target_concurrency > 10000
 }
+
+export function oauthDegradationPayload(c?: OAuthDegradationConfig | null): OAuthDegradationConfig {
+ const cfg=c ?? defaultOAuthDegradationConfig()
+ return { ...cfg, models: cfg.models ?? [] }
+}
