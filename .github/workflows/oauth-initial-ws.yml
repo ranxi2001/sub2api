@@ -1,0 +1,67 @@
+name: OAuth initial WS settings
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/oauth_auto_config*'
+      - 'backend/internal/handler/admin/account_auto_config*'
+      - 'frontend/src/api/admin/autoConfig.ts'
+      - 'frontend/src/views/admin/AutoConfigView.vue'
+      - 'frontend/src/views/admin/__tests__/AutoConfigView.spec.ts'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/i18n/locales/*/autoConfig.ts'
+      - '.github/workflows/oauth-initial-ws.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oauth-initial-ws-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Initial template scope, API compatibility and WS behavior
+        working-directory: backend
+        run: >-
+          go test -tags=unit ./internal/service ./internal/handler/admin
+          -run '^(TestOAuthAutoConfig|TestAutoConfig|TestOpenAIWSSSEAcceleration)'
+          -count=1 -timeout=15m
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Initial WS form, notice lifecycle and locales
+        run: >-
+          pnpm --dir frontend exec vitest run
+          src/views/admin/__tests__/AutoConfigView.spec.ts
+          src/components/common/__tests__/NewFeatureBadge.spec.ts
+          src/i18n/__tests__/localeKeyCompleteness.spec.ts
+          --maxWorkers=1 --minWorkers=1
+      - name: Typecheck and production build
+        run: pnpm --dir frontend build

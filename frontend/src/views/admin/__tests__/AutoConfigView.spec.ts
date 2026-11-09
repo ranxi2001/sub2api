@@ -25,7 +25,7 @@ vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('@/api/admin/autoConfig', async importOriginal => ({ ...await importOriginal<typeof import('@/api/admin/autoConfig')>(), getAutoConfig: vi.fn(), saveAutoConfig: vi.fn() }))
 vi.mock('@/api/admin/accountQuality', () => ({ listQualityPlans: vi.fn() }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn(), list: vi.fn() }))
-const config: AutoConfig = { openai_totp_rotate_on_429: false, openai_disable_scheduling_on_429: false, openai_two_fa_admission: defaultOpenAITwoFAAdmissionConfig(), model_billing: defaultModelBillingConfig(), model_mappings: defaultOAuthModelMappings('openai'), excel_bps: defaultExcelBPSDefaults(), enabled: false, platform: 'openai', priority: 50, load_factor: 1, concurrency: 3, cost_multiplier: 0.07, group_ids: [], upgrade_enabled: false, upgrade_group_ids: [], successes_per_step: 20, upgrade_step: 1, max_concurrency: 100, cooldown_seconds: 60, revision: '' }
+const config: AutoConfig = { openai_ws_mode: 'ctx_pool', openai_ws_sse_acceleration: false, openai_totp_rotate_on_429: false, openai_disable_scheduling_on_429: false, openai_two_fa_admission: defaultOpenAITwoFAAdmissionConfig(), model_billing: defaultModelBillingConfig(), model_mappings: defaultOAuthModelMappings('openai'), excel_bps: defaultExcelBPSDefaults(), enabled: false, platform: 'openai', priority: 50, load_factor: 1, concurrency: 3, cost_multiplier: 0.07, group_ids: [], upgrade_enabled: false, upgrade_group_ids: [], successes_per_step: 20, upgrade_step: 1, max_concurrency: 100, cooldown_seconds: 60, revision: '' }
 beforeEach(() => {
  localStorage.clear(); setActivePinia(createPinia())
  vi.resetAllMocks(); vi.mocked(listQualityPlans).mockResolvedValue([]); state.auth = reactive({ user: { id: 1, role: 'admin' } })
@@ -34,6 +34,96 @@ beforeEach(() => {
  vi.mocked(getAll).mockResolvedValue([{ id: 5, name: 'OpenAI test', platform: 'openai', status: 'active' }, { id: 6, name: 'Anthropic test', platform: 'anthropic', status: 'active' }] as Group[])
 })
 describe('AutoConfigView', () => {
+ it('defaults missing initial WS settings to context pool and unchecked acceleration before explicitly saving them', async () => {
+  const { openai_ws_mode: _mode, openai_ws_sse_acceleration: _acceleration, ...legacy } = config
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(legacy)
+  vi.mocked(saveAutoConfig).mockResolvedValueOnce(legacy)
+  const w = mount(AutoConfigView); await flushPromises()
+  const mode = '[data-testid="initial-ws-mode-select"]', acceleration = '[data-testid="initial-ws-sse-acceleration-enabled"]'
+  expect(w.get<HTMLSelectElement>(mode).element.value).toBe('ctx_pool')
+  expect(w.get<HTMLInputElement>(acceleration).element.checked).toBe(false)
+  expect(w.get(mode).findAll('option').map(option => option.element.value)).toEqual(['off', 'ctx_pool', 'passthrough', 'http_bridge'])
+  expect(w.get(mode).element.closest('section')).toBe(w.get('[data-testid="initial-enabled"]').element.closest('section'))
+  expect(w.get(acceleration).element.closest('section')).toBe(w.get('[data-testid="initial-enabled"]').element.closest('section'))
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalledWith(config)
+  expect(w.get<HTMLSelectElement>(mode).element.value).toBe('ctx_pool')
+  expect(w.get<HTMLInputElement>(acceleration).element.checked).toBe(false)
+  w.unmount()
+ })
+ it.each([
+  { mode: 'off', acceleration: false },
+  { mode: 'off', acceleration: true },
+  { mode: 'ctx_pool', acceleration: false },
+  { mode: 'ctx_pool', acceleration: true },
+  { mode: 'passthrough', acceleration: false },
+  { mode: 'passthrough', acceleration: true },
+  { mode: 'http_bridge', acceleration: false },
+  { mode: 'http_bridge', acceleration: true }
+ ] as const)('saves and reloads initial WS mode $mode with acceleration=$acceleration independently of 429 settings', async ({ mode, acceleration }) => {
+  const w = mount(AutoConfigView); await flushPromises()
+  await w.get('[data-testid="initial-enabled"]').setValue(true)
+  await w.get('[data-testid="initial-group-5"]').setValue(true)
+  await w.get('[data-testid="initial-ws-mode-select"]').setValue(mode)
+  await w.get('[data-testid="initial-ws-sse-acceleration-enabled"]').setValue(acceleration)
+  await w.get('[data-testid="totp-rotate-on-429"]').setValue(true)
+  await w.get('[data-testid="disable-scheduling-on-429"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  const saved: AutoConfig = { ...config, enabled: true, group_ids: [5], openai_ws_mode: mode, openai_ws_sse_acceleration: acceleration, openai_totp_rotate_on_429: true, openai_disable_scheduling_on_429: true }
+  expect(saveAutoConfig).toHaveBeenCalledWith(saved)
+  expect(w.get<HTMLSelectElement>('[data-testid="initial-ws-mode-select"]').element.value).toBe(mode)
+  expect(w.get<HTMLInputElement>('[data-testid="initial-ws-sse-acceleration-enabled"]').element.checked).toBe(acceleration)
+  w.unmount()
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(saved)
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(reloaded.get<HTMLSelectElement>('[data-testid="initial-ws-mode-select"]').element.value).toBe(mode)
+  expect(reloaded.get<HTMLInputElement>('[data-testid="initial-ws-sse-acceleration-enabled"]').element.checked).toBe(acceleration)
+  expect(reloaded.get<HTMLInputElement>('[data-testid="totp-rotate-on-429"]').element.checked).toBe(true)
+  expect(reloaded.get<HTMLInputElement>('[data-testid="disable-scheduling-on-429"]').element.checked).toBe(true)
+  const hint = { off: null, ctx_pool: 'wsModeCtxPoolHint', passthrough: 'wsModePassthroughHint', http_bridge: 'wsModeHttpBridgeHint' }[mode]
+  if (hint) expect(reloaded.get('[data-testid="initial-ws-mode"]').text()).toContain('admin.accounts.openai.' + hint)
+  reloaded.unmount()
+ })
+ it('hides initial WS settings for other platforms and resets them before returning to OpenAI', async () => {
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_ws_mode: 'passthrough', openai_ws_sse_acceleration: true })
+  const w = mount(AutoConfigView); await flushPromises()
+  for (const platform of ['anthropic', 'gemini', 'antigravity', 'grok']) {
+   await w.get('[data-testid="platform"]').setValue(platform)
+   expect(w.find('[data-testid="initial-ws-mode"]').exists()).toBe(false)
+   expect(w.find('[data-testid="initial-ws-sse-acceleration"]').exists()).toBe(false)
+   await w.get('form').trigger('submit'); await flushPromises()
+   expect(saveAutoConfig).toHaveBeenLastCalledWith({ ...config, platform, selected_models: null, quality_rule: null, model_mappings: defaultOAuthModelMappings(platform) })
+  }
+  await w.get('[data-testid="platform"]').setValue('openai')
+  expect(w.get<HTMLSelectElement>('[data-testid="initial-ws-mode-select"]').element.value).toBe('ctx_pool')
+  expect(w.get<HTMLInputElement>('[data-testid="initial-ws-sse-acceleration-enabled"]').element.checked).toBe(false)
+  w.unmount()
+ })
+ it('shares the initial WS notice between both controls, preserves old dismissals and remembers its dismissal per admin', async () => {
+  const id = NEW_FEATURE_NOTICES.oauthInitialWSSettings, oldId = NEW_FEATURE_NOTICES.oauthInitialDisableScheduling429
+  useNewFeatureNoticeStore().dismiss(1, oldId)
+  const w = mount(AutoConfigView); await flushPromises()
+  const wsNotices = (view: typeof w) => view.findAllComponents(NewFeatureBadge).filter(badge => badge.props('noticeId') === id)
+  expect(wsNotices(w)).toHaveLength(2)
+  expect(wsNotices(w).every(badge => badge.find('[data-testid="new-feature-badge"]').exists())).toBe(true)
+  expect(w.findAllComponents(NewFeatureBadge).find(badge => badge.props('noticeId') === oldId)!.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+  await wsNotices(w)[0]!.get('[data-testid="new-feature-badge"]').trigger('click')
+  expect(wsNotices(w).every(badge => !badge.find('[data-testid="new-feature-badge"]').exists())).toBe(true)
+  expect(w.get<HTMLSelectElement>('[data-testid="initial-ws-mode-select"]').element.value).toBe('ctx_pool')
+  expect(w.get<HTMLInputElement>('[data-testid="initial-ws-sse-acceleration-enabled"]').element.checked).toBe(false)
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  w.unmount()
+  setActivePinia(createPinia())
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(wsNotices(reloaded).every(badge => !badge.find('[data-testid="new-feature-badge"]').exists())).toBe(true)
+  expect(useNewFeatureNoticeStore().isDismissed(1, oldId)).toBe(true)
+  const future = mount(NewFeatureBadge, { props: { noticeId: 'future-ws-announcement-test', userId: 1 } })
+  expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  const otherAdmin = mount(NewFeatureBadge, { props: { noticeId: id, userId: 2 } })
+  expect(otherAdmin.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  reloaded.unmount(); future.unmount(); otherAdmin.unmount()
+ })
  it('keeps the new 429 notice independent of old dismissals and persists its dismissal', async () => {
   const id = NEW_FEATURE_NOTICES.oauthInitialTOTPRotation429
   const oldId = NEW_FEATURE_NOTICES.protocolFeatureSwitches

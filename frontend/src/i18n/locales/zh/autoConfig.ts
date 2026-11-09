@@ -96,7 +96,11 @@ export default {
   },
   "initial": "OAuth 账户首次配置",
   "enable": "启用",
-  "initialHint": "仅对所选平台的新 OAuth 账号生效，四项模板值优先于导入值。已有账号、重新授权和手动编辑不触发首次配置。",
+  "initialHint": "仅对所选平台的新 OAuth 账号生效，字段和开关的模板值优先于导入值。已有账号、重新授权和手动编辑不触发首次配置。",
+  ws: {
+    modeHint: '随首次配置为新 OpenAI OAuth 账号设置 WS 模式，默认上下文池；选择“关闭”可禁用 WS。全局 WS 开关仍生效，其余模式需 gateway.openai_ws.mode_router_v2_enabled=true 才按所选方式连接，未开启时统一使用上下文池。',
+    accelerationHint: '随首次配置为新 OpenAI OAuth 账号设置加速开关，默认不勾选。已有账号、重新授权和手动编辑不受影响。'
+  },
   "platform": "OAuth 平台",
   "priority": "优先级",
   "load_factor": "负载因子",
