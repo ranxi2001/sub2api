@@ -169,13 +169,13 @@
             </div>
           </div>
 
-          <!-- Performance (RPM/TPM) -->
-          <div class="card p-4">
+          <!-- Performance (RPM/TPM and current account concurrency) -->
+          <div class="card col-span-2 p-4 lg:col-span-1">
             <div class="flex items-center gap-3">
               <div class="rounded-lg bg-violet-100 p-2 dark:bg-violet-900/30">
                 <Icon name="bolt" size="md" class="text-violet-600 dark:text-violet-400" :stroke-width="2" />
               </div>
-              <div class="flex-1">
+              <div class="min-w-0 flex-1">
                 <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
                   {{ t('admin.dashboard.performance') }}
                 </p>
@@ -185,13 +185,29 @@
                   </p>
                   <span class="text-xs text-gray-500 dark:text-gray-400">RPM</span>
                 </div>
-                <div class="flex items-baseline gap-2">
-                  <p class="text-sm font-semibold text-violet-600 dark:text-violet-400">
-                    {{ formatTokens(stats.tpm) }}
-                  </p>
-                  <span class="text-xs text-gray-500 dark:text-gray-400">TPM</span>
-                </div>
               </div>
+            </div>
+            <div
+              class="mt-1 flex items-baseline gap-1.5 overflow-x-auto whitespace-nowrap"
+              data-testid="account-concurrency"
+              :title="t('admin.dashboard.accountConcurrencyHint')"
+            >
+              <span class="shrink-0 text-sm font-semibold text-violet-600 dark:text-violet-400">
+                {{ accountConcurrency === null ? '—' : formatNumber(accountConcurrency) }}
+              </span>
+              <span class="shrink-0 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.dashboard.accountConcurrency') }}
+              </span>
+              <NewFeatureBadge
+                :notice-id="NEW_FEATURE_NOTICES.dashboardAccountConcurrency"
+                :user-id="authStore.user?.id"
+                compact
+              />
+              <span class="shrink-0 text-xs text-gray-400 dark:text-gray-500">/</span>
+              <span class="shrink-0 text-sm font-semibold text-violet-600 dark:text-violet-400">
+                {{ formatTokens(stats.tpm) }}
+              </span>
+              <span class="shrink-0 text-xs text-gray-500 dark:text-gray-400">TPM</span>
             </div>
           </div>
 
@@ -353,6 +369,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
@@ -365,6 +382,8 @@ import type {
 } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import Icon from '@/components/icons/Icon.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
@@ -396,9 +415,12 @@ ChartJS.register(
 )
 
 const appStore = useAppStore()
+const authStore = useAuthStore()
 const router = useRouter()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 const stats = ref<DashboardStats | null>(null)
+const accountConcurrency = ref<number | null>(null)
+let accountConcurrencyLoadSeq = 0
 const loading = ref(false)
 const chartsLoading = ref(false)
 const userTrendLoading = ref(false)
@@ -750,6 +772,18 @@ const loadUserSpendingRanking = async () => {
   }
 }
 
+const loadAccountConcurrency = async () => {
+  const currentSeq = ++accountConcurrencyLoadSeq
+  accountConcurrency.value = null
+  try {
+    const { current_concurrency: count } = await adminAPI.accounts.getConcurrencySummary()
+    if (currentSeq !== accountConcurrencyLoadSeq) return
+    accountConcurrency.value = Number.isSafeInteger(count) && count >= 0 ? count : null
+  } catch {
+    if (currentSeq === accountConcurrencyLoadSeq) accountConcurrency.value = null
+  }
+}
+
 const loadDashboardStats = async () => {
   if (appliedPreset.value === 'last24Hours') {
     const range = getLast24HoursRangeDates()
@@ -759,6 +793,7 @@ const loadDashboardStats = async () => {
 
   await Promise.all([
     loadDashboardSnapshot(true),
+    loadAccountConcurrency(),
     loadUsersTrend(),
     loadUserSpendingRanking()
   ])

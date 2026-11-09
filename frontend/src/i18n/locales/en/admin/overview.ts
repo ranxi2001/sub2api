@@ -22,6 +22,8 @@ export default {
       output: 'Output',
       cacheToday: 'Cache (Today)',
       performance: 'Performance',
+      accountConcurrency: 'Account concurrency',
+      accountConcurrencyHint: 'Total account slots currently in use across the site. Updated on page load or refresh; — means unavailable.',
       avgResponse: 'Avg Response',
       averageTime: 'Average Time',
       active: 'active',
