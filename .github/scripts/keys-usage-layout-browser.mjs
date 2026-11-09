@@ -231,6 +231,8 @@ try {
   }
   for (const [locale, width] of [['zh', 1366], ['en', 320]]) {
     const page = await open({ width, height: 844 }, `?locale=${locale}`)
+    const initialGeometry = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, scrollX }))
+    assert(initialGeometry.documentWidth <= width && initialGeometry.scrollX === 0, JSON.stringify(initialGeometry))
     const range = page.locator('[data-test="key-usage-date-range"]')
     const last24Hours = locale === 'zh' ? '近24小时' : 'Last 24 Hours'
     await range.locator('.date-picker-trigger').click()
@@ -267,8 +269,10 @@ try {
     }), 'The open calendar must be visible above the key list')
     const bounds = await dropdown.boundingBox()
     assert(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1, JSON.stringify(bounds))
+    const finalGeometry = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, scrollX }))
+    assert(finalGeometry.documentWidth <= width && finalGeometry.scrollX === 0, JSON.stringify(finalGeometry))
     await screenshot(page, `after-calendar-range-${locale}-${width}`, 'candidate')
-    measurements.push({ viewport: page.viewportSize(), scenario: 'calendar-only-date-range', locale, query, dropdown: bounds })
+    measurements.push({ viewport: page.viewportSize(), scenario: 'calendar-only-date-range', locale, query, dropdown: bounds, initialGeometry, finalGeometry })
     await page.close()
   }
   assert.deepEqual(errors, [])
