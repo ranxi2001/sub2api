@@ -331,13 +331,19 @@ func TestOAuthDegradationOutboxSchedulerChain(t *testing.T) {
 			// fallback so the final choices must use the repaired Redis candidate.
 			readerCfg := &config.Config{}
 			reader := service.NewSchedulerSnapshotService(NewSchedulerCache(rdb), outbox, repo, groups, readerCfg)
+			repaired, _, err := reader.ListSchedulableAccounts(ctx, &group.ID, service.PlatformOpenAI, true)
+			require.NoError(t, err, "fresh Redis candidates must be ready without database fallback")
+			require.Len(t, repaired, 1)
+			require.Equal(t, a.ID, repaired[0].ID)
+			require.Contains(t, repaired[0].Extra, "oauth_degradation_action")
+			require.Equal(t, min(tc.current, 10), repaired[0].Concurrency)
 			fresh := degradationGateway(t, repo, reader, rdb)
 			selection, _, err = fresh.SelectAccountWithScheduler(ctx, &group.ID, "", "", "gpt-6.1-terra", nil, service.OpenAIUpstreamTransportHTTPSSE, false)
-			require.Error(t, err, "fresh actual scheduler must reject the former model after outbox compensation")
+			require.ErrorIs(t, err, service.ErrNoAvailableAccounts, "fresh actual scheduler must reject the former model after outbox compensation")
 			require.Nil(t, selection)
 			if tc.empty {
 				selection, _, err = fresh.SelectAccountWithScheduler(ctx, &group.ID, "", "", "gpt-6-luna", nil, service.OpenAIUpstreamTransportHTTPSSE, false)
-				require.Error(t, err, "empty authorization intersection must reject every model at actual selection")
+				require.ErrorIs(t, err, service.ErrNoAvailableAccounts, "empty authorization intersection must reject every model at actual selection")
 				require.Nil(t, selection)
 			} else {
 				var releases []func()
@@ -360,6 +366,15 @@ func TestOAuthDegradationOutboxSchedulerChain(t *testing.T) {
 					t.Fatal("actual scheduler acquired an eleventh Redis slot after concurrency was capped at 10")
 				}
 				require.True(t, err != nil || selection != nil, "busy scheduling must produce an error or a wait plan")
+				if err == nil {
+					require.NotNil(t, selection.WaitPlan)
+					require.Equal(t, 10, selection.WaitPlan.MaxConcurrency)
+				} else {
+					require.ErrorIs(t, err, service.ErrNoAvailableAccounts)
+				}
+				inFlight, err := NewConcurrencyCache(rdb, 1, 1).GetAccountConcurrency(ctx, a.ID)
+				require.NoError(t, err)
+				require.Equal(t, 10, inFlight, "actual Redis must contain exactly the ten retained scheduler slots")
 			}
 			current, err := repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
