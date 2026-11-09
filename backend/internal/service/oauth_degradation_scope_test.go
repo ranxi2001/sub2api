@@ -21,3 +21,12 @@ func TestOAuthDegradationModelScopeIsAdditionalBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestOAuthDegradationPublicModels(t *testing.T) {
+	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{}, Extra: map[string]any{}}
+	require.NoError(t, json.Unmarshal([]byte(`{"oauth_degradation_action":{"models":["gpt-6-luna"],"concurrency_cap":10}}`), &a.Extra))
+	body, err := projectAccountModelAliases([]byte(`{"data":[{"id":"gpt-6-luna"},{"id":"gpt-6.1-sol"}]}`), a, nil, false)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "gpt-6-luna", "allowed models remain discoverable with default mapping")
+	require.NotContains(t, string(body), "gpt-6.1-sol", "degraded models must not be published")
+}

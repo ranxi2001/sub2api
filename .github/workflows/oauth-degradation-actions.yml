@@ -40,7 +40,7 @@ jobs:
           git -C baseline rev-parse HEAD > evidence/red-head.txt
           cp candidate/backend/internal/service/oauth_degradation_actions_test.go candidate/backend/internal/service/oauth_degradation_scope_test.go baseline/backend/internal/service/
           set +e
-          (cd baseline/backend && go test -tags=unit ./internal/service -run '^TestOAuthDegradation(Hold|Requires)' -count=1 -v) > evidence/red.log 2>&1
+          (cd baseline/backend && go test -tags=unit ./internal/service -run '^TestOAuthDegradation' -count=1 -v) > evidence/red.log 2>&1
           result=$?
           set -e
           cat evidence/red.log
@@ -73,6 +73,25 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - uses: actions/checkout@v6
+        with:
+          ref: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+          path: baseline
+      - name: PostgreSQL baseline behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          cp backend/internal/repository/oauth_degradation_actions_integration_test.go backend/internal/repository/oauth_degradation_edit_integration_test.go baseline/backend/internal/repository/
+          set +e
+          (cd baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuthDegradation' -count=1 -v -timeout=15m) > evidence/postgres-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/postgres-red.log
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' evidence/postgres-red.log
+          grep -F 'OAuth degradation startup must apply' evidence/postgres-red.log
+          grep -F 'stale editor must not erase' evidence/postgres-red.log
       - name: Migrated disposable PostgreSQL and Redis
         shell: bash
         run: |
@@ -102,6 +121,24 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
+      - run: git fetch --no-tags --depth=1 origin 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
+      - name: Vue baseline behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          source=frontend/src/views/admin/AutoConfigView.vue
+          cp "$source" "$RUNNER_TEMP/auto-config-candidate.vue"
+          trap 'cp "$RUNNER_TEMP/auto-config-candidate.vue" "$source"' EXIT
+          git show 1411d0fc6e1fca51d4b657c21837cd74c87bf84e:"$source" > "$source"
+          set +e
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts --maxWorkers=1 --minWorkers=1 > evidence/ui-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/ui-red.log
+          test "$result" -ne 0
+          grep -F 'missing degradation action business controls' evidence/ui-red.log
+          ! grep -Eq 'Failed to resolve|Transform failed|No test files found' evidence/ui-red.log
       - name: Actual Vue settings and notices
         shell: bash
         run: |
