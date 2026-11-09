@@ -17,9 +17,6 @@ jobs:
     timeout-minutes: 25
     env:
       EVIDENCE_HEAD: ${{ github.sha }}
-      EVIDENCE_RUNTIME: ${{ runner.temp }}/maintenance-ui-runtime
-      EVIDENCE_OUTPUT: ${{ runner.temp }}/maintenance-ui-evidence
-      PLAYWRIGHT_ROOT: ${{ runner.temp }}/maintenance-ui-runtime/browser/node_modules/playwright
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,6 +27,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export EVIDENCE_RUNTIME="$RUNNER_TEMP/maintenance-ui-runtime"
+          export EVIDENCE_OUTPUT="$RUNNER_TEMP/maintenance-ui-evidence"
+          export PLAYWRIGHT_ROOT="$RUNNER_TEMP/maintenance-ui-runtime/browser/node_modules/playwright"
+          printf '%s\n' "EVIDENCE_RUNTIME=$EVIDENCE_RUNTIME" "EVIDENCE_OUTPUT=$EVIDENCE_OUTPUT" "PLAYWRIGHT_ROOT=$PLAYWRIGHT_ROOT" >> "$GITHUB_ENV"
           mkdir -p "$EVIDENCE_OUTPUT" "$EVIDENCE_RUNTIME/sources" "$EVIDENCE_RUNTIME/dependencies"
           test "$GITHUB_REF" = refs/heads/evidence/maintenance-ui-760-763-20261110
           test "$(git rev-parse HEAD)" = "$EVIDENCE_HEAD"
