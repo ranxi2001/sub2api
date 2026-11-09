@@ -9683,6 +9683,7 @@ import SmartOpsSidebarSettings from "@/components/settings/SmartOpsSidebarSettin
 import NewFeatureBadge from "@/components/common/NewFeatureBadge.vue";
 import GroupSelector from "@/components/common/GroupSelector.vue";
 import { NEW_FEATURE_NOTICES } from "@/constants/newFeatureNotices";
+import { DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS } from "@/constants/smartOpsMenu";
 import { normalizeVisibleMethod } from "@/components/payment/paymentFlow";
 import {
   isRegistrationEmailSuffixDomainValid,
@@ -10728,7 +10729,7 @@ const form = reactive<SettingsForm>({
   usage_show_cache_rate: true,
   usage_show_cache_rate_to_users: false,
   usage_show_upstream_response_model_to_users: false,
-  smart_ops_hidden_menu_items: [] as string[],
+  smart_ops_hidden_menu_items: [...DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS],
   request_capture_enabled: false,
   request_capture_quota_mib: 1024,
   request_capture_retention_days: 7,
@@ -11738,6 +11739,7 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    form.smart_ops_hidden_menu_items = [...(settings.smart_ops_hidden_menu_items ?? DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS)];
     // For this optional override, null explicitly selects per-account rates.
     if (settings.openai_oauth_scheduling_rate_multiplier === null) {
       form.openai_oauth_scheduling_rate_multiplier = null;
@@ -12630,13 +12632,14 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
-    adminSettingsStore.smartOpsHiddenMenuItems = updated.smart_ops_hidden_menu_items ?? [];
+    adminSettingsStore.smartOpsHiddenMenuItems = [...(updated.smart_ops_hidden_menu_items ?? DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS)];
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    form.smart_ops_hidden_menu_items = [...adminSettingsStore.smartOpsHiddenMenuItems];
     if (updated.openai_oauth_scheduling_rate_multiplier === null) {
       form.openai_oauth_scheduling_rate_multiplier = null;
     }
