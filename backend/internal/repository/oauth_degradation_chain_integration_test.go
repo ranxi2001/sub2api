@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -67,11 +68,12 @@ func degradationChainFixture(t *testing.T, current int, empty bool) (*service.Ac
 	var plan int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at) VALUES($1,'gpt-6-luna','*/30 * * * *',true,'{"quality":{}}',NOW()-INTERVAL '2 hours') RETURNING id`, a.ID).Scan(&plan))
 	for i, verdict := range []string{"correct", "incorrect"} {
-		status := "success"
+		status, message := "success", ""
 		if verdict == "incorrect" {
 			status = "failed"
+			message = "state_degraded"
 		}
-		_, err = integrationDB.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment) VALUES($1,$2,NOW()-INTERVAL '1 minute',NOW()-INTERVAL '50 seconds',NOW()-INTERVAL '50 seconds','{"parallel_count":1}',$3,'evaluated',jsonb_build_object('verdict',$4::text))`, plan, status, fmt.Sprintf("chain-%d-%d", a.ID, i), verdict)
+		_, err = integrationDB.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message) VALUES($1,$2,NOW()-INTERVAL '1 minute',NOW()-INTERVAL '50 seconds',NOW()-INTERVAL '50 seconds','{"parallel_count":1}',$3,'evaluated',jsonb_build_object('verdict',$4::text),$5)`, plan, status, fmt.Sprintf("chain-%d-%d", a.ID, i), verdict, message)
 		require.NoError(t, err)
 	}
 	return a, group
@@ -120,19 +122,72 @@ func (h *degradationRedisErrors) ProcessPipelineHook(next redis.ProcessPipelineH
 	}
 }
 
+// Extend the shared namespace helper for set commands and the scheduler Lua
+// scripts' dynamic old-snapshot prefix arguments. No command/result is mocked.
+type degradationNamespace struct{ prefix string }
+
+func (h degradationNamespace) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h degradationNamespace) prefixCmd(cmd redis.Cmder) {
+	prefixHook{prefix: h.prefix}.prefixCmd(cmd)
+	args := cmd.Args()
+	addPrefix := func(index int) {
+		if index < len(args) {
+			if value, ok := args[index].(string); ok && !strings.HasPrefix(value, h.prefix) {
+				args[index] = h.prefix + value
+			}
+		}
+	}
+	switch cmd.Name() {
+	case "smembers", "sadd", "srem":
+		addPrefix(1)
+	case "eval", "evalsha":
+		if len(args) < 3 {
+			return
+		}
+		keys, err := strconv.Atoi(fmt.Sprint(args[2]))
+		if err != nil {
+			return
+		}
+		for index := 3 + keys; index < len(args); index++ {
+			if value, ok := args[index].(string); ok && strings.HasPrefix(value, "sched:") {
+				addPrefix(index)
+			}
+		}
+	}
+}
+func (h degradationNamespace) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		h.prefixCmd(cmd)
+		return next(ctx, cmd)
+	}
+}
+func (h degradationNamespace) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		for _, cmd := range cmds {
+			h.prefixCmd(cmd)
+		}
+		return next(ctx, cmds)
+	}
+}
+
 func degradationChainRedis(t *testing.T) (*redis.Client, func(bool), *degradationRedisErrors) {
 	t.Helper()
 	ctx := context.Background()
 	user := fmt.Sprintf("degradation-%d", time.Now().UnixNano())
 	prefix := user + ":"
-	require.NoError(t, integrationRedis.Do(ctx, "ACL", "SETUSER", user, "on", "nopass", "+@all", "~"+prefix+"*").Err())
+	password := "disposable-ci-fixture"
+	require.NoError(t, integrationRedis.Do(ctx, "ACL", "SETUSER", user, "on", ">"+password, "+@all", "~"+prefix+"*").Err())
 	opts := *integrationRedis.Options()
 	opts.Username = user
+	opts.Password = password
 	rdb := redis.NewClient(&opts)
-	rdb.AddHook(prefixHook{prefix: prefix})
+	rdb.AddHook(degradationNamespace{prefix: prefix})
 	observed := &degradationRedisErrors{}
 	rdb.AddHook(observed)
 	require.NoError(t, rdb.Ping(ctx).Err())
+	identity, err := rdb.Do(ctx, "ACL", "WHOAMI").Text()
+	require.NoError(t, err)
+	require.Equal(t, user, identity, "fault injection must authenticate the isolated user, never default")
 	t.Cleanup(func() {
 		_ = rdb.Close()
 		require.NoError(t, integrationRedis.Do(ctx, "ACL", "DELUSER", user).Err())

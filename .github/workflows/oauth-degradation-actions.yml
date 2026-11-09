@@ -162,7 +162,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd candidate/backend && go list -deps -tags=integration ./internal/repository) > evidence/instrumented-dependencies.txt
+          (cd candidate/backend && go list -deps -test -race -tags=integration ./internal/repository) > evidence/instrumented-dependencies.txt
           (cd candidate/backend && go test -race -tags=integration ./internal/repository -run '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres' -count=1 -v -timeout=15m) 2>&1 | tee evidence/integration-race.log
           ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/integration-race.log
       - uses: actions/upload-artifact@v7
