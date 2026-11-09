@@ -1212,7 +1212,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	return s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true, nil)
 }
 
-func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool, stickyBindingAllowed func(*Account) bool) (*AccountSelectionResult, error) {
+func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool, stickyBindingAllowed ...func(*Account) bool) (*AccountSelectionResult, error) {
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
@@ -1242,7 +1242,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	// not publish that candidate: its write would make the final account conflict
 	// with this selection's original CAS snapshot. Slot release stays with the caller.
 	canBindSticky := func(account *Account) bool {
-		return stickyBindingAllowed == nil || stickyBindingAllowed(account)
+		return len(stickyBindingAllowed) == 0 || stickyBindingAllowed[0] == nil || stickyBindingAllowed[0](account)
 	}
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
