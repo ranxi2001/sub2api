@@ -215,3 +215,57 @@ func TestOAuthDegradationRedisMetadataScope(t *testing.T) {
 	require.True(t, accounts[0].IsModelSupported("gpt-6-luna"))
 	require.False(t, accounts[0].IsModelSupported("gpt-6.1-sol"))
 }
+
+func TestOAuthDegradationReevaluationRestartAndUpgradeHold(t *testing.T) {
+	repo, c := degradationPolicyFixture(t)
+	ctx := t.Context()
+	group := mustCreateGroup(t, integrationEntClient, &service.Group{Name: fmt.Sprintf("degradation-upgrade-%d", time.Now().UnixNano()), Platform: service.PlatformOpenAI, Status: service.StatusActive})
+	t.Cleanup(func() {
+		require.NoError(t, integrationEntClient.Group.DeleteOneID(group.ID).Exec(context.Background()))
+	})
+	a := degradationAccountFixture(t, 20, nil, []string{"incorrect"}, time.Minute)
+	require.NoError(t, repo.BindGroups(ctx, a.ID, []int64{group.ID}))
+	c.UpgradeEnabled = true
+	c.UpgradeGroupIDs = []int64{group.ID}
+	c.SuccessesPerStep = 1
+	raw, err := json.Marshal(c)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE settings SET value=$2 WHERE key=$1", service.SettingKeyOAuthAutoConfig, string(raw))
+	require.NoError(t, err)
+	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	got, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	appliedAt := got.UpdatedAt
+	require.Equal(t, 10, got.Concurrency)
+	var state service.AutoConfigConcurrencyState
+	stateRaw, err := json.Marshal(got.Extra[service.AutoConfigConcurrencyExtraKey])
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(stateRaw, &state))
+	require.True(t, state.DegradationHold)
+	// A new repository has no process-local memory from the original evaluator.
+	restarted := newAccountRepositoryWithSQL(integrationEntClient, integrationDB, nil)
+	for range 3 {
+		require.NoError(t, restarted.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	}
+	got, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, appliedAt, got.UpdatedAt, "re-evaluation is read-only after first action")
+	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET concurrency=3 WHERE id=$1", a.ID)
+	require.NoError(t, err)
+	for _, revision := range []string{c.Revision, c.Revision + "-edited"} {
+		c.Revision = revision
+		raw, err = json.Marshal(c)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(ctx, "UPDATE settings SET value=$2 WHERE key=$1", service.SettingKeyOAuthAutoConfig, string(raw))
+		require.NoError(t, err)
+		for range 3 {
+			require.NoError(t, restarted.RecordConcurrencyResult(ctx, service.AccountConcurrencyResult{AccountID: a.ID, StartedAt: time.Now(), Success: true}, c))
+		}
+	}
+	got, err = repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, 3, got.Concurrency, "success and policy revisions never restore a manual lower limit")
+	var events int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM account_auto_config_events WHERE account_id=$1", a.ID).Scan(&events))
+	require.Equal(t, 1, events)
+}
