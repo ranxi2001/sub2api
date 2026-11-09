@@ -34,7 +34,7 @@ try {
     const buildDir = join(output, `${mode}-build`)
     try {
       const html = create(join(root, suffix + '.html'), `<html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="./${suffix}.js"></script></html>`)
-      create(join(root, suffix + '.js'), `
+      const entry = create(join(root, suffix + '.js'), `
         import {createApp,h,ref} from 'vue';import {createPinia} from 'pinia';
         import {createRouter,createMemoryHistory} from 'vue-router';import {createI18n} from 'vue-i18n';
         import {apiClient} from '/src/api/client.ts';import {useAuthStore} from '/src/stores/auth.ts';
@@ -77,7 +77,7 @@ try {
       `)
       await build({ root, configFile: false, cacheDir: join(output, `${mode}-cache`),
         resolve: { alias: { '@': join(root, 'src') } }, plugins: [vue()],
-        css: { postcss: { plugins: [tailwindcss({ ...tailwindConfig, content: [html, join(root, 'src/**/*.{vue,js,ts}')] }), autoprefixer()] } },
+        css: { postcss: { plugins: [tailwindcss({ ...tailwindConfig, content: [html, entry, join(root, 'src/**/*.{vue,js,ts}')] }), autoprefixer()] } },
         build: { outDir: buildDir, emptyOutDir: true, minify: false, target: 'esnext', rollupOptions: { input: html } },
       })
       server = await preview({ root, configFile: false, build: { outDir: buildDir }, preview: { host: '127.0.0.1', port: 4198, strictPort: true } })
