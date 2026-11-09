@@ -12,28 +12,21 @@
   <p v-if="config.threshold_percent == null" class="text-xs leading-5 text-amber-700 dark:text-amber-300">{{ t('autoConfig.degradation.thresholdRequired') }}</p>
   <p class="rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{{ t('autoConfig.degradation.defaultsPending') }}</p>
   <fieldset class="space-y-2"><legend class="mb-2 text-sm font-medium">{{ t('autoConfig.degradation.models') }}</legend>
-   <div class="grid max-h-48 gap-x-4 gap-y-2 overflow-y-auto rounded-xl border border-gray-200 p-3 sm:grid-cols-2 lg:grid-cols-3 dark:border-dark-700">
-    <label v-for="model in options" :key="model" class="flex min-w-0 items-center gap-2 break-all text-sm"><input v-model="config.models" type="checkbox" :value="model" :data-degradation-model="model" class="h-4 w-4 shrink-0 rounded text-primary-600" /><span>{{ model }}</span></label>
-   </div>
+   <div data-testid="degradation-models"><ModelWhitelistSelector v-model="config.models" :platforms="['openai', 'anthropic', 'gemini', 'antigravity', 'grok']" :show-sync-button="false" /></div>
   </fieldset>
-  <div class="flex flex-wrap items-end gap-2"><label class="min-w-0 flex-1 text-sm">{{ t('autoConfig.selection.custom') }}<input v-model="custom" class="input mt-2 w-full" maxlength="256" @keydown.enter.prevent="addModel" /></label><button type="button" class="btn btn-secondary" :disabled="!validCustom" @click="addModel">{{ t('autoConfig.selection.add') }}</button></div>
   <p v-if="!config.models.length" role="status" class="text-sm text-amber-700 dark:text-amber-300">{{ t('autoConfig.degradation.empty') }}</p>
   <p class="text-xs leading-5 text-gray-500">{{ t('autoConfig.degradation.scope') }}</p>
  </section>
 </template>
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
-import { getModelsByPlatform } from '@/composables/useModelWhitelist'
+import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import type { OAuthDegradationConfig } from '@/utils/oauthDegradation'
 const props = defineProps<{ modelValue: OAuthDegradationConfig; userId?: number }>()
 const { t } = useI18n()
 const config = computed(() => props.modelValue)
-const custom = ref('')
-const options = computed(() => [...new Set([...getModelsByPlatform('openai'), ...getModelsByPlatform('anthropic'), ...getModelsByPlatform('gemini'), ...getModelsByPlatform('antigravity'), ...getModelsByPlatform('grok'), ...config.value.models])])
-const validCustom = computed(() => !!custom.value.trim() && !/[\s*]/.test(custom.value.trim()) && [...custom.value.trim()].every(char => char.charCodeAt(0) >= 32 && !(char.charCodeAt(0) >= 127 && char.charCodeAt(0) <= 159)) && new TextEncoder().encode(custom.value.trim()).length <= 256)
-function addModel() { if (validCustom.value) { config.value.models = [...new Set([...config.value.models, custom.value.trim()])]; custom.value = '' } }
 function setThreshold(event: Event) { const text = (event.target as HTMLInputElement).value; config.value.threshold_percent = text === '' ? null : Number(text) }
 </script>

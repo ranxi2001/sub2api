@@ -49,7 +49,6 @@ const server = await createServer({
   { find: '@/stores/auth', replacement: 'fixture:auth' },
   { find: '@/components/layout/AppLayout.vue', replacement: 'fixture:layout' },
   { find: '@/components/admin/operations/SmartOpsNav.vue', replacement: 'fixture:nav' },
-  { find: '@/components/account/ModelWhitelistSelector.vue', replacement: 'fixture:whitelist' },
   { find: '@', replacement: path.join(frontend, 'src') },
   { find: 'vue-i18n', replacement: 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js' }
  ] },
@@ -97,12 +96,17 @@ try {
  assert.equal(await page.getByTestId('degradation-threshold').inputValue(),'')
  assert.equal(await page.getByTestId('degradation-concurrency').inputValue(),'10')
  await annotate(); await card.screenshot({path:path.join(output,'after-disabled-zh.png')})
+ const picker=card.getByTestId('degradation-models')
+ await picker.locator('.cursor-pointer').click()
+ await picker.getByTestId('model-option').filter({hasText:'gpt-6-luna'}).getByTestId('select-model').click()
+ await picker.locator('.cursor-pointer').click()
  await page.getByTestId('degradation-threshold').fill('25')
  await page.getByTestId('degradation-enabled').check()
  await save()
  assert.equal(saved.degradation_action.threshold_percent,25)
  assert.equal(saved.degradation_action.enabled,true)
  assert.equal(saved.degradation_action.target_concurrency,10)
+ assert(!saved.degradation_action.models.includes('gpt-6-luna'))
  await page.reload({waitUntil:'networkidle'})
  assert.equal(await page.getByTestId('degradation-enabled').isChecked(),true)
  assert.equal(await page.getByTestId('degradation-threshold').inputValue(),'25')

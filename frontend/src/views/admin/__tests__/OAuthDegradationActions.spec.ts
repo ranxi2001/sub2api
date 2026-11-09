@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { reactive } from 'vue'
 import AutoConfigView from '../AutoConfigView.vue'
+import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
 import { getAutoConfig, saveAutoConfig } from '@/api/admin/autoConfig'
@@ -11,8 +12,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => reactive(auth) }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('@/components/admin/operations/AutoConfigHistory.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('@/api/admin/autoConfig', () => ({ getAutoConfig: vi.fn(), saveAutoConfig: vi.fn(), getModelBillingGroups: vi.fn(async () => []) }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn(async () => []) }))
@@ -29,6 +29,12 @@ it('OAuth degradation renders a separate safe disabled card and requires a thres
  expect(w.get<HTMLInputElement>('[data-testid="degradation-enabled"]').element.checked).toBe(false)
  expect(w.get<HTMLInputElement>('[data-testid="degradation-threshold"]').element.value).toBe('')
  expect(w.get<HTMLInputElement>('[data-testid="degradation-concurrency"]').element.value).toBe('10')
+ const picker=w.get('[data-testid="degradation-models"]').findComponent(ModelWhitelistSelector)
+ expect(picker.props('showSyncButton')).toBe(false)
+ await picker.get('.cursor-pointer').trigger('click')
+ const option=picker.findAll('[data-testid="model-option"]').find(row=>row.text().includes('gpt-6-luna'))!
+ await option.get('[data-testid="select-model"]').trigger('click')
+ expect(picker.props('modelValue')).not.toContain('gpt-6-luna')
  await w.get('[data-testid="degradation-enabled"]').setValue(true)
  await w.get('form').trigger('submit'); await flushPromises()
  expect(saveAutoConfig).not.toHaveBeenCalled()

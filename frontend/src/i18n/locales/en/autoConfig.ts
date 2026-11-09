@@ -9,7 +9,7 @@ export default {
   "models": "Model scope after action (intersected with existing authorization)",
   "empty": "No models selected: affected accounts will support no models.",
   "scope": "Concurrency becomes the smaller of its current value and the target. Both source and final target must be in the authorized intersection. Applied once and retained permanently; better metrics, disabling or editing the template never restore limits. Manual configuration and other isolation remain. Successful requests cannot ramp concurrency.",
-  "invalid": "Set a threshold from 0 to 100 and an integer target concurrency from 1 to 10000.",
+  "invalid": "Set a threshold from 0 to 100, an integer target concurrency from 1 to 10000, and valid exact model IDs (up to 500).",
   "event": "Probe degradation {percent}% ≥ {threshold}% · {samples} conclusive rounds · concurrency {before} → {after} · models: {models} · window {start} — {end}"
 },
   selection: {
