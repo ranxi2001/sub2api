@@ -1,0 +1,161 @@
+name: OpenAI legacy admission binding
+
+on:
+  push:
+    branches: [fix/pr756-legacy-admission-followup-20261110]
+    paths:
+      - 'backend/internal/service/openai_account_scheduler.go'
+      - 'backend/internal/service/openai_gateway_scheduling.go'
+      - 'backend/internal/service/openai_legacy_admission_rebind_test.go'
+      - 'backend/internal/repository/gateway_cache_legacy_admission_test.go'
+      - '.github/workflows/openai-legacy-admission.yml'
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai_account_scheduler.go'
+      - 'backend/internal/service/openai_gateway_scheduling.go'
+      - 'backend/internal/service/openai_legacy_admission_rebind_test.go'
+      - 'backend/internal/repository/gateway_cache_legacy_admission_test.go'
+      - '.github/workflows/openai-legacy-admission.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openai-legacy-admission-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  admission:
+    name: legacy-admission-${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [RED, GREEN]
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify exact candidate and record regression blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG_DIR="$RUNNER_TEMP/pr756-legacy-admission-logs"
+          printf 'LOG_DIR=%s\n' "$LOG_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$LOG_DIR"
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test -z "$(git status --porcelain)"
+          {
+            git rev-parse HEAD
+            go version
+            git rev-parse HEAD:backend/internal/service/openai_legacy_admission_rebind_test.go
+            git rev-parse HEAD:backend/internal/repository/gateway_cache_legacy_admission_test.go
+          } | tee "$LOG_DIR/candidate.txt"
+      - name: RED must fail only at final admitted binding assertions
+        if: matrix.mode == 'RED'
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=b10b3856bee445820a7748764b9641f8229d3dbe
+          red="$RUNNER_TEMP/pr756-legacy-admission-red"
+          git worktree add --detach "$red" "$EXPECTED"
+          trap 'git worktree remove --force "$red"' EXIT
+          # Keep the exact candidate tests and all other production files. Only
+          # these two cooperating implementation paths are restored for RED.
+          for target in \
+            backend/internal/service/openai_account_scheduler.go \
+            backend/internal/service/openai_gateway_scheduling.go; do
+            git show "$baseline:$target" > "$red/$target"
+            restored=$(git -C "$red" hash-object "$target")
+            test "$restored" = "$(git rev-parse "$baseline:$target")"
+            echo "$target baseline=$baseline blob=$restored" >> "$LOG_DIR/red-source.txt"
+          done
+          for target in \
+            backend/internal/service/openai_legacy_admission_rebind_test.go \
+            backend/internal/repository/gateway_cache_legacy_admission_test.go; do
+            test "$(git -C "$red" hash-object "$target")" = "$(git rev-parse "HEAD:$target")"
+          done
+          expected_paths=$(printf '%s\n' \
+            backend/internal/service/openai_account_scheduler.go \
+            backend/internal/service/openai_gateway_scheduling.go)
+          test "$(git -C "$red" diff --name-only)" = "$expected_paths"
+          test -z "$(git -C "$red" ls-files --others --exclude-standard)"
+          git -C "$red" diff > "$LOG_DIR/red-source.diff"
+          set +e
+          (cd "$red/backend" && go test -tags=unit ./internal/service ./internal/repository \
+            -run '^(TestOpenAILegacyAdmissionRebind|TestStickySessionLegacyAdmissionRedis)$' \
+            -count=1 -v -timeout=5m) > "$LOG_DIR/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$LOG_DIR/red.log"
+          test "$result" -ne 0
+          ! grep -Eqi 'build failed|setup failed|undefined:|syntax error|no tests to run|panic:|fatal error:|--- SKIP:|LEGACY_ADMISSION_FIXTURE' "$LOG_DIR/red.log"
+          grep -q -- '--- FAIL: TestOpenAILegacyAdmissionRebind ' "$LOG_DIR/red.log"
+          grep -q -- '--- FAIL: TestStickySessionLegacyAdmissionRedis ' "$LOG_DIR/red.log"
+          test "$(grep -c 'LEGACY_ADMISSION_REBIND: final admitted C must own sticky session' "$LOG_DIR/red.log")" -eq 6
+          test "$(grep -c 'LEGACY_ADMISSION_REDIS: final admitted C must own sticky session' "$LOG_DIR/red.log")" -eq 6
+          # Verify every intended subcase failed, rather than accepting an
+          # unrelated package failure that happened to print a marker.
+          for mode in priority_lru load_batch; do
+            for scenario in new_session rpm_spillover; do
+              grep -q -- "--- FAIL: TestOpenAILegacyAdmissionRebind/$mode/$scenario " "$LOG_DIR/red.log"
+            done
+            for scenario in new_session excluded_A; do
+              grep -q -- "--- FAIL: TestStickySessionLegacyAdmissionRedis/$mode/$scenario " "$LOG_DIR/red.log"
+            done
+          done
+          grep -q -- '--- FAIL: TestOpenAILegacyAdmissionRebind/load_batch/capacity_spillover ' "$LOG_DIR/red.log"
+          grep -q -- '--- FAIL: TestStickySessionLegacyAdmissionRedis/load_batch/capacity_spillover ' "$LOG_DIR/red.log"
+          grep -q -- '--- FAIL: TestOpenAILegacyAdmissionRebind/load_batch/load_read_failure ' "$LOG_DIR/red.log"
+          grep -q -- '--- FAIL: TestStickySessionLegacyAdmissionRedis/load_batch/load_read_failure ' "$LOG_DIR/red.log"
+          test "$(git -C "$red" diff --name-only)" = "$expected_paths"
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test -z "$(git status --porcelain)"
+      - name: GREEN compile production packages from clean candidate
+        if: matrix.mode == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test -z "$(git status --porcelain)"
+          (cd backend && go build ./internal/service ./internal/repository) 2>&1 | tee "$LOG_DIR/production-build.log"
+      - name: GREEN race regressions and ownership boundaries
+        if: matrix.mode == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -tags=unit ./internal/service ./internal/repository \
+            -run '^(TestOpenAILegacyAdmissionRebind|TestStickySessionLegacyAdmissionRedis(LateWaiter)?|TestOpenAIStickyEscapeLateWaitPlanCannotRestoreOriginalBinding|TestStickySessionRebind.*|TestOpenAILegacyStickySpilloverRebindKeepsReplacement|TestOpenAIStickyEscapeDoesNotMoveProviderContinuationOwner|TestOpenAIStickyEscapePreservesExplicitOwnerBinding|TestOpenAIProfitControlStickyBindingOccursOnlyAfterTerminalAdmission|TestOpenAIProfitControlAfterAdmissionBindEagerWithoutGate|TestLegacySchedulerDecision_.*|TestOpenAIGatewayService_GuardianParent.*|TestIssue715Recovery(RetainsNativeOwnerAgainstBPSPreference|CannotBypassRPM))$' \
+            -count=1 -v -timeout=8m) 2>&1 | tee "$LOG_DIR/green-race.log"
+          ! grep -Eqi 'no tests to run|--- SKIP:' "$LOG_DIR/green-race.log"
+          for name in \
+            TestOpenAILegacyAdmissionRebind \
+            TestStickySessionLegacyAdmissionRedis \
+            TestStickySessionLegacyAdmissionRedisLateWaiter \
+            TestOpenAIStickyEscapeLateWaitPlanCannotRestoreOriginalBinding \
+            TestStickySessionRebindCompetingInstancesAgreeOnOneReplacement \
+            TestOpenAIStickyEscapeDoesNotMoveProviderContinuationOwner \
+            TestOpenAIGatewayService_GuardianParentHashCollisionPreservesParentBinding \
+            TestIssue715RecoveryRetainsNativeOwnerAgainstBPSPreference \
+            TestOpenAIProfitControlStickyBindingOccursOnlyAfterTerminalAdmission; do
+            grep -q -- "--- PASS: $name " "$LOG_DIR/green-race.log"
+          done
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr756-legacy-admission-${{ matrix.mode }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/pr756-legacy-admission-logs
+          if-no-files-found: error
