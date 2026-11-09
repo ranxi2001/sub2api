@@ -46,6 +46,7 @@ type openAIAgentRecoveryState struct {
 
 type openAIAgentRecoveryRequest struct {
 	keyID            int64
+	userID           int64
 	delivery         *openAIAgentRecoveryDelivery
 	outputs          [][32]byte
 	disallowLearning bool
@@ -71,6 +72,7 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 	request := &openAIAgentRecoveryRequest{groupID: getOpenAIGroupIDFromContext(c), model: model, session: sessionHash}
 	keyID := getAPIKeyIDFromContext(c)
 	request.keyID = keyID
+	request.userID = openAIAgentRecoveryHTTPUser(c, keyID)
 	request.disallowLearning = isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c)
 	if s == nil || keyID <= 0 || sessionHash == "" || model == "" {
 		return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, request)
@@ -394,7 +396,11 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 				// Saturation loses recovery availability, never task contents.
 				continue
 			}
-			state.bindings[key] = binding
+			retained := binding
+			if exists && old.expiresAt.After(retained.expiresAt) {
+				retained.expiresAt = old.expiresAt
+			}
+			state.bindings[key] = retained
 		}
 	}, nil
 }

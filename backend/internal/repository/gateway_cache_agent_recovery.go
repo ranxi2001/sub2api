@@ -61,6 +61,36 @@ func (c *gatewayCache) PublishOpenAIAgentRecovery(ctx context.Context, key, rout
 
 var _ service.OpenAIAgentRecoveryCache = (*gatewayCache)(nil)
 
+// Waiting for quota does not constitute another successful observation. Only
+// extend the existing exact route; expiry or a concurrent delivery/conflict must
+// never be overwritten or resurrected by a delayed waiting request.
+var refreshOpenAIAgentRecoveryScript = redis.NewScript(`
+local old = redis.call('GET', KEYS[1])
+if not old or old ~= ARGV[1] or old == 'failed' or old == 'conflict' or string.sub(old, 1, 8) == 'pending:' then
+ return 0
+end
+local remaining = redis.call('PTTL', KEYS[1])
+local ttl = tonumber(ARGV[2])
+if remaining >= 0 and remaining < ttl then
+ redis.call('PEXPIRE', KEYS[1], ttl)
+end
+return 1
+`)
+
+func (c *gatewayCache) RefreshOpenAIAgentRecovery(ctx context.Context, key, route string, ttl time.Duration) (bool, error) {
+	redisKey, err := openAIAgentRecoveryKey(key)
+	if err != nil {
+		return false, err
+	}
+	if route == "" || ttl.Milliseconds() <= 0 {
+		return false, errors.New("invalid encrypted agent ownership refresh")
+	}
+	result, err := refreshOpenAIAgentRecoveryScript.Run(ctx, c.rdb, []string{redisKey}, route, ttl.Milliseconds()).Int()
+	return result == 1 && err == nil, err
+}
+
+var _ service.OpenAIAgentRecoveryRetentionCache = (*gatewayCache)(nil)
+
 // A producer token is compared atomically on the same Redis Cluster key as the
 // completed route. Neither abort nor a delayed commit may replace another token.
 var reserveOpenAIAgentRecoveryScript = redis.NewScript(`

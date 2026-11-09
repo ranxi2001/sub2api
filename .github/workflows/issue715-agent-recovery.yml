@@ -36,7 +36,7 @@ jobs:
           git rev-parse HEAD
           test -z "$(git status --porcelain)"
           cd backend
-          go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository -run '^Test(Issue715|AstraCodexToolCapabilities|EncryptedSticky|EncryptedPrioritySticky|OpenAIGatewayService_SelectAccountWithScheduler_Encrypted)' -count=1 -v -timeout=10m
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository -run '^Test(Issue715|Issue758|AstraCodexToolCapabilities|EncryptedSticky|EncryptedPrioritySticky|OpenAIGatewayService_SelectAccountWithScheduler_Encrypted)' -count=1 -v -timeout=10m
           go test -tags=integration ./internal/repository -run '^TestGatewayCacheSuite$' -testify.m '^TestIssue715AgentOwnership$' -count=1 -v -timeout=5m
 
   red:
@@ -98,7 +98,7 @@ jobs:
           git rev-parse HEAD
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
-          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_ws_agent_recovery.go)
+          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go)
           # The exact original gateway struct predates analysis admission state.
           # Pin this unrelated leaf to its pre-admission version, preserving all
           # Issue715 business-chain blobs and the retained handler regressions.
@@ -226,12 +226,25 @@ jobs:
           ws_original=a575df898ccd0876c4c0eb1559da38cedfdfe99d
           ws_targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           ws_added=backend/internal/service/openai_ws_agent_recovery.go
+          # The historical recovery request predates Issue758 cooldown state.
+          # Keep the exact delivery-defect blobs above, and pin only this
+          # scheduling compatibility leaf to the pre-Issue758 production base.
+          scheduler_compat=45e92f44470f91435bd261ea18111c271063c0ac
+          scheduler_leaf=backend/internal/service/openai_account_scheduler.go
+          wait_added=backend/internal/service/openai_agent_message_recovery_wait.go
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$ws_original"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "$ws_added"; git diff --exit-code' EXIT
+          git fetch --no-tags --depth=1 origin "$scheduler_compat"
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "$ws_added" "$scheduler_leaf" "$wait_added"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
-          rm -- "$added" "$ws_added"
+          git restore --source="$scheduler_compat" -- "$scheduler_leaf"
+          expected=$(git rev-parse "$scheduler_compat:$scheduler_leaf")
+          actual=$(git hash-object "$scheduler_leaf")
+          echo "compatibility_leaf_baseline=$scheduler_compat path=$scheduler_leaf expected_blob=$expected tested_blob=$actual"
+          test "$expected" = "$actual"
+          rm -- "$added" "$ws_added" "$wait_added"
+          test ! -e "$wait_added"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")
             actual=$(git hash-object "$target")
