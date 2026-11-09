@@ -9,7 +9,7 @@ export interface OAuthDegradationConfig {
  group_ids?: number[]
 }
 export function defaultOAuthDegradationConfig(): OAuthDegradationConfig {
- return { enabled: false, threshold_percent: null, limit_concurrency: true, limit_models: true, limit_groups: false, target_concurrency: 10, models: ['gpt-5.6-terra', 'gpt-6.1-terra', 'gpt-6-luna'], group_ids: [] }
+ return { enabled: false, threshold_percent: null, limit_concurrency: true, limit_models: true, limit_groups: false, target_concurrency: 10, models: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-6-luna', 'gpt-6.1-terra'], group_ids: [] }
 }
 export function oauthDegradationError(c: OAuthDegradationConfig): boolean {
  const limitConcurrency = c.limit_concurrency !== false, limitModels = c.limit_models !== false

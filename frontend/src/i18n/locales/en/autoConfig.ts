@@ -10,7 +10,6 @@ export default {
   "actionsRequired": "Select at least one action before enabling.",
   "concurrency": "Target concurrency (default 10)",
   "thresholdRequired": "Set a threshold before enabling.",
-  "defaultsPending": "Requested defaults: 5.6terra, luna, 6.1terra, 6luna. Three confirmed IDs are selected. The version of bare luna is pending confirmation; review models before enabling.",
   "models": "Model scope after action (intersected with existing authorization)",
   "empty": "No models selected: affected accounts will support no models.",
   "groups": "Remove account bindings to these groups",

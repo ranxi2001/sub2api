@@ -37,6 +37,7 @@ it('OAuth degradation renders a separate safe disabled card and requires a thres
  expect(w.get<HTMLInputElement>('[data-testid="degradation-limit-groups"]').element.checked).toBe(false)
  const picker=w.get('[data-testid="degradation-models"]').findComponent(ModelWhitelistSelector)
  expect(picker.props('showSyncButton')).toBe(false)
+ expect(picker.props('modelValue')).toEqual(['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-6-luna', 'gpt-6.1-terra'])
  await picker.get('.cursor-pointer').trigger('click')
  const option=picker.findAll('[data-testid="model-option"]').find(row=>row.text().includes('gpt-6-luna'))!
  await option.get('[data-testid="select-model"]').trigger('click')

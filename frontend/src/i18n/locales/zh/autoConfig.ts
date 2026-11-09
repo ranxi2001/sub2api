@@ -10,7 +10,6 @@ export default {
   "actionsRequired": "启用时至少勾选一项处置。",
   "concurrency": "目标并发数（默认 10）",
   "thresholdRequired": "请先设置阈值；未设置时不能启用。",
-  "defaultsPending": "默认模型原文：5.6terra、luna、6.1terra、6luna。已勾选可确认的三个 ID；裸 luna 版本尚待确认，请先核对模型选择再启用。",
   "models": "处置后模型范围（与账号已有授权取交集）",
   "empty": "当前全不选：被处置账号将不支持任何模型。",
   "groups": "关闭这些分组的账号绑定",
