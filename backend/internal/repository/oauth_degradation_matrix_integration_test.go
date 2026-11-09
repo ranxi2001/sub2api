@@ -88,10 +88,18 @@ func TestOAuthDegradationPostgresMatrix(t *testing.T) {
 		{"zero samples", nil, 20, nil, false, true},
 		{"network failure", []string{"unknown"}, 20, nil, false, true},
 		{"low concurrency", []string{"incorrect"}, 3, nil, true, true},
+		{"strict zero min", []string{"incorrect"}, 0, nil, true, true},
+		{"strict negative min", []string{"incorrect"}, -1, nil, true, true},
 		{"empty intersection", []string{"incorrect"}, 20, map[string]any{"gpt-6.1-sol": "gpt-6.1-sol"}, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := degradationAccountFixture(t, tc.current, tc.mapping, tc.rounds, time.Minute)
+			if tc.current == 0 {
+				// mustCreateAccount supplies 3 for zero; restore the actual legacy
+				// value to verify strict numeric min without changing its meaning.
+				_, err := integrationDB.ExecContext(ctx, "UPDATE accounts SET concurrency=0 WHERE id=$1", a.ID)
+				require.NoError(t, err)
+			}
 			require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
 			got, err := repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
