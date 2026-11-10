@@ -7,6 +7,7 @@ on:
       - '.github/workflows/openai-sse-delivery.yml'
       - 'backend/internal/config/**'
       - 'backend/internal/pkg/requesttiming/**'
+      - 'backend/internal/handler/openai_ws_sse_incomplete*'
       - 'backend/internal/service/openai_*'
       - 'backend/internal/service/plugin_*'
       - 'frontend/src/components/admin/usage/**'
@@ -52,8 +53,13 @@ jobs:
         working-directory: backend
         run: >-
           go test -race -tags=unit ./internal/service
-          -run 'Test(PluginSSE|OpenAISSE|OpenAIWS.*Timing|OpenAIWSSSEAcceleration|OpenAIResponsesTTFT|WSSemanticFirstToken|PriorityResponsesSemanticEventContext|OpenAINativeFirstOutput|Issue605)'
+          -run 'Test(PluginSSE|OpenAISSE|OpenAIWS.*Timing|OpenAIWSSSEAcceleration|OpenAIWSSSEIncomplete|OpenAIResponsesTTFT|WSSemanticFirstToken|PriorityResponsesSemanticEventContext|OpenAINativeFirstOutput|Issue605)'
           -count=1 -timeout=8m
+      - name: Accelerated WS incomplete response ownership
+        working-directory: backend
+        run: >-
+          go test -race -tags=unit ./internal/handler
+          -run '^TestOpenAIWSSSEIncomplete' -count=1 -timeout=3m
 
   frontend:
     runs-on: ubuntu-latest
