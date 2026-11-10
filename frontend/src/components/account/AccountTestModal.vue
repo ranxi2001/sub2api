@@ -7,7 +7,7 @@
   >
     <div class="space-y-4">
       <AccountTestTiming :timing="connectionTiming.timing.value" :delivery="connectionTiming.delivery.value" />
-      <div v-if="account?.extra?.openai_excel_bps_authorization_pending === true" role="status" class="text-sm text-amber-700 dark:text-amber-300">
+      <div v-if="legacyBPSAuthorizationPending" role="status" class="text-sm text-amber-700 dark:text-amber-300">
         {{ t('admin.accounts.bpsAuthorizing') }}
         <a href="/admin/token-guard-v2" target="_blank" rel="noopener noreferrer" class="ml-2 underline">{{ t('admin.accounts.openCredentialOperations') }}</a>
       </div>
@@ -315,6 +315,11 @@ let abortController: AbortController | null = null
 const generatedImages = ref<PreviewImage[]>([])
 const testMode = ref<'default' | 'compact' | 'bps_tools'>('default')
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
+// Managed accounts authorize BPS through authorization connections and never
+// receive the legacy Excel grant this marker waits for.
+const legacyBPSAuthorizationPending = computed(() =>
+  props.account?.extra?.openai_excel_bps_authorization_pending === true && props.account?.extra?.openai_connections_managed !== true
+)
 const isBPSAccount = computed(() =>
   isOpenAIAccount.value && props.account?.type === 'oauth' && props.account?.extra?.openai_excel_bps === true && props.account?.extra?.openai_excel_bps_authorization_pending !== true
 )
