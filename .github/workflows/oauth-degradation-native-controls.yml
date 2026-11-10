@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
-          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestOpenAIResponsesWebSocket_(DisconnectBeforeFirstMessageIsInfo|GracefulDisconnectBeforeFirstMessageIsInfo|FirstMessageTimeoutUsesConfig)$' -count=20 -v) 2>&1 | tee evidence/websocket-first-message.log
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestOpenAIResponsesWebSocket_(DisconnectBeforeFirstMessageIsInfo|RequestCanceledBeforeFirstMessageIsInfo|FirstMessageTimeoutUsesConfig)$' -count=20 -v) 2>&1 | tee evidence/websocket-first-message.log
           ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/websocket-first-message.log
       - uses: actions/upload-artifact@v7
         if: always()

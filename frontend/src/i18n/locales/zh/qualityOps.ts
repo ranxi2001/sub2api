@@ -1,4 +1,8 @@
 export default {
+  "oauth401MaxRounds": "OAuth 连续 401 后清理规则（轮）",
+  "oauth401MaxRoundsHint": "仅对 OAuth 账号生效，API Key 账号不会自动清理。新规则默认 6 轮，可填 1–100；0 关闭，旧规则默认关闭。自身直连 401 当前支持 OpenAI OAuth，整轮样本均满足时计数；含 model_unavailable 跳过的轮次，还须账号明确 401 且凭据已撤销，其余样本均为自身直连 401。BPS 或借用凭据的 401 不计数，成功或其他错误清零。达到上限后删除检测规则及其历史，保留账号；规则仍持有隔离或冷却状态时会保留规则。",
+  "invalidOAuth401MaxRounds": "上限须为 0–100 之间的整数轮数。",
+  "oauth401Rounds": "连续 {count} 轮",
   "retestRest": "降智后复测静置时间（分钟）",
   "retestRestHint": "0 表示沿用原检测计划。确认降智并处置后，本规则在静置期内不再检测，立即执行和 5xx 触发也会等待；到期后重新检测，开启自动恢复且通过时才按原规则恢复。静置作用于本规则的全部检测模型，最长 7 天；静置不保证账号质量恢复。",
   "invalidRetestRest": "静置时间须为 0–10080 之间的整数分钟。",
@@ -438,6 +442,7 @@ export default {
   "bulkEditTitle": "批量编辑 {count} 条规则",
   "bulkEditHint": "勾选需要统一修改的字段，未勾选的字段保留每条规则自己的值。初始值来自第一条已选规则；检测配置包含检测方式、检测通道、题目、参考答案、推理强度、检测次数和判题模型。",
   "bulkFields": {
+    "oauth401": "OAuth 401 规则清理",
     "retention": "结果保留次数",
     "trigger": "上游 5xx 触发",
     "model": "检测模型",

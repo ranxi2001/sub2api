@@ -276,3 +276,32 @@ func TestExtraImageModelsAccountTestRejectsPartiallyAllowedAlias(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "images endpoint requires an image model")
 	require.Empty(t, upstream.requests)
 }
+
+func TestIssue765ExtraImagesCandidateAuthorization(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		platform string
+		typ      string
+		endpoint string
+		extra    map[string]any
+		rejected bool
+	}{
+		{"exact", PlatformOpenAI, AccountTypeAPIKey, openAIImagesGenerationsEndpoint, map[string]any{ExtraImageModelsKey: []any{extraImageTestModel}}, false},
+		{"prefix", PlatformOpenAI, AccountTypeAPIKey, openAIImagesGenerationsEndpoint, map[string]any{ExtraImageModelPrefixesKey: []any{"nai-diffusion-"}}, false},
+		{"unauthorized", PlatformOpenAI, AccountTypeAPIKey, openAIImagesGenerationsEndpoint, nil, true},
+		{"other_platform", PlatformGemini, AccountTypeAPIKey, openAIImagesGenerationsEndpoint, map[string]any{ExtraImageModelsKey: []any{extraImageTestModel}}, true},
+		{"oauth", PlatformOpenAI, AccountTypeOAuth, openAIImagesGenerationsEndpoint, map[string]any{ExtraImageModelsKey: []any{extraImageTestModel}}, true},
+		{"setup_token", PlatformOpenAI, AccountTypeSetupToken, openAIImagesGenerationsEndpoint, map[string]any{ExtraImageModelsKey: []any{extraImageTestModel}}, true},
+		{"edits", PlatformOpenAI, AccountTypeAPIKey, openAIImagesEditsEndpoint, map[string]any{ExtraImageModelsKey: []any{extraImageTestModel}}, true},
+		{"responses", PlatformOpenAI, AccountTypeAPIKey, "/v1/responses", map[string]any{ExtraImageModelsKey: []any{extraImageTestModel}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := extraImageTestAccount()
+			a.Platform, a.Type, a.Extra = tc.platform, tc.typ, tc.extra
+			r := &OpenAIImagesRequest{Endpoint: tc.endpoint, Model: extraImageTestModel}
+			ctx := r.WithModelAuthorization(context.Background(), "")
+			require.Equal(t, tc.rejected, extraImagesAccountRejected(ctx, &a))
+			require.True(t, extraImagesAccountRejected(ctx, nil))
+		})
+	}
+}

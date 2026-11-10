@@ -73,7 +73,13 @@ func TestOAuthDegradationHoldSurvivesQualityRecovery(t *testing.T) {
 			if !holdBeforePending {
 				degrade()
 			}
-			require.Equal(t, "recovery_started", f.apply("passed"))
+			expectedRecovery := "recovery_started"
+			if !holdBeforePending {
+				// A different policy changed concurrency after this quality action
+				// captured it. Preserve that ownership conflict rather than restore.
+				expectedRecovery = "restore_conflict"
+			}
+			require.Equal(t, expectedRecovery, f.apply("passed"))
 			ramp := f.extra()[service.AutoConfigConcurrencyExtraKey].(map[string]any)
 			require.Equal(t, true, ramp["degradation_hold"], "quality block/arm must retain the independent hold")
 			for range 3 {

@@ -2751,6 +2751,8 @@ export interface QualityBPSPolicy {
 }
 export interface QualityPolicy {
   trigger_on_upstream_5xx?: boolean
+  // OAuth quality rules only: 0 or missing disables automatic rule cleanup.
+  oauth_401_max_rounds?: number
   admission?: import('@/utils/openaiTwoFAAdmission').OpenAITwoFAAdmissionConfig
   judge?: QualityJudgeConfig
   expected_answer: string
