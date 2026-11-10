@@ -1144,24 +1144,96 @@ func TestOpenAIResponsesWebSocket_FirstMessageTimeoutUsesConfig(t *testing.T) {
 }
 
 func TestOpenAIResponsesWebSocket_DisconnectBeforeFirstMessageIsInfo(t *testing.T) {
+	for _, status := range []coderws.StatusCode{coderws.StatusNormalClosure, coderws.StatusGoingAway} {
+		t.Run(status.String(), func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			logSink, restore := captureHandlerStructuredLog(t)
+			defer restore()
+
+			h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
+			h.cfg = &config.Config{}
+			wsServer := newOpenAIWSHandlerTestServer(t, h, middleware.AuthSubject{UserID: 1, Concurrency: 1})
+			defer wsServer.Close()
+
+			dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+			clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http")+"/openai/v1/responses", nil)
+			cancelDial()
+			require.NoError(t, err)
+			defer func() { _ = clientConn.CloseNow() }()
+			// Keep TCP open until the peer reads and echoes our close frame.
+			// CloseNow immediately after Dial can cancel the HTTP request before
+			// Accept finishes hijacking, exercising request cancellation instead.
+			const closeReason = "client done before first message"
+			require.NoError(t, clientConn.Close(status, closeReason))
+
+			require.Eventually(t, func() bool {
+				reason, ok := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "reason")
+				closeStatus, hasStatus := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "close_status")
+				gotCloseReason, hasCloseReason := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "close_reason")
+				return ok && reason == "peer_disconnected" &&
+					hasStatus && closeStatus == fmt.Sprintf("%d(%s)", status, status.String()) &&
+					hasCloseReason && gotCloseReason == closeReason &&
+					logSink.ContainsMessageAtLevel("openai.websocket_read_first_message_failed", "info") &&
+					!logSink.ContainsMessageAtLevel("openai.websocket_read_first_message_failed", "warn")
+			}, time.Second, 10*time.Millisecond)
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocket_RequestCanceledBeforeFirstMessageIsInfo(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	logSink, restore := captureHandlerStructuredLog(t)
 	defer restore()
 
 	h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
 	h.cfg = &config.Config{}
-	wsServer := newOpenAIWSHandlerTestServer(t, h, middleware.AuthSubject{UserID: 1, Concurrency: 1})
+	cancelRequest := make(chan context.CancelFunc, 1)
+	wsServer := newOpenAIWSHandlerTestServer(t, h, middleware.AuthSubject{UserID: 1, Concurrency: 1}, func(c *gin.Context) {
+		ctx, cancel := context.WithCancel(c.Request.Context())
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		cancelRequest <- cancel
+		c.Next()
+	})
 	defer wsServer.Close()
 
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
 	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http")+"/openai/v1/responses", nil)
 	cancelDial()
 	require.NoError(t, err)
-	require.NoError(t, clientConn.CloseNow())
+	defer func() { _ = clientConn.CloseNow() }()
+
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelRead()
+	readDone := make(chan error, 1)
+	go func() {
+		_, _, err := clientConn.Read(readCtx)
+		readDone <- err
+	}()
+	// A pong proves the handler's first-message reader is processing control
+	// frames, without sending response.create or closing the client transport.
+	require.NoError(t, clientConn.Ping(readCtx))
+	cancel := <-cancelRequest
+	cancel()
+	select {
+	case err := <-readDone:
+		var closeErr coderws.CloseError
+		require.ErrorAs(t, err, &closeErr)
+		require.Equal(t, coderws.StatusGoingAway, closeErr.Code)
+		require.Equal(t, "websocket request canceled", closeErr.Reason)
+	case <-readCtx.Done():
+		t.Fatal("handler did not send the request cancellation close frame")
+	}
 
 	require.Eventually(t, func() bool {
 		reason, ok := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "reason")
-		return ok && reason == "peer_disconnected" &&
+		closeStatus, hasStatus := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "close_status")
+		closeReason, hasCloseReason := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "close_reason")
+		readError, hasReadError := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "error")
+		return ok && reason == "request_canceled" &&
+			hasStatus && closeStatus == "1001(StatusGoingAway)" &&
+			hasCloseReason && closeReason == "websocket request canceled" &&
+			hasReadError && strings.Contains(fmt.Sprint(readError), context.Canceled.Error()) &&
 			logSink.ContainsMessageAtLevel("openai.websocket_read_first_message_failed", "info") &&
 			!logSink.ContainsMessageAtLevel("openai.websocket_read_first_message_failed", "warn")
 	}, time.Second, 10*time.Millisecond)
@@ -1961,7 +2033,7 @@ func newOpenAIHandlerForPreviousResponseIDValidation(t *testing.T, cache *concur
 	}
 }
 
-func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject middleware.AuthSubject) *httptest.Server {
+func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject middleware.AuthSubject, beforeHandler ...gin.HandlerFunc) *httptest.Server {
 	t.Helper()
 	groupID := int64(2)
 	apiKey := &service.APIKey{
@@ -1976,6 +2048,7 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 		c.Set(string(middleware.ContextKeyUser), subject)
 		c.Next()
 	})
+	router.Use(beforeHandler...)
 	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	return httptest.NewServer(router)
 }
