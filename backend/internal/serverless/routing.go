@@ -15,8 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 const forwardHeader = "X-Sub2api-Route"
@@ -281,6 +284,7 @@ func approved(cfg Config, p Pod, newBinding bool) bool {
 	return false
 }
 func (m *Manager) forward(c *gin.Context, p Pod, clientIP string) {
+	started := time.Now()
 	target, err := url.Parse(p.Endpoint)
 	if err != nil {
 		failure(c, "Invalid Pod endpoint")
@@ -292,6 +296,9 @@ func (m *Manager) forward(c *gin.Context, p Pod, clientIP string) {
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
 			r.Out.Host = r.In.Host // Preserve public origin for generated capability URLs.
+			if requestID, _ := r.In.Context().Value(ctxkey.RequestID).(string); requestID != "" {
+				r.Out.Header.Set("X-Request-ID", requestID)
+			}
 			r.Out.Header.Del("Forwarded")
 			r.Out.Header.Del("X-Forwarded-For")
 			r.Out.Header.Del("X-Real-IP")
@@ -304,7 +311,16 @@ func (m *Manager) forward(c *gin.Context, p Pod, clientIP string) {
 			r.Out.Header.Set(forwardHeader, string(encoded))
 		},
 		ModifyResponse: func(r *http.Response) error { r.Header.Set("X-Sub2api-Pod", p.ID); return nil },
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// Raw transport errors may contain capability URLs or credentials.
+			logger.FromContext(r.Context()).Warn("serverless.forward_failed",
+				zap.String("component", "serverless"),
+				zap.String("pod_id", p.ID),
+				zap.String("error_kind", forwardErrorKind(err)),
+				zap.String("error_type", fmt.Sprintf("%T", err)),
+				zap.Int64("duration_ms", time.Since(started).Milliseconds()),
+				zap.Int64("response_header_timeout_ms", m.transport.ResponseHeaderTimeout.Milliseconds()),
+			)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(503)
 			_, _ = w.Write([]byte("{\"error\":{\"type\":\"serverless_unavailable\",\"message\":\"Pod transfer failed; request was not retried\"}}"))

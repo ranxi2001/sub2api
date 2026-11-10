@@ -28,6 +28,8 @@ type RuntimeConfig struct {
 	ServerlessEndpoint      string                   `mapstructure:"serverless_endpoint"`
 	ServerlessRegion        string                   `mapstructure:"serverless_region"`
 	ServerlessSecret        string                   `mapstructure:"serverless_secret"`
+	// Zero leaves the response-header budget to the request context and Pod.
+	ServerlessResponseHeaderTimeout int `mapstructure:"serverless_response_header_timeout"`
 }
 
 func (c *Config) RunsBackgroundJobs() bool {
@@ -55,7 +57,15 @@ func (c *Config) validateRuntime() error {
 	if err := c.validateSchedulerSnapshotMode(); err != nil {
 		return err
 	}
-	if err := serverless.ValidateRuntime(serverless.Runtime{ID: c.Runtime.ServerlessID, Endpoint: c.Runtime.ServerlessEndpoint, Region: c.Runtime.ServerlessRegion, Secret: c.Runtime.ServerlessSecret, Gateway: c.Runtime.Role == RuntimeRoleGateway}); err != nil {
+	if c.Runtime.ServerlessResponseHeaderTimeout < 0 || c.Runtime.ServerlessResponseHeaderTimeout > 86400 {
+		return fmt.Errorf("runtime.serverless_response_header_timeout must be between 0 and 86400 seconds")
+	}
+	if err := serverless.ValidateRuntime(serverless.Runtime{
+		ID: c.Runtime.ServerlessID, Endpoint: c.Runtime.ServerlessEndpoint,
+		Region: c.Runtime.ServerlessRegion, Secret: c.Runtime.ServerlessSecret,
+		Gateway:               c.Runtime.Role == RuntimeRoleGateway,
+		ResponseHeaderTimeout: time.Duration(c.Runtime.ServerlessResponseHeaderTimeout) * time.Second,
+	}); err != nil {
 		return err
 	}
 	switch c.Runtime.Role {

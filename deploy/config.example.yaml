@@ -9,6 +9,10 @@ runtime:
   # Optional direct origin for this process's temporary BPS image capabilities.
   # Empty keeps the shared setting. Must resolve to this node, not a shared LB.
   image_relay_owner_origin: ""
+  # Seconds to wait for Pod response headers after writing a forwarded request.
+  # 0 adds no forwarding deadline; the request context and Pod upstream budgets apply.
+  # Allowed 0..86400; restart required. Signed health probes keep their separate 3s budget.
+  serverless_response_header_timeout: 0
   # Opt-in native store=false WS safety gate; no node routing or replay.
   # Each process must use a unique, stable node_id; boot identity is generated.
   ws_node_owner:
