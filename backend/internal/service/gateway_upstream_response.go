@@ -775,6 +775,36 @@ func FlushGatewayResponse(w gin.ResponseWriter) error {
 	}
 }
 
+// SSE fast-path predicates. Package-level byte slices keep the per-event
+// checks allocation-free.
+var (
+	sseUsageFieldBytes       = []byte(`"usage"`)
+	sseMessageFieldBytes     = []byte(`"message"`)
+	sseModelFieldBytes       = []byte(`"model"`)
+	sseMessageStopValueBytes = []byte(`"message_stop"`)
+)
+
+// sseEventNeedsJSONParse reports whether an Anthropic SSE data line must be
+// decoded into map[string]any. Most stream events (content_block_delta, ping,
+// etc.) are forwarded verbatim; decoding them only adds allocations and GC
+// pressure on the hot path.
+func sseEventNeedsJSONParse(eventName string, data []byte, useNoopDeltaKeepalive, needModelReplace bool) bool {
+	eventName = strings.ToLower(strings.TrimSpace(eventName))
+	if eventName == "" || eventName == "message_start" || eventName == "message_delta" {
+		return true
+	}
+	if useNoopDeltaKeepalive {
+		switch eventName {
+		case "content_block_start", "content_block_delta", "content_block_stop", "message_stop":
+			return true
+		}
+	}
+	if needModelReplace && bytes.Contains(data, sseMessageFieldBytes) {
+		return true
+	}
+	return bytes.Contains(data, sseUsageFieldBytes)
+}
+
 func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string, mimicClaudeCode bool) (*streamingResult, error) {
 	// Stop the upstream read as soon as forwarding ends, including silent upstreams.
 	defer func() { _ = resp.Body.Close() }()
@@ -941,8 +971,8 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				eventName = strings.TrimSpace(strings.TrimPrefix(trimmed, "event:"))
 				continue
 			}
-			if dataLine == "" && sseDataRe.MatchString(trimmed) {
-				dataLine = sseDataRe.ReplaceAllString(trimmed, "")
+			if dataLine == "" && strings.HasPrefix(trimmed, "data:") {
+				dataLine = strings.TrimLeft(strings.TrimPrefix(trimmed, "data:"), " \t\n\f\r")
 			}
 		}
 
@@ -964,8 +994,28 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			return []string{block}, dataLine, nil, nil
 		}
 
+		dataLineBytes := []byte(dataLine)
+		if !sseEventNeedsJSONParse(eventName, dataLineBytes, useNoopDeltaKeepalive, needModelReplace) {
+			// Fast path: the event is forwarded verbatim. Skip the map decode and
+			// only do the cheap observations that still need the raw payload.
+			if bytes.Contains(dataLineBytes, sseModelFieldBytes) {
+				observer.ObserveAnthropic(dataLineBytes)
+			}
+			if strings.EqualFold(eventName, "message_stop") || bytes.Contains(dataLineBytes, sseMessageStopValueBytes) {
+				if anthropicStreamEventIsTerminal(eventName, dataLine) {
+					sawTerminalEvent = true
+				}
+			}
+			block := ""
+			if eventName != "" {
+				block = "event: " + eventName + "\n"
+			}
+			block += "data: " + dataLine + "\n\n"
+			return []string{block}, dataLine, nil, nil
+		}
+
 		var event map[string]any
-		if err := json.Unmarshal([]byte(dataLine), &event); err != nil {
+		if err := json.Unmarshal(dataLineBytes, &event); err != nil {
 			// JSON 解析失败，直接透传原始数据
 			block := ""
 			if eventName != "" {
@@ -1190,8 +1240,8 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 					}
 				}
 				for _, block := range outputBlocks {
-					restored := reverseToolNamesIfPresent(c, []byte(block))
-					if _, werr := fmt.Fprint(w, string(restored)); werr != nil {
+					restored := reverseToolNamesIfPresentString(c, block)
+					if _, werr := io.WriteString(w, restored); werr != nil {
 						return clientGone(werr)
 					}
 					if err := FlushGatewayResponse(w); err != nil {
