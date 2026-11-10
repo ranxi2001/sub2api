@@ -44,7 +44,7 @@ func (c *issue776CloseConn) ReadFrame(ctx context.Context) (coderws.MessageType,
 	return coderws.MessageText, message, err
 }
 
-func issue776Forward(t *testing.T, events []string, beforeClose func(*gin.Context)) (*httptest.ResponseRecorder, *gin.Context, *OpenAIForwardResult, error, *issue776CloseConn) {
+func issue776Forward(t *testing.T, events []string, beforeClose func(*gin.Context)) (*httptest.ResponseRecorder, *gin.Context, *OpenAIForwardResult, *issue776CloseConn, error) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -71,7 +71,7 @@ func issue776Forward(t *testing.T, events []string, beforeClose func(*gin.Contex
 	require.Len(t, conn.writes, 1)
 	require.Equal(t, "response.create", conn.writes[0]["type"])
 	conn.mu.Unlock()
-	return w, c, result, err, conn
+	return w, c, result, conn, err
 }
 
 func TestOpenAIWSSSEIncompleteControlMetadataDoesNotCommitSuccess(t *testing.T) {
@@ -83,7 +83,7 @@ func TestOpenAIWSSSEIncompleteControlMetadataDoesNotCommitSuccess(t *testing.T) 
 			name = "two_control_events_then_1000"
 		}
 		t.Run(name, func(t *testing.T) {
-			w, c, result, err, conn := issue776Forward(t, events, func(c *gin.Context) {
+			w, c, result, conn, err := issue776Forward(t, events, func(c *gin.Context) {
 				require.False(t, c.Writer.Written(), "control metadata must not commit HTTP 200")
 			})
 			require.Error(t, err)
@@ -119,7 +119,7 @@ func TestOpenAIWSSSEIncompleteAfterOutputHasOneFailedTerminal(t *testing.T) {
 		`{"type":"vendor.unknown_event","data":"synthetic"}`,
 	} {
 		t.Run(gjson.Get(event, "type").String(), func(t *testing.T) {
-			w, c, _, err, _ := issue776Forward(t, []string{issue776RateLimits, issue776Metadata, event}, func(c *gin.Context) {
+			w, c, _, _, err := issue776Forward(t, []string{issue776RateLimits, issue776Metadata, event}, func(c *gin.Context) {
 				require.True(t, c.Writer.Written(), "only the two known control event types may be delayed")
 			})
 			require.Error(t, err)
@@ -148,7 +148,7 @@ func TestOpenAIWSSSEIncompleteAfterOutputHasOneFailedTerminal(t *testing.T) {
 
 func TestOpenAIWSSSEIncompleteControlMetadataSuccessPreservesOrder(t *testing.T) {
 	terminal := `{"type":"response.completed","response":{"id":"resp_issue776","model":"gpt-5.1","status":"completed","usage":{"input_tokens":7,"output_tokens":0}}}`
-	w, c, result, err, _ := issue776Forward(t, []string{issue776RateLimits, issue776Metadata, terminal}, nil)
+	w, c, result, _, err := issue776Forward(t, []string{issue776RateLimits, issue776Metadata, terminal}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Nil(t, result.FirstTokenMs, "control and terminal-only events do not invent TTFT")
@@ -164,7 +164,7 @@ func TestOpenAIWSSSEIncompleteControlMetadataSuccessPreservesOrder(t *testing.T)
 
 func TestOpenAIWSSSEIncompleteMetadataThenOverloadCannotEnableFailover(t *testing.T) {
 	event := `{"type":"error","error":{"type":"server_error","code":"server_is_overloaded","message":"synthetic busy"}}`
-	w, _, _, err, _ := issue776Forward(t, []string{issue776RateLimits, issue776Metadata, event}, nil)
+	w, _, _, _, err := issue776Forward(t, []string{issue776RateLimits, issue776Metadata, event}, nil)
 	require.Error(t, err)
 	var failover *UpstreamFailoverError
 	require.False(t, errors.As(err, &failover), "buffering must not turn an already-started metadata stream into a new account attempt")
@@ -191,7 +191,7 @@ func TestOpenAIWSSSEIncompleteControlMetadataBufferHasFiniteBounds(t *testing.T)
 			name = "byte_count"
 		}
 		t.Run(name, func(t *testing.T) {
-			w, _, _, err, _ := issue776Forward(t, events, func(c *gin.Context) {
+			w, _, _, _, err := issue776Forward(t, events, func(c *gin.Context) {
 				require.True(t, c.Writer.Written(), "excess control metadata must flush instead of growing an unbounded buffer")
 			})
 			require.Error(t, err)
@@ -206,7 +206,7 @@ func TestOpenAIWSSSEIncompleteControlMetadataBufferHasFiniteBounds(t *testing.T)
 
 func TestOpenAIWSSSEIncompletePreservesObservedUsage(t *testing.T) {
 	event := `{"type":"response.in_progress","response":{"id":"resp_usage_issue776","usage":{"input_tokens":9,"output_tokens":2,"input_tokens_details":{"cached_tokens":4}}}}`
-	_, _, result, err, _ := issue776Forward(t, []string{issue776RateLimits, event}, nil)
+	_, _, result, _, err := issue776Forward(t, []string{issue776RateLimits, event}, nil)
 	require.Error(t, err)
 	require.NotNil(t, result, "explicit upstream usage must survive an incomplete stream")
 	require.True(t, result.streamReadIncomplete)
@@ -269,7 +269,7 @@ func TestOpenAIWSSSEIncompleteMetadataCancellationKeepsClientDisconnect(t *testi
 
 func TestOpenAIWSSSEIncompleteZeroEventCapacityRejectionKeepsExistingFailover(t *testing.T) {
 	event := `{"type":"error","error":{"type":"server_error","code":"server_is_overloaded","message":"synthetic busy"}}`
-	w, _, _, err, _ := issue776Forward(t, []string{event}, nil)
+	w, _, _, _, err := issue776Forward(t, []string{event}, nil)
 	var failover *UpstreamFailoverError
 	require.ErrorAs(t, err, &failover, "an explicit capacity rejection before any other event retains its existing policy")
 	require.Equal(t, http.StatusServiceUnavailable, failover.StatusCode)
@@ -278,7 +278,7 @@ func TestOpenAIWSSSEIncompleteZeroEventCapacityRejectionKeepsExistingFailover(t 
 
 func TestOpenAIWSSSEIncompletePreservesObservedImageWithoutTokenUsage(t *testing.T) {
 	event := `{"type":"response.output_item.done","item":{"id":"ig_issue776","type":"image_generation_call","status":"completed","result":"synthetic-image-data"}}`
-	_, _, result, err, _ := issue776Forward(t, []string{issue776RateLimits, event}, nil)
+	_, _, result, _, err := issue776Forward(t, []string{issue776RateLimits, event}, nil)
 	require.Error(t, err)
 	require.NotNil(t, result, "a delivered image is concrete output evidence even without token usage")
 	require.True(t, result.streamReadIncomplete)
