@@ -362,12 +362,20 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 			// while the provider call was in flight. Return the durable row so
 			// post-refresh cache publication cannot restore that stale snapshot.
 			freshAccount = durableAccount
-		} else if updateErr := persistAccountCredentials(ctx, api.accountRepo, freshAccount, newCredentials); updateErr != nil {
-			slog.Error("oauth_refresh_update_failed",
-				"account_id", freshAccount.ID,
-				"error", updateErr,
-			)
-			return nil, fmt.Errorf("%w: %v", errOAuthRefreshCredentialPersist, updateErr)
+		} else {
+			current, applied, updateErr := persistOAuthRefreshedCredentials(ctx, api.accountRepo, freshAccount, attemptedAccount, newCredentials)
+			if updateErr != nil {
+				slog.Error("oauth_refresh_update_failed",
+					"account_id", freshAccount.ID,
+					"error", updateErr,
+				)
+				return nil, fmt.Errorf("%w: %w", errOAuthRefreshCredentialPersist, updateErr)
+			}
+			if !applied {
+				return &OAuthRefreshResult{Account: current}, nil
+			}
+			freshAccount = current
+			newCredentials = shallowCopyMap(current.Credentials)
 		}
 	}
 

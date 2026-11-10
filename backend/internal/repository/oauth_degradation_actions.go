@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -83,7 +84,7 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	}
 	a := service.Account{ID: id}
 	var credentials, extra []byte
-	err = tx.QueryRowContext(ctx, `SELECT name,platform,type,concurrency,credentials,COALESCE(extra,'{}'::jsonb) FROM accounts WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL AND type='oauth' FOR UPDATE`, id).Scan(&a.Name, &a.Platform, &a.Type, &a.Concurrency, &credentials, &extra)
+	err = tx.QueryRowContext(ctx, `SELECT name,platform,type,concurrency,schedulable,credentials,COALESCE(extra,'{}'::jsonb) FROM accounts WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL AND type='oauth' FOR UPDATE`, id).Scan(&a.Name, &a.Platform, &a.Type, &a.Concurrency, &a.Schedulable, &credentials, &extra)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -110,9 +111,38 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 		return nil
 	}
 	models := make([]string, 0, len(c.DegradationAction.Models))
-	for _, model := range c.DegradationAction.Models {
-		if c.DegradationAction.RestrictsModels() && a.IsModelSupported(model) {
-			models = append(models, model)
+	mapping := make(map[string]any)
+	nativeSchedulingPaused := false
+	if c.DegradationAction.RestrictsModels() {
+		for _, model := range c.DegradationAction.Models {
+			target := a.GetMappedModel(model)
+			// Preserve existing aliases and exact/wildcard targets, and keep the
+			// intersection on both sides of the mapping. Never grant a model
+			// that the account or the selected post-action scope did not allow.
+			if a.IsModelSupported(model) && slices.Contains(c.DegradationAction.Models, target) {
+				models = append(models, model)
+				mapping[model] = target
+			}
+		}
+		if len(mapping) == 0 {
+			// Native empty mappings mean unrestricted. Keep the original map
+			// and visibly pause scheduling instead of inventing a hidden scope.
+			a.Schedulable = false
+			nativeSchedulingPaused = true
+		} else {
+			if a.Credentials == nil {
+				a.Credentials = make(map[string]any)
+			}
+			a.Credentials["model_mapping"] = mapping
+			a.Credentials["model_mapping_mode"] = "whitelist"
+			delete(a.Credentials, "compact_model_mapping")
+			if a.Extra == nil {
+				a.Extra = make(map[string]any)
+			}
+			if a.Platform == service.PlatformOpenAI {
+				a.Extra["openai_passthrough"] = false
+				a.Extra["openai_oauth_passthrough"] = false
+			}
 		}
 	}
 	removedGroups := make([]int64, 0)
@@ -143,12 +173,25 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 		next = min(next, c.DegradationAction.TargetConcurrency)
 	}
 	limitConcurrency, limitModels := c.DegradationAction.RestrictsConcurrency(), c.DegradationAction.RestrictsModels()
-	state := service.OAuthDegradationState{LimitConcurrency: &limitConcurrency, LimitModels: &limitModels, LimitGroups: c.DegradationAction.LimitGroups, GroupIDs: append([]int64{}, c.DegradationAction.GroupIDs...), RemovedGroupIDs: removedGroups, Revision: c.Revision, Models: models, ConcurrencyCap: next, ThresholdPercent: *c.DegradationAction.ThresholdPercent, DegradationPercent: *m.DegradationPercent, QualitySamples: m.QualitySamples, WindowStart: m.WindowStart, WindowEnd: m.WindowEnd, AppliedAt: now}
-	encoded, err := json.Marshal(state)
+	state := service.OAuthDegradationState{NativeControls: true, NativeSchedulingPaused: nativeSchedulingPaused, LimitConcurrency: &limitConcurrency, LimitModels: &limitModels, LimitGroups: c.DegradationAction.LimitGroups, GroupIDs: append([]int64{}, c.DegradationAction.GroupIDs...), RemovedGroupIDs: removedGroups, Revision: c.Revision, Models: models, ConcurrencyCap: next, ThresholdPercent: *c.DegradationAction.ThresholdPercent, DegradationPercent: *m.DegradationPercent, QualitySamples: m.QualitySamples, WindowStart: m.WindowStart, WindowEnd: m.WindowEnd, AppliedAt: now}
+	if a.Extra == nil {
+		a.Extra = make(map[string]any)
+	}
+	a.Extra[service.OAuthDegradationActionExtraKey] = state
+	if limitConcurrency {
+		// A native manual concurrency edit clears this automatic-upgrade hold.
+		// It does not cap later administrator changes at the historical value.
+		a.Extra[service.AutoConfigConcurrencyExtraKey] = service.AutoConfigConcurrencyState{Concurrency: next, DegradationHold: true}
+	}
+	credentialsJSON, err := json.Marshal(a.Credentials)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE accounts SET concurrency=$2,extra=jsonb_set(CASE WHEN $4 THEN jsonb_set(COALESCE(extra,'{}'::jsonb),'{auto_config_concurrency}',COALESCE(extra->'auto_config_concurrency','{}'::jsonb)||'{"degradation_hold":true}'::jsonb) ELSE COALESCE(extra,'{}'::jsonb) END,'{oauth_degradation_action}',$3::jsonb),updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') WHERE id=$1`, id, next, string(encoded), limitConcurrency)
+	extraJSON, err := json.Marshal(a.Extra)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET concurrency=$2,credentials=$3::jsonb,extra=$4::jsonb,schedulable=$5,updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') WHERE id=$1`, id, next, string(credentialsJSON), string(extraJSON), a.Schedulable)
 	if err != nil {
 		return err
 	}
@@ -168,11 +211,4 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	}
 	r.syncSchedulerAccountSnapshotDetached(ctx, id)
 	return nil
-}
-
-// A bulk update evaluates this expression against each locked live row.
-func oauthDegradationConcurrencySQL(proposed string) string {
-	cap := "(extra->'oauth_degradation_action'->>'concurrency_cap')::int"
-	ceiling := "(CASE WHEN " + cap + ">0 THEN CASE WHEN concurrency>0 THEN LEAST(concurrency," + cap + ") ELSE " + cap + " END ELSE concurrency END)"
-	return "CASE WHEN extra ? 'oauth_degradation_action' AND COALESCE((extra->'oauth_degradation_action'->>'limit_concurrency')::boolean,true) THEN CASE WHEN " + ceiling + "<=0 THEN " + ceiling + " WHEN " + proposed + "<=0 THEN " + ceiling + " ELSE LEAST(" + proposed + "," + ceiling + ") END ELSE " + proposed + " END"
 }

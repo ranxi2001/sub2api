@@ -2,14 +2,13 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // Membership writers share the account lock with the degradation evaluator.
-// Reading the live server-owned marker after waiting prevents an old editor or
-// another automated policy from recreating a group removed by degradation.
+// Degradation removes native bindings once; later administrator edits may restore
+// them. The historical action must never filter an ordinary binding save.
 func lockOAuthDegradationGroupBindings(ctx context.Context, exec sqlExecutor, accountID int64, proposed []int64) ([]int64, error) {
 	rows, err := exec.QueryContext(ctx, `SELECT COALESCE(extra,'{}'::jsonb) FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR NO KEY UPDATE`, accountID)
 	if err != nil {
@@ -26,9 +25,5 @@ func lockOAuthDegradationGroupBindings(ctx context.Context, exec sqlExecutor, ac
 	if err := rows.Scan(&raw); err != nil {
 		return nil, err
 	}
-	var account service.Account
-	if err := json.Unmarshal(raw, &account.Extra); err != nil {
-		return nil, err
-	}
-	return account.FilterOAuthDegradationGroups(proposed), rows.Err()
+	return proposed, rows.Err()
 }

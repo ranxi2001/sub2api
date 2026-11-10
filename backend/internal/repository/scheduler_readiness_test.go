@@ -35,6 +35,44 @@ func TestSchedulerReadinessRequiresPublishedSnapshot(t *testing.T) {
 	require.Error(t, checker.CheckSnapshotReadiness(ctx, []service.SchedulerBucket{bucket}, time.Minute), "a live Redis connection does not imply complete account metadata")
 }
 
+func TestSchedulerReadinessExplicitEmptySnapshot(t *testing.T) {
+	for _, name := range []string{"published_empty", "missing_snapshot", "mixed_members", "wrong_generation", "missing_stamp", "stale_stamp", "retired"} {
+		t.Run(name, func(t *testing.T) {
+			cache, mr := newSchedulerCacheUnitWithRedis(t)
+			mr.SetTime(time.Unix(1700000000, 0))
+			ctx := t.Context()
+			bucket := service.SchedulerBucket{GroupID: 325, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeForced}
+			token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+			require.NoError(t, err)
+			require.NoError(t, cache.SetSnapshot(ctx, bucket, token, nil))
+			active, err := mr.Get(schedulerBucketKey(schedulerActivePrefix, bucket))
+			require.NoError(t, err)
+			snapshotKey := schedulerSnapshotKey(bucket, active)
+			switch name {
+			case "missing_snapshot":
+				mr.Del(snapshotKey)
+			case "mixed_members":
+				require.NoError(t, cache.SetAccount(ctx, &service.Account{ID: 7}))
+				require.NoError(t, cache.rdb.ZAdd(ctx, snapshotKey, redis.Z{Member: "7", Score: 1}).Err())
+			case "wrong_generation":
+				mr.HSet(schedulerBucketKey(schedulerPublishedPrefix, bucket), "version", "old")
+			case "missing_stamp":
+				mr.Del(schedulerBucketKey(schedulerPublishedPrefix, bucket))
+			case "stale_stamp":
+				mr.SetTime(time.Unix(1700000061, 0))
+			case "retired":
+				require.NoError(t, cache.RetireBucket(ctx, bucket))
+			}
+			err = cache.CheckSnapshotReadiness(ctx, []service.SchedulerBucket{bucket}, time.Minute)
+			if name == "published_empty" {
+				require.NoError(t, err, "a deliberately published empty pool is complete without account metadata")
+			} else {
+				require.ErrorIs(t, err, service.ErrSchedulerCacheNotReady)
+			}
+		})
+	}
+}
+
 func TestSchedulerReadinessRejectsStaleRetiredAndIncomplete(t *testing.T) {
 	for _, name := range []string{"missing_stamp", "wrong_generation", "old_stamp", "future_stamp", "missing_active", "not_ready", "retired", "missing_members", "invalid_member", "wrong_metadata_type", "empty_metadata", "missing_full_account", "over_limit"} {
 		t.Run(name, func(t *testing.T) {
@@ -151,6 +189,19 @@ func TestSchedulerReadinessRealRedis(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, writer.SetSnapshot(ctx, bucket, token, []service.Account{{ID: 7}}))
 	require.NoError(t, reader.CheckSnapshotReadiness(ctx, []service.SchedulerBucket{bucket}, time.Second))
+	// Publishing no candidates is complete; losing the version-local sorted
+	// set or mixing its empty marker with real accounts is not.
+	require.NoError(t, writer.SetSnapshot(ctx, bucket, token, nil))
+	require.NoError(t, reader.CheckSnapshotReadiness(ctx, []service.SchedulerBucket{bucket}, time.Second))
+	active, err := client.Get(ctx, schedulerBucketKey(schedulerActivePrefix, bucket)).Result()
+	require.NoError(t, err)
+	snapshotKey := schedulerSnapshotKey(bucket, active)
+	require.NoError(t, client.ZAdd(ctx, snapshotKey, redis.Z{Member: "7", Score: 1}).Err())
+	require.ErrorIs(t, reader.CheckSnapshotReadiness(ctx, []service.SchedulerBucket{bucket}, time.Second), service.ErrSchedulerCacheNotReady)
+	require.NoError(t, client.ZRem(ctx, snapshotKey, "7").Err())
+	require.NoError(t, reader.CheckSnapshotReadiness(ctx, []service.SchedulerBucket{bucket}, time.Second))
+	require.NoError(t, client.Del(ctx, snapshotKey).Err())
+	require.ErrorIs(t, reader.CheckSnapshotReadiness(ctx, []service.SchedulerBucket{bucket}, time.Second), service.ErrSchedulerCacheNotReady)
 }
 
 func TestSchedulerReadinessAllScopesAndRedisFailure(t *testing.T) {

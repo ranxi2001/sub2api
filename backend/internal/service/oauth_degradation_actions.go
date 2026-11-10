@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"math"
-	"slices"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -77,6 +76,7 @@ func (c OAuthDegradationConfig) Triggered(m AccountPerformance) bool {
 
 type OAuthDegradationState struct {
 	Revision           string    `json:"revision"`
+	NativeControls     bool      `json:"native_controls,omitempty"`
 	LimitConcurrency   *bool     `json:"limit_concurrency"`
 	LimitModels        *bool     `json:"limit_models"`
 	LimitGroups        bool      `json:"limit_groups"`
@@ -90,6 +90,10 @@ type OAuthDegradationState struct {
 	WindowStart        time.Time `json:"window_start"`
 	WindowEnd          time.Time `json:"window_end"`
 	AppliedAt          time.Time `json:"applied_at"`
+
+	// Admission preserves the current native switch after an unrepresentable
+	// model scope paused it. This audit flag never overrides a manual resume.
+	NativeSchedulingPaused bool `json:"native_scheduling_paused,omitempty"`
 }
 
 func (s OAuthDegradationState) RestrictsConcurrency() bool {
@@ -103,69 +107,23 @@ func (a *Account) HasOAuthDegradationAction() bool {
 	_, ok := a.Extra[OAuthDegradationActionExtraKey]
 	return ok
 }
-func (a *Account) degradationState() (OAuthDegradationState, bool) {
-	var state OAuthDegradationState
-	raw, err := json.Marshal(a.Extra[OAuthDegradationActionExtraKey])
-	if err != nil || json.Unmarshal(raw, &state) != nil || (state.RestrictsModels() && state.Models == nil) {
-		return state, false
-	}
-	return state, true
-}
 
-// HasOAuthDegradationModelLimit also keeps malformed legacy markers closed.
-func (a *Account) HasOAuthDegradationModelLimit() bool {
-	if !a.HasOAuthDegradationAction() {
-		return false
-	}
-	state, ok := a.degradationState()
-	return !ok || state.RestrictsModels()
-}
-
-// FilterOAuthDegradationGroups preserves ordinary bindings while preventing a
-// stale edit or automated group move from reintroducing a disabled group.
+// Degradation history does not override current native group bindings.
 func (a *Account) FilterOAuthDegradationGroups(proposed []int64) []int64 {
-	state, ok := a.degradationState()
-	if !ok || !state.LimitGroups {
-		return proposed
-	}
-	allowed := make([]int64, 0, len(proposed))
-	for _, id := range proposed {
-		if !slices.Contains(state.GroupIDs, id) {
-			allowed = append(allowed, id)
-		}
-	}
-	return allowed
+	return proposed
 }
 
-func (a *Account) oauthDegradationAllows(model string) bool {
-	if !a.HasOAuthDegradationAction() {
-		return true
-	}
-	state, ok := a.degradationState()
-	return ok && (!state.RestrictsModels() || slices.Contains(state.Models, model))
-}
-
-// Other automated recovery policies may tighten the cap, never restore it.
+// Automated recovery must not undo the current native concurrency setting.
+// Explicit account edits may raise it; the audit snapshot is not a ceiling.
 func (a *Account) LimitOAuthDegradationConcurrency(proposed int) int {
-	if !a.HasOAuthDegradationAction() {
+	var state AutoConfigConcurrencyState
+	raw, err := json.Marshal(a.Extra[AutoConfigConcurrencyExtraKey])
+	if err != nil || json.Unmarshal(raw, &state) != nil || !state.DegradationHold {
 		return proposed
 	}
-	// Never turn a finite limit into the project's <=0 (unlimited) value,
-	// nor undo a later manual reduction while another policy recovers.
 	ceiling := a.Concurrency
-	state, ok := a.degradationState()
-	if ok && !state.RestrictsConcurrency() {
-		return proposed
-	}
-	if ok && state.ConcurrencyCap > 0 {
-		if ceiling <= 0 {
-			ceiling = state.ConcurrencyCap
-		} else {
-			ceiling = min(ceiling, state.ConcurrencyCap)
-		}
-	}
 	if ceiling <= 0 {
-		return ceiling
+		return proposed
 	}
 	if proposed <= 0 {
 		return ceiling

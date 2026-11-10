@@ -79,16 +79,27 @@ func applyOpenAITwoFAAdmissionOutcome(ctx context.Context, tx *sql.Tx, plan *ser
 		}
 	}
 	passedConcurrency := account.LimitOAuthDegradationConcurrency(state.Policy.PassedConcurrency)
+	passedSchedulable := true
+	if degradation, ok := account.Extra[service.OAuthDegradationActionExtraKey].(map[string]any); ok {
+		nativeControls, _ := degradation["native_controls"].(bool)
+		nativeSchedulingPaused, _ := degradation["native_scheduling_paused"].(bool)
+		if nativeControls && nativeSchedulingPaused {
+			// Admission must not undo a native pause imposed because the model
+			// scope could not be represented. Keep an administrator's explicit
+			// true as well: the audit marker is not a separate scheduling gate.
+			passedSchedulable = schedulable
+		}
+	}
 	encoded, err := json.Marshal(state)
 	if err != nil {
 		return "", err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE accounts SET
- extra=jsonb_set(CASE WHEN $3 OR $5 OR $6 THEN COALESCE(extra,'{}'::jsonb)-'auto_config_concurrency' ELSE COALESCE(extra,'{}'::jsonb) END,'{openai_two_fa_admission}',$2::jsonb),
+ extra=jsonb_set(CASE WHEN ($3 OR $5 OR $6) AND COALESCE((extra->'auto_config_concurrency'->>'degradation_hold')::boolean,false) IS NOT TRUE THEN COALESCE(extra,'{}'::jsonb)-'auto_config_concurrency' ELSE COALESCE(extra,'{}'::jsonb) END,'{openai_two_fa_admission}',$2::jsonb),
  concurrency=CASE WHEN $3 THEN $4 ELSE concurrency END,
- schedulable=CASE WHEN $3 THEN true WHEN $6 THEN false WHEN $5 AND $7::boolean IS NOT NULL THEN $7 ELSE schedulable END,
+ schedulable=CASE WHEN $3 THEN $8 WHEN $6 THEN false WHEN $5 AND $7::boolean IS NOT NULL THEN $7 ELSE schedulable END,
  updated_at=CASE WHEN $3 OR $5 OR $6 THEN clock_timestamp() ELSE updated_at END
- WHERE id=$1`, plan.AccountID, string(encoded), action == "admission_passed", passedConcurrency, action == "admission_isolated", action == "admission_isolation_pending", state.IsolationSchedulable)
+ WHERE id=$1`, plan.AccountID, string(encoded), action == "admission_passed", passedConcurrency, action == "admission_isolated", action == "admission_isolation_pending", state.IsolationSchedulable, passedSchedulable)
 	if err != nil {
 		return "", err
 	}

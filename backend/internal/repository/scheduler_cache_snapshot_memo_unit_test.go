@@ -423,17 +423,29 @@ func TestSchedulerCacheSnapshotMemoEmptyAndNilMetadataAreNotCached(t *testing.T)
 	ctx := context.Background()
 	cache, _, _ := newSchedulerCacheMemoUnit(t, defaultSchedulerSnapshotWriteChunkSize)
 
-	t.Run("empty zset", func(t *testing.T) {
+	t.Run("published empty snapshot", func(t *testing.T) {
 		bucket := memoTestBucket(110)
 		_, err := cache.writeAccountIDs(ctx, []service.Account{memoTestAccount(81, "a")})
 		require.NoError(t, err)
 		memoPublish(t, cache, bucket)
-		memoRequireMiss(t, cache, bucket)
+		snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+		require.NoError(t, err)
+		require.True(t, hit)
+		require.Empty(t, snapshot)
+		require.Nil(t, cache.lookupSnapshotEntry(bucket.String()), "empty pools need no account memo")
 
 		active := cache.rdb.Get(ctx, schedulerBucketKey(schedulerActivePrefix, bucket)).Val()
 		require.NotEmpty(t, active)
-		require.NoError(t, cache.rdb.ZAdd(ctx, schedulerSnapshotKey(bucket, active), redis.Z{Score: 0, Member: "81"}).Err())
+		memoPublish(t, cache, bucket, memoTestAccount(81, "a"))
 		require.Equal(t, []int64{81}, memoIDs(memoRead(t, cache, bucket)))
+	})
+
+	t.Run("missing nonempty zset", func(t *testing.T) {
+		bucket := memoTestBucket(112)
+		memoPublish(t, cache, bucket, memoTestAccount(93, "a"))
+		active := cache.rdb.Get(ctx, schedulerBucketKey(schedulerActivePrefix, bucket)).Val()
+		require.NoError(t, cache.rdb.Del(ctx, schedulerSnapshotKey(bucket, active)).Err())
+		memoRequireMiss(t, cache, bucket)
 	})
 
 	t.Run("nil metadata", func(t *testing.T) {

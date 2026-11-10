@@ -11,17 +11,17 @@ export default {
   "concurrency": "Target concurrency (default 10)",
   "thresholdRequired": "Set a threshold before enabling.",
   "models": "Model scope after action (intersected with existing authorization)",
-  "empty": "No models selected: affected accounts will support no models.",
+  "empty": "No allowed models disables account scheduling. Configure models in the account editor before enabling it again.",
   "groups": "Remove account bindings to these groups",
-  "groupsHint": "Select up to 100 groups. Affected accounts leave these groups and later edits cannot reattach them. Other bindings remain; the groups themselves and other accounts are unaffected.",
+  "groupsHint": "Select up to 100 groups. Affected accounts leave these groups; you can reattach them in the account editor. Other bindings remain; the groups themselves and other accounts are unaffected.",
   "groupsRequired": "Select at least one group binding to remove.",
   "unavailableGroup": "Unavailable group; selection retained. Uncheck to remove this ID",
-  "scope": "Only selected actions apply: lower concurrency to the smaller of its current value and target, intersect models with existing authorization, or remove selected group bindings. Applied once; better metrics, disabling or editing the template do not restore changes. Concurrency limits also stop successful requests from ramping it.",
+  "scope": "Applies once by updating the account’s concurrency, model mappings or group bindings, which you can view and change in the account editor. Concurrency only decreases; models intersect existing authorization, and no allowed models disables scheduling. Better metrics, disabling the policy or changing its threshold do not restore existing account settings.",
   "invalid": "Set a threshold from 0 to 100 and select at least one action. Check the selected actions’ concurrency (integer 1–10000), exact model IDs (up to 500), or group selections (1–100).",
   "event": "Probe degradation {percent}% ≥ {threshold}% · {samples} conclusive rounds · {actions} · window {start} — {end}",
   "concurrencyEvent": "concurrency {before} → {after}",
   "modelsEvent": "models: {models}",
-  "groupsEvent": "blocked group bindings: {groups}; removed: {removed}"
+  "groupsEvent": "selected groups: {groups}; removed: {removed}"
 },
   selection: {
     "accountHint": "This account retains its initial model scope (an empty scope disables every model). Normal saves and reauthorization preserve it; changing model mappings takes ownership.",

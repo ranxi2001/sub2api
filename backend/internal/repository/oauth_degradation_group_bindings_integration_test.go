@@ -11,9 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A saved pre-action form and the other membership entry points must all obey
-// the committed group scope rather than recreating the removed membership.
-func TestOAuthDegradationGroupBindingWritersKeepClosedGroupsRemoved(t *testing.T) {
+// Every native membership editor may restore a group removed by a past action.
+func TestOAuthDegradationGroupBindingWritersRestoreNativeMembership(t *testing.T) {
 	for _, writer := range []string{"account form", "single add", "group bulk", "scoped account form"} {
 		t.Run(writer, func(t *testing.T) {
 			tx := testEntTx(t)
@@ -44,8 +43,8 @@ func TestOAuthDegradationGroupBindingWritersKeepClosedGroupsRemoved(t *testing.T
 			}
 			after, err := repo.GetByID(ctx, account.ID)
 			require.NoError(t, err)
-			require.Equal(t, []int64{kept.ID}, after.GroupIDs)
-			require.Equal(t, []string{"gpt-6-luna"}, after.AccountGroups[0].AllowedModels)
+			require.ElementsMatch(t, []int64{closed.ID, kept.ID}, after.GroupIDs)
+			require.Equal(t, []string{"gpt-6-luna"}, after.GroupAllowedModels(kept.ID))
 			require.True(t, after.HasOAuthDegradationAction())
 		})
 	}
@@ -69,7 +68,7 @@ func TestOAuthDegradationLegacyMarkerDoesNotCloseGroups(t *testing.T) {
 	require.Equal(t, []int64{group.ID}, after.GroupIDs)
 }
 
-func TestOAuthDegradationExcel403MoveCannotRestoreClosedDestination(t *testing.T) {
+func TestOAuthDegradationAuditDoesNotOverrideNativeExcel403Destination(t *testing.T) {
 	tx := testEntTx(t)
 	ctx := dbent.NewTxContext(context.Background(), tx)
 	client := tx.Client()
@@ -89,8 +88,9 @@ func TestOAuthDegradationExcel403MoveCannotRestoreClosedDestination(t *testing.T
 	require.NoError(t, err)
 	changed, err := repo.MoveExcelBPSOn403(ctx, before)
 	require.NoError(t, err)
-	require.False(t, changed)
+	require.True(t, changed)
 	after, err := repo.GetByID(ctx, account.ID)
 	require.NoError(t, err)
-	require.Equal(t, []int64{kept.ID}, after.GroupIDs)
+	require.Equal(t, []int64{closed.ID}, after.GroupIDs)
+	require.True(t, after.HasOAuthDegradationAction(), "native routing changes retain historical action evidence")
 }

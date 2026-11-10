@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestOAuthDegradationStaleEditPreservesAction(t *testing.T) {
+func TestOAuthDegradationNativeEditPreservesAudit(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
 	a := mustCreateAccount(t, tx.Client(), &service.Account{Name: "degradation-edit-fixture", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Concurrency: 20, Credentials: map[string]any{}})
@@ -26,7 +26,7 @@ func TestOAuthDegradationStaleEditPreservesAction(t *testing.T) {
 	got, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Contains(t, got.Extra, "oauth_degradation_action", "stale editor must not erase a committed degradation action")
-	require.Equal(t, 10, got.Concurrency, "stale account snapshot must not restore concurrency")
+	require.Equal(t, 20, got.Concurrency, "native account save must not be capped by historical audit data")
 	require.Equal(t, "keep", got.Extra["manual"])
 	// Incoming marker injection cannot replace server-owned scope.
 	require.NoError(t, repo.UpdateExtra(ctx, a.ID, map[string]any{"oauth_degradation_action": map[string]any{"models": []string{"gpt-6.1-sol"}, "concurrency_cap": 100}}))
@@ -38,7 +38,7 @@ func TestOAuthDegradationStaleEditPreservesAction(t *testing.T) {
 	require.NotContains(t, string(data), "gpt-6.1-sol")
 }
 
-func TestOAuthDegradationBulkAndRepeatedStaleEditRetainLowerManualLimit(t *testing.T) {
+func TestOAuthDegradationBulkNativeConcurrencyCanBeRestored(t *testing.T) {
 	ctx := t.Context()
 	tx := testEntTx(t)
 	a := mustCreateAccount(t, tx.Client(), &service.Account{Name: "degradation-manual-fixture", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Concurrency: 20})
@@ -50,13 +50,13 @@ func TestOAuthDegradationBulkAndRepeatedStaleEditRetainLowerManualLimit(t *testi
 	require.NoError(t, repo.Update(ctx, stale))
 	got, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	require.Equal(t, 3, got.Concurrency, "stale save retains later manual reduction")
+	require.Equal(t, 20, got.Concurrency, "administrator may restore the native concurrency")
 	for _, proposed := range []int{0, -1, 20} {
 		_, err = repo.BulkUpdate(ctx, []int64{a.ID}, service.AccountBulkUpdate{Concurrency: &proposed, Extra: map[string]any{"oauth_degradation_action": nil, "manual": "bulk"}})
 		require.NoError(t, err)
 		got, err = repo.GetByID(ctx, a.ID)
 		require.NoError(t, err)
-		require.Equal(t, 3, got.Concurrency)
+		require.Equal(t, proposed, got.Concurrency)
 		require.Contains(t, got.Extra, "oauth_degradation_action")
 		require.Equal(t, "bulk", got.Extra["manual"])
 	}

@@ -222,6 +222,9 @@ func i64p(v int64) *int64 {
 func newOpenAIRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo UserRepository, subRepo UserSubscriptionRepository, rateRepo UserGroupRateRepository) *OpenAIGatewayService {
 	cfg := &config.Config{}
 	cfg.Default.RateMultiplier = 1.1
+	// Accounting fixtures replace dependencies after construction. Background
+	// harvesting must not race with those replacements or outlive the test.
+	cfg.Runtime.Role = config.RuntimeRoleGateway
 	svc := NewOpenAIGatewayService(
 		nil,
 		nil,

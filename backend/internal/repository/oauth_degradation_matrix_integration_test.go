@@ -114,7 +114,12 @@ func TestOAuthDegradationPostgresMatrix(t *testing.T) {
 			require.Contains(t, got.Extra, "model_rate_limits", "unrelated isolation must remain")
 			if tc.applied {
 				require.Equal(t, tc.allowed, got.IsModelSupported("gpt-6-luna"))
-				require.False(t, got.IsModelSupported("gpt-6.1-sol"))
+				if tc.allowed {
+					require.False(t, got.IsModelSupported("gpt-6.1-sol"))
+				} else {
+					require.False(t, got.Schedulable, "empty native model intersection visibly pauses scheduling")
+					require.Equal(t, tc.mapping["gpt-6.1-sol"], got.GetMappedModel("gpt-6.1-sol"), "pause retains the editable original mapping")
+				}
 			}
 		})
 	}
@@ -210,7 +215,7 @@ func TestOAuthDegradationSettingsCASAndDisableFence(t *testing.T) {
 func TestOAuthDegradationRedisMetadataScope(t *testing.T) {
 	cache := NewSchedulerCache(testRedis(t))
 	ctx := t.Context()
-	a := service.Account{ID: 17, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 10, Credentials: map[string]any{}, Extra: map[string]any{service.OAuthDegradationActionExtraKey: service.OAuthDegradationState{ConcurrencyCap: 10, Models: []string{"gpt-6-luna"}}}}
+	a := service.Account{ID: 17, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 10, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6-luna": "gpt-6-luna"}, "model_mapping_mode": "whitelist"}, Extra: map[string]any{service.OAuthDegradationActionExtraKey: service.OAuthDegradationState{ConcurrencyCap: 10, Models: []string{"gpt-6-luna"}}}}
 	bucket := service.SchedulerBucket{Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
 	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
 	require.NoError(t, err)
@@ -258,22 +263,31 @@ func TestOAuthDegradationReevaluationRestartAndUpgradeHold(t *testing.T) {
 	got, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, appliedAt, got.UpdatedAt, "re-evaluation is read-only after first action")
-	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET concurrency=3 WHERE id=$1", a.ID)
+	got.Concurrency = 3
+	require.NoError(t, repo.Update(ctx, got))
+	got, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	for _, revision := range []string{c.Revision, c.Revision + "-edited"} {
-		c.Revision = revision
-		raw, err = json.Marshal(c)
-		require.NoError(t, err)
-		_, err = integrationDB.ExecContext(ctx, "UPDATE settings SET value=$2 WHERE key=$1", service.SettingKeyOAuthAutoConfig, string(raw))
-		require.NoError(t, err)
-		for range 3 {
-			require.NoError(t, restarted.RecordConcurrencyResult(ctx, service.AccountConcurrencyResult{AccountID: a.ID, StartedAt: time.Now(), Success: true}, c))
-		}
+	require.Equal(t, 3, got.Concurrency, "native manual concurrency edit is persisted")
+	stateRaw, err = json.Marshal(got.Extra[service.AutoConfigConcurrencyExtraKey])
+	require.NoError(t, err)
+	// False is omitted by the JSON schema. Decode into a fresh value so the
+	// earlier hold=true fixture does not survive an absent JSON field.
+	var manualState service.AutoConfigConcurrencyState
+	require.NoError(t, json.Unmarshal(stateRaw, &manualState))
+	require.NotContains(t, string(stateRaw), "degradation_hold")
+	require.False(t, manualState.DegradationHold, "native manual edit releases automatic upgrade hold")
+	c.CooldownSeconds = 0
+	raw, err = json.Marshal(c)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE settings SET value=$2 WHERE key=$1", service.SettingKeyOAuthAutoConfig, string(raw))
+	require.NoError(t, err)
+	for range 3 {
+		require.NoError(t, restarted.RecordConcurrencyResult(ctx, service.AccountConcurrencyResult{AccountID: a.ID, StartedAt: time.Now(), Success: true}, c))
 	}
 	got, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	require.Equal(t, 3, got.Concurrency, "success and policy revisions never restore a manual lower limit")
+	require.Equal(t, 6, got.Concurrency, "native manual take-over permits configured success upgrades")
 	var events int
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM account_auto_config_events WHERE account_id=$1", a.ID).Scan(&events))
-	require.Equal(t, 1, events)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM account_auto_config_events WHERE account_id=$1 AND kind='degradation_applied'", a.ID).Scan(&events))
+	require.Equal(t, 1, events, "audit marker prevents a repeat treatment after manual restoration")
 }
