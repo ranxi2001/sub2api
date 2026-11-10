@@ -62,7 +62,7 @@ const errors = [], external = [], saves = [], requests = []
 let saved
 const groups = [{ id: 5, name: 'OpenAI 示例组', platform: 'openai', status: 'active' }, { id: 6, name: 'Anthropic 示例组', platform: 'anthropic', status: 'active' }]
 try {
- const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
+ const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, timezoneId: 'UTC' })
  await context.route('**/*', async route => {
   const url = new URL(route.request().url())
   if (url.origin !== 'http://127.0.0.1:4183') { external.push(url.origin); return route.abort() }
@@ -75,7 +75,7 @@ try {
   } else if (url.pathname === '/api/v1/admin/groups/all') data = groups
   else if (url.pathname === '/api/v1/admin/accounts') {
    assert.equal(route.request().method(), 'GET')
-   assert.deepEqual(Object.fromEntries(url.searchParams), { page: '1', page_size: '100', platform: 'openai', type: 'apikey', status: 'active', lite: '1', sort_by: 'id', sort_order: 'asc' })
+   assert.deepEqual(Object.fromEntries(url.searchParams), { page: '1', page_size: '100', platform: 'openai', type: 'apikey', status: 'active', lite: '1', sort_by: 'id', sort_order: 'asc', timezone: 'UTC' })
    data = { items: [], page: 1, page_size: 100, pages: 1, total: 0 }
   }
   else if (url.pathname === '/api/v1/admin/groups') data = { items: groups, page: 1, page_size: 100, pages: 1, total: 2 }

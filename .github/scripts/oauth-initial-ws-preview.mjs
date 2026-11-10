@@ -48,7 +48,7 @@ window.__previewRequests=[];
 apiClient.defaults.adapter=async request=>{let data;window.__previewRequests.push({method:request.method,url:request.url});switch(request.url){
 case '/admin/account-ops/auto-config':if(request.method==='put'){config=typeof request.data==='string'?JSON.parse(request.data):request.data;window.__saved=structuredClone(config)}data=structuredClone(config);break;
 case '/admin/accounts':{
-const expected={page:1,page_size:100,platform:'openai',type:'apikey',status:'active',lite:'1',sort_by:'id',sort_order:'asc'};
+const expected={page:1,page_size:100,platform:'openai',type:'apikey',status:'active',lite:'1',sort_by:'id',sort_order:'asc',timezone:'UTC'};
 if(request.method!=='get'||Object.keys(request.params||{}).length!==Object.keys(expected).length||Object.entries(expected).some(([key,value])=>request.params[key]!==value))throw Error('Unexpected preview account query');
 data={items:[],page:1,page_size:100,pages:1,total:0};break;
 }
@@ -81,7 +81,7 @@ window.preview=mount(View,{attachTo:'#preview',global:{plugins:[createPinia(),i1
   })
   await server.listen()
   browser = process.env.SUB2API_CDP_ENDPOINT ? await chromium.connectOverCDP(process.env.SUB2API_CDP_ENDPOINT) : await chromium.launch({ headless: true })
-  context = await browser.newContext({ viewport: { width: 1180, height: 1000 }, locale: 'zh-CN' })
+  context = await browser.newContext({ viewport: { width: 1180, height: 1000 }, locale: 'zh-CN', timezoneId: 'UTC' })
   const page = await context.newPage()
   page.on('pageerror', error => { errors.push(error.message); console.error(error.message) })
   page.on('console', message => {
