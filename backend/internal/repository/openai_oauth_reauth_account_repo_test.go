@@ -39,7 +39,7 @@ func TestAccountRepositoryApplyOpenAIOAuthReauthIsAtomic(t *testing.T) {
 	require.Contains(t, query, "task.worker_id = $10")
 	require.Contains(t, query, "expires_at = COALESCE($14::timestamptz, a.expires_at)")
 	require.Contains(t, query, "status = $5")
-	require.Contains(t, query, `schedulable = CASE WHEN a.extra ? 'openai_two_fa_admission' OR a.extra @> '{"openai_disable_scheduling_on_429":true}'::jsonb THEN a.schedulable ELSE TRUE END`)
+	require.NotContains(t, query, "schedulable =", "credential recovery must not overwrite the persistent scheduling switch")
 	require.Contains(t, query, "rate_limited_at = NULL")
 	require.Contains(t, query, "rate_limit_reset_at = NULL")
 	require.Contains(t, query, "overload_until = NULL")
