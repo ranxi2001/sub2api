@@ -69,18 +69,32 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Native account edits, migration and scheduler cache with PostgreSQL and Redis
+      - name: Record integration runtime and prepare crash diagnostics
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence
           git rev-parse HEAD > evidence/head.txt
-          (cd backend && go test -race -tags=integration ./internal/repository -run '^(TestOAuthDegradation|TestAutoConfigConcurrent|TestOpenAITwoFAAdmission|TestQualityActionsRestore|TestQualityIsolation|TestQualityBPSAndQuarantineCoexist|TestQualityCoexist|TestAstraGroups)' -count=1 -v -timeout=25m) 2>&1 | tee evidence/postgres.log
+          go version > evidence/toolchain.txt
+          go env GOOS GOARCH CGO_ENABLED GOFLAGS >> evidence/toolchain.txt
+          uname -a > evidence/kernel.txt
+          docker version > evidence/docker-version.txt
+          docker info > evidence/docker-info.txt
+          if ! command -v gdb >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdb
+          fi
+          (cd backend && go list -deps -test -race -tags=integration ./internal/repository) > evidence/instrumented-dependencies.txt
+      - name: Native account edits, migration and scheduler cache with PostgreSQL and Redis
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/oauth-degradation-integration-race.sh postgres "$GITHUB_WORKSPACE" '^(TestOAuthDegradation|TestAutoConfigConcurrent|TestOpenAITwoFAAdmission|TestQualityActionsRestore|TestQualityIsolation|TestQualityBPSAndQuarantineCoexist|TestQualityCoexist|TestAstraGroups)' 25m
           ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/postgres.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: oauth-native-controls-postgres-${{ github.run_id }}
+          name: oauth-native-controls-postgres-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/
           retention-days: 14
 
