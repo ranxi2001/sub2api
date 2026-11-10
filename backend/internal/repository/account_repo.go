@@ -618,7 +618,7 @@ func (r *accountRepository) updateAccount(
 	account.UpdatedAt = updated.UpdatedAt
 	account.Schedulable = updated.Schedulable
 	account.Status = updated.Status
-	account.ErrorMessage = updated.ErrorMessage
+	account.ErrorMessage = derefString(updated.ErrorMessage)
 	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
 	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
 	if contextTx == nil {
