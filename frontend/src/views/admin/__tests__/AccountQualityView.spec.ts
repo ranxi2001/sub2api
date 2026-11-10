@@ -680,9 +680,10 @@ describe('quality operations', () => {
     await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
     expect(scheduledTests.create).toHaveBeenCalledTimes(1)
     const body = vi.mocked(scheduledTests.create).mock.calls[0][0]
+    // Copying a legacy rule preserves disabled cleanup instead of the new-rule default.
     expect(body).toEqual({ account_id: 4, model_id: 'model-1', cron_expression: '*/30 * * * *', enabled: false, max_results: 75, auto_recover: false,
       pelican_config: { rule_name: 'Independent probe', question_kind: 'state_probe', test_channel: 'account', prompt: '', reasoning_effort: 'high', parallel_count: 1,
-        model_ids: ['model-1'], quality: { trigger_on_upstream_5xx: true, expected_answer: '', action: 'remove_groups', remove_group_ids: [1], auto_restore: false } } })
+        model_ids: ['model-1'], quality: { trigger_on_upstream_5xx: true, oauth_401_max_rounds: 0, expected_answer: '', action: 'remove_groups', remove_group_ids: [1], auto_restore: false } } })
     expect(vm.plans.map((item: ScheduledTestPlan) => item.id)).toEqual([1, 91])
     expect(vm.showForm).toBe(false)
     expect(JSON.stringify(plan)).toBe(original)
@@ -1635,7 +1636,8 @@ describe('quality operations', () => {
     expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.selectGroups')
     vm.form.pelican_config.quality.remove_group_ids = [21]
     await vm.save()
-    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 1, auto_recover: false, pelican_config: expect.objectContaining({ quality: { trigger_on_upstream_5xx: false, expected_answer: '21', action: 'remove_groups', remove_group_ids: [21], auto_restore: false, judge: {group_id:21,model_id:'test-judge',prompt:'grade semantically'} } }) }))
+    // Fresh rules default cleanup to six rounds; automatic restoration stays opt-in.
+    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 1, auto_recover: false, pelican_config: expect.objectContaining({ quality: { trigger_on_upstream_5xx: false, oauth_401_max_rounds: 6, expected_answer: '21', action: 'remove_groups', remove_group_ids: [21], auto_restore: false, judge: {group_id:21,model_id:'test-judge',prompt:'grade semantically'} } }) }))
     wrapper.unmount()
   })
   it('retries only accounts that were not created before a partial batch failure', async () => {
