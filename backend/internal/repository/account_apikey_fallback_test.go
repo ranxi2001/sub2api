@@ -23,7 +23,7 @@ func TestAPIKeyFallbackChangedRowsControlSchedulingPublication(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			expect := mock.ExpectExec("UPDATE accounts SET schedulable=TRUE,updated_at=NOW\\(\\)").WithArgs(int64(10), service.SettingKeyOAuthAutoConfig, "revision")
 			if tc.err != nil {
 				expect.WillReturnError(tc.err)

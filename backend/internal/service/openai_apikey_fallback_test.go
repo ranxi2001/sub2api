@@ -192,7 +192,9 @@ func TestOpenAIAPIKeyFallbackHealthMetricAndConfiguredWindow(t *testing.T) {
 	cfg.OpenAIAPIKeyFallback.Metric, cfg.OpenAIAPIKeyFallback.Threshold, cfg.OpenAIAPIKeyFallback.WindowMinutes = "health_score", 80, 30
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
-	svc.settings.(*accountOpsSettingsStub).raw = string(raw)
+	settings, ok := svc.settings.(*accountOpsSettingsStub)
+	require.True(t, ok)
+	settings.raw = string(raw)
 	svc.evaluateOpenAIAPIKeyFallback(t.Context())
 	require.Equal(t, "health_score", metric.metric)
 	require.Equal(t, 30*time.Minute, metric.window)
