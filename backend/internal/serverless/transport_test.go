@@ -1,8 +1,11 @@
 package serverless
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,12 +15,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
 
 func managerWithHeaderBudget(t *testing.T, cache *redis.Client, store *memoryStore, budget time.Duration) *Manager {
@@ -136,8 +136,9 @@ func TestServerlessTransferFiniteHeaderBudgetDoesNotReplay(t *testing.T) {
 	store.config = routeConfig(srv.URL)
 	store.config.FallbackToPrimary = true
 	m := managerWithHeaderBudget(t, cache, store, 50*time.Millisecond)
-	core, logs := observer.New(zap.WarnLevel)
-	ctx, cancel := context.WithCancel(logger.IntoContext(context.Background(), zap.New(core)))
+	var logs bytes.Buffer
+	m.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := testRequest(http.MethodPost, "/v1/responses", strings.NewReader("{}")).WithContext(ctx)
 	result := make(chan *httptest.ResponseRecorder, 1)
@@ -158,9 +159,12 @@ func TestServerlessTransferFiniteHeaderBudgetDoesNotReplay(t *testing.T) {
 	waitForTransferSignal(t, cancelled, "timed-out transfer did not cancel the Pod request")
 	require.Equal(t, int32(1), podHits.Load(), "a transferred POST must be sent only once")
 	require.Zero(t, primaryHits.Load(), "fallback must not replay a business request already sent to the Pod")
-	entries := logs.FilterMessage("serverless.forward_failed").All()
-	require.Len(t, entries, 1)
-	require.Equal(t, "response_header_timeout", entries[0].ContextMap()["error_kind"])
+	var entry map[string]any
+	decoder := json.NewDecoder(&logs)
+	require.NoError(t, decoder.Decode(&entry))
+	require.Equal(t, "serverless.forward_failed", entry["msg"])
+	require.Equal(t, "response_header_timeout", entry["error_kind"])
+	require.ErrorIs(t, decoder.Decode(&entry), io.EOF, "one failed transfer must emit one failure log")
 }
 
 func TestServerlessTransferCancellationWhileWaitingForHeadersReachesPod(t *testing.T) {

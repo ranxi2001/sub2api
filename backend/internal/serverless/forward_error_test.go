@@ -1,17 +1,17 @@
 package serverless
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestServerlessForwardFailureLogDoesNotExposeRequest(t *testing.T) {
@@ -19,8 +19,9 @@ func TestServerlessForwardFailureLogDoesNotExposeRequest(t *testing.T) {
 	m, err := New(Runtime{}, nil, &memoryStore{})
 	require.NoError(t, err)
 	t.Cleanup(m.Stop)
-	core, logs := observer.New(zap.WarnLevel)
-	ctx := logger.IntoContext(context.Background(), zap.New(core).With(zap.String("request_id", "safe-request-id")))
+	var logs bytes.Buffer
+	m.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "safe-request-id")
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 
@@ -34,9 +35,9 @@ func TestServerlessForwardFailureLogDoesNotExposeRequest(t *testing.T) {
 	router.ServeHTTP(w, r.WithContext(ctx))
 	require.Equal(t, 503, w.Code)
 
-	entries := logs.FilterMessage("serverless.forward_failed").All()
-	require.Len(t, entries, 1)
-	fields := entries[0].ContextMap()
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(logs.Bytes(), &fields))
+	require.Equal(t, "serverless.forward_failed", fields["msg"])
 	require.Equal(t, "test-pod", fields["pod_id"])
 	require.Equal(t, "canceled", fields["error_kind"])
 	require.Equal(t, "safe-request-id", fields["request_id"])
