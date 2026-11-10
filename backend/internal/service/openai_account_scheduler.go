@@ -3012,11 +3012,11 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	})
 }
 
-func accountSupportsOpenAICapabilities(account *Account, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {
+func accountSupportsOpenAICapabilities(ctx context.Context, account *Account, requiredCapability OpenAIEndpointCapability, requiredImageCapability OpenAIImagesCapability) bool {
 	if account == nil {
 		return false
 	}
-	return account.SupportsOpenAIEndpointCapability(requiredCapability) &&
+	return account.supportsOpenAIEndpointCapabilityForRequest(ctx, requiredCapability) &&
 		account.SupportsOpenAIImageCapability(requiredImageCapability)
 }
 
@@ -3024,13 +3024,16 @@ func accountSupportsOpenAICapabilitiesForRequest(ctx context.Context, account *A
 	if openAIImageRequestRejection(ctx, account, requestedModel) != "" {
 		return false
 	}
-	if account != nil && requiredImageCapability == "" && account.IsExcelBPSEnabledForModel(requestedModel) {
+	// A managed parent is routed by its selected connection; legacy BPS
+	// switches left on it are replaced by prepareAuthConnection and must not
+	// admit an endpoint that connection cannot serve.
+	if account != nil && !account.HasManagedOpenAIConnections() && requiredImageCapability == "" && account.IsExcelBPSEnabledForModel(requestedModel) {
 		switch requiredCapability {
 		case OpenAIEndpointCapabilityChatCompletions, OpenAIEndpointCapabilityResponses, OpenAIEndpointCapabilityResponsesCompact:
 			return true
 		}
 	}
-	return accountSupportsOpenAICapabilities(account, requiredCapability, requiredImageCapability)
+	return accountSupportsOpenAICapabilities(ctx, account, requiredCapability, requiredImageCapability)
 }
 
 func cloneExcludedAccountIDs(excludedIDs map[int64]struct{}) map[int64]struct{} {

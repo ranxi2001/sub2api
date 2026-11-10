@@ -989,8 +989,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
+		// Managed authorization connections are filtered by the connection
+		// capability this route requires at send time, not by the abstract
+		// scheduler capability above.
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
-			c.Request.Context(),
+			service.WithOpenAIConnectionCapabilityForRequest(c.Request.Context(), c),
 			apiKey.GroupID,
 			previousResponseID,
 			sessionHash,
