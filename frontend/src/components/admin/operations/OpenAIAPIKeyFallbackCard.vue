@@ -10,12 +10,19 @@
       <label><span class="mb-2 block text-sm font-medium">{{ t('autoConfig.apikeyFallback.threshold') }}</span><div class="flex items-center gap-2"><input v-model.number="model.threshold" data-testid="apikey-fallback-threshold" type="number" min="0" max="100" step="any" required class="input min-w-0 w-full" /><span class="shrink-0 text-sm text-gray-500">{{ model.metric === 'sla' ? '%' : t('autoConfig.apikeyFallback.scoreUnit') }}</span></div></label>
       <label><span class="mb-2 block text-sm font-medium">{{ t('autoConfig.apikeyFallback.window') }}</span><input v-model.number="model.window_minutes" data-testid="apikey-fallback-window" type="number" min="1" max="1440" step="1" required class="input w-full" /></label>
     </div>
-    <div class="flex flex-wrap items-center justify-between gap-2"><h3 class="text-sm font-medium">{{ t('autoConfig.apikeyFallback.accounts') }}</h3><button type="button" data-testid="apikey-fallback-reload-accounts" class="text-sm text-primary-600 underline" :disabled="loading" @click="loadAccounts">{{ t('autoConfig.apikeyFallback.reloadAccounts') }}</button></div>
+    <div class="flex justify-end"><button type="button" data-testid="apikey-fallback-reload-accounts" class="text-sm text-primary-600 underline" :disabled="loading" @click="loadAccounts">{{ t('autoConfig.apikeyFallback.reloadAccounts') }}</button></div>
     <p v-if="loading" class="text-sm text-gray-500" data-testid="apikey-fallback-loading">{{ t('common.loading') }}</p>
     <p v-if="failed" role="alert" data-testid="apikey-fallback-accounts-error" class="text-sm text-red-600">{{ t('autoConfig.apikeyFallback.accountsFailed') }}</p>
-    <fieldset :disabled="loading || failed" class="max-h-60 space-y-2 overflow-y-auto rounded-xl border border-gray-200 p-3 dark:border-dark-700">
-      <label v-for="account in accounts" :key="account.id" class="flex items-center gap-2 text-sm"><input v-model="model.account_ids" :value="account.id" :data-testid="'apikey-fallback-account-' + account.id" type="checkbox" class="h-4 w-4 shrink-0 rounded text-primary-600" /><span class="min-w-0 break-words">{{ account.name }} · #{{ account.id }} <small class="text-gray-500">{{ t(account.schedulable ? 'autoConfig.apikeyFallback.schedulingOn' : 'autoConfig.apikeyFallback.schedulingOff') }}</small></span></label>
-      <p v-if="!accounts.length && !loading && !failed" class="text-sm text-gray-500">{{ t('autoConfig.apikeyFallback.noAccounts') }}</p>
+    <fieldset :disabled="loading || failed" class="min-w-0">
+      <QualityAccountSelector v-model="model.account_ids" v-model:search="search" v-model:group="accountGroup" v-model:type="accountType" v-model:statuses="accountStatuses" v-model:scope="accountScope"
+        data-testid="apikey-fallback-account-picker" search-id="apikey-fallback-account-search"
+        :label="t('autoConfig.apikeyFallback.accounts')" :selection-hint="t('autoConfig.apikeyFallback.selectionHint')"
+        :accounts="visibleAccounts" :groups="openAIGroups" :accounts-loading="loading" :selecting-accounts="false" accounts-error=""
+        :account-page="accountPage" :account-pages="accountPages" :accounts-total="matchingAccounts.length" :bulk="false"
+        hide-scope hide-type-filter hide-status-filter :disabled-reason="accountDisabledReason"
+        @search="searchAccounts" @select-page="selectAccounts(visibleAccounts)" @select-all="selectAccounts(matchingAccounts)" @clear="model.account_ids = []">
+        <template #account-details="{ account }"><small class="ml-1 text-gray-500">{{ t(account.schedulable ? 'autoConfig.apikeyFallback.schedulingOn' : 'autoConfig.apikeyFallback.schedulingOff') }}</small></template>
+      </QualityAccountSelector>
     </fieldset>
     <div v-if="unavailableAccountIds.length && !loading && !failed" class="space-y-2 text-sm text-amber-700 dark:text-amber-300" data-testid="apikey-fallback-unavailable">
       <p>{{ t('autoConfig.apikeyFallback.unavailableHint') }}</p>
@@ -44,19 +51,56 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { list } from '@/api/admin/accounts'
-import type { AccountListItem } from '@/types'
+import type { AccountListItem, Group } from '@/types'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import QualityAccountSelector from './QualityAccountSelector.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import type { OpenAIAPIKeyFallbackConfig, OpenAIAPIKeyFallbackStatus } from '@/utils/openaiAPIKeyFallback'
 
 const model = defineModel<OpenAIAPIKeyFallbackConfig>({ required: true })
-defineProps<{ userId: number | null | undefined; status?: OpenAIAPIKeyFallbackStatus | null; statusLoading: boolean; statusFailed: boolean }>()
+const props = defineProps<{ userId: number | null | undefined; groups: Group[]; status?: OpenAIAPIKeyFallbackStatus | null; statusLoading: boolean; statusFailed: boolean }>()
 defineEmits<{ 'refresh-status': [] }>()
 const { t } = useI18n()
-const accounts = ref<Pick<AccountListItem, 'id' | 'name' | 'schedulable'>[]>([])
+const accounts = ref<AccountListItem[]>([])
 const loading = ref(true), failed = ref(false)
 const unavailableAccountIds = computed(() => model.value.account_ids.filter(id => !accounts.value.some(account => account.id === id)))
+const search = ref(''), appliedSearch = ref(''), accountGroup = ref('')
+const accountType = ref('apikey'), accountStatuses = ref(['active'])
+const accountScope = ref<'all' | 'manual'>('manual')
+const requestedPage = ref(1), pageSize = 20, maxAccounts = 100
+const openAIGroups = computed(() => props.groups.filter(group => group.platform === 'openai'))
+const matchingAccounts = computed(() => {
+  const query = appliedSearch.value.trim().toLowerCase()
+  return accounts.value.filter(account => {
+    const groupIds = account.group_ids ?? []
+    if (accountGroup.value === 'ungrouped' && groupIds.length) return false
+    if (accountGroup.value && accountGroup.value !== 'ungrouped' && !groupIds.includes(Number(accountGroup.value))) return false
+    return !query || account.name.toLowerCase().includes(query) || String(account.id).includes(query.replace(/^#/, ''))
+  })
+})
+const accountPages = computed(() => Math.max(1, Math.ceil(matchingAccounts.value.length / pageSize)))
+const accountPage = computed(() => Math.min(requestedPage.value, accountPages.value))
+const visibleAccounts = computed(() => matchingAccounts.value.slice((accountPage.value - 1) * pageSize, accountPage.value * pageSize))
 let alive = true, generation = 0
+
+function searchAccounts(page: number) {
+  appliedSearch.value = search.value
+  requestedPage.value = page
+}
+
+function accountDisabledReason(account: AccountListItem): string {
+  return !model.value.account_ids.includes(account.id) && model.value.account_ids.length >= maxAccounts ? t('autoConfig.apikeyFallback.selectionLimit') : ''
+}
+
+function selectAccounts(candidates: AccountListItem[]) {
+  if (loading.value || failed.value) return
+  const ids = new Set(model.value.account_ids)
+  for (const account of candidates) {
+    if (ids.size >= maxAccounts) break
+    ids.add(account.id)
+  }
+  model.value.account_ids = [...ids]
+}
 
 async function loadAccounts() {
   const current = ++generation
@@ -64,7 +108,9 @@ async function loadAccounts() {
   try {
     const found = new Map<number, AccountListItem>()
     for (let page = 1; ; page++) {
-      const result = await list(page, 100, { platform: 'openai', type: 'apikey', status: 'active', lite: '1', sort_by: 'id', sort_order: 'asc' })
+      // The list API's "active" filter also requires schedulable=true. Fallback
+      // must include paused accounts, so filter the raw status after loading.
+      const result = await list(page, 100, { platform: 'openai', type: 'apikey', lite: '1', sort_by: 'id', sort_order: 'asc' })
       if (!alive || generation !== current) return
       if (result.page !== page || !Number.isSafeInteger(result.pages) || result.pages < 0 || !Number.isSafeInteger(result.total) || result.total < 0) throw new Error('Incomplete account list')
       for (const account of result.items) found.set(account.id, account)
@@ -78,7 +124,7 @@ async function loadAccounts() {
     if (alive && generation === current) accounts.value = [...found.values()].filter(account =>
       account.platform === 'openai' && account.type === 'apikey' && account.status === 'active' && account.parent_account_id == null &&
       (account.expires_at == null || Number.isFinite(account.expires_at) && Number.isFinite(new Date(account.expires_at * 1000).getTime()) && account.expires_at > now)
-    ).map(({ id, name, schedulable }) => ({ id, name, schedulable }))
+    )
   } catch {
     if (alive && generation === current) failed.value = true
   } finally {

@@ -11,7 +11,7 @@
         <p v-if="draft.runtime_blocked" role="alert" class="rounded-xl bg-amber-50 p-4 text-amber-800">{{ t('autoConfig.blocked') }}</p>
         <div class="grid min-w-0 gap-5 lg:grid-cols-2" data-testid="oauth-handling-panels">
           <fieldset :disabled="saving" class="min-w-0"><OAuthDegradationCard v-model="draft.degradation_action" :groups="groups" :user-id="auth.user?.id" /></fieldset>
-          <fieldset :disabled="saving" class="min-w-0"><OpenAIAPIKeyFallbackCard ref="fallbackCard" v-model="draft.openai_apikey_fallback" :user-id="auth.user?.id" :status="fallbackStatus" :status-loading="fallbackStatusLoading" :status-failed="fallbackStatusFailed" @refresh-status="refreshFallbackStatus" /></fieldset>
+          <fieldset :disabled="saving" class="min-w-0"><OpenAIAPIKeyFallbackCard ref="fallbackCard" v-model="draft.openai_apikey_fallback" :groups="groups" :user-id="auth.user?.id" :status="fallbackStatus" :status-loading="fallbackStatusLoading" :status-failed="fallbackStatusFailed" @refresh-status="refreshFallbackStatus" /></fieldset>
         </div>
         <fieldset :disabled="saving" class="min-w-0"><BPSDefaultsCard v-model="draft.excel_bps" :groups="groups" /></fieldset>
         <fieldset :disabled="saving" class="min-w-0">
