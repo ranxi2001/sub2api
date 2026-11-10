@@ -61,6 +61,8 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
+	// Runtime-only; set solely from an actual own-credential OAuth HTTP 401.
+	DirectOAuth401  bool               `json:"-"`
 	QualityRoundID  string             `json:"quality_round_id,omitempty"`
 	QualityJudgment *QualityJudgment   `json:"quality_judgment,omitempty"`
 	QualityAction   string             `json:"quality_action,omitempty"`

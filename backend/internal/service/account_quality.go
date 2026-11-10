@@ -46,6 +46,9 @@ func (q *QualityPolicy) UsesModelResults() bool {
 
 // QualityPolicy is opt-in. Legacy connectivity/HTML tests never modify membership.
 type QualityPolicy struct {
+	// OAuth401MaxRounds removes only an OAuth quality rule after this many
+	// consecutive authentication-failure rounds. Zero preserves legacy behavior.
+	OAuth401MaxRounds    int                         `json:"oauth_401_max_rounds,omitempty"`
 	Admission            *OpenAITwoFAAdmissionConfig `json:"admission,omitempty"`
 	TriggerOnUpstream5xx bool                        `json:"trigger_on_upstream_5xx"`
 	Judge                *QualityJudgeConfig         `json:"judge,omitempty"`
@@ -65,6 +68,9 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 	q := plan.PelicanConfig.Quality
 	if q == nil {
 		return nil
+	}
+	if q.OAuth401MaxRounds < 0 || q.OAuth401MaxRounds > 100 {
+		return fmt.Errorf("OAuth 401 cleanup must be 0-100 rounds")
 	}
 	if q.RetestRestMinutes < 0 || q.RetestRestMinutes > 10080 {
 		return fmt.Errorf("quality retest rest must be 0-10080 minutes")

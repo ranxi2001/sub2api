@@ -28,6 +28,59 @@ const probePlan = () => {
   return rule
 }
 
+describe('OAuth 401 rule cleanup settings', () => {
+  it('copies the explicit limit and keeps legacy rules disabled instead of applying new-rule defaults', () => {
+    const source = draft().pelican_config
+    expect(copyQualityRuleConfig(source).quality.oauth_401_max_rounds).toBe(0)
+    source.quality.oauth_401_max_rounds = 9
+    expect(copyQualityRuleConfig(source).quality.oauth_401_max_rounds).toBe(9)
+    source.quality.oauth_401_max_rounds = 0
+    expect(copyQualityRuleConfig(source).quality.oauth_401_max_rounds).toBe(0)
+  })
+
+  it('changes only the cleanup limit when its independent bulk checkbox is selected', () => {
+    const current = plan(), source = draft()
+    current.pelican_config!.quality!.oauth_401_max_rounds = 12
+    source.pelican_config.quality.oauth_401_max_rounds = 6
+    const original = JSON.stringify(current)
+    const changed = buildQualityRulePatch(current, source, ['oauth401'])
+    expect(changed.pelican_config!.quality).toEqual({ ...current.pelican_config!.quality, oauth_401_max_rounds: 6 })
+    expect(changed).not.toHaveProperty('model_id')
+    expect(JSON.stringify(current)).toBe(original)
+    expect(buildQualityRulePatch(current, source, ['restore']).pelican_config!.quality!.oauth_401_max_rounds).toBe(12)
+    expect(buildQualityRulePatch(current, source, ['action']).pelican_config!.quality!.oauth_401_max_rounds).toBe(12)
+    expect(buildQualityRulePatch(current, source, ['enabled'])).toEqual({ enabled: false })
+    source.pelican_config.quality.oauth_401_max_rounds = 0
+    expect(buildQualityRulePatch(current, source, ['oauth401']).pelican_config!.quality!.oauth_401_max_rounds).toBe(0)
+    delete source.pelican_config.quality.oauth_401_max_rounds
+    expect(buildQualityRulePatch(current, source, ['oauth401']).pelican_config!.quality!.oauth_401_max_rounds).toBe(0)
+  })
+
+  it('compares cleanup independently of the failure action and treats a missing value as disabled', () => {
+    const current = plan(), changed = plan()
+    changed.pelican_config!.quality!.oauth_401_max_rounds = 6
+    expect(qualityRuleFieldValue(current, 'oauth401')).toBe(0)
+    expect(qualityRuleFieldValue(changed, 'oauth401')).toBe(6)
+    expect(qualityRuleFieldValue(current, 'action')).toEqual(qualityRuleFieldValue(changed, 'action'))
+  })
+
+  it.each([0, 1, 6, 100])('accepts a cleanup limit of %s rounds', limit => {
+    const source = draft()
+    source.pelican_config.quality.oauth_401_max_rounds = limit
+    expect(qualityActionPayload(source.pelican_config.quality).oauth_401_max_rounds).toBe(limit)
+    expect(buildQualityRulePatch(plan(), source, ['oauth401']).pelican_config!.quality!.oauth_401_max_rounds).toBe(limit)
+  })
+
+  it.each([-1, 1.5, 101, NaN, Infinity])('rejects an invalid cleanup limit of %s in create and bulk payloads', limit => {
+    const source = draft()
+    source.pelican_config.quality.oauth_401_max_rounds = limit
+    expect(() => qualityActionPayload(source.pelican_config.quality)).toThrow('qualityOps.invalidOAuth401MaxRounds')
+    expect(() => buildQualityRulePatch(plan(), source, ['oauth401'])).toThrow('qualityOps.invalidOAuth401MaxRounds')
+    // An unchecked cleanup field cannot block an unrelated top-level edit.
+    expect(buildQualityRulePatch(plan(), source, ['enabled'])).toEqual({ enabled: false })
+  })
+})
+
 describe('quality rule copy inputs', () => {
   it('preserves quality rest in copies and changes it only with the bulk action field', () => {
     const current = plan(), source = draft()
