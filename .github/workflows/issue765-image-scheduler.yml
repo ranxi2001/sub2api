@@ -129,19 +129,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p evidence
+          export ISSUE765_WS_EVIDENCE="$RUNNER_TEMP/issue765-ws-first-frame"
+          printf 'ISSUE765_WS_EVIDENCE=%s\n' "$ISSUE765_WS_EVIDENCE" >> "$GITHUB_ENV"
+          mkdir -p "$ISSUE765_WS_EVIDENCE"
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           test -z "$(git status --porcelain)"
-          git rev-parse HEAD | tee evidence/head.txt
-          go version | tee evidence/toolchain.txt
-          grep -F 'go1.27.3' evidence/toolchain.txt
+          git rev-parse HEAD | tee "$ISSUE765_WS_EVIDENCE/head.txt"
+          go version | tee "$ISSUE765_WS_EVIDENCE/toolchain.txt"
+          grep -F 'go1.27.3' "$ISSUE765_WS_EVIDENCE/toolchain.txt"
           test -z "$(gofmt -l backend/internal/handler/openai_gateway_handler_test.go)"
-          (cd backend && go test -race -shuffle=on -json -tags=unit ./internal/handler -run '^TestOpenAIResponsesWebSocket_(DisconnectBeforeFirstMessageIsInfo|RequestCanceledBeforeFirstMessageIsInfo|FirstMessageTimeoutUsesConfig)$' -count=20 -timeout=5m) > evidence/ws-first-frame.jsonl 2> evidence/ws-first-frame.stderr
+          (cd backend && go test -race -shuffle=on -json -tags=unit ./internal/handler -run '^TestOpenAIResponsesWebSocket_(DisconnectBeforeFirstMessageIsInfo|RequestCanceledBeforeFirstMessageIsInfo|FirstMessageTimeoutUsesConfig)$' -count=20 -timeout=5m) > "$ISSUE765_WS_EVIDENCE/ws-first-frame.jsonl" 2> "$ISSUE765_WS_EVIDENCE/ws-first-frame.stderr"
           python3 - <<'PY'
           import json
+          import os
           from collections import Counter
           from pathlib import Path
-          events = [json.loads(line) for line in Path('evidence/ws-first-frame.jsonl').read_text().splitlines()]
+          evidence = Path(os.environ['ISSUE765_WS_EVIDENCE'])
+          events = [json.loads(line) for line in (evidence / 'ws-first-frame.jsonl').read_text().splitlines()]
           peer = 'TestOpenAIResponsesWebSocket_DisconnectBeforeFirstMessageIsInfo'
           expected = {
               peer,
@@ -161,4 +165,4 @@ jobs:
         if: always()
         with:
           name: issue765-ws-first-frame-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
-          path: evidence/
+          path: ${{ env.ISSUE765_WS_EVIDENCE }}/
