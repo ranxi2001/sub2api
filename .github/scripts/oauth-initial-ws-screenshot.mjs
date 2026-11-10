@@ -44,6 +44,11 @@ try {
             if(request.method==='put'){state.config=JSON.parse(request.data);state.writes.push(structuredClone(state.config));localStorage.setItem('fixture-oauth-ws',JSON.stringify(state.config))}
             data=structuredClone(state.config);
           }else if(path==='/admin/account-ops/auto-config/events')data={items:[],has_more:false};
+          else if(path==='/admin/accounts'&&request.method==='get'){
+            const params=request.params||{};
+            if(params.platform!=='openai'||params.type!=='apikey'||params.status!=='active'||params.lite!=='1')throw Error('Unexpected fallback account filters');
+            data={items:[],total:0,page:1,page_size:100,pages:1};
+          }
           else if(path==='/admin/groups/all')data=groups;
           else if(path==='/admin/groups')data={items:groups,total:1,page:1,page_size:100,pages:1};
           else if(path==='/admin/account-quality-plans')data=[];
@@ -79,6 +84,10 @@ try {
         await screenshot('before.png')
         manifest.results.push({ mode, ws_controls_present: false })
       } else {
+        await page.getByTestId('apikey-fallback-loading').waitFor({state:'detached'})
+        assert.equal(await page.getByTestId('apikey-fallback-accounts-error').count(), 0)
+        assert.equal(await page.getByTestId('apikey-fallback-enabled').isChecked(), false)
+        assert.equal(await page.evaluate(() => window.__oauthWSFixture.requests.some(request => request.method==='get'&&request.path==='/admin/accounts')), true)
         const select = () => page.getByTestId('initial-ws-mode-select')
         const acceleration = () => page.getByTestId('initial-ws-sse-acceleration-enabled')
         assert.equal(await select().inputValue(), 'ctx_pool')

@@ -83,6 +83,10 @@ try {
       const page=Number(url.searchParams.get('page'))
       if(page===2&&failSecondPage)return route.fulfill({status:503,json:{code:503,message:'synthetic page failure'}})
       data={items:[groups[page-1]],total:2,page,page_size:100,pages:2}
+    } else if(url.pathname==='/api/v1/admin/accounts'){
+      assert.equal(route.request().method(),'GET')
+      for(const [key,value] of Object.entries({platform:'openai',type:'apikey',status:'active',lite:'1'}))assert.equal(url.searchParams.get(key),value)
+      data={items:[],total:0,page:1,page_size:100,pages:0}
     } else if(url.pathname==='/api/v1/admin/account-quality-plans')data=[]
     else if(url.pathname==='/api/v1/admin/account-ops/auto-config/events')data={items:[],has_more:false}
     else throw new Error('Unexpected synthetic API: '+url.pathname)
@@ -104,6 +108,7 @@ try {
   assert.equal(await page.getByTestId('model-billing-group-0-5').isChecked(),true)
   assert.equal(await page.getByTestId('model-billing-group-1-6').isChecked(),true)
   assert(requests.some(r=>r.path==='/api/v1/admin/groups'&&r.page==='2'))
+  assert(requests.some(r=>r.path==='/api/v1/admin/accounts'&&r.method==='GET'))
   await page.getByTestId('model-billing').screenshot({path:path.join(output,'selected-groups-desktop-zh.png')})
   await page.setViewportSize({width:390,height:1000})
   await page.getByTestId('model-billing').screenshot({path:path.join(output,'selected-groups-mobile-zh.png')})
