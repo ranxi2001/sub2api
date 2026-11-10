@@ -6235,6 +6235,11 @@ const handleSubmit = async () => {
 	}
 
   const updatePayload: Record<string, unknown> = { ...form }
+  // An unchanged OAuth status is a settings save, not an instruction to undo
+  // an authentication failure or recovery that happened while the form was open.
+  if (props.account.platform === 'openai' && props.account.type === 'oauth' && form.status === props.account.status) {
+    delete updatePayload.status
+  }
   try {
     if (authStore.isObserver) {
       delete updatePayload.proxy_id

@@ -349,6 +349,33 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it.each(['active', 'error'])('omits unchanged OpenAI OAuth status %s from an unrelated edit', async (status) => {
+    const account = { ...buildOpenAIOAuthParentAccount(), status }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('Updated name')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({ name: 'Updated name' }))
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('status')
+  })
+
+  it('sends an explicitly changed OpenAI OAuth status', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    updateAccountMock.mockReset().mockResolvedValue({ ...account, status: 'inactive' })
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const statusSelect = wrapper.findAll('select').find((select) => select.find('option[value="inactive"]').exists())
+    expect(statusSelect).toBeDefined()
+    await statusSelect!.setValue('inactive')
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(account.id, expect.objectContaining({ status: 'inactive' }))
+  })
+
   it('round-trips and clears API-key image grants without affecting other extra fields', async () => {
     const account = buildAccount()
     account.extra = { extra_image_models: ['my-nai'], extra_image_model_prefixes: ['nai-diffusion-'], unrelated: 'preserve' }
