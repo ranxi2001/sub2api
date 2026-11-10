@@ -1046,6 +1046,10 @@ func (s *SchedulerSnapshotService) prepareBucketWriteTasks(ctx context.Context, 
 		return nil, ErrSchedulerCacheNotReady
 	}
 	tasks := make([]schedulerBucketWriteTask, 0, len(buckets))
+	// A successful inactive reconciliation already retires the entire group,
+	// including historical buckets. Reuse only that completed decision within
+	// this preparation; failures and active plans still follow the fresh path.
+	var retiredGroups map[int64]struct{}
 	var firstErr error
 	for _, bucket := range buckets {
 		token, err := s.cache.CaptureBucketWriteToken(ctx, bucket)
@@ -1054,11 +1058,23 @@ func (s *SchedulerSnapshotService) prepareBucketWriteTasks(ctx context.Context, 
 				// A delayed account event can refer to a now-deleted group. Recheck
 				// authority under the existing lifecycle lease; do not reopen it
 				// from the event payload or retain an already-retired group forever.
+				// Capture above always takes precedence: a concurrent reopen can
+				// supply a current token even after this group's inactive decision.
+				if _, completed := retiredGroups[bucket.GroupID]; completed {
+					continue
+				}
 				plan, lifecycleErr := s.prepareGroupLifecycle(ctx, bucket.GroupID, nil)
 				if lifecycleErr != nil {
 					if firstErr == nil {
 						firstErr = lifecycleErr
 					}
+					continue
+				}
+				if !plan.active {
+					if retiredGroups == nil {
+						retiredGroups = make(map[int64]struct{})
+					}
+					retiredGroups[bucket.GroupID] = struct{}{}
 					continue
 				}
 				for _, task := range plan.tasks {

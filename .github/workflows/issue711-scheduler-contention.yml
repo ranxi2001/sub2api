@@ -10,6 +10,8 @@ on:
       - 'backend/internal/repository/account_scheduler_publication_unit_test.go'
       - 'backend/internal/service/openai_codex_snapshot_contract.go'
       - 'backend/internal/service/scheduler_snapshot_latest_accounts_test.go'
+      - 'backend/internal/service/scheduler_snapshot_service.go'
+      - 'backend/internal/service/scheduler_snapshot_retired_group_batch_test.go'
       - 'backend/internal/integration/issue711/**'
       - '.github/workflows/issue711-scheduler-contention.yml'
 
@@ -24,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [green, red-locks, red-state]
+        mode: [green, red-locks, red-state, red-retirement]
     services:
       postgres:
         image: postgres:18.1-alpine3.23
@@ -65,7 +67,8 @@ jobs:
           mkdir -p evidence
           git rev-parse HEAD | tee evidence/head.txt
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          sha256sum backend/internal/integration/issue711/snapshot_contention_test.go > evidence/tests.sha256
+          sha256sum backend/internal/integration/issue711/snapshot_contention_test.go \
+            backend/internal/service/scheduler_snapshot_retired_group_batch_test.go > evidence/tests.sha256
           go version | tee evidence/toolchain.txt
       - name: Restore exact defective production blob in isolated RED job
         if: matrix.mode != 'green'
@@ -75,14 +78,18 @@ jobs:
         run: |
           set -euo pipefail
           baseline=7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
-          git fetch --no-tags --depth=1 origin "$baseline"
           if [ "$MODE" = red-locks ]; then
             target=backend/internal/repository/account_codex_snapshot.go
             expected=4b0f4c612101ef6d83080e96ae205164ab164b1c
-          else
+          elif [ "$MODE" = red-state ]; then
             target=backend/internal/service/openai_codex_snapshot_contract.go
             expected=8029364741588ba7263ae581f1f22b4dc4315ff2
+          else
+            baseline=b677bb176ae66e67ed09919756c10f1b0ae2ac0f
+            target=backend/internal/service/scheduler_snapshot_service.go
+            expected=20f7505e699aaf8853da320f3d11ac182e69e2a7
           fi
+          git fetch --no-tags --depth=1 origin "$baseline"
           git show "$baseline:$target" > "$target"
           test "$(git hash-object "$target")" = "$expected"
           printf '%s %s %s\n' "$baseline" "$target" "$expected" | tee evidence/baseline.txt
@@ -94,10 +101,35 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -tags=unit ./internal/service ./internal/repository \
-            -run '^(TestSchedulerPublicationLockRoundTripAndRollback|TestSchedulerPublicationDiagnostics|TestSchedulerSnapshotUsesLatestCompleteAccounts|TestSchedulerSnapshotIDRetryFiltersLatestMembership|TestSchedulerOutboxRetry)' \
+            -run '^(TestSchedulerPublicationLockRoundTripAndRollback|TestSchedulerPublicationDiagnostics|TestSchedulerSnapshotUsesLatestCompleteAccounts|TestSchedulerSnapshotIDRetryFiltersLatestMembership|TestSchedulerOutboxRetry|TestSchedulerRetiredGroupBatch|TestSchedulerGroupLifecycle|TestSchedulerPrepareGroupLifecycle|TestSchedulerRebuildBatch|TestSchedulerBulkAccountEvent|TestSchedulerFullRebuild|TestSchedulerRebuildRetireAfterDBLoadFencesPublish)' \
             -count=1 -v -timeout=5m 2>&1 | tee ../evidence/unit-green.log
           ! grep -Eq 'no tests to run|--- SKIP:' ../evidence/unit-green.log
+          for name in ReconcilesOnce RechecksNextCall DoesNotCacheFailure CapturesConcurrentReopen; do
+            grep -F -- "--- PASS: TestSchedulerRetiredGroupBatch$name" ../evidence/unit-green.log
+          done
+      - name: Retired-group behavioral RED against exact baseline
+        if: matrix.mode == 'red-retirement'
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          go test -race -tags=unit ./internal/service \
+            -run '^TestSchedulerRetiredGroupBatchReconcilesOnce$' \
+            -count=1 -v -timeout=5m > ../evidence/retirement-red.log 2>&1
+          result=$?
+          set -e
+          cat ../evidence/retirement-red.log
+          printf '%s\n' "$result" > ../evidence/exit.txt
+          if grep -Eq '\[build failed\]|\[setup failed\]|undefined:|syntax error:|no tests to run|panic:|--- SKIP:|WARNING: DATA RACE|race detected during execution' ../evidence/retirement-red.log; then
+            echo 'Compilation, fixture errors, missing tests and skips are not behavioral evidence'
+            exit 1
+          fi
+          test "$result" -ne 0
+          grep -F -- '--- FAIL: TestSchedulerRetiredGroupBatchReconcilesOnce' ../evidence/retirement-red.log
+          grep -F -- 'retired group authority must be read once per bucket preparation' ../evidence/retirement-red.log
       - name: Real PostgreSQL and Redis behavioral RED or GREEN
+        if: matrix.mode != 'red-retirement'
         env:
           MODE: ${{ matrix.mode }}
         working-directory: backend
