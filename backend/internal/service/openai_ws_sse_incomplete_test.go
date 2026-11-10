@@ -119,10 +119,14 @@ func TestOpenAIWSSSEIncompleteAfterOutputHasOneFailedTerminal(t *testing.T) {
 		`{"type":"vendor.unknown_event","data":"synthetic"}`,
 	} {
 		t.Run(gjson.Get(event, "type").String(), func(t *testing.T) {
-			w, c, _, _, err := issue776Forward(t, []string{issue776RateLimits, issue776Metadata, event}, func(c *gin.Context) {
+			w, c, _, conn, err := issue776Forward(t, []string{issue776RateLimits, issue776Metadata, event}, func(c *gin.Context) {
 				require.True(t, c.Writer.Written(), "only the two known control event types may be delayed")
 			})
 			require.Error(t, err)
+			conn.mu.Lock()
+			outboundModel, _ := conn.writes[0]["model"].(string)
+			conn.mu.Unlock()
+			require.Equal(t, "gpt-5.4", outboundModel, "OAuth normalizes the actual outbound model while preserving the client alias below")
 			require.Equal(t, http.StatusOK, w.Code, "committed HTTP status cannot be replaced after output")
 			messages := issue776SSEMessages(t, w.Body.String())
 			require.Len(t, messages, 4)

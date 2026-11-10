@@ -29,6 +29,7 @@ import (
 type incompleteRegionalLedger struct {
 	reservations, starts, completed, canceled int
 	reservation                               ledger.Reservation
+	started                                   atomic.Bool
 }
 
 func (l *incompleteRegionalLedger) Reserve(_ context.Context, r ledger.Reservation) (bool, error) {
@@ -39,6 +40,7 @@ func (l *incompleteRegionalLedger) Reserve(_ context.Context, r ledger.Reservati
 
 func (l *incompleteRegionalLedger) Start(context.Context, string) error {
 	l.starts++
+	l.started.Store(true)
 	return nil
 }
 
@@ -79,6 +81,11 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 		for _, closeMode := range []string{"eof", "1000"} {
 			t.Run(mode+"/"+closeMode, func(t *testing.T) {
 				var handshakes, submissions atomic.Int32
+				meterLedger := &incompleteRegionalLedger{}
+				outbound := make(chan struct {
+					model   string
+					started bool
+				}, 4)
 				peerDone := make(chan struct{}, 4)
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					defer func() {
@@ -100,6 +107,10 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 						return
 					}
 					submissions.Add(1)
+					outbound <- struct {
+						model   string
+						started bool
+					}{gjson.GetBytes(payload, "model").String(), meterLedger.started.Load()}
 					if gjson.GetBytes(payload, "type").String() != "response.create" {
 						t.Errorf("expected response.create, got %s", payload)
 					}
@@ -108,7 +119,7 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 						`{"type":"codex.response.metadata","metadata":{"synthetic":true}}`,
 					}
 					if mode == "sse" {
-						events = append(events, `{"type":"response.created","sequence_number":7,"response":{"id":"resp_regional_incomplete","model":"gpt-5.1"}}`)
+						events = append(events, `{"type":"response.created","sequence_number":7,"response":{"id":"resp_regional_incomplete","model":"gpt-5.4"}}`)
 					}
 					for _, event := range events {
 						if err := conn.Write(r.Context(), coderws.MessageText, []byte(event)); err != nil {
@@ -153,11 +164,12 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 						"openai_oauth_responses_websockets_v2_enabled": true,
 						"openai_oauth_ws_sse_acceleration":             true,
 					}}
-				meterLedger := &incompleteRegionalLedger{}
+				// Regional pricing requires the admitted and outbound model to
+				// agree. OAuth normalizes gpt-5.1 to gpt-5.4 before dispatch.
 				meter := &service.RegionalMetering{Ledger: meterLedger, Readiness: func(context.Context) error { return nil },
 					Admit: func(_ context.Context, key *service.APIKey, a *service.Account, _ []byte) (ledger.Reservation, ledger.Price, error) {
 						return ledger.Reservation{RequestID: "regional-incomplete", UserID: key.UserID, APIKeyID: key.ID, AccountID: a.ID, AdmittedAt: time.Now().Add(-time.Millisecond)},
-							ledger.Price{Model: "gpt-5.1", Input: 1_000_000_000, Output: 2_000_000_000, MaxInput: 1000, MaxOutput: 100}, nil
+							ledger.Price{Model: "gpt-5.4", Input: 1_000_000_000, Output: 2_000_000_000, MaxInput: 1000, MaxOutput: 100}, nil
 					}}
 				httpUpstream := &incompleteRegionalHTTP{}
 				billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
@@ -181,15 +193,24 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 				defer cancel()
 				request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/responses", strings.NewReader(
-					`{"model":"gpt-5.1","input":"synthetic text","max_output_tokens":10,"stream":true}`))
+					`{"model":"gpt-5.4","input":"synthetic text","max_output_tokens":10,"stream":true}`))
 				request.Header.Set("Content-Type", "application/json")
 				router.ServeHTTP(rec, request)
 
 				require.EqualValues(t, 1, handshakes.Load(), "no reconnect after an ambiguous submitted turn")
 				require.EqualValues(t, 1, submissions.Load(), "exactly one billable response.create")
+				select {
+				case sent := <-outbound:
+					require.True(t, sent.started, "regional Start must precede the real response.create")
+					require.Equal(t, "gpt-5.4", sent.model, "the peer must receive the admitted pricing model")
+					t.Logf("regional dispatch evidence: started=%t outbound_model=%s submissions=%d", sent.started, sent.model, submissions.Load())
+				default:
+					t.Fatal("missing real outbound response.create evidence")
+				}
 				require.Zero(t, httpUpstream.calls.Load(), "no HTTP replay")
 				require.Equal(t, 1, meterLedger.reservations)
 				require.Equal(t, 1, meterLedger.starts)
+				require.Equal(t, "gpt-5.4", meterLedger.reservation.Model)
 				require.Positive(t, int64(meterLedger.reservation.Maximum))
 				require.Zero(t, meterLedger.completed, "missing terminal usage must retain the hold")
 				require.Zero(t, meterLedger.canceled, "a started hold cannot be canceled")
@@ -222,7 +243,7 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 					}
 					require.Equal(t, service.OpenAIWSSSEIncompleteCode, gjson.Get(terminal, "response.error.code").String())
 					require.Equal(t, "resp_regional_incomplete", gjson.Get(terminal, "response.id").String())
-					require.Equal(t, "gpt-5.1", gjson.Get(terminal, "response.model").String())
+					require.Equal(t, "gpt-5.4", gjson.Get(terminal, "response.model").String())
 					require.Greater(t, gjson.Get(terminal, "sequence_number").Int(), int64(7))
 				}
 				require.NotContains(t, body, "Upstream request failed", "the real handler must not append its generic fallback")
