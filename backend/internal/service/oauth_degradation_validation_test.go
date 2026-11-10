@@ -3,9 +3,10 @@
 package service
 
 import (
-	"github.com/stretchr/testify/require"
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestOAuthDegradationThresholdEvidence(t *testing.T) {
@@ -41,19 +42,41 @@ func TestOAuthDegradationThresholdEvidence(t *testing.T) {
 }
 func floatPtrDegradation(v float64) *float64 { return &v }
 
-func TestOAuthDegradationZeroConcurrencyRetainsModelScope(t *testing.T) {
+func TestOAuthDegradationZeroConcurrencyDoesNotReviveHistoricalModelScope(t *testing.T) {
 	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 0, Credentials: map[string]any{}, Extra: map[string]any{OAuthDegradationActionExtraKey: map[string]any{"models": []string{"gpt-6-luna"}, "concurrency_cap": 0}}}
-	require.True(t, a.IsModelSupported("gpt-6-luna"), "non-positive existing concurrency must not corrupt valid model scope")
-	require.False(t, a.IsModelSupported("gpt-6.1-sol"))
+	require.True(t, a.IsModelSupported("gpt-6-luna"))
+	require.True(t, a.IsModelSupported("gpt-6.1-sol"), "native model configuration controls availability independently of concurrency")
 }
 
 func TestOAuthDegradationFiniteConcurrencyCannotBecomeUnlimited(t *testing.T) {
 	for _, proposed := range []int{-1, 0, 3, 10, 20} {
-		a := &Account{Concurrency: 5, Extra: map[string]any{OAuthDegradationActionExtraKey: map[string]any{"models": []string{"gpt-6-luna"}, "concurrency_cap": 10}}}
+		a := &Account{Concurrency: 5, Extra: map[string]any{AutoConfigConcurrencyExtraKey: map[string]any{"degradation_hold": true}, OAuthDegradationActionExtraKey: map[string]any{"models": []string{"gpt-6-luna"}, "concurrency_cap": 10}}}
 		expected := 5
 		if proposed > 0 {
 			expected = min(proposed, 5)
 		}
 		require.Equal(t, expected, a.LimitOAuthDegradationConcurrency(proposed))
+	}
+}
+
+func TestOAuthDegradationAutomaticRecoveryUsesCurrentNativeConcurrency(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		current, proposed int
+		hold              bool
+		want              int
+	}{
+		{"active hold keeps current cap", 30, 60, true, 30},
+		{"active hold permits tightening", 30, 20, true, 20},
+		{"manual edit cleared hold", 30, 60, false, 60},
+		{"manual unlimited setting", 0, 60, true, 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Account{Concurrency: tc.current, Extra: map[string]any{
+				AutoConfigConcurrencyExtraKey:  map[string]any{"degradation_hold": tc.hold},
+				OAuthDegradationActionExtraKey: map[string]any{"concurrency_cap": 10},
+			}}
+			require.Equal(t, tc.want, a.LimitOAuthDegradationConcurrency(tc.proposed), "the historical cap must not override an explicit native edit")
+		})
 	}
 }

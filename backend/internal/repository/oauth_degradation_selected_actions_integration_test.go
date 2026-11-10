@@ -70,12 +70,12 @@ func TestOAuthDegradationSelectedActionsPostgres(t *testing.T) {
 				var changed int
 				require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1 AND event_type=$2 AND payload->'group_ids' @> to_jsonb(ARRAY[$3::bigint])", a.ID, service.SchedulerOutboxEventAccountGroupsChanged, selected.ID).Scan(&changed))
 				require.Positive(t, changed, "removed group bucket must receive invalidation metadata")
-				// A stale editor and a newly-added previously absent selection must
-				// both honor the durable closed scope, preserving unrelated groups.
+				// Native account editors may restore removed memberships; the
+				// old treatment marker is audit data, not a permanent group ban.
 				require.NoError(t, repo.BindGroups(ctx, a.ID, []int64{selected.ID, retained.ID, absent.ID}))
 				got, err = repo.GetByID(ctx, a.ID)
 				require.NoError(t, err)
-				require.Equal(t, []int64{retained.ID}, got.GroupIDs)
+				require.ElementsMatch(t, []int64{selected.ID, retained.ID, absent.ID}, got.GroupIDs)
 			} else {
 				require.ElementsMatch(t, []int64{selected.ID, retained.ID}, got.GroupIDs)
 			}
@@ -89,19 +89,11 @@ func TestOAuthDegradationSelectedActionsPostgres(t *testing.T) {
 			require.NoError(t, err)
 			got, err = repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
-			if concurrency {
-				require.Equal(t, 10, got.Concurrency)
-			} else {
-				require.Equal(t, 40, got.Concurrency)
-			}
+			require.Equal(t, 40, got.Concurrency, "native manual save can override the old treatment")
 			require.NoError(t, repo.RecordConcurrencyResult(ctx, service.AccountConcurrencyResult{AccountID: a.ID, StartedAt: time.Now(), Success: true}, c))
 			got, err = repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
-			if concurrency {
-				require.Equal(t, 10, got.Concurrency)
-			} else {
-				require.Equal(t, 41, got.Concurrency, "model/group action must leave native success upgrades working")
-			}
+			require.Equal(t, 41, got.Concurrency, "native manual takeover restores configured success upgrades")
 			require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
 			var events int
 			require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM account_auto_config_events WHERE account_id=$1 AND kind='degradation_applied'", a.ID).Scan(&events))
@@ -130,12 +122,12 @@ func TestOAuthDegradationGroupOnlyAdmissionKeepsIndependentConcurrency(t *testin
 	for range 5 {
 		require.Equal(t, "observed", f.round("answer_29"))
 	}
-	require.Equal(t, "admission_isolation_pending", f.round("answer_29"))
-	require.Equal(t, "isolation_pending", f.state().Phase)
+	require.Equal(t, "admission_isolated", f.round("answer_29"))
+	require.Equal(t, "isolated", f.state().Phase)
 	var schedulable bool
 	require.NoError(t, integrationDB.QueryRowContext(t.Context(), "SELECT schedulable FROM accounts WHERE id=$1", f.account.ID).Scan(&schedulable))
-	require.False(t, schedulable, "conflicting automated isolation must keep traffic paused without restoring a closed group")
+	require.True(t, schedulable, "the ordinary admission isolation policy may rebind its native destination")
 	var bound bool
 	require.NoError(t, integrationDB.QueryRowContext(t.Context(), "SELECT EXISTS(SELECT 1 FROM account_groups WHERE account_id=$1 AND group_id=$2)", f.account.ID, f.policy.IsolationGroupID).Scan(&bound))
-	require.False(t, bound)
+	require.True(t, bound)
 }

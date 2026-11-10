@@ -35,8 +35,8 @@ func (r *accountRepository) ClaimAutomaticUpstreamModelSync(ctx context.Context,
 }
 
 // UpdateUpstreamModelMappingIfUnchanged updates only model_mapping and commits
-// its scheduler invalidation atomically. Credential/proxy changes after model
-// discovery cause a harmless skip, never a stale full-credential replacement.
+// its scheduler invalidation atomically. Credential, proxy or availability
+// changes after discovery cause a harmless skip.
 func (r *accountRepository) UpdateUpstreamModelMappingIfUnchanged(ctx context.Context, expected *service.Account, mapping map[string]string) (bool, error) {
 	if r == nil || r.sql == nil || expected == nil {
 		return false, errors.New("account repository or expected account is not configured")
@@ -61,12 +61,13 @@ func (r *accountRepository) UpdateUpstreamModelMappingIfUnchanged(ctx context.Co
 			AND a.platform = $3 AND a.type = $4
 			AND a.credentials = $5::jsonb
 			AND a.proxy_id IS NOT DISTINCT FROM $6
+			AND a.status = $7 AND a.schedulable = $8
 		RETURNING a.id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
-		SELECT $7, updated.id, NULL, NULL FROM updated
+		SELECT $9, updated.id, NULL, NULL FROM updated
 	`, expected.ID, string(mappingJSON), expected.Platform, expected.Type,
-		string(expectedJSON), expected.ProxyID, service.SchedulerOutboxEventAccountChanged)
+		string(expectedJSON), expected.ProxyID, expected.Status, expected.Schedulable, service.SchedulerOutboxEventAccountChanged)
 	if err != nil {
 		return false, err
 	}

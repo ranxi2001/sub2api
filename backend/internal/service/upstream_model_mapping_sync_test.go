@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -180,5 +181,34 @@ func TestReconciledUpstreamModelsDoesNotRetainChainedOrWildcardIdentityTargets(t
 	for i := 0; i < 20; i++ {
 		mapping := reconciledUpstreamModelMapping(existing, []string{"new", "next"})
 		require.Equal(t, map[string]string{"new": "new", "next": "next", "alias": "new", "alias-*": "new"}, mapping)
+	}
+}
+
+func TestOAuthDegradationNativeAutomaticModelSync(t *testing.T) {
+	for _, withHistory := range []bool{false, true} {
+		t.Run(fmt.Sprintf("history-%v", withHistory), func(t *testing.T) {
+			svc, repo, upstream := modelMappingSyncFixture(http.StatusOK, `{"models":[{"slug":"gpt-6-luna"},{"slug":"gpt-6-astra"}]}`)
+			repo.account.Type = AccountTypeOAuth
+			repo.account.Credentials["access_token"] = "test-oauth-token"
+			repo.account.Credentials[OpenAIModelMappingModeKey] = "whitelist"
+			repo.account.Credentials["model_mapping"] = map[string]any{"gpt-6-luna": "gpt-6-luna"}
+			repo.account.Extra = map[string]any{}
+			if withHistory {
+				repo.account.Extra[OAuthDegradationActionExtraKey] = map[string]any{"native_controls": true, "models": []string{"gpt-6-luna"}}
+			}
+			catalog, err := svc.SyncUpstreamModelCatalogWithOptions(context.Background(), repo.account, UpstreamModelSyncOptions{Apply: true, Automatic: true})
+			require.NoError(t, err)
+			require.Equal(t, "account_policy", catalog.Skipped)
+			require.False(t, catalog.Applied)
+			require.Empty(t, upstream.requests, "automatic refresh cannot expand a native whitelist")
+			require.Zero(t, repo.claimCalls)
+			require.Zero(t, repo.applyCalls)
+
+			catalog, err = svc.SyncUpstreamModelCatalogWithOptions(context.Background(), repo.account, UpstreamModelSyncOptions{Apply: true})
+			require.NoError(t, err)
+			require.True(t, catalog.Applied, "an explicit administrator sync can restore models without erasing historical action evidence")
+			require.Equal(t, map[string]string{"gpt-6-luna": "gpt-6-luna", "gpt-6-astra": "gpt-6-astra"}, repo.mapping)
+			require.Equal(t, 1, repo.applyCalls)
+		})
 	}
 }

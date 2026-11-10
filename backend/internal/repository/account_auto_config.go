@@ -43,7 +43,6 @@ func (r *accountRepository) RecordConcurrencyResult(ctx context.Context, event s
 	var extra, admission []byte
 	err = tx.QueryRowContext(ctx, `SELECT concurrency,COALESCE(extra->'auto_config_concurrency','{}'::jsonb),name,platform,COALESCE(extra->'openai_two_fa_admission','null'::jsonb) FROM accounts a
  WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL
- AND NOT (COALESCE(extra,'{}'::jsonb) ? 'oauth_degradation_action' AND COALESCE((extra->'oauth_degradation_action'->>'limit_concurrency')::boolean,true))
  AND concurrency>0 AND (NOT $3 OR (status='active' AND schedulable=true))
  AND (NOT $3 OR ((rate_limit_reset_at IS NULL OR rate_limit_reset_at<=NOW()) AND (overload_until IS NULL OR overload_until<=NOW()) AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until<=NOW())))
  AND (expires_at IS NULL OR NOT auto_pause_on_expired OR expires_at>NOW())
@@ -68,7 +67,7 @@ func (r *accountRepository) RecordConcurrencyResult(ctx context.Context, event s
 	if err = json.Unmarshal(extra, &state); err != nil {
 		return err
 	}
-	if state.Concurrency != 0 && state.Concurrency != current {
+	if !state.DegradationHold && state.Concurrency != 0 && state.Concurrency != current {
 		// A manual change starts a fresh cycle; old in-flight samples cannot fill it.
 		state = service.AutoConfigConcurrencyState{Revision: actual.Revision, Concurrency: current, PausedUntil: time.Now().UTC().Add(time.Duration(actual.CooldownSeconds) * time.Second)}
 	}

@@ -48,6 +48,11 @@ func (s *AccountTestService) SyncUpstreamModelCatalogWithOptions(ctx context.Con
 	if account.IsCredentialShadow() || account.IsOpenAIModelMappingAliases() || account.hasOAuthInitialModelSelection() {
 		return skippedUpstreamModelSync("account_policy", nil), nil
 	}
+	// Automatic catalog refresh must not broaden an explicit OAuth whitelist.
+	// An administrator can still deliberately replace it with an explicit apply.
+	if options.Automatic && account.Type == AccountTypeOAuth && account.GetCredential(OpenAIModelMappingModeKey) == "whitelist" && len(rawUpstreamModelMapping(account)) > 0 {
+		return skippedUpstreamModelSync("account_policy", nil), nil
+	}
 	if options.Automatic && (account.Status != StatusActive || !account.Schedulable) {
 		return skippedUpstreamModelSync("inactive", nil), nil
 	}
