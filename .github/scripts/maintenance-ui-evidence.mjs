@@ -106,8 +106,11 @@ const modules = {
   auth: `import {reactive} from 'vue'; const auth=reactive({user:{id:41,role:'admin'},isAdmin:true,isSimpleMode:false}); export const useAuthStore=()=>auth;`,
   layout: `import {h} from 'vue'; export default {setup(_,{slots}){return()=>h('main',{class:'mx-auto min-w-0 p-4 sm:p-6'},slots.default?.())}}`,
   nav: `import {h} from 'vue'; export default {setup(){return()=>h('nav',{class:'text-sm text-gray-500'},'离线证据 · 全部为虚构账号')}}`,
-  client: `async function request(method,url,options,data){if(method!=='GET'&&!${qualitySuite})throw Error('Evidence forbids API writes'); const query=new URLSearchParams(Object.entries(options?.params??{}).filter(([,value])=>value!==undefined)); const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{method,signal:options?.signal,headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)}); if(!response.ok)throw Error('fixture '+response.status); return {data:await response.json()}}
-export const apiClient={get:(url,options)=>request('GET',url,options),post:(url,data)=>request('POST',url,null,data),put:(url,data)=>request('PUT',url,null,data),delete:()=>{throw Error('Evidence forbids deletion')}};`,
+  // Match the production client exports, using the archived URL helpers with a
+  // fixture-only API base. Return the same data shape as its response interceptor.
+  client: `import {buildApiUrl} from '@/api/url';export {buildApiUrl,buildGatewayUrl} from '@/api/url';
+async function request(method,url,options,data){if(method!=='GET'&&!${qualitySuite})throw Error('Evidence forbids API writes'); const query=new URLSearchParams(Object.entries(options?.params??{}).filter(([,value])=>value!==undefined)); const response=await fetch(buildApiUrl(url)+(query.size?'?'+query:''),{method,signal:options?.signal,headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)}); if(!response.ok)throw Error('fixture '+response.status); return {data:await response.json()}}
+export const apiClient={get:(url,options)=>request('GET',url,options),post:(url,data)=>request('POST',url,null,data),put:(url,data)=>request('PUT',url,null,data),delete:()=>{throw Error('Evidence forbids deletion')}};export default apiClient;`,
 }
 const timerRows = [
   { id: 901, name: '虚构账号 A · 一次性开启', schedulable: false },
@@ -258,7 +261,7 @@ async function withSource(pr, phase, action) {
       { find: '@/components/admin/operations/SmartOpsNav.vue', replacement: path.join(fixture, 'nav.js') },
       { find: '@', replacement: path.join(frontend, 'src') },
     ] },
-    define: { __INTLIFY_JIT_COMPILATION__: true },
+    define: { __INTLIFY_JIT_COMPILATION__: true, 'import.meta.env.VITE_API_BASE_URL': JSON.stringify('/fixture') },
     css: { postcss: { plugins: [requireDeps('tailwindcss')(tailwindConfig), requireDeps('autoprefixer')()] } },
     server: { host: '127.0.0.1', port: 4196, strictPort: true, hmr: false, fs: { allow: [runtime] } },
     optimizeDeps: { entries: [path.join(fixture, 'index.html')], include: ['vue', 'vue-i18n', 'vue-router', 'pinia', '@tanstack/vue-virtual'] },
@@ -506,13 +509,17 @@ function qualityResponse(url, request, state) {
   const groups = [{ id: 21, name: '虚构分组 A', platform: 'openai', status: 'active' }]
   if (method === 'GET') {
     if (endpoint === '/admin/groups/all') return groups
+    if (endpoint === '/admin/groups/21/model-allowlist-candidates') return { models: ['synthetic-model'] }
     if (endpoint === '/admin/accounts') return { items: [901, 902, 910, 911].map(id => ({ id, name: `虚构账号 ${id}`, platform: 'openai', type: 'oauth', status: 'active', schedulable: true })), total: 4, page: 1, page_size: 50, pages: 1 }
     if (endpoint === '/admin/account-quality-plans') return state.plans
     if (endpoint === '/admin/account-quality-templates') return state.templates
     if (endpoint === '/admin/account-quality-presets') return state.presets
     if (endpoint === '/admin/account-quality-results') return { items: [], next_cursor: 0 }
-    if (/^\/admin\/account-quality-plans\/\d+\/ownership$/.test(endpoint)) return { plan_id: Number(endpoint.split('/')[3]), models: ['synthetic-model'], group_ids: [], entries: [], action: '', ownership_retained: false, relinquishable_count: 0 }
-    if (endpoint === '/admin/account-ops/auto-config/events') return { has_more: false, items: [{ id: 1, account_id: 901, account_name: '虚构处置账号 A', platform: 'openai', kind: 'degradation_applied', created_at: serverNow, details: { previous_concurrency: 20, concurrency: 10, degradation: { degradation_percent: 75, threshold_percent: 50, quality_samples: 8, limit_concurrency: true, limit_models: true, limit_groups: true, models: [], group_ids: [21], removed_group_ids: [21], window_start: '2026-11-10T15:00:00Z', window_end: serverNow } } }] }
+    if (/^\/admin\/account-quality-plans\/\d+\/ownership$/.test(endpoint)) {
+      const plan = state.plans.find(row => row.id === Number(endpoint.split('/')[3])); assert(plan)
+      return { plan_id: plan.id, account_id: plan.account_id, rule_version: 'synthetic-rule-v1', account_version: 'synthetic-account-v1', fence: 'a'.repeat(64), models: plan.pelican_config.model_ids || [plan.model_id], group_ids: [], entries: [], action: '', ownership_retained: false, relinquishable_count: 0, restrictions_changed: false }
+    }
+    if (endpoint === '/admin/account-ops/auto-config/events') return { has_more: false, items: [{ id: 1, account_id: 901, account_name: '虚构处置账号 A', platform: 'openai', kind: 'degradation_applied', created_at: serverNow, details: { priority: 50, load_factor: 1, cooldown_seconds: 60, previous_concurrency: 20, concurrency: 10, degradation: { revision: 'synthetic-degradation-v1', concurrency_cap: 10, degradation_percent: 75, threshold_percent: 50, quality_samples: 8, limit_concurrency: true, limit_models: true, limit_groups: true, models: [], group_ids: [21], removed_group_ids: [21], window_start: '2026-11-10T15:00:00Z', window_end: serverNow } } }] }
     throw Error(`Unexpected synthetic GET ${endpoint}`)
   }
   assert.equal(state.phase, 'after', 'Baseline evidence must never write')
