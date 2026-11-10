@@ -17,6 +17,7 @@ DECLARE
     matched BOOLEAN;
     allows_identity BOOLEAN;
     invalid_action BOOLEAN;
+    native_scheduling_paused BOOLEAN;
 BEGIN
     FOR account_row IN
         SELECT id, platform, credentials, extra, schedulable, concurrency
@@ -35,6 +36,7 @@ BEGIN
         next_credentials := account_row.credentials;
         next_extra := account_row.extra;
         next_schedulable := account_row.schedulable;
+        native_scheduling_paused := false;
         invalid_action :=
             (action ? 'limit_models' AND jsonb_typeof(action->'limit_models') NOT IN ('boolean', 'null'))
             OR (action ? 'limit_concurrency' AND jsonb_typeof(action->'limit_concurrency') NOT IN ('boolean', 'null'))
@@ -46,6 +48,7 @@ BEGIN
         END IF;
         IF invalid_action THEN
             next_schedulable := false;
+            native_scheduling_paused := true;
         END IF;
 
         IF action->'limit_models' IS DISTINCT FROM 'false'::jsonb THEN
@@ -99,6 +102,7 @@ BEGIN
                 -- Empty ordinary mappings mean default support; use the native
                 -- scheduling switch instead, keeping the previous mapping editable.
                 next_schedulable := false;
+                native_scheduling_paused := true;
             ELSE
                 next_credentials := (next_credentials - 'compact_model_mapping')
                     || jsonb_build_object('model_mapping', native_mapping, 'model_mapping_mode', 'whitelist');
@@ -107,7 +111,8 @@ BEGIN
         END IF;
 
         next_extra := jsonb_set(next_extra, '{oauth_degradation_action}',
-            action || '{"native_controls":true}'::jsonb);
+            action || jsonb_build_object('native_controls', true,
+                'native_scheduling_paused', native_scheduling_paused));
         IF action->'limit_concurrency' IS DISTINCT FROM 'false'::jsonb THEN
             next_extra := jsonb_set(next_extra, '{auto_config_concurrency}',
                 jsonb_build_object('concurrency', account_row.concurrency, 'degradation_hold', true));

@@ -112,6 +112,7 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	}
 	models := make([]string, 0, len(c.DegradationAction.Models))
 	mapping := make(map[string]any)
+	nativeSchedulingPaused := false
 	if c.DegradationAction.RestrictsModels() {
 		for _, model := range c.DegradationAction.Models {
 			target := a.GetMappedModel(model)
@@ -127,6 +128,7 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 			// Native empty mappings mean unrestricted. Keep the original map
 			// and visibly pause scheduling instead of inventing a hidden scope.
 			a.Schedulable = false
+			nativeSchedulingPaused = true
 		} else {
 			if a.Credentials == nil {
 				a.Credentials = make(map[string]any)
@@ -171,7 +173,7 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 		next = min(next, c.DegradationAction.TargetConcurrency)
 	}
 	limitConcurrency, limitModels := c.DegradationAction.RestrictsConcurrency(), c.DegradationAction.RestrictsModels()
-	state := service.OAuthDegradationState{NativeControls: true, LimitConcurrency: &limitConcurrency, LimitModels: &limitModels, LimitGroups: c.DegradationAction.LimitGroups, GroupIDs: append([]int64{}, c.DegradationAction.GroupIDs...), RemovedGroupIDs: removedGroups, Revision: c.Revision, Models: models, ConcurrencyCap: next, ThresholdPercent: *c.DegradationAction.ThresholdPercent, DegradationPercent: *m.DegradationPercent, QualitySamples: m.QualitySamples, WindowStart: m.WindowStart, WindowEnd: m.WindowEnd, AppliedAt: now}
+	state := service.OAuthDegradationState{NativeControls: true, NativeSchedulingPaused: nativeSchedulingPaused, LimitConcurrency: &limitConcurrency, LimitModels: &limitModels, LimitGroups: c.DegradationAction.LimitGroups, GroupIDs: append([]int64{}, c.DegradationAction.GroupIDs...), RemovedGroupIDs: removedGroups, Revision: c.Revision, Models: models, ConcurrencyCap: next, ThresholdPercent: *c.DegradationAction.ThresholdPercent, DegradationPercent: *m.DegradationPercent, QualitySamples: m.QualitySamples, WindowStart: m.WindowStart, WindowEnd: m.WindowEnd, AppliedAt: now}
 	if a.Extra == nil {
 		a.Extra = make(map[string]any)
 	}

@@ -90,6 +90,10 @@ type OAuthDegradationState struct {
 	WindowStart        time.Time `json:"window_start"`
 	WindowEnd          time.Time `json:"window_end"`
 	AppliedAt          time.Time `json:"applied_at"`
+
+	// Admission preserves the current native switch after an unrepresentable
+	// model scope paused it. This audit flag never overrides a manual resume.
+	NativeSchedulingPaused bool `json:"native_scheduling_paused,omitempty"`
 }
 
 func (s OAuthDegradationState) RestrictsConcurrency() bool {
