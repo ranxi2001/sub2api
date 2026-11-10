@@ -45,7 +45,7 @@ jobs:
           mkdir -p evidence
           git rev-parse HEAD > evidence/head.txt
           (cd backend && go test -race -tags=unit ./internal/service ./internal/handler/admin -run '^(TestOAuthDegradation|TestOAuthAutoConfig|TestOAuthInitial|TestOAuthModelMapping|TestAccountIsModelSupported|TestGPT55Retirement|TestQualitySupportedModels|TestQualityModel|TestOpenAI.*Model|TestAutoConfig|TestAdvanceConcurrency|TestOpenAITwoFAAdmission|TestApplyUpstreamModels|TestAutomaticUpstreamModels)' -count=1 -v) 2>&1 | tee evidence/service-unit.log
-          (cd backend && go test -race -tags=unit ./internal/repository -run '^(TestOAuthDegradation|TestAutoConfig|TestAccountQuality|TestOpenAITwoFAAdmission)' -count=1 -v) 2>&1 | tee evidence/repository-unit.log
+          (cd backend && go test -race -tags=unit ./internal/repository -run '^(TestOAuthDegradation|TestAutoConfig|TestAccountQuality|TestOpenAITwoFAAdmission|TestSchedulerCacheSnapshotAccountIDReuseKeepsEmptySnapshotSemantics$|TestSchedulerCacheSnapshotMemoEmptyAndNilMetadataAreNotCached$)' -count=1 -v) 2>&1 | tee evidence/repository-unit.log
           ! grep -Eq -- '--- SKIP:|no tests to run' evidence/service-unit.log evidence/repository-unit.log
       - uses: actions/upload-artifact@v7
         if: always()

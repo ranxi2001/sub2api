@@ -267,10 +267,15 @@ func TestOAuthDegradationReevaluationRestartAndUpgradeHold(t *testing.T) {
 	require.NoError(t, repo.Update(ctx, got))
 	got, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
+	require.Equal(t, 3, got.Concurrency, "native manual concurrency edit is persisted")
 	stateRaw, err = json.Marshal(got.Extra[service.AutoConfigConcurrencyExtraKey])
 	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal(stateRaw, &state))
-	require.False(t, state.DegradationHold, "native manual edit releases automatic upgrade hold")
+	// False is omitted by the JSON schema. Decode into a fresh value so the
+	// earlier hold=true fixture does not survive an absent JSON field.
+	var manualState service.AutoConfigConcurrencyState
+	require.NoError(t, json.Unmarshal(stateRaw, &manualState))
+	require.NotContains(t, string(stateRaw), "degradation_hold")
+	require.False(t, manualState.DegradationHold, "native manual edit releases automatic upgrade hold")
 	c.CooldownSeconds = 0
 	raw, err = json.Marshal(c)
 	require.NoError(t, err)
