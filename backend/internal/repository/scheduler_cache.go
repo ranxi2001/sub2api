@@ -1402,6 +1402,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	keys := []string{
 		service.OAuthDegradationActionExtraKey,
+		// Images candidate authorization runs before full-account hydration.
+		service.ExtraImageModelsKey,
+		service.ExtraImageModelPrefixesKey,
 		"openai_connections_managed", "openai_auth_connections",
 		// Usage settlement can receive an account from this projection. Preserve
 		// the explicit response-tier billing contract through scheduler caches.
