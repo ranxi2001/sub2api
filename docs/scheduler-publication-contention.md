@@ -2,8 +2,8 @@
 
 关联 [#711](https://github.com/ranxi2001/sub2api/issues/711)。分析基线为
 `production@dc1e1b072faa53ec2e6f0925be39d5d024ec1687`。
-本文前半部分说明本次新增的日志；后半部分是尚未实现的设计与验收门槛。
-本次不修改锁粒度、Redis 发布位置或请求 fallback，不能据此关闭 #711。
+本文包含已落地的分阶段日志与退休分组批次优化；后半部分是尚未实现的设计与验收门槛。
+这些增量不修改账号锁粒度、Redis 发布位置或请求 fallback，不能据此关闭 #711。
 
 ## 当前一致性边界
 
@@ -47,6 +47,35 @@ bucket 重建沿用现有日志维度，并补充 `load_ms`、`publish_ms`、`el
 4. bucket 加载耗时、主 outbox 水位、retry 待处理量与最老事件年龄一起看；主水位前进不能证明 retry 已排空。
 
 本次未增加持久化指标或 retry 深度采集器，未采集线上耗时，不声称任何生产性能改善幅度。
+
+## 退休分组：减少一次 bucket 准备内的重复协调
+
+在 `production@b677bb176ae66e67ed09919756c10f1b0ae2ac0f`，严格 outbox
+处理延迟到达的 `account_changed` 时，已删除账号会通过旧分组 ID 重建全部平台。
+若该分组已经退休，`prepareBucketWriteTasks` 为每个退休 bucket 再次调用
+`prepareGroupLifecycle`。每次都获取生命周期租约、fresh 查询分组、读取 bucket 注册表，
+并退休全部 canonical 与已登记历史 bucket；同组 B 个退休 bucket 重复 B 轮。
+
+现在仅在一次 `prepareBucketWriteTasks` 内记住**已成功完成**的 inactive/missing 协调。
+相同分组后续仍然退休的 bucket 不再重复整组协调；该分组的权威读取、注册表读取和租约
+获取由 B 次变为 1 次，全组退休由 B 轮变为 1 轮。这是源码调用次数的变化，未测量线上收益。
+
+每个 bucket 仍先捕获当前 epoch，成功 capture 优先于之前的 inactive 判断，
+并发 reopen 后仍可生成写任务；之后的 retire/reopen 仍由原 token fencing 拒绝旧写入。
+失败（包括租约释放失败）不缓存，首个错误仍向上传递；active 协调不复用。
+记录不跨调用、事件或 retry，后续调用重新读取权威状态。首次 inactive 判断之后发生的
+状态变化继续由既有事件与全量对账处理，不新增 revision 或事件可靠性保证。
+
+本增量进度（勾选表示源码/接线完成，不表示测试已执行）：
+
+- [x] 生产严格 outbox 路径复用同次准备内完成的 inactive/missing 整组退休。
+- [x] 确定性回归源码覆盖 missing/inactive、主事件/retry、历史 bucket、失败后重试、下一调用激活、并发 reopen 与旧 token fencing。
+- [x] 专项 CI 选择新回归与生命周期守卫，并新增固定旧 blob 的 expected-RED；原真实 PG18/双 Redis adapter 集成检查继续运行。
+- [ ] 当前候选 SHA 的远端 GREEN、行为 RED 与真实 adapter 集成证据（本轮禁止本地动态验证，尚未发布）。
+
+回归位于 `backend/internal/service/scheduler_snapshot_retired_group_batch_test.go`；
+远端命令为 `go test -race -tags=unit ./internal/service -run '^TestSchedulerRetiredGroupBatch' -count=1 -v`。
+此优化没有减少活跃大分组的全量成员重建，也没有实现真正的增量成员更新。
 
 ## 后续方案：账号 revision 与 Redis CAS（尚未实现）
 
@@ -98,7 +127,7 @@ usage 已有逐字段 observation version，要保留该语义。现有请求反
 
 ## #711 关闭验收
 
-以下均为待完成条件，不能用本次日志单测或 #712 的历史 GREEN 替代：
+以下均为待完成条件，不能用日志单测、退休分组批次优化或 #712 的历史 GREEN 替代：
 
 - [ ] 明确单账号状态修订顺序、临时请求反馈、usage 逐字段版本和删除 tombstone 的契约。
 - [ ] Redis 原子 CAS 对旧 revision、同版本冲突、硬删除、Redis 重启、TTL/清理和旧 writer 均 fail closed。
