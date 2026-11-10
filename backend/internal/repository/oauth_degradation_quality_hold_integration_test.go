@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -19,14 +20,14 @@ func TestOAuthDegradationHoldSurvivesQualityRecovery(t *testing.T) {
 			name = "degradation_before_pending"
 		}
 		t.Run(name, func(t *testing.T) {
-			ctx := t.Context()
+			ctx := context.Background()
 			repo, cfg := degradationPolicyFixture(t)
 			cfg.UpgradeEnabled, cfg.SuccessesPerStep, cfg.CooldownSeconds = true, 1, 0
 			cfg.DegradationAction.TargetConcurrency = 2
 			limitModels := false
 			cfg.DegradationAction.LimitModels = &limitModels
 			var groupID int64
-			require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups(name,platform,status) VALUES('native-hold-test','openai','active') RETURNING id`).Scan(&groupID))
+			require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO groups(name,platform,status) VALUES($1,'openai','active') RETURNING id`, fmt.Sprintf("native-hold-%s-%d", name, time.Now().UnixNano())).Scan(&groupID))
 			t.Cleanup(func() {
 				_, err := integrationDB.ExecContext(ctx, `DELETE FROM groups WHERE id=$1`, groupID)
 				require.NoError(t, err)
@@ -52,12 +53,9 @@ func TestOAuthDegradationHoldSurvivesQualityRecovery(t *testing.T) {
 			degrade := func() {
 				// Use the same persisted completed-round evidence as the actual
 				// degradation evaluator, rather than inserting the hold itself.
-				var evidencePlanID int64
-				require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at)
- VALUES($1,'gpt-6-luna','*/30 * * * *',true,'{"quality":{}}',NOW()-INTERVAL '2 hours') RETURNING id`, f.account).Scan(&evidencePlanID))
 				for i := range 6 {
 					_, err := integrationDB.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message)
- VALUES($1,'failed',NOW()-INTERVAL '1 minute',NOW()-INTERVAL '50 seconds',NOW()-INTERVAL '50 seconds','{"parallel_count":1}',$2,'evaluated','{"verdict":"incorrect"}','state_degraded')`, evidencePlanID, fmt.Sprintf("%s-%d-%d", name, f.account, i))
+ VALUES($1,'failed',clock_timestamp(),clock_timestamp(),clock_timestamp(),'{"parallel_count":1}',$2,'evaluated','{"verdict":"incorrect"}','state_degraded')`, f.plan.ID, fmt.Sprintf("%s-%d-%d", name, f.account, i))
 					require.NoError(t, err)
 				}
 				require.NoError(t, repo.EvaluateOAuthDegradation(ctx, f.account, time.Now()))
