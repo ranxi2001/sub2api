@@ -98,7 +98,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/fallback-base" "$RUNNER_TEMP/fallback-evidence"
           git rev-parse HEAD > "$RUNNER_TEMP/fallback-evidence/head.txt"
           git rev-parse "$SOURCE_BASE" > "$RUNNER_TEMP/fallback-evidence/base.txt"
-          git archive "$SOURCE_BASE" frontend | tar -x -C "$RUNNER_TEMP/fallback-base"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/fallback-base"
           cmp frontend/package.json "$RUNNER_TEMP/fallback-base/frontend/package.json"
           cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/fallback-base/frontend/pnpm-lock.yaml"
           ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/fallback-base/frontend/node_modules"
