@@ -38,6 +38,15 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Install Redis for scheduler readiness regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          redis-server --version
       - name: Account model policy and manual control regressions
         shell: bash
         run: |
@@ -45,8 +54,15 @@ jobs:
           mkdir -p evidence
           git rev-parse HEAD > evidence/head.txt
           (cd backend && go test -race -tags=unit ./internal/service ./internal/handler/admin -run '^(TestOAuthDegradation|TestOAuthAutoConfig|TestOAuthInitial|TestOAuthModelMapping|TestAccountIsModelSupported|TestGPT55Retirement|TestQualitySupportedModels|TestQualityModel|TestOpenAI.*Model|TestAutoConfig|TestAdvanceConcurrency|TestOpenAITwoFAAdmission|TestApplyUpstreamModels|TestAutomaticUpstreamModels)' -count=1 -v) 2>&1 | tee evidence/service-unit.log
-          (cd backend && go test -race -tags=unit ./internal/repository -run '^(TestOAuthDegradation|TestAutoConfig|TestAccountQuality|TestOpenAITwoFAAdmission|TestSchedulerCacheSnapshotAccountIDReuseKeepsEmptySnapshotSemantics$|TestSchedulerCacheSnapshotMemoEmptyAndNilMetadataAreNotCached$)' -count=1 -v) 2>&1 | tee evidence/repository-unit.log
+          (cd backend && go test -race -tags=unit ./internal/repository -run '^(TestOAuthDegradation|TestAutoConfig|TestAccountQuality|TestOpenAITwoFAAdmission|TestSchedulerReadiness|TestSchedulerCacheSnapshotAccountIDReuseKeepsEmptySnapshotSemantics$|TestSchedulerCacheSnapshotMemoEmptyAndNilMetadataAreNotCached$)' -count=1 -v) 2>&1 | tee evidence/repository-unit.log
           ! grep -Eq -- '--- SKIP:|no tests to run' evidence/service-unit.log evidence/repository-unit.log
+      - name: WebSocket first-message disconnect and timeout log boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestOpenAIResponsesWebSocket_(DisconnectBeforeFirstMessageIsInfo|GracefulDisconnectBeforeFirstMessageIsInfo|FirstMessageTimeoutUsesConfig)$' -count=20 -v) 2>&1 | tee evidence/websocket-first-message.log
+          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/websocket-first-message.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:
