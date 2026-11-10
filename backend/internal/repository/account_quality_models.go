@@ -486,6 +486,9 @@ func applyQualityModelOutcome(ctx context.Context, tx *sql.Tx, plan *service.Sch
 // auto-config JSON state. No schema change is needed and manual edits still
 // invalidate the state through RecordConcurrencyResult's current-value check.
 func armNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]any, current, target int) error {
+	if held, err := nativeRecoveryRampHeld(extra); err != nil || held {
+		return err
+	}
 	if target < current {
 		return nil
 	}
@@ -514,6 +517,9 @@ func armNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]any
 }
 
 func blockNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]any, current int) error {
+	if held, err := nativeRecoveryRampHeld(extra); err != nil || held {
+		return err
+	}
 	var raw string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyOAuthAutoConfig).Scan(&raw); err != nil {
 		return nil
@@ -532,4 +538,18 @@ func blockNativeRecoveryRamp(ctx context.Context, tx *sql.Tx, extra map[string]a
 	}
 	extra[service.AutoConfigConcurrencyExtraKey] = json.RawMessage(encoded)
 	return nil
+}
+
+// Quality recovery owns its ramp, but cannot release a hold imposed by a
+// separate degradation decision. An explicit native concurrency edit releases it.
+func nativeRecoveryRampHeld(extra map[string]any) (bool, error) {
+	raw, err := json.Marshal(extra[service.AutoConfigConcurrencyExtraKey])
+	if err != nil {
+		return false, err
+	}
+	var state service.AutoConfigConcurrencyState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return false, err
+	}
+	return state.DegradationHold, nil
 }

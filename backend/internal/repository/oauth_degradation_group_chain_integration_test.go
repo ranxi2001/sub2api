@@ -149,6 +149,37 @@ func TestOAuthDegradationGroupOutboxSchedulerChain(t *testing.T) {
 	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
 	history, _ := degradationRows(t, a.ID)
 	require.Equal(t, 1, history)
+	require.NoError(t, repo.BindGroups(ctx, a.ID, []int64{closed.ID, kept.ID}), "an explicit native edit may restore removed membership")
+	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()), "the one-time action must not repeat after a manual restoration")
+	restored, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []int64{closed.ID, kept.ID}, restored.GroupIDs)
+	require.Equal(t, []string{"gpt-6.1-terra"}, restored.GroupAllowedModels(kept.ID))
+	restoredEvent, err := outbox.MaxID(ctx)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		watermark, err := cache.GetOutboxWatermark(ctx)
+		if err != nil || watermark < restoredEvent {
+			return false
+		}
+		accounts, hit, err := cache.GetSnapshot(ctx, service.SchedulerBucket{GroupID: closed.ID, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeForced})
+		if err != nil || !hit {
+			return false
+		}
+		for _, account := range accounts {
+			if account.ID == a.ID {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 20*time.Millisecond, "the restored native binding must propagate through the group outbox before selection")
+	selection, _, err = fresh.SelectAccountWithScheduler(ctx, &closed.ID, "", "", "gpt-6.1-terra", map[int64]struct{}{survivor.ID: {}}, service.OpenAIUpstreamTransportHTTPSSE, false)
+	require.NoError(t, err)
+	require.True(t, selection.Acquired)
+	require.Equal(t, a.ID, selection.Account.ID, "the restored native binding must reach scheduler selection")
+	selection.ReleaseFunc()
+	history, _ = degradationRows(t, a.ID)
+	require.Equal(t, 1, history)
 	t.Logf("group outbox=%d recovered after service restart with startup gated; closed bucket selects survivor=%d, kept selects account=%d concurrency=20", groupEvent, survivor.ID, a.ID)
 	release()
 	snapshots.Stop()

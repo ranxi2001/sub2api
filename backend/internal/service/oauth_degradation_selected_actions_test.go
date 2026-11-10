@@ -35,7 +35,7 @@ func TestOAuthDegradationSelectedActionValidation(t *testing.T) {
 	require.Error(t, c.Validate())
 }
 
-func TestOAuthDegradationSelectedActionsAreIndependent(t *testing.T) {
+func TestOAuthDegradationActionHistoryDoesNotRestrictCurrentNativeSettings(t *testing.T) {
 	for _, tc := range []struct {
 		name                        string
 		concurrency, models, groups bool
@@ -51,28 +51,15 @@ func TestOAuthDegradationSelectedActionsAreIndependent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			state := OAuthDegradationState{LimitConcurrency: degradationSelectedBool(tc.concurrency), LimitModels: degradationSelectedBool(tc.models), LimitGroups: tc.groups, GroupIDs: []int64{7}, Models: []string{"gpt-6-luna"}, ConcurrencyCap: 10}
 			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 10, Credentials: map[string]any{}, Extra: map[string]any{OAuthDegradationActionExtraKey: state}}
-			require.Equal(t, !tc.models, a.IsModelSupported("gpt-6.1-sol"))
+			require.True(t, a.IsModelSupported("gpt-6.1-sol"))
 			require.True(t, a.IsModelSupported("gpt-6-luna"))
-			if tc.concurrency {
-				require.Equal(t, 10, a.LimitOAuthDegradationConcurrency(20))
-				require.Equal(t, 10, a.LimitOAuthDegradationConcurrency(0))
-			} else {
-				require.Equal(t, 20, a.LimitOAuthDegradationConcurrency(20))
-				require.Equal(t, 0, a.LimitOAuthDegradationConcurrency(0))
-			}
-			if tc.groups {
-				require.Equal(t, []int64{8}, a.FilterOAuthDegradationGroups([]int64{7, 8}))
-			} else {
-				require.Equal(t, []int64{7, 8}, a.FilterOAuthDegradationGroups([]int64{7, 8}))
-			}
+			require.Equal(t, 20, a.LimitOAuthDegradationConcurrency(20), "only an active native concurrency hold can prevent automated recovery")
+			require.Equal(t, 0, a.LimitOAuthDegradationConcurrency(0))
+			require.Equal(t, []int64{7, 8}, a.FilterOAuthDegradationGroups([]int64{7, 8}), "historical removed groups may be explicitly rebound")
 			body := []byte(`{"data":[{"id":"gpt-6-luna"},{"id":"gpt-6.1-sol"}]}`)
 			catalog, err := projectAccountModelAliases(body, a, nil, false)
 			require.NoError(t, err)
-			if tc.models {
-				require.NotContains(t, string(catalog), "gpt-6.1-sol")
-			} else {
-				require.JSONEq(t, string(body), string(catalog), "unselected model restriction must not alter model discovery")
-			}
+			require.JSONEq(t, string(body), string(catalog), "historical action flags must not alter native model discovery")
 		})
 	}
 }
@@ -80,12 +67,12 @@ func TestOAuthDegradationSelectedActionsAreIndependent(t *testing.T) {
 func TestOAuthDegradationLegacyActionFlags(t *testing.T) {
 	a := &Account{Concurrency: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{}}
 	require.NoError(t, json.Unmarshal([]byte(`{"oauth_degradation_action":{"concurrency_cap":10,"models":["gpt-6-luna"]}}`), &a.Extra))
-	require.Equal(t, 10, a.LimitOAuthDegradationConcurrency(20))
-	require.False(t, a.IsModelSupported("gpt-6.1-sol"))
+	require.Equal(t, 20, a.LimitOAuthDegradationConcurrency(20))
+	require.True(t, a.IsModelSupported("gpt-6.1-sol"))
 	require.Equal(t, []int64{7, 8}, a.FilterOAuthDegradationGroups([]int64{7, 8}), "legacy actions did not close groups")
-	// New group-only markers do not need model data, unlike legacy model caps.
+	// Both old and new marker shapes are audit data after native conversion.
 	require.NoError(t, json.Unmarshal([]byte(`{"oauth_degradation_action":{"limit_concurrency":false,"limit_models":false,"limit_groups":true,"group_ids":[7]}}`), &a.Extra))
 	require.True(t, a.IsModelSupported("gpt-6.1-sol"))
 	require.Equal(t, 20, a.LimitOAuthDegradationConcurrency(20))
-	require.Equal(t, []int64{8}, a.FilterOAuthDegradationGroups([]int64{7, 8}))
+	require.Equal(t, []int64{7, 8}, a.FilterOAuthDegradationGroups([]int64{7, 8}))
 }

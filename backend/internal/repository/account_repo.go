@@ -640,7 +640,6 @@ func (r *accountRepository) updateLockedAccount(
 		return nil, err
 	}
 	account.Extra = extra
-	account.Concurrency = account.LimitOAuthDegradationConcurrency(account.Concurrency)
 	// lockAndMergeAccountProbeExtra holds the account row lock in this transaction.
 	if err := accounttimer.CancelPending(ctx, client, account.ID, time.Now().UTC()); err != nil {
 		return nil, err
@@ -869,8 +868,6 @@ func lockAndMergeAccountProbeExtra(
 			currentExtra = nil
 		}
 	}
-	live := service.Account{Concurrency: currentConcurrency, Extra: currentExtra}
-	account.Concurrency = live.LimitOAuthDegradationConcurrency(account.Concurrency)
 	validNewAPIBinding := false
 	if currentExtra[service.UpstreamBillingProviderExtraKey] == "new_api" {
 		var fingerprint string
@@ -942,6 +939,14 @@ func lockAndMergeAccountProbeExtra(
 	}
 	delete(extra, service.AutoConfigConcurrencyExtraKey)
 	if state, ok := currentExtra[service.AutoConfigConcurrencyExtraKey]; ok {
+		if extra == nil {
+			extra = make(map[string]any)
+		}
+		if account.Concurrency != currentConcurrency {
+			// Native manual edits take over from degradation. Old successful
+			// requests cannot carry their progress into the new setting.
+			state = service.AutoConfigConcurrencyState{Concurrency: account.Concurrency}
+		}
 		extra[service.AutoConfigConcurrencyExtraKey] = state
 	}
 	for _, key := range []string{
@@ -3577,7 +3582,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if updates.Concurrency != nil {
-		setClauses = append(setClauses, "concurrency = "+oauthDegradationConcurrencySQL("$"+itoa(idx)))
+		setClauses = append(setClauses, "concurrency = $"+itoa(idx))
 		args = append(args, *updates.Concurrency)
 		idx++
 	}
@@ -3676,7 +3681,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				" AND COALESCE(btrim("+credentialPlaceholder+"::jsonb ->> 'account_mode') <> 'zen', true) IS NOT TRUE")
 	}
 
-	if len(updates.Extra) > 0 || len(updates.ExcelBPSAuthorizationPending) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
+	if updates.Concurrency != nil || len(updates.Extra) > 0 || len(updates.ExcelBPSAuthorizationPending) > 0 || len(ollamaGroupIdentityChanges) > 0 || len(opencodeGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || updates.EnsureCodexFingerprintSeed {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
 			payload, err := json.Marshal(updates.Extra)
@@ -3797,6 +3802,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			extraExpression = "CASE WHEN id=ANY($" + itoa(idx) + "::bigint[]) THEN (" + extraExpression + ") || '{\"openai_excel_bps_authorization_pending\":true}'::jsonb ELSE (" + extraExpression + ") - 'openai_excel_bps_authorization_pending' END"
 			args = append(args, pq.Array(pendingIDs))
 			idx++
+		}
+		if updates.Concurrency != nil {
+			// An explicit native concurrency save releases only this upgrade
+			// hold. The degradation history remains immutable audit data.
+			extraExpression = "(" + extraExpression + ") - 'auto_config_concurrency'"
 		}
 		setClauses = append(setClauses, "extra = "+extraExpression)
 	}

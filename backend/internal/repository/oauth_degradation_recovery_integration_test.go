@@ -12,7 +12,7 @@ import (
 
 func TestOAuthDegradationAdmissionDoesNotRestoreConcurrency(t *testing.T) {
 	f := newAdmissionFixture(t)
-	_, err := integrationDB.ExecContext(context.Background(), `UPDATE accounts SET extra=jsonb_set(extra,'{oauth_degradation_action}','{"models":["gpt-6-luna"],"concurrency_cap":1}') WHERE id=$1`, f.account.ID)
+	_, err := integrationDB.ExecContext(context.Background(), `UPDATE accounts SET extra=jsonb_set(extra,'{oauth_degradation_action}','{"models":["gpt-6-luna"],"concurrency_cap":1}')||'{"auto_config_concurrency":{"degradation_hold":true}}'::jsonb WHERE id=$1`, f.account.ID)
 	require.NoError(t, err)
 	for range 5 {
 		require.Equal(t, "observed", f.round("passed"))
@@ -29,7 +29,7 @@ func TestOAuthDegradationQualityRecoveryDoesNotRestoreConcurrency(t *testing.T) 
 	_, err := transitionQualityModels(a, &state, 7, []string{"probe-model"}, now.Add(time.Hour), "failed", true, now)
 	require.NoError(t, err)
 	require.Equal(t, 5, a.Concurrency)
-	a.Extra["oauth_degradation_action"] = map[string]any{"models": []string{"gpt-6-luna"}, "concurrency_cap": 5}
+	a.Extra[service.AutoConfigConcurrencyExtraKey] = map[string]any{"degradation_hold": true}
 	_, err = transitionQualityModels(a, &state, 7, []string{"probe-model"}, now.Add(time.Hour), "passed", true, now)
 	require.NoError(t, err)
 	require.Equal(t, 5, a.Concurrency, "quality recovery must not restore degradation-limited concurrency")

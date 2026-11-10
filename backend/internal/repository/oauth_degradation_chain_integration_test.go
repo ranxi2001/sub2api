@@ -333,10 +333,14 @@ func TestOAuthDegradationOutboxSchedulerChain(t *testing.T) {
 			reader := service.NewSchedulerSnapshotService(NewSchedulerCache(rdb), outbox, repo, groups, readerCfg)
 			repaired, _, err := reader.ListSchedulableAccounts(ctx, &group.ID, service.PlatformOpenAI, true)
 			require.NoError(t, err, "fresh Redis candidates must be ready without database fallback")
-			require.Len(t, repaired, 1)
-			require.Equal(t, a.ID, repaired[0].ID)
-			require.Contains(t, repaired[0].Extra, "oauth_degradation_action")
-			require.Equal(t, min(tc.current, 10), repaired[0].Concurrency)
+			if tc.empty {
+				require.Empty(t, repaired, "native schedulable=false removes an empty intersection from Redis candidates")
+			} else {
+				require.Len(t, repaired, 1)
+				require.Equal(t, a.ID, repaired[0].ID)
+				require.Contains(t, repaired[0].Extra, "oauth_degradation_action")
+				require.Equal(t, min(tc.current, 10), repaired[0].Concurrency)
+			}
 			fresh := degradationGateway(t, repo, reader, rdb)
 			selection, _, err = fresh.SelectAccountWithScheduler(ctx, &group.ID, "", "", "gpt-6.1-terra", nil, service.OpenAIUpstreamTransportHTTPSSE, false)
 			require.ErrorIs(t, err, service.ErrNoAvailableAccounts, "fresh actual scheduler must reject the former model after outbox compensation")

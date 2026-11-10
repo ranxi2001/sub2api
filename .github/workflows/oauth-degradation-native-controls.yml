@@ -1,0 +1,146 @@
+name: OAuth degradation native controls
+
+on:
+  push:
+    branches: [production, fix/oauth-degradation-native-controls-20261110]
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/*oauth*'
+      - 'backend/internal/service/account.go'
+      - 'backend/internal/service/openai_model*'
+      - 'backend/internal/repository/*oauth*'
+      - 'backend/internal/repository/account*'
+      - 'backend/internal/repository/*group*'
+      - 'backend/migrations/*oauth_degradation*'
+      - 'frontend/src/i18n/locales/*/autoConfig.ts'
+      - '.github/workflows/oauth-degradation-native-controls.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install Redis for scheduler readiness regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          redis-server --version
+      - name: Account model policy and manual control regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head.txt
+          (cd backend && go test -race -tags=unit ./internal/service ./internal/handler/admin -run '^(TestOAuthDegradation|TestOAuthRefresh|TestOAuthAutoConfig|TestOAuthInitial|TestOAuthModelMapping|TestAccountIsModelSupported|TestGPT55Retirement|TestQualitySupportedModels|TestQualityModel|TestOpenAI.*Model|TestAutoConfig|TestAdvanceConcurrency|TestOpenAITwoFAAdmission|TestApplyUpstreamModels|TestAutomaticUpstreamModels)' -count=1 -v) 2>&1 | tee evidence/service-unit.log
+          (cd backend && go test -race -tags=unit ./internal/repository -run '^(TestOAuthDegradation|TestAutoConfig|TestAccountQuality|TestOpenAITwoFAAdmission|TestSchedulerReadiness|TestSchedulerCacheSnapshotAccountIDReuseKeepsEmptySnapshotSemantics$|TestSchedulerCacheSnapshotMemoEmptyAndNilMetadataAreNotCached$)' -count=1 -v) 2>&1 | tee evidence/repository-unit.log
+          ! grep -Eq -- '--- SKIP:|no tests to run' evidence/service-unit.log evidence/repository-unit.log
+      - name: WebSocket first-message disconnect and timeout log boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestOpenAIResponsesWebSocket_(DisconnectBeforeFirstMessageIsInfo|RequestCanceledBeforeFirstMessageIsInfo|FirstMessageTimeoutUsesConfig)$' -count=20 -v) 2>&1 | tee evidence/websocket-first-message.log
+          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/websocket-first-message.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-native-controls-unit-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14
+
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: 'true'
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Record integration runtime and prepare crash diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head.txt
+          go version > evidence/toolchain.txt
+          go env GOOS GOARCH CGO_ENABLED GOFLAGS >> evidence/toolchain.txt
+          uname -a > evidence/kernel.txt
+          docker version > evidence/docker-version.txt
+          docker info > evidence/docker-info.txt
+          if ! command -v gdb >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdb
+          fi
+          (cd backend && go list -deps -test -race -tags=integration ./internal/repository) > evidence/instrumented-dependencies.txt
+      - name: Native account edits, migration and scheduler cache with PostgreSQL and Redis
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/oauth-degradation-integration-race.sh postgres "$GITHUB_WORKSPACE" '^(TestOAuthDegradation|TestOAuthRefresh|TestAutoConfigConcurrent|TestOpenAITwoFAAdmission|TestQualityActionsRestore|TestQualityIsolation|TestQualityBPSAndQuarantineCoexist|TestQualityCoexist|TestAstraGroups)' 25m
+          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/postgres.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-native-controls-postgres-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          retention-days: 14
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Account editor, degradation settings and locales
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head.txt
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts src/views/admin/__tests__/AutoConfigView.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/admin/operations/__tests__/AutoConfigHistory.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee evidence/frontend.log
+          pnpm --dir frontend typecheck 2>&1 | tee evidence/typecheck.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-native-controls-frontend-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14

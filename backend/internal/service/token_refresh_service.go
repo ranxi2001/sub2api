@@ -899,6 +899,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			}
 		} else {
 			// 降级：直接调用 refresher（兼容旧路径）
+			attemptedAccount := snapshotOAuthRefreshAccount(account)
 			releaseRate := func() {}
 			if acquireRate != nil {
 				releaseRate, err = acquireRate(attemptCtx)
@@ -912,10 +913,16 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			attemptTimedOut := errors.Is(refreshContextErr(attemptCtx), context.DeadlineExceeded) && refreshContextErr(ctx) == nil
 			if err == nil && newCredentials != nil && !attemptTimedOut && refreshContextErr(ctx) == nil {
 				newCredentials["_token_version"] = time.Now().UnixMilli()
-				if saveErr := persistAccountCredentials(attemptCtx, s.accountRepo, account, newCredentials); saveErr != nil {
+				current, applied, saveErr := persistOAuthRefreshedCredentials(attemptCtx, s.accountRepo, account, attemptedAccount, newCredentials)
+				if saveErr != nil {
 					err = fmt.Errorf("failed to save credentials: %w", saveErr)
 				} else {
-					credentialsPersisted = true
+					account = current
+					credentialsPersisted = applied
+					if !applied {
+						err = s.refreshPolicy.handleAlreadyRefreshed()
+						shortCircuit = true
+					}
 				}
 			}
 		}

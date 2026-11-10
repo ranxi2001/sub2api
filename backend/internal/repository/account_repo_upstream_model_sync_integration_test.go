@@ -87,3 +87,40 @@ func TestApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler(t *testi
 	require.Equal(t, map[string]any{"live": "live"}, latest.Credentials["model_mapping"])
 	require.Len(t, cache.setAccounts, 1, "a skipped CAS must not publish a stale scheduler snapshot")
 }
+
+func TestOAuthDegradationNativeModelSyncFencesAccountAvailabilityChanges(t *testing.T) {
+	for _, change := range []string{"scheduling paused", "status changed"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := t.Context()
+			tx := testEntTx(t)
+			repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+			account := mustCreateAccount(t, tx.Client(), &service.Account{
+				Name: "degradation-native-model-sync-fence", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+				Status: service.StatusActive, Schedulable: true,
+				Credentials: map[string]any{"access_token": "fixture-token", "model_mapping": map[string]any{"old": "old"}},
+			})
+			expected, err := repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			update := tx.Client().Account.UpdateOneID(account.ID)
+			if change == "scheduling paused" {
+				update.SetSchedulable(false)
+			} else {
+				update.SetStatus(service.StatusDisabled)
+			}
+			_, err = update.Save(ctx)
+			require.NoError(t, err)
+			cache := &schedulerCacheRecorder{}
+			repo.schedulerCache = cache
+			applied, err := repo.UpdateUpstreamModelMappingIfUnchanged(ctx, expected, map[string]string{"new": "new"})
+			require.NoError(t, err)
+			require.False(t, applied, "a catalog fetched before native pause must not overwrite the model mapping")
+			latest, err := repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			require.Equal(t, expected.Credentials, latest.Credentials)
+			require.Empty(t, cache.setAccounts, "the skipped catalog must not publish scheduler state")
+			var outboxCount int
+			require.NoError(t, scanSingleRow(ctx, repo.sql, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", []any{account.ID}, &outboxCount))
+			require.Zero(t, outboxCount)
+		})
+	}
+}

@@ -33,6 +33,9 @@ const (
 	schedulerPublishedPrefix       = "sched:published:"
 	schedulerSnapshotPrefix        = "sched:"
 	schedulerLockPrefix            = "sched:lock:"
+	// Redis cannot retain an empty sorted set. A version-local sentinel marks
+	// a deliberately published empty snapshot without accepting a missing key.
+	schedulerEmptySnapshotMember = "__empty__"
 	// 账号精简记录（sched:meta:<id>）的修订号：全局修订号与按平台划分的修订号（前缀后接平台名）。
 	// 改写精简记录后写入所涉平台的修订号；删除记录、改写平台为空或平台发生变化的记录、写入出错时写入全局修订号。
 	// 取值都是新的随机串，读侧只比较是否相等，键丢失后重建也不会与旧取值相同；
@@ -368,10 +371,13 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 		return nil, false, err
 	}
 	if len(ids) == 0 {
-		// 空快照视为缓存未命中，触发数据库回退查询
-		// 这解决了新分组创建后立即绑定账号时的竞态条件问题
+		// An active version without its data is incomplete, not an empty pool.
 		c.dropSnapshotEntry(bucketKey)
 		return nil, false, nil
+	}
+	if len(ids) == 1 && ids[0] == schedulerEmptySnapshotMember {
+		c.dropSnapshotEntry(bucketKey)
+		return []*service.Account{}, true, nil
 	}
 
 	keys := make([]string, 0, len(ids))
@@ -753,7 +759,7 @@ func schedulerSnapshotMembers(accountIDs []int64) []redis.Z {
 
 func (c *schedulerCache) writeSnapshotMembers(ctx context.Context, bucket service.SchedulerBucket, version string, members []redis.Z) error {
 	if len(members) == 0 {
-		return nil
+		members = []redis.Z{{Score: 0, Member: schedulerEmptySnapshotMember}}
 	}
 	snapshotKey := schedulerSnapshotKey(bucket, version)
 	pipe := c.rdb.Pipeline()

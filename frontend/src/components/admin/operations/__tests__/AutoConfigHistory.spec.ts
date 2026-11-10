@@ -39,7 +39,7 @@ describe('AutoConfigHistory', () => {
     vi.mocked(getAutoConfigEvents).mockResolvedValue({ items:[groupsOnly,legacy],has_more:false })
     const w = render(); await flushPromises()
     const rows = w.findAll('[data-testid=history-row]')
-    expect(rows[0].text()).toContain('禁用分组绑定：#5 / #6；实际移出：#5')
+    expect(rows[0].text()).toContain('所选分组：#5 / #6；实际移出：#5')
     expect(rows[0].text()).not.toContain('并发 5 → 6')
     expect(rows[0].text()).not.toContain('模型：')
     expect(rows[1].text()).toContain('并发 5 → 6')
