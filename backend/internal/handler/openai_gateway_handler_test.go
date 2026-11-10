@@ -1135,8 +1135,35 @@ func TestOpenAIResponsesWebSocket_FirstMessageTimeoutUsesConfig(t *testing.T) {
 	require.Less(t, elapsed, 4*time.Second)
 	require.Eventually(t, func() bool {
 		readTimeout, ok := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "read_timeout")
-		return ok && readTimeout == time.Second &&
+		reason, hasReason := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "reason")
+		closeStatus, hasCloseStatus := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "close_status")
+		return ok && readTimeout == time.Second && hasReason && reason == "first_message_timeout" &&
+			hasCloseStatus && closeStatus == "1008(StatusPolicyViolation)" &&
 			logSink.ContainsMessageAtLevel("openai.websocket_read_first_message_failed", "warn")
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestOpenAIResponsesWebSocket_DisconnectBeforeFirstMessageIsInfo(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logSink, restore := captureHandlerStructuredLog(t)
+	defer restore()
+
+	h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
+	h.cfg = &config.Config{}
+	wsServer := newOpenAIWSHandlerTestServer(t, h, middleware.AuthSubject{UserID: 1, Concurrency: 1})
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http")+"/openai/v1/responses", nil)
+	cancelDial()
+	require.NoError(t, err)
+	require.NoError(t, clientConn.CloseNow())
+
+	require.Eventually(t, func() bool {
+		reason, ok := logSink.FieldValueForMessage("openai.websocket_read_first_message_failed", "reason")
+		return ok && reason == "peer_disconnected" &&
+			logSink.ContainsMessageAtLevel("openai.websocket_read_first_message_failed", "info") &&
+			!logSink.ContainsMessageAtLevel("openai.websocket_read_first_message_failed", "warn")
 	}, time.Second, 10*time.Millisecond)
 }
 
