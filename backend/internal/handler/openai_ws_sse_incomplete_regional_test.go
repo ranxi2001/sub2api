@@ -211,6 +211,13 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 					rec.Code, rec.Header().Get("Content-Type"), rec.Body.String(), meterLedger.stages,
 					meterLedger.reservations, meterLedger.starts, meterLedger.completed, meterLedger.canceled, meterLedger.started.Load(),
 					meterLedger.reservation.Model, meterLedger.reservation.Maximum, expectedMaximum, handshakes.Load(), submissions.Load(), httpUpstream.calls.Load(), ctx.Err())
+				// Keep peer errors in this subtest even when the first dispatch
+				// assertion fails on the isolated pre-fix forwarder.
+				select {
+				case <-peerDone:
+				case <-time.After(2 * time.Second):
+					t.Fatal("local WS peer did not finish")
+				}
 
 				require.EqualValues(t, 1, handshakes.Load(), "no reconnect after an ambiguous submitted turn")
 				require.EqualValues(t, 1, submissions.Load(), "exactly one billable response.create")
@@ -231,11 +238,6 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 				require.Zero(t, meterLedger.completed, "missing terminal usage must retain the hold")
 				require.Zero(t, meterLedger.canceled, "a started hold cannot be canceled")
 				require.NoError(t, ctx.Err(), "handler must finish before the caller deadline")
-				select {
-				case <-peerDone:
-				case <-time.After(2 * time.Second):
-					t.Fatal("local WS peer did not finish")
-				}
 				body := rec.Body.String()
 				if mode == "json" {
 					require.Equal(t, http.StatusBadGateway, rec.Code)

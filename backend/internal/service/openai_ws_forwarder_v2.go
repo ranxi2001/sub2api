@@ -20,6 +20,27 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func validateOpenAIWSRegionalPayload(ctx context.Context, value any) error {
+	if regionalMeterAttemptFrom(ctx) == nil {
+		return nil
+	}
+	// The accelerated writer consumes these exact encoded bytes. Marshaling
+	// this named byte slice again would validate a base64 string instead.
+	raw, prepared := value.(openAIWSPreparedJSON)
+	if prepared {
+		if !json.Valid(raw) {
+			return errors.New("invalid prepared websocket JSON payload")
+		}
+	} else {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		raw = encoded
+	}
+	return regionalMeterValidatePayload(ctx, raw)
+}
+
 func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	ctx context.Context,
 	c *gin.Context,
@@ -509,14 +530,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 	sendRequest := func(value any) error {
-		if regionalMeterAttemptFrom(ctx) != nil {
-			raw, err := json.Marshal(value)
-			if err != nil {
-				return err
-			}
-			if err = regionalMeterValidatePayload(ctx, raw); err != nil {
-				return err
-			}
+		if err := validateOpenAIWSRegionalPayload(ctx, value); err != nil {
+			return err
 		}
 		if err := regionalMeterBeforeSend(ctx); err != nil {
 			return err
