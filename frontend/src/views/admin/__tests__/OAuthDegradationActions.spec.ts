@@ -19,6 +19,7 @@ vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('@/api/admin/autoConfig', () => ({ getAutoConfig: vi.fn(), saveAutoConfig: vi.fn(), getModelBillingGroups: vi.fn(async () => []) }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn(async () => []) }))
 vi.mock('@/api/admin/accountQuality', () => ({ listQualityPlans: vi.fn(async () => []) }))
+vi.mock('@/api/admin/accounts', () => ({ list: vi.fn(async () => ({ items: [], page: 1, page_size: 100, pages: 0, total: 0 })) }))
 const baseline = { enabled:false,platform:'openai',priority:50,load_factor:1,concurrency:3,group_ids:[],upgrade_enabled:false,upgrade_group_ids:[],successes_per_step:20,upgrade_step:1,max_concurrency:100,cooldown_seconds:60,revision:'fixture' }
 beforeEach(() => {
  localStorage.clear(); setActivePinia(createPinia()); vi.clearAllMocks()

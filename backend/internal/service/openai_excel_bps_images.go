@@ -301,7 +301,7 @@ func (s *OpenAIGatewayService) forwardExcelBPSImages(ctx context.Context, c *gin
 			event.Kind = "failover"
 			appendOpsUpstreamError(c, event)
 			if !isQualityObservation(ctx) {
-				s.coolDownExcelBPS(ctx, account, resp.Header.Get("Retry-After"))
+				s.coolDownExcelBPS(ctx, account, resp.Header.Get("Retry-After"), resp.Header)
 			}
 			// The next account may use Codex, so the endpoint is recorded only
 			// for final BPS outcomes; the image path never clears it.

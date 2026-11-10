@@ -309,7 +309,10 @@ type OpsWindowStats struct {
 	StartTime time.Time `json:"start_time"`
 	EndTime   time.Time `json:"end_time"`
 
-	SuccessCount    int64 `json:"success_count"`
-	ErrorCountTotal int64 `json:"error_count_total"`
-	TokenConsumed   int64 `json:"token_consumed"`
+	SuccessCount    int64   `json:"success_count"`
+	ErrorCountTotal int64   `json:"error_count_total"`
+	TokenConsumed   int64   `json:"token_consumed"`
+	ErrorCountSLA   int64   `json:"error_count_sla"`
+	RequestCountSLA int64   `json:"request_count_sla"`
+	SLA             float64 `json:"sla"`
 }

@@ -914,6 +914,7 @@ func ProvideOpsService(
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
 	svc.StartRuntimeSettingsRefresh(context.Background())
+	accountOps.setOpenAIAPIKeyFallbackSLAReader(svc, settingService)
 	svc.StartAIOpsController(context.Background())
 	return svc
 }

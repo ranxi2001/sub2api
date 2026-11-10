@@ -1,4 +1,38 @@
 export default {
+  apikeyFallback: {
+    title: 'Fallback handling',
+    hint: 'Independent of initial configuration. Automatically enable scheduling for selected API Key accounts when all OpenAI OAuth accounts are unavailable, or when the chosen OpenAI metric falls below your threshold within the selected window. Either condition can trigger fallback.',
+    metric: 'Metric',
+    metrics: { sla: 'OpenAI SLA', health_score: 'OpenAI health score' },
+    threshold: 'Enable fallback below this threshold',
+    scoreUnit: 'points',
+    window: 'Data window (minutes)',
+    minutes: 'minutes',
+    accounts: 'Fallback OpenAI API Key accounts (up to 100)',
+    reloadAccounts: 'Refresh accounts',
+    schedulingOn: 'Scheduling enabled',
+    schedulingOff: 'Scheduling disabled',
+    noAccounts: 'No active OpenAI API Key accounts are available.',
+    accountsFailed: 'Could not load the complete account list. Selections are preserved. Refresh the list before enabling this rule; you can still turn it off.',
+    retainedIds: 'Preserved account IDs:',
+    unavailableHint: 'Selected accounts are unavailable and remain selected. Deselect them before enabling this rule; you can still turn it off.',
+    unavailableAccount: 'Missing, ineligible or inactive account',
+    chooseAccounts: 'Select at least one available OpenAI API Key account.',
+    invalid: 'Choose a valid metric, a threshold from 0 to 100, an integer window from 1 to 1440 minutes, and up to 100 distinct valid accounts.',
+    recoveryHint: 'Metrics use the same definitions as operations monitoring and include OpenAI only. No metric trigger runs without valid samples. This rule only enables accounts: disable fallback accounts manually after recovery. Turning off the rule also leaves already enabled accounts running.',
+    status: 'Latest check',
+    refreshStatus: 'Refresh status',
+    statusFailed: 'Could not refresh status. The previous check is still shown.',
+    notChecked: 'No check yet. Background checks run after you save and enable the rule.',
+    lastChecked: 'Checked at:',
+    lastMetricChecked: 'Metric measured at:',
+    oauthAvailable: 'Available OAuth accounts:',
+    samples: 'Valid samples:',
+    lastTrigger: 'Last trigger:',
+    lastEnabled: 'Last enabled at:',
+    reasons: { oauth_unavailable: 'All OAuth accounts unavailable', metric_below_threshold: 'Selected metric below threshold' },
+    errors: { accounts_unavailable: 'Could not read account state.', metric_unavailable: 'Could not read the monitored metric.', account_enable_failed: 'Some fallback accounts could not be enabled. Check their state.' }
+  },
  degradation: {
   "title": "Degradation actions",
   "hint": "Independent policy for all OAuth accounts. Uses the same rolling window and complete, conclusive quality probe rounds as Account performance. Applies when the failed-probe percentage meets or exceeds the threshold, not the percentage of all customer requests. A performance pause monitor is not required.",
@@ -136,8 +170,10 @@ export default {
     hint: 'Enable for new OpenAI OAuth accounts through initial configuration. After a 429, use the email, password and current 2FA saved in Credential Operations to rotate the secret and store it encrypted. At most one rotation task per account per hour; incomplete credentials or an unresolved rotation prevent automatic rotation.'
   },
   disableScheduling429: {
-    label: 'Automatically disable scheduling after a 429',
-    hint: 'Enable for new OpenAI OAuth accounts through initial configuration. An upstream 429 turns off the account scheduling switch, which you can manually re-enable. Can be enabled together with automatic 2FA rotation.'
+    label: 'Disable scheduling on a 429 when 7-day usage exceeds the threshold',
+    hint: 'Enable for new OpenAI OAuth accounts through initial configuration. Disable scheduling only when an upstream 429 occurs and 7-day usage exceeds the chosen threshold, which defaults to 98%. The 5-hour window does not count. Without valid 7-day usage, this rule does not disable scheduling. You can manually re-enable scheduling and use this together with automatic 2FA rotation.',
+    threshold: '7-day usage threshold',
+    invalidThreshold: 'The 7-day usage threshold must be a valid number from 0 to 100.'
   },
   "noGroups": "No active matching groups. Create one in group management first.",
   "loadHint": "Lower priority values run first. Load factor controls scheduling frequency independently of concurrency limits and billing multipliers.",
