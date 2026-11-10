@@ -30,26 +30,31 @@ type incompleteRegionalLedger struct {
 	reservations, starts, completed, canceled int
 	reservation                               ledger.Reservation
 	started                                   atomic.Bool
+	stages                                    []string
 }
 
 func (l *incompleteRegionalLedger) Reserve(_ context.Context, r ledger.Reservation) (bool, error) {
+	l.stages = append(l.stages, "reserve")
 	l.reservations++
 	l.reservation = r
 	return true, nil
 }
 
 func (l *incompleteRegionalLedger) Start(context.Context, string) error {
+	l.stages = append(l.stages, "start")
 	l.starts++
 	l.started.Store(true)
 	return nil
 }
 
 func (l *incompleteRegionalLedger) CancelBeforeStart(context.Context, string) error {
+	l.stages = append(l.stages, "cancel_before_start")
 	l.canceled++
 	return nil
 }
 
 func (l *incompleteRegionalLedger) Complete(context.Context, ledger.Event) error {
+	l.stages = append(l.stages, "complete")
 	l.completed++
 	return nil
 }
@@ -82,6 +87,9 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 			t.Run(mode+"/"+closeMode, func(t *testing.T) {
 				var handshakes, submissions atomic.Int32
 				meterLedger := &incompleteRegionalLedger{}
+				price := ledger.Price{Model: "gpt-5.4", Input: 1_000_000_000, Output: 2_000_000_000, MaxInput: 1000, MaxOutput: 100}
+				expectedMaximum, err := price.Maximum(price.MaxOutput)
+				require.NoError(t, err)
 				outbound := make(chan struct {
 					model   string
 					started bool
@@ -168,8 +176,9 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 				// agree. OAuth normalizes gpt-5.1 to gpt-5.4 before dispatch.
 				meter := &service.RegionalMetering{Ledger: meterLedger, Readiness: func(context.Context) error { return nil },
 					Admit: func(_ context.Context, key *service.APIKey, a *service.Account, _ []byte) (ledger.Reservation, ledger.Price, error) {
+						meterLedger.stages = append(meterLedger.stages, "admit")
 						return ledger.Reservation{RequestID: "regional-incomplete", UserID: key.UserID, APIKeyID: key.ID, AccountID: a.ID, AdmittedAt: time.Now().Add(-time.Millisecond)},
-							ledger.Price{Model: "gpt-5.4", Input: 1_000_000_000, Output: 2_000_000_000, MaxInput: 1000, MaxOutput: 100}, nil
+							price, nil
 					}}
 				httpUpstream := &incompleteRegionalHTTP{}
 				billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
@@ -196,6 +205,12 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 					`{"model":"gpt-5.4","input":"synthetic text","max_output_tokens":10,"stream":true}`))
 				request.Header.Set("Content-Type", "application/json")
 				router.ServeHTTP(rec, request)
+				// All data is synthetic. Log before any assertion can stop the
+				// subtest, including when a local guard rejects the WS write.
+				t.Logf("regional handler diagnostic: status=%d content_type=%q body=%q stages=%v reservations=%d starts=%d completed=%d canceled=%d started=%t reserved_model=%q maximum=%d expected_maximum=%d handshakes=%d submissions=%d http_replays=%d context_error=%v",
+					rec.Code, rec.Header().Get("Content-Type"), rec.Body.String(), meterLedger.stages,
+					meterLedger.reservations, meterLedger.starts, meterLedger.completed, meterLedger.canceled, meterLedger.started.Load(),
+					meterLedger.reservation.Model, meterLedger.reservation.Maximum, expectedMaximum, handshakes.Load(), submissions.Load(), httpUpstream.calls.Load(), ctx.Err())
 
 				require.EqualValues(t, 1, handshakes.Load(), "no reconnect after an ambiguous submitted turn")
 				require.EqualValues(t, 1, submissions.Load(), "exactly one billable response.create")
@@ -212,6 +227,7 @@ func TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse(t *testing.T) {
 				require.Equal(t, 1, meterLedger.starts)
 				require.Equal(t, "gpt-5.4", meterLedger.reservation.Model)
 				require.Positive(t, int64(meterLedger.reservation.Maximum))
+				require.Equal(t, expectedMaximum, meterLedger.reservation.Maximum, "OAuth must reserve the full output window after stripping the client limit")
 				require.Zero(t, meterLedger.completed, "missing terminal usage must retain the hold")
 				require.Zero(t, meterLedger.canceled, "a started hold cannot be canceled")
 				require.NoError(t, ctx.Err(), "handler must finish before the caller deadline")
