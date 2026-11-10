@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"time"
 
@@ -18,39 +20,59 @@ const AutoConfigConcurrencyExtraKey = "auto_config_concurrency"
 
 // Initial account fields, BPS defaults, model billing and concurrency upgrades are independent.
 type OAuthAutoConfig struct {
-	DegradationAction            OAuthDegradationConfig     `json:"degradation_action"`
-	OpenAITwoFAAdmission         OpenAITwoFAAdmissionConfig `json:"openai_two_fa_admission"`
-	OpenAITOTPRotateOn429        bool                       `json:"openai_totp_rotate_on_429"`
-	OpenAIDisableSchedulingOn429 bool                       `json:"openai_disable_scheduling_on_429"`
-	OpenAIWSMode                 *string                    `json:"openai_ws_mode,omitempty"`
-	OpenAIWSSSEAcceleration      *bool                      `json:"openai_ws_sse_acceleration,omitempty"`
-	QualityRule                  *OAuthInitialQualityRule   `json:"quality_rule,omitempty"`
-	ModelMappings                []OAuthModelMappingRule    `json:"model_mappings"`
-	SelectedModels               []string                   `json:"selected_models"`
-	ModelBilling                 ModelBillingConfig         `json:"model_billing"`
-	ExcelBPS                     ExcelBPSDefaults           `json:"excel_bps"`
-	UpdatedAt                    time.Time                  `json:"updated_at"`
-	Enabled                      bool                       `json:"enabled"`
-	Platform                     string                     `json:"platform"`
-	Priority                     int                        `json:"priority"`
-	LoadFactor                   int                        `json:"load_factor"`
-	Concurrency                  int                        `json:"concurrency"`
-	GroupIDs                     []int64                    `json:"group_ids"`
-	UpgradeEnabled               bool                       `json:"upgrade_enabled"`
-	UpgradeGroupIDs              []int64                    `json:"upgrade_group_ids"`
-	SuccessesPerStep             int                        `json:"successes_per_step"`
-	UpgradeStep                  int                        `json:"upgrade_step"`
-	MaxConcurrency               int                        `json:"max_concurrency"`
-	CooldownSeconds              int                        `json:"cooldown_seconds"`
-	CostMultiplier               float64                    `json:"cost_multiplier"`
-	Revision                     string                     `json:"revision"`
+	OpenAIAPIKeyFallback                           OpenAIAPIKeyFallbackConfig `json:"openai_apikey_fallback"`
+	DegradationAction                              OAuthDegradationConfig     `json:"degradation_action"`
+	OpenAITwoFAAdmission                           OpenAITwoFAAdmissionConfig `json:"openai_two_fa_admission"`
+	OpenAITOTPRotateOn429                          bool                       `json:"openai_totp_rotate_on_429"`
+	OpenAIDisableSchedulingOn429                   bool                       `json:"openai_disable_scheduling_on_429"`
+	OpenAIDisableSchedulingOn4297dThresholdPercent float64                    `json:"openai_disable_scheduling_on_429_7d_threshold_percent"`
+	OpenAIWSMode                                   *string                    `json:"openai_ws_mode,omitempty"`
+	OpenAIWSSSEAcceleration                        *bool                      `json:"openai_ws_sse_acceleration,omitempty"`
+	QualityRule                                    *OAuthInitialQualityRule   `json:"quality_rule,omitempty"`
+	ModelMappings                                  []OAuthModelMappingRule    `json:"model_mappings"`
+	SelectedModels                                 []string                   `json:"selected_models"`
+	ModelBilling                                   ModelBillingConfig         `json:"model_billing"`
+	ExcelBPS                                       ExcelBPSDefaults           `json:"excel_bps"`
+	UpdatedAt                                      time.Time                  `json:"updated_at"`
+	Enabled                                        bool                       `json:"enabled"`
+	Platform                                       string                     `json:"platform"`
+	Priority                                       int                        `json:"priority"`
+	LoadFactor                                     int                        `json:"load_factor"`
+	Concurrency                                    int                        `json:"concurrency"`
+	GroupIDs                                       []int64                    `json:"group_ids"`
+	UpgradeEnabled                                 bool                       `json:"upgrade_enabled"`
+	UpgradeGroupIDs                                []int64                    `json:"upgrade_group_ids"`
+	SuccessesPerStep                               int                        `json:"successes_per_step"`
+	UpgradeStep                                    int                        `json:"upgrade_step"`
+	MaxConcurrency                                 int                        `json:"max_concurrency"`
+	CooldownSeconds                                int                        `json:"cooldown_seconds"`
+	CostMultiplier                                 float64                    `json:"cost_multiplier"`
+	Revision                                       string                     `json:"revision"`
+}
+
+func (c *OAuthAutoConfig) UnmarshalJSON(data []byte) error {
+	type configJSON OAuthAutoConfig
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, exists := fields[OpenAIDisableSchedulingOn4297dThresholdExtraKey]; exists && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("7d scheduling threshold must be a number")
+	}
+	return json.Unmarshal(data, (*configJSON)(c))
 }
 
 func DefaultOAuthAutoConfig() OAuthAutoConfig {
 	wsMode, wsSSEAcceleration := OpenAIWSIngressModeCtxPool, false
-	return OAuthAutoConfig{DegradationAction: DefaultOAuthDegradationConfig(), OpenAIWSMode: &wsMode, OpenAIWSSSEAcceleration: &wsSSEAcceleration, OpenAITwoFAAdmission: DefaultOpenAITwoFAAdmissionConfig(), ModelMappings: defaultOAuthModelMappings(PlatformOpenAI), ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, CostMultiplier: 0.07, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
+	return OAuthAutoConfig{OpenAIAPIKeyFallback: DefaultOpenAIAPIKeyFallbackConfig(), OpenAIDisableSchedulingOn4297dThresholdPercent: DefaultOpenAIDisableSchedulingOn4297dThresholdPercent, DegradationAction: DefaultOAuthDegradationConfig(), OpenAIWSMode: &wsMode, OpenAIWSSSEAcceleration: &wsSSEAcceleration, OpenAITwoFAAdmission: DefaultOpenAITwoFAAdmissionConfig(), ModelMappings: defaultOAuthModelMappings(PlatformOpenAI), ModelBilling: DefaultModelBillingConfig(), ExcelBPS: DefaultExcelBPSDefaults(), Platform: PlatformOpenAI, Priority: 50, LoadFactor: 1, Concurrency: 3, CostMultiplier: 0.07, GroupIDs: []int64{}, UpgradeGroupIDs: []int64{}, SuccessesPerStep: 20, UpgradeStep: 1, MaxConcurrency: 100, CooldownSeconds: 60}
 }
 func ValidateOAuthAutoConfig(c OAuthAutoConfig) error {
+	if err := c.OpenAIAPIKeyFallback.Validate(); err != nil {
+		return err
+	}
+	if threshold := c.OpenAIDisableSchedulingOn4297dThresholdPercent; math.IsNaN(threshold) || math.IsInf(threshold, 0) || threshold < 0 || threshold > 100 {
+		return infraerrors.BadRequest("AUTO_CONFIG_INVALID", "7d scheduling threshold must be a finite number between 0 and 100")
+	}
 	if err := c.DegradationAction.Validate(); err != nil {
 		return err
 	}
@@ -210,6 +232,7 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 	if input.Platform == PlatformOpenAI {
 		input.Extra[OpenAITOTPRotateOn429ExtraKey] = c.OpenAITOTPRotateOn429
 		input.Extra[OpenAIDisableSchedulingOn429ExtraKey] = c.OpenAIDisableSchedulingOn429
+		input.Extra[OpenAIDisableSchedulingOn4297dThresholdExtraKey] = c.OpenAIDisableSchedulingOn4297dThresholdPercent
 		applyOAuthInitialWS(input.Extra, c)
 	}
 	return nil
@@ -225,6 +248,9 @@ func (s *AccountOpsService) SaveOAuthAutoConfig(ctx context.Context, c OAuthAuto
 		c.ModelMappings = []OAuthModelMappingRule{}
 	}
 	if err := ValidateOAuthAutoConfig(c); err != nil {
+		return c, err
+	}
+	if err := s.validateOpenAIAPIKeyFallbackAccounts(ctx, c.OpenAIAPIKeyFallback); err != nil {
 		return c, err
 	}
 	if c.QualityRule != nil {

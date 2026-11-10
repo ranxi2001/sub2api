@@ -27,8 +27,9 @@ const {default:Page}=new URLSearchParams(location.search).has('baseline')?await 
 import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';
 import {defaultExcelBPSDefaults} from '/src/utils/excelBPSDefaults.ts';
 import {defaultOpenAITwoFAAdmissionConfig} from '/src/utils/openaiTwoFAAdmission.ts';
+import {defaultOpenAIAPIKeyFallbackConfig} from '/src/utils/openaiAPIKeyFallback.ts';
 import '/src/style.css';
-window.fixture={enabled:true,platform:'openai',priority:50,load_factor:1,concurrency:3,cost_multiplier:0.07,group_ids:[5],upgrade_enabled:false,upgrade_group_ids:[],successes_per_step:20,upgrade_step:1,max_concurrency:100,cooldown_seconds:60,revision:'synthetic',excel_bps:defaultExcelBPSDefaults(),openai_two_fa_admission:defaultOpenAITwoFAAdmissionConfig(),model_mappings:[],model_billing:{enabled:false,rules:[]},selected_models:null};
+window.fixture={enabled:true,platform:'openai',priority:50,load_factor:1,concurrency:3,cost_multiplier:0.07,group_ids:[5],upgrade_enabled:false,upgrade_group_ids:[],successes_per_step:20,upgrade_step:1,max_concurrency:100,cooldown_seconds:60,revision:'synthetic',excel_bps:defaultExcelBPSDefaults(),openai_two_fa_admission:defaultOpenAITwoFAAdmissionConfig(),openai_apikey_fallback:defaultOpenAIAPIKeyFallbackConfig(),openai_disable_scheduling_on_429_7d_threshold_percent:98,model_mappings:[],model_billing:{enabled:false,rules:[]},selected_models:null};
 const lang=new URLSearchParams(location.search).get('lang')||'zh';await loadLocaleMessages(lang);i18n.global.locale.value=lang;
 createApp(Page).use(i18n).use(createPinia()).mount('#app');</script>`
 process.chdir(frontend) // Tailwind/PostCSS resolve the actual frontend config.
@@ -61,7 +62,7 @@ const errors = [], external = [], saves = [], requests = []
 let saved
 const groups = [{ id: 5, name: 'OpenAI 示例组', platform: 'openai', status: 'active' }, { id: 6, name: 'Anthropic 示例组', platform: 'anthropic', status: 'active' }]
 try {
- const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
+ const context = await browser.newContext({ viewport: { width: 1280, height: 1000 }, timezoneId: 'UTC' })
  await context.route('**/*', async route => {
   const url = new URL(route.request().url())
   if (url.origin !== 'http://127.0.0.1:4183') { external.push(url.origin); return route.abort() }
@@ -72,6 +73,11 @@ try {
    if (route.request().method() === 'PUT') { saved = route.request().postDataJSON(); saves.push(structuredClone(saved)) }
    data = saved ?? await route.request().frame().evaluate(() => window.fixture)
   } else if (url.pathname === '/api/v1/admin/groups/all') data = groups
+  else if (url.pathname === '/api/v1/admin/accounts') {
+   assert.equal(route.request().method(), 'GET')
+   assert.deepEqual(Object.fromEntries(url.searchParams), { page: '1', page_size: '100', platform: 'openai', type: 'apikey', status: 'active', lite: '1', sort_by: 'id', sort_order: 'asc', timezone: 'UTC' })
+   data = { items: [], page: 1, page_size: 100, pages: 1, total: 0 }
+  }
   else if (url.pathname === '/api/v1/admin/groups') data = { items: groups, page: 1, page_size: 100, pages: 1, total: 2 }
   else if (url.pathname === '/api/v1/admin/account-quality-plans') data = []
   else if (url.pathname === '/api/v1/admin/account-ops/auto-config/events') data = { items: [], has_more: false }
@@ -90,6 +96,10 @@ try {
  assert.equal(await page.getByTestId('degradation-action').count(), 0)
  await page.screenshot({ path: path.join(output, 'before-zh.png'), fullPage: true })
  await open()
+ await page.getByTestId('apikey-fallback-loading').waitFor({ state: 'detached' })
+ assert.equal(await page.getByTestId('apikey-fallback-accounts-error').count(), 0)
+ assert.equal(await page.getByTestId('apikey-fallback-enabled').isChecked(), false)
+ assert(requests.some(request => request.path === '/api/v1/admin/accounts' && request.method === 'GET'))
  const card=page.getByTestId('degradation-action')
  const annotate=()=>page.addStyleTag({content:'[data-testid=degradation-action]::before{content:"CI fixture · 虚构数据 · 非生产";display:block;color:#92400e;font-size:12px}'})
  assert.equal(await page.getByTestId('degradation-enabled').isChecked(),false)

@@ -35,17 +35,23 @@ import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';
 import {apiClient} from '/src/api/client.ts';
 import {defaultExcelBPSDefaults} from '/src/utils/excelBPSDefaults.ts';
 import {defaultOpenAITwoFAAdmissionConfig} from '/src/utils/openaiTwoFAAdmission.ts';
+import {defaultOpenAIAPIKeyFallbackConfig} from '/src/utils/openaiAPIKeyFallback.ts';
 import {defaultModelBillingConfig} from '/src/utils/modelBilling.ts';
 import {defaultOAuthModelMappings} from '/src/utils/oauthModelMappings.ts';
 import View from '/src/views/admin/AutoConfigView.vue';
 import '/src/style.css';
 const locale=new URL(location.href).searchParams.get('locale')||'zh';
 await loadLocaleMessages(locale);i18n.global.locale.value=locale;
-let config={enabled:false,platform:'openai',priority:50,load_factor:1,concurrency:3,cost_multiplier:0.07,group_ids:[],upgrade_enabled:false,upgrade_group_ids:[],successes_per_step:20,upgrade_step:1,max_concurrency:100,cooldown_seconds:60,revision:'synthetic-preview',openai_totp_rotate_on_429:false,openai_disable_scheduling_on_429:false,openai_two_fa_admission:defaultOpenAITwoFAAdmissionConfig(),excel_bps:defaultExcelBPSDefaults(),model_billing:defaultModelBillingConfig(),model_mappings:defaultOAuthModelMappings('openai')};
+let config={enabled:false,platform:'openai',priority:50,load_factor:1,concurrency:3,cost_multiplier:0.07,group_ids:[],upgrade_enabled:false,upgrade_group_ids:[],successes_per_step:20,upgrade_step:1,max_concurrency:100,cooldown_seconds:60,revision:'synthetic-preview',openai_totp_rotate_on_429:false,openai_disable_scheduling_on_429:false,openai_two_fa_admission:defaultOpenAITwoFAAdmissionConfig(),openai_apikey_fallback:defaultOpenAIAPIKeyFallbackConfig(),openai_disable_scheduling_on_429_7d_threshold_percent:98,excel_bps:defaultExcelBPSDefaults(),model_billing:defaultModelBillingConfig(),model_mappings:defaultOAuthModelMappings('openai')};
 const groups=[{id:5,name:'OpenAI Demo',platform:'openai',status:'active'},{id:6,name:'Anthropic Demo',platform:'anthropic',status:'active'}];
 window.__previewRequests=[];
 apiClient.defaults.adapter=async request=>{let data;window.__previewRequests.push({method:request.method,url:request.url});switch(request.url){
 case '/admin/account-ops/auto-config':if(request.method==='put'){config=typeof request.data==='string'?JSON.parse(request.data):request.data;window.__saved=structuredClone(config)}data=structuredClone(config);break;
+case '/admin/accounts':{
+const expected={page:1,page_size:100,platform:'openai',type:'apikey',status:'active',lite:'1',sort_by:'id',sort_order:'asc',timezone:'UTC'};
+if(request.method!=='get'||Object.keys(request.params||{}).length!==Object.keys(expected).length||Object.entries(expected).some(([key,value])=>request.params[key]!==value))throw Error('Unexpected preview account query');
+data={items:[],page:1,page_size:100,pages:1,total:0};break;
+}
 case '/admin/groups/all':data=groups;break;
 case '/admin/groups':data={items:groups,page:1,pages:1,page_size:100,total:groups.length};break;
 case '/admin/account-quality-plans':data=[];break;
@@ -75,7 +81,7 @@ window.preview=mount(View,{attachTo:'#preview',global:{plugins:[createPinia(),i1
   })
   await server.listen()
   browser = process.env.SUB2API_CDP_ENDPOINT ? await chromium.connectOverCDP(process.env.SUB2API_CDP_ENDPOINT) : await chromium.launch({ headless: true })
-  context = await browser.newContext({ viewport: { width: 1180, height: 1000 }, locale: 'zh-CN' })
+  context = await browser.newContext({ viewport: { width: 1180, height: 1000 }, locale: 'zh-CN', timezoneId: 'UTC' })
   const page = await context.newPage()
   page.on('pageerror', error => { errors.push(error.message); console.error(error.message) })
   page.on('console', message => {
@@ -101,6 +107,11 @@ window.preview=mount(View,{attachTo:'#preview',global:{plugins:[createPinia(),i1
   server.moduleGraph.invalidateAll()
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByTestId('initial-ws-mode-select').waitFor({ timeout: 60000 })
+  await page.getByTestId('apikey-fallback').waitFor()
+  await page.getByTestId('apikey-fallback-loading').waitFor({ state: 'detached' })
+  if (await page.getByTestId('apikey-fallback-accounts-error').count()) throw Error('Fallback account fixture failed to load')
+  if (await page.getByTestId('apikey-fallback-enabled').isChecked()) throw Error('Fallback must remain disabled in the WS fixture')
+  if (!await page.evaluate(() => window.__previewRequests.some(request => request.method === 'get' && request.url === '/admin/accounts'))) throw Error('Missing fallback account request')
   await capture('after-defaults.png')
   await page.getByTestId('initial-enabled').check()
   await page.getByTestId('initial-group-5').check()

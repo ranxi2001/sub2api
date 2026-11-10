@@ -16,8 +16,9 @@ func (h *AccountOpsHandler) GetAutoConfig(c *gin.Context) {
 	}
 	response.Success(c, struct {
 		service.OAuthAutoConfig
-		RuntimeBlocked bool `json:"runtime_blocked"`
-	}{cfg, h.svc.AutoConfigBlocked()})
+		RuntimeBlocked             bool                               `json:"runtime_blocked"`
+		OpenAIAPIKeyFallbackStatus service.OpenAIAPIKeyFallbackStatus `json:"openai_apikey_fallback_status"`
+	}{cfg, h.svc.AutoConfigBlocked(), h.svc.OpenAIAPIKeyFallbackStatus()})
 }
 func (h *AccountOpsHandler) SaveAutoConfig(c *gin.Context) {
 	// Preserve fields unknown to older clients, including the BPS template.

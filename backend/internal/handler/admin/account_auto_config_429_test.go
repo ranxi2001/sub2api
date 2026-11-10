@@ -65,3 +65,54 @@ func TestAutoConfigDisableScheduling429SaveAndLegacyClient(t *testing.T) {
 		})
 	}
 }
+
+func TestAutoConfigWeekly429ThresholdSaveValidationAndLegacyClient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// An old stored template still receives the safe weekly threshold default.
+	repo := &opsHandlerWritableSettings{raw: `{"enabled":false,"platform":"openai","openai_disable_scheduling_on_429":true}`}
+	cfg := &config.Config{}
+	cfg.Runtime.Role = config.RuntimeRoleGateway
+	svc := service.ProvideAccountOpsService(repo, opsHandlerQueue{}, nil, nil, modelBillingHandlerGroups{}, cfg, nil, nil, nil, nil, nil)
+	svc.Stop()
+	handler := NewAccountOpsHandler(svc, nil)
+	router := gin.New()
+	router.PUT("/config", handler.SaveAutoConfig)
+	router.GET("/config", handler.GetAutoConfig)
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		threshold  float64
+	}{
+		{"legacy default", `{"priority":6}`, http.StatusOK, 98},
+		{"fractional value", `{"openai_disable_scheduling_on_429_7d_threshold_percent":97.5}`, http.StatusOK, 97.5},
+		{"legacy client preserves saved value", `{"priority":7}`, http.StatusOK, 97.5},
+		{"negative", `{"openai_disable_scheduling_on_429_7d_threshold_percent":-1}`, http.StatusBadRequest, 97.5},
+		{"over 100", `{"openai_disable_scheduling_on_429_7d_threshold_percent":100.01}`, http.StatusBadRequest, 97.5},
+		{"string", `{"openai_disable_scheduling_on_429_7d_threshold_percent":"98"}`, http.StatusBadRequest, 97.5},
+		{"null", `{"openai_disable_scheduling_on_429_7d_threshold_percent":null}`, http.StatusBadRequest, 97.5},
+		{"boolean", `{"openai_disable_scheduling_on_429_7d_threshold_percent":true}`, http.StatusBadRequest, 97.5},
+		{"zero", `{"openai_disable_scheduling_on_429_7d_threshold_percent":0}`, http.StatusOK, 0},
+		{"100", `{"openai_disable_scheduling_on_429_7d_threshold_percent":100}`, http.StatusOK, 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := repo.raw
+			written := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPut, "/config", strings.NewReader(tc.body))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(written, request)
+			require.Equal(t, tc.status, written.Code, written.Body.String())
+			if tc.status != http.StatusOK {
+				require.Equal(t, before, repo.raw)
+			}
+			read := httptest.NewRecorder()
+			router.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/config", nil))
+			require.Equal(t, http.StatusOK, read.Code)
+			var payload struct {
+				Data service.OAuthAutoConfig `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(read.Body.Bytes(), &payload))
+			require.Equal(t, tc.threshold, payload.Data.OpenAIDisableSchedulingOn4297dThresholdPercent)
+			require.True(t, payload.Data.OpenAIDisableSchedulingOn429)
+		})
+	}
+}

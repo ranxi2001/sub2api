@@ -9,12 +9,14 @@ import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
 import { getAutoConfig, saveAutoConfig, type AutoConfig } from '@/api/admin/autoConfig'
 import { listQualityPlans } from '@/api/admin/accountQuality'
 import { getAll, list as listGroups } from '@/api/admin/groups'
+import { list as listAccounts } from '@/api/admin/accounts'
 import type { Group } from '@/types'
 import { defaultModelBillingConfig } from '@/utils/modelBilling'
 import { defaultExcelBPSDefaults } from '@/utils/excelBPSDefaults'
 import { defaultOAuthModelMappings } from '@/utils/oauthModelMappings'
 import { defaultOAuthDegradationConfig } from '@/utils/oauthDegradation'
 import { defaultOpenAITwoFAAdmissionConfig } from '@/utils/openaiTwoFAAdmission'
+import { defaultOpenAIAPIKeyFallbackConfig, type OpenAIAPIKeyFallbackStatus } from '@/utils/openaiAPIKeyFallback'
 vi.mock('@/components/account/ModelWhitelistSelector.vue', () => ({ default: { props: ['modelValue'], template: '<div data-testid="model-selection">{{ modelValue.join(", ") }}</div>' } }))
 const state = vi.hoisted(() => ({ auth: null as any }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => state.auth }))
@@ -26,15 +28,167 @@ vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('@/api/admin/autoConfig', async importOriginal => ({ ...await importOriginal<typeof import('@/api/admin/autoConfig')>(), getAutoConfig: vi.fn(), saveAutoConfig: vi.fn() }))
 vi.mock('@/api/admin/accountQuality', () => ({ listQualityPlans: vi.fn() }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn(), list: vi.fn() }))
-const config: AutoConfig = { degradation_action: defaultOAuthDegradationConfig(), openai_ws_mode: 'ctx_pool', openai_ws_sse_acceleration: false, openai_totp_rotate_on_429: false, openai_disable_scheduling_on_429: false, openai_two_fa_admission: defaultOpenAITwoFAAdmissionConfig(), model_billing: defaultModelBillingConfig(), model_mappings: defaultOAuthModelMappings('openai'), excel_bps: defaultExcelBPSDefaults(), enabled: false, platform: 'openai', priority: 50, load_factor: 1, concurrency: 3, cost_multiplier: 0.07, group_ids: [], upgrade_enabled: false, upgrade_group_ids: [], successes_per_step: 20, upgrade_step: 1, max_concurrency: 100, cooldown_seconds: 60, revision: '' }
+vi.mock('@/api/admin/accounts', () => ({ list: vi.fn() }))
+const config: AutoConfig = { openai_apikey_fallback: defaultOpenAIAPIKeyFallbackConfig(), degradation_action: defaultOAuthDegradationConfig(), openai_ws_mode: 'ctx_pool', openai_ws_sse_acceleration: false, openai_totp_rotate_on_429: false, openai_disable_scheduling_on_429: false, openai_disable_scheduling_on_429_7d_threshold_percent: 98, openai_two_fa_admission: defaultOpenAITwoFAAdmissionConfig(), model_billing: defaultModelBillingConfig(), model_mappings: defaultOAuthModelMappings('openai'), excel_bps: defaultExcelBPSDefaults(), enabled: false, platform: 'openai', priority: 50, load_factor: 1, concurrency: 3, cost_multiplier: 0.07, group_ids: [], upgrade_enabled: false, upgrade_group_ids: [], successes_per_step: 20, upgrade_step: 1, max_concurrency: 100, cooldown_seconds: 60, revision: '' }
 beforeEach(() => {
  localStorage.clear(); setActivePinia(createPinia())
- vi.resetAllMocks(); vi.mocked(listQualityPlans).mockResolvedValue([]); state.auth = reactive({ user: { id: 1, role: 'admin' } })
+ vi.resetAllMocks(); vi.mocked(listAccounts).mockResolvedValue({ items: [], page: 1, page_size: 100, pages: 0, total: 0 }); vi.mocked(listQualityPlans).mockResolvedValue([]); state.auth = reactive({ user: { id: 1, role: 'admin' } })
  vi.mocked(listGroups).mockImplementation(async () => ({ items: await getAll(), page: 1, page_size: 100, pages: 1, total: 2 }) as any)
  vi.mocked(getAutoConfig).mockResolvedValue(structuredClone(config)); vi.mocked(saveAutoConfig).mockImplementation(async c => c)
  vi.mocked(getAll).mockResolvedValue([{ id: 5, name: 'OpenAI test', platform: 'openai', status: 'active' }, { id: 6, name: 'Anthropic test', platform: 'anthropic', status: 'active' }] as Group[])
 })
 describe('AutoConfigView', () => {
+ it('places fallback handling beside degradation handling and saves its controls independently of initial configuration', async () => {
+  vi.mocked(listAccounts).mockResolvedValueOnce({ items: [{ id: 71, name: 'Fallback fixture', platform: 'openai', type: 'apikey', status: 'active', schedulable: false, parent_account_id: null }] as any, page: 1, page_size: 100, pages: 1, total: 1 })
+  const w = mount(AutoConfigView); await flushPromises()
+  const panels = w.get('[data-testid="oauth-handling-panels"]')
+  expect(panels.classes()).toContain('lg:grid-cols-2')
+  expect(panels.find('[data-testid="degradation-action"]').exists()).toBe(true)
+  expect(panels.find('[data-testid="apikey-fallback"]').exists()).toBe(true)
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-enabled"]').element.checked).toBe(false)
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-threshold"]').element.value).toBe('95')
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-window"]').element.value).toBe('5')
+  await w.get('[data-testid="platform"]').setValue('anthropic')
+  await w.get('[data-testid="apikey-fallback-enabled"]').setValue(true)
+  await w.get('[data-testid="apikey-fallback-account-71"]').setValue(true)
+  await w.get('[data-testid="apikey-fallback-metric"]').setValue('health_score')
+  await w.get('[data-testid="apikey-fallback-threshold"]').setValue('82.5')
+  await w.get('[data-testid="apikey-fallback-window"]').setValue('1440')
+  await w.get('form').trigger('submit'); await flushPromises()
+  const saved: AutoConfig = { ...config, platform: 'anthropic', selected_models: null, quality_rule: null, model_mappings: [], openai_apikey_fallback: { enabled: true, account_ids: [71], metric: 'health_score', threshold: 82.5, window_minutes: 1440 } }
+  expect(saveAutoConfig).toHaveBeenCalledWith(saved)
+  expect(w.get<HTMLInputElement>('[data-testid="initial-enabled"]').element.checked).toBe(false)
+  w.unmount()
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(saved)
+  vi.mocked(listAccounts).mockResolvedValueOnce({ items: [{ id: 71, name: 'Fallback fixture', platform: 'openai', type: 'apikey', status: 'active', schedulable: false }] as any, page: 1, page_size: 100, pages: 1, total: 1 })
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(reloaded.get<HTMLSelectElement>('[data-testid="apikey-fallback-metric"]').element.value).toBe('health_score')
+  expect(reloaded.get<HTMLInputElement>('[data-testid="apikey-fallback-threshold"]').element.value).toBe('82.5')
+  expect(reloaded.get<HTMLInputElement>('[data-testid="apikey-fallback-window"]').element.value).toBe('1440')
+  expect(reloaded.get<HTMLInputElement>('[data-testid="apikey-fallback-account-71"]').element.checked).toBe(true)
+  reloaded.unmount()
+ })
+ it('loads all fallback account pages and excludes OAuth, other platforms, inactive accounts, shadows and expired or invalid expiry timestamps', async () => {
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_apikey_fallback: { ...defaultOpenAIAPIKeyFallbackConfig(), account_ids: [77] } })
+  vi.mocked(listAccounts).mockResolvedValueOnce({ items: [
+   { id: 71, name: 'First key', platform: 'openai', type: 'apikey', status: 'active', schedulable: false },
+   { id: 72, name: 'OAuth fixture', platform: 'openai', type: 'oauth', status: 'active' },
+   { id: 73, name: 'Shadow fixture', platform: 'openai', type: 'apikey', status: 'active', parent_account_id: 71 }
+  ] as any, page: 1, page_size: 100, pages: 2, total: 9 })
+  vi.mocked(listAccounts).mockResolvedValueOnce({ items: [
+   { id: 74, name: 'Other platform', platform: 'anthropic', type: 'apikey', status: 'active' },
+   { id: 75, name: 'Inactive fixture', platform: 'openai', type: 'apikey', status: 'inactive' },
+   { id: 76, name: 'Second key', platform: 'openai', type: 'apikey', status: 'active', schedulable: true, expires_at: Date.now() / 1000 + 3600 },
+   { id: 77, name: 'Expired key', platform: 'openai', type: 'apikey', status: 'active', schedulable: false, expires_at: 1 },
+   { id: 78, name: 'Invalid expiry', platform: 'openai', type: 'apikey', status: 'active', schedulable: false, expires_at: 'invalid' },
+   { id: 79, name: 'Non-finite expiry', platform: 'openai', type: 'apikey', status: 'active', schedulable: false, expires_at: Number.POSITIVE_INFINITY }
+  ] as any, page: 2, page_size: 100, pages: 2, total: 9 })
+  const w = mount(AutoConfigView); await flushPromises()
+  expect(listAccounts).toHaveBeenNthCalledWith(1, 1, 100, { platform: 'openai', type: 'apikey', status: 'active', lite: '1', sort_by: 'id', sort_order: 'asc' })
+  expect(listAccounts).toHaveBeenNthCalledWith(2, 2, 100, { platform: 'openai', type: 'apikey', status: 'active', lite: '1', sort_by: 'id', sort_order: 'asc' })
+  expect(w.findAll('[data-testid^="apikey-fallback-account-"]').map(input => input.attributes('data-testid'))).toEqual(['apikey-fallback-account-71', 'apikey-fallback-account-76'])
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-unavailable-77"]').element.checked).toBe(true)
+  w.unmount()
+ })
+ it('preserves unavailable selected account IDs, blocks enabling them and still allows the rule to be disabled', async () => {
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_apikey_fallback: { ...defaultOpenAIAPIKeyFallbackConfig(), enabled: true, account_ids: [999] } })
+  const w = mount(AutoConfigView); await flushPromises()
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-unavailable-999"]').element.checked).toBe(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  expect(w.get('[role="alert"]').text()).toContain('autoConfig.apikeyFallback.unavailableHint')
+  await w.get('[data-testid="apikey-fallback-enabled"]').setValue(false)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, openai_apikey_fallback: { ...defaultOpenAIAPIKeyFallbackConfig(), account_ids: [999] } })
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-unavailable-999"]').element.checked).toBe(true)
+  w.unmount()
+ })
+ it('keeps selections on an incomplete account response and can retry before enabling fallback', async () => {
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_apikey_fallback: { ...defaultOpenAIAPIKeyFallbackConfig(), enabled: true, account_ids: [71] } })
+  vi.mocked(listAccounts).mockResolvedValueOnce({ items: [], page: 1, page_size: 100, pages: 2, total: 1 })
+  const w = mount(AutoConfigView); await flushPromises()
+  expect(w.get('[data-testid="apikey-fallback-accounts-error"]').text()).toContain('autoConfig.apikeyFallback.accountsFailed')
+  expect(w.get('[data-testid="apikey-fallback-retained-ids"]').text()).toContain('#71')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  vi.mocked(listAccounts).mockResolvedValueOnce({ items: [{ id: 71, name: 'Fallback fixture', platform: 'openai', type: 'apikey', status: 'active', schedulable: false }] as any, page: 1, page_size: 100, pages: 1, total: 1 })
+  await w.get('[data-testid="apikey-fallback-reload-accounts"]').trigger('click'); await flushPromises()
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-account-71"]').element.checked).toBe(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalled()
+  w.unmount()
+ })
+ it.each([
+  { metric: 'sla', threshold: -1, window_minutes: 5 },
+  { metric: 'health_score', threshold: 100.1, window_minutes: 5 },
+  { metric: 'sla', threshold: Number.NaN, window_minutes: 5 },
+  { metric: 'sla', threshold: 95, window_minutes: 0 },
+  { metric: 'sla', threshold: 95, window_minutes: 1441 },
+  { metric: 'sla', threshold: 95, window_minutes: 1.5 }
+ ] as const)('rejects invalid fallback metric controls $metric / $threshold / $window_minutes', async controls => {
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_apikey_fallback: { ...defaultOpenAIAPIKeyFallbackConfig(), ...controls } })
+  const w = mount(AutoConfigView); await flushPromises()
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  expect(w.get('[role="alert"]').text()).toContain('autoConfig.apikeyFallback.invalid')
+  w.unmount()
+ })
+ it('defaults legacy fallback settings to off and requires a target before enabling', async () => {
+  const { openai_apikey_fallback: _fallback, ...legacy } = config
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(legacy)
+  const w = mount(AutoConfigView); await flushPromises()
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-enabled"]').element.checked).toBe(false)
+  await w.get('[data-testid="apikey-fallback-enabled"]').setValue(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  expect(w.get('[role="alert"]').text()).toContain('autoConfig.apikeyFallback.chooseAccounts')
+  await w.get('[data-testid="apikey-fallback-enabled"]').setValue(false)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalledWith(config)
+  w.unmount()
+ })
+ it('refreshes read-only fallback status without overwriting the draft or including status in saves', async () => {
+  const status: OpenAIAPIKeyFallbackStatus = { last_checked_at: '2026-11-10T15:00:00Z', last_metric_checked_at: '2026-11-10T14:59:30Z', oauth_account_count: 5, oauth_available_count: 0, metric: 'sla', metric_value: 91, samples: 100, window_minutes: 5, last_trigger_reason: 'metric_below_threshold', last_enabled_at: '2026-11-10T14:59:00Z' }
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_apikey_fallback_status: status })
+  const w = mount(AutoConfigView); await flushPromises()
+  expect(w.get('[data-testid="apikey-fallback-status"]').text()).toContain('91.00%')
+  expect(w.get('[data-testid="apikey-fallback-metric-checked-at"]').text()).toContain('2026-11-10T14:59:30Z')
+  expect(w.get('[data-testid="apikey-fallback-metric-checked-at"]').text()).toContain('autoConfig.apikeyFallback.lastMetricChecked')
+  await w.get('[data-testid="apikey-fallback-threshold"]').setValue('88')
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_apikey_fallback_status: { ...status, last_checked_at: '2026-11-10T15:00:15Z', metric: 'health_score', metric_value: 86, samples: 50, window_minutes: 15 } })
+  await w.get('[data-testid="apikey-fallback-refresh-status"]').trigger('click'); await flushPromises()
+  expect(w.get('[data-testid="apikey-fallback-status"]').text()).toContain('86.00')
+  expect(w.get('[data-testid="apikey-fallback-status"]').text()).toContain('autoConfig.apikeyFallback.metrics.health_score')
+  expect(w.get('[data-testid="apikey-fallback-status"]').text()).toContain('86.00autoConfig.apikeyFallback.scoreUnit')
+  expect(w.get('[data-testid="apikey-fallback-status"]').text()).not.toContain('86.00%')
+  expect(w.get<HTMLSelectElement>('[data-testid="apikey-fallback-metric"]').element.value).toBe('sla')
+  expect(w.get('[data-testid="apikey-fallback-metric-checked-at"]').text()).toContain('2026-11-10T14:59:30Z')
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-threshold"]').element.value).toBe('88')
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, openai_apikey_fallback: { ...defaultOpenAIAPIKeyFallbackConfig(), threshold: 88 } })
+  expect(vi.mocked(saveAutoConfig).mock.lastCall![0]).not.toHaveProperty('openai_apikey_fallback_status')
+  w.unmount()
+ })
+ it('registers an independent fallback notice and preserves its dismissal across remounts', async () => {
+  const oldId = NEW_FEATURE_NOTICES.oauthDegradationActions, id = NEW_FEATURE_NOTICES.openaiAPIKeyFallback
+  useNewFeatureNoticeStore().dismiss(1, oldId)
+  const w = mount(AutoConfigView); await flushPromises()
+  const badge = w.get('[data-testid="apikey-fallback"] [data-testid="new-feature-badge"]')
+  const second = mount(NewFeatureBadge, { props: { noticeId: id, userId: 1 } })
+  await badge.trigger('click')
+  expect(second.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+  expect(w.get<HTMLInputElement>('[data-testid="apikey-fallback-enabled"]').element.checked).toBe(false)
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  w.unmount(); second.unmount(); setActivePinia(createPinia())
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(reloaded.find('[data-testid="apikey-fallback"] [data-testid="new-feature-badge"]').exists()).toBe(false)
+  expect(useNewFeatureNoticeStore().isDismissed(1, oldId)).toBe(true)
+  const future = mount(NewFeatureBadge, { props: { noticeId: 'future-fallback-test', userId: 1 } })
+  expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  const otherAdmin = mount(NewFeatureBadge, { props: { noticeId: id, userId: 2 } })
+  expect(otherAdmin.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  reloaded.unmount(); future.unmount(); otherAdmin.unmount()
+ })
  it('preserves degradation actions when saving WS settings and preserves WS settings when saving degradation actions', async () => {
   const degradation = { ...defaultOAuthDegradationConfig(), enabled: true, threshold_percent: 42, limit_concurrency: false, limit_models: false, limit_groups: true, group_ids: [5] }
   const initial: AutoConfig = { ...config, openai_ws_mode: 'off', degradation_action: degradation }
@@ -221,6 +375,8 @@ describe('AutoConfigView', () => {
   const w = mount(AutoConfigView); await flushPromises()
   const schedulingNotice = (view: typeof w) => view.findAllComponents(NewFeatureBadge).find(badge => badge.props('noticeId') === id)!
   const rotationNotice = (view: typeof w) => view.findAllComponents(NewFeatureBadge).find(badge => badge.props('noticeId') === oldId)!
+  const threshold = '[data-testid="disable-scheduling-on-429-7d-threshold"]'
+  expect(w.get(threshold).element.closest('fieldset')).toBe(schedulingNotice(w).element.closest('fieldset'))
   const other = mount(NewFeatureBadge, { props: { noticeId: id, userId: 1 } })
   expect(schedulingNotice(w).find('[data-testid="new-feature-badge"]').exists()).toBe(true)
   expect(rotationNotice(w).find('[data-testid="new-feature-badge"]').exists()).toBe(false)
@@ -228,6 +384,7 @@ describe('AutoConfigView', () => {
   expect(schedulingNotice(w).find('[data-testid="new-feature-badge"]').exists()).toBe(false)
   expect(other.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
   expect(w.get<HTMLInputElement>('[data-testid="disable-scheduling-on-429"]').element.checked).toBe(false)
+  expect(w.get<HTMLInputElement>(threshold).element.value).toBe('98')
   w.unmount(); other.unmount()
   setActivePinia(createPinia())
   const reloaded = mount(AutoConfigView); await flushPromises()
@@ -263,22 +420,25 @@ describe('AutoConfigView', () => {
   expect(reloaded.get<HTMLInputElement>('[data-testid="totp-rotate-on-429"]').element.checked).toBe(rotate)
   reloaded.unmount()
  })
- it('resets both OpenAI 429 options when changing platforms', async () => {
-  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_disable_scheduling_on_429: true, openai_totp_rotate_on_429: true })
+ it('resets both OpenAI 429 options and their weekly threshold when changing platforms', async () => {
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_disable_scheduling_on_429: true, openai_totp_rotate_on_429: true, openai_disable_scheduling_on_429_7d_threshold_percent: 97.5 })
   const w = mount(AutoConfigView); await flushPromises()
-  const scheduling = '[data-testid="disable-scheduling-on-429"]', rotation = '[data-testid="totp-rotate-on-429"]'
+  const scheduling = '[data-testid="disable-scheduling-on-429"]', rotation = '[data-testid="totp-rotate-on-429"]', threshold = '[data-testid="disable-scheduling-on-429-7d-threshold"]'
   await w.get('[data-testid="platform"]').setValue('anthropic')
   expect(w.find(scheduling).exists()).toBe(false)
   expect(w.find(rotation).exists()).toBe(false)
+  expect(w.find(threshold).exists()).toBe(false)
   await w.get('form').trigger('submit'); await flushPromises()
   expect(saveAutoConfig).toHaveBeenLastCalledWith({ ...config, platform: 'anthropic', selected_models: null, quality_rule: null, model_mappings: [] })
   await w.get('[data-testid="platform"]').setValue('openai')
   expect(w.get<HTMLInputElement>(scheduling).element.checked).toBe(false)
   expect(w.get<HTMLInputElement>(rotation).element.checked).toBe(false)
+  expect(w.get<HTMLInputElement>(threshold).element.value).toBe('98')
+  expect(w.get<HTMLInputElement>(threshold).element.disabled).toBe(true)
   w.unmount()
  })
  it('keeps automatic scheduling shutdown off when loading or saving legacy settings', async () => {
-  const { openai_disable_scheduling_on_429: _scheduling, ...legacy } = config
+  const { openai_disable_scheduling_on_429: _scheduling, openai_disable_scheduling_on_429_7d_threshold_percent: _threshold, ...legacy } = config
   vi.mocked(getAutoConfig).mockResolvedValueOnce(legacy)
   vi.mocked(saveAutoConfig).mockResolvedValueOnce(legacy)
   const w = mount(AutoConfigView); await flushPromises()
@@ -287,6 +447,71 @@ describe('AutoConfigView', () => {
   await w.get('form').trigger('submit'); await flushPromises()
   expect(saveAutoConfig).toHaveBeenCalledWith(config)
   expect(w.get<HTMLInputElement>(checkbox).element.checked).toBe(false)
+  w.unmount()
+ })
+ it('defaults the weekly shutdown threshold to 98 and enables editing only with the switch', async () => {
+  const w = mount(AutoConfigView); await flushPromises()
+  const threshold = '[data-testid="disable-scheduling-on-429-7d-threshold"]'
+  expect(w.get<HTMLInputElement>(threshold).element.value).toBe('98')
+  expect(w.get<HTMLInputElement>(threshold).element.disabled).toBe(true)
+  expect(w.get(threshold).attributes()).toEqual(expect.objectContaining({ min: '0', max: '100', step: 'any', required: '' }))
+  await w.get('[data-testid="disable-scheduling-on-429"]').setValue(true)
+  expect(w.get<HTMLInputElement>(threshold).element.disabled).toBe(false)
+  await w.get(threshold).setValue('97.25')
+  await w.get('[data-testid="disable-scheduling-on-429"]').setValue(false)
+  expect(w.get<HTMLInputElement>(threshold).element.disabled).toBe(true)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, openai_disable_scheduling_on_429_7d_threshold_percent: 97.25 })
+  w.unmount()
+ })
+ it.each([0, 97.5, 98, 100])('saves and reloads weekly shutdown threshold %s independently of 2FA', async threshold => {
+  const w = mount(AutoConfigView); await flushPromises()
+  const input = '[data-testid="disable-scheduling-on-429-7d-threshold"]'
+  await w.get('[data-testid="disable-scheduling-on-429"]').setValue(true)
+  await w.get('[data-testid="totp-rotate-on-429"]').setValue(true)
+  await w.get(input).setValue(threshold)
+  await w.get('form').trigger('submit'); await flushPromises()
+  const saved = { ...config, openai_disable_scheduling_on_429: true, openai_totp_rotate_on_429: true, openai_disable_scheduling_on_429_7d_threshold_percent: threshold }
+  expect(saveAutoConfig).toHaveBeenCalledWith(saved)
+  expect(w.get<HTMLInputElement>(input).element.value).toBe(String(threshold))
+  w.unmount()
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(saved)
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(reloaded.get<HTMLInputElement>(input).element.value).toBe(String(threshold))
+  expect(reloaded.get<HTMLInputElement>('[data-testid="disable-scheduling-on-429"]').element.checked).toBe(true)
+  expect(reloaded.get<HTMLInputElement>('[data-testid="totp-rotate-on-429"]').element.checked).toBe(true)
+  reloaded.unmount()
+ })
+ it('uses 98 for existing opt-in settings without a weekly threshold on load and save', async () => {
+  const { openai_disable_scheduling_on_429_7d_threshold_percent: _threshold, ...withoutThreshold } = config
+  const legacy = { ...withoutThreshold, openai_disable_scheduling_on_429: true }
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(legacy)
+  vi.mocked(saveAutoConfig).mockResolvedValueOnce(legacy)
+  const w = mount(AutoConfigView); await flushPromises()
+  const input = '[data-testid="disable-scheduling-on-429-7d-threshold"]'
+  expect(w.get<HTMLInputElement>(input).element.value).toBe('98')
+  expect(w.get<HTMLInputElement>(input).element.disabled).toBe(false)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).toHaveBeenCalledWith({ ...config, openai_disable_scheduling_on_429: true })
+  expect(w.get<HTMLInputElement>(input).element.value).toBe('98')
+  expect(w.get<HTMLInputElement>('[data-testid="disable-scheduling-on-429"]').element.checked).toBe(true)
+  w.unmount()
+ })
+ it.each([-1, 100.01, ''])('rejects invalid weekly shutdown threshold input %s', async threshold => {
+  const w = mount(AutoConfigView); await flushPromises()
+  await w.get('[data-testid="disable-scheduling-on-429"]').setValue(true)
+  await w.get('[data-testid="disable-scheduling-on-429-7d-threshold"]').setValue(threshold)
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  expect(w.get('[role="alert"]').text()).toContain('autoConfig.disableScheduling429.invalidThreshold')
+  w.unmount()
+ })
+ it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('rejects a non-finite loaded weekly shutdown threshold (%s)', async threshold => {
+  vi.mocked(getAutoConfig).mockResolvedValueOnce({ ...config, openai_disable_scheduling_on_429_7d_threshold_percent: threshold })
+  const w = mount(AutoConfigView); await flushPromises()
+  await w.get('form').trigger('submit'); await flushPromises()
+  expect(saveAutoConfig).not.toHaveBeenCalled()
+  expect(w.get('[role="alert"]').text()).toContain('autoConfig.disableScheduling429.invalidThreshold')
   w.unmount()
  })
  it('starts with the Luna 10x rule disabled and saves model billing independently', async () => {

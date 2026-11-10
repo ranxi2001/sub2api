@@ -24,6 +24,7 @@ func TestOAuthAutoConfigDisableSchedulingOn429Scope(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := DefaultOAuthAutoConfig()
 			cfg.Enabled, cfg.OpenAIDisableSchedulingOn429, cfg.GroupIDs = tc.enabled, tc.disable, []int64{2}
+			cfg.OpenAIDisableSchedulingOn4297dThresholdPercent = 97.5
 			if tc.templatePlatform != "" {
 				cfg.Platform = tc.templatePlatform
 			}
@@ -50,6 +51,12 @@ func TestOAuthAutoConfigDisableSchedulingOn429Scope(t *testing.T) {
 			}
 			require.NoError(t, svc.ApplyOAuthAutoConfig(ctx, input))
 			require.Equal(t, tc.want, input.Extra[OpenAIDisableSchedulingOn429ExtraKey])
+			if tc.want != nil {
+				require.Equal(t, 97.5, input.Extra[OpenAIDisableSchedulingOn4297dThresholdExtraKey])
+			} else {
+				require.NotContains(t, input.Extra, OpenAIDisableSchedulingOn4297dThresholdExtraKey)
+			}
+			require.NotContains(t, original, OpenAIDisableSchedulingOn4297dThresholdExtraKey)
 			require.Equal(t, "unchanged", input.Extra["keep"])
 			if tc.want != nil {
 				require.Equal(t, !tc.disable, original[OpenAIDisableSchedulingOn429ExtraKey], "template must not mutate the imported map")
@@ -65,6 +72,8 @@ func TestOAuthAutoConfigDisableSchedulingOn429LegacyAndRoundTrip(t *testing.T) {
 	cfg, err := GetOAuthAutoConfig(t.Context(), repo)
 	require.NoError(t, err)
 	require.False(t, cfg.OpenAIDisableSchedulingOn429, "old settings must not opt in")
+	require.Equal(t, 98.0, cfg.OpenAIDisableSchedulingOn4297dThresholdPercent)
+	cfg.OpenAIDisableSchedulingOn4297dThresholdPercent = 97.5
 	svc := NewAccountOpsService(repo, nil, nil)
 	svc.autoGroups = autoConfigGroups{}
 	for _, rotate := range []bool{false, true} {
@@ -75,6 +84,7 @@ func TestOAuthAutoConfigDisableSchedulingOn429LegacyAndRoundTrip(t *testing.T) {
 			loaded, err := GetOAuthAutoConfig(t.Context(), repo)
 			require.NoError(t, err)
 			require.Equal(t, disable, loaded.OpenAIDisableSchedulingOn429)
+			require.Equal(t, 97.5, loaded.OpenAIDisableSchedulingOn4297dThresholdPercent)
 			require.Equal(t, rotate, loaded.OpenAITOTPRotateOn429, "the two policies are independent")
 		}
 	}

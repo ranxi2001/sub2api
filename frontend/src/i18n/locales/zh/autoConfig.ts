@@ -1,4 +1,38 @@
 export default {
+  apikeyFallback: {
+    title: '兜底处置',
+    hint: '独立于首次配置。OpenAI OAuth 账号全部不可调度，或选定周期内的 OpenAI 指标低于所填阈值时，自动开启勾选 API Key 账号的调度；两项条件满足任意一项即可。',
+    metric: '监控指标',
+    metrics: { sla: 'OpenAI SLA', health_score: 'OpenAI 健康状况分数' },
+    threshold: '低于此阈值时开启',
+    scoreUnit: '分',
+    window: '数据周期（分钟）',
+    minutes: '分钟',
+    accounts: '兜底 OpenAI API Key 账号（最多 100 个）',
+    reloadAccounts: '刷新账号列表',
+    schedulingOn: '调度已开启',
+    schedulingOff: '调度已关闭',
+    noAccounts: '暂无启用状态的 OpenAI API Key 账号。',
+    accountsFailed: '未能取得完整账号列表，已保留选择。请刷新列表后再启用；仍可关闭此规则。',
+    retainedIds: '保留的账号 ID：',
+    unavailableHint: '已选账号不可用，已保留选择。请取消勾选后再启用；仍可关闭此规则。',
+    unavailableAccount: '账号不存在、不符合条件或已停用',
+    chooseAccounts: '请至少勾选一个可用的 OpenAI API Key 账号。',
+    invalid: '请选择有效指标、0～100 的阈值、1～1440 的整数分钟周期，以及最多 100 个不同的有效账号。',
+    recoveryHint: '指标与运维监控使用相同口径，仅统计 OpenAI；没有有效样本时不触发指标条件。规则只自动开启账号，恢复后需手动关闭兜底账号；停用本规则也不会关闭已开启的账号。',
+    status: '最近检查',
+    refreshStatus: '刷新状态',
+    statusFailed: '状态刷新失败，仍显示上一次检查结果。',
+    notChecked: '尚无检查结果；保存并启用后由后台检查。',
+    lastChecked: '检查时间：',
+    lastMetricChecked: '指标统计时间：',
+    oauthAvailable: '可调度 OAuth：',
+    samples: '有效样本：',
+    lastTrigger: '最近触发原因：',
+    lastEnabled: '最近开启时间：',
+    reasons: { oauth_unavailable: 'OAuth 账号全部不可调度', metric_below_threshold: '所选指标低于阈值' },
+    errors: { accounts_unavailable: '账号状态读取失败。', metric_unavailable: '监控指标读取失败。', account_enable_failed: '部分兜底账号开启失败，请检查账号状态。' }
+  },
  degradation: {
   "title": "降智后处置",
   "hint": "独立适用于所有 OAuth 账号。使用账号性能相同的统一滚动窗口：仅统计完整、可明确判定的质量探针轮次，探针失败比例达到或超过阈值时处置；不是全部请求的降智率。无需开启账号性能停调监控。",
@@ -136,8 +170,10 @@ export default {
     hint: '随首次配置为新 OpenAI OAuth 账号启用。遇到 429 时，使用凭证运营已保存的邮箱、密码和当前 2FA 更换密钥，新密钥加密保存。同一账号 1 小时内最多自动创建一次更换任务；凭据不完整或更换结果待确认时不自动更换。'
   },
   disableScheduling429: {
-    label: '429 后自动关闭调度',
-    hint: '随首次配置为新 OpenAI OAuth 账号启用。收到上游 429 时关闭账号调度开关，可手动重新开启；可与自动更换 2FA 同时启用。'
+    label: '429 且 7 天额度超阈值后关闭调度',
+    hint: '随首次配置为新 OpenAI OAuth 账号启用。仅在收到上游 429 且 7 天额度使用率超过所填阈值时关闭调度，默认 98%；5 小时用量不参与判断，无有效 7 天用量时不关闭。可手动重新开启，也可与自动更换 2FA 同时启用。',
+    threshold: '7 天额度使用率阈值',
+    invalidThreshold: '7 天额度使用率阈值必须是 0～100 之间的有效数值。'
   },
   "noGroups": "暂无符合条件的启用分组，请先在分组管理中创建。",
   "loadHint": "优先级数值越小越优先；负载因子影响调度频率，与实际并发上限、计费倍率独立。",

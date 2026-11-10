@@ -34,7 +34,7 @@ func (r *opsRepository) GetWindowStats(ctx context.Context, filter *service.OpsD
 		return nil, err
 	}
 
-	errorTotal, _, _, _, _, _, err := r.queryErrorCounts(ctx, filter, start, end)
+	errorTotal, _, errorSLA, _, _, _, err := r.queryErrorCounts(ctx, filter, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -46,5 +46,8 @@ func (r *opsRepository) GetWindowStats(ctx context.Context, filter *service.OpsD
 		SuccessCount:    successCount,
 		ErrorCountTotal: errorTotal,
 		TokenConsumed:   tokenConsumed,
+		ErrorCountSLA:   errorSLA,
+		RequestCountSLA: successCount + errorSLA,
+		SLA:             safeDivideFloat64(float64(successCount), float64(successCount+errorSLA)),
 	}, nil
 }

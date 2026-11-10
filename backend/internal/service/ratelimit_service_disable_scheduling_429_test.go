@@ -40,7 +40,7 @@ func (r *scheduling429Repo) SetSchedulable(ctx context.Context, id int64, enable
 
 func scheduling429Account() *Account {
 	return &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Schedulable: true,
-		Extra: map[string]any{OpenAIDisableSchedulingOn429ExtraKey: true}}
+		Extra: map[string]any{OpenAIDisableSchedulingOn429ExtraKey: true, "codex_7d_used_percent": 99.0, "codex_usage_updated_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)}}
 }
 
 func TestRateLimitDisableSchedulingOn429ScopeAndObservation(t *testing.T) {
@@ -73,8 +73,8 @@ func TestRateLimitDisableSchedulingOn429ScopeAndObservation(t *testing.T) {
 			tc.mutate(account)
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			ctx, disabled := svc.maybeDisableOpenAISchedulingOn429(ctx, account, tc.status)
-			_, repeated := svc.maybeDisableOpenAISchedulingOn429(ctx, account, tc.status)
+			ctx, disabled := svc.maybeDisableOpenAISchedulingOn429(ctx, account, tc.status, nil)
+			_, repeated := svc.maybeDisableOpenAISchedulingOn429(ctx, account, tc.status, nil)
 			require.Equal(t, tc.want, disabled)
 			require.Equal(t, disabled, repeated)
 			if tc.want {
@@ -181,8 +181,8 @@ func TestRateLimitDisableSchedulingOn429UsesAuthoritativeManagedOwner(t *testing
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			ctx, disabled := svc.maybeDisableOpenAISchedulingOn429(ctx, projection, 429)
-			_, repeated := svc.maybeDisableOpenAISchedulingOn429(ctx, projection, 429)
+			ctx, disabled := svc.maybeDisableOpenAISchedulingOn429(ctx, projection, 429, nil)
+			_, repeated := svc.maybeDisableOpenAISchedulingOn429(ctx, projection, 429, nil)
 			require.Equal(t, tc.want, disabled)
 			require.Equal(t, disabled, repeated)
 			require.Equal(t, []int64{42}, repo.reads, "read the mother account once; never infer policy from the projection")
