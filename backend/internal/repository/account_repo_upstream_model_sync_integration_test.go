@@ -105,7 +105,7 @@ func TestOAuthDegradationNativeModelSyncFencesAccountAvailabilityChanges(t *test
 			if change == "scheduling paused" {
 				update.SetSchedulable(false)
 			} else {
-				update.SetStatus(service.StatusInactive)
+				update.SetStatus(service.StatusDisabled)
 			}
 			_, err = update.Save(ctx)
 			require.NoError(t, err)
