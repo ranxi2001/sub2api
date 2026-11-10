@@ -643,6 +643,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	// single/bulk switch APIs carry manual intent; an ordinary edit must neither
 	// overwrite a concurrently executed timer nor cancel plans via inherited intent.
 	ctx = accounttimer.WithPreservedSchedulable(accounttimer.WithoutManualIntent(ctx))
+	// An omitted status does not own authentication state. Explicit status edits
+	// override any inherited preservation marker just as scheduling intent does.
+	ctx = withAccountStatusPreservation(ctx, input.Status == "")
 	if err := ValidateAccountCostMultiplierExtra(input.Extra); err != nil {
 		return nil, err
 	}
