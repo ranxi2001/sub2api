@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -12,6 +13,26 @@ import (
 type QualityOAuth401Round struct {
 	AllDirect401        bool `json:"all_direct_401"`
 	All401OrUnavailable bool `json:"all_401_or_unavailable"`
+	HasDirectRevoked401 bool `json:"has_direct_revoked_401,omitempty"`
+}
+
+// Only a structured code on the proven own-credential response grants trust.
+// Messages, including embedded/quoted JSON and negated codes, are not evidence.
+func qualityOAuth401RevokedCode(body []byte) bool {
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return false
+	}
+	switch payload.Error.Code {
+	case "token_revoked", "token_invalidated", "refresh_token_invalidated", "refresh_token_reused", "invalid_grant":
+		return true
+	default:
+		return false
+	}
 }
 
 type QualityOAuth401Repository interface {
@@ -40,6 +61,10 @@ func QualityOAuth401Evidence(plan *ScheduledTestPlan, results []*ScheduledTestRe
 		unavailable := result.Status == "skipped" && result.ErrorMessage == "model_unavailable"
 		evidence.AllDirect401 = evidence.AllDirect401 && direct
 		evidence.All401OrUnavailable = evidence.All401OrUnavailable && (direct || unavailable)
+		evidence.HasDirectRevoked401 = evidence.HasDirectRevoked401 || direct && result.DirectOAuthRevoked401
+	}
+	if !evidence.All401OrUnavailable {
+		evidence.HasDirectRevoked401 = false
 	}
 	return evidence
 }

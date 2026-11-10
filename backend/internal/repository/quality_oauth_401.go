@@ -15,10 +15,9 @@ import (
 var _ service.QualityOAuth401Repository = (*scheduledTestPlanRepository)(nil)
 
 var qualityAccount401Pattern = regexp.MustCompile(`(^|[^0-9])401([^0-9]|$)`)
-var qualityTokenRevokedPattern = regexp.MustCompile(`(?i)(token[ _]revoked|token_invalidated|refresh_token_invalidated|refresh_token_reused|invalid_grant)`)
 
-// Claim captures the credential identity before the request. A credential
-// replacement or rule edit starts a fresh streak even after a process restart.
+// Claim captures the credential identity before the request. A changed captured
+// identity or saved rule version starts a fresh streak after a process restart.
 // Equality markers stay in this runtime table, never in snapshots or responses.
 func claimQualityOAuth401Tx(ctx context.Context, tx *sql.Tx, plan *service.ScheduledTestPlan, until time.Time) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO quality_oauth_401_streaks
@@ -28,9 +27,15 @@ func claimQualityOAuth401Tx(ctx context.Context, tx *sql.Tx, plan *service.Sched
  WHERE a.id=$4 AND a.type='oauth' AND a.deleted_at IS NULL
  ON CONFLICT(plan_id) DO UPDATE SET
  failures=CASE WHEN quality_oauth_401_streaks.config_revision=EXCLUDED.config_revision
+ AND quality_oauth_401_streaks.config_updated_at=EXCLUDED.config_updated_at
  AND quality_oauth_401_streaks.credentials_revision=EXCLUDED.credentials_revision
  AND quality_oauth_401_streaks.last_round_until=quality_oauth_401_streaks.claimed_until
  THEN quality_oauth_401_streaks.failures ELSE 0 END,
+ own_revoked_401=CASE WHEN quality_oauth_401_streaks.config_revision=EXCLUDED.config_revision
+ AND quality_oauth_401_streaks.config_updated_at=EXCLUDED.config_updated_at
+ AND quality_oauth_401_streaks.credentials_revision=EXCLUDED.credentials_revision
+ AND quality_oauth_401_streaks.last_round_until=quality_oauth_401_streaks.claimed_until
+ THEN quality_oauth_401_streaks.own_revoked_401 ELSE false END,
  config_updated_at=EXCLUDED.config_updated_at,config_revision=EXCLUDED.config_revision,credentials_revision=EXCLUDED.credentials_revision,
  claimed_until=EXCLUDED.claimed_until`, plan.ID, plan.UpdatedAt, until, plan.AccountID)
 	return err
@@ -106,9 +111,10 @@ func completeQualityOAuth401RoundTx(ctx context.Context, tx *sql.Tx, plan *servi
 	var claimedVersion, claimedUntil time.Time
 	var claimedRevision string
 	var last sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT failures,config_updated_at,credentials_revision,claimed_until,last_round_until
+	var ownRevoked401 bool
+	err = tx.QueryRowContext(ctx, `SELECT failures,config_updated_at,credentials_revision,claimed_until,last_round_until,own_revoked_401
  FROM quality_oauth_401_streaks WHERE plan_id=$1 FOR UPDATE`, plan.ID).
-		Scan(&failures, &claimedVersion, &claimedRevision, &claimedUntil, &last)
+		Scan(&failures, &claimedVersion, &claimedRevision, &claimedUntil, &last, &ownRevoked401)
 	if err == sql.ErrNoRows {
 		return false, nil // No pre-request credential identity was captured.
 	} else if err != nil {
@@ -117,15 +123,18 @@ func completeQualityOAuth401RoundTx(ctx context.Context, tx *sql.Tx, plan *servi
 	if !claimedUntil.Equal(until) || !claimedVersion.Equal(version) || last.Valid && !last.Time.Before(until) {
 		return false, nil
 	}
+	// The persisted evidence belongs to this rule's captured credential hash.
+	// Generic account error text can never grant revocation trust to skipped rounds.
+	trustedRevocation := ownRevoked401 || evidence.HasDirectRevoked401
 	qualifies := accountType == service.AccountTypeOAuth && !deletedAt.Valid && status == "error" &&
 		qualityAccount401Pattern.MatchString(errorMessage) && claimedRevision == revision &&
-		cfg.TestChannel != "bps" && (evidence.AllDirect401 || evidence.All401OrUnavailable && qualityTokenRevokedPattern.MatchString(errorMessage))
+		cfg.TestChannel != "bps" && (evidence.AllDirect401 || evidence.All401OrUnavailable && trustedRevocation)
 	if qualifies {
 		failures = min(failures+1, 100)
 	} else {
 		failures = 0
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE quality_oauth_401_streaks SET failures=$2,last_round_until=$3 WHERE plan_id=$1`, plan.ID, failures, until); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE quality_oauth_401_streaks SET failures=$2,last_round_until=$3,own_revoked_401=$4 WHERE plan_id=$1`, plan.ID, failures, until, qualifies && trustedRevocation); err != nil {
 		return false, err
 	}
 	if failures < cfg.Quality.OAuth401MaxRounds {

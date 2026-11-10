@@ -49,13 +49,14 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 
 	}
 	started := time.Now()
-	directOAuth401, nativeOAuthTransport := false, false
+	directOAuth401, directOAuthRevoked401, nativeOAuthTransport := false, false, false
 	ctx = withPelicanTestOptions(ctx, pelicanTestOptions{
-		directOAuth401:       &directOAuth401,
-		nativeOAuthTransport: &nativeOAuthTransport,
-		qualityBatch:         cfg.QualityBatch,
-		testChannel:          cfg.TestChannel,
-		observeOnly:          cfg.Quality != nil && cfg.Quality.Action == QualityActionObserveOnly,
+		directOAuth401:        &directOAuth401,
+		directOAuthRevoked401: &directOAuthRevoked401,
+		nativeOAuthTransport:  &nativeOAuthTransport,
+		qualityBatch:          cfg.QualityBatch,
+		testChannel:           cfg.TestChannel,
+		observeOnly:           cfg.Quality != nil && cfg.Quality.Action == QualityActionObserveOnly,
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -86,7 +87,7 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 	finished := time.Now()
 	snapshot := *cfg
 	snapshot.ModelID = model
-	return &ScheduledTestResult{DirectOAuth401: directOAuth401, Status: status, ResponseText: output, ErrorMessage: message, LatencyMs: finished.Sub(started).Milliseconds(), StartedAt: started, FinishedAt: finished, PelicanConfig: &snapshot}, nil
+	return &ScheduledTestResult{DirectOAuth401: directOAuth401, DirectOAuthRevoked401: directOAuthRevoked401, Status: status, ResponseText: output, ErrorMessage: message, LatencyMs: finished.Sub(started).Milliseconds(), StartedAt: started, FinishedAt: finished, PelicanConfig: &snapshot}, nil
 }
 
 func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *ScheduledTestPlan) bool {

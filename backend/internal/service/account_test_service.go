@@ -1158,6 +1158,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if resp.StatusCode == http.StatusUnauthorized && isOAuth && credentialAccount.ID == account.ID && authToken != "" && req.Header.Get("Authorization") == "Bearer "+authToken && !IsAstraSourceAcquisition(ctx) && !aiRecoveryProbe {
 			if options, ok := pelicanTestOptionsFromContext(ctx); ok && options.directOAuth401 != nil && options.nativeOAuthTransport != nil && *options.nativeOAuthTransport {
 				*options.directOAuth401 = true
+				if options.directOAuthRevoked401 != nil {
+					*options.directOAuthRevoked401 = qualityOAuth401RevokedCode(body)
+				}
 			}
 		}
 		// 401 Unauthorized: 标记账号为永久错误
