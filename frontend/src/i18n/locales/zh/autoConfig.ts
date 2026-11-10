@@ -9,6 +9,8 @@ export default {
     window: '数据周期（分钟）',
     minutes: '分钟',
     accounts: '兜底 OpenAI API Key 账号（最多 100 个）',
+    selectionHint: '仅列出启用状态、未过期的 OpenAI API Key 母账号，包含调度已关闭的账号。可按名称、#ID 或分组筛选；跨页保留勾选，批量选择最多保留 100 个账号。',
+    selectionLimit: '已达 100 个上限，请先取消其他账号',
     reloadAccounts: '刷新账号列表',
     schedulingOn: '调度已开启',
     schedulingOff: '调度已关闭',

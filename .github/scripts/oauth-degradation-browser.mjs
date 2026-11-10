@@ -54,7 +54,7 @@ const server = await createServer({
   { find: 'vue-i18n', replacement: 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js' }
  ] },
  server: { host: '127.0.0.1', port: 4183, strictPort: true },
- optimizeDeps: { include: ['vue', 'pinia', 'vue-i18n', 'axios'] }
+ optimizeDeps: { entries: [], include: ['vue', 'pinia', 'vue-i18n', 'axios'] }
 })
 await server.listen()
 const browser = await chromium.launch({ headless: true })
@@ -75,7 +75,8 @@ try {
   } else if (url.pathname === '/api/v1/admin/groups/all') data = groups
   else if (url.pathname === '/api/v1/admin/accounts') {
    assert.equal(route.request().method(), 'GET')
-   assert.deepEqual(Object.fromEntries(url.searchParams), { page: '1', page_size: '100', platform: 'openai', type: 'apikey', status: 'active', lite: '1', sort_by: 'id', sort_order: 'asc', timezone: 'UTC' })
+   // Fallback picker only; the ordinary accounts page retains its derived status filter contract.
+   assert.deepEqual(Object.fromEntries(url.searchParams), { page: '1', page_size: '100', platform: 'openai', type: 'apikey', lite: '1', sort_by: 'id', sort_order: 'asc', timezone: 'UTC' })
    data = { items: [], page: 1, page_size: 100, pages: 1, total: 0 }
   }
   else if (url.pathname === '/api/v1/admin/groups') data = { items: groups, page: 1, page_size: 100, pages: 1, total: 2 }

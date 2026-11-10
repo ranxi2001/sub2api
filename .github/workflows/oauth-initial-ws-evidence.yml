@@ -1,13 +1,23 @@
 name: OAuth initial WS rendered evidence
 on:
   push:
-    branches: [feat/oauth-initial-ws-settings-20261109]
+    branches: [feat/oauth-initial-ws-settings-20261109, fix/debug-fallback-account-picker-20261111]
   pull_request:
     branches: [production]
     paths:
       - '.github/workflows/oauth-initial-ws-evidence.yml'
       - '.github/scripts/oauth-initial-ws-screenshot.mjs'
       - 'frontend/src/views/admin/AutoConfigView.vue'
+      - 'frontend/src/components/admin/operations/OpenAIAPIKeyFallbackCard.vue'
+      - 'frontend/src/components/admin/operations/QualityAccountSelector.vue'
+      - 'frontend/src/utils/openaiAPIKeyFallback.ts'
+      - 'frontend/src/api/admin/accounts.ts'
+      - 'frontend/src/i18n/locales/*/autoConfig.ts'
+      - 'frontend/src/i18n/locales/*/qualityOps.ts'
+      - 'frontend/src/style.css'
+      - 'frontend/tailwind.config.js'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
 permissions:
   contents: read
 jobs:
@@ -59,3 +69,56 @@ jobs:
           name: oauth-initial-ws-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.event_name }}
           path: ${{ runner.temp }}/oauth-ws-evidence
           if-no-files-found: error
+  fallback-before-after:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_BASE: 8545bf9ffac5a870ade18fbe7c4b61a48755c8db
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Pin PR782 base and exact candidate with original frontend trees
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code
+          mkdir -p "$RUNNER_TEMP/fallback-base" "$RUNNER_TEMP/fallback-evidence"
+          git rev-parse HEAD > "$RUNNER_TEMP/fallback-evidence/head.txt"
+          git rev-parse "$SOURCE_BASE" > "$RUNNER_TEMP/fallback-evidence/base.txt"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/fallback-base"
+          cmp frontend/package.json "$RUNNER_TEMP/fallback-base/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/fallback-base/frontend/pnpm-lock.yaml"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/fallback-base/frontend/node_modules"
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/fallback-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/fallback-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render real fallback controls and CSS with synthetic API data
+        env:
+          EVIDENCE_SCENARIO: apikey-fallback
+          BASELINE_ROOT: ${{ runner.temp }}/fallback-base/frontend
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/fallback-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/fallback-evidence
+        run: |
+          set -euo pipefail
+          node .github/scripts/oauth-initial-ws-screenshot.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr782-fallback-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.event_name }}
+          path: ${{ runner.temp }}/fallback-evidence
+          if-no-files-found: error
+          retention-days: 14

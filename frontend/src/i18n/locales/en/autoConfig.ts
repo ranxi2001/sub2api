@@ -9,6 +9,8 @@ export default {
     window: 'Data window (minutes)',
     minutes: 'minutes',
     accounts: 'Fallback OpenAI API Key accounts (up to 100)',
+    selectionHint: 'Shows active, unexpired OpenAI API Key parent accounts, including accounts with scheduling disabled. Filter by name, #ID or group. Selections persist across pages; bulk selection stops at 100 accounts.',
+    selectionLimit: '100-account limit reached; deselect another account first',
     reloadAccounts: 'Refresh accounts',
     schedulingOn: 'Scheduling enabled',
     schedulingOff: 'Scheduling disabled',
