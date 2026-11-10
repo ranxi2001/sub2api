@@ -20,6 +20,12 @@ jobs:
         with:
           ref: 1411d0fc6e1fca51d4b657c21837cd74c87bf84e
           path: baseline
+      # Historical RED must use the assertions validated with that contract.
+      # Current native-control tests require symbols absent from this baseline.
+      - uses: actions/checkout@v6
+        with:
+          ref: fb75b87cebe8314d9eba171948367451511f9417 # v2.20.2; run 42662656742
+          path: historical-fixtures
       - uses: actions/setup-go@v6
         with:
           go-version-file: candidate/backend/go.mod
@@ -30,7 +36,8 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git -C baseline rev-parse HEAD > evidence/red-head.txt
-          cp candidate/backend/internal/service/oauth_degradation_actions_test.go candidate/backend/internal/service/oauth_degradation_scope_test.go baseline/backend/internal/service/
+          git -C historical-fixtures rev-parse HEAD > evidence/historical-fixtures-head.txt
+          cp historical-fixtures/backend/internal/service/oauth_degradation_actions_test.go historical-fixtures/backend/internal/service/oauth_degradation_scope_test.go baseline/backend/internal/service/
           set +e
           (cd baseline/backend && go test -tags=unit ./internal/service -run '^TestOAuthDegradation' -count=1 -v) > evidence/red.log 2>&1
           result=$?
@@ -179,6 +186,12 @@ jobs:
         with:
           ref: cf1612fb550404d5a468d9d7114dea4efd6e62cd
           path: reviewed
+      # Keep historical controls on the v2.20.2 test contract; exact candidate
+      # GREEN below still runs the current native-control assertions.
+      - uses: actions/checkout@v6
+        with:
+          ref: fb75b87cebe8314d9eba171948367451511f9417 # v2.20.2; run 42662656742
+          path: historical-fixtures
       - uses: actions/setup-go@v6
         with:
           go-version-file: candidate/backend/go.mod
@@ -191,6 +204,7 @@ jobs:
           git -C candidate rev-parse HEAD > evidence/candidate-head.txt
           git -C baseline rev-parse HEAD > evidence/baseline-head.txt
           git -C reviewed rev-parse HEAD > evidence/reviewed-head.txt
+          git -C historical-fixtures rev-parse HEAD > evidence/historical-fixtures-head.txt
           go version > evidence/toolchain.txt
           go env GOOS GOARCH CGO_ENABLED GOFLAGS >> evidence/toolchain.txt
           uname -a > evidence/kernel.txt
@@ -207,7 +221,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp candidate/backend/internal/repository/oauth_degradation_chain_integration_test.go baseline/backend/internal/repository/
+          cp historical-fixtures/backend/internal/repository/oauth_degradation_chain_integration_test.go baseline/backend/internal/repository/
           set +e
           bash candidate/.github/scripts/oauth-degradation-integration-race.sh chain-red "$GITHUB_WORKSPACE/baseline" '^TestOAuthDegradationOutboxSchedulerChain$' 10m
           result=$?
@@ -222,7 +236,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp candidate/backend/internal/repository/oauth_degradation_chain_integration_test.go candidate/backend/internal/repository/oauth_degradation_race_integration_test.go reviewed/backend/internal/repository/
+          cp historical-fixtures/backend/internal/repository/oauth_degradation_chain_integration_test.go historical-fixtures/backend/internal/repository/oauth_degradation_race_integration_test.go reviewed/backend/internal/repository/
           bash candidate/.github/scripts/oauth-degradation-integration-race.sh reviewed-integration-race "$GITHUB_WORKSPACE/reviewed" '^TestOAuthDegradationOutboxSchedulerChain$|^TestOAuthDegradationDeterministic|^TestOAuthDegradationTransactionFailures$' 15m
           ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/reviewed-integration-race.log
       - name: Exact head real PostgreSQL Redis evaluator outbox and scheduler race GREEN
