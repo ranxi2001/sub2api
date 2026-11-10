@@ -48,7 +48,7 @@ window.__previewRequests=[];
 apiClient.defaults.adapter=async request=>{let data;window.__previewRequests.push({method:request.method,url:request.url});switch(request.url){
 case '/admin/account-ops/auto-config':if(request.method==='put'){config=typeof request.data==='string'?JSON.parse(request.data):request.data;window.__saved=structuredClone(config)}data=structuredClone(config);break;
 case '/admin/accounts':{
-const expected={page:1,page_size:100,platform:'openai',type:'apikey',status:'active',lite:'1',sort_by:'id',sort_order:'asc',timezone:'UTC'};
+const expected={page:1,page_size:100,platform:'openai',type:'apikey',lite:'1',sort_by:'id',sort_order:'asc',timezone:'UTC'};
 if(request.method!=='get'||Object.keys(request.params||{}).length!==Object.keys(expected).length||Object.entries(expected).some(([key,value])=>request.params[key]!==value))throw Error('Unexpected preview account query');
 data={items:[],page:1,page_size:100,pages:1,total:0};break;
 }
