@@ -2950,14 +2950,39 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return
 		}
 		closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
-		reqLog.Warn("openai.websocket_read_first_message_failed",
+		var localClose *service.OpenAIWSClientCloseError
+		closedByServer := errors.As(err, &localClose)
+		if closedByServer {
+			closeStatus = fmt.Sprintf("%d(%s)", int(localClose.StatusCode()), localClose.StatusCode().String())
+			closeReason = localClose.Reason()
+		}
+		reason := "read_error"
+		peerCloseStatus := coderws.CloseStatus(err)
+		peerDisconnected := errors.Is(err, io.EOF) || peerCloseStatus == coderws.StatusNormalClosure || peerCloseStatus == coderws.StatusGoingAway
+		switch {
+		case closedByServer && localClose.StatusCode() == coderws.StatusPolicyViolation && errors.Is(err, context.DeadlineExceeded):
+			reason = "first_message_timeout"
+		case peerDisconnected:
+			reason = "peer_disconnected"
+		case errors.Is(err, context.Canceled):
+			reason = "request_canceled"
+		}
+		fields := []zap.Field{
 			zap.Error(err),
 			zap.String("client_ip", clientIP),
 			zap.String("close_status", closeStatus),
 			zap.String("close_reason", closeReason),
 			zap.Duration("read_timeout", firstMessageTimeout),
-		)
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "missing first response.create message")
+			zap.String("reason", reason),
+		}
+		if reason == "peer_disconnected" || reason == "request_canceled" {
+			reqLog.Info("openai.websocket_read_first_message_failed", fields...)
+		} else {
+			reqLog.Warn("openai.websocket_read_first_message_failed", fields...)
+		}
+		if !closedByServer && peerCloseStatus == -1 && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "missing first response.create message")
+		}
 		return
 	}
 	firstTurnStartedAt := requesttiming.Now(ctx)
@@ -3343,6 +3368,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			requestPlatform,
 		)
 		if err != nil {
+			if h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, err) {
+				return
+			}
 			if errors.Is(err, service.ErrPriorityLatencyUnavailable) {
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "latency scheduling temporarily unavailable; retry after 5 seconds")
 				return

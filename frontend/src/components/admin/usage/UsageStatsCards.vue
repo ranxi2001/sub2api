@@ -1,5 +1,8 @@
 <template>
-  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+  <div
+    class="grid grid-cols-2 gap-4"
+    :class="showRate ? 'lg:grid-cols-3 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,1fr)_minmax(0,1fr)]' : 'lg:grid-cols-4'"
+  >
     <div class="card p-4 flex items-center gap-3">
       <div class="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 text-blue-600">
         <Icon name="document" size="md" />
@@ -58,6 +61,29 @@
         </p>
       </div>
     </div>
+    <div
+      v-if="showRate"
+      class="card flex flex-col justify-center gap-1 p-4 2xl:min-w-[10rem]"
+      data-testid="usage-rate-card"
+      :title="t('usage.rateCardHint')"
+    >
+      <p class="flex items-baseline justify-between gap-3">
+        <span class="flex items-center gap-1.5 text-xs font-medium text-gray-500">
+          RPM
+          <NewFeatureBadge
+            v-if="noticeUserId != null"
+            :notice-id="NEW_FEATURE_NOTICES.usageRateCard"
+            :user-id="noticeUserId"
+            compact
+          />
+        </span>
+        <span class="text-lg font-bold tabular-nums" data-testid="usage-rpm">{{ formatUsageRate(rpm) }}</span>
+      </p>
+      <p class="flex items-baseline justify-between gap-3">
+        <span class="text-xs font-medium text-gray-500">TPM</span>
+        <span class="text-lg font-bold tabular-nums" data-testid="usage-tpm">{{ formatUsageRate(tpm) }}</span>
+      </p>
+    </div>
     <div class="card p-4 flex items-center gap-3">
       <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30 text-green-600">
         <Icon name="dollar" size="md" />
@@ -94,14 +120,25 @@ import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { formatUsageRate, usagePerMinute, type UsageRateWindow } from '@/utils/usageRate'
 
 const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
   showAccountCost?: boolean
   strikeStandardCost?: boolean
+  /** Show the RPM/TPM card, averaged over rateWindow (the range the stats were loaded for). */
+  showRate?: boolean
+  rateWindow?: UsageRateWindow | null
+  /** Admin who owns the new-feature badge dismissal; omit to hide the badge. */
+  noticeUserId?: number | null
 }>(), {
   showAccountCost: true,
   strikeStandardCost: false,
+  showRate: false,
+  rateWindow: null,
+  noticeUserId: null,
 })
 
 const { t } = useI18n()
@@ -112,6 +149,10 @@ const totalAccountCost = computed(() => {
 })
 const showAccountCost = computed(() => props.showAccountCost)
 const strikeStandardCost = computed(() => props.strikeStandardCost)
+
+// Stats arrive after the window is captured; until then there is nothing to average.
+const rpm = computed(() => props.stats ? usagePerMinute(props.stats.total_requests, props.rateWindow) : null)
+const tpm = computed(() => props.stats ? usagePerMinute(props.stats.total_tokens, props.rateWindow) : null)
 
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`

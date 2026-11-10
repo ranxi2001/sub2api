@@ -406,6 +406,7 @@ export default {
     resetPending: '待刷新',
     accountMultiplier: '账号倍率',
     avgDuration: '服务端平均耗时',
+    rateCardHint: '所选时间范围内每分钟的平均值：RPM = 总请求数 ÷ 分钟数，TPM = 总 Token ÷ 分钟数；范围包含当前时刻时只算到现在',
     inSelectedRange: '所选范围内',
     perRequest: '每次请求',
     apiKeyFilter: 'API 密钥',

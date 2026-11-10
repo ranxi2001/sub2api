@@ -3,7 +3,7 @@ import { reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import PrioritySchedulingView from '../PrioritySchedulingView.vue'
 import { apiClient } from '@/api/client'
-import type { PriorityAnalysis } from '@/api/admin/priorityScheduling'
+import type { PriorityAnalysis, PriorityCandidate, PrioritySnapshot } from '@/api/admin/priorityScheduling'
 
 const fixture = vi.hoisted(() => ({ auth: null as any }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => fixture.auth }))
@@ -28,6 +28,33 @@ async function choose(id: string, label: string) {
   expect(option, `real Select option ${label}`).toBeTruthy(); option!.click(); await flushPromises()
 }
 const reads = () => vi.mocked(apiClient.get).mock.calls.filter(([url]) => url === '/admin/priority-scheduling/analysis')
+function evidenceAnalysis(candidate: Partial<PriorityCandidate> = {}, snapshot: Partial<PrioritySnapshot> = {}) {
+  const result = analysis({ model: 'fixture-model', group_id: 11, minutes: 60 })
+  const row: PriorityCandidate = {
+    ...result.snapshot.candidates[0]!, account_id: 901, account_name: 'Fixture with historical evidence',
+    score: 75.3, tier: 'insufficient', reasons: ['load_unknown'], history_status: 'ready',
+    samples: 600, selected_ttft_ms: 10000, p90_ttft_ms: 25000, quality_passed: 30, quality_samples: 30,
+    profit: 10, margin: 0.5, economics_source: 'usage', revenue: 20, theoretical_cost: 10,
+    profit_samples: 600, concurrency: 10, load_factor: 1, load_percent: null, waiting: 0, rate: 0.1,
+    error_rate: null, error_successes: 0, error_failures: 0, error_window_minutes: 0, error_endpoint: '',
+    error_observed_at: '0001-01-01T00:00:00Z', error_penalty: 1, base_score: 75.3, selection_weight: 0.16,
+    ...candidate,
+  }
+  Object.assign(result.snapshot, { selection_policy: 'read_only_analysis', min_samples: 5 }, snapshot, { candidates: [row] })
+  result.latency.accounts = [{ ...result.latency.accounts[0]!, account_id: row.account_id, account_name: row.account_name }]
+  return result
+}
+function replyWithAnalysis(result: PriorityAnalysis) {
+  const original = vi.mocked(apiClient.get).getMockImplementation()!
+  vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/analysis' ? { data: result } : original(url, options))
+}
+function candidateCell(key: string) {
+  const table = wrapper!.get('[data-testid="candidate-table"]')
+  const label = key === 'details' ? 'priorityScheduling.reading.diagnostics' : `priorityScheduling.${key}`
+  const index = table.findAll('thead th').findIndex(header => header.text() === label)
+  expect(index, `candidate column ${key}`).toBeGreaterThanOrEqual(0)
+  return table.get('[data-row-id="901"]').findAll('td')[index]!
+}
 beforeEach(() => {
   vi.resetAllMocks()
   fixture.auth = reactive({ user: { id: 1, role: 'admin' } })
@@ -42,6 +69,94 @@ beforeEach(() => {
   })
 })
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.restoreAllMocks(); document.body.innerHTML = '' })
+
+describe('priority analysis evidence presentation', () => {
+  it.each([
+    { name: 'only live capacity is missing', candidate: {}, expected: 'eligible' },
+    { name: 'an explicitly eligible historical result', candidate: { tier: 'eligible', reasons: [] }, expected: 'eligible' },
+    { name: 'quality evidence is missing', candidate: { reasons: ['load_unknown', 'quality_unknown'] }, expected: 'insufficient' },
+    { name: 'latency evidence is missing', candidate: { reasons: ['load_unknown', 'latency_insufficient'] }, expected: 'insufficient' },
+    { name: 'profit evidence is missing', candidate: { reasons: ['load_unknown', 'profit_insufficient'] }, expected: 'insufficient' },
+    { name: 'the insufficient reason is unspecified', candidate: { reasons: [] }, expected: 'insufficient' },
+    { name: 'the missing-capacity reason is duplicated', candidate: { reasons: ['load_unknown', 'load_unknown'] }, expected: 'insufficient' },
+    { name: 'an unrecognized reason is present', candidate: { reasons: ['load_unknown', 'future_unknown'] }, expected: 'insufficient' },
+    { name: 'the historical result is degraded', candidate: { tier: 'degraded', reasons: ['load_unknown', 'quality_below_target'] }, expected: 'degraded' },
+    { name: 'the latency result is recovering', candidate: { reasons: ['load_unknown', 'latency_recovery'], latency_recovery: true }, expected: 'recovery' },
+    { name: 'a degraded result is also recovering', candidate: { tier: 'degraded', reasons: ['quality_below_target', 'latency_recovery'], latency_recovery: true }, expected: 'degraded' },
+  ])('labels $name without rewriting scheduler evidence', async ({ candidate, expected }) => {
+    const result = evidenceAnalysis(candidate)
+    const original = JSON.stringify(result.snapshot.candidates[0])
+    replyWithAnalysis(result)
+    render(); await flushPromises()
+    expect(candidateCell('tier').text()).toBe(`priorityScheduling.analysis.${expected}`)
+    expect(candidateCell('score').text()).toBe('75.3')
+    expect(candidateCell('quality').text()).toBe('30/30')
+    expect(candidateCell('latency').text()).toContain('10000 ms')
+    expect(JSON.stringify(result.snapshot.candidates[0]), 'presentation must preserve the API tier, reasons and score').toBe(original)
+    expect(vi.mocked(apiClient.put)).not.toHaveBeenCalled()
+    expect(vi.mocked(apiClient.post)).not.toHaveBeenCalled()
+  })
+
+  it.each(['stale', 'partial', 'loading', 'error', 'unavailable', 'limited'] as const)('does not label a %s account history as meeting historical targets', async history_status => {
+    replyWithAnalysis(evidenceAnalysis({ history_status }))
+    render(); await flushPromises()
+    expect(candidateCell('tier').text()).toBe('priorityScheduling.analysis.insufficient')
+  })
+
+  it('marks uncollected live evidence and estimated weight without displaying zero-time error statistics', async () => {
+    replyWithAnalysis(evidenceAnalysis())
+    render(); await flushPromises()
+    expect(wrapper!.text()).toContain('priorityScheduling.analysis.notice')
+    expect(candidateCell('load').text()).toBe('priorityScheduling.analysis.notCollected')
+    expect(candidateCell('errorRate').text()).toBe('priorityScheduling.analysis.notCollected')
+    const details = candidateCell('details')
+    await details.get('summary').trigger('click')
+    expect(details.text()).toContain('priorityScheduling.analysis.estimatedWeight: 0.16')
+    expect(details.text()).not.toContain('priorityScheduling.selectionWeight:')
+    const errors = details.get('[data-testid="error-rate-901"]').text()
+    expect(errors).toContain('priorityScheduling.analysis.notCollected')
+    for (const key of ['errorNoSamples', 'errorObservedAt', 'errorWindow', 'errorPenalty', 'errorLocalScope']) {
+      expect(errors).not.toContain(`priorityScheduling.${key}`)
+    }
+    expect(errors).not.toContain('1.000')
+  })
+
+  it.each(['capacity_first', undefined])('preserves actual snapshot labels and valid zero-sample observations with policy %s', async selection_policy => {
+    replyWithAnalysis(evidenceAnalysis({
+      load_percent: 25, error_observed_at: '2026-11-09T00:00:00Z', error_window_minutes: 10,
+      error_endpoint: '/v1/responses',
+    }, { selection_policy }))
+    render(); await flushPromises()
+    expect(wrapper!.text()).not.toContain('priorityScheduling.analysis.notice')
+    expect(candidateCell('tier').text()).toBe('priorityScheduling.tiers.insufficient')
+    expect(candidateCell('load').text()).toBe('25%')
+    expect(candidateCell('errorRate').text()).toBe('priorityScheduling.errorNoSamples')
+    const details = candidateCell('details')
+    expect(details.text()).toContain('priorityScheduling.selectionWeight: 0.16')
+    expect(details.text()).not.toContain('priorityScheduling.analysis.estimatedWeight')
+    const errors = details.get('[data-testid="error-rate-901"]').text()
+    expect(errors).toContain('priorityScheduling.errorObservedAt')
+    expect(errors).toContain('priorityScheduling.errorWindow: 10 min')
+    expect(errors).toContain('/v1/responses')
+    expect(errors).toContain('priorityScheduling.errorLocalScope')
+    expect(errors).not.toContain('priorityScheduling.analysis.notCollected')
+  })
+
+  it.each([
+    { error_rate: 0, error_successes: 0, error_failures: 0, rate: '0.0%' },
+    { error_rate: 0.25, error_successes: 3, error_failures: 1, rate: '25.0%' },
+    { error_rate: null, error_successes: 4, error_failures: 0, rate: 'priorityScheduling.errorNoSamples' },
+  ])('retains legacy actual-snapshot evidence without an observed-at field: %o', async ({ rate, ...evidence }) => {
+    replyWithAnalysis(evidenceAnalysis({ ...evidence, error_observed_at: undefined, error_window_minutes: 10, error_endpoint: '/v1/responses' }, { selection_policy: 'capacity_first' }))
+    render(); await flushPromises()
+    expect(candidateCell('errorRate').text()).toBe(rate)
+    const errors = candidateCell('details').get('[data-testid="error-rate-901"]').text()
+    expect(errors).toContain('priorityScheduling.errorWindow: 10 min')
+    expect(errors).not.toContain('priorityScheduling.errorObservedAt')
+    expect(errors).not.toContain('priorityScheduling.analysis.notCollected')
+    if (evidence.error_successes + evidence.error_failures > 0) expect(errors).toContain('priorityScheduling.errorAttempts')
+  })
+})
 
 describe('priority explicit scope filters', () => {
   it('followup F1 offers Composite through the real strict platform catalog and retains public alias across switches', async () => {

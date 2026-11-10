@@ -80,3 +80,94 @@ func TestIssue715RedisDeliveryTokenCAS(t *testing.T) {
 	require.Error(t, finish("pending:first", true))
 	require.Equal(t, "conflict", value())
 }
+
+func TestIssue758RedisOwnerRetentionSurvivesQuotaReset(t *testing.T) {
+	cache, mr := newHTTPResponseOwnerTestCache(t)
+	other := &gatewayCache{rdb: cache.rdb}
+	ctx := context.Background()
+	key := strings.Repeat("d", 64)
+	redisKey := openAIAgentRecoveryPrefix + key
+	require.NoError(t, cache.PublishOpenAIAgentRecovery(ctx, key, "route-one", time.Hour))
+	mr.FastForward(30 * time.Minute)
+
+	// The owner's remaining five-hour quota window outlives the original
+	// affinity TTL. Keep one more hour after reset for the next continuation.
+	refreshed, err := other.RefreshOpenAIAgentRecovery(ctx, key, "route-one", 6*time.Hour)
+	require.NoError(t, err)
+	require.True(t, refreshed)
+	mr.FastForward(5 * time.Hour)
+	value, err := cache.GetOpenAIAgentRecovery(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "route-one", value, "ownership must survive until quota recovery across adapters")
+
+	remaining := mr.TTL(redisKey)
+	refreshed, err = cache.RefreshOpenAIAgentRecovery(ctx, key, "route-one", time.Minute)
+	require.NoError(t, err)
+	require.True(t, refreshed)
+	require.Equal(t, remaining, mr.TTL(redisKey), "a shorter refresh must not shorten the recovery grace period")
+	mr.FastForward(59 * time.Minute)
+	require.True(t, mr.Exists(redisKey))
+	mr.FastForward(2 * time.Minute)
+	refreshed, err = other.RefreshOpenAIAgentRecovery(ctx, key, "route-one", 6*time.Hour)
+	require.NoError(t, err)
+	require.False(t, refreshed)
+	require.False(t, mr.Exists(redisKey), "expired evidence must never be recreated by refresh")
+}
+
+func TestIssue758RedisOwnerRetentionPreservesOtherStates(t *testing.T) {
+	for _, old := range []string{"", "route-two", "failed", "conflict", "pending:fixture:route-one"} {
+		t.Run(old, func(t *testing.T) {
+			cache, mr := newHTTPResponseOwnerTestCache(t)
+			ctx := context.Background()
+			key := strings.Repeat("e", 64)
+			redisKey := openAIAgentRecoveryPrefix + key
+			if old != "" {
+				require.NoError(t, cache.rdb.Set(ctx, redisKey, old, time.Hour).Err())
+			}
+			remaining := mr.TTL(redisKey)
+			refreshed, err := cache.RefreshOpenAIAgentRecovery(ctx, key, "route-one", 6*time.Hour)
+			require.NoError(t, err)
+			require.False(t, refreshed)
+			value, err := cache.GetOpenAIAgentRecovery(ctx, key)
+			require.NoError(t, err)
+			require.Equal(t, old, value)
+			require.Equal(t, remaining, mr.TTL(redisKey), "a stale waiter cannot retain a different delivery state")
+
+			if old == "failed" || old == "conflict" || strings.HasPrefix(old, "pending:") {
+				refreshed, err = cache.RefreshOpenAIAgentRecovery(ctx, key, old, 6*time.Hour)
+				require.NoError(t, err)
+				require.False(t, refreshed, "non-proven states cannot be retained as ownership evidence")
+				require.Equal(t, remaining, mr.TTL(redisKey))
+			}
+		})
+	}
+}
+
+func TestIssue758RedisOwnerRetentionConcurrentConflict(t *testing.T) {
+	cache, mr := newHTTPResponseOwnerTestCache(t)
+	ctx := context.Background()
+	key := strings.Repeat("f", 64)
+	require.NoError(t, cache.PublishOpenAIAgentRecovery(ctx, key, "route-one", time.Hour))
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := cache.RefreshOpenAIAgentRecovery(ctx, key, "route-one", 6*time.Hour)
+		errs <- err
+	}()
+	go func() {
+		<-start
+		errs <- cache.PublishOpenAIAgentRecovery(ctx, key, "route-two", time.Hour)
+	}()
+	close(start)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+	value, err := cache.GetOpenAIAgentRecovery(ctx, key)
+	require.NoError(t, err)
+	require.Equal(t, "conflict", value, "refresh cannot overwrite a concurrent conflicting observation")
+	remaining := mr.TTL(openAIAgentRecoveryPrefix + key)
+	refreshed, err := cache.RefreshOpenAIAgentRecovery(ctx, key, "route-one", 6*time.Hour)
+	require.NoError(t, err)
+	require.False(t, refreshed)
+	require.Equal(t, remaining, mr.TTL(openAIAgentRecoveryPrefix+key))
+}
