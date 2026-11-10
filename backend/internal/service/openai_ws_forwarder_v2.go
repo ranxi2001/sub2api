@@ -853,12 +853,16 @@ readLoop:
 		}
 		responseModelObserver.ObserveOpenAI(message, eventType)
 		eventCount++
-		nextSequenceNumber = max(nextSequenceNumber, int64(eventCount))
+		if int64(eventCount) > nextSequenceNumber {
+			nextSequenceNumber = int64(eventCount)
+		}
 		if sequence := gjson.GetBytes(message, "sequence_number"); sequence.Type == gjson.Number {
 			// Keep the synthetic terminal after observed events without allowing
 			// an overflowing peer integer to wrap into a negative sequence.
 			if value := sequence.Int(); value >= 0 && value < int64(^uint64(0)>>1) {
-				nextSequenceNumber = max(nextSequenceNumber, value+1)
+				if value+1 > nextSequenceNumber {
+					nextSequenceNumber = value + 1
+				}
 			}
 		}
 		if firstEventType == "" {
