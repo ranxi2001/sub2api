@@ -152,8 +152,16 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	if s.pluginManager != nil {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
+			if options, ok := pelicanTestOptionsFromContext(request.Context()); ok && options.nativeOAuthTransport != nil && !IsAstraSourceAcquisition(request.Context()) {
+				*options.nativeOAuthTransport = false
+			}
 			return response, err
 		}
+	}
+	// Ticket admission (including donor tickets) and handled plugin requests
+	// returned above. Only this native transport may certify an own OAuth 401.
+	if options, ok := pelicanTestOptionsFromContext(request.Context()); ok && options.nativeOAuthTransport != nil && !IsAstraSourceAcquisition(request.Context()) {
+		*options.nativeOAuthTransport = true
 	}
 	if useTLSFallback {
 		return timedAccountTestUpstream(s.httpUpstream).DoWithTLS(

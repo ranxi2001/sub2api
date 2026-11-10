@@ -84,6 +84,7 @@ func (r *scheduledTestPlanRepository) CollectQualityBatch(ctx context.Context, r
 		return nil // The complete collection was already committed; never replay it.
 	}
 	stored := *run
+	stored.OAuth401 = service.QualityOAuth401Evidence(run.Plan, run.Results)
 	stored.Results = nil
 	for _, sample := range run.Results {
 		if sample.PelicanConfig == nil || sample.PelicanConfig.QualityBatch == nil || sample.PelicanConfig.QualityBatch.ID != batchID {
@@ -257,6 +258,17 @@ func (r *scheduledTestPlanRepository) finalizeQualityBatchRun(ctx context.Contex
 		if _, err = tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT quality_batch_action`); err != nil {
 			return err
 		}
+	}
+	deleted, err := completeQualityOAuth401RoundTx(ctx, tx, run.Plan, run.Until, run.OAuth401)
+	if err != nil {
+		return err
+	}
+	if deleted {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		logQualityOAuth401Deletion(run.Plan)
+		return nil // Results and this batch run were removed by the native cascade.
 	}
 	for _, result := range run.Results {
 		cfg := result.PelicanConfig

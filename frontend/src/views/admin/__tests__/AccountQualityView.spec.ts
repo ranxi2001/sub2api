@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import AccountQualityView from '../AccountQualityView.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import * as accountsAPI from '@/api/admin/accounts'
 import scheduledTests from '@/api/admin/scheduledTests'
 import { updateQualityPreset, previewQualityOwnership, restoreQualityOwnership, removeQualityOwnedModel, createQualityPreset, listQualityPresets, type QualityRulePreset, createQualityTemplate, deleteQualityTemplate, listQualityPlans, listQualityOperations, listQualityTemplates, runQualityPlan, updateQualityTemplate, type QualityRuleTemplate } from '@/api/admin/accountQuality'
@@ -47,6 +49,95 @@ describe('quality operations', () => {
   const preset = (): QualityRulePreset => ({ id: 17, name: 'Saved probe', model_id: 'preset-model', cron_expression: '0 * * * *', enabled: false, max_results: 75,
     pelican_config: { question_kind: 'state_probe', test_channel: 'account', prompt: '', reasoning_effort: 'high', parallel_count: 1,
       quality: { action: 'observe_only', expected_answer: '', remove_group_ids: [], auto_restore: false } }, created_at: '', updated_at: '' })
+
+  it('defaults new OAuth cleanup to six rounds and saves a custom limit on a new rule', async () => {
+    const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
+    vm.newPlan(); vm.accountScope = 'manual'; await flushPromises(); vm.selectedAccounts = [1]
+    const input = wrapper.get<HTMLInputElement>('[data-testid="quality-oauth-401-max-rounds"]')
+    expect(input.element.value).toBe('6')
+    expect(input.attributes()).toMatchObject({ min: '0', max: '100', step: '1', 'aria-describedby': 'quality-oauth-401-hint' })
+    expect(wrapper.get('[data-testid="quality-oauth-401-setting"]').findComponent(NewFeatureBadge).props('noticeId')).toBe(NEW_FEATURE_NOTICES.qualityOAuth401Cleanup)
+    expect(wrapper.get('#quality-oauth-401-hint').text()).toBe('qualityOps.oauth401MaxRoundsHint')
+    await wrapper.get('[data-testid="quality-question-kind"]').setValue('state_probe')
+    await wrapper.get('[data-testid="quality-action-observe-only"]').setValue(true)
+    await input.setValue('8')
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 1,
+      pelican_config: expect.objectContaining({ quality: expect.objectContaining({ oauth_401_max_rounds: 8 }) }) }))
+    wrapper.unmount()
+  })
+
+  it('keeps legacy account and group rules disabled until the cleanup limit is explicitly edited', async () => {
+    vi.mocked(listQualityPlans).mockResolvedValue([rules()[0]])
+    vi.mocked(listQualityTemplates).mockResolvedValue([groupRule()])
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-plan-id="1"] .rule-actions button:nth-child(2)').trigger('click'); await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="quality-oauth-401-max-rounds"]').element.value).toBe('0')
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(vi.mocked(scheduledTests.update).mock.calls[0][1].pelican_config!.quality!.oauth_401_max_rounds).toBe(0)
+    await wrapper.get('[data-testid="quality-template-edit"]').trigger('click'); await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="quality-oauth-401-max-rounds"]').element.value).toBe('0')
+    await wrapper.get('[data-testid="quality-oauth-401-max-rounds"]').setValue('12')
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(vi.mocked(updateQualityTemplate).mock.calls[0][1].pelican_config!.quality!.oauth_401_max_rounds).toBe(12)
+    wrapper.unmount()
+  })
+
+  it('shows cleanup as an independent bulk field and preserves each rules other settings', async () => {
+    const targets = rules().slice(0, 2)
+    targets[0].pelican_config!.quality!.oauth_401_max_rounds = 9
+    targets[1].pelican_config!.quality!.oauth_401_max_rounds = 12
+    vi.mocked(listQualityPlans).mockResolvedValue(targets)
+    const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
+    vm.selectedRuleIds = [1, 2]; vm.editSelectedRules(); await flushPromises()
+    expect(wrapper.find('[data-testid="quality-oauth-401-max-rounds"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="quality-bulk-field-oauth401"]').setValue(true)
+    await wrapper.get('[data-testid="quality-oauth-401-max-rounds"]').setValue('6')
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(scheduledTests.update).toHaveBeenCalledTimes(2)
+    for (const [index, [id, body]] of vi.mocked(scheduledTests.update).mock.calls.entries()) {
+      expect(id).toBe(index + 1)
+      expect(body.pelican_config!.quality).toEqual({ ...targets[index].pelican_config!.quality, oauth_401_max_rounds: 6 })
+      expect(body).not.toHaveProperty('enabled')
+    }
+    wrapper.unmount()
+  })
+
+  it('retains preset limits and copies legacy missing limits as disabled', async () => {
+    const saved = preset(); saved.pelican_config.quality!.oauth_401_max_rounds = 15
+    vi.mocked(listQualityPresets).mockResolvedValue([saved])
+    vi.mocked(listQualityPlans).mockResolvedValue([rules()[0]])
+    const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
+    vm.newPlan(); await flushPromises()
+    await wrapper.get('[data-testid="quality-preset-select"]').setValue('17')
+    await wrapper.get('[data-testid="quality-apply-preset"]').trigger('click'); await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="quality-oauth-401-max-rounds"]').element.value).toBe('15')
+    vm.copyRule(rules()[0]); await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="quality-oauth-401-max-rounds"]').element.value).toBe('0')
+    wrapper.unmount()
+  })
+
+  it('shares the cleanup notice dismissal across account and template editors', async () => {
+    const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
+    vm.newPlan(); await flushPromises()
+    await wrapper.get('[data-testid="quality-oauth-401-setting"] [data-testid="new-feature-badge"]').trigger('click')
+    expect(wrapper.find('[data-testid="quality-oauth-401-setting"] [data-testid="new-feature-badge"]').exists()).toBe(false)
+    vm.editTemplate(groupRule()); await flushPromises()
+    expect(wrapper.find('[data-testid="quality-oauth-401-setting"] [data-testid="new-feature-badge"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([-1, 1.5, 101])('rejects the invalid cleanup limit %s before creating a rule', async limit => {
+    const wrapper = mountView(); await flushPromises(); const vm = wrapper.vm as any
+    vm.newPlan(); vm.accountScope = 'manual'; await flushPromises(); vm.selectedAccounts = [1]
+    await wrapper.get('[data-testid="quality-question-kind"]').setValue('state_probe')
+    await wrapper.get('[data-testid="quality-action-observe-only"]').setValue(true)
+    await wrapper.get('[data-testid="quality-oauth-401-max-rounds"]').setValue(String(limit))
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(scheduledTests.create).not.toHaveBeenCalled()
+    expect(wrapper.get('.editor-error').text()).toContain('qualityOps.invalidOAuth401MaxRounds')
+    wrapper.unmount()
+  })
 
   it('edits quality rest on group rules and keeps legacy account rules at zero', async () => {
     const plan = rules()[0]
@@ -589,9 +680,10 @@ describe('quality operations', () => {
     await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
     expect(scheduledTests.create).toHaveBeenCalledTimes(1)
     const body = vi.mocked(scheduledTests.create).mock.calls[0][0]
+    // Copying a legacy rule preserves disabled cleanup instead of the new-rule default.
     expect(body).toEqual({ account_id: 4, model_id: 'model-1', cron_expression: '*/30 * * * *', enabled: false, max_results: 75, auto_recover: false,
       pelican_config: { rule_name: 'Independent probe', question_kind: 'state_probe', test_channel: 'account', prompt: '', reasoning_effort: 'high', parallel_count: 1,
-        model_ids: ['model-1'], quality: { trigger_on_upstream_5xx: true, expected_answer: '', action: 'remove_groups', remove_group_ids: [1], auto_restore: false } } })
+        model_ids: ['model-1'], quality: { trigger_on_upstream_5xx: true, oauth_401_max_rounds: 0, expected_answer: '', action: 'remove_groups', remove_group_ids: [1], auto_restore: false } } })
     expect(vm.plans.map((item: ScheduledTestPlan) => item.id)).toEqual([1, 91])
     expect(vm.showForm).toBe(false)
     expect(JSON.stringify(plan)).toBe(original)
@@ -1544,7 +1636,8 @@ describe('quality operations', () => {
     expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.selectGroups')
     vm.form.pelican_config.quality.remove_group_ids = [21]
     await vm.save()
-    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 1, auto_recover: false, pelican_config: expect.objectContaining({ quality: { trigger_on_upstream_5xx: false, expected_answer: '21', action: 'remove_groups', remove_group_ids: [21], auto_restore: false, judge: {group_id:21,model_id:'test-judge',prompt:'grade semantically'} } }) }))
+    // Fresh rules default cleanup to six rounds; automatic restoration stays opt-in.
+    expect(scheduledTests.create).toHaveBeenCalledWith(expect.objectContaining({ account_id: 1, auto_recover: false, pelican_config: expect.objectContaining({ quality: { trigger_on_upstream_5xx: false, oauth_401_max_rounds: 6, expected_answer: '21', action: 'remove_groups', remove_group_ids: [21], auto_restore: false, judge: {group_id:21,model_id:'test-judge',prompt:'grade semantically'} } }) }))
     wrapper.unmount()
   })
   it('retries only accounts that were not created before a partial batch failure', async () => {
@@ -1778,7 +1871,7 @@ describe('quality operations', () => {
     await vm.save()
     const request = vi.mocked(scheduledTests.create).mock.calls[0][0] as any
     expect(request.cron_expression).toBe('*/10 * * * *')
-    expect(request.pelican_config.quality).toEqual({ trigger_on_upstream_5xx: false, expected_answer: '', action: 'enable_bps', remove_group_ids: [], auto_restore: true, bps: {
+    expect(request.pelican_config.quality).toEqual({ trigger_on_upstream_5xx: false, oauth_401_max_rounds: 6, expected_answer: '', action: 'enable_bps', remove_group_ids: [], auto_restore: true, bps: {
       failure_threshold: 3, usage_percent: 80, require_all: true, all_models: false, models: ['gpt-6-astra'],
       omit_unsupported_tools: false, ignore_encrypted_content: true, auto_disable_on_403: true,
       auto_recover_on_403: true, recovery_interval_minutes: 360,

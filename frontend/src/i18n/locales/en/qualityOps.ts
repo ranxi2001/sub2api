@@ -1,4 +1,8 @@
 export default {
+  "oauth401MaxRounds": "Remove rule after consecutive OAuth 401 rounds",
+  "oauth401MaxRoundsHint": "Applies only to OAuth accounts; API key accounts are never automatically cleaned up. New rules default to 6 rounds (1–100); 0 disables cleanup, as do missing values on existing rules. Direct 401 evidence currently supports OpenAI OAuth; a round counts when every sample receives a 401 using the account’s own credentials. Rounds containing model_unavailable skips also require an explicit account 401 and revoked credentials, with every remaining sample returning a direct 401. BPS or borrowed-credential 401s do not count; success or other errors reset the count. At the limit, the rule and its history are deleted while the account remains. Rules that still own isolation or cooldown state are retained.",
+  "invalidOAuth401MaxRounds": "The limit must be an integer from 0 to 100 rounds.",
+  "oauth401Rounds": "{count} consecutive rounds",
   "retestRest": "Rest before retesting a degraded account (minutes)",
   "retestRestHint": "0 keeps the existing schedule. After confirmed degradation and quarantine, this rule waits before testing again, including manual and 5xx triggers. It retests after the deadline and restores only when the test passes and auto-restore is enabled. Rest applies to all models in this rule, up to 7 days; it does not guarantee recovery.",
   "invalidRetestRest": "Rest must be an integer from 0 to 10080 minutes.",
@@ -438,6 +442,7 @@ export default {
   "bulkEditTitle": "Edit {count} rules",
   "bulkEditHint": "Check the fields to apply to every selected rule. Unchecked fields keep their own values. Initial values come from the first selected rule; test settings include the method, question, reference answer, reasoning effort, probe count and grading model.",
   "bulkFields": {
+    "oauth401": "OAuth 401 rule cleanup",
     "retention": "Result retention",
     "trigger": "Upstream 5xx trigger",
     "model": "Test model",

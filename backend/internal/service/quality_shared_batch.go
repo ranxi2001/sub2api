@@ -47,6 +47,8 @@ type QualityBatchEvidence struct {
 }
 
 type QualityBatchRun struct {
+	// Safe round classification survives removal of provider error bodies.
+	OAuth401   *QualityOAuth401Round  `json:"oauth_401,omitempty"`
 	Apply      bool                   `json:"apply"`
 	Plan       *ScheduledTestPlan     `json:"plan"`
 	Until      time.Time              `json:"until"`
