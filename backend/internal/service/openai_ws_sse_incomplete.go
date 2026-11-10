@@ -89,6 +89,8 @@ func (s *OpenAIGatewayService) writeOpenAIWSSSEIncomplete(c *gin.Context, accoun
 			"type": "upstream_error", "code": OpenAIWSSSEIncompleteCode, "message": openAIWSSSEIncompleteMessage,
 		}})
 		incomplete.ResponseWritten = true
+		// Request ownership must survive regional metering replacing the error.
+		MarkResponseCommitted(c)
 		return true
 	}
 	MarkOpsStreamFailure(c, "upstream_error", OpenAIWSSSEIncompleteCode, openAIWSSSEIncompleteMessage, http.StatusBadGateway)
@@ -103,6 +105,7 @@ func (s *OpenAIGatewayService) writeOpenAIWSSSEIncomplete(c *gin.Context, accoun
 	// An attempted terminal write after committed output must not cause a second
 	// terminal frame from the handler; the client may receive only part of it.
 	incomplete.ResponseWritten = true
+	MarkResponseCommitted(c)
 	if _, err := fmt.Fprintf(c.Writer, "event: response.failed\ndata: %s\n\n", payload); err != nil {
 		_ = c.Error(err)
 		return true
