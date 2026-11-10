@@ -1067,6 +1067,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 				return true
 			}
+			s.handleOpenAIStreamTerminalAccountSideEffects(c, account, payloadBytes, message, resp.Header, upstreamModel)
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 			defaultStatus, defaultErrType, defaultMsg := http.StatusBadGateway, "upstream_error", message
 			failureStatus := openAIStreamFailureStatus(payloadBytes, message)
