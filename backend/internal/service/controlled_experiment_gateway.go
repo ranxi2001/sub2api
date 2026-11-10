@@ -177,7 +177,7 @@ func (g *controlledExperimentGateway) Execute(parent context.Context, route Cont
 		d.EffortEvidence = "request_sent"
 		if g.billing != nil && !result.UsageUnavailable {
 			cacheCreation := result.Usage.CacheCreationInputTokens
-			if account.IsExcelBPSCacheCreationAsInputEnabled() && result.UpstreamEndpoint == "/basispoints/api/responses" {
+			if excelBPSCacheCreationBilledAsInput(account, result) {
 				cacheCreation = 0
 			}
 			inputTokens := max(result.Usage.InputTokens-result.Usage.CacheReadInputTokens-cacheCreation, 0)
