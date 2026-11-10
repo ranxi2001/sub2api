@@ -245,6 +245,15 @@ describe('Excel authorization model errors', () => {
 })
 
 
+it('does not show legacy BPS authorization progress for managed authorization connections', async () => {
+  getAvailableModels.mockResolvedValue([{id:'gpt-6-sol',display_name:'Sol'}])
+  const wrapper = mountModal({id:42,name:'Managed BPS',platform:'openai',type:'oauth',status:'active',extra:{openai_excel_bps:true,openai_excel_bps_authorization_pending:true,openai_connections_managed:true}})
+  await wrapper.setProps({show:true})
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('admin.accounts.bpsAuthorizing')
+  wrapper.unmount()
+})
+
 it('keeps native model testing available during automatic BPS authorization', async () => {
   getAvailableModels.mockResolvedValue([{id:'gpt-6-sol',display_name:'Sol'}])
   const wrapper = mountModal({id:42,name:'Automatic BPS',platform:'openai',type:'oauth',status:'active',extra:{openai_excel_bps:true,openai_excel_bps_authorization_pending:true}})

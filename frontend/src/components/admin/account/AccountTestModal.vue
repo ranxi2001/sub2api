@@ -7,7 +7,7 @@
   >
     <div class="space-y-4">
       <AccountTestTiming :timing="connectionTiming.timing.value" :delivery="connectionTiming.delivery.value" />
-      <div v-if="account?.extra?.openai_excel_bps_authorization_pending === true" role="status" class="text-sm text-amber-700 dark:text-amber-300">
+      <div v-if="legacyBPSAuthorizationPending" role="status" class="text-sm text-amber-700 dark:text-amber-300">
         {{ t('admin.accounts.bpsAuthorizing') }}
         <a href="/admin/token-guard-v2" target="_blank" rel="noopener noreferrer" class="ml-2 underline">{{ t('admin.accounts.openCredentialOperations') }}</a>
       </div>
@@ -443,6 +443,11 @@ const uploadAudioName = ref('')
 const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
+// Managed accounts authorize BPS through authorization connections and never
+// receive the legacy Excel grant this marker waits for.
+const legacyBPSAuthorizationPending = computed(() =>
+  props.account?.extra?.openai_excel_bps_authorization_pending === true && props.account?.extra?.openai_connections_managed !== true
+)
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },

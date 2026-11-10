@@ -41,6 +41,9 @@ func ExcelBPSCredentialStateFromAccount(account *Account, now time.Time) *ExcelB
 	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || (account.Extra["openai_excel_bps"] != true && !account.IsExcelOAuth()) {
 		return nil
 	}
+	if account.HasManagedOpenAIConnections() {
+		return managedExcelBPSCredentialState(account)
+	}
 	state := ExcelBPSCredentialState{Status: "unknown"}
 	if account.IsExcelOAuth() {
 		state.ExpiresAt = account.GetCredentialAsTime("expires_at")
@@ -72,4 +75,37 @@ func ExcelBPSCredentialStateFromAccount(account *Account, now time.Time) *ExcelB
 	}
 	state.RequiresManualResume = !account.Schedulable || account.Status != StatusActive
 	return &state
+}
+
+// Managed accounts authorize BPS through their authorization connections. They
+// never receive a legacy Excel grant, so the legacy diagnosis and the
+// preparation marker kept by the grant worker do not describe them. Report only
+// a BPS connection that still awaits authorization; an active connection, or a
+// preferred non-BPS connection, is shown by the authorization connections panel.
+func managedExcelBPSCredentialState(account *Account) *ExcelBPSCredentialState {
+	raw, err := json.Marshal(account.Extra["openai_auth_connections"])
+	if err != nil {
+		return nil
+	}
+	var connections []*OpenAIAuthConnection
+	if json.Unmarshal(raw, &connections) != nil {
+		return nil
+	}
+	var bps *OpenAIAuthConnection
+	for _, c := range connections {
+		if c == nil || c.Legacy {
+			continue
+		}
+		if c.Preferred {
+			bps = c
+			break
+		}
+		if bps == nil && c.Kind == "bps" {
+			bps = c
+		}
+	}
+	if bps == nil || bps.Kind != "bps" || bps.Status != "pending" {
+		return nil
+	}
+	return &ExcelBPSCredentialState{Status: "pending", RequiresManualResume: !account.Schedulable || account.Status != StatusActive}
 }
