@@ -10,13 +10,22 @@ import { fileURLToPath } from 'node:url'
 
 const root = process.cwd()
 const branch = 'evidence/maintenance-ui-760-763-20261110'
-const base = '45e92f44470f91435bd261ea18111c271063c0ac'
-const commits = { base, pr760: '7aa315645d76c01f7afa2f3ee0de6af001cc97f2', pr763: '8ff898117438587b5aad0fe5895745d010c6b6e4' }
-const components = {
+const qualitySuite = process.env.EVIDENCE_SUITE === '771-772'
+const base = qualitySuite ? 'e295f336ffd681ca5ccb3e85b27e9ae7d247bf46' : '45e92f44470f91435bd261ea18111c271063c0ac'
+const commits = qualitySuite
+  ? { base, pr771: 'ffdbf5c68f8407b2ea5cfe1865eba2596b845a03', pr772: '689621b969a6f718a59fed515acd69de72200428' }
+  : { base, pr760: '7aa315645d76c01f7afa2f3ee0de6af001cc97f2', pr763: '8ff898117438587b5aad0fe5895745d010c6b6e4' }
+const components = qualitySuite ? {
+  pr771: 'frontend/src/components/admin/operations/OAuthDegradationCard.vue',
+  pr772: 'frontend/src/views/admin/AccountQualityView.vue',
+} : {
   pr760: 'frontend/src/views/admin/PrioritySchedulingView.vue',
   pr763: 'frontend/src/components/account/SchedulableTimerControl.vue',
 }
-const blobs = {
+const blobs = qualitySuite ? {
+  pr771: { before: 'af373c32aa279e4b130f140ad4b3259c11a55277', after: 'af373c32aa279e4b130f140ad4b3259c11a55277' },
+  pr772: { before: '6ef2c412dd9788e5f01e599a7d99d04455107de9', after: 'dee4c579524ac0a4ceaa49b567839ec141391f1f' },
+} : {
   pr760: { before: '1fec8806cfa1986a1c0dd98f57db68105aa94110', after: '566b5dc22bb7b0e8ba9edac76f8d3584533c4aa0' },
   pr763: { before: '00edd09ceeca1f2842eefa497ef1a9726aee2bba', after: 'e1da8708cb2c5558c1f2d59aeeb37fcc03f1978f' },
 }
@@ -38,7 +47,7 @@ under(process.env.RUNNER_TEMP, runtime); under(process.env.RUNNER_TEMP, out)
 const head = gitText('rev-parse', 'HEAD')
 assert.equal(head, process.env.EVIDENCE_HEAD)
 assert.equal(head, process.env.GITHUB_SHA)
-assert.equal(gitText('merge-base', commits.pr760, commits.pr763), base)
+assert.equal(gitText('merge-base', ...Object.values(commits).slice(1)), base)
 assert.equal(gitText('status', '--porcelain'), '')
 for (const pr of Object.keys(components)) for (const phase of ['before', 'after']) {
   assert.equal(gitText('rev-parse', `${phase === 'before' ? base : commits[pr]}:${components[pr]}`), blobs[pr][phase])
@@ -52,9 +61,12 @@ const manifest = {
   status: 'running', evidence_head: head, baseline: base, targets: commits,
   run_url: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
   run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+  suite: qualitySuite ? '771-772' : '760-763',
+  ...(qualitySuite ? { production_observed_at_freeze: 'e295f336ffd681ca5ccb3e85b27e9ae7d247bf46', target_policy: 'Only the exact archived commits and UI blobs listed here; later PR heads are not covered. Backend review findings remain separate.' } : {}),
   scope: 'Isolated synthetic browser evidence; no backend, providers, production or paid calls',
   reused_patterns: ['.github/scripts/issue733-browser.mjs', '.github/scripts/account-connection-timing-browser.mjs'],
-  shell: 'PR760 full view with auth/layout/navigation stubs; PR763 real DataTable + real timer + real BaseDialog, 224px timer slot; not a full AccountsView test',
+  shell: qualitySuite ? 'PR771 real OAuthDegradationCard + AutoConfigHistory; PR772 full AccountQualityView + real BaseDialog/store/API modules; synthetic transport/auth/layout/navigation. UI evidence does not resolve backend review findings.' : 'PR760 full view with auth/layout/navigation stubs; PR763 real DataTable + real timer + real BaseDialog, 224px timer slot; not a full AccountsView test',
+  validation: { local_dynamic_execution: false, remote_browser_assertions: 'pending', server_persistence: 'not tested; synthetic in-memory API readback only' },
   source_checks: [], screenshots: [], behaviors: [], api_requests: [], browser_errors: [], network_errors: [], traces: [],
 }
 const saveManifest = () => fs.writeFile(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
@@ -91,11 +103,11 @@ async function verifyArchive(label, phase) {
 }
 
 const modules = {
-  auth: `import {reactive} from 'vue'; const auth=reactive({user:{id:41,role:'admin'}}); export const useAuthStore=()=>auth;`,
+  auth: `import {reactive} from 'vue'; const auth=reactive({user:{id:41,role:'admin'},isAdmin:true,isSimpleMode:false}); export const useAuthStore=()=>auth;`,
   layout: `import {h} from 'vue'; export default {setup(_,{slots}){return()=>h('main',{class:'mx-auto min-w-0 p-4 sm:p-6'},slots.default?.())}}`,
   nav: `import {h} from 'vue'; export default {setup(){return()=>h('nav',{class:'text-sm text-gray-500'},'离线证据 · 全部为虚构账号')}}`,
-  client: `async function request(method,url,options){if(method!=='GET')throw Error('Evidence forbids API writes'); const query=new URLSearchParams(options?.params??{}); const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{signal:options?.signal}); if(!response.ok)throw Error('fixture '+response.status); return {data:await response.json()}}
-export const apiClient={get:(url,options)=>request('GET',url,options),post:()=>request('POST'),put:()=>request('PUT'),delete:()=>request('DELETE')};`,
+  client: `async function request(method,url,options,data){if(method!=='GET'&&!${qualitySuite})throw Error('Evidence forbids API writes'); const query=new URLSearchParams(Object.entries(options?.params??{}).filter(([,value])=>value!==undefined)); const response=await fetch('/fixture'+url+(query.size?'?'+query:''),{method,signal:options?.signal,headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)}); if(!response.ok)throw Error('fixture '+response.status); return {data:await response.json()}}
+export const apiClient={get:(url,options)=>request('GET',url,options),post:(url,data)=>request('POST',url,null,data),put:(url,data)=>request('PUT',url,null,data),delete:()=>{throw Error('Evidence forbids deletion')}};`,
 }
 const timerRows = [
   { id: 901, name: '虚构账号 A · 一次性开启', schedulable: false },
@@ -167,6 +179,10 @@ async function openPage(origin, label, state, viewport = desktop) {
     window.evidenceClicks = 0
     document.addEventListener('click', () => window.evidenceClicks++, true)
   })
+  if (qualitySuite) await page.addInitScript(() => {
+    const key = 'sub2api:new-feature-notices:v1:41'
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(['quality-retest-rest-initial-announcement']))
+  })
   page.on('pageerror', error => manifest.browser_errors.push({ label, message: error.message }))
   page.on('console', message => { if (message.type() === 'error') manifest.browser_errors.push({ label, message: message.text() }) })
   page.on('response', response => { if (response.status() >= 400) manifest.network_errors.push({ label, url: response.url(), status: response.status() }) })
@@ -179,6 +195,11 @@ async function openPage(origin, label, state, viewport = desktop) {
     }
     if (!url.pathname.startsWith('/fixture/')) return route.continue()
     try {
+      if (qualitySuite) {
+        const body = qualityResponse(url, request, state)
+        manifest.api_requests.push({ label, method: request.method(), path: url.pathname, query: url.search, request_body: request.postDataJSON(), response_sha256: digest(JSON.stringify(body)) })
+        return await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+      }
       assert.equal(request.method(), 'GET', 'No backend writes are allowed')
       let body
       if (url.pathname === '/fixture/admin/groups/all') body = url.searchParams.get('platform') === 'openai' ? [{ id: 11, name: '虚构分组', platform: 'openai' }] : []
@@ -200,7 +221,7 @@ async function openPage(origin, label, state, viewport = desktop) {
       await route.fulfill({ status: 500, body: 'Unexpected synthetic request' })
     }
   })
-  await page.goto(origin, { waitUntil: 'networkidle' })
+  await page.goto(origin + (state.locale ? `/?locale=${state.locale}` : ''), { waitUntil: 'networkidle' })
   return { page, async close() {
     const name = `${label}-trace.zip`
     await context.tracing.stop({ path: path.join(out, name) })
@@ -214,7 +235,7 @@ async function withSource(pr, phase, action) {
   const fixture = path.join(runtime, 'fixtures', `${pr}-${phase}`)
   await fs.mkdir(fixture, { recursive: true })
   for (const [name, source] of Object.entries(modules)) await fs.writeFile(path.join(fixture, `${name}.js`), source)
-  await fs.writeFile(path.join(fixture, 'entry.js'), pr === 'pr760' ? priorityEntry : timerEntry)
+  await fs.writeFile(path.join(fixture, 'entry.js'), qualitySuite ? qualityEntries[pr] : pr === 'pr760' ? priorityEntry : timerEntry)
   await fs.writeFile(path.join(fixture, 'index.html'), '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="data:,"><title>离线虚构 UI 证据</title></head><body><div id="app"></div><script type="module" src="/entry.js"></script></body></html>')
   const requireDeps = createRequire(path.join(runtime, 'dependencies/package.json'))
   const { createServer } = requireDeps('vite'), vueModule = requireDeps('@vitejs/plugin-vue')
@@ -223,9 +244,13 @@ async function withSource(pr, phase, action) {
   const tailwindConfig = { ...theme, content: { ...content, files: [...content.files.map(file => typeof file === 'string' ? path.resolve(frontend, file) : file), path.join(fixture, '**/*.js')] } }
   const sourceInfo = { pr, phase, label, exact_commit: commits[label], target_exact_commit: commits[pr], baseline: base, component: components[pr], component_blob: blobs[pr][phase], component_sha256: digest(await fs.readFile(path.join(runtime, 'sources', label, components[pr]))), tailwind_content: tailwindConfig.content.files, theme_and_plugins_preserved: true, stylesheet_blob: gitText('rev-parse', `${commits[label]}:frontend/src/style.css`), tailwind_config_blob: gitText('rev-parse', `${commits[label]}:frontend/tailwind.config.js`) }
   assert.equal(gitText('rev-parse', `${commits[label]}:${components[pr]}`), sourceInfo.component_blob)
+  if (qualitySuite) sourceInfo.related_blobs = Object.fromEntries(qualityRelated[pr].map(file => [file, gitText('rev-parse', `${commits[label]}:${file}`)]))
   const server = await createServer({
     root: fixture, configFile: false, cacheDir: path.join(runtime, 'vite-cache', `${pr}-${phase}`),
-    plugins: [(vueModule.default || vueModule)()],
+    plugins: [(vueModule.default || vueModule)(), {
+      name: 'evidence-auth-store',
+      resolveId(id, importer) { if (id === './auth' && importer?.endsWith('/stores/accountQuality.ts')) return path.join(fixture, 'auth.js') },
+    }],
     resolve: { alias: [
       { find: /^(?:\.\.\/client|\.\/client|@\/api\/client)$/, replacement: path.join(fixture, 'client.js') },
       { find: '@/stores/auth', replacement: path.join(fixture, 'auth.js') },
@@ -236,7 +261,7 @@ async function withSource(pr, phase, action) {
     define: { __INTLIFY_JIT_COMPILATION__: true },
     css: { postcss: { plugins: [requireDeps('tailwindcss')(tailwindConfig), requireDeps('autoprefixer')()] } },
     server: { host: '127.0.0.1', port: 4196, strictPort: true, hmr: false, fs: { allow: [runtime] } },
-    optimizeDeps: { entries: [path.join(fixture, 'index.html')], include: ['vue', 'vue-i18n', 'pinia', '@tanstack/vue-virtual'] },
+    optimizeDeps: { entries: [path.join(fixture, 'index.html')], include: ['vue', 'vue-i18n', 'vue-router', 'pinia', '@tanstack/vue-virtual'] },
   })
   try { await server.listen(); await action('http://127.0.0.1:4196', sourceInfo) }
   finally { await server.close() }
@@ -246,7 +271,7 @@ async function capture(page, name, source, computedStyles, assertions) {
   await page.evaluate(() => document.fonts.ready)
   const file = path.join(out, name)
   await page.screenshot({ path: file, fullPage: true, animations: 'disabled' })
-  manifest.screenshots.push({ name, sha256: digest(await fs.readFile(file)), ...source, viewport: page.viewportSize(), browser_timezone: 'Asia/Shanghai', synthetic_accounts_only: true, computed_styles: computedStyles, behavior_assertions: assertions })
+  manifest.screenshots.push({ name, sha256: digest(await fs.readFile(file)), ...source, viewport: page.viewportSize(), locale: await page.evaluate(() => document.documentElement.lang), browser_timezone: 'Asia/Shanghai', synthetic_accounts_only: true, computed_styles: computedStyles, behavior_assertions: assertions })
   await saveManifest()
 }
 function observe(name, data) { manifest.behaviors.push({ name, ...data }); return data }
@@ -440,28 +465,323 @@ async function runTimers(phase) {
   })
 }
 
+// The 771/772 suite reuses the immutable archives, real CSS pipeline, traces and
+// manifest above. Only API transport, auth and page chrome are fixtures.
+const qualityRelated = {
+  pr771: ['frontend/src/views/admin/AutoConfigView.vue', 'frontend/src/components/admin/operations/AutoConfigHistory.vue', 'frontend/src/i18n/locales/zh/autoConfig.ts', 'frontend/src/i18n/locales/en/autoConfig.ts'],
+  pr772: ['frontend/src/utils/qualityRulePatch.ts', 'frontend/src/constants/newFeatureNotices.ts', 'frontend/src/components/common/NewFeatureBadge.vue', 'frontend/src/stores/newFeatureNotices.ts', 'frontend/src/i18n/locales/zh/qualityOps.ts', 'frontend/src/i18n/locales/en/qualityOps.ts'],
+}
+const qualityCommon = `import {createApp,h,ref} from 'vue';import {createPinia} from 'pinia';import {createI18n} from 'vue-i18n';import {createRouter,createMemoryHistory} from 'vue-router';
+import zh from '@/i18n/locales/zh/index.ts';import en from '@/i18n/locales/en/index.ts';import '@/style.css';
+const locale=new URLSearchParams(location.search).get('locale')||'zh';document.documentElement.lang=locale;
+const i18n=createI18n({legacy:false,locale,messages:{zh,en}});`
+const qualityEntries = {
+  pr771: `${qualityCommon}
+import Card from '@/components/admin/operations/OAuthDegradationCard.vue';import History from '@/components/admin/operations/AutoConfigHistory.vue';
+const groups=[{id:21,name:'虚构分组 A',platform:'openai',status:'active'}];
+createApp({setup(){const config=ref({enabled:true,threshold_percent:50,limit_concurrency:true,limit_models:true,limit_groups:true,target_concurrency:10,models:[],group_ids:[21]});return()=>h('main',{class:'mx-auto max-w-5xl space-y-5 p-4 sm:p-6'},[
+h('h1',{class:'text-2xl font-semibold'},locale==='zh'?'自动配置 · 虚构处置样例':'Auto configuration · Synthetic action fixture'),
+h(Card,{modelValue:config.value,'onUpdate:modelValue':value=>config.value=value,groups,userId:41}),h(History,{refreshKey:0})])}}).use(createPinia()).use(i18n).mount('#app');`,
+  pr772: `${qualityCommon}
+import View from '@/views/admin/AccountQualityView.vue';const router=createRouter({history:createMemoryHistory(),routes:[{path:'/',component:View}]});
+await router.push('/');await router.isReady();createApp(View).use(createPinia()).use(i18n).use(router).mount('#app');`,
+}
+const noticeId = 'quality-oauth-401-cleanup-initial-announcement'
+const roundInput = page => page.getByTestId('quality-oauth-401-max-rounds')
+const setting = page => page.getByTestId('quality-oauth-401-setting')
+const planCard = (page, id) => page.locator(`[data-plan-id="${id}"]`)
+const clone = value => JSON.parse(JSON.stringify(value))
+function qualityState(phase, locale = 'zh') {
+  const policy = { expected_answer: '', action: 'observe_only', remove_group_ids: [], auto_restore: false, trigger_on_upstream_5xx: false }
+  const cfg = { rule_name: '虚构旧规则', question_kind: 'state_probe', test_channel: 'account', prompt: '', reasoning_effort: 'high', parallel_count: 1, model_ids: ['synthetic-model'], quality: policy }
+  const rule = { model_id: 'synthetic-model', cron_expression: '*/30 * * * *', enabled: true, max_results: 100, auto_recover: false, last_run_at: null, next_run_at: null, created_at: serverNow, updated_at: serverNow, pelican_config: cfg }
+  return { phase, locale, writes: [], nextId: 101,
+    plans: [71, 72].map((id, i) => ({ ...clone(rule), id, account_id: 910 + i, account_name: `虚构旧账号 ${i + 1}` })),
+    templates: [{ ...clone(rule), id: 7, account_filter: { group: '21', statuses: ['active'] }, plan_ids: [], last_synced_at: null }],
+    presets: [{ ...clone(rule), id: 17, name: '虚构可复用预设', pelican_config: { ...clone(cfg), quality: { ...policy, ...(phase === 'after' ? { oauth_401_max_rounds: 15 } : {}) } } }],
+  }
+}
+function qualityResponse(url, request, state) {
+  const endpoint = url.pathname.replace(/^\/fixture/, ''), method = request.method()
+  const groups = [{ id: 21, name: '虚构分组 A', platform: 'openai', status: 'active' }]
+  if (method === 'GET') {
+    if (endpoint === '/admin/groups/all') return groups
+    if (endpoint === '/admin/accounts') return { items: [901, 902, 910, 911].map(id => ({ id, name: `虚构账号 ${id}`, platform: 'openai', type: 'oauth', status: 'active', schedulable: true })), total: 4, page: 1, page_size: 50, pages: 1 }
+    if (endpoint === '/admin/account-quality-plans') return state.plans
+    if (endpoint === '/admin/account-quality-templates') return state.templates
+    if (endpoint === '/admin/account-quality-presets') return state.presets
+    if (endpoint === '/admin/account-quality-results') return { items: [], next_cursor: 0 }
+    if (/^\/admin\/account-quality-plans\/\d+\/ownership$/.test(endpoint)) return { plan_id: Number(endpoint.split('/')[3]), models: ['synthetic-model'], group_ids: [], entries: [], action: '', ownership_retained: false, relinquishable_count: 0 }
+    if (endpoint === '/admin/account-ops/auto-config/events') return { has_more: false, items: [{ id: 1, account_id: 901, account_name: '虚构处置账号 A', platform: 'openai', kind: 'degradation_applied', created_at: serverNow, details: { previous_concurrency: 20, concurrency: 10, degradation: { degradation_percent: 75, threshold_percent: 50, quality_samples: 8, limit_concurrency: true, limit_models: true, limit_groups: true, models: [], group_ids: [21], removed_group_ids: [21], window_start: '2026-11-10T15:00:00Z', window_end: serverNow } } }] }
+    throw Error(`Unexpected synthetic GET ${endpoint}`)
+  }
+  assert.equal(state.phase, 'after', 'Baseline evidence must never write')
+  assert(['POST', 'PUT'].includes(method), 'No deletion, run or provider calls')
+  const body = request.postDataJSON()
+  assert(Number.isInteger(body?.pelican_config?.quality?.oauth_401_max_rounds), 'Fixture writes must include the real draft cleanup field')
+  assert(body.pelican_config.quality.oauth_401_max_rounds >= 0 && body.pelican_config.quality.oauth_401_max_rounds <= 100)
+  const write = { method, endpoint, body: clone(body) }
+  if (method === 'POST' && endpoint === '/admin/scheduled-test-plans') {
+    assert([901, 902].includes(body.account_id))
+    const plan = { ...clone(body), id: state.nextId++, account_name: `虚构账号 ${body.account_id}`, last_run_at: null, next_run_at: null, created_at: serverNow, updated_at: serverNow }
+    state.plans.push(plan); state.writes.push(write); return plan
+  }
+  const planMatch = endpoint.match(/^\/admin\/scheduled-test-plans\/(\d+)$/)
+  if (method === 'PUT' && planMatch) {
+    const plan = state.plans.find(row => row.id === Number(planMatch[1])); assert(plan)
+    Object.assign(plan, clone(body)); state.writes.push(write); return plan
+  }
+  if (method === 'PUT' && endpoint === '/admin/account-quality-templates/7') {
+    Object.assign(state.templates[0], clone(body)); state.writes.push(write)
+    return { template: state.templates[0], updated: 0, failed: 0, created: 0 }
+  }
+  if (method === 'PUT' && endpoint === '/admin/account-quality-presets/17') {
+    Object.assign(state.presets[0], clone(body)); state.writes.push(write); return state.presets[0]
+  }
+  throw Error(`Unexpected synthetic mutation ${method} ${endpoint}`)
+}
+async function qualityCSS(page, editor = false) {
+  const css = await page.evaluate(editor => {
+    const heading = document.querySelector('h1,.workspace-heading h2'), dialog = document.querySelector('[role="dialog"]')
+    const card = document.querySelector('[data-testid="degradation-action"],.workspace-panel')
+    const input = document.querySelector('[data-testid="quality-oauth-401-max-rounds"],[data-testid="quality-trigger-5xx"]')
+    const target = document.querySelector('[data-testid="quality-oauth-401-setting"]')
+    return { heading_size: getComputedStyle(heading).fontSize, body_background: getComputedStyle(document.body).backgroundColor,
+      card_radius: getComputedStyle(card).borderRadius, card_background: getComputedStyle(card).backgroundColor,
+      page_width: document.documentElement.scrollWidth, viewport_width: innerWidth,
+      ...(editor ? { overlay_position: getComputedStyle(dialog).position, overlay_display: getComputedStyle(dialog).display,
+        content_display: getComputedStyle(dialog.querySelector('.modal-content')).display, dialog_width: dialog.querySelector('.modal-content').getBoundingClientRect().width,
+        input_min: input?.min, input_max: input?.max, input_step: input?.step,
+        setting_width: target?.getBoundingClientRect().width, setting_scroll_width: target?.scrollWidth, setting_client_width: target?.clientWidth,
+        input_radius: input?.classList.contains('input') ? getComputedStyle(input).borderRadius : null } : {}) }
+  }, editor)
+  assert.equal(css.heading_size, '24px'); assert.equal(css.card_radius, '16px'); assert.equal(css.card_background, 'rgb(255, 255, 255)'); assert.equal(css.body_background, 'rgb(249, 250, 251)')
+  assert(css.page_width <= css.viewport_width + 2, 'Real page must fit viewport')
+  if (editor) {
+    assert.equal(css.overlay_position, 'fixed'); assert.equal(css.overlay_display, 'flex'); assert.equal(css.content_display, 'flex'); assert(css.dialog_width <= css.viewport_width)
+    if (css.input_radius) { assert.equal(css.input_radius, '12px'); assert.equal(css.input_min, '0'); assert.equal(css.input_max, '100'); assert.equal(css.input_step, '1'); assert(css.setting_scroll_width <= css.setting_client_width + 2) }
+  }
+  return css
+}
+async function runDegradation(phase) {
+  await withSource('pr771', phase, async (origin, source) => {
+    for (const locale of ['zh', 'en']) {
+      const session = await openPage(origin, `pr771-${phase}-${locale}`, { phase, locale }), { page } = session
+      try {
+        const card = page.getByTestId('degradation-action')
+        await page.getByTestId('history-row').waitFor()
+        assert(await page.getByTestId('degradation-enabled').isChecked())
+        assert(await page.getByTestId('degradation-group-21').isChecked())
+        const text = await card.innerText(), event = await page.getByTestId('history-row').innerText()
+        if (locale === 'zh') {
+          assert(text.includes(phase === 'after' ? '直接修改账号的并发、模型映射或分组绑定' : '成功请求不能自动升档'))
+          assert(text.includes(phase === 'after' ? '之后可在账号编辑中重新绑定' : '后续编辑也不能重新绑定'))
+          assert(text.includes(phase === 'after' ? '没有允许模型时关闭账号调度' : '被处置账号将不支持任何模型'))
+          assert(event.includes(phase === 'after' ? '所选分组' : '禁用分组绑定'))
+        } else {
+          assert(text.includes(phase === 'after' ? 'updating the account’s concurrency' : 'stop successful requests from ramping it'))
+          assert(text.includes(phase === 'after' ? 'you can reattach them in the account editor' : 'later edits cannot reattach them'))
+          assert(text.includes(phase === 'after' ? 'No allowed models disables account scheduling' : 'affected accounts will support no models'))
+          assert(event.includes(phase === 'after' ? 'selected groups' : 'blocked group bindings'))
+        }
+        const assertions = observe(`771 ${phase} ${locale} copy`, { real_card_and_history: true, locale, card_text: text, event_text: event, empty_model_selection: true })
+        await capture(page, `pr771-${phase}-desktop-${locale}.png`, source, await qualityCSS(page), assertions)
+        await page.getByTestId('degradation-limit-groups').uncheck()
+        assert.equal(await page.getByTestId('degradation-groups').count(), 0)
+        await page.getByTestId('degradation-limit-groups').check()
+        assert(await page.getByTestId('degradation-group-21').isChecked())
+        observe(`771 ${phase} ${locale} group control`, { real_toggle_hides_and_restores_group_help: true, selected_group_retained: 21 })
+        if (phase === 'after' && locale === 'zh') {
+          await page.setViewportSize(mobile)
+          await capture(page, 'pr771-after-mobile-zh.png', source, await qualityCSS(page), assertions)
+        }
+      } finally { await session.close() }
+    }
+  })
+}
+async function editorClosed(page) { await page.getByRole('dialog').waitFor({ state: 'detached' }) }
+async function openNewQuality(page) {
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  await page.getByTestId('quality-create-rule').click()
+  await page.locator('#quality-rule-form').waitFor({ state: 'visible' })
+}
+async function editQuality(page, id) {
+  assert.equal(await page.getByRole('dialog').count(), 0)
+  const edit = planCard(page, id).locator('.rule-actions button').nth(1)
+  assert(await edit.isEnabled()); await edit.click()
+  await page.locator('#quality-rule-form').waitFor({ state: 'visible' })
+}
+async function reloadQuality(page) {
+  await page.reload({ waitUntil: 'networkidle' }); await planCard(page, 71).waitFor(); await editorClosed(page)
+}
+async function expectedRoundValue(page, value, entry) {
+  await roundInput(page).waitFor({ state: 'visible' })
+  assert.equal(await roundInput(page).inputValue(), String(value), entry)
+  observe(`772 ${entry}`, { value, real_editor: true })
+}
+async function saveQuality(page, method, endpoint) {
+  const save = page.locator('.editor-footer button[form="quality-rule-form"]')
+  assert.equal(await save.count(), 1); assert(await save.isEnabled())
+  await Promise.all([
+    page.waitForResponse(res => new URL(res.url()).pathname === '/fixture' + endpoint && res.request().method() === method),
+    save.click(),
+  ])
+  await editorClosed(page)
+  await page.waitForFunction(() => document.querySelector('[data-testid="rules-scroll"]')?.getAttribute('aria-busy') === 'false')
+}
+async function noCleanupBadge(page, entry) {
+  assert.equal(await setting(page).getByTestId('new-feature-badge').count(), 0, entry)
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('sub2api:new-feature-notices:v1:41')))
+  assert(stored.includes(noticeId)); assert(stored.includes('quality-retest-rest-initial-announcement'))
+  observe(`772 notice ${entry}`, { shared_notice_id: noticeId, dismissed: true, local_storage: stored })
+}
+async function runQuality(phase) {
+  await withSource('pr772', phase, async (origin, source) => {
+    const state = qualityState(phase), session = await openPage(origin, `pr772-${phase}-zh`, state), { page } = session
+    try {
+      await planCard(page, 71).waitFor(); await openNewQuality(page)
+      if (phase === 'before') {
+        assert.equal(await setting(page).count(), 0); assert.equal(await page.getByTestId('quality-bulk-field-oauth401').count(), 0)
+        await page.getByTestId('quality-trigger-5xx').scrollIntoViewIfNeeded()
+        await capture(page, 'pr772-before-desktop-zh.png', source, await qualityCSS(page, true), observe('772 original editor', { cleanup_field_absent: true, original_base_archive: true, writes: state.writes.length }))
+        return
+      }
+      await expectedRoundValue(page, 6, 'new default')
+      assert.equal(await setting(page).getByTestId('new-feature-badge').count(), 1)
+      await setting(page).scrollIntoViewIfNeeded()
+      await capture(page, 'pr772-after-desktop-new-zh.png', source, await qualityCSS(page, true), { new_default: 6, notice_visible: true })
+      await page.setViewportSize(mobile); await setting(page).scrollIntoViewIfNeeded()
+      await capture(page, 'pr772-after-mobile-new-zh.png', source, await qualityCSS(page, true), { new_default: 6, narrow_real_drawer: true })
+      await page.setViewportSize(desktop)
+      await setting(page).getByTestId('new-feature-badge').click(); await noCleanupBadge(page, 'new editor')
+      await page.getByTestId('quality-account-scope-manual').check()
+      await page.getByTestId('quality-question-kind').selectOption('state_probe')
+      await page.getByTestId('quality-action-observe-only').check()
+      await page.getByTestId('quality-account-picker').locator('input[value="901"]').check()
+      for (const value of ['-1', '1.5', '101']) {
+        await roundInput(page).fill(value)
+        assert.equal(await roundInput(page).evaluate(el => el.checkValidity()), false)
+        const count = state.writes.length
+        await page.locator('.editor-footer button[form="quality-rule-form"]').click()
+        assert.equal(state.writes.length, count, 'Invalid native form must not save')
+        observe('772 invalid range blocks save', { value, request_count_unchanged: true })
+      }
+      for (const value of ['0', '1', '100']) {
+        await roundInput(page).fill(value); assert(await roundInput(page).evaluate(el => el.checkValidity()))
+      }
+      await roundInput(page).fill('6')
+      await saveQuality(page, 'POST', '/admin/scheduled-test-plans')
+      assert.equal(state.writes.at(-1).body.pelican_config.quality.oauth_401_max_rounds, 6)
+      await editQuality(page, 101); await expectedRoundValue(page, 6, 'synthetic saved draft readback'); await noCleanupBadge(page, 'single editor')
+      await roundInput(page).fill('0'); await saveQuality(page, 'PUT', '/admin/scheduled-test-plans/101')
+      await editQuality(page, 101); await expectedRoundValue(page, 0, 'zero disables on synthetic readback')
+      assert.match(await setting(page).innerText(), /0 关闭/)
+      await reloadQuality(page)
+      await planCard(page, 71).getByTestId('quality-rule-copy').click()
+      await expectedRoundValue(page, 0, 'legacy rule copy'); await noCleanupBadge(page, 'copy after browser reload')
+      await setting(page).scrollIntoViewIfNeeded()
+      await capture(page, 'pr772-after-desktop-copy-zh.png', source, await qualityCSS(page, true), { legacy_missing_value: 0, notice_persisted: true })
+      await reloadQuality(page); await editQuality(page, 72)
+      await expectedRoundValue(page, 0, 'legacy single editor')
+      await saveQuality(page, 'PUT', '/admin/scheduled-test-plans/72')
+      assert.equal(state.writes.at(-1).body.pelican_config.quality.oauth_401_max_rounds, 0)
+      await openNewQuality(page)
+      const beforeReuse = state.writes.length
+      await page.getByTestId('quality-preset-select').selectOption('17'); await page.getByTestId('quality-apply-preset').click()
+      await expectedRoundValue(page, 15, 'reused preset draft'); await noCleanupBadge(page, 'reused preset')
+      const preview = page.locator('[data-reuse-field="oauth401"]')
+      assert.match(await preview.innerText(), /连续 6 轮/); assert.match(await preview.innerText(), /连续 15 轮/)
+      const beforeReuseSave = state.writes.length
+      assert.equal(beforeReuseSave, beforeReuse, 'Importing a preset only changes the draft')
+      await preview.scrollIntoViewIfNeeded()
+      await capture(page, 'pr772-after-desktop-reuse-zh.png', source, await qualityCSS(page, true), { draft_only_before_submit: true, before: 6, imported: 15, writes_before_submit: beforeReuseSave })
+      await page.getByTestId('quality-account-picker').locator('input[value="902"]').check()
+      await saveQuality(page, 'POST', '/admin/scheduled-test-plans')
+      assert.equal(state.writes.at(-1).body.pelican_config.quality.oauth_401_max_rounds, 15)
+      await editQuality(page, 102); await expectedRoundValue(page, 15, 'reuse synthetic save readback')
+      await reloadQuality(page)
+      await page.getByTestId('quality-template-edit').click()
+      await expectedRoundValue(page, 0, 'legacy group template'); await noCleanupBadge(page, 'group template')
+      await roundInput(page).fill('12'); await saveQuality(page, 'PUT', '/admin/account-quality-templates/7')
+      await page.getByTestId('quality-template-edit').click(); await expectedRoundValue(page, 12, 'group template synthetic readback')
+      await reloadQuality(page); await openNewQuality(page)
+      await page.getByTestId('quality-preset-select').selectOption('17'); await page.getByTestId('quality-edit-preset').click()
+      await expectedRoundValue(page, 15, 'preset editor'); await noCleanupBadge(page, 'preset editor')
+      await roundInput(page).fill('100'); await saveQuality(page, 'PUT', '/admin/account-quality-presets/17')
+      assert.equal(state.presets[0].pelican_config.quality.oauth_401_max_rounds, 100)
+      await openNewQuality(page)
+      await page.getByTestId('quality-preset-select').selectOption('17'); await page.getByTestId('quality-edit-preset').click()
+      await expectedRoundValue(page, 100, 'preset synthetic readback')
+      await reloadQuality(page)
+      const originals = clone(state.plans.filter(plan => [71, 72].includes(plan.id)))
+      for (const id of [71, 72]) await planCard(page, id).locator('.rule-checkbox input').check()
+      await page.getByTestId('quality-bulk-edit').click()
+      assert.equal(await roundInput(page).count(), 0, 'Bulk cleanup requires explicit field selection')
+      await page.getByTestId('quality-bulk-field-oauth401').check()
+      await expectedRoundValue(page, 0, 'bulk selected field'); await noCleanupBadge(page, 'bulk editor')
+      await roundInput(page).fill('9'); await setting(page).scrollIntoViewIfNeeded()
+      await capture(page, 'pr772-after-desktop-bulk-zh.png', source, await qualityCSS(page, true), { explicit_bulk_field: 'oauth401', target_ids: [71, 72], draft: 9 })
+      const start = state.writes.length, save = page.locator('.editor-footer button[form="quality-rule-form"]')
+      assert(await save.isEnabled())
+      await Promise.all([
+        ...[71, 72].map(id => page.waitForResponse(res => new URL(res.url()).pathname === `/fixture/admin/scheduled-test-plans/${id}` && res.request().method() === 'PUT')),
+        save.click(),
+      ])
+      await editorClosed(page)
+      const writes = state.writes.slice(start); assert.equal(writes.length, 2)
+      for (const [i, write] of writes.entries()) {
+        assert.deepEqual(write.body.pelican_config.quality, { ...originals[i].pelican_config.quality, oauth_401_max_rounds: 9 })
+        for (const key of ['enabled', 'model_id', 'cron_expression', 'max_results']) assert(!Object.hasOwn(write.body, key))
+      }
+      await editQuality(page, 71); await expectedRoundValue(page, 9, 'bulk synthetic readback')
+      await reloadQuality(page)
+      await planCard(page, 71).getByTestId('quality-rule-save-preset').click()
+      await expectedRoundValue(page, 9, 'save rule as preset entry'); await noCleanupBadge(page, 'save rule as preset')
+      await page.waitForLoadState('networkidle')
+      observe('772 actual draft payloads', { synthetic_only: true, server_save_not_tested: true, writes: state.writes, bulk_unchecked_fields_preserved: true, accepted_range: [0, 1, 100] })
+    } finally { await session.close() }
+    if (phase === 'after') {
+      const english = await openPage(origin, 'pr772-after-en', qualityState('after', 'en')), { page } = english
+      try {
+        await planCard(page, 71).waitFor(); await openNewQuality(page); await expectedRoundValue(page, 6, 'English new default')
+        assert.match(await setting(page).innerText(), /Remove rule after consecutive OAuth 401 rounds/)
+        assert.match(await setting(page).innerText(), /0 disables cleanup/)
+        await setting(page).scrollIntoViewIfNeeded()
+        await capture(page, 'pr772-after-desktop-new-en.png', source, await qualityCSS(page, true), { english_label_and_hint: true, new_default: 6 })
+      } finally { await english.close() }
+    }
+  })
+}
+
 try {
   for (const label of Object.keys(commits)) await verifyArchive(label, 'before-browser')
   for (const file of ['package.json', 'pnpm-lock.yaml', '.npmrc']) {
     const expected = await fs.readFile(path.join(runtime, 'sources/base/frontend', file))
     assert.deepEqual(await fs.readFile(path.join(runtime, 'dependencies', file)), expected)
-    for (const pr of ['pr760', 'pr763']) assert.deepEqual(await fs.readFile(path.join(runtime, 'sources', pr, 'frontend', file)), expected)
+    for (const pr of Object.keys(components)) assert.deepEqual(await fs.readFile(path.join(runtime, 'sources', pr, 'frontend', file)), expected)
   }
   const { chromium } = createRequire(path.join(process.env.PLAYWRIGHT_ROOT, 'package.json'))('playwright')
   browser = await chromium.launch({ headless: true })
   manifest.browser_version = browser.version()
   manifest.chinese_font = execFileSync('fc-match', ['-f', '%{family}', 'sans:lang=zh-cn'], { encoding: 'utf8' })
   assert.match(manifest.chinese_font, /Noto/)
-  for (const phase of ['before', 'after']) await runPriority(phase)
-  for (const phase of ['before', 'after']) await runTimers(phase)
-  assert.equal(manifest.screenshots.length, 11)
-  for (const pr of ['pr760', 'pr763']) for (const [phase, width] of [['before', 1600], ['after', 1600], ['after', 390]]) {
+  if (qualitySuite) {
+    for (const phase of ['before', 'after']) await runDegradation(phase)
+    for (const phase of ['before', 'after']) await runQuality(phase)
+  } else {
+    for (const phase of ['before', 'after']) await runPriority(phase)
+    for (const phase of ['before', 'after']) await runTimers(phase)
+  }
+  assert.equal(manifest.screenshots.length, qualitySuite ? 12 : 11)
+  for (const pr of Object.keys(components)) for (const [phase, width] of [['before', 1600], ['after', 1600], ['after', 390]]) {
     assert(manifest.screenshots.some(shot => shot.pr === pr && shot.phase === phase && shot.viewport.width === width), `Missing ${pr}/${phase}/${width}`)
   }
   assert.deepEqual(manifest.browser_errors, []); assert.deepEqual(manifest.network_errors, [])
-  assert(manifest.api_requests.every(request => request.method === 'GET'))
+  if (!qualitySuite) assert(manifest.api_requests.every(request => request.method === 'GET'))
+  manifest.validation.remote_browser_assertions = 'passed'
   manifest.status = 'passed'
 } catch (error) {
+  manifest.validation.remote_browser_assertions = 'failed'
   manifest.status = 'failed'; manifest.failure = error.stack || error.message
   process.exitCode = 1
   console.error(error)

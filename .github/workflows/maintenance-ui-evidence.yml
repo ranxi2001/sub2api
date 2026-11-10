@@ -1,4 +1,4 @@
-name: Maintenance UI evidence for PR760 and PR763
+name: Maintenance UI evidence for PR771 and PR772
 
 on:
   push:
@@ -27,24 +27,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export EVIDENCE_RUNTIME="$RUNNER_TEMP/maintenance-ui-runtime"
-          export EVIDENCE_OUTPUT="$RUNNER_TEMP/maintenance-ui-evidence"
-          export PLAYWRIGHT_ROOT="$RUNNER_TEMP/maintenance-ui-runtime/browser/node_modules/playwright"
-          printf '%s\n' "EVIDENCE_RUNTIME=$EVIDENCE_RUNTIME" "EVIDENCE_OUTPUT=$EVIDENCE_OUTPUT" "PLAYWRIGHT_ROOT=$PLAYWRIGHT_ROOT" >> "$GITHUB_ENV"
+          export EVIDENCE_SUITE=771-772
+          export EVIDENCE_RUNTIME="$RUNNER_TEMP/maintenance-ui-771-772-runtime"
+          export EVIDENCE_OUTPUT="$RUNNER_TEMP/maintenance-ui-771-772-evidence"
+          export PLAYWRIGHT_ROOT="$EVIDENCE_RUNTIME/browser/node_modules/playwright"
+          printf '%s\n' "EVIDENCE_SUITE=$EVIDENCE_SUITE" "EVIDENCE_RUNTIME=$EVIDENCE_RUNTIME" "EVIDENCE_OUTPUT=$EVIDENCE_OUTPUT" "PLAYWRIGHT_ROOT=$PLAYWRIGHT_ROOT" >> "$GITHUB_ENV"
           mkdir -p "$EVIDENCE_OUTPUT" "$EVIDENCE_RUNTIME/sources" "$EVIDENCE_RUNTIME/dependencies"
           test "$GITHUB_REF" = refs/heads/evidence/maintenance-ui-760-763-20261110
           test "$(git rev-parse HEAD)" = "$EVIDENCE_HEAD"
           test -z "$(git status --porcelain)"
-          base=45e92f44470f91435bd261ea18111c271063c0ac
-          pr760=7aa315645d76c01f7afa2f3ee0de6af001cc97f2
-          pr763=8ff898117438587b5aad0fe5895745d010c6b6e4
-          git -c credential.helper= fetch --no-tags https://github.com/ranxi2001/sub2api.git "$base" "$pr760" "$pr763"
-          test "$(git merge-base "$pr760" "$pr763")" = "$base"
-          test "$(git rev-parse "$base:frontend/src/views/admin/PrioritySchedulingView.vue")" = 1fec8806cfa1986a1c0dd98f57db68105aa94110
-          test "$(git rev-parse "$pr760:frontend/src/views/admin/PrioritySchedulingView.vue")" = 566b5dc22bb7b0e8ba9edac76f8d3584533c4aa0
-          test "$(git rev-parse "$base:frontend/src/components/account/SchedulableTimerControl.vue")" = 00edd09ceeca1f2842eefa497ef1a9726aee2bba
-          test "$(git rev-parse "$pr763:frontend/src/components/account/SchedulableTimerControl.vue")" = e1da8708cb2c5558c1f2d59aeeb37fcc03f1978f
-          for label in base pr760 pr763; do
+          base=e295f336ffd681ca5ccb3e85b27e9ae7d247bf46
+          pr771=ffdbf5c68f8407b2ea5cfe1865eba2596b845a03
+          pr772=689621b969a6f718a59fed515acd69de72200428
+          git -c credential.helper= fetch --no-tags https://github.com/ranxi2001/sub2api.git "$base" "$pr771" "$pr772"
+          test "$(git merge-base "$pr771" "$pr772")" = "$base"
+          test "$(git rev-parse "$base:frontend/src/components/admin/operations/OAuthDegradationCard.vue")" = af373c32aa279e4b130f140ad4b3259c11a55277
+          test "$(git rev-parse "$pr771:frontend/src/components/admin/operations/OAuthDegradationCard.vue")" = af373c32aa279e4b130f140ad4b3259c11a55277
+          test "$(git rev-parse "$base:frontend/src/i18n/locales/zh/autoConfig.ts")" = c8f60211fd6fa52dae696282e8d157199ad30d7e
+          test "$(git rev-parse "$pr771:frontend/src/i18n/locales/zh/autoConfig.ts")" = ab0dc7582047930d3c943d2fec4bd87dc09c2947
+          test "$(git rev-parse "$base:frontend/src/i18n/locales/en/autoConfig.ts")" = 73ed75bd7a1813b72a67e5954a05c25e3337e6e6
+          test "$(git rev-parse "$pr771:frontend/src/i18n/locales/en/autoConfig.ts")" = c7ab84f53c12a23a4c54a2323d02c6ff595202cd
+          test "$(git rev-parse "$base:frontend/src/views/admin/AccountQualityView.vue")" = 6ef2c412dd9788e5f01e599a7d99d04455107de9
+          test "$(git rev-parse "$pr772:frontend/src/views/admin/AccountQualityView.vue")" = dee4c579524ac0a4ceaa49b567839ec141391f1f
+          for label in base pr771 pr772; do
             sha="${!label}"
             test "$(git rev-parse "$sha^{commit}")" = "$sha"
             mkdir "$EVIDENCE_RUNTIME/sources/$label"
@@ -85,7 +90,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: maintenance-ui-evidence-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/maintenance-ui-evidence
+          name: maintenance-ui-771-772-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/maintenance-ui-771-772-evidence
           if-no-files-found: error
           retention-days: 14
