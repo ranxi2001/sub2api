@@ -41,6 +41,7 @@ func reusableQualityConfig(source *PelicanTestConfig) (*PelicanTestConfig, error
 		action = QualityActionObserveOnly
 	}
 	policy := &QualityPolicy{
+		OAuth401MaxRounds:    q.OAuth401MaxRounds,
 		TriggerOnUpstream5xx: q.TriggerOnUpstream5xx, ExpectedAnswer: q.ExpectedAnswer,
 		Action: action, RemoveGroupIDs: append([]int64(nil), q.RemoveGroupIDs...),
 		RemoveModels: append([]string(nil), q.RemoveModels...), RecoveryConcurrency: q.RecoveryConcurrency,

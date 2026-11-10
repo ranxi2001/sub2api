@@ -1,0 +1,168 @@
+name: Issue 765 image scheduler authorization
+
+on:
+  push:
+    branches: [fix/issue765-image-scheduler-20261110]
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/repository/scheduler_cache*'
+      - 'backend/internal/service/openai_images_allowlist*'
+      - 'backend/internal/handler/openai_gateway_handler_test.go'
+      - '.github/workflows/issue765-image-scheduler.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: 'true'
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+      - uses: actions/checkout@v6
+        with:
+          ref: e295f336ffd681ca5ccb3e85b27e9ae7d247bf46
+          path: baseline
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Record clean candidate and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git -C candidate rev-parse HEAD | tee evidence/head.txt
+          git -C candidate diff --exit-code
+          git -C candidate diff --check
+          go version | tee evidence/toolchain.txt
+          grep -F 'go1.27.3' evidence/toolchain.txt
+          sha256sum candidate/backend/internal/repository/scheduler_cache_image_authorization*test.go > evidence/tests.sha256
+          test -z "$(gofmt -l candidate/backend/internal/repository/scheduler_cache_image_authorization*test.go candidate/backend/internal/service/openai_images_allowlist_test.go)"
+      - name: RED - identical regressions on isolated original projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C baseline rev-parse HEAD)" = e295f336ffd681ca5ccb3e85b27e9ae7d247bf46
+          cp candidate/backend/internal/repository/scheduler_cache_image_authorization*test.go baseline/backend/internal/repository/
+          git -C baseline diff --exit-code
+          set +e
+          (cd baseline/backend && go test -json -tags=integration ./internal/repository -run '^TestIssue765ImageAuthorization(Marshal|Redis)$' -count=1 -timeout=12m) > evidence/red.jsonl 2> evidence/red.stderr
+          result=$?
+          set -e
+          cat evidence/red.stderr
+          test "$result" -eq 1
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          events = [json.loads(line) for line in Path('evidence/red.jsonl').read_text().splitlines()]
+          parents = {'TestIssue765ImageAuthorizationMarshal', 'TestIssue765ImageAuthorizationRedis'}
+          grants = {'exact', 'prefix', 'mapping_complete'}
+          expected = parents | {f'{parent}/{grant}' for parent in parents for grant in grants}
+          failed = {e['Test'] for e in events if e.get('Action') == 'fail' and 'Test' in e}
+          assert failed == expected, (failed, expected)
+          assert not any(e.get('Action') == 'skip' for e in events), 'RED skipped tests'
+          for parent in parents:
+              for grant in grants:
+                  name = f'{parent}/{grant}'
+                  output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
+                  model = 'public-image' if grant == 'mapping_complete' else 'nano-banana-2'
+                  marker = f'ISSUE765_AUTHORIZATION_LOST payload=metadata grant={grant} model={model}'
+                  assert marker in output, (name, output)
+                  print(f'Expected behavioral RED: {name}: {marker}')
+          PY
+      - name: GREEN - clean candidate marshal and candidate rejection boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git -C candidate status --porcelain)"
+          (cd candidate/backend && go test -race -json -tags=unit ./internal/repository ./internal/service -run '^(TestIssue765|TestExtraImageModels)' -count=1 -timeout=10m) > evidence/green-unit.jsonl 2> evidence/green-unit.stderr
+      - name: GREEN - real Redis publication, memo refresh and revocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd candidate/backend && go test -race -json -tags=integration ./internal/repository -run '^(TestIssue765|TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount$)' -count=1 -timeout=12m) > evidence/green-redis.jsonl 2> evidence/green-redis.stderr
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          required = {
+              'green-unit': {'TestIssue765ImageAuthorizationMarshal', 'TestIssue765ExtraImagesCandidateAuthorization'},
+              'green-redis': {'TestIssue765ImageAuthorizationMarshal', 'TestIssue765ImageAuthorizationRedis', 'TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount'},
+          }
+          for log, names in required.items():
+              events = [json.loads(line) for line in Path(f'evidence/{log}.jsonl').read_text().splitlines()]
+              passed = {e['Test'] for e in events if e.get('Action') == 'pass' and 'Test' in e}
+              assert names <= passed, (log, names - passed)
+              assert not any(e.get('Action') in {'skip', 'fail'} for e in events), log
+              print(f'{log}: required tests passed without skips')
+          PY
+          test -z "$(git -C candidate status --porcelain)"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue765-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/
+
+  ws-first-frame-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Repeat real handler peer close, cancellation and configured timeout
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ISSUE765_WS_EVIDENCE="$RUNNER_TEMP/issue765-ws-first-frame"
+          printf 'ISSUE765_WS_EVIDENCE=%s\n' "$ISSUE765_WS_EVIDENCE" >> "$GITHUB_ENV"
+          mkdir -p "$ISSUE765_WS_EVIDENCE"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD | tee "$ISSUE765_WS_EVIDENCE/head.txt"
+          go version | tee "$ISSUE765_WS_EVIDENCE/toolchain.txt"
+          grep -F 'go1.27.3' "$ISSUE765_WS_EVIDENCE/toolchain.txt"
+          test -z "$(gofmt -l backend/internal/handler/openai_gateway_handler_test.go)"
+          (cd backend && go test -race -shuffle=on -json -tags=unit ./internal/handler -run '^TestOpenAIResponsesWebSocket_(DisconnectBeforeFirstMessageIsInfo|RequestCanceledBeforeFirstMessageIsInfo|FirstMessageTimeoutUsesConfig)$' -count=20 -timeout=5m) > "$ISSUE765_WS_EVIDENCE/ws-first-frame.jsonl" 2> "$ISSUE765_WS_EVIDENCE/ws-first-frame.stderr"
+          python3 - <<'PY'
+          import json
+          import os
+          from collections import Counter
+          from pathlib import Path
+          evidence = Path(os.environ['ISSUE765_WS_EVIDENCE'])
+          events = [json.loads(line) for line in (evidence / 'ws-first-frame.jsonl').read_text().splitlines()]
+          peer = 'TestOpenAIResponsesWebSocket_DisconnectBeforeFirstMessageIsInfo'
+          expected = {
+              peer,
+              peer + '/StatusNormalClosure',
+              peer + '/StatusGoingAway',
+              'TestOpenAIResponsesWebSocket_RequestCanceledBeforeFirstMessageIsInfo',
+              'TestOpenAIResponsesWebSocket_FirstMessageTimeoutUsesConfig',
+          }
+          passed = Counter(e['Test'] for e in events if e.get('Action') == 'pass' and 'Test' in e)
+          assert passed == Counter({name: 20 for name in expected}), passed
+          assert not any(e.get('Action') in {'skip', 'fail'} for e in events), 'unexpected skip/failure'
+          for name in sorted(expected):
+              print(f'{name}: {passed[name]} passes')
+          PY
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue765-ws-first-frame-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ env.ISSUE765_WS_EVIDENCE }}/

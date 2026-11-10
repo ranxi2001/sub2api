@@ -1,0 +1,61 @@
+name: Quality OAuth 401 safety
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/quality_oauth_401*'
+      - 'backend/internal/service/account_test_service.go'
+      - 'backend/internal/service/pelican*'
+      - 'backend/internal/service/scheduled_test_port.go'
+      - 'backend/internal/repository/quality_oauth_401*'
+      - 'backend/internal/repository/quality_shared_batch.go'
+      - 'backend/internal/repository/scheduled_test_repo.go'
+      - 'backend/migrations/*quality_oauth_401*'
+      - '.github/workflows/quality-oauth-401.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Record exact head
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head.txt
+          git diff --exit-code
+      - name: Own transport and complete round evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -tags=unit ./internal/service -run '^TestQualityOAuth401' -count=1 -v -timeout=10m) 2>&1 | tee evidence/unit.log
+          if grep -Eq -- '--- SKIP:|no tests to run' evidence/unit.log; then exit 1; fi
+          for name in DirectSourceExcludesTicketsAndPlugins RevocationRequiresStructuredCode EvidenceRequiresCompleteOwnCredentialRound PolicyLimitsAndReusableConfig; do
+            grep -F -- "--- PASS: TestQualityOAuth401$name" evidence/unit.log
+          done
+      - name: Durable trust and saved rule version on isolated PostgreSQL
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestQualityOAuth401' -count=1 -v -timeout=20m) 2>&1 | tee evidence/storage.log
+          if grep -Eq -- '--- SKIP:|no tests to run' evidence/storage.log; then exit 1; fi
+          for name in SharedBatchCountsBeforeErrorRedaction SixRoundsSurvivePruningAndDeleteOnlyRule ResetAndTypeCredentialFences UnavailableRequiresCurrentRevoked401 Untrusted401ThenUnavailableNeverDeletes UnavailableUsesOnlyCurrentCredentialTrust SavedRuleVersionRestartsStreak PreservesOtherRuleOwnership KeepsOwnershipAndTemplateDeletionMarker; do
+            grep -F -- "--- PASS: TestQualityOAuth401$name" evidence/storage.log
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: quality-oauth-401-${{ github.event.pull_request.head.sha }}
+          path: evidence/
+          if-no-files-found: error

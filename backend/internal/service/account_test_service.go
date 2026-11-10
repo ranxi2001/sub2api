@@ -1153,6 +1153,16 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if resp.StatusCode == http.StatusTooManyRequests && !aiRecoveryProbe {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
+		// Only an actual own-credential OAuth response can count toward rule
+		// cleanup. BPS, SIWC, borrowed credentials and acquisition failures do not.
+		if resp.StatusCode == http.StatusUnauthorized && isOAuth && credentialAccount.ID == account.ID && authToken != "" && req.Header.Get("Authorization") == "Bearer "+authToken && !IsAstraSourceAcquisition(ctx) && !aiRecoveryProbe {
+			if options, ok := pelicanTestOptionsFromContext(ctx); ok && options.directOAuth401 != nil && options.nativeOAuthTransport != nil && *options.nativeOAuthTransport {
+				*options.directOAuth401 = true
+				if options.directOAuthRevoked401 != nil {
+					*options.directOAuthRevoked401 = qualityOAuth401RevokedCode(body)
+				}
+			}
+		}
 		// 401 Unauthorized: 标记账号为永久错误
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) && !aiRecoveryProbe {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
