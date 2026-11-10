@@ -52,6 +52,7 @@ func TestAPIKeyFallbackChecksSavedPolicyAndAccountEligibility(t *testing.T) {
 			if tc.shadow {
 				parent := mustCreateAccount(t, client, &service.Account{Name: "fallback-parent"})
 				account.ParentAccountID = &parent.ID
+				account.QuotaDimension = service.QuotaDimensionSpark
 			}
 			account = mustCreateAccount(t, client, account)
 			now := time.Now().UTC().Truncate(time.Microsecond)
