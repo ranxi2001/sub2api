@@ -7,6 +7,7 @@ on:
       - '.github/workflows/openai-sse-delivery.yml'
       - 'backend/internal/config/**'
       - 'backend/internal/pkg/requesttiming/**'
+      - 'backend/internal/handler/openai_ws_sse_incomplete*'
       - 'backend/internal/service/openai_*'
       - 'backend/internal/service/plugin_*'
       - 'frontend/src/components/admin/usage/**'
@@ -38,10 +39,136 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Regional response ownership RED on pre-fix production code
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          evidence="$RUNNER_TEMP/pr777-response-ownership"
+          mkdir -p "$evidence"
+          baseline_sha=978ad19f2299a61f3ec1a158a1c79203bbfc0bcb
+          production_path=backend/internal/service/openai_ws_sse_incomplete.go
+          test_name=TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse
+          test_path=backend/internal/handler/openai_ws_sse_incomplete_regional_test.go
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          baseline_checkout=$(mktemp -d "$RUNNER_TEMP/pr777-baseline.XXXXXX")
+          git clone --no-hardlinks --no-checkout "$GITHUB_WORKSPACE" "$baseline_checkout"
+          git -C "$baseline_checkout" checkout --detach "$CANDIDATE_SHA"
+          git -C "$baseline_checkout" restore --source="$baseline_sha" --worktree -- "$production_path"
+          test "$(git -C "$baseline_checkout" diff --name-only)" = "$production_path"
+          test "$(git -C "$baseline_checkout" hash-object "$production_path")" = "$(git rev-parse "$baseline_sha:$production_path")"
+          test "$(git -C "$baseline_checkout" hash-object "$test_path")" = "$(git rev-parse "HEAD:$test_path")"
+          printf 'candidate=%s\nbaseline_production=%s\nrestored_path=%s\n' "$CANDIDATE_SHA" "$baseline_sha" "$production_path" > "$evidence/identity.txt"
+          git -C "$baseline_checkout" diff -- "$production_path" > "$evidence/baseline-production.diff"
+          cd "$baseline_checkout/backend"
+          set +e
+          go test -race -v -tags=unit ./internal/handler -run "^${test_name}$" -count=1 -timeout=3m 2>&1 | tee "$evidence/baseline.log"
+          baseline_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$baseline_exit" > "$evidence/baseline.exitcode"
+          test "$baseline_exit" -eq 1
+          if grep -Eq 'WARNING: DATA RACE|build failed|setup failed|no tests to run|panic:|fatal error:|test timed out|accept local WS:|read response.create:|write local WS event:|expected response.create, got' "$evidence/baseline.log"; then
+            echo 'RED must fail on the ownership assertions, not compilation or fixture errors.'
+            exit 1
+          fi
+          for mode in json sse; do
+            for close_mode in eof 1000; do
+              grep -F -- "--- FAIL: $test_name/$mode/$close_mode " "$evidence/baseline.log"
+            done
+          done
+          test "$(grep -Fc 'regional JSON must remain one complete JSON response' "$evidence/baseline.log")" -eq 2
+          test "$(grep -Fc 'regional SSE must have exactly one failed terminal' "$evidence/baseline.log")" -eq 2
+          test "$(grep -Fc 'stages=[admit reserve start] reservations=1 starts=1 completed=0 canceled=0 started=true reserved_model="gpt-5.4" maximum=1200000 expected_maximum=1200000 handshakes=1 submissions=1 http_replays=0 context_error=<nil>' "$evidence/baseline.log")" -eq 4
+      - name: Regional prepared JSON RED on pre-fix forwarder
+        if: ${{ !cancelled() }}
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          evidence="$RUNNER_TEMP/pr777-response-ownership"
+          mkdir -p "$evidence"
+          baseline_sha=3347ece6f10e8937f7980ce830c73187c1ab6005
+          production_path=backend/internal/service/openai_ws_forwarder_v2.go
+          test_name=TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse
+          test_path=backend/internal/handler/openai_ws_sse_incomplete_regional_test.go
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          baseline_checkout=$(mktemp -d "$RUNNER_TEMP/pr777-prepared-baseline.XXXXXX")
+          git clone --no-hardlinks --no-checkout "$GITHUB_WORKSPACE" "$baseline_checkout"
+          git -C "$baseline_checkout" checkout --detach "$CANDIDATE_SHA"
+          git -C "$baseline_checkout" restore --source="$baseline_sha" --worktree -- "$production_path"
+          test "$(git -C "$baseline_checkout" diff --name-only)" = "$production_path"
+          test "$(git -C "$baseline_checkout" hash-object "$production_path")" = "$(git rev-parse "$baseline_sha:$production_path")"
+          test "$(git -C "$baseline_checkout" hash-object "$test_path")" = "$(git rev-parse "HEAD:$test_path")"
+          printf 'candidate=%s\nbaseline_production=%s\nrestored_path=%s\n' "$CANDIDATE_SHA" "$baseline_sha" "$production_path" > "$evidence/prepared-identity.txt"
+          git -C "$baseline_checkout" diff -- "$production_path" > "$evidence/prepared-baseline-production.diff"
+          cd "$baseline_checkout/backend"
+          set +e
+          go test -race -v -tags=unit ./internal/handler -run "^${test_name}$" -count=1 -timeout=3m 2>&1 | tee "$evidence/prepared-baseline.log"
+          baseline_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$baseline_exit" > "$evidence/prepared-baseline.exitcode"
+          test "$baseline_exit" -eq 1
+          peer_close_pattern='^[[:space:]]+openai_ws_sse_incomplete_regional_test\.go:[0-9]+: read response\.create: failed to get reader: received close frame: status = StatusNormalClosure and reason = ""$'
+          test "$(grep -Ec "$peer_close_pattern" "$evidence/prepared-baseline.log")" -eq 4
+          grep -Ev "$peer_close_pattern" "$evidence/prepared-baseline.log" > "$evidence/prepared-baseline-other.log"
+          if grep -Eq 'WARNING: DATA RACE|build failed|setup failed|no tests to run|panic:|fatal error:|test timed out|accept local WS:|read response.create:|write local WS event:|expected response.create, got' "$evidence/prepared-baseline-other.log"; then
+            echo 'Prepared RED must reject before Start and submission, without unrelated fixture errors.'
+            exit 1
+          fi
+          for mode in json sse; do
+            for close_mode in eof 1000; do
+              grep -F -- "--- FAIL: $test_name/$mode/$close_mode " "$evidence/prepared-baseline.log"
+              awk -v case_name="$test_name/$mode/$close_mode" '
+                $0 == "=== RUN   " case_name { active = 1; next }
+                active && /^=== RUN   / { active = 0 }
+                active && /Messages:[[:space:]]+exactly one billable response\.create$/ { message++ }
+                active && /expected: int\(1\)$/ { expected++ }
+                active && /actual[[:space:]]*: int32\(0\)$/ { actual++ }
+                active && /regional handler diagnostic: status=502 .*stages=\[admit reserve cancel_before_start\] reservations=1 starts=0 completed=0 canceled=1 started=false reserved_model="gpt-5\.4" maximum=1200000 expected_maximum=1200000 handshakes=1 submissions=0 http_replays=0 context_error=<nil>$/ { diagnostic++ }
+                END { if (message != 1 || expected != 1 || actual != 1 || diagnostic != 1) exit 1 }
+              ' "$evidence/prepared-baseline.log"
+            done
+          done
+      - name: Regional response ownership GREEN on clean exact candidate
+        if: ${{ !cancelled() }}
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          evidence="$RUNNER_TEMP/pr777-response-ownership"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          cd backend
+          set +e
+          go test -race -v -tags=unit ./internal/service ./internal/handler -run '^TestOpenAIWSSSEIncomplete' -count=1 -timeout=8m 2>&1 | tee "$evidence/head.log"
+          head_exit=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$head_exit" > "$evidence/head.exitcode"
+          test "$head_exit" -eq 0
+          for mode in json sse; do
+            for close_mode in eof 1000; do
+              grep -F -- "--- PASS: TestOpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse/$mode/$close_mode " "$evidence/head.log"
+            done
+          done
+          grep -F -- '--- PASS: TestOpenAIWSSSEIncompleteRegionalPayloadTypes (' "$evidence/head.log"
+          grep -F -- '--- PASS: TestOpenAIWSSSEIncompleteRegionalPreparedPayloadBounds (' "$evidence/head.log"
+          test "$(grep -Fc 'stages=[admit reserve start] reservations=1 starts=1 completed=0 canceled=0 started=true reserved_model="gpt-5.4" maximum=1200000 expected_maximum=1200000 handshakes=1 submissions=1 http_replays=0 context_error=<nil>' "$evidence/head.log")" -eq 4
+          test -z "$(git status --porcelain)"
+      - name: Upload regional ownership and prepared JSON RED and GREEN evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr777-response-ownership-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/pr777-response-ownership/
+          if-no-files-found: error
       - name: Collector and content projection regressions
         working-directory: backend
         run: go test -race ./internal/pkg/requesttiming -count=1
@@ -52,8 +179,13 @@ jobs:
         working-directory: backend
         run: >-
           go test -race -tags=unit ./internal/service
-          -run 'Test(PluginSSE|OpenAISSE|OpenAIWS.*Timing|OpenAIWSSSEAcceleration|OpenAIResponsesTTFT|WSSemanticFirstToken|PriorityResponsesSemanticEventContext|OpenAINativeFirstOutput|Issue605)'
+          -run 'Test(PluginSSE|OpenAISSE|OpenAIWS.*Timing|OpenAIWSSSEAcceleration|OpenAIWSSSEIncomplete|OpenAIResponsesTTFT|WSSemanticFirstToken|PriorityResponsesSemanticEventContext|OpenAINativeFirstOutput|Issue605)'
           -count=1 -timeout=8m
+      - name: Accelerated WS incomplete response ownership
+        working-directory: backend
+        run: >-
+          go test -race -tags=unit ./internal/handler
+          -run '^TestOpenAIWSSSEIncomplete' -count=1 -timeout=3m
 
   frontend:
     runs-on: ubuntu-latest
