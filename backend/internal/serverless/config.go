@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const SettingKey = "serverless_routing_v1"
@@ -44,12 +45,13 @@ type Store interface {
 
 // Runtime values come from trusted process configuration, never a public form.
 type Runtime struct {
-	ID       string
-	Endpoint string
-	Region   string
-	Secret   string
-	Version  string
-	Gateway  bool
+	ID                    string
+	Endpoint              string
+	Region                string
+	Secret                string
+	Version               string
+	Gateway               bool
+	ResponseHeaderTimeout time.Duration
 }
 
 func ValidateEndpoint(raw string) error {
@@ -103,6 +105,9 @@ func Validate(c Config) error {
 	return nil
 }
 func ValidateRuntime(r Runtime) error {
+	if r.ResponseHeaderTimeout < 0 || r.ResponseHeaderTimeout > 24*time.Hour {
+		return errors.New("runtime.serverless_response_header_timeout must be between 0 and 86400 seconds")
+	}
 	if r.Secret != "" && len(r.Secret) < 32 {
 		return errors.New("serverless cluster secret must be at least 32 bytes")
 	}

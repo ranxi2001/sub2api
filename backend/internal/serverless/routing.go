@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -281,6 +283,7 @@ func approved(cfg Config, p Pod, newBinding bool) bool {
 	return false
 }
 func (m *Manager) forward(c *gin.Context, p Pod, clientIP string) {
+	started := time.Now()
 	target, err := url.Parse(p.Endpoint)
 	if err != nil {
 		failure(c, "Invalid Pod endpoint")
@@ -292,6 +295,9 @@ func (m *Manager) forward(c *gin.Context, p Pod, clientIP string) {
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
 			r.Out.Host = r.In.Host // Preserve public origin for generated capability URLs.
+			if requestID, _ := r.In.Context().Value(ctxkey.RequestID).(string); requestID != "" {
+				r.Out.Header.Set("X-Request-ID", requestID)
+			}
 			r.Out.Header.Del("Forwarded")
 			r.Out.Header.Del("X-Forwarded-For")
 			r.Out.Header.Del("X-Real-IP")
@@ -304,7 +310,20 @@ func (m *Manager) forward(c *gin.Context, p Pod, clientIP string) {
 			r.Out.Header.Set(forwardHeader, string(encoded))
 		},
 		ModifyResponse: func(r *http.Response) error { r.Header.Set("X-Sub2api-Pod", p.ID); return nil },
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// Raw transport errors may contain capability URLs or credentials.
+			requestID, _ := r.Context().Value(ctxkey.RequestID).(string)
+			clientRequestID, _ := r.Context().Value(ctxkey.ClientRequestID).(string)
+			m.logger.WarnContext(r.Context(), "serverless.forward_failed",
+				slog.String("component", "serverless"),
+				slog.String("request_id", requestID),
+				slog.String("client_request_id", clientRequestID),
+				slog.String("pod_id", p.ID),
+				slog.String("error_kind", forwardErrorKind(err)),
+				slog.String("error_type", fmt.Sprintf("%T", err)),
+				slog.Int64("duration_ms", time.Since(started).Milliseconds()),
+				slog.Int64("response_header_timeout_ms", m.transport.ResponseHeaderTimeout.Milliseconds()),
+			)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(503)
 			_, _ = w.Write([]byte("{\"error\":{\"type\":\"serverless_unavailable\",\"message\":\"Pod transfer failed; request was not retried\"}}"))

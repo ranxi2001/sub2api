@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -50,6 +51,7 @@ type Manager struct {
 	boot      string
 	http      *http.Client
 	transport *http.Transport
+	logger    *slog.Logger
 	mu        sync.Mutex
 	config    Config
 	expires   time.Time
@@ -77,10 +79,13 @@ func New(r Runtime, cache *redis.Client, store Store) (*Manager, error) {
 		return nil, err
 	}
 	tr := &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: time.Minute, MaxIdleConns: 128, MaxIdleConnsPerHost: 16, IdleConnTimeout: time.Minute}
-	m := &Manager{runtime: r, redis: cache, store: store, boot: randomID(), transport: tr, health: map[string]healthResult{}}
+		TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: r.ResponseHeaderTimeout, MaxIdleConns: 128, MaxIdleConnsPerHost: 16, IdleConnTimeout: time.Minute}
+	m := &Manager{runtime: r, redis: cache, store: store, boot: randomID(), transport: tr, logger: slog.Default(), health: map[string]healthResult{}}
 	m.geo = NewGeoJSResolver(cache)
-	m.http = &http.Client{Transport: tr, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// Probes retain their own short total budget, independent of business waits.
+	probeTransport := tr.Clone()
+	probeTransport.ResponseHeaderTimeout = 0
+	m.http = &http.Client{Transport: probeTransport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return m, nil
 }
 func (m *Manager) Config(ctx context.Context) (Config, error) {
@@ -159,6 +164,7 @@ func (m *Manager) Stop() {
 		<-m.done
 	}
 	m.transport.CloseIdleConnections()
+	m.http.CloseIdleConnections()
 }
 func (m *Manager) heartbeat(parent context.Context) {
 	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
