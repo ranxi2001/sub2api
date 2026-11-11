@@ -7,7 +7,9 @@ import { apiClient } from '@/api/client'
 import type { PriorityAnalysis, PriorityCandidate, PrioritySchedulingConfig } from '@/api/admin/priorityScheduling'
 import { emptyPerformanceConfig, type AccountPerformance } from '@/types/accountPerformance'
 
-export const fixture = vi.hoisted(() => ({ auth: null as any }))
+// The mock reads auth only when the component mounts, after beforeEach.
+// Export ordinary state: Vitest does not allow exporting vi.hoisted variables.
+export const fixture = { auth: null as any }
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => fixture.auth }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
