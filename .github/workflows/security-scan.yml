@@ -38,7 +38,7 @@ jobs:
           govulncheck ./...
 
   frontend-security:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
