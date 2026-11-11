@@ -16,6 +16,8 @@
 
 开关只控制结算，**不会强制改写出站请求，也不保证上游提供加速**。开启前应确认该上游的响应档位声明与收费约定。
 
+自营 Codex OAuth 中转透传 `default`、导致下游 Fast 降价的情况，使用[可信 OAuth 中转 Fast 兼容选项](openai-oauth-relay-fast-billing.md)。本响应档位计费开关优先级更高，两种上游约定不应同时开启。
+
 ## 档位如何选择
 
 开启后，优先使用上游返回的已知 `service_tier`。Responses 流式请求使用终态事件；终态只返回档位、不重复 `model` 时也能识别。非流式和 Chat Completions 响应读取响应中声明的档位，非终态 Responses 事件中的请求回显不作为实际档位。

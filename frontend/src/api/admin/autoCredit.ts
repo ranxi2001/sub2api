@@ -2,6 +2,7 @@ import { apiClient } from '../client'
 
 export interface AutoCreditConfig {
   enabled: boolean
+  notify_email?: boolean
   threshold: string | null
   amount: string | null
   cap: string | null

@@ -65,7 +65,7 @@ func (h *UserHandler) SaveAutoCredit(c *gin.Context) {
 		return
 	}
 	for k := range fields {
-		if k != "version" && k != "enabled" && k != "threshold" && k != "amount" && k != "cap" {
+		if k != "version" && k != "enabled" && k != "notify_email" && k != "threshold" && k != "amount" && k != "cap" {
 			response.BadRequest(c, "Unknown auto-credit field")
 			return
 		}
@@ -77,7 +77,14 @@ func (h *UserHandler) SaveAutoCredit(c *gin.Context) {
 			return
 		}
 	}
-	state, err := h.autoCredit.Save(c.Request.Context(), uid, actor, service.AutoCreditPatch{Version: *version, Enabled: enabled, Threshold: fields["threshold"], Amount: fields["amount"], Cap: fields["cap"]})
+	var notifyEmail *bool
+	if raw, exists := fields["notify_email"]; exists {
+		if json.Unmarshal(raw, &notifyEmail) != nil || notifyEmail == nil {
+			response.BadRequest(c, "Notify email must be a boolean")
+			return
+		}
+	}
+	state, err := h.autoCredit.Save(c.Request.Context(), uid, actor, service.AutoCreditPatch{Version: *version, Enabled: enabled, NotifyEmail: notifyEmail, Threshold: fields["threshold"], Amount: fields["amount"], Cap: fields["cap"]})
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

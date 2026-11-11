@@ -29,6 +29,7 @@ export const NEW_FEATURE_NOTICES = {
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   profitOperationsTimeRanges: 'profit-operations-time-ranges-initial-announcement',
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
+  vipAutoCreditEmail: 'vip-auto-credit-email',
   oauthInitialTOTPRotation429: 'oauth-initial-totp-rotation-on-429-initial-announcement',
   oauthInitialDisableScheduling429: 'oauth-initial-disable-scheduling-on-429-initial-announcement',
   oauthInitialWSSettings: 'oauth-initial-ws-settings-initial-announcement',

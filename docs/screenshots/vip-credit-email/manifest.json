@@ -1,0 +1,265 @@
+{
+  "head": "cf4c106178b01607978c59920b89f2f798cfbec1",
+  "baseline": "6fa7fb86eae7c732794450646dc13831dce87ff1",
+  "baselineComponentBlob": "5dbb256948478996ccaabf019a29c84ac951a1f0",
+  "cssBlob": "324ded6b9d7d2c946b6d38ca9355c8dd2393086b",
+  "geometry": [
+    {
+      "lang": "zh",
+      "device": "desktop",
+      "columns": 3,
+      "display": "grid",
+      "overflow": false,
+      "formWidth": 846,
+      "panelWidth": 896,
+      "innerWidth": 1280
+    },
+    {
+      "lang": "zh",
+      "device": "desktop",
+      "columns": 3,
+      "display": "grid",
+      "overflow": false,
+      "formWidth": 846,
+      "panelWidth": 896,
+      "innerWidth": 1280
+    },
+    {
+      "lang": "zh",
+      "device": "mobile",
+      "columns": 1,
+      "display": "grid",
+      "overflow": false,
+      "formWidth": 340,
+      "panelWidth": 374,
+      "innerWidth": 390
+    },
+    {
+      "lang": "zh",
+      "device": "mobile",
+      "columns": 1,
+      "display": "grid",
+      "overflow": false,
+      "formWidth": 340,
+      "panelWidth": 374,
+      "innerWidth": 390
+    },
+    {
+      "lang": "en",
+      "device": "desktop",
+      "columns": 3,
+      "display": "grid",
+      "overflow": false,
+      "formWidth": 846,
+      "panelWidth": 896,
+      "innerWidth": 1280
+    },
+    {
+      "lang": "en",
+      "device": "desktop",
+      "columns": 3,
+      "display": "grid",
+      "overflow": false,
+      "formWidth": 846,
+      "panelWidth": 896,
+      "innerWidth": 1280
+    },
+    {
+      "lang": "en",
+      "device": "mobile",
+      "columns": 1,
+      "display": "grid",
+      "overflow": false,
+      "formWidth": 340,
+      "panelWidth": 374,
+      "innerWidth": 390
+    },
+    {
+      "lang": "en",
+      "device": "mobile",
+      "columns": 1,
+      "display": "grid",
+      "overflow": false,
+      "formWidth": 340,
+      "panelWidth": 374,
+      "innerWidth": 390
+    }
+  ],
+  "interactions": [
+    {
+      "lang": "zh",
+      "device": "desktop",
+      "saved": {
+        "version": 2,
+        "enabled": true,
+        "notify_email": false,
+        "threshold": "50.00000000",
+        "amount": "300.00000000",
+        "cap": "500.00000000"
+      },
+      "requests": [
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "put",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "put",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        }
+      ]
+    },
+    {
+      "lang": "zh",
+      "device": "mobile",
+      "saved": {
+        "version": 2,
+        "enabled": true,
+        "notify_email": false,
+        "threshold": "50.00000000",
+        "amount": "300.00000000",
+        "cap": "500.00000000"
+      },
+      "requests": [
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "put",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "put",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        }
+      ]
+    },
+    {
+      "lang": "en",
+      "device": "desktop",
+      "saved": {
+        "version": 2,
+        "enabled": true,
+        "notify_email": false,
+        "threshold": "50.00000000",
+        "amount": "300.00000000",
+        "cap": "500.00000000"
+      },
+      "requests": [
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "put",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "put",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        }
+      ]
+    },
+    {
+      "lang": "en",
+      "device": "mobile",
+      "saved": {
+        "version": 2,
+        "enabled": true,
+        "notify_email": false,
+        "threshold": "50.00000000",
+        "amount": "300.00000000",
+        "cap": "500.00000000"
+      },
+      "requests": [
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "put",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "put",
+          "url": "/admin/users/2/auto-credit"
+        },
+        {
+          "method": "get",
+          "url": "/admin/users/2/auto-credit"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "browserWarnings": [],
+  "boundary": "GitHub Actions Chromium; actual component and CSS with synthetic API/auth. PNGs are evidence artifacts, not native PR attachments.",
+  "captures": [
+    {
+      "file": "zh-desktop-before.png",
+      "sha256": "c2b2a68aa512377de325824ac38506e023ae4ade280a2c4a33ae575dd7f358a1",
+      "bytes": 90297,
+      "source": "6fa7fb86eae7c732794450646dc13831dce87ff1",
+      "lang": "zh",
+      "device": "desktop"
+    },
+    {
+      "file": "zh-desktop-after-default-off.png",
+      "sha256": "25ff0d4978bc9ce947d8e09f990f7b3c79cca825e197152f8e96d8f4e197b6e7",
+      "bytes": 105274,
+      "source": "cf4c106178b01607978c59920b89f2f798cfbec1",
+      "lang": "zh",
+      "device": "desktop"
+    },
+    {
+      "file": "zh-mobile-before.png",
+      "sha256": "832dfe6e8dbc63add6ddd2dc46b779283ad851f2f9ff3b46a40b68c106890329",
+      "bytes": 70305,
+      "source": "6fa7fb86eae7c732794450646dc13831dce87ff1",
+      "lang": "zh",
+      "device": "mobile"
+    },
+    {
+      "file": "zh-mobile-after-saved-reloaded-on-settings.png",
+      "sha256": "193314cc368cc996894c9e2d97178ae4255a3e885c9fbfd9a32040e79e3f894d",
+      "bytes": 80092,
+      "source": "cf4c106178b01607978c59920b89f2f798cfbec1",
+      "lang": "zh",
+      "device": "mobile"
+    }
+  ],
+  "artifact_id": 13836680525,
+  "run_url": "https://github.com/ranxi2001/sub2api/actions/runs/42976773223"
+}

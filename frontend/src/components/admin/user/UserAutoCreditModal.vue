@@ -17,6 +17,13 @@
         <form class="space-y-3" @submit.prevent="save">
           <p class="text-sm text-gray-600 dark:text-gray-300">{{ t('autoCredit.explanation') }}</p>
           <label class="flex items-center gap-2 font-medium"><input v-model="form.enabled" type="checkbox" name="enabled" :disabled="busy || loading" />{{ t('autoCredit.enabled') }}</label>
+          <div class="space-y-1">
+            <div class="flex items-start gap-2">
+              <label class="flex min-w-0 items-start gap-2 font-medium"><input v-model="form.notify_email" type="checkbox" name="notify_email" class="mt-1 shrink-0" :disabled="busy || loading" /><span>{{ t('autoCredit.notifyEmail') }}</span></label>
+              <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.vipAutoCreditEmail" :user-id="auth.user?.id" />
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('autoCredit.notifyEmailHelp') }}</p>
+          </div>
           <div class="grid gap-3 sm:grid-cols-3">
             <label v-for="field in moneyFields" :key="field" class="block text-sm">
               <span class="mb-1 block">{{ t(`autoCredit.${field}`) }}</span>
@@ -76,7 +83,7 @@ const state = ref<AutoCreditState | null>(null)
 const status = ref<CreditStatus>('all')
 const statuses: CreditStatus[] = ['all', 'pending', 'settled']
 const moneyFields = ['threshold', 'amount', 'cap'] as const
-const form = reactive({ enabled: false, threshold: '', amount: '', cap: '' })
+const form = reactive({ enabled: false, notify_email: false, threshold: '', amount: '', cap: '' })
 const error = ref('')
 const loading = ref(false)
 const busy = ref(false)
@@ -92,6 +99,7 @@ function message(e: unknown): string {
 function apply(s: AutoCreditState) {
   state.value = s
   form.enabled = s.config.enabled
+  form.notify_email = s.config.notify_email ?? false
   for (const field of moneyFields) form[field] = s.config[field] ?? ''
 }
 async function load(older = false) {
@@ -111,7 +119,7 @@ async function save() {
   const current = generation
   busy.value = true; error.value = ''
   try {
-    const s = await saveAutoCredit(props.user.id, { version: state.value.config.version, enabled: form.enabled,
+    const s = await saveAutoCredit(props.user.id, { version: state.value.config.version, enabled: form.enabled, notify_email: form.notify_email,
       threshold: form.threshold.trim() || null, amount: form.amount.trim() || null, cap: form.cap.trim() || null })
     if (current !== generation) return
     status.value = 'all'; confirming.value = null; apply(s); emit('success')

@@ -16,18 +16,20 @@ var (
 // RawMessage distinguishes omitted fields from explicit null. Money is always
 // decimal text on this API; float64 is never authoritative for new ledger math.
 type AutoCreditPatch struct {
-	Version   int64           `json:"version"`
-	Enabled   *bool           `json:"enabled"`
-	Threshold json.RawMessage `json:"threshold"`
-	Amount    json.RawMessage `json:"amount"`
-	Cap       json.RawMessage `json:"cap"`
+	Version     int64           `json:"version"`
+	Enabled     *bool           `json:"enabled"`
+	NotifyEmail *bool           `json:"notify_email"`
+	Threshold   json.RawMessage `json:"threshold"`
+	Amount      json.RawMessage `json:"amount"`
+	Cap         json.RawMessage `json:"cap"`
 }
 type AutoCreditConfig struct {
-	Enabled   bool    `json:"enabled"`
-	Threshold *string `json:"threshold"`
-	Amount    *string `json:"amount"`
-	Cap       *string `json:"cap"`
-	Version   int64   `json:"version"`
+	Enabled     bool    `json:"enabled"`
+	NotifyEmail bool    `json:"notify_email"`
+	Threshold   *string `json:"threshold"`
+	Amount      *string `json:"amount"`
+	Cap         *string `json:"cap"`
+	Version     int64   `json:"version"`
 }
 type AutoCreditEntry struct {
 	ID            int64      `json:"id"`
