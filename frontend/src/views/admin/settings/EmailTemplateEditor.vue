@@ -55,6 +55,7 @@
           <div>
             <label class="input-label" for="email-template-event">
               {{ t("admin.settings.emailTemplates.event") }}
+              <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.vipAutoCreditEmail" :user-id="auth.user?.id" />
             </label>
             <select
               id="email-template-event"
@@ -232,6 +233,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import NewFeatureBadge from "@/components/common/NewFeatureBadge.vue";
+import { NEW_FEATURE_NOTICES } from "@/constants/newFeatureNotices";
+import { useAuthStore } from "@/stores/auth";
 import { adminAPI } from "@/api";
 import type {
   EmailTemplateEventOption,
@@ -258,6 +262,8 @@ const fallbackPlaceholders = [
   "{{threshold}}",
   "{{recharge_url}}",
   "{{recharge_amount}}",
+  "{{credit_amount}}",
+  "{{ledger_id}}",
   "{{order_id}}",
   "{{unsubscribe_url}}",
   "{{account_id}}",
@@ -339,7 +345,9 @@ function localText(zh: string, en: string): string {
   return locale.value.toLowerCase().startsWith("zh") ? zh : en;
 }
 
+const auth = useAuthStore();
 const eventDisplayMeta: Record<string, EventDisplayMeta> = {
+  "balance.auto_credit_success": { label: "VIP 自动垫付成功", timing: "管理员为 VIP 用户开启成功通知后，每笔新增垫付成功入账时通知该 VIP 账号邮箱。默认关闭。", categoryLabel: "计费" },
   "auth.verify_code": {
     label: "邮箱验证码",
     timing: "注册、绑定邮箱、OAuth 补全邮箱或 TOTP 邮箱校验时发送。",
@@ -404,6 +412,7 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
 };
 
 const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
+  "balance.auto_credit_success": { label: "VIP Automatic Credit Success", timing: "Sent to the VIP account email after each new committed advance when enabled by an administrator. Off by default.", categoryLabel: "Billing" },
   "auth.verify_code": {
     label: "Email Verification Code",
     timing: "Sent for registration, email binding, OAuth pending email completion, or TOTP email verification.",

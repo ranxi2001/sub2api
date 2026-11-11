@@ -34,10 +34,90 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Mandatory real PostgreSQL ledger, admission, concurrency and upgrade regressions
+      - name: Behavioral RED against pinned original repository in disposable checkout
+        if: github.head_ref == 'feat/vip-credit-email' || github.ref_name == 'feat/vip-credit-email'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/vip-credit-logs"
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres -T template0 -E UTF8 vip_credit_red
+          export VIP_CREDIT_TEST_DSN='host=127.0.0.1 port=5432 user=postgres password=fixture-only dbname=vip_credit_red sslmode=disable'
+          target=backend/internal/repository/auto_credit_repo.go
+          cp "$target" "$RUNNER_TEMP/auto_credit_repo.green.go"
+          trap 'cp "$RUNNER_TEMP/auto_credit_repo.green.go" "$target"' EXIT
+          git show 6fa7fb86eae7c732794450646dc13831dce87ff1:"$target" > "$target"
+          set +e
+          (cd backend && go test -p 1 -tags=vipcreditintegration ./internal/repository -run '^TestVipCreditEmail(ConfigCompatibility|CommittedLedger|SMTPTemplateAndRetry)$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/vip-credit-logs/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/vip-credit-logs/red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|undefined:|no tests to run' "$RUNNER_TEMP/vip-credit-logs/red.log"
+          grep -q -- '--- FAIL: TestVipCreditEmailConfigCompatibility' "$RUNNER_TEMP/vip-credit-logs/red.log"
+          grep -q -- '--- FAIL: TestVipCreditEmailCommittedLedger' "$RUNNER_TEMP/vip-credit-logs/red.log"
+          grep -q -- '--- FAIL: TestVipCreditEmailSMTPTemplateAndRetry' "$RUNNER_TEMP/vip-credit-logs/red.log"
+      - name: Behavioral RED for SMTP acceptance during shutdown against reviewed worker
+        if: github.head_ref == 'feat/vip-credit-email' || github.ref_name == 'feat/vip-credit-email'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres -T template0 -E UTF8 vip_credit_shutdown_red
+          export VIP_CREDIT_TEST_DSN='host=127.0.0.1 port=5432 user=postgres password=fixture-only dbname=vip_credit_shutdown_red sslmode=disable'
+          target=backend/internal/service/auto_credit_email.go
+          cp "$target" "$RUNNER_TEMP/auto_credit_email.green.go"
+          trap 'cp "$RUNNER_TEMP/auto_credit_email.green.go" "$target"' EXIT
+          git show 7b7620487b88cd62b968c51aeebdffb3c1f9e7fe:"$target" > "$target"
+          set +e
+          (cd backend && go test -p 1 -tags=vipcreditintegration ./internal/repository -run '^TestVipCreditEmailSMTPTemplateAndRetry$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|undefined:|no tests to run' "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log"
+          grep -q -- '--- FAIL: TestVipCreditEmailSMTPTemplateAndRetry' "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log"
+          grep -q 'accepted SMTP during Stop must acknowledge the outbox' "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log"
+      - name: Exact same regressions GREEN, real PostgreSQL ledger, admission, mail, concurrency and upgrades
         working-directory: backend
-        run: go test -race -p 1 -tags=vipcreditintegration ./internal/repository -run '^TestVipCredit' -count=1 -v -timeout=10m
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -p 1 -tags=vipcreditintegration ./internal/repository -run '^TestVipCredit' -count=1 -v -timeout=10m | tee "$RUNNER_TEMP/vip-credit-logs/green.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vip-credit-logs-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/vip-credit-logs
+          if-no-files-found: error
+  source-format:
+    if: github.head_ref == 'feat/vip-credit-email' || github.ref_name == 'feat/vip-credit-email'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Format changed Go and regenerate Wire remotely
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'git diff -- "*.go" > "$RUNNER_TEMP/vip-credit-format.patch"' EXIT
+          git diff --name-only 6fa7fb86eae7c732794450646dc13831dce87ff1 HEAD -- '*.go' | xargs -r gofmt -w
+          (cd backend/cmd/server && go run -mod=mod github.com/google/wire/cmd/wire)
+          git diff -- '*.go' > "$RUNNER_TEMP/vip-credit-format.patch"
+          git diff --exit-code -- '*.go'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vip-credit-format-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/vip-credit-format.patch
+          if-no-files-found: error
