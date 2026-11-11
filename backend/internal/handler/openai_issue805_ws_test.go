@@ -353,3 +353,83 @@ func TestIssue805WSUpstreamRejectionNeverDeletesAndRetries(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue805WSNewBOutputWaitsForCrossNodeCommit(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeHTTPBridge} {
+		t.Run(mode, func(t *testing.T) {
+			clients := issue805Redis(t)
+			newCache := func() service.GatewayCache { return repository.NewGatewayCache(clients()) }
+			u := &issue805Oracle{}
+			srv := u.server(t)
+			originalNode := issue805WSNode(t, mode, srv.URL, newCache(), false, false)
+			issue715WSSend(t, originalNode.clientConn, issue715WSCreate("", false))
+			require.Contains(t, string(issue715WSRead(t, originalNode.clientConn)), "fixture-task-reference-715")
+			probe := clients()
+			require.Eventually(t, func() bool {
+				owners := issue805Owners(t, probe)
+				if len(owners) != 1 {
+					return false
+				}
+				for _, raw := range owners {
+					if gjson.Get(raw, "1").Int() != 1 {
+						return false
+					}
+				}
+				return true
+			}, time.Second, 5*time.Millisecond)
+			original := issue805Owners(t, probe)
+			base := newCache()
+			delivery, ok := base.(issue715WSDeliveryCache)
+			require.True(t, ok)
+			barrier := &issue715WSBarrierCache{GatewayCache: base, issue715WSDeliveryCache: delivery, entered: make(chan struct{}), release: make(chan struct{}), observed: make(chan struct{})}
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(barrier.release) }) }
+			defer release()
+			producer := issue805WSNode(t, mode, srv.URL, barrier, true, true)
+			issue715WSSend(t, producer.clientConn, issue715WSCreate("", true))
+			answer := issue715WSRead(t, producer.clientConn)
+			require.Contains(t, string(answer), "fixture-task-produced-by-B")
+			issue715Await(t, barrier.entered) // Finish is reached only after the actual downstream write.
+			pending := issue805Owners(t, probe)
+			require.Len(t, pending, 2)
+			for key, raw := range pending {
+				if old, found := original[key]; found {
+					require.Equal(t, old, raw)
+				} else {
+					require.True(t, strings.HasPrefix(raw, "pending:"), raw)
+					require.Contains(t, raw, `[1,2,`)
+				}
+			}
+			readerBase := newCache()
+			readerDelivery, ok := readerBase.(issue715WSDeliveryCache)
+			require.True(t, ok)
+			observed := make(chan struct{})
+			var observeOnce sync.Once
+			reader := &issue805ReadObserver{GatewayCache: readerBase, issue715WSDeliveryCache: readerDelivery, seen: observed, once: &observeOnce}
+			consumer := issue805WSNode(t, mode, srv.URL, reader, true, true)
+			mixed := strings.Replace(issue715WSCreate("", true), issue715Agent, issue715Agent+","+issue805AgentB, 1)
+			issue715WSSend(t, consumer.clientConn, mixed)
+			issue715Await(t, observed)
+			u.mu.Lock()
+			before := len(u.frames)
+			u.mu.Unlock()
+			require.Equal(t, 2, before, "client-visible B output cannot be consumed on another node before commit")
+			release()
+			require.Equal(t, "response.completed", gjson.GetBytes(issue715WSRead(t, consumer.clientConn), "type").String())
+			for _, node := range []*openAIWSPassthroughHandlerHarness{consumer, producer, originalNode} {
+				issue600Finish(t, node, http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}})
+			}
+			u.mu.Lock()
+			defer u.mu.Unlock()
+			require.Equal(t, []string{"Bearer fixture-ws-one", "Bearer fixture-ws-two", "Bearer fixture-ws-two"}, u.ids)
+			require.JSONEq(t, gjson.Get(mixed, "input").Raw, gjson.GetBytes(u.frames[2], "input").Raw)
+			for key, raw := range issue805Owners(t, probe) {
+				if old, found := original[key]; found {
+					require.Equal(t, old, raw)
+				} else {
+					require.EqualValues(t, 2, gjson.Get(raw, "1").Int(), "new output must retain real B after commit")
+				}
+			}
+		})
+	}
+}
