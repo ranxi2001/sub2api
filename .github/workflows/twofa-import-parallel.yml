@@ -78,6 +78,47 @@ jobs:
           assert.match(regression.failureMessages.join('\n'), /AssertionError/)
           assert.match(regression.failureMessages.join('\n'), /3 times.*1 times|1 times.*3 times/s)
           JS
+      - name: Prove ownership regressions against the independently reviewed implementation
+        env:
+          REVIEW_BASE: 4f49ecf6f2a2eb008cd9510503ceace46590e93f
+        run: |
+          set -euo pipefail
+          review_tree="$RUNNER_TEMP/twofa-ownership-red"
+          mkdir -p "$review_tree"
+          git archive "$REVIEW_BASE" | tar -x -C "$review_tree"
+          cmp frontend/package.json "$review_tree/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$review_tree/frontend/pnpm-lock.yaml"
+          component=frontend/src/components/account/OpenAITwoFAImport.vue
+          git rev-parse "$REVIEW_BASE:$component" > evidence/review-baseline-component-blob.txt
+          git hash-object "$review_tree/$component" > evidence/ownership-red-component-blob.txt
+          cmp evidence/review-baseline-component-blob.txt evidence/ownership-red-component-blob.txt
+          printf '%s\n' "$REVIEW_BASE" > evidence/review-base.txt
+          cp frontend/src/components/account/__tests__/OpenAITwoFAImport.ownership.spec.ts "$review_tree/frontend/src/components/account/__tests__/"
+          sha256sum frontend/src/components/account/__tests__/OpenAITwoFAImport.ownership.spec.ts > evidence/ownership-tests.sha256
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$review_tree/frontend/node_modules"
+          command=(pnpm exec vitest run src/components/account/__tests__/OpenAITwoFAImport.ownership.spec.ts --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/ownership-red.json")
+          printf '%q ' "${command[@]}" > evidence/ownership-red-command.txt
+          set +e
+          (cd "$review_tree/frontend" && "${command[@]}") > evidence/ownership-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/ownership-red.log
+          printf '%s\n' "$result" > evidence/ownership-red-exit.txt
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs'
+          import assert from 'node:assert/strict'
+          const report = JSON.parse(readFileSync('evidence/ownership-red.json', 'utf8'))
+          assert.equal(report.numRuntimeErrorTestSuites ?? 0, 0)
+          assert(report.testResults.every(suite => suite.assertionResults.length > 0))
+          assert.doesNotMatch(readFileSync('evidence/ownership-red.log', 'utf8'), /\[vitest\]|Transform failed|Unhandled Error|SyntaxError/)
+          const tests = report.testResults.flatMap(suite => suite.assertionResults)
+          for (const prefix of ['retains live polling-failed', 'keeps Stop busy', 'fences failed DELETE', 'recovers accepted start IDs through real Axios']) {
+            const regression = tests.find(test => test.title.startsWith(prefix))
+            assert.equal(regression?.status, 'failed', prefix)
+            assert.match(regression.failureMessages.join('\n'), /AssertionError/, prefix)
+          }
+          JS
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -119,7 +160,7 @@ jobs:
       - name: Mounted regressions and affected integration boundaries
         run: |
           set -o pipefail
-          tests=(src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts src/components/account/__tests__/OpenAITwoFAImport.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts src/components/account/__tests__/UpstreamChannelBinding.spec.ts src/components/account/__tests__/CredentialEncryptionSetup.spec.ts src/api/admin/__tests__/accountTokenGuard.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts)
+          tests=(src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts src/components/account/__tests__/OpenAITwoFAImport.ownership.spec.ts src/components/account/__tests__/OpenAITwoFAImport.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts src/components/account/__tests__/UpstreamChannelBinding.spec.ts src/components/account/__tests__/CredentialEncryptionSetup.spec.ts src/api/admin/__tests__/accountTokenGuard.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts)
           command=(pnpm --dir frontend exec vitest run "${tests[@]}" --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/green.json")
           printf '%q ' "${command[@]}" > evidence/green-command.txt
           set +e

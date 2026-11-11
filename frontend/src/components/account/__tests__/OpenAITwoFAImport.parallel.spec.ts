@@ -151,7 +151,7 @@ describe('mounted 2FA bounded account pipelines', () => {
     expect(startTwoFALogin).toHaveBeenCalledTimes(3)
   })
 
-  it.each(['stop', 'unmount'])('%s aborts in-flight requests and never polls late jobs or starts queued accounts', async action => {
+  it.each(['stop', 'unmount'])('%s recovers late start IDs without aborting their POST or starting queued accounts', async action => {
     const starts = new Map(emails.map(email => [email, deferred<TwoFALoginJob>()]))
     vi.mocked(startTwoFALogin).mockImplementation(entry => starts.get(entry.email)!.promise)
     const importCredential = vi.fn().mockResolvedValue('created')
@@ -161,7 +161,7 @@ describe('mounted 2FA bounded account pipelines', () => {
     expect(requests).toHaveLength(3)
     if (action === 'stop') await wrapper.get('button').trigger('click')
     else wrapper.unmount()
-    for (const [, request] of requests) expect(request?.signal?.aborted).toBe(true)
+    for (const [, request] of requests) expect(request?.signal).toBeUndefined()
     for (const email of emails) starts.get(email)!.resolve({ id: email, status: 'running' })
     await flushPromises()
     expect(getTwoFALogin).not.toHaveBeenCalled()

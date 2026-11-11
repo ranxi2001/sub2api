@@ -25,7 +25,7 @@
       <button v-if="busy" type="button" class="btn btn-secondary" :disabled="stopRequested" @click="stop">
         {{ t('tokenGuard.twoFA.stop') }}
       </button>
-      <button v-if="!busy && rows.length" type="button" class="btn btn-secondary" @click="reset">
+      <button v-if="!busy && rows.length" type="button" class="btn btn-secondary" :disabled="hasOwnedJobs" @click="reset">
         {{ t('tokenGuard.twoFA.reset') }}
       </button>
     </div>
@@ -49,6 +49,8 @@ type Row = {
   status: 'pending' | 'login' | 'importing' | 'created' | 'skipped' | 'failed' | 'importFailed'
   credential?: Record<string, unknown>
   jobId?: string
+  cleanup?: Promise<void>
+  retiring?: boolean
 }
 const raw = ref('')
 const encryptionReady = ref(false)
@@ -57,6 +59,7 @@ const rows = ref<Row[]>([])
 const busy = ref(false)
 const stopRequested = ref(false)
 const hasPending = computed(() => rows.value.some(row => row.status !== 'created' && row.status !== 'skipped'))
+const hasOwnedJobs = computed(() => rows.value.some(row => row.jobId || row.cleanup))
 let disposed = false
 let controller: AbortController | undefined
 const pipelineLimit = 3
@@ -64,7 +67,7 @@ const pipelineLimit = 3
 function stop() {
   stopRequested.value = true
   controller?.abort()
-  for (const row of rows.value) void discardJob(row)
+  for (const row of rows.value) void discardJob(row).catch(() => {})
 }
 
 function pollDelay(signal: AbortSignal) {
@@ -80,12 +83,18 @@ function pollDelay(signal: AbortSignal) {
   })
 }
 
-async function discardJob(row: Row) {
-  if (!row.jobId) return
+function discardJob(row: Row): Promise<void> {
+  if (row.cleanup) return row.cleanup
+  if (!row.jobId) return Promise.resolve()
   const id = row.jobId
-  row.jobId = undefined
-  // Server expiry also cleans up jobs if the browser loses its connection.
-  await deleteTwoFALogin(id).catch(() => {})
+  row.retiring = true
+  // Keep both ownership and the shared cleanup promise until DELETE confirms
+  // retirement. A failed DELETE fences this slot and identity across Retry.
+  row.cleanup = deleteTwoFALogin(id).then(() => {
+    row.jobId = undefined
+    row.retiring = false
+  }).finally(() => { row.cleanup = undefined })
+  return row.cleanup
 }
 
 async function run() {
@@ -104,9 +113,13 @@ async function run() {
   stopRequested.value = false
   controller = new AbortController()
   const { signal } = controller
+  const batchRows = rows.value
   emit('busy', true)
   try {
-    const pending = rows.value.filter(row => row.status !== 'created' && row.status !== 'skipped')
+    // Retained jobs already consume capacity. Resume/retire them before
+    // admitting fresh rows, including when an earlier attempt lost polling.
+    const pending = batchRows.filter(row => row.status !== 'created' && row.status !== 'skipped')
+      .sort((a, b) => Number(Boolean(b.jobId)) - Number(Boolean(a.jobId)))
     let next = 0
     const worker = async () => {
       while (!signal.aborted && !disposed) {
@@ -114,11 +127,15 @@ async function run() {
         if (!row) return
         // A slot covers login, import and credential-operations enrollment.
         // Each worker claims one stable input row before yielding.
-        await runRow(row, signal)
+        if (!await runRow(row, signal)) return
       }
     }
     await Promise.all(Array.from({ length: Math.min(pipelineLimit, pending.length) }, worker))
   } finally {
+    // Stop may also retire jobs whose polling worker already returned. Busy
+    // must cover those DELETEs, so Retry cannot overlap their ownership.
+    const cleanup = batchRows.flatMap(row => row.cleanup ? [row.cleanup.catch(() => {})] : [])
+    await Promise.all(cleanup)
     controller = undefined
     busy.value = false
     if (!disposed) emit('busy', false)
@@ -127,11 +144,14 @@ async function run() {
 
 async function runRow(row: Row, signal: AbortSignal) {
   try {
+    if (row.retiring) await discardJob(row)
+    signal.throwIfAborted()
     if (!row.credential) {
       row.status = 'login'
       // Keep the job ID on polling failures; explicit retry resumes that job.
-      if (!row.jobId) row.jobId = (await startTwoFALogin(row.entry, { signal })).id
-      // A start response can arrive after stop/unmount, even when aborted.
+      // Do not abort this short POST: Axios could discard an accepted job ID.
+      // Stop fences the worker until its response arrives and is retired.
+      if (!row.jobId) row.jobId = (await startTwoFALogin(row.entry)).id
       signal.throwIfAborted()
       let job = await getTwoFALogin(row.jobId, { signal })
       signal.throwIfAborted()
@@ -157,20 +177,28 @@ async function runRow(row: Row, signal: AbortSignal) {
     row.entry.mfa_secret = ''
   } catch (cause: unknown) {
     if (signal.aborted) {
-      await discardJob(row)
-      row.status = row.credential ? 'importFailed' : 'pending'
-      return
+      try {
+        if (!row.retiring || row.cleanup) await discardJob(row)
+      } catch {
+        // Retain the ID/retiring flag on failed cleanup; explicit Retry can
+        // retry DELETE, but may not submit a replacement for this identity.
+      }
+      row.status = row.credential ? 'importFailed' : row.jobId ? 'failed' : 'pending'
+      return false
     }
     const status = (cause as { status?: number; response?: { status?: number } })?.status ??
       (cause as { response?: { status?: number } })?.response?.status
-    if (status === 404) row.jobId = undefined
+    if (status === 404 && !row.retiring) row.jobId = undefined
     row.status = row.credential ? 'importFailed' : 'failed'
   }
+  // A polling/cleanup failure has not terminated the server job. Its worker
+  // stays reserved rather than dequeuing a fourth live account pipeline.
+  return !row.jobId
 }
 
 function reset() {
-  if (busy.value && !disposed) return
-  for (const row of rows.value) void discardJob(row)
+  if (!disposed && (busy.value || hasOwnedJobs.value)) return
+  for (const row of rows.value) void discardJob(row).catch(() => {})
   rows.value = []
   raw.value = ''
   error.value = ''
