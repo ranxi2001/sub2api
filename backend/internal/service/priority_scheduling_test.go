@@ -24,9 +24,11 @@ func TestPriorityScoringExperienceAndCost(t *testing.T) {
 	require.Equal(t, "eligible", cheap.Tier)
 	slow := good
 	slow.P90TTFTMs = 5000
+	slow = withAccountPerformanceFixture(slow)
 	require.Equal(t, "degraded", scorePriorityCandidate(c, priorityCandidate(1, 0, 10), slow, time.Now()).Tier)
 	bad := good
 	bad.QualityPassed = 5
+	bad = withAccountPerformanceFixture(bad)
 	require.Equal(t, "degraded", scorePriorityCandidate(c, priorityCandidate(1, 0, 10), bad, time.Now()).Tier)
 	require.Equal(t, "degraded", scorePriorityCandidate(c, priorityCandidate(1, 0, 90), good, time.Now()).Tier)
 	noLoad := priorityCandidate(1, 0, 0)

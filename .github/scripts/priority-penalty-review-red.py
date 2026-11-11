@@ -3,7 +3,6 @@
 from pathlib import Path
 import os
 import re
-import shutil
 import subprocess
 import sys
 
@@ -13,8 +12,8 @@ if len(sys.argv) == 1:
     subprocess.run(['git', 'worktree', 'add', '--detach', str(old), BASE], check=True)
     for package in ['service', 'handler']:
         file = Path(f'backend/internal/{package}/priority_penalty_review_test.go')
-        shutil.copyfile(file, old / file)
-    print(f'Complete review baseline: {BASE}; only two regression files added.')
+        (old / file).write_bytes(subprocess.check_output(['git', 'show', 'd79c1044914e7924c38cc4a239e42ff8980698e6:' + str(file)]))
+    print(f'Complete review baseline: {BASE}; historical regression fixtures pinned to d79c104.')
 else:
     raw = Path(sys.argv[1]).read_text()
     assert not re.search(r'build failed|undefined:|syntax error|setup failed|panic:', raw, re.I), 'not a behavioral red result'

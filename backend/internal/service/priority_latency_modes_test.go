@@ -38,7 +38,7 @@ func (r *latencyModeReader) ReadPrioritySchedulingSignals(_ context.Context, q P
 				signal.LatestBadLatencyAt = &bad
 			}
 		}
-		out[id] = signal
+		out[id] = withAccountPerformanceFixture(signal)
 	}
 	return out, nil
 }
@@ -83,7 +83,7 @@ func setModeSignal(svc *OpenAIGatewayService, req OpenAIAccountScheduleRequest, 
 	entry := svc.priorityScheduling.entries[priorityHistoryKey(req, cfg)]
 	signal := entry.signals[id]
 	change(&signal)
-	entry.signals[id] = signal
+	entry.signals[id] = withAccountPerformanceFixture(signal)
 }
 func TestPriorityLatencyModesDefaultAndSharedHistory(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()

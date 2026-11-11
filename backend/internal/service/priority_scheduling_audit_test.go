@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 	"math"
 	"testing"
 	"time"
@@ -51,42 +52,29 @@ func TestPriorityHistoryRefreshFailureRetainsRecentEvidence(t *testing.T) {
 	require.Equal(t, 9, signals[1].Samples)
 }
 
-func TestPrioritySnapshotRecomputesAttemptEvidenceWithoutMovingSelectionTime(t *testing.T) {
+func TestPrioritySnapshotUsesSharedPerformanceWithoutMovingSelectionTime(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	c.Enabled = true
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 9, P90TTFTMs: 100, QualitySamples: 9, QualityPassed: 9})}}
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 9, P90TTFTMs: 100, QualitySamples: 9, QualityPassed: 9})
+	percent := 25.0
+	signal.Performance.UpstreamError = upstreamstats.Evidence{Source: "process_local_http_responses", Total: 4, Failures: 1, Percent: &percent}
+	signal.Performance.WindowEnd = time.Now()
+	signal.Performance.WindowStart = signal.Performance.WindowEnd.Add(-time.Hour)
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: signal}}
 	g := priorityGateway(c, r)
-	stats := newOpenAIAccountRuntimeStats()
-	g.openaiAccountStats = stats
-	scheduler, ok := newDefaultOpenAIAccountScheduler(g, stats).(*defaultOpenAIAccountScheduler)
-	require.True(t, ok)
+	scheduler := &defaultOpenAIAccountScheduler{service: g}
 	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: "test", UseUpstreamTokenCost: true}
-	key := priorityAttemptKey{accountID: 1, model: "test", endpoint: priorityErrorEndpoint(req)}
-	for _, success := range []bool{true, true, true, false} {
-		stats.attempts.report(key, success, time.Now())
-	}
 	plan := openAIAccountLoadPlan{candidates: []openAIAccountCandidateScore{priorityCandidate(1, .1, 0)}, topK: 1}
+	require.Eventually(t, func() bool { return g.priorityHistory(req, c, plan.candidates).ready() }, time.Second, time.Millisecond)
 	scheduler.applyPriorityScheduling(req, &plan)
 	first := g.PrioritySchedulingSnapshot()
 	require.NotNil(t, first)
-	firstAt := first.At
-	firstEvidence := first.Candidates[0].PriorityErrorEvidence
-	require.Equal(t, int64(3), firstEvidence.Successes)
-	require.Equal(t, int64(1), firstEvidence.Failures)
-	require.Equal(t, 5, firstEvidence.PriorSamples)
-	require.False(t, firstEvidence.ObservedAt.IsZero())
-	require.False(t, first.EvaluatedAt.Before(firstEvidence.ObservedAt))
-	time.Sleep(time.Millisecond)
-	stats.attempts.report(key, true, time.Now())
-	stats.attempts.report(key, true, time.Now())
+	require.Equal(t, int64(3), first.Candidates[0].Successes)
+	require.Equal(t, int64(1), first.Candidates[0].Failures)
+	require.Equal(t, 60, first.Candidates[0].WindowMinutes)
 	last := g.PrioritySchedulingSnapshot()
-	require.NotNil(t, last)
-	require.Equal(t, firstAt, last.At, "refresh must not invent a new selection time")
-	require.True(t, last.EvaluatedAt.After(first.EvaluatedAt), "re-evaluation clock advances")
-	lastEvidence := last.Candidates[0].PriorityErrorEvidence
-	require.Equal(t, int64(5), lastEvidence.Successes, "live attempts are re-read on refresh")
-	require.Equal(t, int64(1), lastEvidence.Failures)
-	require.True(t, lastEvidence.ObservedAt.After(firstEvidence.ObservedAt), "read time advances with the re-evaluation")
+	require.Equal(t, first.At, last.At)
+	require.Equal(t, first.Candidates[0].Performance, last.Candidates[0].Performance)
 }
 
 func TestPrioritySnapshotRefreshesWithoutAnotherSelection(t *testing.T) {

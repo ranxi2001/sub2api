@@ -74,9 +74,9 @@ jobs:
             echo "$file $expected $actual" >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
           done
           regression=backend/internal/service/priority_analysis_admission_regression_test.go
-          cp "$regression" "$RUNNER_TEMP/analysis-budget-red/$regression"
-          cmp "$regression" "$RUNNER_TEMP/analysis-budget-red/$regression"
-          git hash-object "$regression" >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:"$regression" > "$RUNNER_TEMP/analysis-budget-red/$regression"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:"$regression" | cmp - "$RUNNER_TEMP/analysis-budget-red/$regression"
+          git hash-object "$RUNNER_TEMP/analysis-budget-red/$regression" >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
           git rev-parse HEAD >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
           set +e
           (cd "$RUNNER_TEMP/analysis-budget-red/backend" && go test -tags=unit ./internal/service -run '^TestPriorityAnalysisConcurrentScopesHaveBoundedSQLReaders$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/filters-pg/followup-red.log" 2>&1

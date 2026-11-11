@@ -94,7 +94,7 @@ jobs:
           git worktree add --detach "$baseline" c0c7533badd6e4696e58d709f59eb7e10bf4b5f0
           trap 'git worktree remove --force "$baseline"' EXIT
           mkdir -p "$baseline/backend/internal/service"
-          cp backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go "$baseline/backend/internal/service/"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go > "$baseline/backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go"
           mkdir -p "$RUNNER_TEMP/pr598-c0c-red"
           bash .github/scripts/pr598-source-proof.sh "$baseline" c0c7533badd6e4696e58d709f59eb7e10bf4b5f0 \
             backend/internal/service/priority_scheduling_history.go \

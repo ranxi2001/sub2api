@@ -119,7 +119,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/issue733-contract"
           git worktree add --detach "$RUNNER_TEMP/issue733-contract-baseline" 8889aee65d908c2458becb86d4fe54f4359dc61d
-          cp backend/internal/service/priority_latency_series_regression_test.go "$RUNNER_TEMP/issue733-contract-baseline/backend/internal/service/"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:backend/internal/service/priority_latency_series_regression_test.go > "$RUNNER_TEMP/issue733-contract-baseline/backend/internal/service/priority_latency_series_regression_test.go"
           git show 8889aee65d908c2458becb86d4fe54f4359dc61d:backend/internal/service/priority_latency_series.go > "$RUNNER_TEMP/issue733-contract/baseline.go"
           cmp "$RUNNER_TEMP/issue733-contract/baseline.go" "$RUNNER_TEMP/issue733-contract-baseline/backend/internal/service/priority_latency_series.go"
           set +e

@@ -68,11 +68,12 @@ func TestPriorityOAuthQuotaEvidenceAndCapacity(t *testing.T) {
 			a.account.Extra["codex_7d_used_percent"] = math.NaN()
 		}, 0},
 		{"unknown_quality", func(_ *PrioritySchedulingConfig, _ *openAIAccountCandidateScore, s *PrioritySchedulingSignal) {
-			s.LatestQualityPassed = nil
+			s.QualitySamples = 0
 		}, 0},
 		{"latest_degraded_despite_good_average", func(_ *PrioritySchedulingConfig, _ *openAIAccountCandidateScore, s *PrioritySchedulingSignal) {
 			bad := false
 			s.LatestQualityPassed = &bad
+			s.QualityPassed = 0
 		}, 0},
 		{"bad_average", func(_ *PrioritySchedulingConfig, _ *openAIAccountCandidateScore, s *PrioritySchedulingSignal) {
 			s.QualityPassed = 1
@@ -108,10 +109,10 @@ func TestPriorityOAuthQuotaEvidenceAndCapacity(t *testing.T) {
 		{"errors", func(c *PrioritySchedulingConfig, a *openAIAccountCandidateScore, _ *PrioritySchedulingSignal) {
 			c.ErrorRateWeight = 0 // Existing account EWMA contract.
 			a.errorRate = .5
-		}, 0},
+		}, 8},
 		{"scoped_errors", func(_ *PrioritySchedulingConfig, a *openAIAccountCandidateScore, _ *PrioritySchedulingSignal) {
 			a.priorityErrors.SmoothedRate = .5
-		}, 0},
+		}, 8},
 		{"rpm", func(_ *PrioritySchedulingConfig, a *openAIAccountCandidateScore, _ *PrioritySchedulingSignal) {
 			a.rpmEnabled = true
 			a.rpmLimit = 10
@@ -129,6 +130,7 @@ func TestPriorityOAuthQuotaEvidenceAndCapacity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, item, signal := quotaPriorityFixture(now)
 			tc.mutate(&cfg, &item, &signal)
+			signal = withAccountPerformanceFixture(signal)
 			applyPriorityCandidate(cfg, &item, signal, now)
 			require.Equal(t, tc.want, item.priorityOAuthSpare)
 		})
