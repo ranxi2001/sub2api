@@ -77,13 +77,19 @@ func TestOrphanCleanupFastRejectionLargeEscapedContent(t *testing.T) {
 	}
 	escaped := strings.Repeat(`\n\"`, 1<<16)
 	body := []byte(`{"vendor":"` + escaped + `","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + escaped + `"}]}]}`)
-	allocations := testing.AllocsPerRun(5, func() {
-		if openAIResponsesMayNeedOrphanCleanup(body) {
-			t.Fatal("escaped message-only input unexpectedly requires orphan cleanup")
+	measurement := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if openAIResponsesMayNeedOrphanCleanup(body) {
+				b.Fatal("escaped message-only input unexpectedly requires orphan cleanup")
+			}
 		}
 	})
-	if allocations != 0 {
-		t.Fatalf("escaped message-only scan allocated %.0f times; want zero", allocations)
+	// json.Valid borrows a small scanner from sync.Pool; race instrumentation
+	// randomly discards pooled objects. Bound bytes instead of requiring pool
+	// hits: copying or decoding this large escaped body still fails the guard.
+	if allocated := measurement.AllocedBytesPerOp(); allocated > 1024 {
+		t.Fatalf("escaped message-only scan allocated %d bytes per call; maximum 1024", allocated)
 	}
 }
 
