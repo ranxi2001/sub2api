@@ -57,6 +57,7 @@
           </div>
           <button type="button" class="btn btn-secondary" @click="selected = null">{{ t('common.close') }}</button>
         </header>
+        <PelicanQuestionSnapshot :question="selected.record.pelicanQuestion" :actual-prompt="selected.record.actualPrompt" />
         <iframe v-if="selected.record.html" :srcdoc="selected.record.html" class="min-h-0 w-full flex-1 border-0" sandbox="allow-scripts" referrerpolicy="no-referrer" :title="selected.account.name" />
         <p v-else-if="!selected.loaded && !selected.loadError" class="p-4">{{ t('common.loading') }}...</p>
         <pre v-else class="overflow-auto whitespace-pre-wrap p-4 text-sm">{{ detailText(selected) }}</pre>
@@ -65,13 +66,14 @@
   </div>
 </template>
 <script setup lang="ts">
+import PelicanQuestionSnapshot from './PelicanQuestionSnapshot.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { scheduledTestsAPI } from '@/api/admin/scheduledTests'
 import type { PelicanHistoryResult } from '@/api/admin/scheduledTests'
 import { extractPelicanHtml } from '@/utils/pelicanHtml'
 import { isTextAnswerKind, stateProbeVerdict, type StateProbeVerdict } from '@/utils/intelligenceTest'
-import type { Account, AccountListItem, PelicanTestConfig, ScheduledTestResult } from '@/types'
+import type { Account, AccountListItem, PelicanQuestion, PelicanTestConfig, ScheduledTestResult } from '@/types'
 
 interface ManualRun {
   id?: string
@@ -86,6 +88,9 @@ interface ManualRun {
   questionKind?: PelicanTestConfig['question_kind']
 }
 interface ManualRecord {
+  pelicanQuestion?: PelicanQuestion
+  actualPrompt?: string
+  prompt?: string
   id?: string
   createdAt: string
   modelId: string
@@ -94,6 +99,8 @@ interface ManualRecord {
   runs: ManualRun[]
 }
 interface DisplayRecord {
+  pelicanQuestion?: PelicanQuestion
+  actualPrompt?: string
   source: 'manual' | 'scheduled'
   startedAt?: string
   durationMs?: number
@@ -186,6 +193,7 @@ function manualCards(server: PelicanHistoryResult[]): Card[] {
         const output = run.output || run.html || ''
         const html = isTextAnswerKind(run.questionKind || record.questionKind) ? '' : extractPelicanHtml(output)
         results.set(key, { key, account, loaded: true, record: {
+          pelicanQuestion: record.pelicanQuestion, actualPrompt: record.actualPrompt || record.prompt,
           source: 'manual', startedAt: run.startedAt || record.createdAt, durationMs: run.durationMs,
           modelId: run.modelId || record.modelId, reasoningEffort: run.reasoningEffort || record.reasoningEffort,
           status: run.status || (html ? 'success' : 'error'), html, output, error: run.error || ''
@@ -196,7 +204,7 @@ function manualCards(server: PelicanHistoryResult[]): Card[] {
   return [...results.values()]
 }
 function serverRecord(result: ScheduledTestResult): DisplayRecord {
-  return { source: 'scheduled', startedAt: result.started_at, durationMs: result.latency_ms,
+  return { pelicanQuestion: result.pelican_config?.pelican_question, actualPrompt: result.pelican_config?.actual_prompt || result.pelican_config?.prompt, source: 'scheduled', startedAt: result.started_at, durationMs: result.latency_ms,
     modelId: result.pelican_config?.model_id, reasoningEffort: result.pelican_config?.reasoning_effort,
     status: result.status, verdict: stateProbeVerdict(result) ?? undefined, output: result.response_text || '',
     html: isTextAnswerKind(result.pelican_config?.question_kind) ? '' : extractPelicanHtml(result.response_text || ''), error: result.error_message }

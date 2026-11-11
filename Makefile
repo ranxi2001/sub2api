@@ -38,6 +38,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/account/__tests__/ModelTracePanel.spec.ts \
 	src/components/admin/account/__tests__/IQTestModal.modelTrace.spec.ts \
 	src/components/admin/account/__tests__/IQTestModal.spec.ts \
+	src/components/admin/account/__tests__/PelicanPromptMode.spec.ts \
+	src/components/admin/account/__tests__/PelicanTestFields.spec.ts \
 	src/components/admin/account/__tests__/PelicanRecordsDashboard.spec.ts \
 	src/api/admin/__tests__/scheduledTests.spec.ts \
 	src/features/ip-risk/__tests__/IPRiskSettings.spec.ts \

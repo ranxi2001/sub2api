@@ -47,6 +47,9 @@ func pelicanQuestionIndex(roundID string, size int) int {
 
 // selectIndex is injectable for deterministic multi-round tests.
 func freezePelicanQuestion(cfg *PelicanTestConfig, roundID string, selectIndex func(int) int) *PelicanTestConfig {
+	if cfg == nil {
+		return nil
+	}
 	snapshot := *cfg
 	snapshot.PelicanQuestion = nil
 	if cfg.PromptMode == PelicanPromptModeRandom {
@@ -90,4 +93,19 @@ func ResolveManualPelicanQuestion(question *PelicanQuestion) (*PelicanTestConfig
 		return nil, fmt.Errorf("pelican question version or identity changed; start a new round")
 	}
 	return cfg, nil
+}
+
+// Only SVG tests can opt into this bank; missing mode keeps legacy plans intact.
+func validatePelicanPromptMode(cfg *PelicanTestConfig) error {
+	switch cfg.PromptMode {
+	case "", "custom":
+		return nil
+	case PelicanPromptModeRandom:
+		if (cfg.QuestionKind != "" && cfg.QuestionKind != "pelican") || cfg.Quality != nil {
+			return fmt.Errorf("random SVG questions require a pelican test without automatic grading")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid pelican prompt mode")
+	}
 }

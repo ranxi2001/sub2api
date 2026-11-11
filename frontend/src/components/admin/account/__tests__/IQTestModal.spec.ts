@@ -1,7 +1,11 @@
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach as setupPiniaBeforeEach } from 'vitest'
+setupPiniaBeforeEach(() => setActivePinia(createPinia()))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import IQTestModal from '../IQTestModal.vue'
 import TestModelSelect from '../TestModelSelect.vue'
+import { apiClient } from '@/api/client'
 
 const { probeOpenAICodexState, getAvailableModels, getModelReasoning } = vi.hoisted(() => ({
   probeOpenAICodexState: vi.fn(), getAvailableModels: vi.fn(), getModelReasoning: vi.fn()
@@ -82,6 +86,29 @@ describe('IQTestModal', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('freezes one random question across samples and stores its version with the actual prompt', async () => {
+    const question = { id: 'pelican-bicycle', version: 'svg-motion-v1', round_id: 'manual:00000000000000000000000000000000', source: 'builtin:svg-motion', prompt: 'Draw fixture', criteria: ['Fixture rubric'] }
+    vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { prompt: question.prompt, actual_prompt: 'Draw fixture\n\nHTML only', pelican_question: question } })
+    const wrapper = mountModal()
+    const vm = wrapper.vm as any
+    vm.selectQuestion('pelican')
+    vm.selectPromptMode('random')
+    await flushPromises()
+    vm.parallelCount = 2
+    await vm.startTest()
+    const requests = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes('/pelican-test'))
+    expect(requests).toHaveLength(2)
+    for (const [, options] of requests) {
+      expect(JSON.parse(options!.body as string)).toMatchObject({ prompt: 'Draw fixture\n\nHTML only', prompt_mode: 'random', pelican_question: question })
+    }
+    const record = JSON.parse(localStorage.getItem('sub2api-pelican-test:42')!)[0]
+    expect(record.pelicanQuestion).toEqual(question)
+    expect(record.actualPrompt).toBe('Draw fixture\n\nHTML only')
+    vm.prompt = 'Later edit'
+    expect(record.prompt).toBe('Draw fixture')
+    wrapper.unmount()
   })
 
   it('keeps all eight configured model IDs when discovery only returns six', async () => {

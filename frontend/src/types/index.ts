@@ -2797,7 +2797,19 @@ export interface QualityRestoreDiagnostic {
   current_concurrency?: number
 }
 
+export interface PelicanQuestion {
+  id: string
+  version: string
+  round_id: string
+  source: string
+  prompt: string
+  criteria: string[]
+}
+
 export interface PelicanTestConfig {
+  prompt_mode?: 'custom' | 'random'
+  pelican_question?: PelicanQuestion
+  actual_prompt?: string
   // Optional display name, persisted with the rule's editable configuration.
   rule_name?: string
   quality_restore_diagnostic?: QualityRestoreDiagnostic

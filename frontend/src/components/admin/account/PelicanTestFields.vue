@@ -4,7 +4,8 @@
     <Select :model-value="modelValue.question_kind || 'pelican'" :options="questionOptions" @update:model-value="selectQuestion" />
     <p v-if="isProbe" class="text-xs text-gray-500 dark:text-gray-400" data-testid="state-probe-hint">{{ t('admin.accounts.pelicanTest.stateProbeHint') }}</p>
     <template v-else>
-      <TextArea :model-value="modelValue.prompt" :label="t('admin.accounts.pelicanTest.promptLabel')" :rows="3" @update:model-value="update('prompt', $event)" />
+      <PelicanPromptMode v-if="!modelValue.question_kind || modelValue.question_kind === 'pelican'" :model-value="modelValue.prompt_mode" @update:model-value="update('prompt_mode', $event)" />
+      <TextArea v-if="modelValue.prompt_mode !== 'random'" :model-value="modelValue.prompt" :label="t('admin.accounts.pelicanTest.promptLabel')" :rows="3" @update:model-value="update('prompt', $event)" />
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.accounts.pelicanTest.reasoning') }}</label>
@@ -17,6 +18,7 @@
 </template>
 <script setup lang="ts">
 import { computed } from 'vue'
+import PelicanPromptMode from './PelicanPromptMode.vue'
 import { questionPrompt, STATE_PROBE_QUESTION } from '@/utils/intelligenceTest'
 import { useI18n } from 'vue-i18n'
 import Input from '@/components/common/Input.vue'
@@ -35,11 +37,11 @@ const questionOptions = computed(() => [
 function selectQuestion(value: string | number | boolean | null) {
   if (value === STATE_PROBE_QUESTION) {
     // 探针不需要题目；同一账号同一时刻只能跑一次探针，并行固定为 1。
-    emit('update:modelValue', { ...props.modelValue, question_kind: STATE_PROBE_QUESTION, prompt: '', parallel_count: 1, reasoning_effort: props.modelValue.reasoning_effort || 'medium' })
+    emit('update:modelValue', { ...props.modelValue, prompt_mode: 'custom', question_kind: STATE_PROBE_QUESTION, prompt: '', parallel_count: 1, reasoning_effort: props.modelValue.reasoning_effort || 'medium' })
     return
   }
   if (value !== 'candy' && value !== 'pelican') return
-  emit('update:modelValue', { ...props.modelValue, question_kind: value, prompt: questionPrompt(value) })
+  emit('update:modelValue', { ...props.modelValue, prompt_mode: 'custom', question_kind: value, prompt: questionPrompt(value) })
 }
 function update(key: keyof PelicanTestConfig, value: string | number | boolean | null) {
   emit('update:modelValue', { ...props.modelValue, [key]: value })

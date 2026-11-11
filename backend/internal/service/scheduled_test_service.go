@@ -124,6 +124,11 @@ func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 		cfg.QualityModelActions = nil
 		cfg.RandomQuestion = nil
 		cfg.QualityBatch = nil
+		cfg.PelicanQuestion = nil
+		cfg.ActualPrompt = ""
+		if err := validatePelicanPromptMode(cfg); err != nil {
+			return time.Time{}, err
+		}
 		if cfg.QuestionKind == QualityRandomQuestionKind {
 			if cfg.Quality == nil {
 				return time.Time{}, fmt.Errorf("random questions require a quality rule")
@@ -167,7 +172,7 @@ func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 			plan.ModelID = models[0]
 		}
 		// 探针题型不需要题目文本；其余题型题目必填。
-		if isOpenAICodexStateProbePlan(cfg) || cfg.QuestionKind == QualityRandomQuestionKind {
+		if isOpenAICodexStateProbePlan(cfg) || cfg.QuestionKind == QualityRandomQuestionKind || cfg.PromptMode == PelicanPromptModeRandom {
 			if len(cfg.Prompt) > 32000 || strings.TrimSpace(plan.ModelID) == "" || len(plan.ModelID) > 100 {
 				return time.Time{}, fmt.Errorf("probe model is required (maximum 32000/100 bytes)")
 			}
