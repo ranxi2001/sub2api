@@ -155,6 +155,8 @@
       "additional_fork_files": [],
       "prerequisite_sources": [
         "457602c8fc07112fb6e38642adea88a61d7c9759",
+        "0853d160365dbc87c1ebb33eda18b59b8ed2bb72",
+        "457602c8fc07112fb6e38642adea88a61d7c9759",
         "0853d160365dbc87c1ebb33eda18b59b8ed2bb72"
       ]
     },
@@ -205,6 +207,8 @@
       ],
       "additional_fork_files": [],
       "prerequisite_sources": [
+        "457602c8fc07112fb6e38642adea88a61d7c9759",
+        "0853d160365dbc87c1ebb33eda18b59b8ed2bb72",
         "457602c8fc07112fb6e38642adea88a61d7c9759",
         "0853d160365dbc87c1ebb33eda18b59b8ed2bb72"
       ]
@@ -1645,6 +1649,11 @@
           "path": "backend/internal/repository/migrations_schema_integration_test.go",
           "baseline_blob": "eb4aaca79a730de136054dca474210feee30046e",
           "fork_blob": "7825579a36c112f7783cc0127fed017143925e32"
+        },
+        {
+          "path": "backend/internal/service/openai_ws_ttl_billing_test.go",
+          "baseline_blob": null,
+          "fork_blob": "ed31af24994d9fdd065afec99e20b7ed415f3667"
         }
       ]
     },
@@ -2440,7 +2449,7 @@
             ""
           ],
           "fork_path": "backend/internal/service/openai_ws_search_activation_test.go",
-          "fork_blob": "30fe9f0326d8f7a7847b336f09335f89024c1332",
+          "fork_blob": "0d5ed509fad8e071e3eb1b7b9a8489e945bc0797",
           "introduced_or_changed_declarations": [
             "func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {",
             "func TestOpenAIWSConnWebSearchInitialization(t *testing.T) {"
@@ -2478,7 +2487,7 @@
             "func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {"
           ],
           "fork_path": "backend/internal/service/openai_ws_search_activation_test.go",
-          "fork_blob": "30fe9f0326d8f7a7847b336f09335f89024c1332",
+          "fork_blob": "0d5ed509fad8e071e3eb1b7b9a8489e945bc0797",
           "introduced_or_changed_declarations": []
         }
       ],
@@ -3202,6 +3211,7 @@
       ],
       "additional_fork_files": [],
       "prerequisite_sources": [
+        "aae31c7438a1452bbdb81f7de72f184f0c4f7045",
         "aae31c7438a1452bbdb81f7de72f184f0c4f7045"
       ]
     },
@@ -4232,13 +4242,7 @@
         "backend/migrations/usage_log_api_key_cost_index_test.go",
         "frontend/src/views/user/__tests__/KeysView.spec.ts"
       ],
-      "additional_fork_files": [
-        {
-          "path": "frontend/src/utils/settingsSearch.ts",
-          "baseline_blob": "72913cf5fadb864f4537ab763778349e7dd7dbea",
-          "fork_blob": "6185ae7c84a659a6f0c4046fb496f48d9913d2e4"
-        }
-      ]
+      "additional_fork_files": []
     },
     {
       "source_sha": "4a22a75b3dad2c77bdeeee1307a63d53e488eb2d",
@@ -4830,7 +4834,7 @@
       "additional_fork_files": []
     }
   ],
-  "mapped_head": "e3213e58c77c56223043b73c51661b9b36276d4b",
+  "mapped_head": "65e846ed936e70f020ef69815e34c21e60adb43f",
   "pr": "https://github.com/ranxi2001/sub2api/pull/789",
   "dependencies": [
     {
@@ -5356,5 +5360,20 @@
     "fork_version": "2.20.5",
     "go_version": "1.27.4",
     "branding_release_workflows": "owner fork retained; no release/tag/deploy performed"
+  },
+  "acceptance_repairs": {
+    "reason": "Full remote suites revealed these baseline contract/fixture gaps; source assertions retained and production contracts preserved.",
+    "paths": [
+      "frontend/src/api/__tests__/admin.accounts.grokModelDiagnostics.spec.ts",
+      "frontend/src/components/account/__tests__/EditAccountModal.grokUpstream.spec.ts",
+      "frontend/src/router/__tests__/security-audit-pages.spec.ts",
+      "frontend/src/components/admin/security/__tests__/SecurityAuditNav.spec.ts",
+      "frontend/src/utils/__tests__/harvestAvailability.spec.ts",
+      "frontend/src/utils/__tests__/settingsSearch.spec.ts",
+      "frontend/src/utils/settingsSearch.ts",
+      "frontend/src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts",
+      ".github/scripts/quality-live-red-compat.py",
+      ".github/workflows/quality-live-regressions.yml"
+    ]
   }
 }
