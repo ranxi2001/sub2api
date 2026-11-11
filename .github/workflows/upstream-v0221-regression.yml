@@ -76,3 +76,30 @@ jobs:
       - name: Production frontend build
         working-directory: frontend
         run: pnpm run build
+  behavioral-proof:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        defect: [auth, slot, metadata, session, ttl, memory, sealed, refund]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Require candidate GREEN and effective old-behavior RED
+        run: python3 .github/scripts/upstream-v0221-red.py '${{ matrix.defect }}'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: v0221-proof-${{ matrix.defect }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/v0221-proof-${{ matrix.defect }}/
+          if-no-files-found: error

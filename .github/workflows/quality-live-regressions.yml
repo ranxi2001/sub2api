@@ -40,6 +40,7 @@ jobs:
           trap 'for source in "${sources[@]}"; do cp "$RUNNER_TEMP/$(basename "$source")" "$source"; done' EXIT
           git fetch --no-tags --depth=1 origin e082313679d5269eef3e3cce4101c22692695371
           for source in "${sources[@]}"; do git show "e082313679d5269eef3e3cce4101c22692695371:$source" > "$source"; done
+          python3 .github/scripts/quality-live-red-compat.py "$RUNNER_TEMP/quality_supported_models.go"
           set +e
           (cd backend && go test -tags=unit ./internal/service -run '^TestQualityLive' -count=1 -v) > evidence/red-service.log 2>&1
           result=$?
