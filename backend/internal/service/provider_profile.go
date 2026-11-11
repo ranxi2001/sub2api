@@ -88,6 +88,16 @@ func (p *ProviderProfile) SupportsProtocol(mode, protocol string) bool {
 // 上游协议分流方式、Responses 路径约定与 IsMultiProtocolAPIKeyProvider 归属。
 // 默认端点需与前端 credentialsBuilder.ts 的预设保持一致。
 var providerProfiles = map[string]*ProviderProfile{
+	PlatformQwen: {
+		Platform:         PlatformQwen,
+		DefaultMode:      AccountModePayG,
+		DefaultTestModel: DefaultQwenTestModel,
+		// Native Chat Completions; other inbound formats use the existing adapter.
+		// Custom workspace/regional endpoints and compatible relays override this base.
+		Modes: map[string]ProviderEndpoints{
+			AccountModePayG: {BaseURLs: map[string]string{APIProtocolChatCompletions: DefaultQwenBaseURL}},
+		},
+	},
 	PlatformKimi: {
 		Platform:    PlatformKimi,
 		DefaultMode: AccountModePayG,

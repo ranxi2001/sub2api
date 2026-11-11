@@ -54,6 +54,7 @@ const (
 	PlatformCommandCode = domain.PlatformCommandCode
 	PlatformCline       = domain.PlatformCline
 	PlatformMistral     = domain.PlatformMistral
+	PlatformQwen        = domain.PlatformQwen
 	PlatformComposite   = domain.PlatformComposite
 	// PlatformKiro is retained for unsupported-platform threshold tests and legacy
 	// account rows. Scheduling-threshold evaluation never pauses kiro accounts.
@@ -96,6 +97,8 @@ const (
 	DefaultClineBaseURL     = "https://api.cline.bot/api/v1"
 	DefaultMistralBaseURL   = "https://api.mistral.ai/v1"
 	DefaultMistralTestModel = "mistral-small-latest"
+	DefaultQwenBaseURL      = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	DefaultQwenTestModel    = "qwen3.8-max"
 )
 
 // 国产供应商 Anthropic 协议端点的默认 base_url（上游路径为 {base}/v1/messages）。

@@ -297,6 +297,25 @@
           }
         ]
       }
+    },
+    {
+      "id": "qwen",
+      "display_name": "千问 Qwen",
+      "gateway": "openai",
+      "cn_provider": false,
+      "litellm_provider": "dashscope",
+      "multi_protocol": {
+        "default_mode": "payg",
+        "routing": "by_inbound",
+        "modes": [
+          {
+            "mode": "payg",
+            "base_urls": {
+              "chat_completions": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            }
+          }
+        ]
+      }
     }
   ],
   "composite_precedence": [
@@ -313,6 +332,7 @@
     "typesafe",
     "command_code",
     "cline",
-    "mistral"
+    "mistral",
+    "qwen"
   ]
 }

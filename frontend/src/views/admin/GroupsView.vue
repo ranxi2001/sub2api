@@ -543,6 +543,7 @@
             @change="createForm.copy_accounts_from_group_ids = []"
           />
           <p class="input-hint">{{ t("admin.groups.platformHint") }}</p>
+          <QwenPlatformNotice :user-id="authStore.user?.id" />
         </div>
         <!-- 从分组复制账号 -->
         <div v-if="!authStore.isSimpleMode && copyAccountsGroupOptions.length > 0">
@@ -2243,6 +2244,7 @@
             data-tour="group-form-platform"
           />
           <p class="input-hint">{{ t("admin.groups.platformNotEditable") }}</p>
+          <QwenPlatformNotice v-if="editForm.platform === 'qwen'" :user-id="authStore.user?.id" />
         </div>
         <template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
@@ -4417,6 +4419,7 @@
 </template>
 
 <script setup lang="ts">
+import QwenPlatformNotice from '@/components/common/QwenPlatformNotice.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";

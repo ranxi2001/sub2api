@@ -1,5 +1,6 @@
 export default {
   common: {
+    qwenPlatformHint: 'Qwen uses OpenAI-compatible APIs with separate platform statistics. Existing OpenAI accounts and groups are not migrated automatically.',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
