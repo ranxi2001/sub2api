@@ -702,7 +702,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       expect(live.size).toBe(3)
       expect(peak).toBe(3)
       expect(startTwoFALogin).toHaveBeenCalledTimes(3)
-      expect(wrapper.getComponent(OpenAITwoFAImport).vm).toBe(original.vm)
+      expect(wrapper.getComponent(OpenAITwoFAImport).vm.$.uid).toBe(original.vm.$.uid)
       expect(wrapper.emitted('close')).toBeUndefined()
       expect(original.get('[data-testid="two-fa-owned-jobs"]').text()).toContain('tokenGuard.twoFA.ownedJobs')
       expect(original.get('[data-testid="two-fa-start"]').attributes('disabled')).toBeUndefined()
@@ -720,7 +720,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       await wrapper.get('[aria-label="Close modal"]').trigger('click')
       await flushPromises()
       expect(wrapper.props('show')).toBe(true)
-      expect(wrapper.getComponent(OpenAITwoFAImport).vm).toBe(original.vm)
+      expect(wrapper.getComponent(OpenAITwoFAImport).vm.$.uid).toBe(original.vm.$.uid)
       expect(startTwoFALogin).toHaveBeenCalledTimes(3)
       if (initialMode === 'failed') {
         expect(original.get('[data-testid="two-fa-start"]').attributes('disabled')).toBeUndefined()
@@ -745,7 +745,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       await wrapper.setProps({ show: true })
       mode = 'confirmed'
       const reopened = await enter()
-      expect(reopened.vm).not.toBe(original.vm)
+      expect(reopened.vm.$.uid).not.toBe(original.vm.$.uid)
       expect(startTwoFALogin).toHaveBeenCalledTimes(6)
       expect(live.size).toBe(3)
       expect(new Set(live.values()).size).toBe(3)
