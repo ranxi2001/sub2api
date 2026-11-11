@@ -1,5 +1,5 @@
 {
-  "head": "194b6b022447bc4c222eef38d3f90971c5f771e1",
+  "head": "b2ddaad1f1ef3d36a57387ab4166799c4a3dc878",
   "baseline": "87d01c39e",
   "captures": [
     {
@@ -9,7 +9,7 @@
     },
     {
       "file": "zh-after.png",
-      "source": "194b6b022447bc4c222eef38d3f90971c5f771e1",
+      "source": "b2ddaad1f1ef3d36a57387ab4166799c4a3dc878",
       "lang": "zh"
     },
     {
@@ -19,7 +19,7 @@
     },
     {
       "file": "en-after.png",
-      "source": "194b6b022447bc4c222eef38d3f90971c5f771e1",
+      "source": "b2ddaad1f1ef3d36a57387ab4166799c4a3dc878",
       "lang": "en"
     }
   ],

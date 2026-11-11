@@ -1,6 +1,6 @@
 # VIP 自动垫付充值记录截图
 
-PR #799 的 CI 组件预览，来源提交 `194b6b022447bc4c222eef38d3f90971c5f771e1`。
+PR #799 的 CI 组件预览，来源提交 `b2ddaad1f1ef3d36a57387ab4166799c4a3dc878`。
 前后对比使用真实 `UserBalanceHistoryModal.vue` 与项目 CSS，接口为虚构数据。
 修复前组件来自 `87d01c39ee4cda151534812b172e7acdf959a50e`。
 
@@ -11,4 +11,4 @@ PR #799 的 CI 组件预览，来源提交 `194b6b022447bc4c222eef38d3f90971c5f7
 
 页面入口为管理员用户列表的充值记录弹窗。本预览只验证组件、CSS 与模拟筛选交互，不代表生产环境验收。
 
-CI: https://github.com/ranxi2001/sub2api/actions/runs/43041852502
+CI: https://github.com/ranxi2001/sub2api/actions/runs/43043976145
