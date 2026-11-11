@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
