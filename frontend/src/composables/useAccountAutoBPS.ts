@@ -52,17 +52,22 @@ export function useAccountAutoBPS() {
   }
 
   // 新建账号后逐个建规则；单个失败不影响其它账号，返回没建成的账号。
-  async function createFor(accountIds: number[]): Promise<{ failed: number[]; error: string }> {
+  async function createFor(accountIds: number[], signal?: AbortSignal): Promise<{ failed: number[]; error: string }> {
     const result = { failed: [] as number[], error: '' }
     if (!draft.value.enabled) return result
     for (const id of accountIds) {
+      signal?.throwIfAborted()
       try {
-        await adminAPI.scheduledTests.create(autoBPSCreateRequest(id, draft.value))
+        const request = autoBPSCreateRequest(id, draft.value)
+        if (signal) await adminAPI.scheduledTests.create(request, { signal })
+        else await adminAPI.scheduledTests.create(request)
       } catch (error) {
+        signal?.throwIfAborted()
         result.failed.push(id)
         result.error ||= extractApiErrorMessage(error, '')
       }
     }
+    signal?.throwIfAborted()
     return result
   }
 

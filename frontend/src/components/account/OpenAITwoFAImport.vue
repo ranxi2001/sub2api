@@ -22,7 +22,7 @@
       <button v-if="!busy && (!rows.length || hasPending)" type="button" class="btn btn-primary" :disabled="!encryptionReady" data-testid="two-fa-start" @click="run">
         {{ t(rows.length ? 'tokenGuard.twoFA.retry' : 'tokenGuard.twoFA.start') }}
       </button>
-      <button v-if="busy" type="button" class="btn btn-secondary" :disabled="stopRequested" @click="stopRequested = true">
+      <button v-if="busy" type="button" class="btn btn-secondary" :disabled="stopRequested" @click="stop">
         {{ t('tokenGuard.twoFA.stop') }}
       </button>
       <button v-if="!busy && rows.length" type="button" class="btn btn-secondary" @click="reset">
@@ -40,7 +40,7 @@ import { deleteTwoFALogin, getTwoFALogin, parseTwoFALoginText, startTwoFALogin }
 import type { TokenGuardReloginAccount } from '@/api/admin/accountTokenGuard'
 
 const props = defineProps<{
-  importCredential: (credential: Record<string, unknown>, email: string, login: TokenGuardReloginAccount) => Promise<'created' | 'skipped'>
+  importCredential: (credential: Record<string, unknown>, email: string, login: TokenGuardReloginAccount, signal?: AbortSignal) => Promise<'created' | 'skipped'>
 }>()
 const emit = defineEmits<{ busy: [value: boolean] }>()
 const { t } = useI18n()
@@ -58,6 +58,27 @@ const busy = ref(false)
 const stopRequested = ref(false)
 const hasPending = computed(() => rows.value.some(row => row.status !== 'created' && row.status !== 'skipped'))
 let disposed = false
+let controller: AbortController | undefined
+const pipelineLimit = 3
+
+function stop() {
+  stopRequested.value = true
+  controller?.abort()
+  for (const row of rows.value) void discardJob(row)
+}
+
+function pollDelay(signal: AbortSignal) {
+  return new Promise<void>(resolve => {
+    const finish = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, 1500)
+    signal.addEventListener('abort', finish, { once: true })
+    if (signal.aborted) finish()
+  })
+}
 
 async function discardJob(row: Row) {
   if (!row.jobId) return
@@ -68,7 +89,7 @@ async function discardJob(row: Row) {
 }
 
 async function run() {
-  if (busy.value || !encryptionReady.value) return
+  if (busy.value || disposed || !encryptionReady.value) return
   error.value = ''
   if (!rows.value.length) {
     try {
@@ -81,56 +102,74 @@ async function run() {
   }
   busy.value = true
   stopRequested.value = false
+  controller = new AbortController()
+  const { signal } = controller
   emit('busy', true)
   try {
-    for (const row of rows.value) {
-      if (stopRequested.value || disposed) break
-      if (row.status === 'created' || row.status === 'skipped') continue
-      try {
-        if (!row.credential) {
-          row.status = 'login'
-          // Keep the job ID on polling failures; retry resumes the same login.
-          if (!row.jobId) row.jobId = (await startTwoFALogin(row.entry)).id
-          let job = await getTwoFALogin(row.jobId)
-          while (job.status === 'running' && !stopRequested.value && !disposed) {
-            await new Promise(resolve => setTimeout(resolve, 1500))
-            if (stopRequested.value || disposed) break
-            job = await getTwoFALogin(row.jobId)
-          }
-          if (stopRequested.value || disposed) {
-            await discardJob(row)
-            row.status = 'pending'
-            break
-          }
-          if (job.status !== 'succeeded' || !job.credential) {
-            await discardJob(row)
-            throw new Error('login_failed')
-          }
-          row.credential = job.credential
-          await discardJob(row)
-        }
-        if (stopRequested.value || disposed) { row.status = 'pending'; break }
-        row.status = 'importing'
-        // Keep the input in memory until encrypted credential-operations
-        // enrollment succeeds. An import/enrollment retry reuses this login.
-        row.status = await props.importCredential(row.credential, row.entry.email, { ...row.entry })
-        row.credential = undefined
-        row.entry.password = ''
-        row.entry.mfa_secret = ''
-      } catch (cause: unknown) {
-        const status = (cause as { status?: number; response?: { status?: number } })?.status ??
-          (cause as { response?: { status?: number } })?.response?.status
-        if (status === 404) row.jobId = undefined
-        row.status = row.credential ? 'importFailed' : 'failed'
+    const pending = rows.value.filter(row => row.status !== 'created' && row.status !== 'skipped')
+    let next = 0
+    const worker = async () => {
+      while (!signal.aborted && !disposed) {
+        const row = pending[next++]
+        if (!row) return
+        // A slot covers login, import and credential-operations enrollment.
+        // Each worker claims one stable input row before yielding.
+        await runRow(row, signal)
       }
     }
+    await Promise.all(Array.from({ length: Math.min(pipelineLimit, pending.length) }, worker))
   } finally {
+    controller = undefined
     busy.value = false
-    emit('busy', false)
+    if (!disposed) emit('busy', false)
+  }
+}
+
+async function runRow(row: Row, signal: AbortSignal) {
+  try {
+    if (!row.credential) {
+      row.status = 'login'
+      // Keep the job ID on polling failures; explicit retry resumes that job.
+      if (!row.jobId) row.jobId = (await startTwoFALogin(row.entry, { signal })).id
+      // A start response can arrive after stop/unmount, even when aborted.
+      signal.throwIfAborted()
+      let job = await getTwoFALogin(row.jobId, { signal })
+      signal.throwIfAborted()
+      while (job.status === 'running') {
+        await pollDelay(signal)
+        signal.throwIfAborted()
+        job = await getTwoFALogin(row.jobId!, { signal })
+        signal.throwIfAborted()
+      }
+      if (job.status !== 'succeeded' || !job.credential) {
+        await discardJob(row)
+        throw new Error('login_failed')
+      }
+      row.credential = job.credential
+      await discardJob(row)
+    }
+    signal.throwIfAborted()
+    row.status = 'importing'
+    // Retry is explicit and reuses the credential; completed rows stay skipped.
+    row.status = await props.importCredential(row.credential, row.entry.email, { ...row.entry }, signal)
+    row.credential = undefined
+    row.entry.password = ''
+    row.entry.mfa_secret = ''
+  } catch (cause: unknown) {
+    if (signal.aborted) {
+      await discardJob(row)
+      row.status = row.credential ? 'importFailed' : 'pending'
+      return
+    }
+    const status = (cause as { status?: number; response?: { status?: number } })?.status ??
+      (cause as { response?: { status?: number } })?.response?.status
+    if (status === 404) row.jobId = undefined
+    row.status = row.credential ? 'importFailed' : 'failed'
   }
 }
 
 function reset() {
+  if (busy.value && !disposed) return
   for (const row of rows.value) void discardJob(row)
   rows.value = []
   raw.value = ''
@@ -139,7 +178,7 @@ function reset() {
 
 onBeforeUnmount(() => {
   disposed = true
-  stopRequested.value = true
+  stop()
   reset()
 })
 </script>

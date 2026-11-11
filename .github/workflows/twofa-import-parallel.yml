@@ -85,3 +85,60 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 30
+
+  candidate-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Record clean candidate identity
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code
+          git rev-parse HEAD > evidence/head.txt
+          git rev-parse "$SOURCE_BASE" > evidence/base.txt
+          git diff --check "$SOURCE_BASE" HEAD
+          git diff --name-only "$SOURCE_BASE" HEAD > evidence/changed-files.txt
+      - name: Install locked dependencies on remote runner only
+        run: pnpm --dir frontend install --frozen-lockfile
+      - name: Mounted regressions and affected integration boundaries
+        run: |
+          set -o pipefail
+          printf '%s\n' 'pnpm --dir frontend exec vitest run <2FA component, parent, autoBPS, channel binding, encryption, API, locale suites>' > evidence/green-command.txt
+          pnpm --dir frontend exec vitest run src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts src/components/account/__tests__/OpenAITwoFAImport.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts src/components/account/__tests__/UpstreamChannelBinding.spec.ts src/components/account/__tests__/CredentialEncryptionSetup.spec.ts src/api/admin/__tests__/accountTokenGuard.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/green.json" 2>&1 | tee evidence/green.log
+      - name: Lint changed frontend sources without mutation
+        if: always()
+        run: |
+          set -o pipefail
+          git diff --name-only -z "$SOURCE_BASE" HEAD -- 'frontend/src/*.ts' 'frontend/src/*.vue' | sed -z 's#frontend/##g' | (cd frontend && xargs -0 pnpm exec eslint) 2>&1 | tee evidence/lint.log
+      - name: Frontend typecheck
+        if: always()
+        run: |
+          set -o pipefail
+          pnpm --dir frontend run typecheck 2>&1 | tee evidence/typecheck.log
+      - name: Frontend production build
+        if: always()
+        run: |
+          set -o pipefail
+          pnpm --dir frontend run build 2>&1 | tee evidence/build.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: twofa-green-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30

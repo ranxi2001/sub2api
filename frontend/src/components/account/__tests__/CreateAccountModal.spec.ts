@@ -586,6 +586,64 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     })
   })
 
+  it('keeps parallel 2FA imports and enrollment identities isolated until each enrollment completes', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const callback = wrapper.getComponent(OpenAITwoFAImport).props('importCredential')
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>(yes => { resolve = yes })
+      return { promise, resolve }
+    }
+    type Result = { created: number; failed: number; items: { action: string; account_id: number }[] }
+    const imports = [deferred<Result>(), deferred<Result>()]
+    const enrollments = [deferred<void>(), deferred<void>()]
+    importCodexSessionMock.mockImplementationOnce(() => imports[0]!.promise).mockImplementationOnce(() => imports[1]!.promise)
+    createCredentialOperationsMock.mockImplementation((entry: { account_id: number }) => enrollments[entry.account_id - 41]!.promise)
+    const logins = [41, 42].map(id => ({ email: `fixture-${id}@example.test`, password: `synthetic-${id}`, mfa_secret: `synthetic-secret-${id}` }))
+    const controller = new AbortController()
+    const completed: number[] = []
+    const tasks = logins.map((login, i) => callback({ synthetic_account: i + 41 }, login.email, login, controller.signal).then(() => completed.push(i)))
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(2)
+    expect(createCredentialOperationsMock).not.toHaveBeenCalled()
+    imports[1]!.resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 42 }] })
+    await flushPromises()
+    expect(createCredentialOperationsMock).toHaveBeenCalledTimes(1)
+    expect(createCredentialOperationsMock).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 42, login_email: logins[1]!.email, password: logins[1]!.password, totp_secret: logins[1]!.mfa_secret }), { signal: controller.signal })
+    expect(completed).toEqual([])
+    imports[0]!.resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 41 }] })
+    await flushPromises()
+    expect(createCredentialOperationsMock).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 41, login_email: logins[0]!.email, password: logins[0]!.password, totp_secret: logins[0]!.mfa_secret }), { signal: controller.signal })
+    enrollments[1]!.resolve()
+    await flushPromises()
+    expect(completed).toEqual([1])
+    enrollments[0]!.resolve()
+    await Promise.all(tasks)
+    expect(completed).toEqual([1, 0])
+    expect(wrapper.emitted('created')).toHaveLength(2)
+  })
+
+  it('does not enroll or announce success when stopped while a 2FA import response is pending', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    let resolve!: (result: unknown) => void
+    importCodexSessionMock.mockImplementationOnce(() => new Promise(yes => { resolve = yes }))
+    const controller = new AbortController()
+    const login = { email: 'fixture@example.test', password: 'synthetic', mfa_secret: 'synthetic-secret' }
+    const task = wrapper.getComponent(OpenAITwoFAImport).props('importCredential')({ synthetic_account: 41 }, login.email, login, controller.signal)
+    const rejection = expect(task).rejects.toThrow()
+    expect(importCodexSessionMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
+    controller.abort()
+    resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 41 }] })
+    await rejection
+    expect(createCredentialOperationsMock).not.toHaveBeenCalled()
+    expect(wrapper.emitted('created')).toBeUndefined()
+  })
+
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-01-31T12:34:00'))

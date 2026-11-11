@@ -75,19 +75,19 @@ describe('OpenAI initial 2FA import', () => {
     expect(importCredential).toHaveBeenCalledTimes(1)
   })
 
-  it('stops an active login without importing or starting the next row', async () => {
+  it('stops all active logins without importing or starting queued rows', async () => {
     vi.useFakeTimers()
     try {
       vi.mocked(getTwoFALogin).mockResolvedValue({ id: 'job-1', status: 'running' })
       const importCredential = vi.fn()
       const wrapper = mount(OpenAITwoFAImport, { props: { importCredential } })
-      await start(wrapper, 'a@example.com----p----s\nb@example.com----p----s')
+      await start(wrapper, 'a@example.com----p----s\nb@example.com----p----s\nc@example.com----p----s\nd@example.com----p----s')
       await wrapper.get('button').trigger('click')
       await vi.advanceTimersByTimeAsync(1500)
       await flushPromises()
       expect(deleteTwoFALogin).toHaveBeenCalledWith('job-1')
       expect(importCredential).not.toHaveBeenCalled()
-      expect(startTwoFALogin).toHaveBeenCalledTimes(1)
+      expect(startTwoFALogin).toHaveBeenCalledTimes(3)
     } finally {
       vi.useRealTimers()
     }

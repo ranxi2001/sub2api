@@ -169,4 +169,41 @@ describe('mounted 2FA bounded account pipelines', () => {
     expect(startTwoFALogin).toHaveBeenCalledTimes(3)
     expect(vi.mocked(deleteTwoFALogin).mock.calls.map(call => call[0]).sort()).toEqual(emails.slice(0, 3))
   })
+
+  it('clears all polling delays immediately on stop without polling or dequeuing again', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(getTwoFALogin).mockImplementation(async id => ({ id, status: 'running' }))
+      const importCredential = vi.fn().mockResolvedValue('created')
+      const wrapper = mount(OpenAITwoFAImport, { props: { importCredential } })
+      await begin(wrapper)
+      expect(vi.getTimerCount()).toBe(3)
+      await wrapper.get('button').trigger('click')
+      await flushPromises()
+      expect(vi.getTimerCount()).toBe(0)
+      expect(wrapper.emitted('busy')).toEqual([[true], [false]])
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(getTwoFALogin).toHaveBeenCalledTimes(3)
+      expect(startTwoFALogin).toHaveBeenCalledTimes(3)
+      expect(importCredential).not.toHaveBeenCalled()
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['stop', 'unmount'])('%s propagates cancellation through active imports and keeps queued rows untouched', async action => {
+    const imports = deferred<'created'>()
+    const importCredential = vi.fn().mockReturnValue(imports.promise)
+    const wrapper = mount(OpenAITwoFAImport, { props: { importCredential } })
+    await begin(wrapper)
+    expect(importCredential).toHaveBeenCalledTimes(3)
+    if (action === 'stop') await wrapper.get('button').trigger('click')
+    else wrapper.unmount()
+    for (const call of importCredential.mock.calls) expect((call[3] as AbortSignal).aborted).toBe(true)
+    imports.resolve('created')
+    await flushPromises()
+    expect(startTwoFALogin).toHaveBeenCalledTimes(3)
+    expect(importCredential).toHaveBeenCalledTimes(3)
+  })
 })
