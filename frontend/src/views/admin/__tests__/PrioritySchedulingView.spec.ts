@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { client as apiClient, settle as flushPromises, analysis, overrideGet, performance, render, wrapper } from './prioritySchedulingFixture'
+import { client as apiClient, settle as flushPromises, analysis, config, deferred, overrideGet, performance, render, wrapper } from './prioritySchedulingFixture'
 import AccountPerformanceCell from '@/components/account/AccountPerformanceCell.vue'
 
 describe('priority scheduling shares account performance', () => {
@@ -60,6 +60,28 @@ describe('priority scheduling shares account performance', () => {
     confirm.mockReturnValue(true)
     await wrapper!.get('[data-testid="clear-changed-sticky"]').trigger('click'); await flushPromises()
     expect(apiClient.post).toHaveBeenCalledWith('/admin/priority-scheduling/sticky-bindings/clear',{group_id:17,account_ids:[1]})
+  })
+
+  it('reads back the recomputed group after automatically switching the sticky scope', async () => {
+    const latest = analysis({ model: 'fixture-model', group_id: 11, minutes: 60 }).snapshot
+    const pending = deferred<any>()
+    overrideGet((url, options) => {
+      if (url === '/admin/priority-scheduling/config') return { data: { ...config, group_ids: [12] } }
+      if (url === '/admin/priority-scheduling/snapshot') return { data: { snapshot: latest } }
+      if (url === '/admin/priority-scheduling/sticky-bindings') {
+        if (options.params.group_id === 11) return pending.promise
+        return { data: { group_id: 12, total: 4, by_account: [{ account_id: 2, count: 4 }] } }
+      }
+    })
+    vi.mocked(apiClient.post).mockResolvedValue({ data: { before: latest, after: latest, timed_out: false, diff: [] } })
+    render(); await flushPromises()
+    expect(wrapper!.get('[data-testid="sticky-group"]').element).toHaveProperty('value', '12')
+    await wrapper!.get('[data-testid="recompute"]').trigger('click'); await flushPromises()
+    expect(apiClient.get).toHaveBeenLastCalledWith('/admin/priority-scheduling/sticky-bindings', { params: { group_id: 11 } })
+    pending.resolve({ data: { group_id: 11, total: 2, by_account: [{ account_id: 1, count: 2 }] } }); await flushPromises()
+    expect(wrapper!.get('[data-testid="sticky-group"]').element).toHaveProperty('value', '11')
+    expect(wrapper!.find('[data-testid="sticky-clear-1"]').exists()).toBe(true)
+    expect(wrapper!.find('[data-testid="sticky-clear-2"]').exists()).toBe(false)
   })
 
   it('does not expose changed-sticky cleanup when the actual snapshot changes', async () => {

@@ -32,17 +32,19 @@ describe('priority shared performance scope', () => {
     expect((reads().at(-1)![1] as any).params).toEqual({ model: 'another-model', minutes: 60 })
   })
 
-  it.each(['scope','logout','unmount'])('cancels old performance analysis on %s and rejects its late response', async action => {
+  it.each(['scope','window','logout','unmount'])('cancels old performance analysis on %s and rejects its late response', async action => {
     render(); await flushPromises()
     const pending = deferred<any>(); vi.mocked(apiClient.get).mockReturnValueOnce(pending.promise)
     const refresh = (wrapper!.vm as any).refresh(); await flushPromises()
     const signal = (reads().at(-1)![1] as any).signal
     if (action === 'scope') await choose('priority-group-filter','Composite (#23)')
+    else if (action === 'window') await wrapper!.get('[data-testid="latency-window"]').setValue(15)
     else if (action === 'logout') fixture.auth.user = null
     else unmount()
     expect(signal.aborted).toBe(true)
     pending.resolve({ data: analysis({ model:'fixture-model',group_id:17,minutes:60 },3,'old') }); await refresh; await flushPromises()
     if (action === 'scope') expect((wrapper!.vm as any).snapshot.group_id).toBe(23)
+    if (action === 'window') expect((wrapper!.vm as any).snapshot.window_minutes).toBe(15)
   })
 
   it('fences an in-flight read after saving without overwriting newer edits or selected scope', async () => {
