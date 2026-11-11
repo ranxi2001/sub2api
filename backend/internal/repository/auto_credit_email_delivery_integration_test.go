@@ -12,6 +12,8 @@ import (
 	"mime/quotedprintable"
 	"net"
 	"net/mail"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,7 +23,10 @@ import (
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -168,6 +173,20 @@ func TestVipCreditEmailIndependentNodesAndLifecycle(t *testing.T) {
 	restarted.Stop() // Stop before Start is safe
 }
 
+func TestVipCreditEmailStopWhilePoolSaturated(t *testing.T) {
+	db := creditDB(t)
+	db.SetMaxOpenConns(1)
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	w := service.NewAutoCreditEmailWorker(NewAutoCreditEmailOutboxRepository(db), emailFixtureSender(func(context.Context, service.NotificationEmailSendInput) error { return errors.New("must not send") }))
+	w.Start()
+	require.Eventually(t, func() bool { return db.Stats().WaitCount > 0 }, 5*time.Second, 10*time.Millisecond)
+	done := make(chan struct{})
+	go func() { w.Stop(); close(done) }()
+	select { case <-done: case <-time.After(3*time.Second): t.Fatal("Stop hung behind saturated DB pool") }
+}
+
 // A real local SMTP protocol capture inside GitHub Actions only. No external
 // network is used; the first DATA is rejected to prove durable retry.
 type creditSMTPFixture struct {
@@ -219,15 +238,30 @@ func TestVipCreditEmailSMTPTemplateAndRetry(t *testing.T) {
 	uid := emailCredit(t, db)
 	_, err := db.Exec(`UPDATE users SET email='vip-recipient@example.invalid' WHERE id=$1`, uid)
 	require.NoError(t, err)
-	_, err = NewAutoCreditRepository(db).Evaluate(ctx, uid)
-	require.NoError(t, err)
+	var key int64
+	credential := fmt.Sprintf("sk-email-admission-fixture-%d", uid)
+	require.NoError(t, db.QueryRow(`INSERT INTO api_keys(user_id,key,name) VALUES($1,$2,'smtp admission fixture') RETURNING id`, uid, credential).Scan(&key))
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	cfg := &config.Config{}
+	keys := service.NewAPIKeyService(NewAPIKeyRepository(client, db), NewUserRepository(client, db), NewGroupRepository(client, db), nil, NewUserGroupRateRepository(db), nil, cfg)
+	keys.SetAutoCredit(NewAutoCreditRepository(db), nil)
+	engine := gin.New()
+	engine.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(keys, nil, cfg)))
+	engine.POST("/v1/messages", func(c *gin.Context) { c.Status(200) })
+	request := func() int {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/v1/messages", nil)
+		r.Header.Set("Authorization", "Bearer "+credential)
+		engine.ServeHTTP(w, r)
+		return w.Code
+	}
+	require.Equal(t, 200, request(), "actual middleware admission must issue the credit before mail")
 	_, err = db.Exec(`UPDATE auto_credit_email_outbox SET available_at=NOW()+INTERVAL '1 hour' WHERE ledger_id NOT IN (SELECT id FROM auto_credit_ledger WHERE user_id=$1)`, uid)
 	require.NoError(t, err)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	smtp := &creditSMTPFixture{listener:listener}; smtp.fail.Store(true); smtp.wg.Add(1); go smtp.serve()
 	t.Cleanup(func() { _=listener.Close(); smtp.wg.Wait() })
-	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
 	settings := NewSettingRepository(client)
 	host, port, err := net.SplitHostPort(listener.Addr().String()); require.NoError(t, err)
 	require.NoError(t, settings.SetMultiple(ctx, map[string]string{
@@ -235,7 +269,12 @@ func TestVipCreditEmailSMTPTemplateAndRetry(t *testing.T) {
 	}))
 	mailService := service.NewNotificationEmailService(settings, service.NewEmailService(settings,nil))
 	mailService.RememberRecipientLocale(ctx,uid,"vip-recipient@example.invalid","zh")
-	w := service.NewAutoCreditEmailWorker(NewAutoCreditEmailOutboxRepository(db),mailService)
+	// Match production's dedicated one-connection outbox pool and prove the
+	// main template/settings pool works even when configured with one slot.
+	claimDB, err := sql.Open("postgres",os.Getenv("VIP_CREDIT_TEST_DSN")); require.NoError(t,err)
+	t.Cleanup(func() { _ = claimDB.Close() })
+	claimDB.SetMaxOpenConns(1); db.SetMaxOpenConns(1)
+	w := service.NewAutoCreditEmailWorker(NewAutoCreditEmailOutboxRepository(claimDB),mailService)
 	found, err := w.ProcessNext(ctx); require.True(t,found); require.ErrorContains(t,err,"delivery failed")
 	var balance string
 	require.NoError(t,db.QueryRow(`SELECT balance::text FROM users WHERE id=$1`,uid).Scan(&balance)); require.Equal(t,"300.00000000",balance,"SMTP failure must not undo committed credit")
@@ -253,6 +292,36 @@ func TestVipCreditEmailSMTPTemplateAndRetry(t *testing.T) {
 	message, err := mail.ReadMessage(strings.NewReader(messages[0])); require.NoError(t,err)
 	body, err := io.ReadAll(quotedprintable.NewReader(message.Body)); require.NoError(t,err)
 	require.Contains(t,string(body),"300.00000000"); require.Contains(t,string(body),"垫付"); require.Contains(t,string(body),"尚未支付")
+	require.Contains(t,string(body),"vip-recipient@example.invalid"); require.NotContains(t,string(body),"张三"); require.NotContains(t,string(body),"Alex")
+	// End-to-end real debit -> ledger -> outbox -> existing templates -> SMTP.
+	repo := NewAutoCreditRepository(db)
+	state, err := repo.Get(ctx,uid,"all"); require.NoError(t,err)
+	_, err = repo.Settle(ctx,uid,state.Entries[0].ID,uid); require.NoError(t,err)
+	_, err = repo.Save(ctx,uid,uid,service.AutoCreditPatch{Version:3,NotifyEmail:boolPtr(true)}); require.NoError(t,err)
+	cmd := &service.UsageBillingCommand{RequestID:fmt.Sprintf("smtp-real-debit-%d",uid),APIKeyID:key,UserID:uid,BalanceCost:290}
+	applied, err := NewUsageBillingRepository(nil,db).Apply(ctx,cmd); require.NoError(t,err); require.True(t,applied.AutoCreditIssued)
+	found, err = w.ProcessNext(ctx); require.NoError(t,err); require.True(t,found)
+	applied, err = NewUsageBillingRepository(nil,db).Apply(ctx,cmd); require.NoError(t,err); require.False(t,applied.Applied)
+	found, err = w.ProcessNext(ctx); require.NoError(t,err); require.False(t,found)
+	_, err = db.Exec(`UPDATE users SET status='disabled' WHERE id=$1`,uid); require.NoError(t,err)
+	require.Equal(t,401,request())
+	found, err = w.ProcessNext(ctx); require.NoError(t,err); require.False(t,found)
+	smtp.mu.Lock(); messages=append([]string{},smtp.messages...); recipients=append([]string{},smtp.recipients...); smtp.mu.Unlock()
+	require.Len(t,messages,2); require.Equal(t,[]string{"<vip-recipient@example.invalid>","<vip-recipient@example.invalid>"},recipients)
+	message, err = mail.ReadMessage(strings.NewReader(messages[1])); require.NoError(t,err)
+	body, err = io.ReadAll(quotedprintable.NewReader(message.Body)); require.NoError(t,err)
+	require.Contains(t,string(body),"310.00000000")
+	state, err = repo.Get(ctx,uid,"all"); require.NoError(t,err)
+	require.Len(t,state.Entries,2)
+	for i, raw := range messages {
+		parsed, e := mail.ReadMessage(strings.NewReader(raw)); require.NoError(t,e)
+		decoded, e := io.ReadAll(quotedprintable.NewReader(parsed.Body)); require.NoError(t,e)
+		require.Contains(t,string(decoded),fmt.Sprintf("账本编号：%d</p>",state.Entries[1-i].ID),"each mail must identify exactly its own committed ledger")
+	}
+	for _, locale := range []string{"zh","en"} {
+		preview, e := mailService.PreviewTemplate(ctx,service.NotificationEmailPreviewInput{Event:service.NotificationEmailEventAutoCreditSuccess,Locale:locale}); require.NoError(t,e)
+		require.Contains(t,preview.HTML,"300.00000000"); require.Contains(t,preview.HTML,"42")
+	}
 	// Template infrastructure supports custom English as well as official zh.
 	_, err = mailService.UpdateTemplate(ctx,service.NotificationEmailEventAutoCreditSuccess,"en","Advance {{ledger_id}}","<p>{{credit_amount}} / {{current_balance}}</p>"); require.NoError(t,err)
 	preview, err := mailService.PreviewTemplate(ctx,service.NotificationEmailPreviewInput{Event:service.NotificationEmailEventAutoCreditSuccess,Locale:"en",Variables:map[string]string{"ledger_id":"42","credit_amount":"300.00000000","current_balance":"309.00000000"}}); require.NoError(t,err); require.Equal(t,"Advance 42",preview.Subject)

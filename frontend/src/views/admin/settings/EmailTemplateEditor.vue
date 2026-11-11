@@ -262,6 +262,8 @@ const fallbackPlaceholders = [
   "{{threshold}}",
   "{{recharge_url}}",
   "{{recharge_amount}}",
+  "{{credit_amount}}",
+  "{{ledger_id}}",
   "{{order_id}}",
   "{{unsubscribe_url}}",
   "{{account_id}}",

@@ -8,10 +8,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-type autoCreditEmailOutboxRepository struct { db *sql.DB }
+type autoCreditEmailOutboxRepository struct { db *sql.DB; ownsDB bool }
+
+// One separate lazy connection prevents the outbox lock from starving template
+// and SMTP setting reads, including installations with a one-connection main pool.
+func ProvideAutoCreditEmailOutboxRepository(cfg *config.Config) (service.AutoCreditEmailOutboxRepository, error) {
+	db, err := sql.Open("postgres", cfg.Database.DSNWithTimezone(cfg.Timezone))
+	if err != nil { return nil, err }
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxIdleTime(time.Minute)
+	db.SetConnMaxLifetime(5*time.Minute)
+	return &autoCreditEmailOutboxRepository{db: db, ownsDB: true}, nil
+}
+
+func (r *autoCreditEmailOutboxRepository) Close() error {
+	if r.ownsDB { return r.db.Close() }
+	return nil
+}
 
 func NewAutoCreditEmailOutboxRepository(db *sql.DB) service.AutoCreditEmailOutboxRepository {
 	return &autoCreditEmailOutboxRepository{db: db}
@@ -22,7 +40,12 @@ func (r *autoCreditEmailOutboxRepository) DeliverNext(ctx context.Context, send 
 	// Do not let parent cancellation release the lock while SMTP is still in
 	// flight. Stop joins the sender; SMTP itself has bounded I/O deadlines.
 	// This transaction never locks/writes users, ledger or billing tables.
-	tx, err := r.db.BeginTx(context.WithoutCancel(ctx), nil)
+	conn, err := r.db.Conn(ctx)
+	if err != nil { return false, err }
+	defer func() { _ = conn.Close() }()
+	txCtx, txCancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
+	defer txCancel()
+	tx, err := conn.BeginTx(txCtx, nil)
 	if err != nil { return false, err }
 	defer func() { _ = tx.Rollback() }()
 	var event service.AutoCreditEmail

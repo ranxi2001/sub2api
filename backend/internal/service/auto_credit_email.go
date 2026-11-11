@@ -20,6 +20,7 @@ type AutoCreditEmail struct {
 // SMTP acceptance followed by a crash before ack can still cause a retry.
 type AutoCreditEmailOutboxRepository interface {
 	DeliverNext(context.Context, func(context.Context, AutoCreditEmail) error) (bool, error)
+	Close() error
 }
 
 type AutoCreditEmailSender interface {
@@ -33,6 +34,7 @@ type AutoCreditEmailWorker struct {
 	cancel context.CancelFunc
 	done chan struct{}
 	stopped bool
+	close sync.Once
 }
 
 func NewAutoCreditEmailWorker(repo AutoCreditEmailOutboxRepository, sender AutoCreditEmailSender) *AutoCreditEmailWorker {
@@ -59,6 +61,7 @@ func (w *AutoCreditEmailWorker) Stop() {
 	done := w.done
 	w.mu.Unlock()
 	if done != nil { <-done }
+	w.close.Do(func() { if w.repo != nil { _ = w.repo.Close() } })
 }
 
 func (w *AutoCreditEmailWorker) run(ctx context.Context) {
@@ -88,6 +91,7 @@ func (w *AutoCreditEmailWorker) ProcessNext(ctx context.Context) (bool, error) {
 			Event: NotificationEmailEventAutoCreditSuccess,
 			UserID: event.UserID,
 			RecipientEmail: event.RecipientEmail,
+			RecipientName: event.RecipientEmail,
 			SourceType: "auto_credit_ledger",
 			SourceID: strconv.FormatInt(event.LedgerID, 10),
 			Variables: map[string]string{"credit_amount": event.Amount, "current_balance": event.BalanceAfter, "ledger_id": strconv.FormatInt(event.LedgerID, 10)},
