@@ -56,7 +56,7 @@ try {
         import zh from '/src/i18n/locales/zh/index.ts';import en from '/src/i18n/locales/en/index.ts';import '/src/style.css';
         const lang=new URLSearchParams(location.search).get('lang')||'zh';
         const state={starts:[],requests:[],imports:[],enrollments:[],aborted:[],unexpected:[],busy:false};window.__twofa=state;
-        const pending=new Map();
+        const pending=new Map(),failures=new Map();
         apiClient.defaults.adapter=async request=>{
           const path=request.url;const method=request.method;state.requests.push({path,method});let data;
           const payload=typeof request.data==='string'?JSON.parse(request.data):request.data;
@@ -67,14 +67,17 @@ try {
           else if(path.startsWith('/admin/account-ops/token-guard/two-fa-login/')&&method==='get'){
             const email=path.split('/').at(-1);
             data=await new Promise((resolve,reject)=>{
-              const abort=()=>{pending.delete(email);state.aborted.push(email);reject(Error('synthetic abort'))};
-              pending.set(email,()=>{request.signal?.removeEventListener('abort',abort);pending.delete(email);resolve({id:email,status:'succeeded',credential:{synthetic_account:email}})});
+              const fail=error=>{request.signal?.removeEventListener('abort',abort);pending.delete(email);failures.delete(email);reject(error)};
+              const abort=()=>{state.aborted.push(email);fail(Error('synthetic abort'))};
+              failures.set(email,fail);
+              pending.set(email,()=>{request.signal?.removeEventListener('abort',abort);pending.delete(email);failures.delete(email);resolve({id:email,status:'succeeded',credential:{synthetic_account:email}})});
               request.signal?.addEventListener('abort',abort,{once:true});if(request.signal?.aborted)abort();
             });
           }else {state.unexpected.push({path,method});throw Error('Unexpected fixture endpoint')}
           return{data:{code:0,message:'success',data},status:200,statusText:'OK',headers:{},config:request};
         };
         state.complete=email=>{if(!pending.has(email))throw Error('No pending synthetic login '+email);pending.get(email)()};
+        state.failPending=()=>{for(const fail of [...failures.values()])fail(Error('synthetic polling failure'))};
         const importCredential=async(credential,email,login,signal)=>{
           signal?.throwIfAborted();if(credential.synthetic_account!==email||login.email!==email)throw Error('Synthetic identity mismatch');
           state.imports.push(email);await Promise.resolve();signal?.throwIfAborted();state.enrollments.push(email);return 'created';
@@ -137,12 +140,22 @@ try {
       await begin('zh')
       await capture('zh-desktop-active')
       if (mode === 'after') {
-        await page.locator('main button').click()
+        await page.getByTestId('two-fa-stop').click()
         await page.waitForFunction(() => !window.__twofa.busy)
         assert.equal((await snapshot()).starts.length, 3)
         assert.deepEqual((await snapshot()).imports, [])
         assert.equal((await snapshot()).aborted.length, 3)
         await capture('zh-desktop-stopped')
+        await begin('zh')
+        await page.evaluate(() => window.__twofa.failPending())
+        await page.getByTestId('two-fa-owned-jobs').waitFor()
+        assert.equal((await snapshot()).busy, true, 'Parent Close remains fenced while the attempt is paused')
+        assert.equal(await page.getByTestId('two-fa-start').isEnabled(), true)
+        assert.equal(await page.getByTestId('two-fa-stop').isEnabled(), true)
+        assert.equal((await snapshot()).starts.length, 3)
+        await capture('zh-desktop-unresolved-tasks')
+        await page.getByTestId('two-fa-stop').click()
+        await page.waitForFunction(() => !window.__twofa.busy)
         await begin('zh')
         for (const email of [emails[1], emails[0], emails[2], emails[4], emails[3]]) {
           await page.waitForFunction(email => window.__twofa.starts.includes(email), email)

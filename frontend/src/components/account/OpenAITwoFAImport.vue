@@ -12,6 +12,9 @@
         :placeholder="t('tokenGuard.twoFA.placeholder')" />
     </template>
     <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
+    <p v-if="!busy && hasOwnedJobs" role="status" class="input-hint" data-testid="two-fa-owned-jobs">
+      {{ t('tokenGuard.twoFA.ownedJobs') }}
+    </p>
     <ul v-if="rows.length" class="space-y-2" aria-live="polite">
       <li v-for="(row, index) in rows" :key="row.entry.email" class="flex justify-between gap-4 text-sm">
         <span>{{ index + 1 }}. {{ row.entry.email }}</span>
@@ -22,7 +25,7 @@
       <button v-if="!busy && (!rows.length || hasPending)" type="button" class="btn btn-primary" :disabled="!encryptionReady" data-testid="two-fa-start" @click="run">
         {{ t(rows.length ? 'tokenGuard.twoFA.retry' : 'tokenGuard.twoFA.start') }}
       </button>
-      <button v-if="busy" type="button" class="btn btn-secondary" :disabled="stopRequested" @click="stop">
+      <button v-if="busy || hasOwnedJobs" type="button" class="btn btn-secondary" :disabled="busy && stopRequested" data-testid="two-fa-stop" @click="stop">
         {{ t('tokenGuard.twoFA.stop') }}
       </button>
       <button v-if="!busy && rows.length" type="button" class="btn btn-secondary" :disabled="hasOwnedJobs" @click="reset">
@@ -33,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import CredentialEncryptionSetup from './CredentialEncryptionSetup.vue'
 import { useI18n } from 'vue-i18n'
 import { deleteTwoFALogin, getTwoFALogin, parseTwoFALoginText, startTwoFALogin } from '@/api/admin/accountTokenGuard'
@@ -64,10 +67,23 @@ let disposed = false
 let controller: AbortController | undefined
 const pipelineLimit = 3
 
-function stop() {
+// Parent Close must preserve ownership even when this attempt has paused.
+// The local busy flag stays separate so explicit Retry/cleanup remains usable.
+watch(() => busy.value || hasOwnedJobs.value, value => {
+  if (!disposed) emit('busy', value)
+}, { flush: 'sync' })
+
+async function stop() {
   stopRequested.value = true
   controller?.abort()
-  for (const row of rows.value) void discardJob(row).catch(() => {})
+  const ownsBusy = !busy.value
+  if (ownsBusy) busy.value = true
+  try {
+    await Promise.all(rows.value.filter(row => row.jobId || row.cleanup)
+      .map(row => discardJob(row).catch(() => {})))
+  } finally {
+    if (ownsBusy) busy.value = false
+  }
 }
 
 function pollDelay(signal: AbortSignal) {
@@ -114,7 +130,6 @@ async function run() {
   controller = new AbortController()
   const { signal } = controller
   const batchRows = rows.value
-  emit('busy', true)
   try {
     // Retained jobs already consume capacity. Resume/retire them before
     // admitting fresh rows, including when an earlier attempt lost polling.
@@ -138,7 +153,6 @@ async function run() {
     await Promise.all(cleanup)
     controller = undefined
     busy.value = false
-    if (!disposed) emit('busy', false)
   }
 }
 

@@ -4538,6 +4538,7 @@ const openaiTwoFA = ref(false)
 const openaiBPSOAuth = ref(false)
 const bpsOAuthModels = ref<string[]>([...DEFAULT_EXCEL_BPS_MODELS])
 const isOpenAIBPSOAuth = computed(() => form.platform === 'openai' && accountCategory.value === 'oauth-based' && openaiBPSOAuth.value)
+// Includes unresolved login ownership while the importer is paused for Retry.
 const twoFABusy = ref(false)
 const isOpenAITwoFA = computed(() => form.platform === 'openai' && accountCategory.value === 'oauth-based' && openaiTwoFA.value)
 // 「降智后自动开启 BPS」：OpenAI OAuth / 2FA 添加时可选，账号建好后按这里的设置给每个新账号建一条质量运维规则。

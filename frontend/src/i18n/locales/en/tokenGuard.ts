@@ -11,6 +11,7 @@ export default {
   "start": "Log in and import",
   "retry": "Continue unfinished entries",
   "stop": "Stop this batch",
+  "ownedJobs": "Some login tasks are unresolved, so this window must stay open. Continue unfinished entries to resume them, or stop this batch to clean them up. If cleanup fails, you can try again.",
   "reset": "Import another batch",
   "states": {
     "pending": "Pending",

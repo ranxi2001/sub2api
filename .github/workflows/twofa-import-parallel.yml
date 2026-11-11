@@ -119,6 +119,49 @@ jobs:
             assert.match(regression.failureMessages.join('\n'), /AssertionError/, prefix)
           }
           JS
+      - name: Prove actual modal Close-reopen regression against fixed-head review
+        env:
+          MODAL_REVIEW_BASE: 3facaf7966def4e640590a23b8db3bf648d53ed9
+        run: |
+          set -euo pipefail
+          modal_tree="$RUNNER_TEMP/twofa-modal-red"
+          mkdir -p "$modal_tree"
+          git archive "$MODAL_REVIEW_BASE" | tar -x -C "$modal_tree"
+          cmp frontend/package.json "$modal_tree/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$modal_tree/frontend/pnpm-lock.yaml"
+          printf '%s\n' "$MODAL_REVIEW_BASE" > evidence/modal-review-base.txt
+          for component in OpenAITwoFAImport.vue CreateAccountModal.vue; do
+            source="frontend/src/components/account/$component"
+            git rev-parse "$MODAL_REVIEW_BASE:$source" > "evidence/modal-base-$component.blob"
+            git hash-object "$modal_tree/$source" > "evidence/modal-red-$component.blob"
+            cmp "evidence/modal-base-$component.blob" "evidence/modal-red-$component.blob"
+          done
+          cp frontend/src/components/account/__tests__/CreateAccountModal.spec.ts "$modal_tree/frontend/src/components/account/__tests__/"
+          sha256sum frontend/src/components/account/__tests__/CreateAccountModal.spec.ts > evidence/modal-tests.sha256
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$modal_tree/frontend/node_modules"
+          command=(pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts -t '2FA controlled Close/reopen' --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/modal-red.json")
+          printf '%q ' "${command[@]}" > evidence/modal-red-command.txt
+          set +e
+          (cd "$modal_tree/frontend" && "${command[@]}") > evidence/modal-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/modal-red.log
+          printf '%s\n' "$result" > evidence/modal-red-exit.txt
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs'
+          import assert from 'node:assert/strict'
+          const report = JSON.parse(readFileSync('evidence/modal-red.json', 'utf8'))
+          assert.equal(report.numRuntimeErrorTestSuites ?? 0, 0)
+          assert.doesNotMatch(readFileSync('evidence/modal-red.log', 'utf8'), /\[vitest\]|Transform failed|Unhandled Error|SyntaxError/)
+          const tests = report.testResults.flatMap(suite => suite.assertionResults).filter(test => test.title.startsWith('2FA controlled Close/reopen'))
+          assert.equal(tests.length, 2)
+          for (const test of tests) {
+            assert.equal(test.status, 'failed')
+            assert.match(test.failureMessages.join('\n'), /AssertionError/)
+            assert.match(test.failureMessages.join('\n'), /expected 6 to be 3/)
+          }
+          JS
       - uses: actions/upload-artifact@v7
         if: always()
         with:
