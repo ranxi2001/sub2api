@@ -109,3 +109,30 @@ jobs:
           name: v0221-proof-${{ matrix.defect }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/v0221-proof-${{ matrix.defect }}/
           if-no-files-found: error
+  generated:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify committed Ent generation and module metadata
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/v0221-generated"
+          (cd backend && go generate ./ent)
+          git diff --binary -- backend/ent backend/go.mod backend/go.sum > "$RUNNER_TEMP/v0221-generated/generated.patch"
+          git diff --exit-code -- backend/ent backend/go.mod backend/go.sum
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: v0221-generated-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/v0221-generated/
+          if-no-files-found: error
