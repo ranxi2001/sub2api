@@ -21,7 +21,7 @@ func TestQwenSessionCacheUsesNativeResponsesAndPreservesContinuation(t *testing.
 	response := `{"id":"resp_qwen_next","object":"response","status":"completed","model":"qwen3.8-max","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":4000,"output_tokens":2,"input_tokens_details":{"cached_tokens":3000,"cache_creation_input_tokens":900}}}`
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(response))}}
 	svc := &OpenAIGatewayService{cfg: deepSeekChatFallbackTestConfig(), httpUpstream: upstream}
-	body := `{"model":"qwen3.8-max","input":"continue","previous_response_id":"resp_qwen_first","store":true,"stream":false}`
+	body := `{"model":"qwen3.8-max","input":"continue","previous_response_id":"resp_qwen_first","store":true,"stream":false,"max_output_tokens":128}`
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 	result, err := svc.Forward(context.Background(), c, account, []byte(body))
@@ -31,6 +31,7 @@ func TestQwenSessionCacheUsesNativeResponsesAndPreservesContinuation(t *testing.
 	require.Equal(t, "enable", upstream.lastReq.Header.Get("x-dashscope-session-cache"))
 	require.Equal(t, "resp_qwen_first", gjson.GetBytes(upstream.lastBody, "previous_response_id").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
+	require.Equal(t, int64(128), gjson.GetBytes(upstream.lastBody, "max_output_tokens").Int())
 	usage, ok := extractOpenAIUsageFromJSONBytes([]byte(response))
 	require.True(t, ok)
 	require.Equal(t, 3000, usage.CacheReadInputTokens)
