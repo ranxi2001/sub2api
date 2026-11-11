@@ -151,6 +151,7 @@ docs/*
 !docs/registration-email-alias-block.md
 !docs/openai-ws-sse-acceleration.md
 !docs/openai-ultrafast-billing.md
+!docs/openai-oauth-relay-fast-billing.md
 !docs/openai-ws-mode.md
 !docs/oauth-initial-ws.md
 !docs/openai-outbound-identity.md
