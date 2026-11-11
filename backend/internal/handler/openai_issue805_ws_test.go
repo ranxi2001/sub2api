@@ -433,3 +433,33 @@ func TestIssue805WSNewBOutputWaitsForCrossNodeCommit(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue805WSHTTPBridgeHTTPRejectionReportsOriginalCode(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, 520} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			clients := issue805Redis(t)
+			u := &issue805Oracle{}
+			srv := u.server(t)
+			producer := issue805WSNode(t, service.OpenAIWSIngressModeHTTPBridge, srv.URL, repository.NewGatewayCache(clients()), false, false)
+			issue715WSSend(t, producer.clientConn, issue715WSCreate("", false))
+			require.Contains(t, string(issue715WSRead(t, producer.clientConn)), "fixture-task-reference-715")
+			u.mu.Lock()
+			u.rejection, u.rejectionStatus = "unsupported_encrypted_agent_message", status
+			u.mu.Unlock()
+			consumer := issue805WSNode(t, service.OpenAIWSIngressModeHTTPBridge, srv.URL, repository.NewGatewayCache(clients()), true, true)
+			body := issue715WSCreate("", true)
+			issue715WSSend(t, consumer.clientConn, body)
+			answer := issue715WSRead(t, consumer.clientConn)
+			require.Equal(t, "error", gjson.GetBytes(answer, "type").String(), string(answer))
+			require.Equal(t, "unsupported_encrypted_agent_message", gjson.GetBytes(answer, "error.code").String())
+			require.EqualValues(t, status, gjson.GetBytes(answer, "status").Int())
+			for _, node := range []*openAIWSPassthroughHandlerHarness{consumer, producer} {
+				issue600Finish(t, node, http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}})
+			}
+			u.mu.Lock()
+			defer u.mu.Unlock()
+			require.Equal(t, []string{"Bearer fixture-ws-one", "Bearer fixture-ws-two"}, u.ids)
+			require.JSONEq(t, gjson.Get(body, "input").Raw, gjson.GetBytes(u.frames[1], "input").Raw)
+		})
+	}
+}

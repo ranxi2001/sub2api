@@ -109,7 +109,8 @@ func TestIssue805AlternativeStillNeedsNormalAdmission(t *testing.T) {
 
 func TestIssue805FinalAdmissionStillRechecksGroup(t *testing.T) {
 	accounts := []Account{{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, GroupIDs: []int64{715}}}
-	svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}}
+	repo := &turnAdmissionRepo{account: &accounts[0]}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: repo, requireLatestTurnAdmission: true}
 	svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
 	selected := accounts[0]
 	_, err := svc.admitOpenAITurnForGroup(context.Background(), 715, true, &selected, "gpt-6-astra")
@@ -119,6 +120,7 @@ func TestIssue805FinalAdmissionStillRechecksGroup(t *testing.T) {
 	var denied *OpenAITurnAdmissionError
 	require.ErrorAs(t, err, &denied)
 	require.Equal(t, "group_membership_changed", denied.Reason, "opt-out cannot bypass final fresh admission")
+	require.Equal(t, 2, repo.reads, "both sends must use the production authoritative admission contract")
 }
 
 func TestIssue805FinalSendPreservesHistoryAndDeliveryFences(t *testing.T) {
