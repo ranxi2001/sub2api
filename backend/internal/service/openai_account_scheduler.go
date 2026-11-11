@@ -490,7 +490,10 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	// 命名返回值保证 defer 写入的耗时同时返回给调用方。
 	defer func() {
 		if err == nil && selection != nil && selection.Account != nil {
-			if selection.Account.QwenStrictSessionAffinity() && !req.StrictSessionAffinity && req.RequiredImageCapability == "" {
+			// Every identified Qwen first turn participates in the atomic claim:
+			// a non-strict candidate must not dispatch past a concurrent strict owner.
+			qwenFirstTurn := req.Platform == PlatformQwen && req.StickyAccountID == 0 && strings.TrimSpace(req.SessionHash) != ""
+			if (selection.Account.QwenStrictSessionAffinity() || qwenFirstTurn) && !req.StrictSessionAffinity && req.RequiredImageCapability == "" {
 				if bindErr := s.service.claimStrictSessionAccount(ctx, req, selection.Account.ID); bindErr != nil {
 					if selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()

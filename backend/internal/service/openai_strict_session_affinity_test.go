@@ -163,17 +163,20 @@ func (c *qwenConcurrentFirstTurnCache) CompareAndSwapSessionAccountID(_ context.
 }
 
 func TestQwenStrictConcurrentFirstTurnDoesNotEscapeNewOwner(t *testing.T) {
-	f := newStickyEscapeRebindFixture()
-	f.request.Platform = PlatformQwen
-	f.cache.sessionBindings = map[string]int64{}
-	f.service.cache = &qwenConcurrentFirstTurnCache{schedulerTestGatewayCache: f.cache}
-	for i := range f.accounts {
-		f.accounts[i].Platform = PlatformQwen
-		f.accounts[i].Type = AccountTypeAPIKey
-		f.accounts[i].Credentials = map[string]any{qwenStrictSessionCredential: true}
+	for _, peerStrict := range []bool{false, true} {
+		f := newStickyEscapeRebindFixture()
+		f.request.Platform = PlatformQwen
+		f.cache.sessionBindings = map[string]int64{}
+		f.service.cache = &qwenConcurrentFirstTurnCache{schedulerTestGatewayCache: f.cache}
+		for i := range f.accounts {
+			f.accounts[i].Platform = PlatformQwen
+			f.accounts[i].Type = AccountTypeAPIKey
+			f.accounts[i].Credentials = map[string]any{qwenStrictSessionCredential: true}
+		}
+		f.accounts[1].Credentials[qwenStrictSessionCredential] = peerStrict
+		selected, _, err := f.scheduler.Select(context.Background(), f.request)
+		require.Error(t, err, "peer strict=%v", peerStrict)
+		require.Nil(t, selected)
+		require.Equal(t, int64(947101), f.cache.sessionBindings["openai:rebind-session"])
 	}
-	selected, _, err := f.scheduler.Select(context.Background(), f.request)
-	require.Error(t, err)
-	require.Nil(t, selected)
-	require.Equal(t, int64(947101), f.cache.sessionBindings["openai:rebind-session"])
 }

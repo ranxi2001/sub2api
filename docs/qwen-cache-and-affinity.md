@@ -10,7 +10,7 @@
 
 管理 API 的 credentials 字段为 `qwen_session_cache_enabled`、`qwen_strict_session_affinity`，值为布尔值。更新仍须保留完整非敏感 credentials；省略 API Key 由服务保留，不应将脱敏占位值回传。缓存开关决定原生 Responses 路径，优先于该账号原有的 `api_protocol`；关闭时无须重建原协议配置。
 
-严格绑定沿用 `gateway.openai_ws.sticky_session_ttl_seconds`，默认一小时。到期后可重新分配；同一会话同时首次请求时，Redis compare-and-swap 只允许一个账号成为所有者，竞争失败的请求释放槽位并报错。Redis 无法确认所有者时不猜测渠道。开启后请求失败率可能上升，这是保持缓存和状态归属的明确取舍。已有同账号重试规则不变，不新增已发送请求的重放。
+严格绑定沿用 `gateway.openai_ws.sticky_session_ttl_seconds`，默认一小时。到期后可重新分配；带会话身份的千问首次请求均参与 Redis compare-and-swap，只允许一个账号成为所有者，竞争失败的请求释放槽位并报错，避免未开启严格模式的候选账号抢走已建立的严格绑定。共享缓存无法确认所有者时不猜测渠道；不带会话身份的普通千问请求仍按原配置处理。开启严格模式后请求失败率可能上升，这是保持缓存和状态归属的明确取舍。已有同账号重试规则不变，不新增已发送请求的重放。
 
 原先用 OpenAI 平台接入千问的分组，可在完成平台迁移前按分组开启相同的严格策略：
 
