@@ -1,8 +1,8 @@
 export default {
   common: {
-    qwenPlatformHint: '千问 Qwen 使用 OpenAI 兼容接口，按独立平台统计。已有 OpenAI 账号和分组不会自动迁移。',
+    qwenPlatformHint: 'Qwen 使用 OpenAI 兼容接口，按独立平台统计。已有 OpenAI 账号和分组不会自动迁移。',
     qwenCache: {
-      title: '千问缓存与会话',
+      title: 'Qwen 缓存与会话',
       enable: '开启官方 Responses 会话缓存',
       cacheHint: '启用后使用 Responses 转发并开启上游会话缓存；客户端需通过 previous_response_id 续接。缓存写入可能计费，命中以实际用量为准。关闭后沿用原协议设置。',
       strict: '严格保持会话粘性',
