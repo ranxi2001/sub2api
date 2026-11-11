@@ -60,8 +60,9 @@ try {
           let originalAccount
           if (scenario === 'accounts') {
             await page.getByText('Synthetic quota account', { exact: true }).first().waitFor()
+            await page.waitForFunction(() => document.body.innerText.includes('71%'))
             originalAccount = await page.getByText('Synthetic quota account', { exact: true }).first().elementHandle()
-            await page.locator('button.btn-primary').filter({ hasText: '创建' }).first().locator('..').locator('button.btn-secondary').first().click()
+            await page.getByRole('button', { name: '添加账号', exact: true }).locator('..').locator('button.btn-secondary').first().click()
             await page.waitForFunction(() => window.__v0221.pendingAccounts.length > 0)
             if (mode === 'after') {
               assert.equal(await originalAccount.evaluate(element => element.isConnected), true)

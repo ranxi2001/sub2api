@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,10 +32,12 @@ func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {
 		nextFields    string
 		nextInput     string
 		nextPrevious  string
+		retryBlocked  bool
 		wantReconnect bool
 		wantFailClose bool
 		wantTypes     []string
 	}{
+		{name: "exposed task prevents search replay", accountType: AccountTypeOAuth, nextFields: search, nextInput: userInput, retryBlocked: true, wantFailClose: true},
 		{name: "empty OAuth prewarm", accountType: AccountTypeOAuth, firstFields: `,"generate":false`, nextFields: search, nextInput: userInput, wantReconnect: true, wantTypes: []string{"message"}},
 		{name: "Lite search history injection", accountType: AccountTypeOAuth, firstFields: `,"generate":false`, nextFields: `,"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}`, nextInput: `[{"type":"web_search_call","id":"ws_history","status":"completed","action":{"type":"search","query":"example"}},{"type":"message","role":"user","content":"continue"}]`, wantReconnect: true, wantTypes: []string{"web_search_call", "message", "additional_tools"}},
 		{name: "tool continuation preserves all output", accountType: AccountTypeOAuth, firstFields: `,"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]`, firstInput: `[{"type":"message","role":"user","content":"Run lookup for my original question"}]`, firstOutput: firstOutput, nextFields: search, nextInput: toolOutput, wantReconnect: true, wantTypes: []string{"message", "reasoning", "message", "function_call", "function_call_output"}},
@@ -90,6 +93,12 @@ func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {
 				c.Request = r
 				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 				defer cancel()
+				if tc.retryBlocked {
+					blocked := &atomic.Bool{}
+					blocked.Store(true)
+					ctx = context.WithValue(ctx, openAIWSAgentRecoveryRetryKey{}, blocked)
+					c.Request = c.Request.WithContext(ctx)
+				}
 				_, payload, err := conn.Read(ctx)
 				if err == nil {
 					err = svc.ProxyResponsesWebSocketFromClient(ctx, c, conn, account, "test-token", payload, nil)
@@ -127,6 +136,8 @@ func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {
 				require.Error(t, err)
 				require.Error(t, <-serverErr)
 				require.Len(t, first.writes, 1, "unsafe continuation must not reach upstream")
+				require.Equal(t, 1, dialer.DialCount(), "protected/unsafe history must not open a replay socket")
+				require.Empty(t, second.writes)
 				return
 			}
 			read("resp_second")
