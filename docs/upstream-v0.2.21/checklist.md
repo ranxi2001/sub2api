@@ -1,6 +1,6 @@
 # Upstream v0.2.21 integration checklist
 
-Frozen source: `dab829a4e9b7d1cc307189aea8b0319eb29e29d0..10ba8f9b4dc2e6023d4a9879ab77b21841babd10`; baseline `6fa7fb86eae7c732794450646dc13831dce87ff1`. 82 commits = 44 leaves + 38 merges. Only leaves are imported. Source blob and baseline blob IDs are in [source-map.json](source-map.json).
+Frozen source: `dab829a4e9b7d1cc307189aea8b0319eb29e29d0..10ba8f9b4dc2e6023d4a9879ab77b21841babd10`; baseline `6fa7fb86eae7c732794450646dc13831dce87ff1`. 82 commits = 44 leaves + 38 merges. Only leaves are imported. Source blob and baseline blob IDs are in [source-map.json](source-map.json). Actual function, regression and gap review for all44leaves/38merges/32requirements is in [function-review.md](function-review.md); reviewed implementation is7a8199bb106416882f5aef13d3bd5323622baf00. Dynamic results remain tied to the subsequently published exact head.
 
 Feature checkboxes below mean source coverage; dynamic acceptance remains a separate checklist and is tied to its tested SHA.
 
@@ -90,10 +90,10 @@ Feature checkboxes below mean source coverage; dynamic acceptance remains a sepa
 
 - [ ] Full backend compilation and production adapter/unit/integration coverage on exact published head.
 - [ ] Frontend lint, typecheck, complete tests and build on exact published head.
-- [ ] Critical old-code behavioral RED / current GREEN; compile failures are not RED.
+- [ ] Critical old-code behavioral RED / current GREEN, including the final upstream GLM merge; compile failures are not RED.
 - [ ] Race/resource lifecycle, migration and security gates on the latest head.
 - [ ] New admin feature notice registration, shared dismissal and A→B→C regressions.
-- [x] Real CSS baseline/candidate screenshots, sanitized native PR attachment URLs, hashes and readback (3a46 fixed source, frontend tree unchanged; current rerun pending).
+- [ ] Current exact-head real CSS baseline/candidate screenshots and supervisor native attachment upload/hash/readback. Historical3a46/bce3 evidence remains historical; retained VIP/priority dependency changes mean current UI provenance must be evaluated explicitly.
 - [ ] Full pagination of check runs (filter=all), traditional statuses, attempts and raw failure logs.
 - [ ] Supervisor independent review; sole writer cannot self-certify it.
 

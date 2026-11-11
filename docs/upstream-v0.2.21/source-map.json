@@ -28,8 +28,14 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
-      "additional_fork_files": []
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/cmd/server/VERSION",
+        "source_finding": "Upstream changes only release identity 0.2.19→0.2.20; fork remains 2.20.5 by explicit policy.",
+        "named_regression_or_equivalence": "Static exact file value; no business regression required.",
+        "uncovered_gaps_and_boundaries": "Policy adaptation; owner release/version workflows preserved."
+      }
     },
     {
       "source_sha": "c004c962a78014855bdb74c51f750e3fce3407fb",
@@ -136,7 +142,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "import (",
         "func shouldApplyLegacyWeChatEnv(configKey, envKey string) bool {",
@@ -166,7 +172,13 @@
         "0853d160365dbc87c1ebb33eda18b59b8ed2bb72",
         "457602c8fc07112fb6e38642adea88a61d7c9759",
         "0853d160365dbc87c1ebb33eda18b59b8ed2bb72"
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/config/config.go:autoRequestBodyMemoryBudget/load; backend/internal/pkg/sysutil/memory.go:MemoryLimitBytes",
+        "source_finding": "Missing configuration uses max(min positive physical/cgroup/Go limit / 4,1GiB); explicit zero remains disabled.",
+        "named_regression_or_equivalence": "TestAutoRequestBodyMemoryBudget; TestLoadRequestBodyMemoryBudget; TestCgroupMemoryLimit; TestGoMemoryLimit; TestMinPositive cover boundary, environment/config precedence and limit selection.",
+        "uncovered_gaps_and_boundaries": "Implemented; runtime GREEN and ingress resource tests remain remote."
+      }
     },
     {
       "source_sha": "03bd718abe9f38fb0455a82631c7e492e4abc693",
@@ -204,7 +216,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func cgroupMemoryLimit(root, selfCgroupFile string) uint64 {",
         "func cgroupPathMemoryLimit(mount, cgroupPath, limitFile string) uint64 {",
@@ -227,7 +239,13 @@
         "0853d160365dbc87c1ebb33eda18b59b8ed2bb72",
         "457602c8fc07112fb6e38642adea88a61d7c9759",
         "0853d160365dbc87c1ebb33eda18b59b8ed2bb72"
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/pkg/sysutil/memory.go:cgroupPathMemoryLimit",
+        "source_finding": "os.OpenRoot + Root.ReadFile confine ancestor/root fallback reads to the cgroup mount.",
+        "named_regression_or_equivalence": "TestCgroupMemoryLimit/cgroup path cannot escape the mount rejects traversal and outside symlink limits; v1/v2 and parent limits retained.",
+        "uncovered_gaps_and_boundaries": "Implemented security support; remote race suite required."
+      }
     },
     {
       "source_sha": "5184ff55f68908cfd9e7cf5905e11b71157cfb41",
@@ -261,7 +279,7 @@
           "source_blob": "4a1cb3f3e4e93a6a480c204c4ea8a115d7150c6a",
           "baseline_blob": "71d462c316bc002295bf7c6dbd701f8905216085",
           "source_hunk_contexts": [
-            "OAuth / Setup Token \u7684 1.5\u30012\u30012.5 \u548c 2.6 \u56fe\u7247\u8bf7\u6c42\u4f7f\u7528 Codex \u539f\u751f Im"
+            "OAuth / Setup Token 的 1.5、2、2.5 和 2.6 图片请求使用 Codex 原生 Im"
           ],
           "fork_path": "README.md",
           "fork_blob": "c05ccfac74ba62be2d661768fe3fa4584216b00b",
@@ -272,12 +290,18 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "gateway:"
       ],
       "regression_files": [],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "README.md image-format paragraph; README_CN.md image-format paragraph",
+        "source_finding": "Explains output_format/output_compression passthrough and actual MIME/extension mismatch; retries may duplicate billed generation.",
+        "named_regression_or_equivalence": "Static original-patch comparison of both translated paragraphs.",
+        "uncovered_gaps_and_boundaries": "Documentation adaptation; no paid image acceptance claim."
+      }
     },
     {
       "source_sha": "9935268573dd9f87c34ce0b39d69afe94f8cc9e7",
@@ -311,7 +335,7 @@
           "source_blob": "8f56e41fed6d968bf4cbf77496dd721fb6ceb089",
           "baseline_blob": "71d462c316bc002295bf7c6dbd701f8905216085",
           "source_hunk_contexts": [
-            "OAuth / Setup Token \u7684 1.5\u30012\u30012.5 \u548c 2.6 \u56fe\u7247\u8bf7\u6c42\u4f7f\u7528 Codex \u539f\u751f Im"
+            "OAuth / Setup Token 的 1.5、2、2.5 和 2.6 图片请求使用 Codex 原生 Im"
           ],
           "fork_path": "README.md",
           "fork_blob": "c05ccfac74ba62be2d661768fe3fa4584216b00b",
@@ -322,13 +346,19 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "On `/v1/images/generations` and `/v1/images/edits`, OAuth / Setup Token requests",
         ""
       ],
       "regression_files": [],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "README.md and README_CN.md mapped GPT Image scope paragraphs",
+        "source_finding": "Both languages agree on GPT Image1.5/2/2.5/2.6 and pre2.6 Responses fallback boundaries, including reported2.5-flare JPEG→PNG.",
+        "named_regression_or_equivalence": "Static translated scope comparison against actual patch.",
+        "uncovered_gaps_and_boundaries": "Documentation adaptation; no runtime logic added."
+      }
     },
     {
       "source_sha": "2273a5d63f76fce80a9059cb029d2354a1e1004e",
@@ -349,11 +379,11 @@
             "func TestOpenAIResponsesOrphanPrecheckCompatibilityErrors(t *testing.T) {"
           ],
           "fork_path": "backend/internal/service/openai_responses_orphan_cleanup_perf_test.go",
-          "fork_blob": "0293338bcd385d293e40fa91857424aab2e8ca32",
+          "fork_blob": "735291b934e4fae9cd039063a492dcc540f3792a",
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "import (",
         "func TestOAuthCompatibilityMessageHistoryAvoidsRedundantDecode(t *testing.T) {"
@@ -361,7 +391,13 @@
       "regression_files": [
         "backend/internal/service/openai_responses_orphan_cleanup_perf_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_responses_orphan_cleanup_perf_test.go; openai_responses_input_compat.go:openAIResponsesMayNeedOrphanCleanup",
+        "source_finding": "Fork prefilter avoids full decode; allocation tests execute in isolated child processes. Source review found original giant escaped-string zero-allocation case missing and added it in55373256.",
+        "named_regression_or_equivalence": "TestOAuthCompatibilityMessageHistoryAvoidsRedundantDecode retains2000message/90000allocation assertion; new TestOrphanCleanupFastRejectionLargeEscapedContent measures actual prefilter at zero; TestOrphanCleanupFastRejectionRetainsFallback keeps unicode/output fallback.",
+        "uncovered_gaps_and_boundaries": "Repair55373256; remote execution pending. Process-isolation itself has no honest deterministic behavioral RED."
+      }
     },
     {
       "source_sha": "4ac1675b56760660d5bac5d6aa9fb2cdf57397b4",
@@ -428,7 +464,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "",
         "func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A",
@@ -451,7 +487,13 @@
           "baseline_blob": "bff898104c759c24c36cd4510265adbffaebce27",
           "fork_blob": "bc88b90749fb4f7a22b33eb1c346ec5bf389c5f1"
         }
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/account_usage_service.go:getUsageForAccount/getAntigravityUsage/cachedAntigravityUsage; frontend/src/components/account/AccountUsageCell.vue:loadActiveUsage",
+        "source_finding": "Force bypasses both outer and singleflight-inner cache checks; query button uses existing batched-account UI contract.",
+        "named_regression_or_equivalence": "TestCachedAntigravityUsage_ForceSkipsFreshCache; ExpiredOrMissing; AccountUsageCell: Antigravity query button refreshes past the server cache asserts getUsage(1006,active,true) and100→0 quota.",
+        "uncovered_gaps_and_boundaries": "Implemented; component/mock evidence is distinct from live upstream."
+      }
     },
     {
       "source_sha": "fe093d76bd9feedd55387ea4056302384a7ab304",
@@ -1078,7 +1120,7 @@
             ""
           ],
           "fork_path": "backend/internal/service/openai_cache_write_ttl_test.go",
-          "fork_blob": "d64f5abdea3ca1d44ec146848666c25346902f2d",
+          "fork_blob": "221e6eefec86db387c8fa2ef81634673e0635208",
           "introduced_or_changed_declarations": [
             "func TestOpenAICacheWriteTTLRecordUsage(t *testing.T) {",
             "func TestOpenAICacheWriteTTLInvalidDetailsKeepAggregate(t *testing.T) {",
@@ -1441,7 +1483,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "var (",
         "type UsageLogMutation struct {",
@@ -1671,7 +1713,13 @@
           "baseline_blob": null,
           "fork_blob": "00c1f31cf94b796f32bd7850294050c69d9b4756"
         }
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_gateway_response_handling.go:openAICacheCreationTTLTokensFromUsage; openai_gateway_usage.go:RecordUsage; billing_service.go:openAICacheCreationTTLCost; repository/usage_log_repo_insert.go and usage_log_repo_query.go; migration250; shared PricingEntryCard/IntervalRow",
+        "source_finding": "Valid nonnegative integer30m/12h buckets must sum to aggregate; mutually exclusive ordinary input avoids double charge. TTL survives JSON/SSE/nativeWS, channel/group/stats/intervals, INSERT/SELECT/Scan/Ent/DTO and UI import/export/bundles. Generic configured cache price stays unchanged; explicit zero preserved; default12h is input×2.5.",
+        "named_regression_or_equivalence": "TestOpenAICacheWriteTTLRecordUsage/InvalidDetailsKeepAggregate/Prices; new TestOpenAICacheWriteTTLGroupPricingAndSchedule checks group precedence and independent12hNULL/zero through real charge/schedule/plaza; TestOpenAICacheWriteTTLChannelScheduleKeepsDistinctLongRates prevents merging12h-only rate changes; TestUsageLogRepositoryCacheWriteTTLRoundTrip(single,batch,best_effort); TestChannelCacheWriteTTLPricesRoundTrip(NULL/zero/interval/stats/batch); TestOpenAIWSPassthroughCacheWriteTTLReachesBillingOnce requires one insert/debit; PricingEntryCard.cacheTTL.spec.ts.",
+        "uncovered_gaps_and_boundaries": "Implemented adaptation; real DB fixture/production compile/migrations and full regression gates must run remotely."
+      }
     },
     {
       "source_sha": "7156213cce03b268b3261c59fa6bd47d62e6e6ba",
@@ -1703,11 +1751,11 @@
             "func TestOpenAICacheWriteTTLPrices(t *testing.T) {"
           ],
           "fork_path": "backend/internal/service/openai_cache_write_ttl_test.go",
-          "fork_blob": "d64f5abdea3ca1d44ec146848666c25346902f2d",
+          "fork_blob": "221e6eefec86db387c8fa2ef81634673e0635208",
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *BillingService) computeTokenBreakdown(",
         "func TestOpenAICacheWriteTTLPrices(t *testing.T) {"
@@ -1715,7 +1763,13 @@
       "regression_files": [
         "backend/internal/service/openai_cache_write_ttl_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/billing_service.go:computeTokenBreakdown",
+        "source_finding": "Fast12h ratio starts from configured tier multiplier when free normal input and30m prices provide no ratio.",
+        "named_regression_or_equivalence": "TestOpenAICacheWriteTTLPrices/explicit free 30m with fast 12h: input/30m zero,12h2e-6,2390tokens charged4e-6 each.",
+        "uncovered_gaps_and_boundaries": "Implemented; no live price modifications."
+      }
     },
     {
       "source_sha": "eb2da3448404df3bd2dfcce836652f0782206688",
@@ -2014,7 +2068,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "var DefaultBedrockModelMapping = map[string]string{",
         "func TestDefaultBedrockModelMapping_ContainsNewClaudeModels(t *testing.T) {",
@@ -2056,7 +2110,13 @@
         "frontend/src/components/keys/__tests__/UseKeyModal.spec.ts",
         "frontend/src/composables/__tests__/useModelWhitelist.spec.ts"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/pkg/claude/constants.go/effort_catalog.go; domain Bedrock mapping; apicompat ResponsesToAnthropicRequest; gateway_request.go:validateClaude55Request; frontend useModelWhitelist.ts/UseKeyModal.vue",
+        "source_finding": "Adds normalized Fable/Mythos5.2 catalog/capabilities, adaptive/high conversion and signed thinking, Fast eligibility, Bedrock/OpenCode entries; CLI floor2.1.321.",
+        "named_regression_or_equivalence": "TestClaude52CatalogAndCapabilities; TestFableMythos52ResponsesAdaptiveThinking/SignedThinkingResponsesRoundTrip/ChatAdapter/StreamPreservesThinking/SamplingValidation/DoesNotChangeOlderModelConversion; TestClaude52FastTierEligibility; frontend exports/preserves parameterized Anthropic model tests.",
+        "uncovered_gaps_and_boundaries": "Implemented with leaf14 pricing complement, not duplicate feature import."
+      }
     },
     {
       "source_sha": "ea6b3de8082d5871ce5e90a61f4fe75c8ba6b506",
@@ -2107,7 +2167,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "import (",
         "func TestLatestClaudeCodeStableReleaseVersion(t *testing.T) {",
@@ -2130,7 +2190,13 @@
         "backend/internal/service/claude_code_version_sync_service_test.go",
         "backend/internal/service/setting_claude_code_version_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/claude_code_version_sync_service_test.go:claudeCodeTestVersion; setting_claude_code_version_test.go",
+        "source_finding": "Fixtures derive versions above actual CLI floor rather than fixed stale versions.",
+        "named_regression_or_equivalence": "TestClaudeCodeVersionSyncWritesLatestStableVersion/NeverMovesBackwards/SkippedWhenDisabled; TestGetClaudeCodeClientVersionPriority; TestUpdateSettingsClaudeCodeVersionTakesEffectImmediately retain settings writes, disabled no network and fallback assertions.",
+        "uncovered_gaps_and_boundaries": "Test adaptation; real floor2.1.321 statically confirmed."
+      }
     },
     {
       "source_sha": "508bb9560f70783ab689996344c23e3772978781",
@@ -2190,7 +2256,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *BillingService) initFallbackPricing() {",
         "func TestNewModelPricingCatalogFallbackAndContext(t *testing.T) {",
@@ -2200,7 +2266,13 @@
       "regression_files": [
         "backend/internal/service/billing_service_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/billing_service.go:initFallbackPricing; pricing_service.go:claudeSonnet55FallbackPricing; resources/model_prices_and_context_window.json",
+        "source_finding": "Sonnet5.5 read fallback is0.1e-6 in all three fallback sources.",
+        "named_regression_or_equivalence": "TestNewModelPricingCatalogFallbackAndContext Sonnet5.5 asserts1000×0.1e-6 with other token prices and long-context behavior.",
+        "uncovered_gaps_and_boundaries": "Implemented; persisted live card values untouched."
+      }
     },
     {
       "source_sha": "92d35a6947a9ec77257b0258370124f0a2c2b0f8",
@@ -2242,7 +2314,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *PricingService) downloadPricingData() error {",
         "import (",
@@ -2254,7 +2326,13 @@
       "regression_files": [
         "backend/internal/service/pricing_service_hot_reload_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/pricing_service.go:downloadPricingData",
+        "source_finding": "Use downloaded-body SHA256 when advertised hash mismatches; persist same fingerprint so later matching content is downloaded.",
+        "named_regression_or_equivalence": "TestPricingSyncRetriesMismatchedCatalogUntilDataCatchesUp verifies old-body anchor, later new-body fetch and no repeated download; TestPricingHotReload_DownloadRefreshesFingerprint.",
+        "uncovered_gaps_and_boundaries": "Implemented; remote HTTP fixtures required."
+      }
     },
     {
       "source_sha": "3e8c2ee3f7c128cad3a95e3b099e9bd348fa2012",
@@ -2334,7 +2412,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func IsHaiku55(model string) bool {",
         "func IsFable52(model string) bool {",
@@ -2347,7 +2425,13 @@
       "regression_files": [
         "backend/internal/service/claude52_pricing_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/pricing_service.go:claude52FallbackPricing/matchByModelFamily; billing_service.go:initFallbackPricing/getFallbackPricing; embedded catalog",
+        "source_finding": "Fable/Mythos5.2 use8/40 input/output,10/16 cache-write,0.2read USD/MTok and Fast2x; normalized5.2 matching precedes older family.",
+        "named_regression_or_equivalence": "TestClaude52Pricing; TestClaude52CatalogOverridesAndVersionBoundaries; TestClaude52FallbackPricing cover catalog absent/embedded/explicit zero/provider suffixes/5.20 boundaries/old Fable10input/no long surcharge.",
+        "uncovered_gaps_and_boundaries": "Complementary catalog fallback, deduplicated final upstream merge semantics retained."
+      }
     },
     {
       "source_sha": "0578fb160e5b77ecbfd7139b5b7761c39d73fd78",
@@ -2392,7 +2476,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T",
         "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient("
@@ -2400,7 +2484,13 @@
       "regression_files": [
         "backend/internal/handler/openai_gateway_handler_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_ws_forwarder_ingress.go:ProxyResponsesWebSocketFromClient later-turn failover; actual Responses websocket handler",
+        "source_finding": "Native turn>1 error carries nil retry payload, causing1013 close without replaying initial frame to another account.",
+        "named_regression_or_equivalence": "TestOpenAIResponsesWebSocket_NativeLaterTurnUsageLimitDoesNotReplayFirstMessage: user/tool continuation and reconnect429 assert1013 and zero alternate dials; TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent retains first-turn failover.",
+        "uncovered_gaps_and_boundaries": "Implemented; proven complete-current-turn bridge retries remain separately bounded."
+      }
     },
     {
       "source_sha": "142d22cc4284678a729bce1a28986efcd175126c",
@@ -2472,7 +2562,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(",
         "type openAIWSConn struct {",
@@ -2482,7 +2572,13 @@
       "regression_files": [
         "backend/internal/service/openai_ws_search_activation_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_ws_search_activation.go:openAIWSWebSearchDeclared/recordInitialWebSearch/initializedWithoutWebSearch; openai_ws_pool.go:writeJSON; ingress ProxyResponsesWebSocketFromClient",
+        "source_finding": "First successfully sent create records search capability under writeMu. Complete replay history reconnects incompatible OAuth socket before sending search.",
+        "named_regression_or_equivalence": "TestOpenAIWSIngressWebSearchActivation retains original reasoning/tool history and reuses replacement; TestOpenAIWSConnWebSearchInitialization covers raw/bytes/map; exposed task prevents search replay asserts no replacement dial/write.",
+        "uncovered_gaps_and_boundaries": "Fork boundary: ownerProtected/smartStrict/exposed encrypted tasks reject replay. Supported complete replay-safe history only; no universal recovery claim."
+      }
     },
     {
       "source_sha": "9c7380732df8ad4420b8be161504552a52b585a5",
@@ -2507,14 +2603,20 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {"
       ],
       "regression_files": [
         "backend/internal/service/openai_ws_search_activation_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_ws_search_activation_test.go deferred CloseNow cleanup",
+        "source_finding": "Deferred close errors explicitly discarded without changing assertions.",
+        "named_regression_or_equivalence": "TestOpenAIWSIngressWebSearchActivation substantive lifecycle assertions preserved.",
+        "uncovered_gaps_and_boundaries": "Equivalent supporting test cleanup; remote lint/compile pending."
+      }
     },
     {
       "source_sha": "fab3ec251609ba008e41bd5692668f697152705e",
@@ -2592,7 +2694,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(",
         "readLoop:",
@@ -2631,7 +2733,13 @@
           "baseline_blob": "472b3f2f8eb02e898cd32e5ee5ef06fa89efd8da",
           "fork_blob": "9e8207a9df5adc05cf0f8bbdfc25c5b102194a97"
         }
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_ws_ttft.go:openAIWSFirstTokenEventFunc; openai_ws_v2/passthrough_relay.go:startsFirstToken/observeUpstreamMessage; proxyResponsesWebSocketV2Passthrough and WS bridge/forwarder",
+        "source_finding": "Configured semantic/visible SSE criterion controls first-token timer per turn, excludes terminal/codex metadata; semantic commitment and actual-content diagnostics remain distinct.",
+        "named_regression_or_equivalence": "TestOpenAIWSPassthroughFirstTokenFollowsTTFTMode uses actual downstream WS across two turns and SSE comparison; TestRelay_IsFirstTokenEventDecidesEveryTurnFirstToken expects300ms and nil terminal-only.",
+        "uncovered_gaps_and_boundaries": "Equivalent helper relocation; timing bounds require exact-head remote evidence."
+      }
     },
     {
       "source_sha": "e401c58053ce79b68985d1bd47aed49477baaf48",
@@ -2669,7 +2777,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "",
         "func openAIStreamEventIsMetadata(eventType string) bool {"
@@ -2677,7 +2785,13 @@
       "regression_files": [
         "backend/internal/service/openai_codex_metadata_events_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_gateway_passthrough.go:openAIStreamEventIsMetadata",
+        "source_finding": "Codex rate_limits/response.metadata stay attempt-local; overload after metadata can failover without committing downstream.",
+        "named_regression_or_equivalence": "TestRelayStallsMetadataBeforeCapacityFailure regular/passthrough readers require UpstreamFailoverError, empty body and request-scoped transient.",
+        "uncovered_gaps_and_boundaries": "Implemented; metadata cannot establish output ownership."
+      }
     },
     {
       "source_sha": "ebf01680858d884ea74b77a3cdbeb5ea4164c3ad",
@@ -2743,7 +2857,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont",
         "",
@@ -2759,7 +2873,13 @@
           "baseline_blob": "574073b06bc5869eb5e4d8971fa3c5be70ae9b8c",
           "fork_blob": "574073b06bc5869eb5e4d8971fa3c5be70ae9b8c"
         }
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_account_runtime_block_fastpath.go:handleOpenAIAccountUpstreamError; passthrough:handleOpenAIStreamTerminalAccountSideEffects; upstream_errors:newOpenAIAccountFailoverErrorWithClassificationHeaders",
+        "source_finding": "Enabled explicit model cooldown can override request capacity retry without disabling account/selected auth registration; in-stream503 included.",
+        "named_regression_or_equivalence": "TestOpenAICapacityShedModelRule_StreamReaders/HTTP/ProtectionBoundaries/WriteFailureDoesNotBlockAccount cover four readers,OAuth/setup/APIkey,exact cooldown/no account cooldown/no same-account retry/persistence failure.",
+        "uncovered_gaps_and_boundaries": "Implemented with connection/SIWC and IP401 reset boundaries retained."
+      }
     },
     {
       "source_sha": "88b7090a35badc3cd3ab616d5ac2dc6783627b3e",
@@ -2811,7 +2931,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont",
         "func TestOpenAICapacityShedModelRule_WriteFailureDoesNotBlockAccount(t *testing.",
@@ -2820,7 +2940,13 @@
       "regression_files": [
         "backend/internal/service/openai_capacity_shed_model_rule_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_gateway_passthrough.go:openAICapacityShedRuleBody",
+        "source_finding": "Match response.error/error/flat real error fields; exclude model/output/metadata from keyword matching and saved reason.",
+        "named_regression_or_equivalence": "TestOpenAICapacityShedModelRule_ErrorFieldsOnly excludes output, prompt metadata and model bait; nested/root/flat fields trigger; private-output-marker absent from persisted reason.",
+        "uncovered_gaps_and_boundaries": "Implemented; invalid-JSON raw fallback matches upstream."
+      }
     },
     {
       "source_sha": "a1395eeaf2d600c7e605257e4a1cb02e46b10517",
@@ -2870,7 +2996,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func TestOpenAICapacityShedModelRule_ErrorFieldsOnly(t *testing.T) {",
         "func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(",
@@ -2879,7 +3005,13 @@
       "regression_files": [
         "backend/internal/service/openai_capacity_shed_model_rule_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_gateway_passthrough.go:handleOpenAIStreamTerminalAccountSideEffects; newOpenAIAccountFailoverErrorWithClassificationHeaders",
+        "source_finding": "Capacity special treatment constrained to OpenAI; existing Grok path remains.",
+        "named_regression_or_equivalence": "TestOpenAICapacityShedModelRule_OtherPlatformKeepsDefault verifies no model/account cooldown and normal transient retry.",
+        "uncovered_gaps_and_boundaries": "Implemented platform preservation."
+      }
     },
     {
       "source_sha": "f2b0a32b1ffdbf4ac7d6a8df00f30328f3492b03",
@@ -2931,7 +3063,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "type bufferedFuncCall struct {",
         "func (a *BufferedResponseAccumulator) ProcessEvent(event *ResponsesStreamEvent)",
@@ -2942,7 +3074,13 @@
       "regression_files": [
         "backend/internal/service/openai_responses_sealed_call_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/pkg/apicompat/types.go:ResponsesOutput; responses_to_chatcompletions.go:BufferedResponseAccumulator.ProcessEvent/BuildOutput",
+        "source_finding": "json.RawMessage keeps encrypted_function_args absence/null/empty-array distinct and namespace survives reconstructed calls.",
+        "named_regression_or_equivalence": "TestOpenAIResponsesSealedFunctionCallRoundTrip covers regular/passthrough,terminal/item-done/delta shapes; exact call ID/name/arguments/namespace/marker and usage assertions.",
+        "uncovered_gaps_and_boundaries": "Implemented preservation; does not claim decryption or owner recovery."
+      }
     },
     {
       "source_sha": "552d1ab4bb661f89df4ff267370bf5f578247322",
@@ -2981,7 +3119,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "import (",
         "func TestAnthropicToResponses_ThinkingSignatureBecomesReasoning(t *testing.T) {",
@@ -2990,7 +3128,13 @@
       "regression_files": [
         "backend/internal/pkg/apicompat/anthropic_responses_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/pkg/apicompat/anthropic_to_responses.go:anthropicAssistantToResponses",
+        "source_finding": "Skip trimmed foreign ccswitch-openai-reasoning-v1 signatures while retaining native ciphertext, text and tool ordering.",
+        "named_regression_or_equivalence": "TestAnthropicToResponses_ForeignReasoningEnvelopePreservesToolHistory checks whitespace/malformed wrappers and five retained native/text/call/output items.",
+        "uncovered_gaps_and_boundaries": "Implemented; opaque current task is never replaced or replayed."
+      }
     },
     {
       "source_sha": "85f43b640a5f92dab03599974cb19ee1a5005414",
@@ -3031,7 +3175,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "const contentStablePrefixSessionSeedPrefix = \"compat_csp_\"",
         "scanRoot:",
@@ -3040,7 +3184,13 @@
       "regression_files": [
         "backend/internal/service/openai_content_session_seed_responses_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_content_session_seed.go:deriveOpenAIContentSessionSeed",
+        "source_finding": "Only leading system/developer prefix and first user input seed inferred session; later assistant/tool/reminder additions do not switch affinity.",
+        "named_regression_or_equivalence": "TestDeriveOpenAIContentSessionSeed_ResponsesLeadingPrefix; TestOpenAIGatewayService_ResponsesToolLoopKeepsStickyAccount advanced-mode/identity matrix retains bound healthy account over higher-priority alternative.",
+        "uncovered_gaps_and_boundaries": "Implemented; scheduler fixture is not persisted billing evidence."
+      }
     },
     {
       "source_sha": "090c58f663a8e745b0e564518cafe7557e6f92e2",
@@ -3092,7 +3242,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "",
         "func (s *GatewayService) ForwardAsChatCompletions(",
@@ -3101,11 +3251,17 @@
       "regression_files": [
         "backend/internal/service/gateway_compat_error_policy_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/gateway_forward_as_chat_completions.go:ForwardAsChatCompletions; gateway_forward_as_responses.go:ForwardAsResponses",
+        "source_finding": "Configured account error handling runs before standard failover decision; safety rejection remains terminal and precedes policy.",
+        "named_regression_or_equivalence": "TestAnthropicCompatAccountErrorPolicy both adapters×stream modes checks410custom/pool/temporary/excluded,400/500,exact writes and no premature response.",
+        "uncovered_gaps_and_boundaries": "Implemented preserving fork safety and no-same-account retry."
+      }
     },
     {
       "source_sha": "36484727c7a634795e2d4f1460d11a6e468c3dc1",
-      "subject": "fix(gemini): \u517c\u5bb9\u5165\u53e3\u975e\u6d41\u5f0f\u54cd\u5e94\u4e0d\u518d\u628a\u601d\u8003\u6458\u8981\u6df7\u5165\u6b63\u6587",
+      "subject": "fix(gemini): 兼容入口非流式响应不再把思考摘要混入正文",
       "status": "implemented-adapted",
       "fork_commits": [
         "6b5dbd288b19c783267a8df2398504b957ef459c"
@@ -3141,7 +3297,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func TestGeminiResponseToChatCompletionsRetainsTextAndToolBehavior(t *testing.T)",
         "func convertGeminiToClaudeMessage(geminiResp map[string]any, originalModel strin"
@@ -3149,7 +3305,13 @@
       "regression_files": [
         "backend/internal/service/gemini_chat_completions_compat_service_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/gemini_messages_compat_service.go:convertGeminiToClaudeMessage; gemini_chat_completions_compat_service.go:geminiResponseToChatCompletions",
+        "source_finding": "Filter thought text only; visible text/tools/inline media and usageMetadata remain.",
+        "named_regression_or_equivalence": "TestGeminiResponseToChatCompletionsOmitsThoughtParts/ThoughtOnlyResponse; TestConvertGeminiToClaudeMessageOmitsThoughtParts assert visible text/tool stop and unchanged221/64 output token billing.",
+        "uncovered_gaps_and_boundaries": "Implemented nonstream filtering; no billing suppression."
+      }
     },
     {
       "source_sha": "e2ce0b43dc62d2591cf69f7c4c26d5c48cea87b7",
@@ -3214,7 +3376,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func buildParts(content json.RawMessage, toolIDToName map[string]string, allowDu",
         "func TestTransformClaudeToGemini_ToolResultImagesReachUpstream(t *testing.T) {",
@@ -3233,7 +3395,13 @@
         "aae31c7438a1452bbdb81f7de72f184f0c4f7045",
         "aae31c7438a1452bbdb81f7de72f184f0c4f7045",
         "aae31c7438a1452bbdb81f7de72f184f0c4f7045"
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/pkg/antigravity/request_transformer.go:buildParts; service/buildAntigravityCompatGeminiBody",
+        "source_finding": "Fallback media appended after all functionResponses; Gemini3+ native media stays attached to its call.",
+        "named_regression_or_equivalence": "TestParallelToolResultsKeepFunctionResponsesContiguousBeforeMedia; TestAntigravityResponsesParallelToolResultImagesKeepFunctionResponsesContiguous; TestResponsesToolResultImagesStayWithTheirCalls/TestToolResultMediaPlacement preserve both modes.",
+        "uncovered_gaps_and_boundaries": "Implemented with bounded aae31c7 prerequisite."
+      }
     },
     {
       "source_sha": "7796a2d57aa0496cb87594fd8bf7d1246adcbf8d",
@@ -3302,7 +3470,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "import (",
         "func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {",
@@ -3317,7 +3485,13 @@
         "backend/internal/repository/scheduler_cache_test.go",
         "backend/internal/service/antigravity_pro_quota_rate_limit_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/model_rate_limit.go:antigravityModelRateLimitKeys; Account.modelRateLimitKeysForRequest; setAntigravityModelRateLimits",
+        "source_finding": "Pro Argon normalized variants use separate quota family; read/write helpers agree; Ultra/unknown shared Gemini behavior and image exclusions remain.",
+        "named_regression_or_equivalence": "TestAntigravityModelRateLimits_ProArgonQuotaIsolation; TestSchedulerMetadataAccountKeepsProArgonQuotaIsolation assert snapshots,independent model eligibility and omission of credentials.",
+        "uncovered_gaps_and_boundaries": "Implemented; no quota multiplication."
+      }
     },
     {
       "source_sha": "137316a14c001ea40ab1d99865f5dd88ce03a291",
@@ -3432,7 +3606,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "type easyPayCustomMethod struct {",
         "func NewEasyPay(instanceID string, config map[string]string) (*EasyPay, error) {",
@@ -3465,7 +3639,13 @@
           "baseline_blob": "837d6a076d360f220ba909753b75b9a35f753bdd",
           "fork_blob": "ef70c9c190d4d15d6609835ee7cbed0f7b953649"
         }
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/payment/provider/easypay.go:NewEasyPay/Refund/parseEasyPayRefundResponse/easyPayResponseCodeIsSuccess; frontend providerConfig.ts",
+        "source_finding": "Per-instance refund code0/1 default1; strict integer comparison; ordinary order query still expects1.",
+        "named_regression_or_equivalence": "TestEasyPayRefundSuccessCode; TestNewEasyPayRejectsInvalidRefundSuccessCode; TestExecuteEasyPayRefundSuccessCode full/partial/refused balance/order/audit and exactlyone HTTP request; PaymentProviderDialog loads/saves0/1/default.",
+        "uncovered_gaps_and_boundaries": "Implemented; no actual payment calls."
+      }
     },
     {
       "source_sha": "4ac713c4d4b1bdc5e12111477b9e30a7569aa774",
@@ -3504,7 +3684,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *GatewayService) newSelectionResult(ctx context.Context, account *Accoun",
         ""
@@ -3512,7 +3692,13 @@
       "regression_files": [
         "backend/internal/service/gateway_scheduling_slot_release_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/gateway_scheduling.go:GatewayService.newSelectionResult",
+        "source_finding": "Hydration error invokes acquired release; success retains ReleaseFunc and attachSelectionProfitGate.",
+        "named_regression_or_equivalence": "TestGatewayServiceNewSelectionResultReleasesSlotOnHydrationError requires nil result/error/release once; KeepsReleaseOnSuccess ensures no early release.",
+        "uncovered_gaps_and_boundaries": "Implemented helper contract; real Redis slot end-to-end not established by helper fixture."
+      }
     },
     {
       "source_sha": "7122efee948fc31a086202e75caff1ea2e1562c8",
@@ -3667,7 +3853,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *oauthPendingFlowRefreshTokenCacheStub) DeleteTokenFamily(context.Contex",
         "func (s *wechatOAuthRefreshTokenCacheStub) DeleteTokenFamily(context.Context, st",
@@ -3689,7 +3875,13 @@
         "backend/internal/service/auth_service_refresh_race_test.go",
         "backend/internal/service/auth_service_register_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/repository/refresh_token_cache.go:ConsumeRefreshToken; service/auth_service.go:RefreshTokenPair",
+        "source_finding": "Lua GET+DEL consumes atomically after user/version/session binding checks; only winner rotates; cache error fails unavailable.",
+        "named_regression_or_equivalence": "TestRefreshTokenCacheConsumeIsAtomic16concurrent,miniredis,one winner; TestAuthServiceRefreshTokenPairConsumesTokenOnce eight-reader barrier,one success/seven invalid.",
+        "uncovered_gaps_and_boundaries": "Implemented; miniredis is not production Redis. Explicit cache-command-error behavioral fixture is not newly covered."
+      }
     },
     {
       "source_sha": "eb4ccd173e35b459661fff4a4f079f6f96fccc56",
@@ -3725,7 +3917,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func prepareOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey",
         "func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {"
@@ -3733,7 +3925,13 @@
       "regression_files": [
         "backend/internal/handler/composite_platform_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/handler/composite_platform.go:prepareOpenAIReasoningEffortPolicyForMessagesRequest; service WithOpenAIReasoningEffortPolicyForMessages",
+        "source_finding": "Binds synthesized disabled effort policy while preserving omitted ordinary default, fixed-key/request-model scopes and CN guard.",
+        "named_regression_or_equivalence": "TestMessagesEffortPolicyBinding; TestMessagesEffortPolicyBindingCNTargetsOmitted retain omitted/disabled/mapping-once/ceiling/deny and CN semantics.",
+        "uncovered_gaps_and_boundaries": "Final behavior includes subsequent leaves34/35 and semantic merge f6ea845; repaired55373256."
+      }
     },
     {
       "source_sha": "6f2faba2935c4e592c78c2f629a3d16f2a7ea09a",
@@ -3876,7 +4074,7 @@
             ""
           ],
           "fork_path": "backend/internal/service/openai_messages_effort_policy_test.go",
-          "fork_blob": "b648f1974cd01ceaa31b4f570bb8ff61d7097288",
+          "fork_blob": "aedef3692436c06b27a0707326845085b101adfb",
           "introduced_or_changed_declarations": [
             "func TestMessagesEffortPolicyHTTP(t *testing.T) {",
             "func TestMessagesRawEffortValidation(t *testing.T) {"
@@ -3891,13 +4089,13 @@
             "func WithOpenAIReasoningEffortPolicy(ctx context.Context, maxEffort string, mapp"
           ],
           "fork_path": "backend/internal/service/openai_reasoning_effort_policy.go",
-          "fork_blob": "03b593145cf76a29f060efa6a54be840ca25c927",
+          "fork_blob": "1bb22ea853249feaaa171509837c56201faa8996",
           "introduced_or_changed_declarations": [
             "func WithOpenAIReasoningEffortPolicyForMessages(ctx context.Context, body []byte, maxEffort string, mappings []ReasoningEffortMapping, overLimit string) context.Context {"
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func prepareOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey",
         "func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {",
@@ -3915,7 +4113,13 @@
         "backend/internal/pkg/apicompat/anthropic_effort_validation_test.go",
         "backend/internal/service/openai_messages_effort_policy_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/pkg/apicompat/anthropic_to_responses.go:AnthropicToResponsesWithOptions; service/openai_gateway_messages.go:ForwardAsAnthropic",
+        "source_finding": "Controlled conversion defers synthesized effort validation, applies policy, then final validation; default converter still rejects unsupported values.",
+        "named_regression_or_equivalence": "TestAnthropicToResponsesDeferredEffortValidation; TestMessagesEffortPolicyHTTP auth×adapter×stream matrix asserts final outgoing value and rejected requests never sent.",
+        "uncovered_gaps_and_boundaries": "Implemented; GLM final merge omission repaired55373256."
+      }
     },
     {
       "source_sha": "aa245176ae49d4a37c2b729a633d26968b942b3e",
@@ -4058,7 +4262,7 @@
             "func TestMessagesRawEffortValidation(t *testing.T) {"
           ],
           "fork_path": "backend/internal/service/openai_messages_effort_policy_test.go",
-          "fork_blob": "b648f1974cd01ceaa31b4f570bb8ff61d7097288",
+          "fork_blob": "aedef3692436c06b27a0707326845085b101adfb",
           "introduced_or_changed_declarations": [
             "func TestMessagesGLMMappedEffortPolicyHTTP(t *testing.T) {",
             "func TestMessagesDisabledThinkingCountTokensHTTP(t *testing.T) {"
@@ -4074,7 +4278,7 @@
             "func ApplyOpenAIReasoningEffortPolicyFromContext(ctx context.Context, body []byt"
           ],
           "fork_path": "backend/internal/service/openai_reasoning_effort_policy.go",
-          "fork_blob": "03b593145cf76a29f060efa6a54be840ca25c927",
+          "fork_blob": "1bb22ea853249feaaa171509837c56201faa8996",
           "introduced_or_changed_declarations": [
             "func applyOpenAIReasoningEffortPolicyForGLMFromContext(ctx context.Context, body []byte, model string) ([]byte, bool, error) {"
           ]
@@ -4123,7 +4327,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func prepareOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey",
         "func TestMessagesEffortPolicyBinding(t *testing.T) {",
@@ -4153,11 +4357,17 @@
         "backend/internal/service/openai_responses_tool_schema_test.go",
         "backend/internal/service/token_refresh_pool_health_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_reasoning_effort_policy.go:WithOpenAIReasoningEffortPolicyForMessages/applyOpenAIReasoningEffortPolicyForGLMFromContext; gateway_messages_chat_fallback.go",
+        "source_finding": "Disabled none mapping respects ceilings/final validation; reject original invalid effort before conversion. Source review identified old GLM re-normalization;55373256 now delegates to fork shared policy after native normalization.",
+        "named_regression_or_equivalence": "TestMessagesEffortPolicyHTTP raw aliases/ceiling/one mapping/unsupported final; TestMessagesGLMMappedEffortPolicyHTTP now preserves low/medium/xhigh and tests fixed-key precedence/model scope; count_tokens tests exclude output effort. New remote glm proof restores exact811 helper and requires behavioral failure.",
+        "uncovered_gaps_and_boundaries": "Actual source repair55373256; final merge semantic requirement, not a leaf-only equivalence claim. New remote GREEN/RED pending."
+      }
     },
     {
       "source_sha": "b8de5e170006886b21ceee72e10d8cec7132dcdb",
-      "subject": "perf(keys): API \u5bc6\u94a5\u5217\u8868\u4e0d\u518d\u7b49\u5f85 30 \u5929\u7528\u91cf\u7edf\u8ba1\uff0c\u5e76\u4e3a\u5176\u52a0\u8986\u76d6\u7d22\u5f15",
+      "subject": "perf(keys): API 密钥列表不再等待 30 天用量统计，并为其加覆盖索引",
       "status": "implemented-adapted",
       "fork_commits": [
         "6d2bc8ea49a55fd82f320d7bff864dca8a30d4d9"
@@ -4248,7 +4458,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "const usageLogsUpstreamRequestIDIndex = \"idx_usage_logs_upstream_request_id\"",
         "func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio",
@@ -4262,7 +4472,13 @@
         "backend/migrations/usage_log_api_key_cost_index_test.go",
         "frontend/src/views/user/__tests__/KeysView.spec.ts"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "frontend/src/views/user/KeysView.vue:loadApiKeys/loadUsageStats; migration249; repository migrations_runner.go:prepareNonTransactionalMigration",
+        "source_finding": "List renders without waiting usage; separate controller/date/timezone snapshot prevents stale overwrite. Concurrent covering index(api_key_id,created_at) INCLUDE(actual_cost) handles invalid-index retry.",
+        "named_regression_or_equivalence": "KeysView: renders the key list without waiting for slow usage stats; stops showing usage placeholders when usage request fails; TestApplyMigrationsFS_NonTransactionalMigration_APIKeyCostIndexDropsInvalidIndexBeforeRetry.",
+        "uncovered_gaps_and_boundaries": "Adapted: failed stats show unknown em dash, never false zero. No measured index-only-scan/performance claim."
+      }
     },
     {
       "source_sha": "4a22a75b3dad2c77bdeeee1307a63d53e488eb2d",
@@ -4327,7 +4543,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "",
         "describe('AccountUsageCell', () => {",
@@ -4339,7 +4555,13 @@
         "frontend/src/components/account/__tests__/AccountUsageCell.spec.ts",
         "frontend/src/views/admin/__tests__/AccountsView.lite.spec.ts"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "frontend/src/views/admin/AccountsView.vue DataTable loading/inert; AccountUsageCell.vue loading with retained usageInfo",
+        "source_finding": "Refresh keeps existing DOM rows and old quota until replacement; only empty initial table shows skeleton.",
+        "named_regression_or_equivalence": "AccountsView.lite: keeps existing rows mounted and busy while a manual list refresh is pending; initial loading; AccountUsageCell: keeps cached Claude quota visible while replacement batch loading checks same node21→44.",
+        "uncovered_gaps_and_boundaries": "Implemented; browser evidence separate from component source assertions."
+      }
     },
     {
       "source_sha": "edd7db77fe456da8c4d65ea8d611aad7e06fbd31",
@@ -4462,7 +4684,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda",
         "func formatPositiveFloat(v *float64) string {",
@@ -4479,11 +4701,17 @@
         "backend/internal/service/payment_config_service_test.go",
         "frontend/src/utils/__tests__/rechargeBonus.spec.ts"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/payment_config_service.go:UpdatePaymentConfig/formatBalanceRechargeMultiplier; frontend/utils/rechargeBonus.ts; SettingsView.vue/PaymentView.vue",
+        "source_finding": "Finite positive multiplier accepts six decimal places and persists exact string; recharge amount rounding/ledger paths untouched.",
+        "named_regression_or_equivalence": "TestUpdatePaymentConfig_PersistsBalanceRechargeMultiplierWithUpToSixDecimals; RejectsBalanceRechargeMultiplierWithMoreThanSixDecimals checks no write; frontend formats six decimals.",
+        "uncovered_gaps_and_boundaries": "Implemented precision change; no live pricing/financial reconciliation."
+      }
     },
     {
       "source_sha": "5965ac4e93a83d5386dee8981b47f81c1ab3c1b5",
-      "subject": "feat(settings): \u7cfb\u7edf\u8bbe\u7f6e\u4fdd\u5b58\u6309\u94ae\u6539\u4e3a\u5e95\u90e8\u5438\u9644\u6d6e\u6807",
+      "subject": "feat(settings): 系统设置保存按钮改为底部吸附浮标",
       "status": "implemented-adapted",
       "fork_commits": [
         "e489cb659df88b00c3621dd0cf282879223e83e2"
@@ -4505,7 +4733,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "",
         "h2[id^=\"settings-section-\"]:target {"
@@ -4517,7 +4745,13 @@
           "baseline_blob": "837d6a076d360f220ba909753b75b9a35f753bdd",
           "fork_blob": "ef70c9c190d4d15d6609835ee7cbed0f7b953649"
         }
-      ]
+      ],
+      "source_function_review": {
+        "actual_fork_functions": "frontend/src/views/admin/SettingsView.vue:settings-save-dock; .github/scripts/upstream-v0221-screenshot.mjs settings scene",
+        "source_finding": "Sticky bottom-right submit keeps disabled/saving/backup behavior and stable notice ID; actual component/CSS harness checks top/middle/end/mobile/dark geometry and submit API.",
+        "named_regression_or_equivalence": "NewFeatureBadge table includes settingsSaveDock with A/B/C persistent dismissal; screenshot driver verifies computed position,bounds,elementFromPoint and saving/re-enabled state.",
+        "uncovered_gaps_and_boundaries": "Source complete; exact-head rendering, sanitized artifacts and supervisor native upload/readback still required."
+      }
     },
     {
       "source_sha": "b2a695d617d490242a39b5f245cf2a50ae5d9993",
@@ -4577,7 +4811,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "import (",
         "func normalizeCodexPageContext(body []byte) ([]byte, bool) {",
@@ -4591,7 +4825,13 @@
         "backend/internal/handler/openai_codex_page_context_test.go",
         "backend/internal/handler/openai_page_context_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/handler/openai_codex_page_context.go:normalizeCodexPageContext/isCodexPageContext; Responses handler",
+        "source_finding": "Known orphan page snapshot becomes external-tagged user text; call_id/tool_call_id/other tools/duplicate fields are preserved. sjson avoids remarshal loss of numbers/order.",
+        "named_regression_or_equivalence": "TestNormalizeCodexPageContextFirstMessage/PreservesHistoryAndToolValidation/Multipart/RejectsUnrelatedOrMalformedItems; TestOpenAIResponsesCodexPageContextReachesUpstream(APIkey/OAuth×stream); PreservesHistoryAndOrder/PreservesCallIdentities.",
+        "uncovered_gaps_and_boundaries": "Adapted to existing actual normalizer, no duplicate production implementation."
+      }
     },
     {
       "source_sha": "cf1ba819b99d141f3fa85b4ce127087e9ac2920c",
@@ -4629,7 +4869,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "type openAIImagesJSONKeepalive struct {",
         "func StartOpenAIImagesJSONKeepalive(c *gin.Context, interval time.Duration) func",
@@ -4638,7 +4878,13 @@
       "regression_files": [
         "backend/internal/service/openai_images_json_keepalive_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/service/openai_images_json_keepalive.go:StartOpenAIImagesJSONKeepalive",
+        "source_finding": "Native X-Codex-Image-Turn-Id suppresses early200 heartbeat; ordinary keepalive retained.",
+        "named_regression_or_equivalence": "TestOpenAIImagesJSONKeepalive_CodexLateErrorPreservesStatus generation/edit delayed429 asserts actual status,unflushed writer,error code/message.",
+        "uncovered_gaps_and_boundaries": "Implemented; production CDN behavior unverified."
+      }
     },
     {
       "source_sha": "ffd26af50738d4f31b5fdb0ede1c8cd548e0b879",
@@ -4693,7 +4939,7 @@
           "introduced_or_changed_declarations": []
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "docs/*",
         ""
@@ -4701,7 +4947,13 @@
       "regression_files": [
         "backend/internal/handler/openai_images_native_route_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/handler/openai_images_native_route_test.go; docs/OPENAI_IMAGES_CODEX.md",
+        "source_finding": "Actual Images handler/scheduler/parser/forwarder tested against isolated real HTTP/proxy with native heartbeat/deadline discrimination.",
+        "named_regression_or_equivalence": "TestNativeImagesRoutesDelayedResponse generation/edit400/200,no early headers,one send; TestNativeImagesRoutesProxyTimeout native504 vs ordinary heartbeat/success.",
+        "uncovered_gaps_and_boundaries": "Supporting production-route synthetic tests; no paid-client acceptance."
+      }
     },
     {
       "source_sha": "63f1172292a5604c7f3d1d04300b68058812d925",
@@ -4741,7 +4993,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "import (",
         "func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {",
@@ -4750,11 +5002,17 @@
       "regression_files": [
         "backend/internal/handler/openai_responses_utf8_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/handler/openai_gateway_handler.go:OpenAIGatewayHandler.Responses",
+        "source_finding": "utf8.Valid rejects invalid nonempty bytes before compact normalization/routing with400 invalid_request_error.",
+        "named_regression_or_equivalence": "TestOpenAIResponses_RejectsInvalidUTF8BeforeRouting three bad byte forms×stream modes; ValidUnicodeReachesFieldValidation Chinese/emoji remains valid.",
+        "uncovered_gaps_and_boundaries": "Implemented; no retry/upstream send on bad body."
+      }
     },
     {
       "source_sha": "390ba9905ae21cc2fbff3ad82006152b2c6c0772",
-      "subject": "fix(securityaudit): \u5ba1\u8ba1\u4efb\u52a1\u5165\u961f\u540e\u7acb\u5373\u5524\u9192\u672c\u8fdb\u7a0b worker",
+      "subject": "fix(securityaudit): 审计任务入队后立即唤醒本进程 worker",
       "status": "implemented-adapted",
       "fork_commits": [
         "e649e5e5b92c96a0a91fc871bda3b63b89fb1869"
@@ -4833,7 +5091,7 @@
           ]
         }
       ],
-      "verification": "pending exact-head remote CI and independent review",
+      "verification": "source/function reviewed; dynamic pending exact published head remote CI; parent independent acceptance pending",
       "fork_changed_symbols": [
         "type Enqueuer struct {",
         "func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {",
@@ -4851,10 +5109,16 @@
         "backend/internal/securityaudit/prompt_worker_test.go",
         "backend/internal/securityaudit/prompt_worker_wake_test.go"
       ],
-      "additional_fork_files": []
+      "additional_fork_files": [],
+      "source_function_review": {
+        "actual_fork_functions": "backend/internal/securityaudit/prompt_enqueue.go:Enqueuer.Enqueue; prompt_service.go:NewPromptService; prompt_worker.go:NewRunner/Notify/worker/reclaimer",
+        "source_finding": "Notify only after successful publication; nonblocking bounded signal wakes local worker immediately, initial drain and500ms cross-replica fallback remain.",
+        "named_regression_or_equivalence": "TestEnqueuerNotifiesOnlyAfterPublish; TestWorkerClaimsWithoutWaitingForIdlePoll startup/idle wake in half-poll window and nonblocking notify.",
+        "uncovered_gaps_and_boundaries": "Implemented; fake repository is not cross-process DB race evidence."
+      }
     }
   ],
-  "mapped_head": "6541ea4559797cec55348dbd04cc3cd395fad108",
+  "mapped_head": "7a8199bb106416882f5aef13d3bd5323622baf00",
   "pr": "https://github.com/ranxi2001/sub2api/pull/789",
   "dependencies": [
     {
@@ -4982,7 +5246,8 @@
           "source_blob": "3c1036921dade81d89e3bd5b4ae440b37582f2f2",
           "fork_blob": "ac2490bec1cadbb996a00b60f1b2f5cbbb170d16"
         }
-      ]
+      ],
+      "scope_status": "distinct prerequisite slice; shared fork commit is one integration, not duplicate application"
     },
     {
       "source_sha": "0853d160365dbc87c1ebb33eda18b59b8ed2bb72",
@@ -5003,7 +5268,21 @@
           "path": "backend/internal/pkg/httputil/body_budget_test.go",
           "source_blob": "b1086ca9122f1cf9d43e91acf4c7ff164adb4363",
           "fork_blob": "b1086ca9122f1cf9d43e91acf4c7ff164adb4363"
+        },
+        {
+          "path": "backend/internal/handler/image_task_handler_test.go",
+          "source_blob": "7f360b465f2c1fd119463ae97c392c05f49aa662",
+          "fork_blob": "7f360b465f2c1fd119463ae97c392c05f49aa662",
+          "fork_path": "backend/internal/handler/image_task_handler_test.go"
         }
+      ],
+      "scope_status": "distinct prerequisite slice; shared fork commit is one integration, not duplicate application",
+      "regression_commits": [
+        "7a8199bb106416882f5aef13d3bd5323622baf00"
+      ],
+      "named_regressions": [
+        "TestAsyncImageHandlerTaskUsesOwnBodyReservation",
+        "TestAsyncImageHandlerSubmitRejectsWhenBodyCannotBeRetained"
       ]
     },
     {
@@ -5061,24 +5340,33 @@
           "source_blob": "a207153b7a5c12881f473e8a8b08ac19f9e0f486",
           "fork_blob": "a207153b7a5c12881f473e8a8b08ac19f9e0f486"
         }
-      ]
+      ],
+      "scope_status": "distinct prerequisite slice; shared fork commit is one integration, not duplicate application"
     }
   ],
   "merge_leaf_map": [
     {
       "merge_sha": "355675af2d7b3a1f77c541229e542939b619bc8b",
       "new_release_leaves": [],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "fba4c193aef938c2d51006d98ddd32d8d2a0755b",
       "new_release_leaves": [],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "3bf2a375db1d6b2ceb347bb29950ac928aed40b9",
       "new_release_leaves": [],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Resolution removes stale dependency checksums; fork Go1.27.4/module identity preserved, remote generation gate checks metadata.",
+      "remerge_resolution_files": [
+        "backend/go.sum"
+      ]
     },
     {
       "merge_sha": "d7c05053877cc2dff8f0cd10c6ac396ba9d28785",
@@ -5086,7 +5374,9 @@
         "c004c962a78014855bdb74c51f750e3fce3407fb",
         "03bd718abe9f38fb0455a82631c7e492e4abc693"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "8e649dd654935cc33cc636bea70a9d63ed395a83",
@@ -5094,21 +5384,27 @@
         "5184ff55f68908cfd9e7cf5905e11b71157cfb41",
         "9935268573dd9f87c34ce0b39d69afe94f8cc9e7"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "27ef2a71376a5245fbf2bd018d9221d97327f345",
       "new_release_leaves": [
         "2273a5d63f76fce80a9059cb029d2354a1e1004e"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "8ca1a613e9fc58599eec7d22c6815ab4cb271787",
       "new_release_leaves": [
         "4ac1675b56760660d5bac5d6aa9fb2cdf57397b4"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "ee58c0013c76ccd3f36439881bc848d342ec1c9d",
@@ -5116,7 +5412,9 @@
         "fe093d76bd9feedd55387ea4056302384a7ab304",
         "7156213cce03b268b3261c59fa6bd47d62e6e6ba"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "f6ea845c58266af39bcaef3181d9b8f9692d2772",
@@ -5131,35 +5429,54 @@
         "fe093d76bd9feedd55387ea4056302384a7ab304",
         "7156213cce03b268b3261c59fa6bd47d62e6e6ba"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Semantic GLM finality correction was missing at811; repaired55373256 and covered by new exact-old-helper remote RED/GREEN. Fixed-key/request-model scope retained.",
+      "remerge_resolution_files": [
+        "backend/internal/pkg/apicompat/anthropic_to_responses.go",
+        "backend/internal/service/openai_gateway_converted_reasoning_pricing_test.go",
+        "backend/internal/service/openai_gateway_messages.go",
+        "backend/internal/service/openai_gateway_messages_chat_fallback.go",
+        "backend/internal/service/openai_gateway_request_body.go",
+        "backend/internal/service/openai_messages_effort_policy_test.go",
+        "backend/internal/service/openai_reasoning_effort_policy.go",
+        "backend/internal/service/openai_reasoning_effort_policy_test.go"
+      ]
     },
     {
       "merge_sha": "722bbf6dbe930a4dafdcabeb5fa4bcf171024250",
       "new_release_leaves": [
         "508bb9560f70783ab689996344c23e3772978781"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "1cae79565a4b3f3a05d8ecf0afeb154dce1f287f",
       "new_release_leaves": [
         "92d35a6947a9ec77257b0258370124f0a2c2b0f8"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "d216e4215623ef2500a1907cf6a6e1ccf76f0457",
       "new_release_leaves": [
         "3e8c2ee3f7c128cad3a95e3b099e9bd348fa2012"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "2fd34acc1f23d89923fac038a0af276db39aaba9",
       "new_release_leaves": [
         "0578fb160e5b77ecbfd7139b5b7761c39d73fd78"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "9725718e125131c016812240086b99a8c52ed639",
@@ -5167,21 +5484,27 @@
         "142d22cc4284678a729bce1a28986efcd175126c",
         "9c7380732df8ad4420b8be161504552a52b585a5"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "32d0576edca60dcbeb20847f2820033f728799a3",
       "new_release_leaves": [
         "fab3ec251609ba008e41bd5692668f697152705e"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "fc9d811385b6bc3f359e68682cb9a9d873770ea1",
       "new_release_leaves": [
         "e401c58053ce79b68985d1bd47aed49477baaf48"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "6e128ba405d7ca5ae388a0f40bebeb4bd9187f91",
@@ -5190,77 +5513,99 @@
         "88b7090a35badc3cd3ab616d5ac2dc6783627b3e",
         "a1395eeaf2d600c7e605257e4a1cb02e46b10517"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "aa56a4606d5cea6b65aaf6ac7b33bb7152564c25",
       "new_release_leaves": [
         "f2b0a32b1ffdbf4ac7d6a8df00f30328f3492b03"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "73e75a18d1c2981958aef94691768d504f5df185",
       "new_release_leaves": [
         "552d1ab4bb661f89df4ff267370bf5f578247322"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "f7ddfb82363737ad924a10880388e530ee88773c",
       "new_release_leaves": [
         "85f43b640a5f92dab03599974cb19ee1a5005414"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "9de6dd766b612fe029344600fe63a179a092b4c3",
       "new_release_leaves": [
         "090c58f663a8e745b0e564518cafe7557e6f92e2"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "350c80044938b9211516320a75c67e5984d0aff0",
       "new_release_leaves": [
         "36484727c7a634795e2d4f1460d11a6e468c3dc1"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "6f6b54d3163fd9ab24c6a9ee94d326ff3789b749",
       "new_release_leaves": [
         "e2ce0b43dc62d2591cf69f7c4c26d5c48cea87b7"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "968c1022e67c30741cec06589123461138f87289",
       "new_release_leaves": [
         "7796a2d57aa0496cb87594fd8bf7d1246adcbf8d"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "d18e1dff606e4ef14dbb8d7c2527918db7d48c63",
       "new_release_leaves": [
         "137316a14c001ea40ab1d99865f5dd88ce03a291"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "b455228b46a08e424e43ad7559c52c5bbc1a1e05",
       "new_release_leaves": [
         "4ac713c4d4b1bdc5e12111477b9e30a7569aa774"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "efdc399ecf040660d45086fac02cbdb24f50dda1",
       "new_release_leaves": [
         "7122efee948fc31a086202e75caff1ea2e1562c8"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "5fe13c3c48e13472d1c474d1d2a4ed34c2501583",
@@ -5269,42 +5614,54 @@
         "6f2faba2935c4e592c78c2f629a3d16f2a7ea09a",
         "aa245176ae49d4a37c2b729a633d26968b942b3e"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "a870836599e53bc6a7477fbbbbf843de15839aaa",
       "new_release_leaves": [
         "b8de5e170006886b21ceee72e10d8cec7132dcdb"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "51a0e89b8b1ef6e9612073ae46f2e0da7a616aff",
       "new_release_leaves": [
         "4a22a75b3dad2c77bdeeee1307a63d53e488eb2d"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "48b11bf74308254cfc518f74649d5522e317e34e",
       "new_release_leaves": [
         "edd7db77fe456da8c4d65ea8d611aad7e06fbd31"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "41e4a6b108117a42529183457f44d6f2f80df4bf",
       "new_release_leaves": [
         "5965ac4e93a83d5386dee8981b47f81c1ab3c1b5"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "b045db4a40a65f4ec8456f36b9daeaa0509746ee",
       "new_release_leaves": [
         "b2a695d617d490242a39b5f245cf2a50ae5d9993"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "e6981f0ffde456795e069b295c24673aedd3a2b3",
@@ -5312,21 +5669,27 @@
         "cf1ba819b99d141f3fa85b4ce127087e9ac2920c",
         "ffd26af50738d4f31b5fdb0ede1c8cd548e0b879"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "2cc43fdeffa18abad1ba18273274d6f0a4c4fdc3",
       "new_release_leaves": [
         "63f1172292a5604c7f3d1d04300b68058812d925"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "e2c9812190dd71bb309c8ad020a1211da1e0d3b4",
       "new_release_leaves": [
         "390ba9905ae21cc2fbff3ad82006152b2c6c0772"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     },
     {
       "merge_sha": "6a2c744af36937ca9d89262cc801780da44e9499",
@@ -5365,7 +5728,12 @@
         "63f1172292a5604c7f3d1d04300b68058812d925",
         "390ba9905ae21cc2fbff3ad82006152b2c6c0772"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Resolves overlapping Fable/Mythos5.2 catalog/pricing; fork retains one8/40 tariff per normalized model. TestClaude52Pricing and catalog-boundary regressions cover final combination.",
+      "remerge_resolution_files": [
+        "backend/internal/pkg/claude/effort_catalog.go",
+        "backend/internal/service/billing_service.go"
+      ]
     },
     {
       "merge_sha": "10ba8f9b4dc2e6023d4a9879ab77b21841babd10",
@@ -5373,7 +5741,9 @@
         "eb2da3448404df3bd2dfcce836652f0782206688",
         "ea6b3de8082d5871ce5e90a61f4fe75c8ba6b506"
       ],
-      "applied": false
+      "applied": false,
+      "semantic_source_review": "Mechanical merge; leaf behavior reviewed above; never imported as an extra release patch.",
+      "remerge_resolution_files": []
     }
   ],
   "source_policy_preserved": {
@@ -5447,5 +5817,34 @@
         "frontend/src/constants/newFeatureNotices.ts"
       ]
     }
-  ]
+  ],
+  "source_review": {
+    "head": "7a8199bb106416882f5aef13d3bd5323622baf00",
+    "review_file": "function-review.md",
+    "leaves": 44,
+    "merges": 38,
+    "release_requirements": 32,
+    "independent_acceptance": false,
+    "dynamic_validation": "remote CI only; pending new exact published head"
+  },
+  "acceptance_writer_repairs": [
+    {
+      "commit": "55373256f914fe53043eec352b4ddb0f37a92491",
+      "scope": "final upstream GLM semantic merge, exact-old-helper behavioral proof, isolated escaped input zero-allocation regression"
+    },
+    {
+      "commit": "7a8199bb106416882f5aef13d3bd5323622baf00",
+      "scope": "original-request model in GLM scoped fixture; original0853 async handler ownership cases; group12h precedence and NULL/zero/context-tier projection regressions"
+    }
+  ],
+  "history_preserving_integration": {
+    "merge": "811346e0256a75a978951beff0657a6a3bcf4a60",
+    "parents": [
+      "ece3fad7448248b49803eb16e6e1ba81c716f74f",
+      "b7edc277dde9ee59ddebc58cbbc3b8dd124e2113"
+    ],
+    "scope": "preserve both789 histories and notice ID union; retains independently owned790 as dependency, not new789 feature",
+    "pr790_required_head": "1d3a19f59634e64bb6ca672bd9b3e5809ddb087c",
+    "merge_owner": "parent independent reviewer"
+  }
 }
