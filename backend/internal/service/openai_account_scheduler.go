@@ -443,6 +443,21 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	if s != nil && s.service != nil && s.service.openAIGroupRequiresPrivacySet(ctx, req.GroupID) {
 		req.RequirePrivacySet = true
 	}
+	qwenPreviousOwner := int64(0)
+	if req.Platform == PlatformQwen && strings.TrimSpace(req.PreviousResponseID) != "" {
+		store := s.service.getOpenAIWSStateStore()
+		if store == nil {
+			return nil, decision, strictSessionUnavailable("Qwen response ownership is unavailable")
+		}
+		var ownerErr error
+		qwenPreviousOwner, ownerErr = store.GetResponseAccount(ctx, derefGroupID(req.GroupID), strings.TrimSpace(req.PreviousResponseID))
+		if ownerErr != nil || qwenPreviousOwner <= 0 {
+			return nil, decision, strictSessionUnavailable("Qwen response ownership is unknown")
+		}
+		if strings.TrimSpace(req.SessionHash) == "" {
+			req.SessionHash = "qwen-response:" + DeriveSessionHashFromSeed(req.PreviousResponseID)
+		}
+	}
 	stickyKnown := req.StickyAccountID > 0
 	if !stickyKnown && strings.TrimSpace(req.SessionHash) != "" && s.service.cache != nil {
 		accountID, readErr := s.service.getStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
@@ -452,11 +467,20 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}
 	ctx = withOpenAIStickyBindingSnapshot(ctx, req.GroupID, req.SessionHash, req.StickyAccountID, stickyKnown)
-	req.StrictSessionAffinity = s.service.strictOpenAISessionAffinity(req.GroupID, req.Platform, req.RequiredImageCapability)
+	req.StrictSessionAffinity = qwenPreviousOwner > 0 || s.service.strictOpenAISessionAffinity(req.GroupID, req.Platform, req.RequiredImageCapability)
+	if qwenPreviousOwner > 0 {
+		if req.StickyAccountID > 0 && req.StickyAccountID != qwenPreviousOwner {
+			return nil, decision, strictSessionUnavailable("Qwen response ownership conflicts with the session")
+		}
+		req.StickyAccountID = qwenPreviousOwner
+	}
 	if req.Platform == PlatformQwen && req.StickyAccountID > 0 && req.RequiredImageCapability == "" {
 		owner, ownerErr := s.service.accountRepo.GetByID(ctx, req.StickyAccountID)
 		if ownerErr != nil || owner == nil {
 			return nil, decision, strictSessionUnavailable("Qwen session owner is unavailable")
+		}
+		if qwenPreviousOwner > 0 && !owner.QwenSessionCacheEnabled() {
+			return nil, decision, strictSessionUnavailable("Qwen response owner no longer supports native continuation")
 		}
 		req.StrictSessionAffinity = req.StrictSessionAffinity || owner.QwenStrictSessionAffinity()
 	}

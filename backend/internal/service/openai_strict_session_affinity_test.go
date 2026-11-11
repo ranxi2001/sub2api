@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -107,6 +108,28 @@ func TestQwenAccountStrictSessionAffinityIsOptIn(t *testing.T) {
 		f.accounts[i].Type = AccountTypeAPIKey
 		f.accounts[i].Credentials = map[string]any{qwenStrictSessionCredential: true}
 	}
+	selected, _, err := f.scheduler.Select(context.Background(), f.request)
+	require.NoError(t, err)
+	require.Equal(t, int64(947101), selected.Account.ID)
+	require.NotNil(t, selected.WaitPlan)
+	f.request.ExcludedIDs = map[int64]struct{}{947101: {}}
+	selected, _, err = f.scheduler.Select(context.Background(), f.request)
+	require.Error(t, err)
+	require.Nil(t, selected)
+}
+
+func TestQwenNativeContinuationStaysWithResponseOwnerWithoutSessionHeader(t *testing.T) {
+	f := newStickyEscapeRebindFixture()
+	f.request.Platform = PlatformQwen
+	f.request.SessionHash = ""
+	f.request.PreviousResponseID = "resp_qwen_owner"
+	f.cache.sessionBindings = map[string]int64{}
+	for i := range f.accounts {
+		f.accounts[i].Platform = PlatformQwen
+		f.accounts[i].Type = AccountTypeAPIKey
+		f.accounts[i].Credentials = map[string]any{qwenSessionCacheCredential: true}
+	}
+	require.NoError(t, f.service.getOpenAIWSStateStore().BindResponseAccount(context.Background(), *f.request.GroupID, f.request.PreviousResponseID, 947101, time.Hour))
 	selected, _, err := f.scheduler.Select(context.Background(), f.request)
 	require.NoError(t, err)
 	require.Equal(t, int64(947101), selected.Account.ID)
