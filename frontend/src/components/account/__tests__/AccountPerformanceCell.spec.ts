@@ -1,12 +1,17 @@
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { describe, expect, it } from 'vitest'
+import { createPinia } from 'pinia'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import zh from '@/i18n/locales/zh'
 import Cell from '../AccountPerformanceCell.vue'
 import en from '@/i18n/locales/en'
 const render = (metrics = {}) => mount(Cell, {props:{metrics},global:{plugins:[createI18n({legacy:false,locale:'en',messages:{en}})]}})
 describe('Account performance rolling window',()=>{
- it('renders exactly four metric lines and missing samples as uncollected',()=>{
-  const w=render();expect(w.findAll('[data-metric]')).toHaveLength(4)
+ it('renders exactly five metric lines and missing samples as uncollected',()=>{
+  const w=render();expect(w.findAll('[data-metric]')).toHaveLength(5)
   expect(w.findAll('[data-metric]').every(r=>r.text().includes('Not collected'))).toBe(true)
   expect(w.text()).toContain('Probe degradation · 60m')
   expect(w.attributes('title')).toContain('Rolling 60 minutes')
@@ -53,5 +58,59 @@ describe('upstream HTTP response evidence', () => {
   expect(document.body.textContent).toContain('HTTP 200')
   expect(document.body.textContent).toContain('not the final user error rate')
   w.unmount()
+ })
+})
+
+
+describe('average request cache rate', () => {
+ it.each([0, 70, 100])('shows a measured %s percent', value => {
+  const w = render({ avg_cache_percent: value, cache_samples: 2 })
+  expect(w.get('[data-metric="cache"]').text()).toContain(value.toFixed(1) + '%')
+  w.unmount()
+ })
+ it.each([
+  {}, { avg_cache_percent: null, cache_samples: 0 },
+  { avg_cache_percent: 0, cache_samples: 0 }, { avg_cache_percent: 50 },
+  { avg_cache_percent: -1, cache_samples: 1 }, { avg_cache_percent: 101, cache_samples: 1 },
+  { avg_cache_percent: NaN, cache_samples: 1 }, { avg_cache_percent: Infinity, cache_samples: 1 },
+ ])('keeps missing or invalid evidence unknown: %j', metrics => {
+  const w = render(metrics)
+  expect(w.get('[data-metric="cache"]').text()).toContain('Not collected')
+  w.unmount()
+ })
+ it.each(['en', 'zh'])('explains request weighting, samples and refreshed window in %s', async locale => {
+  const w = mount(Cell, { props: { metrics: { avg_cache_percent: 70, cache_samples: 2 } }, global: { plugins: [createI18n({legacy:false,locale,messages:{en,zh}})] } })
+  await w.get('[data-testid="cache-help"]').trigger('click')
+  expect(document.body.textContent).toContain(locale === 'zh' ? '算术平均' : 'Arithmetic mean')
+  expect(document.body.textContent).toContain(locale === 'zh' ? '有效样本 2 条' : 'Valid samples: 2')
+  await w.setProps({ metrics: { avg_cache_percent: 0, cache_samples: 1, window_start: '2026-11-12T00:00:00Z', window_end: '2026-11-12T00:15:00Z' } })
+  expect(document.body.textContent).toContain(locale === 'zh' ? '最近15分钟' : 'last 15 minutes')
+  expect(w.get('[data-metric="cache"]').text()).toContain('0.0%')
+  await w.setProps({ unavailable: true })
+  expect(w.get('[data-metric="cache"]').text()).toContain(locale === 'zh' ? '暂不可用' : 'Unavailable')
+  w.unmount()
+ })
+ it('keeps A dismissed, shares B dismissal across entries and reloads, and permits a future C', async () => {
+  localStorage.clear()
+  const A = NEW_FEATURE_NOTICES.accountUpstreamHTTPErrorRate
+  const B = NEW_FEATURE_NOTICES.accountAverageCache
+  const pinia = createPinia()
+  useNewFeatureNoticeStore(pinia).dismiss(41, A)
+  const open = (store = pinia) => mount(Cell, { props: { noticeUserId: 41 }, global: { plugins: [store, createI18n({legacy:false,locale:'en',messages:{en}})] } })
+  const first = open(), second = open()
+  const badge = '[data-metric="cache"] [data-testid="new-feature-badge"]'
+  expect(first.find('[data-metric="upstream"] [data-testid="new-feature-badge"]').exists()).toBe(false)
+  expect(first.find(badge).exists()).toBe(true)
+  await first.get(badge).trigger('click')
+  expect(second.find(badge).exists()).toBe(false)
+  first.unmount(); second.unmount()
+  const reloaded = createPinia()
+  const third = open(reloaded)
+  expect(third.find(badge).exists()).toBe(false)
+  const future = mount(NewFeatureBadge, { props: { noticeId: 'future-cache-feature-c', userId: 41 }, global: { plugins: [reloaded, createI18n({legacy:false,locale:'en',messages:{en}})] } })
+  expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+  expect(useNewFeatureNoticeStore(reloaded).isDismissed(41, A)).toBe(true)
+  expect(useNewFeatureNoticeStore(reloaded).isDismissed(41, B)).toBe(true)
+  third.unmount(); future.unmount(); localStorage.clear()
  })
 })

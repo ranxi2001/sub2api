@@ -102,11 +102,11 @@ describe('Account performance dialog',()=>{
   first.unmount();second.unmount();wrappers=[]
   const reloadedPinia=createPinia()
   const reopened=await open('en',41,reloadedPinia)
-  expect(reopened.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+  expect(reopened.find('[data-threshold="upstream_error"] [data-testid="new-feature-badge"]').exists()).toBe(false)
   await reopened.setProps({noticeUserId:42})
   expect(reopened.get('[data-threshold="upstream_error"]').find('[data-testid="new-feature-badge"]').exists()).toBe(true)
   await reopened.setProps({noticeUserId:41})
-  expect(reopened.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+  expect(reopened.find('[data-threshold="upstream_error"] [data-testid="new-feature-badge"]').exists()).toBe(false)
   const future=mount(NewFeatureBadge,{props:{noticeId:C,userId:41},global:{plugins:[reloadedPinia,createI18n({legacy:false,locale:'en',messages:{en}})]}})
   wrappers.push(future)
   expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true)

@@ -16,6 +16,8 @@ on:
       - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/api/__tests__/admin.accounts.performance.spec.ts'
       - '.github/workflows/account-performance-error-threshold.yml'
+      - '.github/scripts/account-performance-cache-screenshot.mjs'
+      - 'frontend/src/components/account/__tests__/AccountUpstreamErrorNotice.spec.ts'
 
 permissions:
   contents: read
@@ -62,6 +64,26 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - name: Error bounds, legacy payloads and new feature notice behavior
         working-directory: frontend
-        run: pnpm exec vitest run src/components/account/__tests__/AccountPerformanceDialog.spec.ts src/components/account/__tests__/AccountPerformanceCell.spec.ts src/api/__tests__/admin.accounts.performance.spec.ts
+        run: pnpm exec vitest run src/components/account/__tests__/AccountPerformanceDialog.spec.ts src/components/account/__tests__/AccountPerformanceCell.spec.ts src/api/__tests__/admin.accounts.performance.spec.ts src/components/account/__tests__/AccountUpstreamErrorNotice.spec.ts
       - name: Typecheck and production bundle
         run: pnpm --dir frontend run build
+
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cache-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/cache-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render performance column before and after with synthetic metrics
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/cache-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/account-cache-ui
+          SOURCE_BASE: b5990096ae10a0b2481182f2ac45812effacda22
+        run: |
+          git fetch --no-tags --depth=1 origin "$SOURCE_BASE"
+          node .github/scripts/account-performance-cache-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: account-cache-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/account-cache-ui/*.png
+            ${{ runner.temp }}/account-cache-ui/manifest.json

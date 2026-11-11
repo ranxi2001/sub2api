@@ -1,4 +1,6 @@
 export default {
+ avgCache: 'Avg cache',
+ cacheNote: 'Arithmetic mean of per-request cache hit percentages over the last {minutes} minutes. Each request: cache read tokens ÷ (uncached input + cache read + cache write tokens) × 100, with equal weight per request, not token-weighted. Uses the performance column’s request start time and completed successful text requests. Excludes missing or ambiguous timing records, failures, media, negative token counts and zero prompt totals. Valid samples: {samples}. No samples means Not collected; measured zero hits show 0.0%. Display only; does not affect pause thresholds or scheduling scores.',
  upstreamErrorRate: 'Upstream error rate',
  localSample: 'local',
  localWindowComplete: 'Local history retained for this window; route coverage remains partial.',
@@ -24,7 +26,7 @@ export default {
  refresh: 'Reload', reason: 'Triggered metrics: {reason}', auditUnavailable: 'Audit unavailable',
  settings: {
   title: 'Account performance monitoring window',
-  description: 'Configure the shared rolling window for TPS, TTFT, probe degradation and process-local upstream HTTP errors.',
+  description: 'Configure the shared rolling window for TPS, average cache, TTFT, probe degradation and process-local upstream HTTP errors.',
   windowMinutes: 'Window (minutes)',
   windowHint: 'Defaults to 60 minutes. Enter a whole number from 1 to 1440; shared by all accounts.',
   effectHint: 'Subsequent metrics and threshold evaluations use the saved window without restarting. Evaluation remains every 30 seconds; changing the window does not release existing pauses.',
