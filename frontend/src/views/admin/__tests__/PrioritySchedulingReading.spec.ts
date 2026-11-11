@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { analysis, apiClient, deferred, fixture, flushPromises, overrideGet, reads, render, unmount, wrapper } from './prioritySchedulingFixture'
+import { client as apiClient, settle as flushPromises, analysis, deferred, fixture, overrideGet, reads, render, unmount, wrapper } from './prioritySchedulingFixture'
 
 describe('priority performance reading lifecycle', () => {
   it('paginates the shared performance table and preserves the reader and unsaved draft on polling', async () => {

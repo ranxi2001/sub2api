@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { analysis, apiClient, choose, config, deferred, directory, fixture, flushPromises, overrideGet, reads, render, unmount, wrapper } from './prioritySchedulingFixture'
+import { client as apiClient, settle as flushPromises, analysis, choose, config, deferred, directory, fixture, overrideGet, reads, render, unmount, wrapper } from './prioritySchedulingFixture'
 
 describe('priority shared performance scope', () => {
   it.each([

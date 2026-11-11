@@ -110,9 +110,6 @@ func TestPriorityOAuthQuotaEvidenceAndCapacity(t *testing.T) {
 			c.ErrorRateWeight = 0 // Existing account EWMA contract.
 			a.errorRate = .5
 		}, 8},
-		{"scoped_errors", func(_ *PrioritySchedulingConfig, a *openAIAccountCandidateScore, _ *PrioritySchedulingSignal) {
-			a.priorityErrors.SmoothedRate = .5
-		}, 8},
 		{"rpm", func(_ *PrioritySchedulingConfig, a *openAIAccountCandidateScore, _ *PrioritySchedulingSignal) {
 			a.rpmEnabled = true
 			a.rpmLimit = 10

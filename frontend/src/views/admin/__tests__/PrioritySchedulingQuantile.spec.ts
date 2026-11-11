@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { apiClient, flushPromises, render, wrapper } from './prioritySchedulingFixture'
+import { client as apiClient, settle as flushPromises, render, wrapper } from './prioritySchedulingFixture'
 import zh from '@/i18n/locales/zh/priorityScheduling'
 import en from '@/i18n/locales/en/priorityScheduling'
 

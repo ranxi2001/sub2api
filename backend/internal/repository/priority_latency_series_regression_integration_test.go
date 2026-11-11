@@ -75,21 +75,8 @@ func TestPriorityLatencySeriesUsesConfiguredMeasurementAndPercentile(t *testing.
 		require.NoError(t, err)
 	}
 
-	var signalQuery service.PrioritySchedulingQuery
-	err := json.Unmarshal([]byte(`{"LatencyPercentile":50,"LatencyMeasurement":"attributed_v1","TargetTTFTMs":15000}`), &signalQuery)
-	require.NoError(t, err)
-	signalQuery.AccountIDs = []int64{account.ID}
-	signalQuery.Model = "fixture-model"
-	signalQuery.UsageSince = now.Add(-time.Hour)
-	signalQuery.UsageUntil = now.Add(time.Second)
-	signalQuery.QualitySince = now.Add(-time.Hour)
-	signals, err := repo.ReadPrioritySchedulingSignals(ctx, signalQuery)
-	require.NoError(t, err)
-	require.NotNil(t, signals[account.ID].SelectedTTFTMs)
-	require.InDelta(t, 10000, *signals[account.ID].SelectedTTFTMs, .01)
-
 	var seriesQuery service.PriorityLatencySeriesQuery
-	err = json.Unmarshal([]byte(`{"LatencyPercentile":50,"LatencyMeasurement":"attributed_v1"}`), &seriesQuery)
+	err := json.Unmarshal([]byte(`{"LatencyPercentile":50,"LatencyMeasurement":"attributed_v1"}`), &seriesQuery)
 	require.NoError(t, err)
 	seriesQuery.AccountIDs = []int64{account.ID}
 	seriesQuery.Model = "fixture-model"

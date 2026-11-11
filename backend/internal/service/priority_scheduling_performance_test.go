@@ -111,3 +111,24 @@ func TestPriorityUnifiedPerformanceSnapshotOwnsMetricPointers(t *testing.T) {
 	require.Equal(t, 30.0, *signal.Performance.AvgTPS)
 	require.Equal(t, 4000.0, *signal.Performance.AvgTTFTMs)
 }
+
+func TestPriorityUnifiedPerformanceStickyUsesSameHTTPSource(t *testing.T) {
+	cfg := DefaultPrioritySchedulingConfig()
+	cfg.Enabled = true
+	signal := performanceFixture(30, 4000, 0)
+	percent := 50.0
+	signal.Performance.UpstreamError = upstreamstats.Evidence{Source: "process_local_http_responses", Total: 4, Failures: 2, Percent: &percent}
+	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: signal}}
+	gateway := priorityGateway(cfg, reader)
+	scheduler := &defaultOpenAIAccountScheduler{service: gateway, stats: newOpenAIAccountRuntimeStats()}
+	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: "fixture", UseUpstreamTokenCost: true}
+	pool := []openAIAccountCandidateScore{priorityCandidate(1, .1, 0)}
+	require.Eventually(t, func() bool { return gateway.priorityHistory(req, cfg, pool).ready() }, time.Second, time.Millisecond)
+	reason, rate, _, escape := scheduler.shouldEscapeStickyForRequest(req, 1, openAIStickyEscapeConfig{enabled: true, errorRate: .2})
+	require.True(t, escape)
+	require.Equal(t, "error_rate", reason)
+	require.Equal(t, .5, rate)
+	req.PreserveStickyBinding = true
+	_, _, _, escape = scheduler.shouldEscapeStickyForRequest(req, 1, openAIStickyEscapeConfig{enabled: true, errorRate: .2})
+	require.False(t, escape)
+}

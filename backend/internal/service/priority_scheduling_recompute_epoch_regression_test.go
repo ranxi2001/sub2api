@@ -173,7 +173,7 @@ func TestPriorityRecomputeIncompleteReadPreservesWholeObservation(t *testing.T) 
 	reader := newPriorityRecomputeBarrierReader([]PrioritySchedulingSignal{{}}, nil)
 	// One returned account looks healthy, but a second queried account is omitted.
 	// No part of this incomplete result may replace the previous observation.
-	reader.rows = []map[int64]PrioritySchedulingSignal{withAccountPerformanceFixture(PrioritySchedulingSignal{8871: {Samples: 30, P90TTFTMs: 100, QualityPassed: 30, QualitySamples: 30}})}
+	reader.rows = []map[int64]PrioritySchedulingSignal{{8871: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 30, P90TTFTMs: 100, QualityPassed: 30, QualitySamples: 30})}}
 	svc, cfg, request, candidates, old := priorityRecomputeEpochFixture(reader)
 	peer := priorityCandidate(8872, 1, 1)
 	candidates = append(candidates, peer)
