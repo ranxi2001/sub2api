@@ -151,6 +151,11 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	ctx := r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, source, r.session, model)
 	r.request = openAIAgentRecoveryFromContext(ctx)
+	if r.request.disableOwnerBinding && (openAIAgentRecoveryBound(ctx) || len(r.request.items) > 0) {
+		// Record current-turn replay safety even when a later delivery/pointer
+		// check refuses the send. The initial warmup context cannot replace it.
+		r.preventReplay()
+	}
 	for _, key := range r.request.keys {
 		if r.known[key] && !r.request.known[key] {
 			return openAIAgentRecoveryError("owner_unavailable")

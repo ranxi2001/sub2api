@@ -199,3 +199,28 @@ func TestIssue805WSPointerAndRecordLossStayConservative(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue805WSFirstSeenHistoryDoesNotInventOwner(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+	manager, _, account := issue715WSManager(t, svc, context.Background())
+	defer manager.abort()
+	require.NoError(t, issue715WSBegin(t, manager, account, issue715OpaqueBody, "ctx_pool"))
+	require.NoError(t, manager.write([]byte(`{"type":"response.completed","response":{"id":"resp_805_first_seen","status":"completed","output":[]}}`), func() error { return nil }))
+	require.Empty(t, svc.agentMessageRecovery.bindings, "consumption of unknown history is not a producer observation")
+	require.Empty(t, manager.known, "later explicit turns must not confuse an unpublished input with lost records")
+	require.False(t, OpenAIWSAgentRecoveryCanRetry(manager.ctx), "lack of an owner is never permission to automatically replay opaque work")
+	account.ID = 2
+	require.NoError(t, issue715WSBegin(t, manager, account, issue715OpaqueBody, "ctx_pool"), "fresh first-seen history follows ordinary admission without inferring a forgotten owner")
+}
+
+func TestIssue805WSRefusedCurrentPointerCannotReplayWarmup(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+	manager, _, account := issue715WSManager(t, svc, context.Background())
+	defer manager.abort()
+	require.True(t, OpenAIWSAgentRecoveryCanRetry(manager.ctx), "empty warmup has no prior opaque side effect")
+	err := issue715WSBegin(t, manager, account, `{"model":"gpt-6-astra","previous_response_id":"resp_unknown","input":[]}`, "ctx_pool")
+	require.Error(t, err)
+	require.False(t, OpenAIWSAgentRecoveryCanRetry(manager.ctx), "a refused current pointer cannot be replaced by replaying the initial warmup")
+}

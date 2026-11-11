@@ -70,6 +70,7 @@ func TestIssue805HTTPUpstreamRejectionIsSingleIntactSend(t *testing.T) {
 		{"invalid_encrypted", "invalid_encrypted_content", 400},
 		{"unsupported", "unsupported_encrypted_agent_message", 400},
 		{"pool_retryable", "server_error", 520},
+		{"rejected_field", "unsupported_parameter", 400},
 		{"stream_failure", "unsupported_encrypted_agent_message", 0},
 	} {
 		for _, stream := range []bool{false, true} {
@@ -86,8 +87,14 @@ func TestIssue805HTTPUpstreamRejectionIsSingleIntactSend(t *testing.T) {
 				accounts[0].RateLimitResetAt = &reset
 				u.mu.Lock()
 				u.rejection, u.rejectionStatus = tc.code, tc.status
+				if tc.name == "rejected_field" {
+					u.rejectionParam = "max_output_tokens"
+				}
 				u.mu.Unlock()
 				body := issue715Body(true, stream)
+				if tc.name == "rejected_field" {
+					body = strings.TrimSuffix(body, "}") + `,"max_output_tokens":256}`
+				}
 				answer := issue758Request(t, nodes(true), body)
 				require.NotContains(t, answer.Body.String(), "response.completed")
 				require.NotContains(t, answer.Body.String(), "existing ledger balance")
@@ -101,6 +108,9 @@ func TestIssue805HTTPUpstreamRejectionIsSingleIntactSend(t *testing.T) {
 				defer u.mu.Unlock()
 				require.Equal(t, []string{"Bearer fixture-ws-one", "Bearer fixture-ws-two"}, u.ids, "upstream rejection must not delete and retry or enter pool failover")
 				require.JSONEq(t, gjson.Get(body, "input").Raw, gjson.GetBytes(u.frames[1], "input").Raw)
+				if tc.name == "rejected_field" {
+					require.EqualValues(t, 256, gjson.GetBytes(u.frames[1], "max_output_tokens").Int(), "exercise a field that the ordinary same-account retry would remove")
+				}
 				require.Equal(t, original, issue805Owners(t, clients()))
 			})
 		}

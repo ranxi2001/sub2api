@@ -31,6 +31,7 @@ type issue805Oracle struct {
 	frames          [][]byte
 	ws, http        int
 	rejection       string
+	rejectionParam  string
 	rejectionStatus int
 	disconnect      bool
 }
@@ -45,7 +46,7 @@ func (u *issue805Oracle) response(r *http.Request, body []byte) []byte {
 		return nil
 	}
 	if u.rejection != "" {
-		return []byte(fmt.Sprintf(`{"type":"response.failed","response":{"id":"resp_805_rejected","status":"failed","error":{"code":%q,"message":"synthetic upstream rejected intact history"}}}`, u.rejection))
+		return []byte(fmt.Sprintf(`{"type":"response.failed","response":{"id":"resp_805_rejected","status":"failed","error":{"code":%q,"param":%q,"message":"synthetic upstream rejected intact history"}}}`, u.rejection, u.rejectionParam))
 	}
 	output := "[" + issue715Agent + "]"
 	if id == "Bearer fixture-ws-two" {
