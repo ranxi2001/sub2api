@@ -68,23 +68,37 @@ func TestOrphanCleanupFastRejectionLargeEscapedContent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.CommandContext(ctx, executable, "-test.run=^"+regexp.QuoteMeta(t.Name())+"$", "-test.count=1")
+		cmd := exec.CommandContext(ctx, executable, "-test.run=^"+regexp.QuoteMeta(t.Name())+"$", "-test.count=1", "-test.v")
 		cmd.Env = append(os.Environ(), childEnv+"=1")
-		if output, err := cmd.CombinedOutput(); err != nil {
+		started := time.Now()
+		output, err := cmd.CombinedOutput()
+		t.Logf("isolated escaped allocation child elapsed=%s", time.Since(started))
+		if err != nil {
 			t.Fatalf("isolated escaped allocation test failed: %v\n%s", err, output)
 		}
+		t.Logf("%s", output)
 		return
 	}
 	escaped := strings.Repeat(`\n\"`, 1<<16)
 	body := []byte(`{"vendor":"` + escaped + `","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + escaped + `"}]}]}`)
+	unexpectedCleanup := false
 	measurement := testing.Benchmark(func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			if openAIResponsesMayNeedOrphanCleanup(body) {
+				unexpectedCleanup = true
 				b.Fatal("escaped message-only input unexpectedly requires orphan cleanup")
 			}
 		}
 	})
+	t.Logf("escaped allocation measurement N=%d B/op=%d elapsed=%s", measurement.N, measurement.AllocedBytesPerOp(), measurement.T)
+	// A standalone Benchmark has no parent T: b.Fatal alone cannot fail this test.
+	if unexpectedCleanup {
+		t.Fatal("escaped message-only input unexpectedly requires orphan cleanup")
+	}
+	if measurement.N <= 0 || measurement.T <= 0 {
+		t.Fatalf("invalid escaped allocation measurement: N=%d elapsed=%s", measurement.N, measurement.T)
+	}
 	// json.Valid borrows a small scanner from sync.Pool; race instrumentation
 	// randomly discards pooled objects. Bound bytes instead of requiring pool
 	// hits: copying or decoding this large escaped body still fails the guard.
