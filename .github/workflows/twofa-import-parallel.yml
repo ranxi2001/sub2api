@@ -142,3 +142,55 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 30
+
+  rendered-before-after:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Preserve complete baseline frontend tree
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/twofa-before" "$RUNNER_TEMP/twofa-screenshots"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/twofa-before"
+          cmp frontend/package.json "$RUNNER_TEMP/twofa-before/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/twofa-before/frontend/pnpm-lock.yaml"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/twofa-before/frontend/node_modules"
+          git rev-parse HEAD > "$RUNNER_TEMP/twofa-screenshots/head.txt"
+          git rev-parse "$SOURCE_BASE" > "$RUNNER_TEMP/twofa-screenshots/base.txt"
+      - name: Install isolated screenshot browser on remote runner only
+        run: |
+          npm install --prefix "$RUNNER_TEMP/twofa-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/twofa-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual components with project CSS and synthetic API promises
+        env:
+          BASELINE_ROOT: ${{ runner.temp }}/twofa-before/frontend
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/twofa-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/twofa-screenshots
+        run: |
+          set -o pipefail
+          printf '%s\n' 'node .github/scripts/twofa-import-screenshot.mjs' > "$SCREENSHOT_DIR/command.txt"
+          node .github/scripts/twofa-import-screenshot.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+          git diff --exit-code
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: twofa-screenshots-${{ github.sha }}
+          path: ${{ runner.temp }}/twofa-screenshots
+          if-no-files-found: error
+          retention-days: 30
