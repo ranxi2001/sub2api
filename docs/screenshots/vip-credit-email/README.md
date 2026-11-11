@@ -11,6 +11,6 @@
 | 中文 / 桌面 | [截图](https://github.com/user-attachments/assets/ce7dc2dc-16e1-463b-8913-cbf3af7120f4) | [截图](https://github.com/user-attachments/assets/736ff541-cce8-480d-9a29-25b0729c33ca) | [截图](https://github.com/user-attachments/assets/851fdd25-d6c4-4d07-b4f1-85e4cf179e99) |
 | 英文 / 移动端 | [截图](https://github.com/user-attachments/assets/8b8022ac-8ce0-4156-8689-6e879e0b3ad6) | [截图](https://github.com/user-attachments/assets/5fa63d64-0bc6-47ae-94d5-623df5a7f137) | [截图](https://github.com/user-attachments/assets/37c86618-b947-4d9a-9682-36a3af6806bc) |
 
-[manifest.json](manifest.json) 保留原有四张中文截图的来源和哈希记录，所列文件名是远端产物名。本表六张附件及其余截图的完整 manifest、SHA256SUMS 和原始 PNG 位于同一 run 的 [artifact 13836680525](https://github.com/ranxi2001/sub2api/actions/runs/42976773223/artifacts/13836680525)。本目录仅保留文字说明和历史来源记录；四张曾提交的 PNG 已通过后续提交删除，历史提交仍保留。
+[manifest.json](manifest.json) 保留原有四张中文截图的来源和哈希记录，所列文件名是远端产物名。本表六张附件及其余截图的完整 manifest（含 SHA256）和原始 PNG 位于同一 run 的 [artifact 13836680525](https://github.com/ranxi2001/sub2api/actions/runs/42976773223/artifacts/13836680525)。本目录仅保留文字说明和历史来源记录；四张曾提交的 PNG 已通过后续提交删除，历史提交仍保留。
 
 这些截图展示配置弹窗，不作为邮件模板编辑器或完整页面导航验收。
