@@ -9,7 +9,7 @@ import (
 // A cooldown is not evidence of incompatible ciphertext. Preserve the existing
 // evidence while waiting, without admitting a request or guessing another owner.
 func (s *defaultOpenAIAccountScheduler) checkOpenAIAgentRecoveryCooldown(ctx context.Context, req OpenAIAccountScheduleRequest, recovery *openAIAgentRecoveryRequest) error {
-	if recovery == nil || recovery.owner == nil || s.service.accountRepo == nil {
+	if !recovery.ownerBindingRequired() || s.service.accountRepo == nil {
 		return nil
 	}
 	// The scheduler snapshot may filter out quota-blocked accounts entirely.

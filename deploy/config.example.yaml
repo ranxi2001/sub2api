@@ -296,6 +296,10 @@ gateway:
   # 已提交请求超时后终止，不表示上游停止执行或费用为零；已收到响应头的正文流不受此计时器影响。
   # 0 disables this timer without inheriting the generic 600s timeout.
   openai_response_header_timeout: 0
+  # Optional cross-account attempt for complete, delivered encrypted agent history.
+  # 默认严格；true 不保证密文兼容，不解除权限/额度/并发和交付安全检查。
+  # 所有节点统一配置、排空旧 WS 后重启；详见 docs/encrypted-agent-owner-policy.md。
+  disable_encrypted_agent_owner_binding: false
   # Grok text Responses first-byte timeout (seconds, 0=disabled; default 120)
   # Grok 文本 Responses 首字节超时时间（秒，0=禁用；默认 120）
   grok_response_header_timeout: 120

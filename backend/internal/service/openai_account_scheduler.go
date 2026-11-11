@@ -434,7 +434,24 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			derefGroupID(req.GroupID) != recovery.groupID || req.RequestedModel != recovery.model {
 			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
 		}
+	}
+	if recovery.ownerBindingRequired() {
 		req.StickyAccountID = recovery.owner.accountID
+		req.StickyWeighted = false
+		req.PreserveStickyBinding = true
+		req.DisableStickyEscape = true
+		req.PreviousResponseCanMove = false
+	}
+	// Agent-history opt-out does not migrate provider-side response pointers.
+	// Keep this independent of the presence of an encrypted item owner.
+	pointerOwner := int64(0)
+	if recovery != nil && recovery.previousResponseID != "" {
+		var pointerErr error
+		pointerOwner, pointerErr = s.service.getOpenAIWSStateStore().GetResponseAccount(ctx, recovery.groupID, recovery.previousResponseID)
+		if pointerErr != nil || pointerOwner <= 0 || req.PreviousResponseID != recovery.previousResponseID {
+			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+		}
+		req.StickyAccountID = pointerOwner
 		req.StickyWeighted = false
 		req.PreserveStickyBinding = true
 		req.DisableStickyEscape = true
@@ -604,13 +621,17 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			}
 		}
 	}
-	if recovery != nil && recovery.owner != nil {
-		if req.GuardianParentAccountID > 0 && req.GuardianParentAccountID != recovery.owner.accountID {
+	if recovery.ownerBindingRequired() || pointerOwner > 0 {
+		ownerID := pointerOwner
+		if recovery.ownerBindingRequired() {
+			ownerID = recovery.owner.accountID
+		}
+		if req.GuardianParentAccountID > 0 && req.GuardianParentAccountID != ownerID {
 			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
 		}
 		if previousResponseID != "" {
-			ownerID, readErr := s.service.getOpenAIWSStateStore().GetResponseAccount(ctx, derefGroupID(req.GroupID), previousResponseID)
-			if readErr != nil || ownerID != recovery.owner.accountID {
+			previousOwner, readErr := s.service.getOpenAIWSStateStore().GetResponseAccount(ctx, derefGroupID(req.GroupID), previousResponseID)
+			if readErr != nil || previousOwner != ownerID {
 				return nil, decision, openAIAgentRecoveryError("owner_unavailable")
 			}
 		}
