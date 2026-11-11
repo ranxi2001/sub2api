@@ -4,7 +4,7 @@ import OpenAITwoFAImport from '../OpenAITwoFAImport.vue'
 import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/accountTokenGuard'
 import type { TokenGuardReloginAccount, TwoFALoginJob } from '@/api/admin/accountTokenGuard'
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', async original => ({ ...await original<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/admin/credentialEncryption', () => ({
   getCredentialEncryption: vi.fn().mockResolvedValue({ configured: true, source: 'server_config' }),
   initializeCredentialEncryption: vi.fn(),
