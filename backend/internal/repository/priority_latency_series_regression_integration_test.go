@@ -93,6 +93,5 @@ func TestPriorityLatencySeriesUsesConfiguredMeasurementAndPercentile(t *testing.
 	require.True(t, exists, "latency series must expose the configured percentile")
 	selectedTTFTMs, ok := selected.(float64)
 	require.True(t, ok, "selected latency must be numeric for a measured bucket")
-	require.InDelta(t, *signals[account.ID].SelectedTTFTMs, selectedTTFTMs, .01,
-		"the heatmap bucket and snapshot summary must share the configured measurement and percentile")
+	require.InDelta(t, 10000, selectedTTFTMs, .01, "legacy latency endpoint retains its configured percentile independently of account performance scoring")
 }

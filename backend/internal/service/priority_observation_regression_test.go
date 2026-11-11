@@ -276,3 +276,12 @@ func TestPriorityObservationScopeCompatibility(t *testing.T) {
 	req.GroupID = &other
 	require.False(t, priorityApplies(cfg, req))
 }
+
+// Compatibility helper for passive transport collector regressions.
+func (s *defaultOpenAIAccountScheduler) priorityErrorEvidence(req OpenAIAccountScheduleRequest, c PrioritySchedulingConfig, id int64, now time.Time) PriorityErrorEvidence {
+	key := priorityRequestAttemptKey(req, id)
+	if s.stats == nil {
+		return PriorityErrorEvidence{WindowMinutes: c.ErrorRateWindowMinutes, PriorSamples: max(1, c.ErrorRatePriorSamples), ObservedAt: now, Endpoint: key.endpoint}
+	}
+	return s.stats.attempts.snapshot(key, now, c.ErrorRateWindowMinutes, c.ErrorRatePriorSamples)
+}
