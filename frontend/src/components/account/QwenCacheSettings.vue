@@ -2,7 +2,7 @@
   <div class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600" data-testid="qwen-cache-settings">
     <div class="flex items-center gap-2 font-medium">
       {{ t('common.qwenCache.title') }}
-      <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.qwenCache" :user-id="userId" />
+      <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.qwenCache" :user-id="userId" />
     </div>
     <label class="flex items-center gap-2">
       <input type="checkbox" data-testid="qwen-session-cache" :checked="sessionCache" @change="emit('update:sessionCache', ($event.target as HTMLInputElement).checked)" />
