@@ -1,0 +1,63 @@
+name: Qwen cache and strict affinity
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/qwen*'
+      - 'backend/internal/service/openai_strict_session*'
+      - 'frontend/src/components/account/QwenCacheSettings.vue'
+      - '.github/scripts/qwen-cache-preview.mjs'
+      - '.github/workflows/qwen-cache-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qwen-cache-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - working-directory: backend
+        run: go test -tags=unit ./internal/service -run 'Test(Qwen|StrictSessionAffinity)' -count=1 -v
+  actual-component:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Capture actual Qwen component with synthetic state
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/qwen-cache-evidence
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/qwen-cache-browser/node_modules/playwright
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qwen-cache-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$PLAYWRIGHT_ROOT/cli.js" install --with-deps chromium
+          node .github/scripts/qwen-cache-preview.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: qwen-cache-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/qwen-cache-evidence
+          if-no-files-found: error

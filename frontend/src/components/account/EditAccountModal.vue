@@ -12,6 +12,7 @@
       class="space-y-5"
     >
       <QwenPlatformNotice v-if="account?.platform === 'qwen'" :user-id="authStore.user?.id" />
+      <QwenCacheSettings v-if="account.platform === 'qwen' && account.type === 'apikey'" v-model:session-cache="qwenSessionCache" v-model:strict-affinity="qwenStrictAffinity" :user-id="authStore.user?.id" @base-url="setQwenBaseUrl" />
       <div v-if="account.credentials?.oauth_initial_selected_models != null" data-testid="initial-model-scope-snapshot" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
         <div class="flex items-start gap-2"><p>{{ t('autoConfig.selection.accountHint') }}</p><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.oauthInitialModelSelection" :user-id="authStore.user?.id" /></div>
         <label class="mt-2 flex items-center gap-2"><input v-model="releaseInitialModelSelection" data-testid="release-initial-model-selection" type="checkbox" />{{ t('autoConfig.selection.takeOver') }}</label>
@@ -3708,6 +3709,8 @@
 
 <script setup lang="ts">
 import QwenPlatformNotice from '@/components/common/QwenPlatformNotice.vue'
+import QwenCacheSettings from './QwenCacheSettings.vue'
+import { applyQwenCacheSettings } from './qwenCacheSettings'
 import OpenAIRequestTimezoneField from '@/components/account/OpenAIRequestTimezoneField.vue'
 import ExtraImageModelsField from '@/components/account/ExtraImageModelsField.vue'
 import { parseExtraImageModels, readExtraImageModels } from '@/utils/extraImageModels'
@@ -4271,6 +4274,12 @@ const customErrorCodesEnabled = ref(false)
 const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const headerOverrideEnabled = ref(false)
+const qwenSessionCache = ref(false)
+const qwenStrictAffinity = ref(false)
+const setQwenBaseUrl = (value: string) => {
+  editBaseUrl.value = value
+  editAdaptiveBaseUrls.value.chat_completions = value
+}
 const headerOverrideRows = ref<HeaderOverrideRow[]>([])
 
 const headerOverrideCapable = computed(
@@ -5348,6 +5357,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   loadAccountSchedulingThresholdOverride(newAccount.platform, credentials)
 
   // Load header override state for eligible account platforms/types
+  qwenSessionCache.value = credentials?.qwen_session_cache_enabled === true
+  qwenStrictAffinity.value = credentials?.qwen_strict_session_affinity === true
   headerOverrideEnabled.value = false
   headerOverrideRows.value = []
   if (newAccount.credentials && isHeaderOverrideCapable(newAccount.platform, newAccount.type)) {
@@ -6312,6 +6323,10 @@ const handleSubmit = async () => {
             delete newCredentials.zhipu_project
           }
         }
+      }
+
+      if (props.account.platform === 'qwen') {
+        applyQwenCacheSettings(newCredentials, qwenSessionCache.value, qwenStrictAffinity.value)
       }
 
       // Handle API key
