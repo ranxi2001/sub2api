@@ -105,7 +105,11 @@ var _ PrioritySchedulingSignalReader = (*priorityReaderStub)(nil)
 func TestPriorityUnifiedPerformanceSnapshotOwnsMetricPointers(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()
 	signal := performanceFixture(30, 4000, 0)
+	cachePercent := 70.0
+	signal.Performance.AvgCachePercent = &cachePercent
 	score := scorePriorityCandidate(cfg, priorityCandidate(1, .1, 0), signal, time.Now())
+	*score.Performance.AvgCachePercent = 99
+	require.Equal(t, 70.0, *signal.Performance.AvgCachePercent)
 	*score.Performance.AvgTPS = 999
 	*score.Performance.AvgTTFTMs = 999
 	require.Equal(t, 30.0, *signal.Performance.AvgTPS)

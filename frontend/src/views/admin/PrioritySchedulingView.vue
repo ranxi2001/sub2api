@@ -65,7 +65,7 @@
             <template #cell-tier="{ row }"><div><span :class="candidateTier(row) === 'eligible' ? 'text-emerald-600' : ['degraded', 'recovery'].includes(candidateTier(row)) ? 'text-amber-600' : 'text-gray-500'">{{ candidateTierLabel(row) }}</span></div></template>
             <template #cell-priority="{ row }"><div>{{ row.priority }}</div></template>
             <template #cell-score="{ row }"><div>{{ row.score.toFixed(1) }}</div></template>
-            <template #cell-performance="{ row }"><AccountPerformanceCell :metrics="row.performance" :unavailable="!!snapshotError" :can-configure="false" /></template>
+            <template #cell-performance="{ row }"><AccountPerformanceCell :metrics="row.performance" :unavailable="!!snapshotError" :can-configure="false" :notice-user-id="auth.user?.id" /></template>
 
             <template #cell-rate="{ row }"><div>{{ row.rate == null ? '—' : `${row.rate.toFixed(3)}×` }}</div></template>
             <template #cell-profit="{ row }"><div><template v-if="row.economics_source === 'usage'"><span :class="(row.profit ?? 0) < 0 ? 'text-red-600' : 'text-emerald-600'">${{ row.profit?.toFixed(4) }} · {{ row.margin == null ? '—' : `${(row.margin * 100).toFixed(1)}%` }}</span></template><span v-else class="text-xs text-gray-500">{{ t(`priorityScheduling.economics.${row.economics_source || 'unknown'}`) }}</span></div></template>
