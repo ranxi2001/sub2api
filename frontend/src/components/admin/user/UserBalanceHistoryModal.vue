@@ -114,7 +114,7 @@
                 </p>
                 <template v-if="item.auto_credit">
                   <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
-                    {{ t('autoCredit.beforeAfter', { before: item.auto_credit.balance_before, after: item.auto_credit.balance_after }) }}
+                    {{ t('autoCredit.beforeAfter', { before: Number(item.auto_credit.balance_before).toFixed(2), after: Number(item.auto_credit.balance_after).toFixed(2) }) }}
                   </p>
                   <p v-if="item.auto_credit.settled_at" class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
                     {{ t('autoCredit.collectedBy', { id: item.auto_credit.settled_by }) }} · {{ formatDateTime(item.auto_credit.settled_at) }}
@@ -336,7 +336,7 @@ const getItemTitle = (item: BalanceHistoryItem) => {
 
 // Format display value
 const formatValue = (item: BalanceHistoryItem) => {
-  if (item.auto_credit) return `+$${item.auto_credit.amount}`
+  if (item.auto_credit) return `+$${Number(item.auto_credit.amount).toFixed(2)}`
   if (isBalanceType(item.type)) {
     const sign = item.value >= 0 ? '+' : ''
     return `${sign}$${item.value.toFixed(2)}`

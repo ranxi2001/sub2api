@@ -69,7 +69,8 @@ createApp({setup(){const show=ref(false);onMounted(()=>{show.value=true});return
       await page.goto(origin + '/?lang=' + lang + (before ? '&before=1' : ''), { waitUntil: 'networkidle' })
       await page.getByText('+$8000.00', { exact: true }).waitFor()
       if (!before) {
-        if (await page.getByText('+$1000.00000000', { exact: true }).count() !== 2) throw Error('Missing exact credit amounts')
+        if (await page.getByText('+$1000.00', { exact: true }).count() !== 2) throw Error('Missing two-decimal credit amounts')
+        if (await page.getByText((lang === 'zh' ? '余额：' : 'Balance: ') + '$999.00 → $1999.00', { exact: true }).count() !== 2) throw Error('Missing two-decimal balances')
         await page.getByText('#2 · ' + (lang === 'zh' ? '待收款' : 'Uncollected'), { exact: true }).waitFor()
       }
       const file = lang + '-' + stage + '.png'
