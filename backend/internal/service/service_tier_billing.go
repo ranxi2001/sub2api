@@ -9,6 +9,11 @@ import (
 // the actual response tier, including upgrades. It defaults to disabled.
 const OpenAIResponseTierBillingEnabledKey = "openai_response_tier_billing_enabled"
 
+// OpenAIOAuthRelayFastBillingKey opts a trusted API-key relay of Codex OAuth
+// into retaining outbound Fast billing when it echoes default. Never infer this
+// contract from the provider URL or account name. Other tiers keep their rules.
+const OpenAIOAuthRelayFastBillingKey = "openai_oauth_relay_fast_billing"
+
 // ServiceTierBillingResolution describes how the billable service tier of one
 // request was settled between the tier the client asked for and the tier the
 // upstream reports having used.
@@ -19,6 +24,7 @@ type ServiceTierBillingResolution struct {
 	Downgraded      bool   // Billing is cheaper than Requested
 	Upgraded        bool   // explicitly enabled response billing raised the tier
 	ResponseBilling bool   // selected API key opts into actual response-tier billing
+	OAuthRelayFast  bool   // trusted OAuth relay's default marker retained outbound Fast
 }
 
 // ResolveBillingServiceTier picks the tier to bill. The upstream declaration is
@@ -91,6 +97,16 @@ func ResolveOpenAIServiceTierBilling(account *Account, requested, observed strin
 		}
 		return resolution
 	}
+	if account != nil && account.IsOpenAIApiKey() && account.Extra[OpenAIOAuthRelayFastBillingKey] == true &&
+		codexOAuthResponseTierIsNonAuthoritative(observed) {
+		tier := normalizeBillingServiceTier(requested)
+		if tier == "priority" || tier == "fast" {
+			return ServiceTierBillingResolution{
+				Requested: tier, Observed: normalizeBillingServiceTier(observed),
+				Billing: tier, OAuthRelayFast: true,
+			}
+		}
+	}
 	if account != nil && account.IsOpenAIOAuthLike() && codexOAuthResponseTierIsNonAuthoritative(observed) {
 		return ServiceTierBillingResolution{
 			Requested: normalizeBillingServiceTier(requested),
@@ -141,7 +157,7 @@ func ApplyForwardServiceTierBillingResolution(result *ForwardResult) ServiceTier
 // logServiceTierBillingDowngrade retains the existing downgrade audit and logs
 // all explicitly enabled response-tier decisions, including missing markers.
 func logServiceTierBillingDowngrade(component string, account *Account, requestID string, resolution ServiceTierBillingResolution) {
-	if !resolution.Downgraded && !resolution.ResponseBilling {
+	if !resolution.Downgraded && !resolution.ResponseBilling && !resolution.OAuthRelayFast {
 		return
 	}
 	attrs := []any{
@@ -153,6 +169,11 @@ func logServiceTierBillingDowngrade(component string, account *Account, requestI
 	}
 	if account != nil {
 		attrs = append(attrs, "platform", account.Platform, "account_id", account.ID)
+	}
+	if resolution.OAuthRelayFast {
+		attrs = append(attrs, "tier_source", "trusted_oauth_relay_request")
+		slog.Info("billing.service_tier_resolved", attrs...)
+		return
 	}
 	if resolution.ResponseBilling {
 		attrs = append(attrs, "tier_source", "upstream_response", "upgraded", resolution.Upgraded)
