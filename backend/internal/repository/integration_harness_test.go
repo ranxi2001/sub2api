@@ -36,6 +36,7 @@ const (
 
 var (
 	integrationDB        *sql.DB
+	integrationDSN       string
 	integrationEntClient *dbent.Client
 	integrationRedis     *redisclient.Client
 	// Isolated test connection string for tests that need a separate database.
@@ -128,6 +129,7 @@ func TestMain(m *testing.M) {
 	}
 	integrationPostgresDSN = dsn
 
+	integrationDSN = dsn
 	integrationDB, err = openSQLWithRetry(ctx, dsn, 30*time.Second)
 	if err != nil {
 		log.Printf("failed to open sql db: %v", err)
