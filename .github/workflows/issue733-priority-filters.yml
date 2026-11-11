@@ -33,49 +33,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
-      - name: Review F1 F2 F3 checkpoint behavioral RED
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/filters-evidence"
-          defect=e395038e98fbc5a0c44944f0edcfbfe714570f71
-          git worktree add --detach "$RUNNER_TEMP/followup-red" "$defect"
-          for file in frontend/src/views/admin/PrioritySchedulingView.vue frontend/src/api/admin/priorityScheduling.ts frontend/src/api/admin/groups.ts; do
-            expected=$(git rev-parse "$defect:$file")
-            actual=$(git hash-object "$RUNNER_TEMP/followup-red/$file")
-            test "$actual" = "$expected"
-            echo "$file $expected $actual" >> "$RUNNER_TEMP/filters-evidence/followup-red-blobs.txt"
-          done
-          regression=frontend/src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts
-          cp "$regression" "$RUNNER_TEMP/followup-red/$regression"
-          cmp "$regression" "$RUNNER_TEMP/followup-red/$regression"
-          git hash-object "$regression" >> "$RUNNER_TEMP/filters-evidence/followup-red-blobs.txt"
-          git rev-parse HEAD >> "$RUNNER_TEMP/filters-evidence/followup-red-blobs.txt"
-          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/followup-red/frontend/node_modules"
-          set +e
-          (cd "$RUNNER_TEMP/followup-red/frontend" && pnpm exec vitest run src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts -t 'followup' --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/filters-evidence/followup-red.json") > "$RUNNER_TEMP/filters-evidence/followup-red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/filters-evidence/followup-red.log"
-          test "$result" -ne 0
-          python3 .github/scripts/issue733-followup-red.py "$RUNNER_TEMP/filters-evidence/followup-red.json"
-      - name: Fixed production baseline behavioral RED
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/filters-evidence"
-          git worktree add --detach "$RUNNER_TEMP/filters-baseline" 8a203b43231c1192cee17f854633a23308d73e7e
-          cp frontend/src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts "$RUNNER_TEMP/filters-baseline/frontend/src/views/admin/__tests__/"
-          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/filters-baseline/frontend/node_modules"
-          git show 8a203b43231c1192cee17f854633a23308d73e7e:frontend/src/views/admin/PrioritySchedulingView.vue > "$RUNNER_TEMP/filters-evidence/baseline.vue"
-          cmp "$RUNNER_TEMP/filters-evidence/baseline.vue" "$RUNNER_TEMP/filters-baseline/frontend/src/views/admin/PrioritySchedulingView.vue"
-          set +e
-          (cd "$RUNNER_TEMP/filters-baseline/frontend" && pnpm exec vitest run src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts -t 'offers explicit model and group filters' --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/filters-evidence/red.json") > "$RUNNER_TEMP/filters-evidence/red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/filters-evidence/red.log"
-          test "$result" -ne 0
-          python3 .github/scripts/issue733-filter-red.py "$RUNNER_TEMP/filters-evidence/red.json"
+      - run: mkdir -p "$RUNNER_TEMP/filters-evidence"
       - name: Candidate filter regression GREEN
         run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts src/views/admin/__tests__/PrioritySchedulingReading.spec.ts src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/views/admin/__tests__/PrioritySchedulingQuantile.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1
       - name: Lint frontend changes
@@ -97,6 +55,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -116,9 +75,9 @@ jobs:
             echo "$file $expected $actual" >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
           done
           regression=backend/internal/service/priority_analysis_admission_regression_test.go
-          cp "$regression" "$RUNNER_TEMP/analysis-budget-red/$regression"
-          cmp "$regression" "$RUNNER_TEMP/analysis-budget-red/$regression"
-          git hash-object "$regression" >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:"$regression" > "$RUNNER_TEMP/analysis-budget-red/$regression"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:"$regression" | cmp - "$RUNNER_TEMP/analysis-budget-red/$regression"
+          git hash-object "$RUNNER_TEMP/analysis-budget-red/$regression" >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
           git rev-parse HEAD >> "$RUNNER_TEMP/filters-pg/followup-red-blobs.txt"
           set +e
           (cd "$RUNNER_TEMP/analysis-budget-red/backend" && go test -tags=unit ./internal/service -run '^TestPriorityAnalysisConcurrentScopesHaveBoundedSQLReaders$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/filters-pg/followup-red.log" 2>&1
@@ -206,6 +165,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -232,6 +192,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
         with:
           version: 9

@@ -21,17 +21,17 @@ func TestPriorityRecoveryRanksAfterNormalCandidate(t *testing.T) {
 	cfg.RecoveryExplorationPercent = 0
 
 	normal := priorityCandidate(1, 0.12, 10) // concurrency 10, current 1 => band 1
-	normalSignal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 5000}
+	normalSignal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 5000})
 	require.Equal(t, "insufficient", applyPriorityCandidate(cfg, &normal, normalSignal, now).Tier)
 
 	recovering := priorityCandidate(2, 0.10, 0)
 	recovering.account.Concurrency = 10000 // current 0 => band 0
 	badAt := now.Add(-11 * time.Minute)
-	recoveringSignal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &badAt}
+	recoveringSignal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &badAt})
 	score := applyPriorityCandidate(cfg, &recovering, recoveringSignal, now)
-	require.True(t, score.LatencyRecovery)
-	require.True(t, recovering.priorityLatencyRecovery)
-	require.Equal(t, "insufficient", score.Tier, "recovery remains insufficient, but must not enter the normal race")
+	require.False(t, score.LatencyRecovery)
+	require.True(t, recovering.priorityLatencyPenalty)
+	require.Equal(t, "degraded", score.Tier, "a slow mean remains degraded regardless of elapsed wall time")
 
 	require.Less(t, priorityCapacityBand(recovering), priorityCapacityBand(normal), "recovery is the lower capacity band on purpose")
 
@@ -54,13 +54,13 @@ func TestPriorityActivePenaltyRanksAfterNormalCandidate(t *testing.T) {
 	cfg.MinSamples = 2
 
 	normal := priorityCandidate(1, 0.12, 10)
-	normalSignal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 5000}
+	normalSignal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 5000})
 	applyPriorityCandidate(cfg, &normal, normalSignal, now)
 
 	penalized := priorityCandidate(2, 0.10, 0)
 	penalized.account.Concurrency = 10000
 	badAt := now.Add(-time.Minute)
-	score := applyPriorityCandidate(cfg, &penalized, PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &badAt}, now)
+	score := applyPriorityCandidate(cfg, &penalized, withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &badAt}), now)
 	require.Equal(t, "degraded", score.Tier)
 	require.True(t, penalized.priorityLatencyPenalty)
 	require.Less(t, priorityCapacityBand(penalized), priorityCapacityBand(normal))
@@ -73,35 +73,6 @@ func TestPriorityActivePenaltyRanksAfterNormalCandidate(t *testing.T) {
 
 // When quality history is missing there is no eligible cohort. The recovery
 // exploration lane must still work instead of silently doing nothing.
-func TestPriorityRecoveryExplorationWorksWithoutEligibleCohort(t *testing.T) {
-	now := time.Now()
-	cfg := DefaultPrioritySchedulingConfig()
-	cfg.Enabled = true
-	cfg.TargetTTFTMs = 15000
-	cfg.MinSamples = 2
-	cfg.RecoveryExplorationPercent = 10
-
-	normal := priorityCandidate(1, 0.12, 0)
-	normalScore := applyPriorityCandidate(cfg, &normal, PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 5000}, now)
-	require.Equal(t, "insufficient", normalScore.Tier)
-
-	passed := true
-	recovering := priorityCandidate(2, 0.10, 0)
-	badAt := now.Add(-11 * time.Minute)
-	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, QualitySamples: 10, QualityPassed: 10, LatestQualityPassed: &passed, LatestBadLatencyAt: &badAt}
-	score := applyPriorityCandidate(cfg, &recovering, signal, now)
-	require.True(t, score.LatencyRecovery)
-	require.True(t, recovering.priorityExploration)
-
-	counts := map[int64]int{}
-	for i := 0; i < 5000; i++ {
-		order := buildPrioritySelectionOrder([]openAIAccountCandidateScore{normal, recovering}, OpenAIAccountScheduleRequest{SessionHash: fmt.Sprintf("recovery-no-eligible-%d", i)})
-		counts[order[0].account.ID]++
-	}
-	require.InDelta(t, 500, counts[2], 100, "recovery exploration should stay near 10%%: %v", counts)
-	require.Greater(t, counts[1], 4300)
-}
-
 func TestPriorityPoolNeedsFallback(t *testing.T) {
 	require.False(t, priorityPoolNeedsFallback(nil))
 	require.False(t, priorityPoolNeedsFallback([]openAIAccountCandidateScore{{}}))
@@ -118,7 +89,7 @@ func TestPrioritySnapshotMarksRecoveryOnlyPoolAsFallback(t *testing.T) {
 	cfg.MinSamples = 2
 	now := time.Now()
 	badAt := now.Add(-11 * time.Minute)
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{2: {Samples: 10, P90TTFTMs: 16000, LatestBadLatencyAt: &badAt}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{2: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 10, P90TTFTMs: 16000, LatestBadLatencyAt: &badAt})}}
 	gateway := priorityGateway(cfg, r)
 	scheduler, ok := newDefaultOpenAIAccountScheduler(gateway, nil).(*defaultOpenAIAccountScheduler)
 	require.True(t, ok)

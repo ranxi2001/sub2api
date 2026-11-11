@@ -82,7 +82,7 @@ func (s *OpenAIGatewayService) prioritySchedulingSnapshotWithHistory(input *prio
 		id := *input.request.GroupID
 		group = &id
 	}
-	snapshot := &PrioritySchedulingSnapshot{LatencyPercentile: input.config.LatencyPercentile, LatencyMeasurement: input.config.LatencyMeasurement, LatencyPenaltyMode: input.config.LatencyPenaltyMode, LatencyFallback: input.fallback, MinSamples: input.config.MinSamples, WindowMinutes: input.config.WindowMinutes, ConfigRevision: priorityConfigRevision(input.config), At: input.at, EvaluatedAt: now, Model: priorityHistoryModel(input.request), GroupID: group, Mode: input.config.Mode, SelectionPolicy: "capacity_first", HistoryReady: h.ready(), HistoryStatus: h.status, HistoryObservedAt: h.observed, HistoryWindowEnd: h.windowEnd, HistoryError: h.failure, HistoryRefreshing: h.refreshing, Candidates: make([]PrioritySchedulingScore, 0, len(input.candidates))}
+	snapshot := &PrioritySchedulingSnapshot{PerformanceSource: "account_performance", LatencyPercentile: input.config.LatencyPercentile, LatencyMeasurement: input.config.LatencyMeasurement, LatencyPenaltyMode: input.config.LatencyPenaltyMode, LatencyFallback: input.fallback, MinSamples: input.config.MinSamples, WindowMinutes: input.config.WindowMinutes, ConfigRevision: priorityConfigRevision(input.config), At: input.at, EvaluatedAt: now, Model: priorityHistoryModel(input.request), GroupID: group, Mode: input.config.Mode, SelectionPolicy: "capacity_first", HistoryReady: h.ready(), HistoryStatus: h.status, HistoryObservedAt: h.observed, HistoryWindowEnd: h.windowEnd, HistoryError: h.failure, HistoryRefreshing: h.refreshing, Candidates: make([]PrioritySchedulingScore, 0, len(input.candidates))}
 	if input.config.OAuthQuotaPriority {
 		snapshot.SelectionPolicy = "oauth_quota_priority"
 	}
@@ -94,10 +94,6 @@ func (s *OpenAIGatewayService) prioritySchedulingSnapshotWithHistory(input *prio
 		}
 		if item.priorityAPIStandby {
 			role = "standby"
-		}
-		if s.openaiAccountStats != nil {
-			key := priorityRequestAttemptKey(input.request, item.account.ID)
-			item.priorityErrors = s.openaiAccountStats.attempts.snapshot(key, now, input.config.ErrorRateWindowMinutes, input.config.ErrorRatePriorSamples)
 		}
 		score := applyPriorityCandidate(input.config, &item, h.signals[item.account.ID], now)
 		score.OAuthQuotaRole = role

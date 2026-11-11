@@ -249,7 +249,7 @@ func (s *OpenAIGatewayService) priorityHistory(req OpenAIAccountScheduleRequest,
 			// completion. Two workers, 32 scopes and the global rolling launch budget bound SQL.
 			ttl := priorityHistoryTTL
 			for _, signal := range entry.signals {
-				if max(signal.Samples+signal.LatencyUnknownSamples, signal.ProfitSamples) < c.MinSamples {
+				if signal.Performance == nil || (max(max(signal.Performance.TTFTSamples, signal.Performance.TPSSamples), signal.ProfitSamples) < c.MinSamples) {
 					ttl = priorityHistoryColdTTL
 					break
 				}

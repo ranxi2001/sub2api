@@ -283,17 +283,17 @@ func TestPriorityPenaltyReviewFreshnessDeadline(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()
 	cfg.LatencyPenaltyMode = PriorityLatencyStop
 	bad := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
-	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad}
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad})
 	candidate := priorityCandidate(1, .1, 0)
-	// Usage was created at bad; persistence/history visibility arrived 8 minutes
-	// later. Read time must not restart the original ten-minute deadline.
+	// The shared rolling mean, not a separate wall-clock timer, controls stop.
 	visible := bad.Add(8 * time.Minute)
 	score := scorePriorityCandidate(cfg, candidate, signal, visible)
 	require.True(t, score.LatencyStopped)
-	require.Equal(t, bad.Add(10*time.Minute), *score.LatencyPenaltyUntil)
-	require.Equal(t, 2*time.Minute, score.LatencyPenaltyUntil.Sub(visible))
-	expired := scorePriorityCandidate(cfg, candidate, signal, bad.Add(10*time.Minute))
-	require.False(t, expired.LatencyStopped)
-	require.True(t, expired.LatencyRecovery)
-	require.Equal(t, *score.LatencyPenaltyUntil, *expired.LatencyPenaltyUntil, "rereading old usage never renews stop")
+	require.Nil(t, score.LatencyPenaltyUntil)
+	later := scorePriorityCandidate(cfg, candidate, signal, bad.Add(10*time.Minute))
+	require.True(t, later.LatencyStopped)
+	require.False(t, later.LatencyRecovery)
+	recovered := 4000.0
+	signal.Performance.AvgTTFTMs = &recovered
+	require.False(t, scorePriorityCandidate(cfg, candidate, signal, visible).LatencyStopped)
 }

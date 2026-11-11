@@ -75,21 +75,8 @@ func TestPriorityLatencySeriesUsesConfiguredMeasurementAndPercentile(t *testing.
 		require.NoError(t, err)
 	}
 
-	var signalQuery service.PrioritySchedulingQuery
-	err := json.Unmarshal([]byte(`{"LatencyPercentile":50,"LatencyMeasurement":"attributed_v1","TargetTTFTMs":15000}`), &signalQuery)
-	require.NoError(t, err)
-	signalQuery.AccountIDs = []int64{account.ID}
-	signalQuery.Model = "fixture-model"
-	signalQuery.UsageSince = now.Add(-time.Hour)
-	signalQuery.UsageUntil = now.Add(time.Second)
-	signalQuery.QualitySince = now.Add(-time.Hour)
-	signals, err := repo.ReadPrioritySchedulingSignals(ctx, signalQuery)
-	require.NoError(t, err)
-	require.NotNil(t, signals[account.ID].SelectedTTFTMs)
-	require.InDelta(t, 10000, *signals[account.ID].SelectedTTFTMs, .01)
-
 	var seriesQuery service.PriorityLatencySeriesQuery
-	err = json.Unmarshal([]byte(`{"LatencyPercentile":50,"LatencyMeasurement":"attributed_v1"}`), &seriesQuery)
+	err := json.Unmarshal([]byte(`{"LatencyPercentile":50,"LatencyMeasurement":"attributed_v1"}`), &seriesQuery)
 	require.NoError(t, err)
 	seriesQuery.AccountIDs = []int64{account.ID}
 	seriesQuery.Model = "fixture-model"
@@ -106,6 +93,5 @@ func TestPriorityLatencySeriesUsesConfiguredMeasurementAndPercentile(t *testing.
 	require.True(t, exists, "latency series must expose the configured percentile")
 	selectedTTFTMs, ok := selected.(float64)
 	require.True(t, ok, "selected latency must be numeric for a measured bucket")
-	require.InDelta(t, *signals[account.ID].SelectedTTFTMs, selectedTTFTMs, .01,
-		"the heatmap bucket and snapshot summary must share the configured measurement and percentile")
+	require.InDelta(t, 10000, selectedTTFTMs, .01, "legacy latency endpoint retains its configured percentile independently of account performance scoring")
 }

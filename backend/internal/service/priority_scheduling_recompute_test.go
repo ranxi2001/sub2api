@@ -16,14 +16,14 @@ func priorityDiffRowsByAccount(rows []PrioritySchedulingDiffRow) map[int64]Prior
 
 func TestDiffPrioritySnapshots(t *testing.T) {
 	before := &PrioritySchedulingSnapshot{Candidates: []PrioritySchedulingScore{
-		{AccountID: 1, AccountName: "A", Score: 80, SelectionWeight: 1.5, Tier: "eligible", PrioritySchedulingSignal: PrioritySchedulingSignal{P90TTFTMs: 1000, Samples: 10, ErrorSamples: 1}},
-		{AccountID: 2, AccountName: "B", Score: 70, SelectionWeight: 1.0, Tier: "insufficient", PrioritySchedulingSignal: PrioritySchedulingSignal{P90TTFTMs: 5000, Samples: 5}},
-		{AccountID: 4, AccountName: "D", Score: 50, SelectionWeight: 0.5, Tier: "degraded", PrioritySchedulingSignal: PrioritySchedulingSignal{P90TTFTMs: 9000, Samples: 2}},
+		{AccountID: 1, AccountName: "A", Score: 80, SelectionWeight: 1.5, Tier: "eligible", PrioritySchedulingSignal: withAccountPerformanceFixture(PrioritySchedulingSignal{P90TTFTMs: 1000, Samples: 10, ErrorSamples: 1})},
+		{AccountID: 2, AccountName: "B", Score: 70, SelectionWeight: 1.0, Tier: "insufficient", PrioritySchedulingSignal: withAccountPerformanceFixture(PrioritySchedulingSignal{P90TTFTMs: 5000, Samples: 5})},
+		{AccountID: 4, AccountName: "D", Score: 50, SelectionWeight: 0.5, Tier: "degraded", PrioritySchedulingSignal: withAccountPerformanceFixture(PrioritySchedulingSignal{P90TTFTMs: 9000, Samples: 2})},
 	}}
 	after := &PrioritySchedulingSnapshot{Candidates: []PrioritySchedulingScore{
-		{AccountID: 2, AccountName: "B", Score: 90, SelectionWeight: 2.0, Tier: "eligible", PrioritySchedulingSignal: PrioritySchedulingSignal{P90TTFTMs: 2000, Samples: 8}},
-		{AccountID: 1, AccountName: "A", Score: 60, SelectionWeight: 0.8, Tier: "degraded", PrioritySchedulingSignal: PrioritySchedulingSignal{P90TTFTMs: 8000, Samples: 12, ErrorSamples: 3}},
-		{AccountID: 3, AccountName: "C", Score: 85, SelectionWeight: 1.7, Tier: "eligible", PrioritySchedulingSignal: PrioritySchedulingSignal{P90TTFTMs: 1500, Samples: 6}},
+		{AccountID: 2, AccountName: "B", Score: 90, SelectionWeight: 2.0, Tier: "eligible", PrioritySchedulingSignal: withAccountPerformanceFixture(PrioritySchedulingSignal{P90TTFTMs: 2000, Samples: 8})},
+		{AccountID: 1, AccountName: "A", Score: 60, SelectionWeight: 0.8, Tier: "degraded", PrioritySchedulingSignal: withAccountPerformanceFixture(PrioritySchedulingSignal{P90TTFTMs: 8000, Samples: 12, ErrorSamples: 3})},
+		{AccountID: 3, AccountName: "C", Score: 85, SelectionWeight: 1.7, Tier: "eligible", PrioritySchedulingSignal: withAccountPerformanceFixture(PrioritySchedulingSignal{P90TTFTMs: 1500, Samples: 6})},
 	}}
 	rows := priorityDiffRowsByAccount(diffPrioritySnapshots(before, after))
 	require.Len(t, rows, 4)
@@ -48,7 +48,7 @@ func TestDiffPrioritySnapshots(t *testing.T) {
 
 func TestDiffPrioritySnapshotsUnchangedAndNil(t *testing.T) {
 	snapshot := &PrioritySchedulingSnapshot{Candidates: []PrioritySchedulingScore{
-		{AccountID: 1, AccountName: "A", Score: 80, SelectionWeight: 1.5, Tier: "eligible", PrioritySchedulingSignal: PrioritySchedulingSignal{P90TTFTMs: 1000, Samples: 10}},
+		{AccountID: 1, AccountName: "A", Score: 80, SelectionWeight: 1.5, Tier: "eligible", PrioritySchedulingSignal: withAccountPerformanceFixture(PrioritySchedulingSignal{P90TTFTMs: 1000, Samples: 10})},
 	}}
 	for _, row := range diffPrioritySnapshots(snapshot, snapshot) {
 		require.False(t, row.Changed)

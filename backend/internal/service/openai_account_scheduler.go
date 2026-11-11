@@ -926,7 +926,6 @@ type openAIAccountCandidateScore struct {
 	score                              float64
 	priority                           int
 	errorRate                          float64
-	priorityErrors                     PriorityErrorEvidence
 	ttft                               float64
 	hasTTFT                            bool
 	rpmCurrent                         int
