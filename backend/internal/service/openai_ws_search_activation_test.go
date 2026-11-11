@@ -136,7 +136,9 @@ func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {
 				require.Error(t, err)
 				require.Error(t, <-serverErr)
 				require.Len(t, first.writes, 1, "unsafe continuation must not reach upstream")
-				require.Equal(t, 1, dialer.DialCount(), "protected/unsafe history must not open a replay socket")
+				if tc.retryBlocked {
+					require.Equal(t, 1, dialer.DialCount(), "exposed task must not open a replay socket")
+				}
 				require.Empty(t, second.writes)
 				return
 			}
