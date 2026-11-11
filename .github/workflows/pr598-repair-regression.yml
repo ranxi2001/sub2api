@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Prove clean exact-head production sources
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -94,14 +95,14 @@ jobs:
           git worktree add --detach "$baseline" c0c7533badd6e4696e58d709f59eb7e10bf4b5f0
           trap 'git worktree remove --force "$baseline"' EXIT
           mkdir -p "$baseline/backend/internal/service"
-          cp backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go "$baseline/backend/internal/service/"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go > "$baseline/backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go"
           mkdir -p "$RUNNER_TEMP/pr598-c0c-red"
           bash .github/scripts/pr598-source-proof.sh "$baseline" c0c7533badd6e4696e58d709f59eb7e10bf4b5f0 \
             backend/internal/service/priority_scheduling_history.go \
             backend/internal/service/priority_scheduling_recompute.go \
             backend/internal/service/priority_scheduling_snapshot.go \
             backend/internal/service/priority_scheduling.go | tee "$RUNNER_TEMP/pr598-c0c-red/production.txt"
-          test "$(git hash-object backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go)" = "$(git -C "$baseline" hash-object backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go)"
+          test "$(git rev-parse d79c1044914e7924c38cc4a239e42ff8980698e6:backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go)" = "$(git -C "$baseline" hash-object backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go)"
           set +e
           (cd "$baseline/backend" && go test -tags=unit ./internal/service -run '^TestPriorityRecompute(RefreshFailurePreservesCachedRiskForScheduler|WaitsForFreshReadAfterInflightReader)$' -count=1 -v -timeout=10s) > "$RUNNER_TEMP/pr598-c0c-red/service.log" 2>&1
           result=$?
@@ -146,13 +147,17 @@ jobs:
           baseline="$RUNNER_TEMP/pr598-c0c-ui"
           git worktree add --detach "$baseline" c0c7533badd6e4696e58d709f59eb7e10bf4b5f0
           trap 'git worktree remove --force "$baseline"' EXIT
-          cp frontend/src/views/admin/__tests__/PrioritySchedulingView.spec.ts "$baseline/frontend/src/views/admin/__tests__/PrioritySchedulingView.spec.ts"
+          # Retain the pre-refactor regressions for this historical component.
+          # Current tests use shared-performance fixtures absent from c0c.
+          test_source=6fa7fb86eae7c732794450646dc13831dce87ff1
+          test_path=frontend/src/views/admin/__tests__/PrioritySchedulingView.spec.ts
+          git show "$test_source:$test_path" > "$baseline/$test_path"
           ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$baseline/frontend/node_modules"
           mkdir -p "$RUNNER_TEMP/pr598-queued-red"
           bash .github/scripts/pr598-source-proof.sh "$baseline" c0c7533badd6e4696e58d709f59eb7e10bf4b5f0 \
             frontend/src/views/admin/PrioritySchedulingView.vue \
             frontend/src/api/admin/priorityScheduling.ts | tee "$RUNNER_TEMP/pr598-queued-red/production.txt"
-          test "$(git hash-object frontend/src/views/admin/__tests__/PrioritySchedulingView.spec.ts)" = "$(git -C "$baseline" hash-object frontend/src/views/admin/__tests__/PrioritySchedulingView.spec.ts)"
+          test "$(git rev-parse "$test_source:$test_path")" = "$(git hash-object "$baseline/$test_path")"
           set +e
           pnpm --dir "$baseline/frontend" exec vitest run src/views/admin/__tests__/PrioritySchedulingView.spec.ts -t 'reads back the recomputed group after automatically switching the sticky scope|supersedes an in-flight old latency window with the selected window' --maxWorkers=1 --minWorkers=1 --reporter=default --reporter=json --outputFile="$RUNNER_TEMP/pr598-queued-red/ui.json" > "$RUNNER_TEMP/pr598-queued-red/ui.log" 2>&1
           result=$?
@@ -188,6 +193,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Prove clean exact-head production sources
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -235,6 +241,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Prove clean exact-head production sources
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -270,7 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/pr598-red"
-          pnpm --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingView.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee "$RUNNER_TEMP/pr598-red/ui.log"
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/PrioritySchedulingView.spec.ts src/views/admin/__tests__/PrioritySchedulingFilters.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee "$RUNNER_TEMP/pr598-red/ui.log"
           ! grep -Eq 'no tests to run|No test files found|skipped' "$RUNNER_TEMP/pr598-red/ui.log"
           pnpm --dir frontend run build
           git diff --exit-code HEAD
@@ -290,6 +297,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Prove clean exact-head production sources
         env:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}

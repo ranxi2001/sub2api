@@ -42,7 +42,7 @@ func TestPriorityFairDistributionIncludesIdleAccount(t *testing.T) {
 func TestPriorityScoringUsesRealCapacity(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()
 	cfg.Mode = "profit"
-	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10}
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10})
 	candidate := priorityCandidate(1, 0.1, 60)
 	normal := scorePriorityCandidate(cfg, candidate, signal, time.Now())
 	factor := 10000
@@ -123,9 +123,9 @@ func TestPriorityExplorationIncludesQualityReadyAPIKey(t *testing.T) {
 	item.account.Type = AccountTypeAPIKey
 	item.loadKnown = true
 	item.loadInfo.CurrentConcurrency = 0
-	score := applyPriorityCandidate(cfg, &item, PrioritySchedulingSignal{
+	score := applyPriorityCandidate(cfg, &item, withAccountPerformanceFixture(PrioritySchedulingSignal{
 		QualityPassed: 9, QualitySamples: 10,
-	}, time.Now())
+	}), time.Now())
 	require.Equal(t, "insufficient", score.Tier)
 	require.True(t, item.priorityExploration)
 }
@@ -145,7 +145,7 @@ func TestPriorityExplorationRequiresSafeUnknownAccount(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()
 	cfg.Enabled = true
 	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{
-		1: {QualityPassed: 10, QualitySamples: 10},
+		1: withAccountPerformanceFixture(PrioritySchedulingSignal{QualityPassed: 10, QualitySamples: 10}),
 	}}
 	gateway := priorityGateway(cfg, reader)
 	scheduler := &defaultOpenAIAccountScheduler{service: gateway}

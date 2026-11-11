@@ -534,16 +534,6 @@ func priorityErrorEndpoint(req OpenAIAccountScheduleRequest) string {
 	}
 	return "/v1/responses"
 }
-func (s *defaultOpenAIAccountScheduler) priorityErrorEvidence(req OpenAIAccountScheduleRequest, c PrioritySchedulingConfig, id int64, now time.Time) PriorityErrorEvidence {
-	key := priorityRequestAttemptKey(req, id)
-	if s.stats == nil {
-		return PriorityErrorEvidence{WindowMinutes: c.ErrorRateWindowMinutes, PriorSamples: max(1, c.ErrorRatePriorSamples), ObservedAt: now, Endpoint: key.endpoint}
-	}
-	return s.stats.attempts.snapshot(key, now, c.ErrorRateWindowMinutes, c.ErrorRatePriorSamples)
-}
-func priorityErrorPenalty(c PrioritySchedulingConfig, e PriorityErrorEvidence) float64 {
-	return math.Max(.1, 1-c.ErrorRateWeight/100*clamp01(e.SmoothedRate))
-}
 
 // Called only for a known upstream watchdog or protocol-validation failure.
 // It annotates the physical attempt owner and never creates a new observation.

@@ -4,103 +4,12 @@ package repository
 
 import (
 	"context"
-	"fmt"
-	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
 )
-
-func TestPrioritySchedulingSignalsSeparateModelsAndCompletedRounds(t *testing.T) {
-	ctx := context.Background()
-	tx := testEntTx(t)
-	client := tx.Client()
-	repo := newUsageLogRepositoryWithSQL(client, tx)
-	user := mustCreateUser(t, client, &service.User{Email: "priority@test.invalid"})
-	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-priority-test", Name: "test"})
-	account := mustCreateAccount(t, client, &service.Account{Name: "priority", Platform: service.PlatformOpenAI})
-	now := time.Now().Add(-time.Minute)
-	add := func(model, requested string, ttft *int, cost float64, tokens int, stream bool, at time.Time) {
-		t.Helper()
-		_, err := repo.Create(ctx, &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, RequestID: fmt.Sprintf("p-%d-%s", time.Now().UnixNano(), model), Model: model, RequestedModel: requested, FirstTokenMs: ttft, ActualCost: cost, InputTokens: tokens, Stream: stream, CreatedAt: at})
-		require.NoError(t, err)
-	}
-	fast, slow := 100, 1000
-	add("upstream", "gpt-test", &fast, 0, 10, true, now) // free usage with real tokens is valid
-	add("gpt-test", "", &slow, 1, 10, true, now)         // legacy model fallback
-	add("other", "other", &slow, 1, 10, true, now)
-	add("gpt-test", "", nil, 1, 10, true, now.Add(10*time.Second))
-	add("gpt-test", "", &slow, 0, 0, true, now.Add(10*time.Second))   // failed placeholder
-	add("gpt-test", "", &slow, 1, 10, false, now.Add(10*time.Second)) // nonstreaming duration is not TTFT
-	add("gpt-test", "", &slow, 1, 10, true, now.Add(-2*time.Hour))
-	var plan int64
-	rows, err := tx.QueryContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at) VALUES($1,'gpt-test','*/30 * * * *',true,'{"quality":{},"parallel_count":2}',NOW()-INTERVAL '1 hour') RETURNING id`, account.ID)
-	require.NoError(t, err)
-	require.True(t, rows.Next())
-	require.NoError(t, rows.Scan(&plan))
-	require.NoError(t, rows.Close())
-	probe := func(round, status, verdict, message, action string, at time.Time) {
-		t.Helper()
-		_, err := tx.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message) VALUES($1,$2,$3,$3,$3,'{"parallel_count":2}',$4,$5,jsonb_build_object('verdict',$6::text),$7)`, plan, status, at, round, action, verdict, message)
-		require.NoError(t, err)
-	}
-	probe("passed", "success", "correct", "", "passed", now)
-	probe("passed", "success", "correct", "", "passed", now)
-	probe("failed", "success", "correct", "", "failure_counted:1/2", now)
-	probe("failed", "failed", "incorrect", "state_degraded", "failure_counted:1/2", now)
-	probe("partial", "success", "correct", "", "passed", now) // incomplete save cannot count as a passed round
-	probe("unknown", "success", "correct", "", "inconclusive", now)
-	probe("unknown", "failed", "inconclusive", "timeout", "inconclusive", now)
-	probe("stale", "success", "correct", "", "stale_run", now)
-	probe("stale", "success", "correct", "", "stale_run", now)
-	probe("old", "success", "correct", "", "passed", now.Add(-2*time.Hour))
-	probe("old", "success", "correct", "", "passed", now.Add(-2*time.Hour))
-	_, err = tx.ExecContext(ctx, `UPDATE usage_logs SET total_cost=3, account_stats_cost=2, account_rate_multiplier=0.5 WHERE account_id=$1 AND actual_cost>0`, account.ID)
-	require.NoError(t, err)
-	got, err := repo.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{AccountIDs: []int64{account.ID}, Model: "gpt-test", UsageSince: time.Now().Add(-time.Hour), QualitySince: time.Now().Add(-time.Hour), TargetTTFTMs: 500})
-	require.NoError(t, err)
-	require.Equal(t, 2, got[account.ID].Samples)
-	require.NotNil(t, got[account.ID].LatestLatencyAt)
-	require.WithinDuration(t, now, *got[account.ID].LatestLatencyAt, time.Millisecond, "nonstreaming, missing TTFT and failed placeholders must not extend a latency penalty")
-	require.Equal(t, 3, got[account.ID].ProfitSamples, "nonstreaming and missing TTFT still contribute financial records")
-	require.InDelta(t, 3, got[account.ID].Revenue, 0.0001)
-	require.InDelta(t, 6, got[account.ID].BaseCost, 0.0001, "account statistics price is aggregated before any billing or cost multiplier")
-	groupID := int64(999999)
-	differentGroup, err := repo.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{AccountIDs: []int64{account.ID}, Model: "gpt-test", GroupID: &groupID, UsageSince: time.Now().Add(-time.Hour), QualitySince: time.Now().Add(-time.Hour)})
-	require.NoError(t, err)
-	require.Nil(t, differentGroup[account.ID].LatestLatencyAt)
-	require.Zero(t, differentGroup[account.ID].Revenue)
-	require.Zero(t, differentGroup[account.ID].ProfitSamples)
-	require.InDelta(t, 550, got[account.ID].P50TTFTMs, 0.01)
-	require.InDelta(t, 910, got[account.ID].P90TTFTMs, 0.01)
-	require.InDelta(t, 991, got[account.ID].P99TTFTMs, 0.01)
-	require.Equal(t, 1, got[account.ID].SlowSamples)
-	require.Zero(t, got[account.ID].ErrorSamples)
-	require.Equal(t, 2, got[account.ID].QualitySamples)
-	require.Equal(t, 1, got[account.ID].QualityPassed)
-	require.NotNil(t, got[account.ID].LatestQualityPassed)
-	require.False(t, *got[account.ID].LatestQualityPassed, "same-time failure must win over success")
-	probe("recovered", "success", "correct", "", "passed", now.Add(10*time.Second))
-	probe("recovered", "success", "correct", "", "passed", now.Add(10*time.Second))
-	query := service.PrioritySchedulingQuery{AccountIDs: []int64{account.ID}, Model: "gpt-test", UsageSince: time.Now().Add(-time.Hour), QualitySince: time.Now().Add(-time.Hour)}
-	recovered, err := repo.ReadPrioritySchedulingSignals(ctx, query)
-	require.NoError(t, err)
-	require.NotNil(t, recovered[account.ID].LatestQualityPassed)
-	require.True(t, *recovered[account.ID].LatestQualityPassed)
-	probe("new_failure", "failed", "incorrect", "state_degraded", "failure_counted:1/2", now.Add(20*time.Second))
-	probe("new_failure", "success", "correct", "", "failure_counted:1/2", now.Add(20*time.Second))
-	failed, err := repo.ReadPrioritySchedulingSignals(ctx, query)
-	require.NoError(t, err)
-	require.NotNil(t, failed[account.ID].LatestQualityPassed)
-	require.False(t, *failed[account.ID].LatestQualityPassed)
-
-	_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_plans SET enabled=false WHERE id=$1`, plan)
-	require.NoError(t, err)
-	got, err = repo.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{AccountIDs: []int64{account.ID}, Model: "gpt-test", UsageSince: time.Now().Add(-time.Hour), QualitySince: time.Now().Add(-time.Hour)})
-	require.NoError(t, err)
-	require.Zero(t, got[account.ID].QualitySamples)
-	require.Nil(t, got[account.ID].LatestQualityPassed)
-}
 
 func TestPriorityAccountCostMultiplierRoundTrip(t *testing.T) {
 	ctx := context.Background()
@@ -124,49 +33,32 @@ func TestPriorityAccountCostMultiplierRoundTrip(t *testing.T) {
 
 // Multi-model plans save the executed model on each result. Plan.ModelID is
 // only the legacy fallback, and a malformed legacy round cannot poison usage.
-func TestPriorityQualityUsesResultModelAndIgnoresMalformedRounds(t *testing.T) {
+
+func TestPrioritySchedulingFinanceScopeAndMissingPerformance(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
-	repo := newUsageLogRepositoryWithSQL(tx.Client(), tx)
-	account := mustCreateAccount(t, tx.Client(), &service.Account{Name: "multi-quality", Platform: service.PlatformOpenAI})
-	rows, err := tx.QueryContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at) VALUES($1,'model-a','*/30 * * * *',true,'{"quality":{},"model_ids":["model-a","model-b"],"parallel_count":2}',NOW()-INTERVAL '1 hour') RETURNING id`, account.ID)
-	require.NoError(t, err)
-	require.True(t, rows.Next())
-	var plan int64
-	require.NoError(t, rows.Scan(&plan))
-	require.NoError(t, rows.Close())
+	client := tx.Client()
+	repo := newUsageLogRepositoryWithSQL(client, tx)
+	user := mustCreateUser(t, client, &service.User{Email: "priority-finance@test.invalid"})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "synthetic-priority-finance", Name: "test"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "finance", Platform: service.PlatformOpenAI})
+	now := time.Now()
 	for _, model := range []string{"model-a", "model-b"} {
-		status, verdict, message := "success", "correct", ""
-		if model == "model-b" {
-			status, verdict, message = "failed", "incorrect", "answer_mismatch"
-		}
-		for i := 0; i < 2; i++ {
-			_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message) VALUES($1,$2,NOW()-INTERVAL '1 minute',NOW()-INTERVAL '1 minute',NOW()-INTERVAL '1 minute',jsonb_build_object('model_id',$3::text,'parallel_count',2),'multi','passed',jsonb_build_object('verdict',$4::text),$5)`, plan, status, model, verdict, message)
-			require.NoError(t, err)
-		}
-	}
-	for _, parallel := range []string{`"oops"`, `2147483648`, `0`, `null`} {
-		_, err = tx.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment) VALUES($1,'success',NOW()-INTERVAL '1 minute',NOW()-INTERVAL '1 minute',$2::jsonb,$3,'passed','{"verdict":"correct"}')`, plan, `{"model_id":"model-b","parallel_count":`+parallel+`}`, "invalid-"+parallel)
+		_, err := repo.Create(ctx, &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, RequestID: model, Model: model, InputTokens: 10, ActualCost: 2, TotalCost: 4, CreatedAt: now})
 		require.NoError(t, err)
 	}
-	for _, model := range []string{"model-a", "model-b"} {
-		got, readErr := repo.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{AccountIDs: []int64{account.ID}, Model: model, UsageSince: time.Now().Add(-time.Hour), QualitySince: time.Now().Add(-time.Hour)})
-		require.NoError(t, readErr)
-		require.Equal(t, 1, got[account.ID].QualitySamples)
-		if model == "model-a" {
-			require.Equal(t, 1, got[account.ID].QualityPassed)
-			require.NotNil(t, got[account.ID].LatestQualityPassed)
-			require.True(t, *got[account.ID].LatestQualityPassed)
-		} else {
-			require.Zero(t, got[account.ID].QualityPassed)
-			require.NotNil(t, got[account.ID].LatestQualityPassed)
-			require.False(t, *got[account.ID].LatestQualityPassed)
-		}
-	}
-	_, err = tx.ExecContext(ctx, `UPDATE scheduled_test_plans SET pelican_config='{"quality":null}' WHERE id=$1`, plan)
+	query := service.PrioritySchedulingQuery{AccountIDs: []int64{account.ID}, Model: "model-a", UsageSince: now.Add(-time.Hour), UsageUntil: now.Add(time.Second)}
+	got, err := repo.ReadPrioritySchedulingSignals(ctx, query)
 	require.NoError(t, err)
-	got, err := repo.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{AccountIDs: []int64{account.ID}, Model: "model-a", UsageSince: time.Now().Add(-time.Hour), QualitySince: time.Now().Add(-time.Hour)})
+	require.Equal(t, 1, got[account.ID].ProfitSamples)
+	require.Equal(t, 2.0, got[account.ID].Revenue)
+	require.NotNil(t, got[account.ID].Performance)
+	require.Nil(t, got[account.ID].Performance.AvgTPS)
+	require.Nil(t, got[account.ID].Performance.AvgTTFTMs)
+	require.Nil(t, got[account.ID].Performance.DegradationPercent)
+	query.Model = "missing-model"
+	missing, err := repo.ReadPrioritySchedulingSignals(ctx, query)
 	require.NoError(t, err)
-	require.Zero(t, got[account.ID].QualitySamples)
-	require.Nil(t, got[account.ID].LatestQualityPassed)
+	require.Zero(t, missing[account.ID].ProfitSamples)
+	require.Equal(t, got[account.ID].Performance, missing[account.ID].Performance)
 }

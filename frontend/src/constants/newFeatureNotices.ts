@@ -8,6 +8,7 @@ export const NEW_FEATURE_NOTICES = {
   openaiCacheWriteTTL12h: 'openai-cache-write-12h-initial-announcement',
   easyPayRefundSuccessCode: 'easypay-refund-success-code-initial-announcement',
   settingsSaveDock: 'settings-save-dock-initial-announcement',
+  priorityAccountPerformance: 'priority-account-performance-scoring-initial-announcement',
   oauthDegradationActions: 'oauth-degradation-actions-initial-announcement',
   openaiAPIKeyFallback: 'openai-apikey-fallback-initial-announcement',
   dashboardAccountConcurrency: 'dashboard-account-concurrency-initial-announcement',

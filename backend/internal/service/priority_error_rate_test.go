@@ -116,27 +116,3 @@ func TestPriorityErrorRateBodyOutcomes(t *testing.T) {
 		})
 	}
 }
-
-func TestPriorityErrorRateScoringAndZeroCompatibility(t *testing.T) {
-	c := DefaultPrioritySchedulingConfig()
-	c.ErrorRateWeight = 100
-	now := time.Now()
-	stats := newOpenAIAccountRuntimeStats()
-	key := priorityAttemptKey{accountID: 1, model: "m", endpoint: "/v1/responses"}
-	for i := 0; i < 20; i++ {
-		stats.attempts.report(key, false, now)
-	}
-	item := openAIAccountCandidateScore{account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 10}, errorRate: .6}
-	item.priorityErrors = stats.attempts.snapshot(key, now, 10, 5)
-	bad := scorePriorityCandidate(c, item, PrioritySchedulingSignal{}, now)
-	good := item
-	good.priorityErrors = PriorityErrorEvidence{}
-	healthy := scorePriorityCandidate(c, good, PrioritySchedulingSignal{}, now)
-	require.Greater(t, healthy.Score, bad.Score)
-	require.Equal(t, healthy.Tier, bad.Tier, "soft penalty must not create an absorbing risk tier")
-	require.Greater(t, bad.ErrorPenalty, 0.0)
-	c.ErrorRateWeight = 0
-	old := scorePriorityCandidate(c, item, PrioritySchedulingSignal{}, now)
-	require.Contains(t, old.Reasons, "recent_errors")
-	require.InDelta(t, old.BaseScore*.4, old.Score, 1e-9)
-}

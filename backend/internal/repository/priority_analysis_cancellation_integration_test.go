@@ -38,9 +38,11 @@ func TestPriorityAnalysisPostgresCancellationAndDeadline(t *testing.T) {
 	for _, reader := range []string{"signals", "latency", "service"} {
 		for _, mode := range []string{"cancel", "deadline"} {
 			t.Run(reader+"/"+mode, func(t *testing.T) {
-				tx := testEntTx(t)
-				client := tx.Client()
+				// Reads below use independent SQL connections, so their account
+				// fixture must be committed and visible outside a setup transaction.
+				client := testEntClient(t)
 				account := mustCreateAccount(t, client, &service.Account{Name: "analysis-cancel-fixture", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey})
+				t.Cleanup(func() { require.NoError(t, client.Account.DeleteOneID(account.ID).Exec(context.Background())) })
 				marker := fmt.Sprintf("analysis_cancel_%s_%s_%d", reader, mode, time.Now().UnixNano())
 				usage := newUsageLogRepositoryWithSQL(client, analysisMarkedSQL{sqlExecutor: integrationDB, marker: marker})
 				// Fixture setup touches only accounts; no uncommitted usage writes
@@ -66,7 +68,7 @@ func TestPriorityAnalysisPostgresCancellationAndDeadline(t *testing.T) {
 						_, err := usage.ReadPriorityLatencySeries(ctx, service.PriorityLatencySeriesQuery{AccountIDs: []int64{account.ID}, Model: "fixture", Since: now.Add(-time.Hour), Until: now, BucketMinutes: 5, LatencyPercentile: 90, LatencyMeasurement: "legacy_forward"})
 						return err
 					default:
-						_, err := service.ReadPriorityAnalysis(ctx, newAccountRepositoryWithSQL(client, tx, nil), usage, service.DefaultPrioritySchedulingConfig(), service.PriorityAnalysisQuery{Model: "fixture", Minutes: 60})
+						_, err := service.ReadPriorityAnalysis(ctx, newAccountRepositoryWithSQL(client, integrationDB, nil), usage, service.DefaultPrioritySchedulingConfig(), service.PriorityAnalysisQuery{Model: "fixture", Minutes: 60})
 						return err
 					}
 				}
