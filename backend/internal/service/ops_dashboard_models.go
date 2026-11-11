@@ -9,6 +9,10 @@ type OpsDashboardFilter struct {
 	Platform string
 	GroupID  *int64
 
+	// Internal fallback scope: attribute traffic to OpenAI OAuth accounts, not
+	// the OpenAI-compatible protocol. Hourly platform aggregates cannot serve it.
+	OpenAIOAuthOnly bool
+
 	// QueryMode controls whether dashboard queries should use raw logs or pre-aggregated tables.
 	// Expected values: auto/raw/preagg (see OpsQueryMode).
 	QueryMode OpsQueryMode

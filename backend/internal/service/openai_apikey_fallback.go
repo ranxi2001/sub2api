@@ -253,13 +253,17 @@ func (s *OpsService) GetOpenAIAPIKeyFallbackMetric(ctx context.Context, metric s
 	if s.opsRepo == nil {
 		return nil, infraerrors.ServiceUnavailable("OPS_REPO_UNAVAILABLE", "Ops repository not available")
 	}
-	filter := &OpsDashboardFilter{StartTime: start, EndTime: end, Platform: PlatformOpenAI}
+	filter := &OpsDashboardFilter{StartTime: start, EndTime: end, Platform: PlatformOpenAI, OpenAIOAuthOnly: true, QueryMode: OpsQueryModeRaw}
 	if metric == "health_score" {
-		overview, err := s.GetDashboardOverview(ctx, filter)
+		// Only request health of the OAuth pool can open fallback accounts.
+		// Global infrastructure and background jobs are not OAuth failures.
+		overview, err := s.opsRepo.GetDashboardOverview(ctx, filter)
 		if err != nil || overview == nil {
 			return nil, err
 		}
-		return &OpenAIAPIKeyFallbackObservation{Value: float64(overview.HealthScore), Samples: overview.RequestCountSLA}, nil
+		scoped := *overview
+		scoped.SystemMetrics, scoped.JobHeartbeats = nil, nil
+		return &OpenAIAPIKeyFallbackObservation{Value: float64(computeDashboardHealthScore(end, &scoped)), Samples: scoped.RequestCountSLA}, nil
 	}
 	stats, err := s.opsRepo.GetWindowStats(ctx, filter)
 	if err != nil || stats == nil {
