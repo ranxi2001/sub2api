@@ -1,0 +1,2842 @@
+{
+  "range": {
+    "total": 82,
+    "leaves": 44,
+    "merges": 38,
+    "previous": "dab829a4e9b7d1cc307189aea8b0319eb29e29d0",
+    "source": "10ba8f9b4dc2e6023d4a9879ab77b21841babd10",
+    "base": "6fa7fb86eae7c732794450646dc13831dce87ff1"
+  },
+  "leaves": [
+    {
+      "source_sha": "6b4b37db43443b5e88e424fe3c69602cc3810dfb",
+      "subject": "chore: sync VERSION to 0.2.20 [skip ci]",
+      "status": "adapted-policy",
+      "fork_commits": [],
+      "rationale": "Preserve owner fork version; upstream VERSION-only churn is intentionally not copied.",
+      "files": [
+        {
+          "path": "backend/cmd/server/VERSION",
+          "source_parent_blob": "6bf5ecb6051f1c7d5b0a6183c8d767fe11cac629",
+          "source_blob": "3bfb9a48bffeaec630de8828211b19a1397d6a2d",
+          "baseline_blob": "099548bab3e4ec3fbd67429a46273c170cacad91",
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "c004c962a78014855bdb74c51f750e3fce3407fb",
+      "subject": "fix(gateway): auto-size request body memory budget from the memory limit",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/config/config.go",
+          "source_parent_blob": "ac7b9c10df4fce954383c65b5639d997d2b6016f",
+          "source_blob": "baf3260dc9d0750e0af475d994ce379457331d33",
+          "baseline_blob": "77537f37d6fb485c943e0022451861ca1c2c405b",
+          "source_hunk_contexts": [
+            "import (",
+            "func shouldApplyLegacyWeChatEnv(configKey, envKey string) bool {",
+            "type GatewayConfig struct {",
+            "func load(allowMissingJWTSecret bool) (*Config, error) {",
+            "func setDefaults() {"
+          ]
+        },
+        {
+          "path": "backend/internal/config/config_test.go",
+          "source_parent_blob": "bc579aecfd806f010774957b35ac842c9f683bf6",
+          "source_blob": "33a8f13d8641ca7c11f0be11da021d9463472265",
+          "baseline_blob": "1f6372617116f73b8ad9695db155e3dc9fc92b75",
+          "source_hunk_contexts": [
+            "func resetViperWithJWTSecret(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/sysutil/memory.go",
+          "source_parent_blob": null,
+          "source_blob": "130b0ba006e78827805cd85f84adc96ca67bd08f",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/sysutil/memory_test.go",
+          "source_parent_blob": null,
+          "source_blob": "e0faedeb5ebf03f2dc69e50359f7f3ab3b6d936f",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "deploy/EDGE_SECURITY.md",
+          "source_parent_blob": "0d4581ecaacd3f80eebc840c3b2ebe34cdf1390e",
+          "source_blob": "b8cf774a2f42dd5e1a145e48ec4dcb8a4dbc98f1",
+          "baseline_blob": "92f1097f14a2ad7490c38aacfb95d05a989f6928",
+          "source_hunk_contexts": [
+            "response. Healthy generations can remain open while an upstream is thinking.",
+            "to reclaim that unreachable memory immediately."
+          ]
+        },
+        {
+          "path": "deploy/config.example.yaml",
+          "source_parent_blob": "557ca32b5fcad639a7f176971589e9bccfd9c3aa",
+          "source_blob": "2c6859ec0d52e946c41beaab0818634a1bffebf8",
+          "baseline_blob": "0acfca6b190ce7b965bc8a3ed5b324990704a567",
+          "source_hunk_contexts": [
+            "gateway:"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "03bd718abe9f38fb0455a82631c7e492e4abc693",
+      "subject": "fix(sysutil): confine cgroup limit reads to the mount with os.Root",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/pkg/sysutil/memory.go",
+          "source_parent_blob": "130b0ba006e78827805cd85f84adc96ca67bd08f",
+          "source_blob": "fd690334073b9c5b642c73a1ec24fe581ee9d1a8",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func cgroupMemoryLimit(root, selfCgroupFile string) uint64 {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/sysutil/memory_test.go",
+          "source_parent_blob": "e0faedeb5ebf03f2dc69e50359f7f3ab3b6d936f",
+          "source_blob": "eea93703055e66b8d86b23b5b21ded1908ce7998",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func TestCgroupMemoryLimit(t *testing.T) {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "5184ff55f68908cfd9e7cf5905e11b71157cfb41",
+      "subject": "docs(images): explain upstream output format mismatches",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "README.md",
+          "source_parent_blob": "6e9d47f11f19659d854da3f5f99f0c783f79d7e9",
+          "source_blob": "ab3f9bab52b107c6418e8a1f0f810ec8aa8b7c3c",
+          "baseline_blob": "1da8cb4f5fbb1497480ad665dfb5b9715b79d148",
+          "source_hunk_contexts": [
+            "Simple Mode is designed for individual developers or internal teams who want qui"
+          ]
+        },
+        {
+          "path": "README_CN.md",
+          "source_parent_blob": "a651b78e4e86fd94e8a805bb40c6392c6bc89f3b",
+          "source_blob": "4a1cb3f3e4e93a6a480c204c4ea8a115d7150c6a",
+          "baseline_blob": "71d462c316bc002295bf7c6dbd701f8905216085",
+          "source_hunk_contexts": [
+            "OAuth / Setup Token \u7684 1.5\u30012\u30012.5 \u548c 2.6 \u56fe\u7247\u8bf7\u6c42\u4f7f\u7528 Codex \u539f\u751f Im"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "9935268573dd9f87c34ce0b39d69afe94f8cc9e7",
+      "subject": "docs(images): align model scope across translations",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "README.md",
+          "source_parent_blob": "ab3f9bab52b107c6418e8a1f0f810ec8aa8b7c3c",
+          "source_blob": "9f9dccc973614031069a736a8ccca5bb2b4ae7f8",
+          "baseline_blob": "1da8cb4f5fbb1497480ad665dfb5b9715b79d148",
+          "source_hunk_contexts": [
+            "Simple Mode is designed for individual developers or internal teams who want qui"
+          ]
+        },
+        {
+          "path": "README_CN.md",
+          "source_parent_blob": "4a1cb3f3e4e93a6a480c204c4ea8a115d7150c6a",
+          "source_blob": "8f56e41fed6d968bf4cbf77496dd721fb6ceb089",
+          "baseline_blob": "71d462c316bc002295bf7c6dbd701f8905216085",
+          "source_hunk_contexts": [
+            "OAuth / Setup Token \u7684 1.5\u30012\u30012.5 \u548c 2.6 \u56fe\u7247\u8bf7\u6c42\u4f7f\u7528 Codex \u539f\u751f Im"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "2273a5d63f76fce80a9059cb029d2354a1e1004e",
+      "subject": "test(openai): isolate orphan precheck allocation test",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_responses_orphan_precheck_test.go",
+          "source_parent_blob": "9e41e8ee634266abac6282f96c9cf490212f51a8",
+          "source_blob": "6da3edbf743cda9da47cd1c4ce58461b2fa1179f",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "",
+            "func TestOpenAIResponsesOrphanPrecheckCompatibilityErrors(t *testing.T) {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "4ac1675b56760660d5bac5d6aa9fb2cdf57397b4",
+      "subject": "feat(antigravity): query button that refreshes usage past the cache",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/account_usage_antigravity_force_test.go",
+          "source_parent_blob": null,
+          "source_blob": "e2fdd1372d6765ff39e42d4f97373dc6953c7358",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/account_usage_service.go",
+          "source_parent_blob": "41fc20929514f3f4e92d26d146e775305644ff45",
+          "source_blob": "f9a8904e6c8d0efee38fe0a9f9f9faefa0548051",
+          "baseline_blob": "fc4bc60752ee69af31a9fabf7c05b031b9a2f160",
+          "source_hunk_contexts": [
+            "func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A",
+            "func (s *AccountUsageService) getGeminiUsage(ctx context.Context, account *Accou"
+          ]
+        },
+        {
+          "path": "frontend/src/components/account/AccountUsageCell.vue",
+          "source_parent_blob": "1ac9f1435a98bb70f58fc125db50cb319138422b",
+          "source_blob": "d3bd7963c9c1bae208c9b1e03191bdb5ae9668ca",
+          "baseline_blob": "514b6ad09e84754c79312afa33cac770e3992336",
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "frontend/src/components/account/__tests__/AccountUsageCell.spec.ts",
+          "source_parent_blob": "4f839cab2497d41473a53805f1125f49efc7e4f8",
+          "source_blob": "cae7984aa4af3847e9a639561ad69332e08ff718",
+          "baseline_blob": "0964f29a86494a4e0576a620e1ca03d33154cced",
+          "source_hunk_contexts": [
+            "describe('AccountUsageCell', () => {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "fe093d76bd9feedd55387ea4056302384a7ab304",
+      "subject": "fix(openai): preserve cache-write TTLs in usage and billing",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/ent/migrate/schema.go",
+          "source_parent_blob": "18c3fa9b7bed641760ebd4d0064dcc648ab1fc2d",
+          "source_blob": "39370f41814af30f5a518c86e97f6b3e172d9c64",
+          "baseline_blob": "c6e9dc7d9c74a7457384f7b88fe41c385fad0ae9",
+          "source_hunk_contexts": [
+            "var (",
+            "var (",
+            "var (",
+            "var ("
+          ]
+        },
+        {
+          "path": "backend/ent/mutation.go",
+          "source_parent_blob": "9f6a50b1a31cb4f8948f84192735db67c9e0f437",
+          "source_blob": "ca3b6e9e5cf3a50f0415b96ef971b59bf7330aff",
+          "baseline_blob": "9d2878a7c15891f82e268f31aa7b62f6e7504b9d",
+          "source_hunk_contexts": [
+            "type UsageLogMutation struct {",
+            "func (m *UsageLogMutation) ResetCacheCreation1hTokens() {",
+            "func (m *UsageLogMutation) Type() string {",
+            "func (m *UsageLogMutation) Fields() []string {",
+            "func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {",
+            "func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value",
+            "func (m *UsageLogMutation) SetField(name string, value ent.Value) error {",
+            "func (m *UsageLogMutation) AddedFields() []string {",
+            "func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {",
+            "func (m *UsageLogMutation) AddField(name string, value ent.Value) error {",
+            "func (m *UsageLogMutation) ResetField(name string) error {"
+          ]
+        },
+        {
+          "path": "backend/ent/runtime/runtime.go",
+          "source_parent_blob": "394f22211604138986139c1bcb3869dadc6ca488",
+          "source_blob": "c36a5110e65dd8e2d35940537ca933ca07136afd",
+          "baseline_blob": "07bd0e3573e767de8c976e5a09964d366597375a",
+          "source_hunk_contexts": [
+            "func init() {"
+          ]
+        },
+        {
+          "path": "backend/ent/schema/usage_log.go",
+          "source_parent_blob": "f13d07170c1355b4568d9282c0ecdb895b46954b",
+          "source_blob": "b48c092570d7fbe99e1fe2fd94aff0d5b672044b",
+          "baseline_blob": "95a8cf8f9dafd6411f09bba46ff83b9d02027a5b",
+          "source_hunk_contexts": [
+            "func (UsageLog) Fields() []ent.Field {"
+          ]
+        },
+        {
+          "path": "backend/ent/usagelog.go",
+          "source_parent_blob": "1bd424f8d55077f822585d3ad9a68fb99d09262a",
+          "source_blob": "dba0a1d521ed54e9c648dde9b1c746ac576e69c1",
+          "baseline_blob": "667cdec5f9e6fc73607ba701fc23590218cb28f5",
+          "source_hunk_contexts": [
+            "type UsageLog struct {",
+            "func (*UsageLog) scanValues(columns []string) ([]any, error) {",
+            "func (_m *UsageLog) assignValues(columns []string, values []any) error {",
+            "func (_m *UsageLog) String() string {"
+          ]
+        },
+        {
+          "path": "backend/ent/usagelog/usagelog.go",
+          "source_parent_blob": "d3f8dfa1b3107ae58abb8f07be66ebefbc782b49",
+          "source_blob": "59b680307ae3a4c428f56b4f17adc1c40894a2b7",
+          "baseline_blob": "181fced062aacdc30a9442b0f9b3891132ef43d4",
+          "source_hunk_contexts": [
+            "const (",
+            "var Columns = []string{",
+            "var (",
+            "func ByCacheCreation1hTokens(opts ...sql.OrderTermOption) OrderOption {"
+          ]
+        },
+        {
+          "path": "backend/ent/usagelog/where.go",
+          "source_parent_blob": "7982d74c5ff5d993c1a5ea4075bc09d076ac242a",
+          "source_blob": "1c56de6ab7c466f56f067185772e675377e08f54",
+          "baseline_blob": "74873c454f4be28abfe5e0db9443a97421168af0",
+          "source_hunk_contexts": [
+            "func CacheCreation1hTokens(v int) predicate.UsageLog {",
+            "func CacheCreation1hTokensLTE(v int) predicate.UsageLog {"
+          ]
+        },
+        {
+          "path": "backend/ent/usagelog_create.go",
+          "source_parent_blob": "8178fa07106c7ef45699800c13c62146b4bf2568",
+          "source_blob": "7959949a178954dcf5a74010b4216f44d09df953",
+          "baseline_blob": "86b5409028ae31654185c51f1b9ff7040916326d",
+          "source_hunk_contexts": [
+            "func (_c *UsageLogCreate) SetNillableCacheCreation1hTokens(v *int) *UsageLogCrea",
+            "func (_c *UsageLogCreate) defaults() {",
+            "func (_c *UsageLogCreate) check() error {",
+            "func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {",
+            "func (u *UsageLogUpsert) AddCacheCreation1hTokens(v int) *UsageLogUpsert {",
+            "func (u *UsageLogUpsertOne) UpdateCacheCreation1hTokens() *UsageLogUpsertOne {",
+            "func (u *UsageLogUpsertBulk) UpdateCacheCreation1hTokens() *UsageLogUpsertBulk {"
+          ]
+        },
+        {
+          "path": "backend/ent/usagelog_update.go",
+          "source_parent_blob": "6c23ebd355066a8c99f664cee20f5170741f069e",
+          "source_blob": "3b6b1e8a49650d94ff56eeedab0a37f5f25a1980",
+          "baseline_blob": "f3ef1f3cb2db836dc01f3baee9d260feae111049",
+          "source_hunk_contexts": [
+            "func (_u *UsageLogUpdate) AddCacheCreation1hTokens(v int) *UsageLogUpdate {",
+            "func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {",
+            "func (_u *UsageLogUpdateOne) AddCacheCreation1hTokens(v int) *UsageLogUpdateOne",
+            "func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err"
+          ]
+        },
+        {
+          "path": "backend/go.sum",
+          "source_parent_blob": "b6fc3d31dc5315e4f7c22344a14490f356c27dbc",
+          "source_blob": "45db03410cba4fb027aaa85b1f7da86ca1976672",
+          "baseline_blob": "5952b01e73c44433e6bff7d7b6f123f77f9b42e5",
+          "source_hunk_contexts": [
+            "github.com/mattn/go-isatty v0.0.14/go.mod h1:7GGIvUiUoEMVVmxf/4nioHXj79iQHKdU27k",
+            "github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJm",
+            "github.com/refraction-networking/utls v1.8.2 h1:j4Q1gJj0xngdeH+Ox/qND11aEfhpgoEv",
+            "github.com/spf13/afero v1.11.0 h1:WJQKhtpdm3v2IzqG8VMqrr6Rf3UYpEF239Jy9wNepM8="
+          ]
+        },
+        {
+          "path": "backend/internal/handler/admin/channel_handler.go",
+          "source_parent_blob": "4d2aa03e156ca387244bf2532aee15a5b62abda2",
+          "source_blob": "62e88d2bf20290ea7e2e27b262d2815462bd1e1f",
+          "baseline_blob": "4d2aa03e156ca387244bf2532aee15a5b62abda2",
+          "source_hunk_contexts": [
+            "type channelModelPricingRequest struct {",
+            "type pricingIntervalRequest struct {",
+            "type channelModelPricingResponse struct {",
+            "type pricingIntervalResponse struct {",
+            "func pricingToResponse(p *service.ChannelModelPricing) channelModelPricingRespon",
+            "func intervalToResponse(iv service.PricingInterval) pricingIntervalResponse {",
+            "func pricingRequestToService(reqs []channelModelPricingRequest, allowChannelMult",
+            "func pricingRequestToService(reqs []channelModelPricingRequest, allowChannelMult",
+            "func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/admin/channel_handler_test.go",
+          "source_parent_blob": "0c01631ecc87b1fd59d5714911ce9291da98bd8e",
+          "source_blob": "738b5cb90107c951e719bc5cb2512bc0911aa749",
+          "baseline_blob": "0c01631ecc87b1fd59d5714911ce9291da98bd8e",
+          "source_hunk_contexts": [
+            "func TestPricingRequestToService_Defaults(t *testing.T) {",
+            "func TestPricingRequestToService_WithAllFields(t *testing.T) {",
+            "func TestPricingRequestToService_WithIntervals(t *testing.T) {",
+            "func TestPricingRequestToService_WithIntervals(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/available_channel_handler.go",
+          "source_parent_blob": "3d5a22c8ba381152c64b42132e034f7fd857a262",
+          "source_blob": "8ec86407337006eb7fe522309311bfaa9baf0937",
+          "baseline_blob": "3d5a22c8ba381152c64b42132e034f7fd857a262",
+          "source_hunk_contexts": [
+            "type userSupportedModelPricing struct {",
+            "type userPricingIntervalDTO struct {",
+            "func toUserPricingIntervals(src []service.PricingInterval) []userPricingInterval",
+            "func toUserPricing(p *service.ChannelModelPricing) *userSupportedModelPricing {"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/dto/mappers.go",
+          "source_parent_blob": "5c2410ff2d33dad9a2bf3a8e7f34e3e40621b059",
+          "source_blob": "b9cbf7ad7594f479c9754a24babde77a15ee48b7",
+          "baseline_blob": "e07e2a134bc05656e7e58bc40964fde74e90447e",
+          "source_hunk_contexts": [
+            "func usageLogFromServiceUser(l *service.UsageLog) UsageLog {"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/dto/types.go",
+          "source_parent_blob": "930cc98193ee5016536b48becfcbc9279e58013a",
+          "source_blob": "557cb37977fcb141eb9d9a7757a1f725febabae3",
+          "baseline_blob": "136e69c1c5d4b9d38f8d1580d051138d9059a213",
+          "source_hunk_contexts": [
+            "type UsageLog struct {"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/model_plaza_handler.go",
+          "source_parent_blob": "6f3a905d816c3fc05ea3022ca38e7f4962959c0d",
+          "source_blob": "f1030d635812cc3cbeeaa1f0469fd635bf9d70ec",
+          "baseline_blob": "21bd07705a56b308731864764469b34825049066",
+          "source_hunk_contexts": [
+            "func NewModelPlazaHandler(",
+            "func toModelPlazaOfficialPricing(p *service.PlazaOfficialPricing) *modelPlazaOff"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/channel_repo_account_stats_pricing.go",
+          "source_parent_blob": "f2a4786ce1fb67a24a20fbc8c92b245b6f374a9d",
+          "source_blob": "8d2b401dca5239b7ce0f06ac3b52d64fd0a1d283",
+          "baseline_blob": "f2a4786ce1fb67a24a20fbc8c92b245b6f374a9d",
+          "source_hunk_contexts": [
+            "func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex",
+            "func (r *channelRepository) batchLoadAccountStatsModelPricing(ctx context.Contex",
+            "func createAccountStatsModelPricingTx(ctx context.Context, tx *sql.Tx, ruleID in",
+            "func createAccountStatsModelPricingTx(ctx context.Context, tx *sql.Tx, ruleID in",
+            "func (r *channelRepository) batchLoadAccountStatsIntervals(ctx context.Context,",
+            "func (r *channelRepository) batchLoadAccountStatsIntervals(ctx context.Context,"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/channel_repo_pricing.go",
+          "source_parent_blob": "e800c223dc3a8b56ded05b869da12116c31f7ab7",
+          "source_blob": "414246a68bc04628ccc132f643b697c47f83bcd3",
+          "baseline_blob": "e800c223dc3a8b56ded05b869da12116c31f7ab7",
+          "source_hunk_contexts": [
+            "import (",
+            "func (r *channelRepository) UpdateModelPricing(ctx context.Context, pricing *ser",
+            "func (r *channelRepository) ReplaceModelPricing(ctx context.Context, channelID i",
+            "func (r *channelRepository) batchLoadModelPricing(ctx context.Context, channelID",
+            "func (r *channelRepository) batchLoadIntervals(ctx context.Context, pricingIDs [",
+            "func scanModelPricingRows(rows *sql.Rows) ([]service.ChannelModelPricing, []int6",
+            "func createModelPricingExec(ctx context.Context, exec dbExec, pricing *service.C",
+            "func unmarshalChannelTimePricing(data []byte) (*service.ChannelTimePricing, erro"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/channel_repo_pricing_reasoning_test.go",
+          "source_parent_blob": "2cf412c67036eee83c7c73add57e69a3bd1b6ea4",
+          "source_blob": "8c83564dec37e5b1e07234a35f2ad8ef58285e3c",
+          "baseline_blob": "2cf412c67036eee83c7c73add57e69a3bd1b6ea4",
+          "source_hunk_contexts": [
+            "func (c *capturedReasoningMultipliersJSON) Match(value driver.Value) bool {",
+            "func TestChannelReasoningEffortMultipliersRoundTrip(t *testing.T) {",
+            "func TestChannelReasoningEffortMultipliersRoundTrip(t *testing.T) {",
+            "func TestAccountStatsReasoningEffortMultipliersRoundTrip(t *testing.T) {",
+            "func TestAccountStatsReasoningEffortMultipliersRoundTrip(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/channel_repo_pricing_time_test.go",
+          "source_parent_blob": "a58cb4e5d9a5ad0aa81fda5c3673610da22f41a0",
+          "source_blob": "9ca676ce4df93cacdcc36a466c43201fce78aa6e",
+          "baseline_blob": "a58cb4e5d9a5ad0aa81fda5c3673610da22f41a0",
+          "source_hunk_contexts": [
+            "import (",
+            "func newChannelModelPricingTimePricingRepo(t *testing.T) (*channelRepository, sq",
+            "func TestChannelModelPricingTimePricingCreateAndUpdateRoundTrip(t *testing.T) {",
+            "func TestChannelModelPricingTimePricingCreateAndUpdateRoundTrip(t *testing.T) {",
+            "func TestChannelModelPricingTimePricingCreateAndUpdateWriteNullWhenDisabled(t *t",
+            "func TestChannelModelPricingTimePricingCreateAndUpdateWriteNullWhenDisabled(t *t"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/openai_cache_write_ttl_integration_test.go",
+          "source_parent_blob": null,
+          "source_blob": "6b0812f1eb79fe9939214b66e244261cca591fba",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/repository/usage_log_repo_insert.go",
+          "source_parent_blob": "e004433f3dc202de8fba804ced4afca8605cd43b",
+          "source_blob": "eff958cc8fa599f4acc9d5c827403df98500b788",
+          "baseline_blob": "8915190bc30d4fc905a3d59a065a6dd747626323",
+          "source_hunk_contexts": [
+            "var usageLogInsertArgTypes = [...]string{",
+            "func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,",
+            "func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,",
+            "func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage",
+            "func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage",
+            "func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage",
+            "func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (",
+            "func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (",
+            "func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (",
+            "func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared",
+            "func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared",
+            "func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/usage_log_repo_insert_shape_unit_test.go",
+          "source_parent_blob": "74f6aafb60bca66d43ccb5ca8de020d665118df3",
+          "source_blob": "132a4ebc4a25640cd1f35f8266f67043127d3508",
+          "baseline_blob": "e9228ff5b957805f60f7a6de4de93156ed077851",
+          "source_hunk_contexts": [
+            "func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/usage_log_repo_query.go",
+          "source_parent_blob": "5f637e1e52b845b89731505187039bb9a2d0f6a7",
+          "source_blob": "4035275fb370a8b509195f3e603e76167d49a045",
+          "baseline_blob": "71a21838e9818797643125d5998a241c9ed2ed16",
+          "source_hunk_contexts": [
+            "import (",
+            "func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e",
+            "func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e",
+            "func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/usage_log_repo_request_type_test.go",
+          "source_parent_blob": "87d6c8672c7ce3ae5dfe61f052c88ccba47884e5",
+          "source_blob": "c8fb2f62ad029c282f3bb0e0e321f7a342d3dad9",
+          "baseline_blob": "da497105382e000d9d7ea37c87e79a8d6054ff06",
+          "source_hunk_contexts": [
+            "func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {",
+            "func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {",
+            "func TestPrepareUsageLogInsert_PersistsNativeCompactionV2WithoutChangingRequestT",
+            "func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {",
+            "func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {",
+            "func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {",
+            "func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/usage_log_session_id_unit_test.go",
+          "source_parent_blob": "296775bfe3bc55d0c36c89a0101a7a56c6aadee8",
+          "source_blob": "002b40f2a6b1c00cb7c0e66dff4339bbe9174305",
+          "baseline_blob": "2556a3b54c947a81a9cdb0ffabefb237af8bd734",
+          "source_hunk_contexts": [
+            "func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {",
+            "func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/server/api_contract_test.go",
+          "source_parent_blob": "4e3efb5cfb5ef5bb28da60048d5428c582320873",
+          "source_blob": "81d3d91854558882dc3fd7a83e4b78c3cf2b00f0",
+          "baseline_blob": "8ff969fc8d7f4201fe4202045b4052ceccf39219",
+          "source_hunk_contexts": [
+            "func TestAPIContracts(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/account_stats_pricing.go",
+          "source_parent_blob": "dcd08e119367c490cf3713c6eda87cb8d6567961",
+          "source_blob": "5cf8971d54a8c06b4a4a28fe12b57f9036361eb6",
+          "baseline_blob": "dcd08e119367c490cf3713c6eda87cb8d6567961",
+          "source_hunk_contexts": [
+            "func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *",
+            "func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *"
+          ]
+        },
+        {
+          "path": "backend/internal/service/billing_context_schedule.go",
+          "source_parent_blob": "0be6d7a07a10a082a33fe5e7d4dc9d8179d1375c",
+          "source_blob": "9e5d6709031c238d9de3d92ffcd63979118a1ead",
+          "baseline_blob": "0be6d7a07a10a082a33fe5e7d4dc9d8179d1375c",
+          "source_hunk_contexts": [
+            "const ContextPricingBasisWholeRequest ContextPricingBasis = \"whole_request\"",
+            "func probeContextTier(seg contextSegment, resolved *ResolvedPricing, probe func(",
+            "func roundContextPrice(v float64) float64 {",
+            "func explicitContextPricingFields(resolved *ResolvedPricing, contextTokens int)",
+            "func mergeEqualContextTiers(tiers []ContextPricingTier) []ContextPricingTier {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/billing_service.go",
+          "source_parent_blob": "7291880ac7fcce13002a50b5ee2ac3011ea31c7f",
+          "source_blob": "ce2881b21a63a502f6e9edc550401e5c9ada1c3f",
+          "baseline_blob": "cc99fdb8c8a0a886342d304c46fbd47c3d8c8f79",
+          "source_hunk_contexts": [
+            "type ModelPricing struct {",
+            "func pricingWithPriorityMultiplier(base *ModelPricing, multiplier float64) *Mode",
+            "func applyChannelTokenPriceOverrides(pricing *ModelPricing, channelPricing *Chan",
+            "func (s *BillingService) computeTokenBreakdown(",
+            "func (s *BillingService) computeTokenBreakdown(",
+            "func (s *BillingService) computeTokenBreakdown(",
+            "func (s *BillingService) computeTokenBreakdown(",
+            "func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens",
+            "func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing",
+            "func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing"
+          ]
+        },
+        {
+          "path": "backend/internal/service/channel.go",
+          "source_parent_blob": "43dfbc2407b5a416ae48446b3abcb6c4f906eeb8",
+          "source_blob": "b32dcac166e196f2a846efc8cf685ce32cc40460",
+          "baseline_blob": "8da73561f63c2f17020f5b6c99fcc5c0b3ad4f53",
+          "source_hunk_contexts": [
+            "type ChannelModelPricing struct {",
+            "type PricingInterval struct {",
+            "func validateIntervalPrices(iv *PricingInterval, idx int) error {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/channel_available.go",
+          "source_parent_blob": "3a6c5aba2fcbda3d34ccf5daac380a701ec6de20",
+          "source_blob": "85d5e5627f6034df5f506c1611f53a1d625625ea",
+          "baseline_blob": "3a6c5aba2fcbda3d34ccf5daac380a701ec6de20",
+          "source_hunk_contexts": [
+            "func pricingNeedsFallback(p *ChannelModelPricing) bool {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/channel_service.go",
+          "source_parent_blob": "1473f3edfd56bb1b243bec88bdeec379ab315994",
+          "source_blob": "f7250c7a7bae4cf8bab11e3c3ee84b218c88c021",
+          "baseline_blob": "ca31ffcbd9a650f527b6cc7a2b849539c820e9db",
+          "source_hunk_contexts": [
+            "func checkPricesNotNegative(p ChannelModelPricing) error {",
+            "func checkPricesNotNegative(p ChannelModelPricing) error {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/model_plaza_service.go",
+          "source_parent_blob": "27e4e0a53b717fcab8317e026a7981bf7fc9496d",
+          "source_blob": "65a537429554cb8777298a7fb821967e9302ce61",
+          "baseline_blob": "f1849d1b464ac0e667c793c0230ccf323195f737",
+          "source_hunk_contexts": [
+            "import (",
+            "func plazaPricingFromSchedule(raw *ChannelModelPricing, sched *ContextPricingSch",
+            "func plazaIntervalsFromTiers(tiers []ContextPricingTier) []PricingInterval {",
+            "func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName",
+            "func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName"
+          ]
+        },
+        {
+          "path": "backend/internal/service/model_pricing_resolver.go",
+          "source_parent_blob": "1d21e4cc15ae98388fbae085e49f6de2d2ea4332",
+          "source_blob": "e67404f73203936da675d9bb4c1ab2b60714a3a3",
+          "baseline_blob": "1d21e4cc15ae98388fbae085e49f6de2d2ea4332",
+          "source_hunk_contexts": [
+            "func filterValidIntervals(intervals []PricingInterval) []PricingInterval {",
+            "func intervalToModelPricing(iv *PricingInterval, base *ModelPricing, chPricing *"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_cache_write_ttl_test.go",
+          "source_parent_blob": null,
+          "source_blob": "5aa29cace436e12b07781deea81f2b20db7060e4",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_response_handling.go",
+          "source_parent_blob": "a2b0fae6a28271bf89513cf31dadca3f2e1d14a6",
+          "source_blob": "ae528e4feace9778635d20991500b60caa4d4af6",
+          "baseline_blob": "2e86b42c6d366bb3f236cb30f30cd0bea474f07b",
+          "source_hunk_contexts": [
+            "func mergeOpenAIUsageNonZero(dst *OpenAIUsage, src OpenAIUsage) {",
+            "func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {",
+            "func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {",
+            "func openAICacheCreationTokensFromUsage(value gjson.Result) int {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_service.go",
+          "source_parent_blob": "e929ce22b02313093fdcd38a4a39e389d969d869",
+          "source_blob": "dc015f96091a30da4fda79ffdb0d3dda2502ac91",
+          "baseline_blob": "7e37d07c808feaa8d1b81ee7728c55a34934cd56",
+          "source_hunk_contexts": [
+            "func (s *OpenAICodexUsageSnapshot) Normalize() *NormalizedCodexLimits {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_usage.go",
+          "source_parent_blob": "f9e75ca4ed8cd1bf95a16d70cf2fe64e3fa800c0",
+          "source_blob": "f3516aad1a01a2717d5157b7074cb8475419e7ba",
+          "baseline_blob": "94553c2df3cf2833ce6a1aee54271772b5d848cc",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec",
+            "func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec"
+          ]
+        },
+        {
+          "path": "backend/internal/service/usage_log.go",
+          "source_parent_blob": "64df9e2695a0a83e8d602b3406a537c06bc36813",
+          "source_blob": "fd54fe8526a43663371a18bf523f10d6b83bb661",
+          "baseline_blob": "4e13c46e90d040d47973ddb8e9175430648970a9",
+          "source_hunk_contexts": [
+            "type UsageLog struct {"
+          ]
+        },
+        {
+          "path": "backend/migrations/250_openai_cache_write_ttl.sql",
+          "source_parent_blob": null,
+          "source_blob": "fca6b590a50a5cfce32a15bbdb9c54e52b1f0ea4",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "frontend/src/api/admin/channels.ts",
+          "source_parent_blob": "a04660ca978d09fc884ab9c3937a210c57664760",
+          "source_blob": "125edad9f5b85fd65cffe530dbdb23ca3715aba1",
+          "baseline_blob": "a04660ca978d09fc884ab9c3937a210c57664760",
+          "source_hunk_contexts": [
+            "export interface PricingInterval {",
+            "export interface ChannelModelPricing {",
+            "export interface ModelDefaultPricing {"
+          ]
+        },
+        {
+          "path": "frontend/src/api/channels.ts",
+          "source_parent_blob": "e229bbcba3e7ab7fc1ed77d5b48e595d8b442c20",
+          "source_blob": "a9e649cc503f6113108092441b039c17b85f3d60",
+          "baseline_blob": "e229bbcba3e7ab7fc1ed77d5b48e595d8b442c20",
+          "source_hunk_contexts": [
+            "export interface UserPricingInterval {",
+            "export interface UserSupportedModelPricing {"
+          ]
+        },
+        {
+          "path": "frontend/src/api/modelPlaza.ts",
+          "source_parent_blob": "ccc478d6a53bf3c55b1a747904961ab0fd17d464",
+          "source_blob": "a390107ce3c1370b4c565cfba33c99b0989f3902",
+          "baseline_blob": "ccc478d6a53bf3c55b1a747904961ab0fd17d464",
+          "source_hunk_contexts": [
+            "export interface PlazaOfficialPricing {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/admin/channel/IntervalRow.vue",
+          "source_parent_blob": "08adbea6003ee1f822d5b27e69261a769169f4ac",
+          "source_blob": "9a18a67a43a074292e007f62d379d4aba3171e94",
+          "baseline_blob": "08adbea6003ee1f822d5b27e69261a769169f4ac",
+          "source_hunk_contexts": [
+            "",
+            "const { t } = useI18n()",
+            "const isEmpty = computed(() => {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/admin/channel/PricingEntryCard.vue",
+          "source_parent_blob": "4c59e20a291383448f1612b3d5a0892a72cb8e59",
+          "source_blob": "8d0b96db3b2a18a141de5f2fbfdc0a3367d22e1f",
+          "baseline_blob": "4c59e20a291383448f1612b3d5a0892a72cb8e59",
+          "source_hunk_contexts": [
+            "",
+            "",
+            "function addInterval() {",
+            "function addMediaTier() {",
+            "async function onModelsUpdate(newModels: string[]) {",
+            "async function onModelsUpdate(newModels: string[]) {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/admin/channel/__tests__/types.spec.ts",
+          "source_parent_blob": "3a5efd052679a6965939e02e4c7ea26bd271293d",
+          "source_blob": "62431c68af48c32e941cd0de77a81abddc40d79e",
+          "baseline_blob": "3a5efd052679a6965939e02e4c7ea26bd271293d",
+          "source_hunk_contexts": [
+            "describe('reasoning effort multipliers', () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/admin/channel/types.ts",
+          "source_parent_blob": "bd818ea4e575f59b8749f3fbbb646746abe57dce",
+          "source_blob": "03c74071e58ab25d31752b2fbc1211708b24f601",
+          "baseline_blob": "bd818ea4e575f59b8749f3fbbb646746abe57dce",
+          "source_hunk_contexts": [
+            "export interface IntervalFormEntry {",
+            "export interface PricingFormEntry {",
+            "export function apiIntervalsToForm(intervals: PricingInterval[]): IntervalFormEn",
+            "export function formIntervalsToAPI(intervals: IntervalFormEntry[]): PricingInter",
+            "function validateIntervalPrices(iv: IntervalFormEntry, idx: number, t: Translate"
+          ]
+        },
+        {
+          "path": "frontend/src/components/admin/usage/UsageTable.vue",
+          "source_parent_blob": "2410ea990f7f1aa4eed8ff2feaf0b69b597f82f1",
+          "source_blob": "2ea6a26782e70ed5b8043eaea79effeed3677af5",
+          "baseline_blob": "4964707651d3c6c13152f010d26faeb7687ea2b4",
+          "source_hunk_contexts": [
+            "",
+            "",
+            ""
+          ]
+        },
+        {
+          "path": "frontend/src/components/admin/usage/__tests__/UsageTable.spec.ts",
+          "source_parent_blob": "35a31013e4771c060d304e69166aef050fa976aa",
+          "source_blob": "535200a13105fc8e539491e7efff03b5adbc8dd9",
+          "baseline_blob": "461457b251621a8024d7e5f43de4609f24178886",
+          "source_hunk_contexts": [
+            "const baseImageRow = {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/channels/SupportedModelChip.vue",
+          "source_parent_blob": "f19ab08b18a31eb2d4ec350c8eccee5092db6c92",
+          "source_blob": "377c1731fa2cb8aa23670029d23af9d7dc5984de",
+          "baseline_blob": "f19ab08b18a31eb2d4ec350c8eccee5092db6c92",
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "frontend/src/components/modelPlaza/PlazaModelPricingTable.vue",
+          "source_parent_blob": "0a8cbfa9f391add91d20681516ae0557106389e2",
+          "source_blob": "6daf1194e85e235f2b60ae5642e014988708e410",
+          "baseline_blob": "0a8cbfa9f391add91d20681516ae0557106389e2",
+          "source_hunk_contexts": [
+            "",
+            "",
+            "",
+            "",
+            "function perUnitSuffix(m: PlazaModel): string {",
+            "function officialIntervals(m: PlazaModel): UserPricingInterval[] {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/modelPlaza/__tests__/PlazaModelPricingTable.spec.ts",
+          "source_parent_blob": "f5c121199bafb02eeaeb4ebe1a11997dd8463596",
+          "source_blob": "1cfe916d0b8a114abda227fd572e23e12e2a86f6",
+          "baseline_blob": "f5c121199bafb02eeaeb4ebe1a11997dd8463596",
+          "source_hunk_contexts": [
+            "function mountTable("
+          ]
+        },
+        {
+          "path": "frontend/src/i18n/locales/en/admin/channels.ts",
+          "source_parent_blob": "b065f1ed1ea86b048f70e04d5e9bd35232070793",
+          "source_blob": "d0aa35cc197a4fc1c99c4738df5cf5bb433d0ddd",
+          "baseline_blob": "9775fde5d73eadb0f32f71a1ea2e707a49fd8476",
+          "source_hunk_contexts": [
+            "export default {",
+            "export default {",
+            "export default {"
+          ]
+        },
+        {
+          "path": "frontend/src/i18n/locales/en/dashboard.ts",
+          "source_parent_blob": "3fa5b7fd214eb4dd350ebfc097ddbae7b71a8edc",
+          "source_blob": "c7792ad4767ca20b8300d356d571b40cf2050223",
+          "baseline_blob": "77b0b6d69dc84c91a22967d67bf4b5525128e285",
+          "source_hunk_contexts": [
+            "export default {"
+          ]
+        },
+        {
+          "path": "frontend/src/i18n/locales/zh/admin/channels.ts",
+          "source_parent_blob": "6e8b0df008d51d5b2f0da69eab698c1e29ee9c81",
+          "source_blob": "236e6ba54a2c0cd7c94da720e807cf69cc046efe",
+          "baseline_blob": "40a1c57dacb646b046bdd98841fdbb9211dc9385",
+          "source_hunk_contexts": [
+            "export default {",
+            "export default {",
+            "export default {"
+          ]
+        },
+        {
+          "path": "frontend/src/i18n/locales/zh/dashboard.ts",
+          "source_parent_blob": "2e9f472747ade6b0c3f2dae2759222cbba1dd861",
+          "source_blob": "6b18eab4ced871e3901dc9069d36e1eb8b2adc6f",
+          "baseline_blob": "3d8eb1583e63e9f8692742d9feadcf95d68c5df6",
+          "source_hunk_contexts": [
+            "export default {"
+          ]
+        },
+        {
+          "path": "frontend/src/types/index.ts",
+          "source_parent_blob": "96177ba00ff5d2e05d991d7d804bf91febcfb707",
+          "source_blob": "1d3fd163d4f56b336fa75fefe49cef010f265048",
+          "baseline_blob": "5d4215ff391392f35fd69055134f698f90133d71",
+          "source_hunk_contexts": [
+            "export interface UsageLog {"
+          ]
+        },
+        {
+          "path": "frontend/src/utils/__tests__/intervalPrices.spec.ts",
+          "source_parent_blob": "b0bf0a283c93cb24a58d3fd39934e31c72cbb1a5",
+          "source_blob": "fa679dab9febb8baa5f33e7ede875695dbcc339d",
+          "baseline_blob": "b0bf0a283c93cb24a58d3fd39934e31c72cbb1a5",
+          "source_hunk_contexts": [
+            "const interval = { min_tokens: 272000, max_tokens: null, input_price: null, outp",
+            "describe('resolveIntervalPrices', () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/utils/pricing.ts",
+          "source_parent_blob": "feef800041ac61e03197b12132e875bffedd251f",
+          "source_blob": "0e42abc70c62d5606593c2ab2924c817ac74d3d9",
+          "baseline_blob": "feef800041ac61e03197b12132e875bffedd251f",
+          "source_hunk_contexts": [
+            "export function formatScaled(value: number | null, scale: number, minFractionDig",
+            "export function resolveIntervalPrices(iv: UserPricingInterval, base: TokenPrices"
+          ]
+        },
+        {
+          "path": "frontend/src/views/admin/ChannelsView.vue",
+          "source_parent_blob": "7f149346623723deaf8c7df4bd092b1e29c9e84e",
+          "source_blob": "5ee185131edb45c9f7e345235b0858a7d0020274",
+          "baseline_blob": "a92a029b4f9bcc34d190d3b54745cb6919cdddd0",
+          "source_hunk_contexts": [
+            "function addPricingEntry(sectionIdx: number) {",
+            "async function syncLatestModels(sectionIdx: number) {",
+            "function addRulePricingEntry(sectionIdx: number, ruleIndex: number) {",
+            "function accountStatsRulesToAPI(): AccountStatsPricingRule[] {",
+            "function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[",
+            "function apiToForm(channel: Channel): PlatformSection[] {",
+            "function distributeRulesToPlatforms(apiRules: AccountStatsPricingRule[]) {"
+          ]
+        },
+        {
+          "path": "frontend/src/views/admin/GroupsView.vue",
+          "source_parent_blob": "516441b821be06034ff8e263d3b4010439f68859",
+          "source_blob": "ae9554b058c1d36495ac183d6c1ad0a8d7786e3c",
+          "baseline_blob": "002beee34d492e0b1aa2bde8a2537c85fadc10b9",
+          "source_hunk_contexts": [
+            "const emptyGroupPricing = (): PricingFormEntry => ({",
+            "const groupPricingFromAPI = (",
+            "const groupPricingToAPI = ("
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "7156213cce03b268b3261c59fa6bd47d62e6e6ba",
+      "subject": "fix(openai): retain Fast multiplier with free input prices",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/billing_service.go",
+          "source_parent_blob": "ce2881b21a63a502f6e9edc550401e5c9ada1c3f",
+          "source_blob": "3cc376f046ecaa19b3fabce3698936ef14b60a47",
+          "baseline_blob": "cc99fdb8c8a0a886342d304c46fbd47c3d8c8f79",
+          "source_hunk_contexts": [
+            "func (s *BillingService) computeTokenBreakdown("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_cache_write_ttl_test.go",
+          "source_parent_blob": "5aa29cace436e12b07781deea81f2b20db7060e4",
+          "source_blob": "060693cd2dad3914eb3d79523bc5ea6329537cb2",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func TestOpenAICacheWriteTTLPrices(t *testing.T) {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "eb2da3448404df3bd2dfcce836652f0782206688",
+      "subject": "feat(gateway): support Claude Fable and Mythos 5.2",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/domain/constants.go",
+          "source_parent_blob": "463a1839a9ca31d0360bfc9b8d35eace06bb903c",
+          "source_blob": "4a6bbb5a9dbb5520ff51a03ae918b5f6ce4f9197",
+          "baseline_blob": "c3718defea1e770c3e8d7965af4d129dd209982f",
+          "source_hunk_contexts": [
+            "var DefaultAntigravityModelMapping = map[string]string{"
+          ]
+        },
+        {
+          "path": "backend/internal/domain/constants_test.go",
+          "source_parent_blob": "430d4802ee70cfd051b99931f2fa407c1378fa88",
+          "source_blob": "93343c89deac1ebcc8963bc63b9785e24f2b96b2",
+          "baseline_blob": "430d4802ee70cfd051b99931f2fa407c1378fa88",
+          "source_hunk_contexts": [
+            "func TestDefaultBedrockModelMapping_ContainsNewClaudeModels(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/apicompat/anthropic_to_responses_response.go",
+          "source_parent_blob": "e29bcdeaf951b9c4be48f19fa3ae4b004d055879",
+          "source_blob": "558763af6a0559d92e7bf93d7d904a8300d3f2d4",
+          "baseline_blob": "2e7c85d3c94dcd36441301a94f9bb73b5ebfc899",
+          "source_hunk_contexts": [
+            "func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {",
+            "func AnthropicToResponsesResponse(resp *AnthropicResponse) *ResponsesResponse {",
+            "func ResponsesEventToSSE(evt ResponsesStreamEvent) (string, error) {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/apicompat/fable_mythos_responses_test.go",
+          "source_parent_blob": null,
+          "source_blob": "62773517fa93f03780fca901456be949bf7c98ad",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/apicompat/responses_to_anthropic_request.go",
+          "source_parent_blob": "3ba7f638f19145547df4f721c6e4063c1f025a3e",
+          "source_blob": "5f8c5664fc7893abefa2afa27a82e00e447b4dd8",
+          "baseline_blob": "3ba7f638f19145547df4f721c6e4063c1f025a3e",
+          "source_hunk_contexts": [
+            "func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro",
+            "func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro",
+            "func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro",
+            "func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/claude/cli_version_test.go",
+          "source_parent_blob": "72ec94cfd5554185302193f4bc2cb25c08c38550",
+          "source_blob": "22817c6b81e46db9507473bf2c39ecfdc3db4b95",
+          "baseline_blob": "72ec94cfd5554185302193f4bc2cb25c08c38550",
+          "source_hunk_contexts": [
+            "func TestIsSupportedCLIVersion(t *testing.T) {",
+            "func TestResolveCLIVersion(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/claude/constants.go",
+          "source_parent_blob": "1d0d6d3a3b0d4e8d729da8ed9d7d3d84efbb3f2f",
+          "source_blob": "17c864328d5dfc46583cfac45feadcad6480fb01",
+          "baseline_blob": "1d0d6d3a3b0d4e8d729da8ed9d7d3d84efbb3f2f",
+          "source_hunk_contexts": [
+            "const DefaultCacheControlTTL = \"5m\"",
+            "type Model struct {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/claude/effort_catalog.go",
+          "source_parent_blob": "2764adc076ac86fe996a2fd612ea2a87142a3cd2",
+          "source_blob": "5676622f59efc0253a88b36966c1fe74627f89fb",
+          "baseline_blob": "cb987c4104ddbac883b66943ac08db41866fccc1",
+          "source_hunk_contexts": [
+            "func IsHaiku55(model string) bool {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/claude/models_52_test.go",
+          "source_parent_blob": null,
+          "source_blob": "1aa9ad196cb7f291407710d6773b4e1105a164ff",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/billing_service.go",
+          "source_parent_blob": "3cc376f046ecaa19b3fabce3698936ef14b60a47",
+          "source_blob": "0dc27525155d3bee3076ec7ad65418c6d6e29f11",
+          "baseline_blob": "cc99fdb8c8a0a886342d304c46fbd47c3d8c8f79",
+          "source_hunk_contexts": [
+            "func (s *BillingService) initFallbackPricing() {",
+            "func (s *BillingService) initFallbackPricing() {",
+            "func (s *BillingService) getFallbackPricing(model string) *ModelPricing {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/claude_52_pricing_test.go",
+          "source_parent_blob": null,
+          "source_blob": "ccced491411c96ac8a9a7f185a2f872309026f44",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/gateway_claude_oauth_body.go",
+          "source_parent_blob": "355be46b7ce4b943ee73158a42f39d8350db9135",
+          "source_blob": "44e9aaaac1a917d92e38507a9df537a9c6b2d52c",
+          "baseline_blob": "8a3eea412947d3b982107e9d0d2e65929ea92070",
+          "source_hunk_contexts": [
+            "func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu"
+          ]
+        },
+        {
+          "path": "backend/internal/service/gateway_forward.go",
+          "source_parent_blob": "b0d59656add70dcaf136e6a8ff460842fbd303b9",
+          "source_blob": "c74472ce1b3b33a63ade351ce3e291f6fa4c4b85",
+          "baseline_blob": "0c5a94bfd13ef3dbf0e470d5e396ea536cfb0c06",
+          "source_hunk_contexts": [
+            "func anthropicSpeedModel(parsed *ParsedRequest, result *ForwardResult) string {",
+            "func anthropicSpeedServiceTier(account *Account, speed, model string) *string {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/gateway_request.go",
+          "source_parent_blob": "f68d87a5ac70aa9812970ef6ff88e1b683ecbb35",
+          "source_blob": "95dfb069a31af566cbbe07d81f1ab88a6198163d",
+          "baseline_blob": "b77fac3187e6124d2ccf284343e72b57897eaeaf",
+          "source_hunk_contexts": [
+            "func StripEmptyTextBlocks(body []byte) []byte {",
+            "func validateClaude55Request(body []byte, model string) error {",
+            "func validateClaude55Request(body []byte, model string) error {",
+            "func validateClaude55Request(body []byte, model string) error {",
+            "func validateClaude55Request(body []byte, model string) error {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_codex_models_service.go",
+          "source_parent_blob": "518ce71757df2c8549768f448d441790f8b61946",
+          "source_blob": "dca69be5509bdc14967da2b883785d02ff4253e4",
+          "baseline_blob": "e89649713f2e4018c70960a514a7282317ee5de2",
+          "source_hunk_contexts": [
+            "func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr",
+            "func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr"
+          ]
+        },
+        {
+          "path": "frontend/src/components/account/AccountStatusIndicator.vue",
+          "source_parent_blob": "44602d43eee27ccfeb1e6c88c224cbf23b70291b",
+          "source_blob": "612d18132d4457a9a4338337f3698e37a7505522",
+          "baseline_blob": "4db9109d4cfe7f9e4a2b5ebe45ed71a6079152cc",
+          "source_hunk_contexts": [
+            "const activeModelStatuses = computed<AccountModelStatusItem[]>(() => {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/account/__tests__/AccountStatusIndicator.spec.ts",
+          "source_parent_blob": "31d1920807921d31e07231cf1d7eb18b7acd419e",
+          "source_blob": "bf8406de5dfbec7972e2edba9c06b15d80fd02b0",
+          "baseline_blob": "a225396f9e33d8335adb986277cf7df6556fd58d",
+          "source_hunk_contexts": [
+            "describe('AccountStatusIndicator', () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/keys/UseKeyModal.vue",
+          "source_parent_blob": "459ae082a45a8430ec2d5b16ef325943493e6bf9",
+          "source_blob": "e0aea84e01e45387ea3fe2dd5358696e4a29be45",
+          "baseline_blob": "29028845d0748db6f8b6922cf086cc784bd79397",
+          "source_hunk_contexts": [
+            "function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin"
+          ]
+        },
+        {
+          "path": "frontend/src/components/keys/__tests__/UseKeyModal.spec.ts",
+          "source_parent_blob": "a1602020d6b60b533889869241553a55592739ff",
+          "source_blob": "64d9c9bed936c31fb5d395f13ad1c55c6f72c555",
+          "baseline_blob": "4f3830e3fcf7140868e9f6427f4350f4e0c12dac",
+          "source_hunk_contexts": [
+            "describe('UseKeyModal', () => {",
+            "describe('UseKeyModal', () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/composables/__tests__/useModelWhitelist.spec.ts",
+          "source_parent_blob": "05461070e798334b36a0174a5921046231c08b16",
+          "source_blob": "2dbd1a894258e3665f450d34ed6707868421a362",
+          "baseline_blob": "8fb6e947b353b250c3bba028e8fc943acaf89701",
+          "source_hunk_contexts": [
+            "describe('useModelWhitelist', () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/composables/useModelWhitelist.ts",
+          "source_parent_blob": "5702773c95146bda46424e4ecea99ddfa86bb16a",
+          "source_blob": "47399f41106ccb3f2968b35c5307c86af29af9d2",
+          "baseline_blob": "c80a9531624f31c4c671f7a2639381951a66a3c5",
+          "source_hunk_contexts": [
+            "export const claudeModels = [",
+            "export const allModels = allModelsList.map(m => ({ value: m, label: m }))",
+            "const antigravityPresetMappings = ["
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "ea6b3de8082d5871ce5e90a61f4fe75c8ba6b506",
+      "subject": "test: keep Claude Code version fixtures above the built-in floor",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/claude_code_version_sync_service_test.go",
+          "source_parent_blob": "b4c4bb33147b7e23854cae3052d13aa301c1e90f",
+          "source_blob": "5867e2e5bc9a6258889df235c45c2568c3c93ec7",
+          "baseline_blob": "b4c4bb33147b7e23854cae3052d13aa301c1e90f",
+          "source_hunk_contexts": [
+            "package service",
+            "func newClaudeCodeVersionSyncService(",
+            "func TestLatestClaudeCodeStableReleaseVersion(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncSkippedWhenDisabled(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncEnabledByDefaultOrOnError(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncKeepsValueOnFetchError(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncFallsBackToReleaseList(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncFallsBackToReleaseList(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncFallsBackToReleaseList(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncFallsBackToReleaseList(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncStartRequiresDependencies(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncInitialSkipsWhenRecentlySynced(t *testing.T) {",
+            "func TestClaudeCodeVersionSyncInitialRunsWhenStaleOrMissing(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/setting_claude_code_version_test.go",
+          "source_parent_blob": "73d8ca9015bd63c7fa72da61bfbd1dac2bd4b053",
+          "source_blob": "052e4d20cc63ce9335e001daaacd27ada407a631",
+          "baseline_blob": "73d8ca9015bd63c7fa72da61bfbd1dac2bd4b053",
+          "source_hunk_contexts": [
+            "func TestGetClaudeCodeClientVersionPriority(t *testing.T) {",
+            "func TestGetClaudeCodeClientVersionPriority(t *testing.T) {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "508bb9560f70783ab689996344c23e3772978781",
+      "subject": "fix: correct Sonnet 5.5 cache read fallback pricing",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/billing_service.go",
+          "source_parent_blob": "f66293ba04e5c726be56eda7421f4ab976e51f0c",
+          "source_blob": "57dab87cfc8a32913eddc8bbe740051e85a3cfb7",
+          "baseline_blob": "cc99fdb8c8a0a886342d304c46fbd47c3d8c8f79",
+          "source_hunk_contexts": [
+            "func (s *BillingService) initFallbackPricing() {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/billing_service_test.go",
+          "source_parent_blob": "cb68489b49d8806fd03a0f197f36a9d5de619d5d",
+          "source_blob": "52264f80581993b1192967699f7c9d3a44f4c54c",
+          "baseline_blob": "52ff8ad180db7511129ed4d2ca1b20612bbc2871",
+          "source_hunk_contexts": [
+            "func TestNewModelPricingCatalogFallbackAndContext(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/pricing_service.go",
+          "source_parent_blob": "08f7f9d6ba0e7115b48052f1e2273b0134e11383",
+          "source_blob": "6155e49438856006ef8c5a1648b5978ccfe80a99",
+          "baseline_blob": "24ac616794cd36a22329f0c6452321a2ead897cb",
+          "source_hunk_contexts": [
+            "var ("
+          ]
+        },
+        {
+          "path": "backend/resources/model-pricing/model_prices_and_context_window.json",
+          "source_parent_blob": "cd1e84434fdf75284d40d83618f7183ed1f6338f",
+          "source_blob": "3ef1e53ccd6695bc5c90e1546204d45762f5e9c2",
+          "baseline_blob": "c1db89897793f1320a34456d56cc3ff2635f1207",
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "92d35a6947a9ec77257b0258370124f0a2c2b0f8",
+      "subject": "fix(pricing): retry sync after catalog hash mismatch",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/pricing_service.go",
+          "source_parent_blob": "08f7f9d6ba0e7115b48052f1e2273b0134e11383",
+          "source_blob": "f46c1315a90805cfa73c81df23011b0d523fed5b",
+          "baseline_blob": "24ac616794cd36a22329f0c6452321a2ead897cb",
+          "source_hunk_contexts": [
+            "func (s *PricingService) downloadPricingData() error {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/pricing_service_hot_reload_test.go",
+          "source_parent_blob": "31a50ac145555a60c1559ad56cb84024c1d6b1c3",
+          "source_blob": "f0d3975831433f29b338de3f24ac274bfac30f84",
+          "baseline_blob": "31a50ac145555a60c1559ad56cb84024c1d6b1c3",
+          "source_hunk_contexts": [
+            "package service",
+            "func TestPricingHotReload_DeletedFileDropsItsLayer(t *testing.T) {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "3e8c2ee3f7c128cad3a95e3b099e9bd348fa2012",
+      "subject": "fix(pricing): add Claude Fable and Mythos 5.2 fallback rates",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/pkg/claude/effort_catalog.go",
+          "source_parent_blob": "2764adc076ac86fe996a2fd612ea2a87142a3cd2",
+          "source_blob": "66efeab976efe1c040366f09a54cb60ec801f84c",
+          "baseline_blob": "cb987c4104ddbac883b66943ac08db41866fccc1",
+          "source_hunk_contexts": [
+            "func IsHaiku55(model string) bool {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/billing_service.go",
+          "source_parent_blob": "3cc376f046ecaa19b3fabce3698936ef14b60a47",
+          "source_blob": "525cb2e624a74a018a911eb12b2c2ec38f727f5d",
+          "baseline_blob": "cc99fdb8c8a0a886342d304c46fbd47c3d8c8f79",
+          "source_hunk_contexts": [
+            "func (s *BillingService) initFallbackPricing() {",
+            "func (s *BillingService) getFallbackPricing(model string) *ModelPricing {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/claude52_pricing_test.go",
+          "source_parent_blob": null,
+          "source_blob": "b1515904cfd1dd74f4fb2be8f72d6513b76d1203",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/pricing_service.go",
+          "source_parent_blob": "a0a65d8bf16e9aaa87119286883a4d74c7b7bbfe",
+          "source_blob": "89715a52172b93859ecbd3c5326a56e85f27fa89",
+          "baseline_blob": "24ac616794cd36a22329f0c6452321a2ead897cb",
+          "source_hunk_contexts": [
+            "var (",
+            "func (s *PricingService) extractBaseName(model string) string {"
+          ]
+        },
+        {
+          "path": "backend/resources/model-pricing/model_prices_and_context_window.json",
+          "source_parent_blob": "bbe05a937c19e9c78bb2950ccb87a11791981fb0",
+          "source_blob": "dd0593ca94cc6edd278e688bbd4daa41a5a2fe70",
+          "baseline_blob": "c1db89897793f1320a34456d56cc3ff2635f1207",
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "0578fb160e5b77ecbfd7139b5b7761c39d73fd78",
+      "subject": "fix(openai): stop native WS later-turn first-frame replay",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/handler/openai_gateway_handler_test.go",
+          "source_parent_blob": "894d2623cc64d1968e87c76ff368065f11673a5b",
+          "source_blob": "b17d9225568c425bf5e3d676197c466a3d2dcfb3",
+          "baseline_blob": "f23fd586d8601f00b2569c8ec0b6c487e1c70306",
+          "source_hunk_contexts": [
+            "func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t",
+            "func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T",
+            "func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T",
+            "func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T",
+            "func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T",
+            "func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T",
+            "func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+          "source_parent_blob": "10bb77450d56682f6fd3cea3ec63e9c94ef4a908",
+          "source_blob": "212bc25feeeb65bcb1e86ea80b4477fc33e76f7b",
+          "baseline_blob": "9754df581b1062caee42968e357566dfd67d5557",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient("
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "142d22cc4284678a729bce1a28986efcd175126c",
+      "subject": "fix(openai-ws): reconnect pooled OAuth sockets before search activation",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_ws_forwarder_ingress.go",
+          "source_parent_blob": "10bb77450d56682f6fd3cea3ec63e9c94ef4a908",
+          "source_blob": "6fa11878516f6d973e754475e4f59139084344f6",
+          "baseline_blob": "9754df581b1062caee42968e357566dfd67d5557",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(",
+            "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(",
+            "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(",
+            "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(",
+            "func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_ws_pool.go",
+          "source_parent_blob": "b632bba5237516ae7b465308dd3660f21cc6d772",
+          "source_blob": "ae4e3fe2c7303d7bdf727f5ce1051b3cbf94e1ea",
+          "baseline_blob": "4620f1e759aa25cdabf177fe1507eb2eceb7fc50",
+          "source_hunk_contexts": [
+            "type openAIWSConn struct {",
+            "func (c *openAIWSConn) writeJSON(value any, writeCtx context.Context) error {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_ws_search_activation.go",
+          "source_parent_blob": null,
+          "source_blob": "6d1e640c11511fd553e090af0268e8c426408a6c",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_ws_search_activation_test.go",
+          "source_parent_blob": null,
+          "source_blob": "d45387b050b9dec709a8b6d398b71968ae3efa8e",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "9c7380732df8ad4420b8be161504552a52b585a5",
+      "subject": "test(openai-ws): explicitly discard deferred close errors",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_ws_search_activation_test.go",
+          "source_parent_blob": "d45387b050b9dec709a8b6d398b71968ae3efa8e",
+          "source_blob": "30fe9f0326d8f7a7847b336f09335f89024c1332",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {",
+            "func TestOpenAIWSIngressWebSearchActivation(t *testing.T) {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "fab3ec251609ba008e41bd5692668f697152705e",
+      "subject": "fix(openai-ws): follow the TTFT mode for WebSocket first token",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_ws_v2/passthrough_relay.go",
+          "source_parent_blob": "78ec429d93a4467fa47d27fe58b6ad43e166b8ab",
+          "source_blob": "af3a57fcf00f68393ba07980d869f5160a6604a7",
+          "baseline_blob": "8eee5904ec1c2398d14d2ac480977e6aee0c230e",
+          "source_hunk_contexts": [
+            "type RelayOptions struct {",
+            "type relayState struct {",
+            "func Relay(",
+            "func observeUpstreamMessage(",
+            "func observeUpstreamMessage(",
+            "func shouldParseUsage(eventType string) bool {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_ws_v2/passthrough_relay_test.go",
+          "source_parent_blob": "5ba49565dfce1d97ce651cadb0d06a6eeeb3549d",
+          "source_blob": "8186025cec8058e9ba7e5f9c6645a788ada27693",
+          "baseline_blob": "0171346020fa86ad6d3acc3c228c5e2ec680a0ef",
+          "source_hunk_contexts": [
+            "func TestRelay_OnTurnComplete_FirstTokenMsRecordedForEveryTurn(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_ws_v2_passthrough_adapter.go",
+          "source_parent_blob": "e7d0a0d09b12420aa05d5063dd8ec37439616ad0",
+          "source_blob": "71804511ebceafceb014710ef56644e3200a6e47",
+          "baseline_blob": "04dedc524a5ccf0f378c3b33995a95e646110602",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(",
+            "func relayErrorText(err error) string {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_ws_v2_passthrough_ttft_mode_test.go",
+          "source_parent_blob": null,
+          "source_blob": "3201113969f7a1210c499f24194b619f34391185",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "e401c58053ce79b68985d1bd47aed49477baaf48",
+      "subject": "fix(openai): keep Codex metadata events retry-safe",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_codex_metadata_events_test.go",
+          "source_parent_blob": null,
+          "source_blob": "6cb2e2393c6ff068503e5ae9a6b3e603445c0d7e",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_passthrough.go",
+          "source_parent_blob": "af55cc0900ff1f97d0ef7ab45577655f828729e3",
+          "source_blob": "9afdc10c8dfea3fbba2ba34e08bd0314ee900270",
+          "baseline_blob": "f5143f54fd8ec14828cc69280e82628e0a4c9924",
+          "source_hunk_contexts": [
+            "func openAIStreamEventIsMetadata(eventType string) bool {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "ebf01680858d884ea74b77a3cdbeb5ea4164c3ad",
+      "subject": "fix(openai): honor explicit model cooldown rules for overloads",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
+          "source_parent_blob": "942ea07bcb4d4a8ad0c990ab70d04a566caf7092",
+          "source_blob": "0ae73d45a192f4d7ee6c2fec4b41d93e9eff9912",
+          "baseline_blob": "da881b84eeb5afeb1ac81bb8a54f7b90f591b0a6",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_capacity_shed_model_rule_test.go",
+          "source_parent_blob": null,
+          "source_blob": "dc51246e88e45f634082bc26786a37ec4890b7eb",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_passthrough.go",
+          "source_parent_blob": "af55cc0900ff1f97d0ef7ab45577655f828729e3",
+          "source_blob": "e311285394dbbbfc06599b61c27b97df30dc4110",
+          "baseline_blob": "f5143f54fd8ec14828cc69280e82628e0a4c9924",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+          "source_parent_blob": "69d10bb2383502b2e297458ec48ed134a3032f60",
+          "source_blob": "565ac058a18b4ec2640660e00bd8091cdb8b0dd6",
+          "baseline_blob": "1d429453a6a82fc1284479d3436a3a5027a5c632",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "88b7090a35badc3cd3ab616d5ac2dc6783627b3e",
+      "subject": "fix(openai): match cooldown rules against actual error fields",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_account_runtime_block_fastpath.go",
+          "source_parent_blob": "0ae73d45a192f4d7ee6c2fec4b41d93e9eff9912",
+          "source_blob": "50ebf955ebd4b6364f186133a4009e1f06e451e7",
+          "baseline_blob": "da881b84eeb5afeb1ac81bb8a54f7b90f591b0a6",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_capacity_shed_model_rule_test.go",
+          "source_parent_blob": "dc51246e88e45f634082bc26786a37ec4890b7eb",
+          "source_blob": "5f8c64bb700fe5464879911074ed81f30ea0cd4e",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func TestOpenAICapacityShedModelRule_WriteFailureDoesNotBlockAccount(t *testing."
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_passthrough.go",
+          "source_parent_blob": "e311285394dbbbfc06599b61c27b97df30dc4110",
+          "source_blob": "568bb3573194f04bac6bc2967bed05d21ceebdf1",
+          "baseline_blob": "f5143f54fd8ec14828cc69280e82628e0a4c9924",
+          "source_hunk_contexts": [
+            "func openAIStream403AccountFailure(payload []byte, message string) bool {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "a1395eeaf2d600c7e605257e4a1cb02e46b10517",
+      "subject": "fix(openai): preserve other platforms' capacity handling",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_capacity_shed_model_rule_test.go",
+          "source_parent_blob": "5f8c64bb700fe5464879911074ed81f30ea0cd4e",
+          "source_blob": "8e5848633e360f80513a96a9a4258ea8af10424d",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func TestOpenAICapacityShedModelRule_ErrorFieldsOnly(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_passthrough.go",
+          "source_parent_blob": "568bb3573194f04bac6bc2967bed05d21ceebdf1",
+          "source_blob": "f42e4b0f7530b2e246591bee385d4bb1a0954556",
+          "baseline_blob": "f5143f54fd8ec14828cc69280e82628e0a4c9924",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_upstream_errors.go",
+          "source_parent_blob": "565ac058a18b4ec2640660e00bd8091cdb8b0dd6",
+          "source_blob": "db13c916e0450bcc34d78dfe49195d09e3560b90",
+          "baseline_blob": "1d429453a6a82fc1284479d3436a3a5027a5c632",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "f2b0a32b1ffdbf4ac7d6a8df00f30328f3492b03",
+      "subject": "fix(apicompat): preserve sealed function call metadata",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/pkg/apicompat/responses_to_chatcompletions.go",
+          "source_parent_blob": "3616da3288df7e4d4237ad8290ff9aeec3027d13",
+          "source_blob": "f33d4792b170a19684b5900d43ffe9a136c961b8",
+          "baseline_blob": "3611a70827c9f2368afaf5175c591e166d1fdba7",
+          "source_hunk_contexts": [
+            "func generateChatCmplID() string {",
+            "func (a *BufferedResponseAccumulator) ProcessEvent(event *ResponsesStreamEvent)",
+            "func (a *BufferedResponseAccumulator) BuildOutput() []ResponsesOutput {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/apicompat/types.go",
+          "source_parent_blob": "ffa8960cb950df540004785b0b34dab7c02245a1",
+          "source_blob": "130f0ff63b9dd77701781bd324c0a8dd86f1dbb6",
+          "baseline_blob": "08cdfee08e619d65cb9624635adfafbb2b06a6af",
+          "source_hunk_contexts": [
+            "type ResponsesOutput struct {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_responses_sealed_call_test.go",
+          "source_parent_blob": null,
+          "source_blob": "31d1406c2d32ae73c3bad33959410ec374980b25",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "552d1ab4bb661f89df4ff267370bf5f578247322",
+      "subject": "fix(apicompat): skip foreign CC Switch reasoning envelopes",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/pkg/apicompat/anthropic_responses_test.go",
+          "source_parent_blob": "700af63d4d6519ef7d112adfdba50cb99f939511",
+          "source_blob": "6755533b001f5af10a4ac7727940c9ccac05a3d1",
+          "baseline_blob": "700af63d4d6519ef7d112adfdba50cb99f939511",
+          "source_hunk_contexts": [
+            "",
+            "func TestAnthropicToResponses_ThinkingSignatureBecomesReasoning(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/apicompat/anthropic_to_responses.go",
+          "source_parent_blob": "c27e44553717e9f5a5b71a71be5bdc38a1b80565",
+          "source_blob": "8987cbd6f13cdf23bb1f368292a1c377ed19fe32",
+          "baseline_blob": "c27e44553717e9f5a5b71a71be5bdc38a1b80565",
+          "source_hunk_contexts": [
+            "func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "85f43b640a5f92dab03599974cb19ee1a5005414",
+      "subject": "fix(openai): stabilize Responses session seeds across tool loops",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_content_session_seed.go",
+          "source_parent_blob": "2acf29872107dcf7507c5a00c198bcf24b084972",
+          "source_blob": "8524f6d669b14946dbb30df743f6708f0b6e6e02",
+          "baseline_blob": "2acf29872107dcf7507c5a00c198bcf24b084972",
+          "source_hunk_contexts": [
+            "const contentStablePrefixSessionSeedPrefix = \"compat_csp_\"",
+            "scanRoot:",
+            "scanRoot:"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_content_session_seed_responses_test.go",
+          "source_parent_blob": null,
+          "source_blob": "13a4e6fd66d77df7aeef64079d31a6355cf5596f",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "090c58f663a8e745b0e564518cafe7557e6f92e2",
+      "subject": "fix(gateway): honor account error policies in compatibility paths",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/gateway_compat_error_policy_test.go",
+          "source_parent_blob": null,
+          "source_blob": "2c2d53d24fb264438c7a6ab0adfd3fcbde27754d",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/gateway_forward_as_chat_completions.go",
+          "source_parent_blob": "24a281d612001a421221b2e24800b15c253a1824",
+          "source_blob": "3f037af48fb0d1fdc961a83527e711ce6faa9a65",
+          "baseline_blob": "fede3804c92a6ca8c688f7b5f720dafe6644e821",
+          "source_hunk_contexts": [
+            "func (s *GatewayService) ForwardAsChatCompletions(",
+            "func (s *GatewayService) ForwardAsChatCompletions("
+          ]
+        },
+        {
+          "path": "backend/internal/service/gateway_forward_as_responses.go",
+          "source_parent_blob": "f7f4897d5aa716bd7315a7f46ce21c7f9dbc5dac",
+          "source_blob": "5c858abe9f9ad2ad301c693eaade7da0302cfb9d",
+          "baseline_blob": "103550990b5b90e00f166efd1e42384d457f39fc",
+          "source_hunk_contexts": [
+            "func (s *GatewayService) ForwardAsResponses(",
+            "func (s *GatewayService) ForwardAsResponses("
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "36484727c7a634795e2d4f1460d11a6e468c3dc1",
+      "subject": "fix(gemini): \u517c\u5bb9\u5165\u53e3\u975e\u6d41\u5f0f\u54cd\u5e94\u4e0d\u518d\u628a\u601d\u8003\u6458\u8981\u6df7\u5165\u6b63\u6587",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/gemini_chat_completions_compat_service_test.go",
+          "source_parent_blob": "e4ebf7a83871abe1ef48343293fb7ec7d89e1be2",
+          "source_blob": "cf32b74e9344b828958f0050b6f96fc1b62fa69e",
+          "baseline_blob": "e4ebf7a83871abe1ef48343293fb7ec7d89e1be2",
+          "source_hunk_contexts": [
+            "func TestGeminiResponseToChatCompletionsRetainsTextAndToolBehavior(t *testing.T)"
+          ]
+        },
+        {
+          "path": "backend/internal/service/gemini_messages_compat_service.go",
+          "source_parent_blob": "1e86598d8a5481327feb7c1e6505175333ce9423",
+          "source_blob": "9d2ad1ae45f9bd9e4cd0f6921e621e477a2b42c9",
+          "baseline_blob": "2d2908d1972d19b08c04a32120274480c157d0b5",
+          "source_hunk_contexts": [
+            "func convertGeminiToClaudeMessage(geminiResp map[string]any, originalModel strin"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "e2ce0b43dc62d2591cf69f7c4c26d5c48cea87b7",
+      "subject": "fix(TASK-144): keep Antigravity tool functionResponses contiguous before media",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/pkg/antigravity/request_transformer.go",
+          "source_parent_blob": "0b3396edb2b876632e23d5c60713e941dfe7e9b7",
+          "source_blob": "d0cac85d9de6868bea026cc636566e5fc7808278",
+          "baseline_blob": "a13748926e712c8132435e78feedb1f6ea13d42a",
+          "source_hunk_contexts": [
+            "func buildParts(content json.RawMessage, toolIDToName map[string]string, allowDu",
+            "func buildParts(content json.RawMessage, toolIDToName map[string]string, allowDu"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/antigravity/request_transformer_test.go",
+          "source_parent_blob": "eb703da14a410c63cd93580df177bb4b26ead15c",
+          "source_blob": "66bbe683774fbe2ece40e298b1497adc938b09aa",
+          "baseline_blob": "7bdb40914b3640c009ce677fc20799327afc96a6",
+          "source_hunk_contexts": [
+            "func TestTransformClaudeToGemini_ToolResultImagesReachUpstream(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/antigravity/tool_result_images_test.go",
+          "source_parent_blob": "87e359450e8aee81c92cd1bd9315b6e71adff659",
+          "source_blob": "6f68f788864d24c5f8d4250b49678fc7909eefff",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func TestToolResultMediaPlacement(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/antigravity_tool_result_images_test.go",
+          "source_parent_blob": "b254c18da2dc350dd7bea66d958d35dcc00eb84f",
+          "source_blob": "f555e0d0db11bb4795e6d390bfbd6615feeaca37",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func toolImageCompatWire(t *testing.T, raw []byte, model string) []byte {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "7796a2d57aa0496cb87594fd8bf7d1246adcbf8d",
+      "subject": "fix(antigravity): isolate Pro Argon quota cooldowns",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/repository/scheduler_cache_test.go",
+          "source_parent_blob": "0542842fdf52de76f21360424ce59ba8009618ff",
+          "source_blob": "d6dfe7e01c5b7ba2bb2aaeb4fbcdbe20beaaf419",
+          "baseline_blob": "9bd67f1bd94c46f5852101313e6db7cb78264d7a",
+          "source_hunk_contexts": [
+            "",
+            "func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/antigravity_gateway_retry.go",
+          "source_parent_blob": "2be464bbe5e62e723fb64032086cf3d8592f903b",
+          "source_blob": "70920eba04d89d46c1723fede8db3162dd7dc6d9",
+          "baseline_blob": "9cbbfef034e43dc4add74c739fe475c4cd03a3e7",
+          "source_hunk_contexts": [
+            "func (s *AntigravityGatewayService) setAntigravityModelRateLimits(ctx context.Co"
+          ]
+        },
+        {
+          "path": "backend/internal/service/antigravity_pro_quota_rate_limit_test.go",
+          "source_parent_blob": null,
+          "source_blob": "34b2ab41991a0601f9d51075a725628ac5afceaf",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/model_rate_limit.go",
+          "source_parent_blob": "46e3419e03e8608823991192e665f3f2a0698324",
+          "source_blob": "fc181de0788eb5e6531234de223242b116a7bdee",
+          "baseline_blob": "f44c03e07db57911e8f41db805f940c1d159e9d3",
+          "source_hunk_contexts": [
+            "import (",
+            "func (a *Account) modelRateLimitKeysForRequest(ctx context.Context, requestedMod",
+            "func isAntigravityGeminiModel(model string) bool {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "137316a14c001ea40ab1d99865f5dd88ce03a291",
+      "subject": "fix(payment): configure EasyPay refund success codes per instance",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/payment/provider/easypay.go",
+          "source_parent_blob": "76469a2b36724dbde80d6d11d3e3ab01874dd35d",
+          "source_blob": "a5426e4ccffca8802032cf990d4c783c25a823e8",
+          "baseline_blob": "76469a2b36724dbde80d6d11d3e3ab01874dd35d",
+          "source_hunk_contexts": [
+            "type easyPayCustomMethod struct {",
+            "func NewEasyPay(instanceID string, config map[string]string) (*EasyPay, error) {",
+            "func (e *EasyPay) queryOrder(ctx context.Context, outTradeNo string) (*easyPayQu",
+            "func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st",
+            "func (e *EasyPay) Refund(ctx context.Context, req payment.RefundRequest) (*payme",
+            "func isEasyPayRefundOrderNotFound(err error) bool {",
+            "func parseEasyPayRefundResponse(status int, body []byte) error {",
+            "func parseEasyPayRefundResponse(status int, body []byte) error {"
+          ]
+        },
+        {
+          "path": "backend/internal/payment/provider/easypay_refund_test.go",
+          "source_parent_blob": "730e82feff03cf3eadeb4f40fa45fd4c45020514",
+          "source_blob": "d1e811d19e3eb735c90db847edd5ac287666b134",
+          "baseline_blob": "730e82feff03cf3eadeb4f40fa45fd4c45020514",
+          "source_hunk_contexts": [
+            "func TestEasyPayRefundResponseErrors(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/payment_refund_test.go",
+          "source_parent_blob": "834c7f45712f00e02cc8073dea13d65198ffc05d",
+          "source_blob": "340e8eb4f218c54e1683f42ae0cb5ae314d6580c",
+          "baseline_blob": "834c7f45712f00e02cc8073dea13d65198ffc05d",
+          "source_hunk_contexts": [
+            "import (",
+            "func TestExecuteRefundUsesActualAvailableBalanceDeduction(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/payment/__tests__/PaymentProviderDialog.spec.ts",
+          "source_parent_blob": "0126faab049a371223a62e5ca13eca4a8d2c090c",
+          "source_blob": "03cb360937b6fa46fe5b9ef6fc7182ec98c7c401",
+          "baseline_blob": "497055d2397d3f3158eec07a137addfbe7fdfda6",
+          "source_hunk_contexts": [
+            "function mountDialog(options: { editing?: ProviderInstance | null } = {}) {",
+            "describe('PaymentProviderDialog callback URLs', () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/components/payment/providerConfig.ts",
+          "source_parent_blob": "395c32725fa41e040665cab337de274957486a2b",
+          "source_blob": "aa59d2373ae97004a5d775feede9cad2defff379",
+          "baseline_blob": "233f1ac61537ee9fd74547b3cf047fff8543be05",
+          "source_hunk_contexts": [
+            "export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {"
+          ]
+        },
+        {
+          "path": "frontend/src/i18n/locales/en/admin/settings.ts",
+          "source_parent_blob": "689e06433cdec287adc1a718d5c813bd7139fa8a",
+          "source_blob": "5141c28978a4a46cb0d75c15db6e8480027a3340",
+          "baseline_blob": "6ac79960aebf22348207defe4334e863b0dc829b",
+          "source_hunk_contexts": [
+            "export default {"
+          ]
+        },
+        {
+          "path": "frontend/src/i18n/locales/zh/admin/settings.ts",
+          "source_parent_blob": "f48160dbe67b452ce238037b843fd6239dfdc14b",
+          "source_blob": "9658045e5423f4ac05555e7a408ce61b2a0203b4",
+          "baseline_blob": "5af572752749d86d9b43526b612114343021ee2b",
+          "source_hunk_contexts": [
+            "export default {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "4ac713c4d4b1bdc5e12111477b9e30a7569aa774",
+      "subject": "fix(scheduling): release acquired slot when account hydration fails",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/gateway_scheduling.go",
+          "source_parent_blob": "c370e2177e2134e5734deed07dc58fece7c7e68b",
+          "source_blob": "b1219980e713e793b02705a23ddd9e33a28df090",
+          "baseline_blob": "572bacfcf011faf866db0a1219278d050f4f2654",
+          "source_hunk_contexts": [
+            "func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac"
+          ]
+        },
+        {
+          "path": "backend/internal/service/gateway_scheduling_slot_release_test.go",
+          "source_parent_blob": null,
+          "source_blob": "8f1e4cb1c8cd931cf4266ffd699b97a3392bb419",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "7122efee948fc31a086202e75caff1ea2e1562c8",
+      "subject": "fix(auth): consume refresh tokens atomically during rotation",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/handler/auth_oauth_pending_flow_test.go",
+          "source_parent_blob": "dd8e1c03fe35b974e63ddcad2f7aa29054f1763f",
+          "source_blob": "730d3299d9f66aae39f9514487f720ac80e71d7c",
+          "baseline_blob": "dd8e1c03fe35b974e63ddcad2f7aa29054f1763f",
+          "source_hunk_contexts": [
+            "func (s *oauthPendingFlowRefreshTokenCacheStub) DeleteTokenFamily(context.Contex"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/auth_wechat_oauth_test.go",
+          "source_parent_blob": "e291b7e7dbc1090b133cf918773a895500860c05",
+          "source_blob": "9b8a01ecac423f6f9b06ee105a6c99594be7f109",
+          "baseline_blob": "5b7122b2861ff8b39597646c8ac51807a9f6f096",
+          "source_hunk_contexts": [
+            "func (s *wechatOAuthRefreshTokenCacheStub) DeleteTokenFamily(context.Context, st"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/user_handler_test.go",
+          "source_parent_blob": "796c64f33981069fb9a64e58df39f09fa345256e",
+          "source_blob": "14df95bb7e412240241c2b9ead90aa3ec9e11a3f",
+          "baseline_blob": "796c64f33981069fb9a64e58df39f09fa345256e",
+          "source_hunk_contexts": [
+            "func (s *userHandlerRefreshTokenCacheStub) DeleteTokenFamily(context.Context, st"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/refresh_token_cache.go",
+          "source_parent_blob": "b01bd4769719ad75e477a327049b79f6dd7d43f9",
+          "source_blob": "2d131aecc0bc4f444ff100fd1fe9fc6de5cd3c26",
+          "baseline_blob": "b01bd4769719ad75e477a327049b79f6dd7d43f9",
+          "source_hunk_contexts": [
+            "package repository",
+            "import (",
+            "func (c *refreshTokenCache) DeleteRefreshToken(ctx context.Context, tokenHash st"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/refresh_token_cache_test.go",
+          "source_parent_blob": null,
+          "source_blob": "c745a58c40ca1270458b4df66ac1513132e4d7d5",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/auth_service.go",
+          "source_parent_blob": "ded56e1e1317d7b6afa74d00a8b1557f55b2c7ee",
+          "source_blob": "5dbe3bca292f90582dd027eebebaac2c3ec6f98e",
+          "baseline_blob": "311d1879b5132fdb456a134d2697ca638e7451f5",
+          "source_hunk_contexts": [
+            "func (s *AuthService) RefreshTokenPair(ctx context.Context, refreshToken string)"
+          ]
+        },
+        {
+          "path": "backend/internal/service/auth_service_email_bind_test.go",
+          "source_parent_blob": "c41734c40bbce43fd6970c092647b27d59949464",
+          "source_blob": "a728b41077a3d2a7cf71379a7af66675273f23f9",
+          "baseline_blob": "c41734c40bbce43fd6970c092647b27d59949464",
+          "source_hunk_contexts": [
+            "func (s *emailBindRefreshTokenCacheStub) DeleteRefreshToken(_ context.Context, t"
+          ]
+        },
+        {
+          "path": "backend/internal/service/auth_service_refresh_race_test.go",
+          "source_parent_blob": null,
+          "source_blob": "c177fc2ff63334a0e436a7b631ed179a56b8fad2",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/auth_service_register_test.go",
+          "source_parent_blob": "076cd025d3f5898e3d3caad5481184668d9e7654",
+          "source_blob": "a1e211bac8b936b6a5bf9b4a21c8b647acdcb252",
+          "baseline_blob": "fb78b7e654cee40b6d78af4ac906653d67999c0d",
+          "source_hunk_contexts": [
+            "func (s *refreshTokenCacheStub) DeleteTokenFamily(context.Context, string) error"
+          ]
+        },
+        {
+          "path": "backend/internal/service/refresh_token_cache.go",
+          "source_parent_blob": "9d49495ac917f51d60ba4747c2f8063d3366ac29",
+          "source_blob": "179fe79d7bd0b87b53880fd8f959463337d4e8c7",
+          "baseline_blob": "9d49495ac917f51d60ba4747c2f8063d3366ac29",
+          "source_hunk_contexts": [
+            "type RefreshTokenCache interface {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "eb4ccd173e35b459661fff4a4f079f6f96fccc56",
+      "subject": "fix(openai): apply reasoning mappings to synthesized effort",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/handler/composite_platform.go",
+          "source_parent_blob": "6e613aa3e4932cb226316196f1f2fcd66e971ef3",
+          "source_blob": "764a6a7f9d51a9d40a4b80ad6a5f01714885fb12",
+          "baseline_blob": "c38471b89ef755d383561ce92b6396633f36c609",
+          "source_hunk_contexts": [
+            "func bindOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey *s"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/composite_platform_test.go",
+          "source_parent_blob": "7704a129a08e507afd982efc57f4116d61b07964",
+          "source_blob": "4dc504e6c3837c8ce3e899bb92e670f0b7796cd1",
+          "baseline_blob": "97ba3b0ac3a1743ffe4ac68107f51dc8e125ad8c",
+          "source_hunk_contexts": [
+            "func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "6f2faba2935c4e592c78c2f629a3d16f2a7ea09a",
+      "subject": "fix(openai): validate synthesized effort after policy mapping",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/handler/composite_platform.go",
+          "source_parent_blob": "764a6a7f9d51a9d40a4b80ad6a5f01714885fb12",
+          "source_blob": "d1ce35fefb4afcf7889b76cc1b59b05da0208c17",
+          "baseline_blob": "c38471b89ef755d383561ce92b6396633f36c609",
+          "source_hunk_contexts": [
+            "func bindOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey *s"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/composite_platform_test.go",
+          "source_parent_blob": "4dc504e6c3837c8ce3e899bb92e670f0b7796cd1",
+          "source_blob": "ee3d4ad8594fb19d2cfd2a1463c99df694b53fed",
+          "baseline_blob": "97ba3b0ac3a1743ffe4ac68107f51dc8e125ad8c",
+          "source_hunk_contexts": [
+            "func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {",
+            "func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/messages_effort_policy_test.go",
+          "source_parent_blob": null,
+          "source_blob": "63734b7e04bb7d1ba5a2c6179d83dbc034ec9a5c",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/apicompat/anthropic_effort_validation_test.go",
+          "source_parent_blob": null,
+          "source_blob": "d72ce9e907f53b47d2ea3716eaa686681d269268",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/pkg/apicompat/anthropic_to_responses.go",
+          "source_parent_blob": "a54ca94133cd582b8c0177e04266c0eb6f608e4c",
+          "source_blob": "aabeacf37f792f233f7750020582001e9e40e86c",
+          "baseline_blob": "c27e44553717e9f5a5b71a71be5bdc38a1b80565",
+          "source_hunk_contexts": [
+            "func AnthropicToResponses(req *AnthropicRequest) (*ResponsesRequest, error) {",
+            "func AnthropicToResponsesWithMinOutputTokens(req *AnthropicRequest, minOutputTok"
+          ]
+        },
+        {
+          "path": "backend/internal/service/apicompat_config.go",
+          "source_parent_blob": "e9605e0a5c0de6261b4837eb5f66277f2fe5bece",
+          "source_blob": "8d7680594c0b0b66271c2d74471df1e682e77b40",
+          "baseline_blob": "e9605e0a5c0de6261b4837eb5f66277f2fe5bece",
+          "source_hunk_contexts": [
+            "func chatCompletionsToResponses(cfg *config.Config, req *apicompat.ChatCompletio"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_messages.go",
+          "source_parent_blob": "45f890a37065fdcec2e2cf83d8e605f62471c6ec",
+          "source_blob": "76c125fc0ee69f53e72482dda6cdd5f5df32eec4",
+          "baseline_blob": "de754997b5e070cb148208ea2987b89d6e9ad11f",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) ForwardAsAnthropic(",
+            "func (s *OpenAIGatewayService) ForwardAsAnthropic(",
+            "func (s *OpenAIGatewayService) ForwardAsAnthropic("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_messages_chat_fallback.go",
+          "source_parent_blob": "d12918a3bb685f8d85ec145c7b4b30f6dbfcebbc",
+          "source_blob": "2eca13ddcac38cf3ffed53d2c193f82157a23eb0",
+          "baseline_blob": "2ddb2d0a1f649fc465687196ddd933a656ba38cb",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(",
+            "func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_request_body.go",
+          "source_parent_blob": "38cc743d9df12a9c3a87050daf9315aaf50c890b",
+          "source_blob": "24bcb517b93a4e935a725faa82051a9111a96a05",
+          "baseline_blob": "7ee1208b6a46dd8c3b4bb0557726a9971c4cfe1f",
+          "source_hunk_contexts": [
+            "func supportsOpenAIReasoningEffortMax(model string) bool {",
+            "func validateGPT61SolCompatRequest(body []byte, model string) error {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_messages_effort_policy_test.go",
+          "source_parent_blob": null,
+          "source_blob": "934de147ef02f8c51d78ba02d19815cc4ab8f1fa",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_reasoning_effort_policy.go",
+          "source_parent_blob": "907025597b4a64c8c315b67d046e8760b90d3a0b",
+          "source_blob": "548aafea972f921ea0a037e028f9fcb676870211",
+          "baseline_blob": "32117d54de9bf5a78759e84a8500d041b7a633c6",
+          "source_hunk_contexts": [
+            "func WithOpenAIReasoningEffortPolicy(ctx context.Context, maxEffort string, mapp"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "aa245176ae49d4a37c2b729a633d26968b942b3e",
+      "subject": "fix(openai): enforce synthesized effort ceilings and final validation",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/go.mod",
+          "source_parent_blob": "0d90a1822998b1957875c1a7f154d2c57c7d00fe",
+          "source_blob": "ae50b6e7b141a2d5b687c8cecb274f0fea0a7eea",
+          "baseline_blob": "4dfe8b3eef62faf2f994590f8c8fdda9a504777e",
+          "source_hunk_contexts": [
+            "require (",
+            "require ("
+          ]
+        },
+        {
+          "path": "backend/go.sum",
+          "source_parent_blob": "5f62bf5c24acce49fa74e780ea394bdcd742e7ac",
+          "source_blob": "09c77be5334fcc0e20cbe5a0a62610fef70ba55c",
+          "baseline_blob": "5952b01e73c44433e6bff7d7b6f123f77f9b42e5",
+          "source_hunk_contexts": [
+            "github.com/aliyun/credentials-go v1.4.5 h1:O76WYKgdy1oQYYiJkERjlA2dxGuvLRrzuO2Sc",
+            "github.com/jtolds/gls v4.20.0+incompatible/go.mod h1:QJZ7F/aHp+rZTRtaJ1ow/lLfFfV"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/composite_platform.go",
+          "source_parent_blob": "d1ce35fefb4afcf7889b76cc1b59b05da0208c17",
+          "source_blob": "83f20583563dd0e21d7cb528f60d300972bc84dc",
+          "baseline_blob": "c38471b89ef755d383561ce92b6396633f36c609",
+          "source_hunk_contexts": [
+            "func bindOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey *s"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/messages_effort_policy_test.go",
+          "source_parent_blob": "63734b7e04bb7d1ba5a2c6179d83dbc034ec9a5c",
+          "source_blob": "5c6eb93869d9bce06d9fceac78a2eb9b48a3ab88",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func TestMessagesEffortPolicyBinding(t *testing.T) {",
+            "func TestMessagesEffortPolicyBinding(t *testing.T) {",
+            "func TestMessagesEffortPolicyBinding(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_converted_reasoning_pricing_test.go",
+          "source_parent_blob": "4a001d4f0d805a49f5898c3204a6a9afd92fe34a",
+          "source_blob": "4a26ce78a12e2d78518894229e0a22e6cf85cbea",
+          "baseline_blob": "4a001d4f0d805a49f5898c3204a6a9afd92fe34a",
+          "source_hunk_contexts": [
+            "func TestOpenAIMessagesGLMReasoningPricingUsesForwardedEffort(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_count_tokens.go",
+          "source_parent_blob": "60bed92f8e3f66fb81761a1999b144a8f6a8302e",
+          "source_blob": "94361a456f1d7558b0f9faf208d5391e8df7d021",
+          "baseline_blob": "0236e739b68af17a144734c3a4eaf4c2bb6945c1",
+          "source_hunk_contexts": [
+            "func prepareOpenAIInputTokensCountRequest("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_count_tokens_test.go",
+          "source_parent_blob": "37bfa91e002b05ee8bde0f08c35618315395a6a4",
+          "source_blob": "db1858363142237d0c3a39faef7c237077204ee8",
+          "baseline_blob": "eaf005274bd747f53b592811caa4e0fcc39ff755",
+          "source_hunk_contexts": [
+            "type countTokensRuntimeStateRepo struct {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_messages_chat_fallback.go",
+          "source_parent_blob": "5cc20b4bb2ee61f9715b137633558817dc7228f9",
+          "source_blob": "47f0caa43334fa49c5dc641a0b55615d2e718815",
+          "baseline_blob": "2ddb2d0a1f649fc465687196ddd933a656ba38cb",
+          "source_hunk_contexts": [
+            "func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(",
+            "func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_gateway_request_body.go",
+          "source_parent_blob": "b2c3f509e4575f06260073f53b8781fc96af8fe9",
+          "source_blob": "187942865bf59d3d54272e0f6bc90322ffbbac2f",
+          "baseline_blob": "7ee1208b6a46dd8c3b4bb0557726a9971c4cfe1f",
+          "source_hunk_contexts": [
+            "func supportsOpenAIReasoningEffortMax(model string) bool {",
+            "func validateGPT61SolRawEffort(body []byte, model string) error {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_messages_effort_policy_test.go",
+          "source_parent_blob": "934de147ef02f8c51d78ba02d19815cc4ab8f1fa",
+          "source_blob": "b648f1974cd01ceaa31b4f570bb8ff61d7097288",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            "func TestMessagesEffortPolicyHTTP(t *testing.T) {",
+            "func TestMessagesEffortPolicyHTTP(t *testing.T) {",
+            "func TestMessagesEffortPolicyHTTP(t *testing.T) {",
+            "func TestMessagesEffortPolicyHTTP(t *testing.T) {",
+            "func TestMessagesEffortPolicyHTTP(t *testing.T) {",
+            "func TestMessagesRawEffortValidation(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_reasoning_effort_policy.go",
+          "source_parent_blob": "548aafea972f921ea0a037e028f9fcb676870211",
+          "source_blob": "3400a3ab7b01c86ef3481dd181418b7a5005362c",
+          "baseline_blob": "32117d54de9bf5a78759e84a8500d041b7a633c6",
+          "source_hunk_contexts": [
+            "func WithOpenAIReasoningEffortPolicy(ctx context.Context, maxEffort string, mapp",
+            "func ApplyOpenAIReasoningEffortPolicyFromContext(ctx context.Context, body []byt"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_reasoning_effort_policy_test.go",
+          "source_parent_blob": "62cc394c3dbc8bfcbd93a3dc8bf17bac4baaa039",
+          "source_blob": "0ab7c53c249b63e2b48a3df31c8b049bd805ed71",
+          "baseline_blob": "b8bcaf03b4851d0fa20fef42d616df0f1817a728",
+          "source_hunk_contexts": [
+            "package service",
+            "import ("
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_responses_tool_schema_test.go",
+          "source_parent_blob": "7b1714e30d08e4771294c185a22dbdf6cb21409b",
+          "source_blob": "06da6635d501f37a42c4f52b16937e3aad6e8135",
+          "baseline_blob": "7b1714e30d08e4771294c185a22dbdf6cb21409b",
+          "source_hunk_contexts": [
+            "package service",
+            "func buildToolSchemaNullTypeBody(t *testing.T, hits int) []byte {",
+            "func TestSanitizeOpenAIResponsesToolParameterTypes_RewriteCountIndependentOfHits"
+          ]
+        },
+        {
+          "path": "backend/internal/service/token_refresh_pool_health_test.go",
+          "source_parent_blob": "a9bd760d955483dccbb0afdabd48e6fa3704624a",
+          "source_blob": "324e4ae012eb0d7bf5be3e8f4be0fcaf6f6283f1",
+          "baseline_blob": "a9bd760d955483dccbb0afdabd48e6fa3704624a",
+          "source_hunk_contexts": [
+            "func (r *poolHealthAccountRepo) snapshot() ([]OAuthRefreshPageOptions, []int64,",
+            "func (r *poolHealthRefresher) Refresh(ctx context.Context, _ *Account) (map[stri",
+            "func TestTokenRefreshService_ParentCancellationStopsRetryWithoutAccountMutation("
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "b8de5e170006886b21ceee72e10d8cec7132dcdb",
+      "subject": "perf(keys): API \u5bc6\u94a5\u5217\u8868\u4e0d\u518d\u7b49\u5f85 30 \u5929\u7528\u91cf\u7edf\u8ba1\uff0c\u5e76\u4e3a\u5176\u52a0\u8986\u76d6\u7d22\u5f15",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/repository/migrations_runner.go",
+          "source_parent_blob": "8c69eb50dd0cd55edb0999af6b23957245aee77e",
+          "source_blob": "5ec51a0e9946575f1bda9801c4f98e2099c144dc",
+          "baseline_blob": "8c69eb50dd0cd55edb0999af6b23957245aee77e",
+          "source_hunk_contexts": [
+            "const usageLogsEffectiveRequestedModelIndex = \"idx_usage_logs_effective_requeste",
+            "func prepareNonTransactionalMigration(ctx context.Context, db migrationConnectio"
+          ]
+        },
+        {
+          "path": "backend/internal/repository/migrations_runner_api_key_cost_index_test.go",
+          "source_parent_blob": null,
+          "source_blob": "a9c6e1ee416a03d00c8cf2a3b625b70976d74fb8",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/migrations/249_add_usage_logs_api_key_cost_index_notx.sql",
+          "source_parent_blob": null,
+          "source_blob": "740e1e516ee92da42c11f398928574db71bcd4cc",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/migrations/usage_log_api_key_cost_index_test.go",
+          "source_parent_blob": null,
+          "source_blob": "5a68667517eba5d7a0b0529f1564bbc467496474",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "frontend/src/views/user/KeysView.vue",
+          "source_parent_blob": "dd779a0a8d02dc746ed4380f0a2d5949aabbdc1b",
+          "source_blob": "df56222ca27cfff26a83ac264e7e76b40598c7f0",
+          "baseline_blob": "c02a7a57649623a79aefe898fdfee7a3ab185cb7",
+          "source_hunk_contexts": [
+            "",
+            "const submitting = ref(false)",
+            "const loadApiKeys = async () => {",
+            "const loadApiKeys = async () => {",
+            "const loadApiKeys = async () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/views/user/__tests__/KeysView.spec.ts",
+          "source_parent_blob": "ebf80be0a00f9fdc849ff7ee9509b26498861f2e",
+          "source_blob": "dbda4f4fc7c56de3f6f3a07ff763b0b3be6cec19",
+          "baseline_blob": "5cb45138b4dfff930545fdc9c2a96d6853869e2c",
+          "source_hunk_contexts": [
+            "const TablePageLayoutStub = {",
+            "const DataTableStub = {",
+            "describe('user KeysView column settings', () => {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "4a22a75b3dad2c77bdeeee1307a63d53e488eb2d",
+      "subject": "fix(accounts): retain rows and quota values while refreshing",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "frontend/src/components/account/AccountUsageCell.vue",
+          "source_parent_blob": "1ac9f1435a98bb70f58fc125db50cb319138422b",
+          "source_blob": "e76507cea1479ec9765f7eab83f64a1fc921c390",
+          "baseline_blob": "514b6ad09e84754c79312afa33cac770e3992336",
+          "source_hunk_contexts": [
+            "",
+            "",
+            "",
+            ""
+          ]
+        },
+        {
+          "path": "frontend/src/components/account/__tests__/AccountUsageCell.spec.ts",
+          "source_parent_blob": "4f839cab2497d41473a53805f1125f49efc7e4f8",
+          "source_blob": "7cfb6658770471eecb05029af0a625b0c7103630",
+          "baseline_blob": "0964f29a86494a4e0576a620e1ca03d33154cced",
+          "source_hunk_contexts": [
+            "describe('AccountUsageCell', () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/views/admin/AccountsView.vue",
+          "source_parent_blob": "6d71337fddcda8fb032ee918913249075fb597e6",
+          "source_blob": "7384e4858bdcd2c4e7a7ecd0502e18e2864f6d06",
+          "baseline_blob": "e3b066fe993f4e48b9ab3ab6883267b8b9cc477f",
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "frontend/src/views/admin/__tests__/AccountsView.lite.spec.ts",
+          "source_parent_blob": "828f20d6e816c8046e64916f04ff855f85b05236",
+          "source_blob": "9d8d7266e5781bc0046a70e896dccb656da7db18",
+          "baseline_blob": "1fe6093a3c717e5a52a66b6b864b5eb716687c28",
+          "source_hunk_contexts": [
+            "vi.mock('vue-i18n', async () => {",
+            "function mountView(stubActionMenu = true) {",
+            "describe('admin AccountsView lite account list', () => {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "edd7db77fe456da8c4d65ea8d611aad7e06fbd31",
+      "subject": "fix(payment): support up to 6 decimals for balance recharge multiplier",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/payment_config_service.go",
+          "source_parent_blob": "ad5583da27a61e7d3a05abf2c5a0165c51e35546",
+          "source_blob": "547bc95e233420f47b0ae01c20b343b5c7ead89e",
+          "baseline_blob": "ad5583da27a61e7d3a05abf2c5a0165c51e35546",
+          "source_hunk_contexts": [
+            "func (s *PaymentConfigService) getStripePublishableKey(ctx context.Context) stri",
+            "func (s *PaymentConfigService) UpdatePaymentConfig(ctx context.Context, req Upda",
+            "func formatPositiveFloat(v *float64) string {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/payment_config_service_test.go",
+          "source_parent_blob": "900866ef9068c094693aa1ada1e972f563f0c42c",
+          "source_blob": "f914bf7e9fa7bf1a45469d643c18d13e9c97c62d",
+          "baseline_blob": "900866ef9068c094693aa1ada1e972f563f0c42c",
+          "source_hunk_contexts": [
+            "func TestUpdatePaymentConfig_PersistsExplicitEmptyAndFalseValues(t *testing.T) {"
+          ]
+        },
+        {
+          "path": "frontend/src/i18n/locales/en/admin/settings.ts",
+          "source_parent_blob": "689e06433cdec287adc1a718d5c813bd7139fa8a",
+          "source_blob": "2e3e157d6e2542c5c7c13adff4675c8268e78b0f",
+          "baseline_blob": "6ac79960aebf22348207defe4334e863b0dc829b",
+          "source_hunk_contexts": [
+            "export default {"
+          ]
+        },
+        {
+          "path": "frontend/src/i18n/locales/zh/admin/settings.ts",
+          "source_parent_blob": "f48160dbe67b452ce238037b843fd6239dfdc14b",
+          "source_blob": "449595d4274f9e08c9ae7e470f0de60c14642391",
+          "baseline_blob": "5af572752749d86d9b43526b612114343021ee2b",
+          "source_hunk_contexts": [
+            "export default {"
+          ]
+        },
+        {
+          "path": "frontend/src/utils/__tests__/rechargeBonus.spec.ts",
+          "source_parent_blob": "25561b50ec2c5cf32c2450e519ceb27cc41c3abf",
+          "source_blob": "b4cba9b7a2a3b616756057aafb3863a9da683ba1",
+          "baseline_blob": "25561b50ec2c5cf32c2450e519ceb27cc41c3abf",
+          "source_hunk_contexts": [
+            "import { describe, expect, it } from 'vitest'",
+            "describe('rechargeBonus helpers', () => {"
+          ]
+        },
+        {
+          "path": "frontend/src/utils/rechargeBonus.ts",
+          "source_parent_blob": "25f1b97fb6387f0fa4097cd01677de95e5e37565",
+          "source_blob": "09a9e3d67c1b9f0f8faa6d97092c3b869da767a1",
+          "baseline_blob": "25f1b97fb6387f0fa4097cd01677de95e5e37565",
+          "source_hunk_contexts": [
+            "export function formatRechargeBonusNumber(value: number): string {"
+          ]
+        },
+        {
+          "path": "frontend/src/views/admin/SettingsView.vue",
+          "source_parent_blob": "a0a5149f9b30b986129ef11cf41f8733aa46431e",
+          "source_blob": "2b68683d953fb9eb6c0350645cbb8481e86629cf",
+          "baseline_blob": "30a09fa969e0fc5f1e9ace219d55b8cf37f077c2",
+          "source_hunk_contexts": [
+            "",
+            "",
+            "import AdminAccessKeysSettings from \"@/components/admin/settings/AdminAccessKeys"
+          ]
+        },
+        {
+          "path": "frontend/src/views/user/PaymentView.vue",
+          "source_parent_blob": "4e64af2efad6bc4f767cb994fa7dde9446b408e0",
+          "source_blob": "247ddd5ce3ce30d143ad9df144dcda3502d3a8d9",
+          "baseline_blob": "882a9bfb3b73d86fbd2a06f8b5963a5fef1e7719",
+          "source_hunk_contexts": [
+            "",
+            "import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiErro"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "5965ac4e93a83d5386dee8981b47f81c1ab3c1b5",
+      "subject": "feat(settings): \u7cfb\u7edf\u8bbe\u7f6e\u4fdd\u5b58\u6309\u94ae\u6539\u4e3a\u5e95\u90e8\u5438\u9644\u6d6e\u6807",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "frontend/src/views/admin/SettingsView.vue",
+          "source_parent_blob": "5c344267fad18b8c068e100bfdc36036693da653",
+          "source_blob": "c878e42b0cd016571d37b48bef528193b4386825",
+          "baseline_blob": "30a09fa969e0fc5f1e9ace219d55b8cf37f077c2",
+          "source_hunk_contexts": [
+            "",
+            "watch(",
+            "watch("
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "b2a695d617d490242a39b5f245cf2a50ae5d9993",
+      "subject": "fix(openai): normalize Codex Desktop page context",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/handler/openai_gateway_handler.go",
+          "source_parent_blob": "05d9ab319167f01744761eee312157686e8caf65",
+          "source_blob": "81e4ff5b7951231d498b9a4bdf4538018f096c68",
+          "baseline_blob": "cce45d944f2651f044e1a1ab172d9ab76be8fe33",
+          "source_hunk_contexts": [
+            "func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/openai_page_context.go",
+          "source_parent_blob": null,
+          "source_blob": "c61e830425c765258609155b64fc2bf398c093d1",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "backend/internal/handler/openai_page_context_test.go",
+          "source_parent_blob": null,
+          "source_blob": "dccdc6fd82f8192094f4926d5f32d3b19083905b",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "cf1ba819b99d141f3fa85b4ce127087e9ac2920c",
+      "subject": "fix(openai): preserve native Codex image error statuses",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/service/openai_images_json_keepalive.go",
+          "source_parent_blob": "6ad79b1ae59b10d8c964151b9eabdffe96157f76",
+          "source_blob": "a47856444fe3b046228183867794ef6f195ed0de",
+          "baseline_blob": "6ad79b1ae59b10d8c964151b9eabdffe96157f76",
+          "source_hunk_contexts": [
+            "type openAIImagesJSONKeepalive struct {"
+          ]
+        },
+        {
+          "path": "backend/internal/service/openai_images_json_keepalive_test.go",
+          "source_parent_blob": "780f47a1c3a208ad78bb1d717fa0582667b2cc17",
+          "source_blob": "0ee407cd80e627fef3ea54f5f35cc05542644f60",
+          "baseline_blob": "1167ada8c9c183d80b40d07e6ff2cbcd6e1a33d8",
+          "source_hunk_contexts": [
+            "func TestOpenAIImagesJSONKeepalive_FastErrorPreservesStatus(t *testing.T) {"
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "ffd26af50738d4f31b5fdb0ede1c8cd548e0b879",
+      "subject": "test(openai): cover native image routes and proxy deadlines",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": ".gitignore",
+          "source_parent_blob": "93d301f15714bc17ce267b1d9d2bd087f2c505c0",
+          "source_blob": "e2d4140aa3b437a77f8ad924b3976198a1339555",
+          "baseline_blob": "2addf0abad0550289944c5f58a66f1ca1d6e603a",
+          "source_hunk_contexts": [
+            "docs/*"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/openai_images_native_route_test.go",
+          "source_parent_blob": null,
+          "source_blob": "e63e1544e2a1bad96ae08630d5aa8a56553e58e4",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        },
+        {
+          "path": "docs/OPENAI_IMAGES_CODEX.md",
+          "source_parent_blob": null,
+          "source_blob": "f1e70a0e9b782d9ffaad815cfc98eb473d4779f0",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "63f1172292a5604c7f3d1d04300b68058812d925",
+      "subject": "fix(openai): reject invalid UTF-8 Responses bodies",
+      "status": "pending",
+      "fork_commits": [],
+      "rationale": "Pending dependency-aware import/adaptation and regression evidence.",
+      "files": [
+        {
+          "path": "backend/internal/handler/openai_gateway_handler.go",
+          "source_parent_blob": "05d9ab319167f01744761eee312157686e8caf65",
+          "source_blob": "b64c56f6f33131aeaa255ade795cc99bb379da14",
+          "baseline_blob": "cce45d944f2651f044e1a1ab172d9ab76be8fe33",
+          "source_hunk_contexts": [
+            "import (",
+            "func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {"
+          ]
+        },
+        {
+          "path": "backend/internal/handler/openai_responses_utf8_test.go",
+          "source_parent_blob": null,
+          "source_blob": "06e89ebe81ef71a0e5ce3860045c735f7f3ca4a1",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "source_sha": "390ba9905ae21cc2fbff3ad82006152b2c6c0772",
+      "subject": "fix(securityaudit): \u5ba1\u8ba1\u4efb\u52a1\u5165\u961f\u540e\u7acb\u5373\u5524\u9192\u672c\u8fdb\u7a0b worker",
+      "status": "implemented",
+      "fork_commits": [
+        "e649e5e5b9"
+      ],
+      "rationale": "PromptService.NewPromptService wires Enqueuer.notify to Runner.Notify; worker startup drain and enqueue/reclaimer wake preserve periodic polling. Runtime verification pending.",
+      "files": [
+        {
+          "path": "backend/internal/securityaudit/prompt_enqueue.go",
+          "source_parent_blob": "625636c90e81ecff0cfbf37fb63c732516981d41",
+          "source_blob": "6336b477dd2975893f88cb53859b78042432045b",
+          "baseline_blob": "625636c90e81ecff0cfbf37fb63c732516981d41",
+          "source_hunk_contexts": [
+            "type Enqueuer struct {",
+            "func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {"
+          ]
+        },
+        {
+          "path": "backend/internal/securityaudit/prompt_service.go",
+          "source_parent_blob": "a8cefcd6486dc18fe5d6ce3adedb1615696a27c5",
+          "source_blob": "322d3c75e3c4db934c60ec09d10238d1422d9ef9",
+          "baseline_blob": "a8cefcd6486dc18fe5d6ce3adedb1615696a27c5",
+          "source_hunk_contexts": [
+            "func NewPromptService("
+          ]
+        },
+        {
+          "path": "backend/internal/securityaudit/prompt_worker.go",
+          "source_parent_blob": "05ae828f052cd7c8afcc23766c1354f26034592c",
+          "source_blob": "89824299fb05f42dc19b4d153ccac568ad18d4a2",
+          "baseline_blob": "05ae828f052cd7c8afcc23766c1354f26034592c",
+          "source_hunk_contexts": [
+            "import (",
+            "type Runner struct {",
+            "type Runner struct {",
+            "func (r *Runner) Shutdown(ctx context.Context) error {",
+            "func (r *Runner) reclaimer(ctx context.Context) {"
+          ]
+        },
+        {
+          "path": "backend/internal/securityaudit/prompt_worker_test.go",
+          "source_parent_blob": "a91569c2cf73e73d5165110b3e6be4293c4920d3",
+          "source_blob": "a8de8833e8cde33fe301d859ffe75e73b77c8390",
+          "baseline_blob": "a91569c2cf73e73d5165110b3e6be4293c4920d3",
+          "source_hunk_contexts": [
+            "type fakeJobRepository struct {",
+            "func (r *fakeJobRepository) MarkStagingFailed(_ context.Context, _ int64, code,"
+          ]
+        },
+        {
+          "path": "backend/internal/securityaudit/prompt_worker_wake_test.go",
+          "source_parent_blob": null,
+          "source_blob": "715aa43aa13103d7186b48eb6f2e2b85e5ff6fe5",
+          "baseline_blob": null,
+          "source_hunk_contexts": [
+            ""
+          ]
+        }
+      ]
+    }
+  ]
+}
