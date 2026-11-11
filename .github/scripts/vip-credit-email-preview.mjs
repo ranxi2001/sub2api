@@ -16,8 +16,8 @@ const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8'
 const baseline = '6fa7fb86eae7c732794450646dc13831dce87ff1', head = git('rev-parse', 'HEAD')
 const cacheDir = mkdtempSync(join(tmpdir(), 'vip-credit-preview-'))
 const entryName = `.vip-credit-preview-${process.pid}.js`, entry = join(root, entryName)
-const origin = 'http://127.0.0.1:4298', captures = [], errors = [], geometry = [], interactions = []
-let before = true, server, browser
+const origin = 'http://127.0.0.1:4298', captures = [], errors = [], browserWarnings = [], geometry = [], interactions = []
+let before = true, server, browser, activePage
 mkdirSync(output, { recursive: true })
 try {
   writeFileSync(entry, `
@@ -53,9 +53,12 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
   for (const lang of ['zh', 'en']) for (const device of ['desktop', 'mobile']) {
     const context = await browser.newContext({ viewport: device === 'desktop' ? { width: 1280, height: 1000 } : { width: 390, height: 844 }, timezoneId: 'UTC' })
     const page = await context.newPage()
+    activePage = page
     page.on('pageerror', e => errors.push(e.message))
     page.on('console', message => {
-      if (message.type() === 'error') { errors.push(message.text()); console.error(message.text()) }
+      if (message.type() !== 'error') return
+      if (message.text() === 'Permissions policy violation: unload is not allowed in this document.') browserWarnings.push(message.text())
+      else { errors.push(message.text()); console.error(message.text()) }
     })
     await page.route('**/*', route => {
       const url = new URL(route.request().url())
@@ -107,8 +110,17 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
   }
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, baseline, baselineComponentBlob: git('rev-parse', baseline + ':frontend/src/components/admin/user/UserAutoCreditModal.vue'), cssBlob: git('rev-parse', head + ':frontend/src/style.css'), captures, geometry, interactions, errors, boundary: 'GitHub Actions Chromium, actual UserAutoCreditModal and project CSS; isolated synthetic API/auth fixture only. No real users, email, paid API, full navigation or production validation.' }, null, 2) + '\n')
   if (errors.length) throw Error(errors.join('\n'))
+} catch (error) {
+  errors.push(error.stack || String(error))
+  if (activePage && !activePage.isClosed()) {
+    writeFileSync(join(output, 'failure-body.txt'), await activePage.locator('body').innerText())
+    await activePage.screenshot({ path: join(output, 'failure.png'), fullPage: true })
+    const bytes = readFileSync(join(output, 'failure.png'))
+    captures.push({ file: 'failure.png', sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, source: before ? baseline : head, failure: true })
+  }
+  throw error
 } finally {
-  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, baseline, baselineComponentBlob: git('rev-parse', baseline + ':frontend/src/components/admin/user/UserAutoCreditModal.vue'), cssBlob: git('rev-parse', head + ':frontend/src/style.css'), captures, geometry, interactions, errors, boundary: 'GitHub Actions Chromium; actual component and CSS with synthetic API/auth. PNGs are evidence artifacts, not native PR attachments.' }, null, 2) + '\n')
+  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, baseline, baselineComponentBlob: git('rev-parse', baseline + ':frontend/src/components/admin/user/UserAutoCreditModal.vue'), cssBlob: git('rev-parse', head + ':frontend/src/style.css'), captures, geometry, interactions, errors, browserWarnings, boundary: 'GitHub Actions Chromium; actual component and CSS with synthetic API/auth. PNGs are evidence artifacts, not native PR attachments.' }, null, 2) + '\n')
   await browser?.close(); await server?.close()
   rmSync(entry, { force: true }); rmSync(cacheDir, { recursive: true, force: true })
 }
