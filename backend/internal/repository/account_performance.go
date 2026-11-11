@@ -55,7 +55,11 @@ WITH source AS (
  AVG(output_tokens*1000.0/NULLIF(duration_ms,0)) FILTER(WHERE output_tokens>=2 AND duration_ms>0) AS tps,
  COUNT(*) FILTER(WHERE output_tokens>=2 AND duration_ms>0) AS tps_n,
  AVG(first_token_ms) FILTER(WHERE stream AND first_token_ms>=0 AND first_token_ms<=duration_ms AND output_tokens>=2) AS ttft,
- COUNT(*) FILTER(WHERE stream AND first_token_ms>=0 AND first_token_ms<=duration_ms AND output_tokens>=2) AS ttft_n
+ COUNT(*) FILTER(WHERE stream AND first_token_ms>=0 AND first_token_ms<=duration_ms AND output_tokens>=2) AS ttft_n,
+ AVG(100.0*cache_read_tokens/NULLIF(input_tokens::numeric+cache_read_tokens+cache_creation_tokens,0))
+  FILTER(WHERE input_tokens>=0 AND cache_read_tokens>=0 AND cache_creation_tokens>=0) AS cache_percent,
+ COUNT(*) FILTER(WHERE input_tokens>=0 AND cache_read_tokens>=0 AND cache_creation_tokens>=0
+  AND input_tokens::numeric+cache_read_tokens+cache_creation_tokens>0) AS cache_n
  FROM successful GROUP BY account_id
 ), rounds AS (
  SELECT p.account_id,p.id,r.quality_round_id,
@@ -87,7 +91,7 @@ WITH source AS (
  COUNT(*) FILTER(WHERE passed OR failed) AS quality_n FROM rounds GROUP BY account_id
 )
 SELECT ids.id,u.tps,COALESCE(u.tps_n,0),u.ttft,COALESCE(u.ttft_n,0),q.degraded,COALESCE(q.quality_n,0),
- COALESCE(m.config,'{}'),COALESCE(m.revision,0),COALESCE(m.paused,false),COALESCE(m.pause_generation,0),m.paused_at,COALESCE(m.reason,'')
+ COALESCE(m.config,'{}'),COALESCE(m.revision,0),COALESCE(m.paused,false),COALESCE(m.pause_generation,0),m.paused_at,COALESCE(m.reason,''),u.cache_percent,COALESCE(u.cache_n,0)
 FROM unnest($1::bigint[]) ids(id)
 JOIN accounts a ON a.id=ids.id AND a.deleted_at IS NULL
 LEFT JOIN usage u ON u.account_id=ids.id LEFT JOIN quality q ON q.account_id=ids.id
@@ -132,7 +136,7 @@ func readAccountPerformance(ctx context.Context, db sqlExecutor, ids []int64, no
 	for rows.Next() {
 		var m service.AccountPerformance
 		var config []byte
-		if err := rows.Scan(&m.AccountID, &m.AvgTPS, &m.TPSSamples, &m.AvgTTFTMs, &m.TTFTSamples, &m.DegradationPercent, &m.QualitySamples, &config, &m.Revision, &m.Paused, &m.PauseGeneration, &m.PausedAt, &m.Reason); err != nil {
+		if err := rows.Scan(&m.AccountID, &m.AvgTPS, &m.TPSSamples, &m.AvgTTFTMs, &m.TTFTSamples, &m.DegradationPercent, &m.QualitySamples, &config, &m.Revision, &m.Paused, &m.PauseGeneration, &m.PausedAt, &m.Reason, &m.AvgCachePercent, &m.CacheSamples); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(config, &m.Config); err != nil {

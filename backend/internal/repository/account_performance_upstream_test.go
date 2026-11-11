@@ -71,7 +71,7 @@ func TestAccountPerformanceUpstreamWriterReader(t *testing.T) {
 			mock.ExpectQuery("SELECT value FROM settings").WithArgs("account_performance_window_minutes").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("120"))
 			rows := sqlmock.NewRows(performanceColumns)
 			for _, id := range []int64{7, 8, 9} {
-				rows.AddRow(id, nil, 0, nil, 0, nil, 0, "{}", 0, false, 0, nil, "")
+				rows.AddRow(id, nil, 0, nil, 0, nil, 0, "{}", 0, false, 0, nil, "", nil, 0)
 			}
 			mock.ExpectQuery("WITH source").WithArgs("{7,8,9}", since, now).WillReturnRows(rows)
 			data, err := (&accountPerformanceRepository{db: db}).Read(context.Background(), []int64{7, 8, 9}, now)

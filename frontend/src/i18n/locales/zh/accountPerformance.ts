@@ -1,4 +1,6 @@
 export default {
+ avgCache: '平均缓存',
+ cacheNote: '最近{minutes}分钟有效请求缓存命中率的算术平均。每条请求：缓存读取 token ÷（未缓存输入 + 缓存读取 + 缓存写入 token）× 100，再按请求等权平均，不按 Token 加权。沿用性能列的请求开始时间和完整成功文本请求范围；无唯一完整耗时记录、失败、媒体、负数或输入总量为0的记录不计入。有效样本 {samples} 条；无样本显示未采集，真实零命中显示0.0%。此项仅供展示，不参与阈值暂停或调度评分。',
  upstreamErrorRate: '上游错误率',
  localSample: '本进程',
  localWindowComplete: '本进程已保留此窗口历史；通道路由覆盖仍不完整。',
@@ -24,7 +26,7 @@ export default {
  refresh: '重新加载', reason: '触发指标：{reason}', auditUnavailable: '审计记录暂不可用',
  settings: {
   title: '账号性能监控周期',
-  description: '全局配置 TPS、首字耗时、探针轮次降智率及本进程上游 HTTP 错误率的滚动统计周期。',
+  description: '全局配置 TPS、平均缓存、首字耗时、探针轮次降智率及本进程上游 HTTP 错误率的滚动统计周期。',
   windowMinutes: '统计周期（分钟）',
   windowHint: '默认 60 分钟，可设置为 1–1440 的整数；所有账号共用此周期。',
   effectHint: '保存后，后续统计与阈值评估使用新周期，无需重启。仍每 30 秒评估一次；更改周期不会解除已有暂停。',

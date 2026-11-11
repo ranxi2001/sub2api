@@ -17,11 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var performanceColumns = []string{"id", "tps", "tps_n", "ttft", "ttft_n", "degraded", "quality_n", "config", "revision", "paused", "pause_generation", "paused_at", "reason"}
+var performanceColumns = []string{"id", "tps", "tps_n", "ttft", "ttft_n", "degraded", "quality_n", "config", "revision", "paused", "pause_generation", "paused_at", "reason", "cache_percent", "cache_n"}
 
 func performanceRow(config service.PerformanceConfig) *sqlmock.Rows {
 	raw, _ := json.Marshal(config)
-	return sqlmock.NewRows(performanceColumns).AddRow(7, nil, 0, nil, 0, nil, 0, string(raw), 1, false, 0, nil, "")
+	return sqlmock.NewRows(performanceColumns).AddRow(7, nil, 0, nil, 0, nil, 0, string(raw), 1, false, 0, nil, "", nil, 0)
 }
 func TestAccountPerformanceQueryBoundsAndMissingSamples(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -35,6 +35,8 @@ func TestAccountPerformanceQueryBoundsAndMissingSamples(t *testing.T) {
 	mock.ExpectQuery("WITH source").WithArgs("{7}", now.Add(-60*time.Minute), now).WillReturnRows(performanceRow(service.PerformanceConfig{}))
 	got, err := readAccountPerformance(context.Background(), db, []int64{7}, now)
 	require.NoError(t, err)
+	require.Nil(t, got[7].AvgCachePercent)
+	require.Zero(t, got[7].CacheSamples)
 	require.Nil(t, got[7].AvgTPS)
 	require.Nil(t, got[7].AvgTTFTMs)
 	require.Nil(t, got[7].DegradationPercent)
@@ -93,7 +95,7 @@ func TestAccountPerformanceEvaluatePauseAuditAtomicAndLatched(t *testing.T) {
 	mock.ExpectQuery("SELECT id FROM accounts.*FOR SHARE").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectQuery("SELECT config,revision,paused,pause_generation.*FOR UPDATE SKIP LOCKED").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"config", "revision", "paused", "pause_generation"}).AddRow(string(raw), 1, false, 0))
 	mock.ExpectQuery("SELECT value FROM settings").WillReturnRows(sqlmock.NewRows([]string{"value"}))
-	mock.ExpectQuery("WITH source").WillReturnRows(sqlmock.NewRows(performanceColumns).AddRow(7, 5, 2, nil, 0, nil, 0, string(raw), 1, false, 0, nil, ""))
+	mock.ExpectQuery("WITH source").WillReturnRows(sqlmock.NewRows(performanceColumns).AddRow(7, 5, 2, nil, 0, nil, 0, string(raw), 1, false, 0, nil, "", nil, 0))
 	mock.ExpectExec("UPDATE account_performance_monitors SET paused=true").WithArgs(int64(7), now, "tps").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO account_performance_events").WithArgs(int64(7), "pause", int64(0), int64(1), int64(1), sqlmock.AnyArg()).WillReturnError(errors.New("audit unavailable"))
 	mock.ExpectRollback()

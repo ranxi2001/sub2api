@@ -3,6 +3,12 @@
     <div v-for="line in lines" :key="line.key" :data-metric="line.key" class="flex justify-between gap-3 py-0.5">
       <span class="inline-flex items-center text-gray-500 dark:text-gray-400">
         {{ line.label }}
+        <template v-if="line.key === 'cache'">
+          <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.accountAverageCache" :user-id="noticeUserId" compact />
+          <HelpTooltip :content="cacheTooltip" trigger="click" width-class="w-80">
+            <template #trigger><button type="button" data-testid="cache-help" class="rounded px-1 text-gray-400" :aria-label="t('accountPerformance.avgCache')">ⓘ</button></template>
+          </HelpTooltip>
+        </template>
         <template v-if="line.key === 'upstream'">
           <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.accountUpstreamHTTPErrorRate" :user-id="noticeUserId" compact />
           <HelpTooltip :content="upstreamTooltip" trigger="click" width-class="w-80">
@@ -56,10 +62,17 @@ const upstreamTooltip = computed(() => {
  const e = upstream.value
  return t('accountPerformance.upstreamHTTPNote', { minutes: windowMinutes.value, failures: e?.failures ?? 0, total: e?.total ?? 0, since: e?.observed_since ?? '—', validity: t(e?.window_complete ? 'accountPerformance.localWindowComplete' : 'accountPerformance.partialHistory') })
 })
+const cachePercent = computed(() => {
+ const value = props.metrics?.avg_cache_percent
+ const samples = props.metrics?.cache_samples
+ return value != null && Number.isFinite(value) && value >= 0 && value <= 100 && Number.isSafeInteger(samples) && (samples ?? 0) > 0 ? value : null
+})
+const cacheTooltip = computed(() => t('accountPerformance.cacheNote', { minutes: windowMinutes.value, samples: props.metrics?.cache_samples ?? 0 }))
 const lines=computed(()=>[
  {key:'tps',label:t('accountPerformance.tps'),value:format(props.metrics?.avg_tps,' t/s'),color:metricColor(props.metrics?.avg_tps,tpsSeverity)},
  {key:'degradation',label:t('accountPerformance.degradation', { minutes: windowMinutes.value }),value:format(props.metrics?.degradation_percent,'%'),color:degradationColor(props.metrics?.degradation_percent)},
  {key:'ttft',label:t('accountPerformance.ttft'),value:format(props.metrics?.avg_ttft_ms,'s',1000),color:metricColor(props.metrics?.avg_ttft_ms,firstTokenSeverity)},
+ {key:'cache',label:t('accountPerformance.avgCache'),value:format(cachePercent.value,'%'),color:uncollectedClass},
  {key:'upstream',label:t('accountPerformance.upstreamErrorRate'),value:upstreamValue.value,color:upstreamColor.value}
 ])
 </script>

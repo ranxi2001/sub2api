@@ -33,6 +33,9 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 		name        string
 		event       time.Time
 		recorded    time.Time
+		input       int
+		read        int
+		write       int
 		output      int
 		duration    int
 		ttft        int
@@ -45,6 +48,7 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 		row := &service.UsageLog{
 			UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID,
 			RequestID: suffix + "-" + s.name, Model: "synthetic-performance",
+			InputTokens: s.input, CacheReadTokens: s.read, CacheCreationTokens: s.write,
 			OutputTokens: s.output, DurationMs: &s.duration, FirstTokenMs: &s.ttft,
 			Stream: true, RateMultiplier: 1, BillingMode: &billingMode, CreatedAt: s.recorded,
 		}
@@ -68,9 +72,9 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 		}
 	}
 	// Lower boundary is inclusive; completion/insert happens after event start.
-	add(sample{name: "inclusive-start-z", event: since, recorded: since.Add(2 * time.Second), output: 100, duration: 2000, ttft: 500, traces: 1})
+	add(sample{name: "inclusive-start-z", input: 25, read: 50, write: 25, event: since, recorded: since.Add(2 * time.Second), output: 100, duration: 2000, ttft: 500, traces: 1})
 	// RFC3339Nano and explicit timezone offset must work on PostgreSQL 14-18.
-	add(sample{name: "nanoseconds-offset", event: now.Add(-5 * time.Minute).Add(123456789 * time.Nanosecond).In(time.FixedZone("fixture", 9*3600)), recorded: now.Add(-4 * time.Minute), output: 400, duration: 4000, ttft: 1500, traces: 1})
+	add(sample{name: "nanoseconds-offset", input: 100, read: 900, event: now.Add(-5 * time.Minute).Add(123456789 * time.Nanosecond).In(time.FixedZone("fixture", 9*3600)), recorded: now.Add(-4 * time.Minute), output: 400, duration: 4000, ttft: 1500, traces: 1})
 
 	for _, s := range []sample{
 		// Delayed insertion cannot pull an older event into the window.
@@ -92,13 +96,29 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 		if s.event.After(now) {
 			s.recorded = s.event.Add(time.Second)
 		}
+		s.input, s.read = 1, 999
 		s.output, s.duration, s.ttft = 9000, 1000, 900
+		add(s)
+	}
+
+	// Cache samples have their own validity: no prompt or negative buckets are unknown.
+	// Zero output keeps these records out of the TPS/TTFT samples above.
+	for _, s := range []sample{
+		{name: "zero-prompt"},
+		{name: "negative-input", input: -1, read: 10},
+		{name: "negative-read", input: 10, read: -1},
+		{name: "negative-write", input: 10, read: 10, write: -1},
+	} {
+		s.event, s.recorded, s.traces = now.Add(-time.Minute), now, 1
 		add(s)
 	}
 
 	metrics, err := readAccountPerformance(ctx, tx, []int64{account.ID, empty.ID}, now)
 	require.NoError(t, err, "execute production metrics SQL against migrated PostgreSQL")
 	got := metrics[account.ID]
+	require.Equal(t, 2, got.CacheSamples)
+	require.NotNil(t, got.AvgCachePercent)
+	require.InDelta(t, 70, *got.AvgCachePercent, 0.00001, "request average of 50%% and 90%%, not token-weighted; includes cache writes")
 	require.Equal(t, 2, got.TPSSamples)
 	require.Equal(t, 2, got.TTFTSamples)
 	require.NotNil(t, got.AvgTPS)
@@ -109,6 +129,8 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 	require.Zero(t, got.QualitySamples)
 	require.Equal(t, since, got.WindowStart)
 	require.Equal(t, now, got.WindowEnd)
+	require.Nil(t, metrics[empty.ID].AvgCachePercent)
+	require.Zero(t, metrics[empty.ID].CacheSamples)
 	require.Nil(t, metrics[empty.ID].AvgTPS)
 	require.Nil(t, metrics[empty.ID].AvgTTFTMs)
 	require.Nil(t, metrics[empty.ID].DegradationPercent)
@@ -135,6 +157,16 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 	require.Equal(t, 1, got.TTFTSamples)
 	require.InDelta(t, 100, *got.AvgTPS, 0.00001)
 	require.InDelta(t, 1500, *got.AvgTTFTMs, 0.00001)
+	require.Equal(t, 1, got.CacheSamples)
+	require.InDelta(t, 90, *got.AvgCachePercent, 0.00001)
+
+	// Measured zero is included even without TPS output; all-cache is valid 100%.
+	add(sample{name: "measured-zero", input: 100, event: now, recorded: now, traces: 1})
+	add(sample{name: "all-cache", read: 200, event: now, recorded: now, traces: 1})
+	metrics, err = readAccountPerformance(ctx, tx, []int64{account.ID}, now)
+	require.NoError(t, err)
+	require.Equal(t, 3, metrics[account.ID].CacheSamples)
+	require.InDelta(t, (90.0+0+100)/3, *metrics[account.ID].AvgCachePercent, 0.00001)
 }
 
 func TestAccountPerformancePostgresCompletedQualityProbeRounds(t *testing.T) {
