@@ -1,0 +1,85 @@
+name: 2FA import bounded parallel
+
+on:
+  push:
+    branches: [feat/twofa-import-bounded-parallel]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: twofa-import-parallel-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_BASE: 8132f162a0ad76acd60b701ac4694fd70d2d75f1
+  EXPECTED_HEAD: ${{ github.sha }}
+
+jobs:
+  baseline-red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install locked dependencies on remote runner only
+        run: pnpm --dir frontend install --frozen-lockfile
+      - name: Isolate exact production sources and retain new mounted regression
+        run: |
+          set -euo pipefail
+          mkdir -p evidence "$RUNNER_TEMP/twofa-red"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code
+          git rev-parse HEAD > evidence/head.txt
+          git rev-parse "$SOURCE_BASE" > evidence/base.txt
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/twofa-red"
+          cmp frontend/package.json "$RUNNER_TEMP/twofa-red/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/twofa-red/frontend/pnpm-lock.yaml"
+          component=frontend/src/components/account/OpenAITwoFAImport.vue
+          git rev-parse "$SOURCE_BASE:$component" > evidence/baseline-component-blob.txt
+          git hash-object "$RUNNER_TEMP/twofa-red/$component" > evidence/red-component-blob.txt
+          cmp evidence/baseline-component-blob.txt evidence/red-component-blob.txt
+          cp frontend/src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts "$RUNNER_TEMP/twofa-red/frontend/src/components/account/__tests__/"
+          sha256sum frontend/src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts > evidence/test-input.sha256
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/twofa-red/frontend/node_modules"
+      - name: Prove assertion RED rather than a compilation or setup failure
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'pnpm exec vitest run src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts --reporter=verbose --reporter=json --outputFile.json=<evidence>/red.json' > evidence/red-command.txt
+          set +e
+          (cd "$RUNNER_TEMP/twofa-red/frontend" && pnpm exec vitest run src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/red.json") > evidence/red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red.log
+          printf '%s\n' "$result" > evidence/red-exit.txt
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs'
+          import assert from 'node:assert/strict'
+          const report = JSON.parse(readFileSync('evidence/red.json', 'utf8'))
+          assert.equal(report.numRuntimeErrorTestSuites, 0)
+          assert(report.numPassedTests > 0)
+          const regression = report.testResults.flatMap(suite => suite.assertionResults).find(test => test.title.startsWith('overlaps exactly three'))
+          assert.equal(regression?.status, 'failed')
+          assert.match(regression.failureMessages.join('\n'), /AssertionError/)
+          assert.match(regression.failureMessages.join('\n'), /3 times.*1 times|1 times.*3 times/s)
+          JS
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: twofa-red-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
