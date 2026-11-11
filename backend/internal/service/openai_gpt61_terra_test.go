@@ -45,12 +45,12 @@ func TestGPT61TerraIdentityAndEffort(t *testing.T) {
 		require.Equal(t, "gpt-6.1-terra", chatConverted.Model)
 		require.Equal(t, effort, chatConverted.Reasoning.Effort)
 		require.Len(t, chatConverted.Tools, 1)
-		require.NoError(t, validateGPT61SolCompatRequest([]byte(`{"reasoning":{"effort":"`+effort+`"}}`), model))
+		require.NoError(t, validateGPT61CompatRequest([]byte(`{"reasoning":{"effort":"`+effort+`"}}`), model))
 	}
-	for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-terra-openai-compact", "openai/gpt_6.1_terra"} {
+	for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-terra-openai-compact", "openai/gpt_6.1_terra", "gpt-6.1-terra-minimal", "openai/GPT_6.1_TERRA_MINIMAL"} {
 		require.Equal(t, "gpt-6.1-terra", normalizeKnownOpenAICodexModel(model))
 	}
-	for _, model := range []string{"gpt-6.1-sol", "gpt-5.6-terra", "gpt-6.1-terra-pro", "gpt-6.1-terra-ultra", "gpt-6.1-terra-minimal"} {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-5.6-terra", "gpt-6.1-terra-pro", "gpt-6.1-terra-ultra"} {
 		require.False(t, openai.IsGPT61TerraModelSpelling(model))
 	}
 	descriptor := newConfiguredCodexModelDescriptor("gpt-6.1-terra")

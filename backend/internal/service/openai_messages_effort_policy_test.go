@@ -23,16 +23,30 @@ func TestMessagesEffortPolicyHTTP(t *testing.T) {
 		for _, auth := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
 			for _, stream := range []bool{false, true} {
 				for _, test := range []struct {
-					name       string
-					preference string
-					mappings   []ReasoningEffortMapping
-					ceiling    string
-					overLimit  string
-					model      string
-					terminal   bool
-					want       string
-					status     int
+					name          string
+					preference    string
+					mappings      []ReasoningEffortMapping
+					ceiling       string
+					overLimit     string
+					model         string
+					upstreamModel string
+					terminal      bool
+					want          string
+					status        int
 				}{
+					{name: "terra none allowed", upstreamModel: "gpt-6.1-terra", preference: `,"output_config":{"effort":"none"}`, want: "none"},
+					{name: "terra disabled allowed", upstreamModel: "gpt-6.1-terra", preference: `,"thinking":{"type":"disabled"}`, want: "none"},
+					{name: "terra minimal rejected", upstreamModel: "gpt-6.1-terra", preference: `,"output_config":{"effort":"minimal"}`, status: 400},
+					{name: "terra minimal cannot be mapped away", upstreamModel: "gpt-6.1-terra", preference: `,"output_config":{"effort":"minimal"}`, mappings: []ReasoningEffortMapping{{From: "minimal", To: "low"}}, status: 400},
+					{name: "terra minimal cannot be hidden by disabled", upstreamModel: "gpt-6.1-terra", preference: `,"thinking":{"type":"disabled"},"output_config":{"effort":"minimal"}`, mappings: noneToLow, status: 400},
+					{name: "terra native minimal cannot be hidden", upstreamModel: "gpt-6.1-terra", preference: `,"thinking":{"type":"disabled"},"reasoning":{"effort":"minimal"}`, mappings: noneToLow, status: 400},
+					{name: "terra chat minimal cannot be hidden", upstreamModel: "gpt-6.1-terra", preference: `,"thinking":{"type":"disabled"},"reasoning_effort":"minimal"`, mappings: noneToLow, status: 400},
+					{name: "terra minimal suffix rejected", model: "gpt-6.1-terra-minimal", upstreamModel: "gpt-6.1-terra", mappings: []ReasoningEffortMapping{{From: "minimal", To: "low"}}, status: 400},
+					{name: "terra underscore minimal cannot be hidden", model: "openai/GPT_6.1_TERRA_MINIMAL", upstreamModel: "gpt-6.1-terra", preference: `,"thinking":{"type":"disabled"}`, mappings: noneToLow, status: 400},
+					{name: "terra none suffix allowed", model: "openai/gpt_6.1_terra_none", upstreamModel: "gpt-6.1-terra", want: "none"},
+					{name: "terra mapped valid final", upstreamModel: "gpt-6.1-terra", preference: `,"thinking":{"type":"disabled"}`, mappings: noneToLow, want: "low"},
+					{name: "terra mapping applied once", upstreamModel: "gpt-6.1-terra", preference: `,"output_config":{"effort":"high"}`, mappings: []ReasoningEffortMapping{{From: "high", To: "low"}, {From: "low", To: "medium"}}, want: "low"},
+					{name: "terra mapped invalid final rejected", upstreamModel: "gpt-6.1-terra", preference: `,"output_config":{"effort":"high"}`, mappings: []ReasoningEffortMapping{{From: "high", To: "minimal"}}, status: 400},
 					{name: "omitted unchanged", want: "medium"},
 					{name: "omitted unrelated mapping unchanged", mappings: []ReasoningEffortMapping{{From: "medium", To: "low"}}, want: "medium"},
 					{name: "omitted ceiling unchanged", ceiling: "low", want: "medium"},
@@ -74,13 +88,17 @@ func TestMessagesEffortPolicyHTTP(t *testing.T) {
 					{name: "terminal override raw rejected", terminal: true, preference: `,"thinking":{"type":"disabled"},"output_config":{"effort":"none"}`, mappings: noneToLow, status: 400},
 				} {
 					t.Run(fmt.Sprintf("chat=%t/%s/stream=%t/%s", chat, auth, stream, test.name), func(t *testing.T) {
+						upstreamModel := test.upstreamModel
+						if upstreamModel == "" {
+							upstreamModel = "gpt-6.1-sol"
+						}
 						model := test.model
 						if model == "" {
-							model = "gpt-6.1-sol"
+							model = upstreamModel
 						}
-						account := rawGPT56ResponsesAPIKeyAccount(model, "gpt-6.1-sol")
+						account := rawGPT56ResponsesAPIKeyAccount(model, upstreamModel)
 						if auth == AccountTypeOAuth {
-							account = rawGPT56ResponsesOAuthAccount(model, "gpt-6.1-sol")
+							account = rawGPT56ResponsesOAuthAccount(model, upstreamModel)
 						}
 						if chat {
 							account.Extra = map[string]any{openai_compat.ExtraKeyResponsesMode: string(openai_compat.ResponsesSupportModeForceChatCompletions)}
@@ -92,12 +110,12 @@ func TestMessagesEffortPolicyHTTP(t *testing.T) {
 							account.Credentials["model_mapping"] = map[string]any{"gpt-6.1-sol": "gpt-6-sol"}
 						}
 						usesChat := chat && auth == AccountTypeAPIKey
-						response := openAICompatSSECompletedResponse("resp_effort", "gpt-6.1-sol")
+						response := openAICompatSSECompletedResponse("resp_effort", upstreamModel)
 						if usesChat {
-							payload := `{"id":"chat_effort","model":"gpt-6.1-sol","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}`
+							payload := `{"id":"chat_effort","model":"` + upstreamModel + `","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}`
 							contentType := "application/json"
 							if stream {
-								payload = "data: " + `{"id":"chat_effort","model":"gpt-6.1-sol","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}` + "\n\ndata: [DONE]\n\n"
+								payload = "data: " + `{"id":"chat_effort","model":"` + upstreamModel + `","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}` + "\n\ndata: [DONE]\n\n"
 								contentType = "text/event-stream"
 							}
 							response = &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(payload))}
@@ -130,7 +148,7 @@ func TestMessagesEffortPolicyHTTP(t *testing.T) {
 						require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 						require.Len(t, upstream.requests, 1)
 						require.True(t, strings.HasSuffix(upstream.lastReq.URL.Path, endpoint), upstream.lastReq.URL.String())
-						require.Equal(t, "gpt-6.1-sol", gjson.GetBytes(upstream.lastBody, "model").String())
+						require.Equal(t, upstreamModel, gjson.GetBytes(upstream.lastBody, "model").String())
 						require.Equal(t, test.want, gjson.GetBytes(upstream.lastBody, preferredEffortPath).String())
 						require.False(t, gjson.GetBytes(upstream.lastBody, "temperature").Exists())
 						require.False(t, gjson.GetBytes(upstream.lastBody, "top_p").Exists())
@@ -168,8 +186,8 @@ func TestMessagesRawEffortValidation(t *testing.T) {
 		{body: `{"model":"gpt-6.1-sol_low","output_config":{"effort":"low"}}`},
 		{body: `{"model":"gpt-6.1-sol","output_config":{"effort":"high"}}`},
 	} {
-		require.Equal(t, test.deny, validateGPT61SolRawEffort([]byte(test.body), "gpt-6.1-sol") != nil, test.body)
-		require.NoError(t, validateGPT61SolRawEffort([]byte(test.body), "gpt-6-sol"))
+		require.Equal(t, test.deny, validateGPT61RawEffort([]byte(test.body), "gpt-6.1-sol") != nil, test.body)
+		require.NoError(t, validateGPT61RawEffort([]byte(test.body), "gpt-6-sol"))
 	}
 }
 

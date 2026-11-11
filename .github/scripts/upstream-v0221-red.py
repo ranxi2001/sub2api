@@ -9,7 +9,8 @@ import sys
 
 BASE = '6fa7fb86eae7c732794450646dc13831dce87ff1'
 CASES = {
-    'glm': ('internal/service', '^TestMessagesGLMMappedEffortPolicyHTTP$', 'backend/internal/service/openai_reasoning_effort_policy.go', 'applyOpenAIReasoningEffortPolicyForGLMFromContext'),
+    'glm': ('internal/service', '^Test(MessagesGLMMappedEffortPolicyHTTP|OpenAIMessagesGLMReasoningPricingUsesForwardedEffort)$', 'backend/internal/service/openai_reasoning_effort_policy.go', 'applyOpenAIReasoningEffortPolicyForGLMFromContext'),
+    'terra': ('internal/service', '^TestMessagesEffortPolicyHTTP$', 'backend/internal/service/openai_gateway_request_body.go', 'validateGPT61RawEffort'),
     'auth': ('internal/service', '^TestAuthServiceRefreshTokenPairConsumesTokenOnce$', 'backend/internal/service/auth_service.go', None),
     'slot': ('internal/service', '^TestGatewayServiceNewSelectionResultReleasesSlotOnHydrationError$', 'backend/internal/service/gateway_scheduling.go', None),
     'metadata': ('internal/service', '^TestRelayStallsMetadataBeforeCapacityFailure$', 'backend/internal/service/openai_gateway_passthrough.go', 'openAIStreamEventIsMetadata'),
@@ -72,7 +73,13 @@ def main():
     source = pathlib.Path(target)
     candidate = source.read_text()
     baseline_ref = '811346e0256a75a978951beff0657a6a3bcf4a60' if case == 'glm' else BASE
+    if case == 'terra':
+        baseline_ref = 'e39708cc31091a8540c5b895c13add0842d4afc5'
     baseline = subprocess.check_output(['git', 'show', baseline_ref + ':' + target], text=True)
+    if case == 'terra':
+        # Restore the exact Sol-only raw validator; rename its declaration to
+        # the candidate API so missing symbols cannot masquerade as RED.
+        baseline = baseline.replace('func validateGPT61SolRawEffort(', 'func validateGPT61RawEffort(')
     evidence = {'case': case, 'candidate': expected, 'baseline': baseline_ref, 'target': target,
                 'candidate_blob': git('hash-object', target), 'baseline_blob': git('rev-parse', baseline_ref + ':' + target),
                 'command': 'go test -json -tags=unit ./' + package + ' -run ' + pattern + ' -count=1 -timeout=5m'}
@@ -91,6 +98,8 @@ def main():
         x, y = method(baseline, function)
         overlay = candidate[:a] + baseline[x:y] + candidate[b:]
         evidence['restored_method'] = function
+        if case == 'terra':
+            evidence['baseline_method'] = 'validateGPT61SolRawEffort (declaration renamed only)'
     else:
         overlay = baseline
         evidence['restored_whole_file'] = True

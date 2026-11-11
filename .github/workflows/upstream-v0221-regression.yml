@@ -39,12 +39,12 @@ jobs:
           -count=3 -v -timeout=5m
       - name: Race and resource lifecycle packages
         working-directory: backend
-        run: go test -race -tags=unit ./internal/pkg/apicompat ./internal/pkg/antigravity ./internal/pkg/claude ./internal/pkg/sysutil ./internal/securityaudit ./internal/service/openai_ws_v2 ./internal/pkg/httputil -count=1 -v -timeout=20m
+        run: go test -race -tags=unit ./internal/pkg/apicompat ./internal/pkg/openai ./internal/pkg/antigravity ./internal/pkg/claude ./internal/pkg/sysutil ./internal/securityaudit ./internal/service/openai_ws_v2 ./internal/pkg/httputil -count=1 -v -timeout=20m
       - name: Gateway, authentication, pricing and scheduling regressions
         working-directory: backend
         run: >-
           go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository ./internal/server/middleware ./internal/payment/provider ./internal/config
-          -run 'Test(OrphanCleanup|Issue715|WSNodeOwner|Messages|NativeImages|AsyncImage|RequestBody|OpenAI|AnthropicCompat|AuthServiceRefresh|RefreshTokenCache|GatewayServiceNewSelection|Antigravity|ConvertGeminiToClaude|GeminiResponseToChatCompletions|Claude52|NewModelPricing|PricingSync|EasyPay|ExecuteEasyPay|UpdatePaymentConfig|AutoRequestBody|LoadRequestBody|PoolCapacity|AgentRecovery|UsageLog|ChannelCacheWrite|ApplyMigrationsFS)'
+          -run 'Test(GPT61|OrphanCleanup|Issue715|WSNodeOwner|Messages|NativeImages|AsyncImage|RequestBody|OpenAI|AnthropicCompat|AuthServiceRefresh|RefreshTokenCache|GatewayServiceNewSelection|Antigravity|ConvertGeminiToClaude|GeminiResponseToChatCompletions|Claude52|NewModelPricing|PricingSync|EasyPay|ExecuteEasyPay|UpdatePaymentConfig|AutoRequestBody|LoadRequestBody|PoolCapacity|AgentRecovery|UsageLog|ChannelCacheWrite|ApplyMigrationsFS)'
           -count=1 -v -timeout=30m
       - name: Migration source contracts
         working-directory: backend
@@ -89,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        defect: [auth, slot, metadata, session, ttl, memory, sealed, refund, glm]
+        defect: [auth, slot, metadata, session, ttl, memory, sealed, refund, glm, terra]
     steps:
       - uses: actions/checkout@v6
         with:

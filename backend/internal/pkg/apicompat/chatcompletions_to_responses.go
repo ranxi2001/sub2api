@@ -28,7 +28,7 @@ func ChatCompletionsToResponsesWithMinOutputTokens(req *ChatCompletionsRequest, 
 	// Legacy Responses ingress still distinguishes native reasoning from the
 	// flat Chat alias when deciding which top-level fields to replace.
 	effort := req.EffectiveReasoningEffort()
-	if err := openai.ValidateGPT61SolReasoningEffort(req.Model, effort); err != nil {
+	if err := openai.ValidateGPT61ReasoningEffort(req.Model, effort); err != nil {
 		return nil, err
 	}
 	input, err := convertChatMessagesToResponsesInput(req.Messages)

@@ -90,7 +90,7 @@ Feature checkboxes below mean source coverage; dynamic acceptance remains a sepa
 
 - [ ] Full backend compilation and production adapter/unit/integration coverage on exact published head.
 - [ ] Frontend lint, typecheck, complete tests and build on exact published head.
-- [ ] Critical old-code behavioral RED / current GREEN, including the final upstream GLM merge; compile failures are not RED.
+- [ ] Critical old-code behavioral RED / current GREEN, including the final upstream GLM pricing matrix and Terra raw/final validation merge; compile failures are not RED.
 - [ ] Race/resource lifecycle, migration and security gates on the latest head.
 - [ ] New admin feature notice registration, shared dismissal and A→B→C regressions.
 - [ ] Current exact-head real CSS baseline/candidate screenshots and supervisor native attachment upload/hash/readback. Historical3a46/bce3 evidence remains historical; retained VIP/priority dependency changes mean current UI provenance must be evaluated explicitly.
