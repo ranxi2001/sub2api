@@ -300,7 +300,7 @@
     },
     {
       "id": "qwen",
-      "display_name": "千问 Qwen",
+      "display_name": "Qwen",
       "gateway": "openai",
       "cn_provider": false,
       "litellm_provider": "dashscope",

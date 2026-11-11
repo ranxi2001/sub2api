@@ -36,7 +36,7 @@ mount(Form,{attachTo:'#app',props:{show:true,proxies:[],groups:[]},global:{plugi
   await page.getByTestId('platform-button-qwen').click()
   await page.locator('#create-account-form input[type=text]').first().fill('Qwen Demo')
   assert.equal(await page.getByTestId('generic-account-mode').count(),0)
-  assert.ok((await page.locator('body').innerText()).includes('千问 Qwen'))
+  assert.equal((await page.getByTestId('platform-button-qwen').innerText()).trim(),'Qwen')
   await page.screenshot({path:path.join(out,'qwen-account-'+lang+'.png'),fullPage:true})
   await page.getByTestId('qwen-platform-notice').getByTestId('new-feature-badge').click()
   assert.equal(await page.getByTestId('qwen-platform-notice').getByTestId('new-feature-badge').count(),0)
