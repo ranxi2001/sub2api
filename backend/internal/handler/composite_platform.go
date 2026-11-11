@@ -197,7 +197,7 @@ func prepareOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey
 		// An explicit ultra model suffix is a client preference, not a bridge
 		// default. Enforce it before conversion or account/model normalization.
 		requested := service.CanonicalRequestedReasoningEffort(nil, requestModel)
-		if requested == nil || *requested != "ultra" {
+		if requested == nil || *requested != "ultra" || gjson.GetBytes(body, "thinking.type").String() == "disabled" {
 			c.Request = c.Request.WithContext(service.WithOpenAIReasoningEffortPolicyForMessages(c.Request.Context(), body, maxEffort, mappings, overLimit, requestModel))
 			return body, nil
 		}
