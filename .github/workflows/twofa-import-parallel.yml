@@ -113,28 +113,50 @@ jobs:
           git rev-parse "$SOURCE_BASE" > evidence/base.txt
           git diff --check "$SOURCE_BASE" HEAD
           git diff --name-only "$SOURCE_BASE" HEAD > evidence/changed-files.txt
+          git diff --name-only -z "$SOURCE_BASE" HEAD | xargs -0 sha256sum > evidence/changed-files.sha256
       - name: Install locked dependencies on remote runner only
         run: pnpm --dir frontend install --frozen-lockfile
       - name: Mounted regressions and affected integration boundaries
         run: |
           set -o pipefail
-          printf '%s\n' 'pnpm --dir frontend exec vitest run <2FA component, parent, autoBPS, channel binding, encryption, API, locale suites>' > evidence/green-command.txt
-          pnpm --dir frontend exec vitest run src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts src/components/account/__tests__/OpenAITwoFAImport.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts src/components/account/__tests__/UpstreamChannelBinding.spec.ts src/components/account/__tests__/CredentialEncryptionSetup.spec.ts src/api/admin/__tests__/accountTokenGuard.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/green.json" 2>&1 | tee evidence/green.log
+          tests=(src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts src/components/account/__tests__/OpenAITwoFAImport.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts src/components/account/__tests__/UpstreamChannelBinding.spec.ts src/components/account/__tests__/CredentialEncryptionSetup.spec.ts src/api/admin/__tests__/accountTokenGuard.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts)
+          command=(pnpm --dir frontend exec vitest run "${tests[@]}" --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/green.json")
+          printf '%q ' "${command[@]}" > evidence/green-command.txt
+          set +e
+          "${command[@]}" 2>&1 | tee evidence/green.log
+          result=$?
+          printf '%s\n' "$result" > evidence/green-exit.txt
+          exit "$result"
       - name: Lint changed frontend sources without mutation
         if: always()
         run: |
           set -o pipefail
+          printf '%s\n' 'git diff --name-only -z "$SOURCE_BASE" HEAD -- frontend/src/*.ts frontend/src/*.vue | sed -z s#frontend/##g | (cd frontend && xargs -0 pnpm exec eslint)' > evidence/lint-command.txt
+          set +e
           git diff --name-only -z "$SOURCE_BASE" HEAD -- 'frontend/src/*.ts' 'frontend/src/*.vue' | sed -z 's#frontend/##g' | (cd frontend && xargs -0 pnpm exec eslint) 2>&1 | tee evidence/lint.log
+          result=$?
+          printf '%s\n' "$result" > evidence/lint-exit.txt
+          exit "$result"
       - name: Frontend typecheck
         if: always()
         run: |
           set -o pipefail
+          printf '%s\n' 'pnpm --dir frontend run typecheck' > evidence/typecheck-command.txt
+          set +e
           pnpm --dir frontend run typecheck 2>&1 | tee evidence/typecheck.log
+          result=$?
+          printf '%s\n' "$result" > evidence/typecheck-exit.txt
+          exit "$result"
       - name: Frontend production build
         if: always()
         run: |
           set -o pipefail
+          printf '%s\n' 'pnpm --dir frontend run build' > evidence/build-command.txt
+          set +e
           pnpm --dir frontend run build 2>&1 | tee evidence/build.log
+          result=$?
+          printf '%s\n' "$result" > evidence/build-exit.txt
+          exit "$result"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
