@@ -10,10 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func degradation429Float(v float64) *float64 { return &v }
+
 func TestOAuthDegradation429Conditions(t *testing.T) {
 	c := DefaultOAuthDegradationConfig()
 	c.Enabled = true
-	c.ThresholdPercent = floatPtrDegradation(9)
+	c.ThresholdPercent = degradation429Float(9)
 	for _, tc := range []struct {
 		name                     string
 		total, failures, limited int64
@@ -27,12 +29,12 @@ func TestOAuthDegradation429Conditions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := AccountPerformance{UpstreamError: upstreamstats.Evidence{Source: "process_local_http_responses", Total: tc.total, Failures: tc.failures, RateLimited: tc.limited}}
 			require.Equal(t, tc.want, c.TriggerReason(m), "missing probe results must not hide HTTP evidence")
-			m.DegradationPercent = floatPtrDegradation(0)
+			m.DegradationPercent = degradation429Float(0)
 			m.QualitySamples = 2
 			require.Equal(t, tc.want, c.TriggerReason(m), "a healthy probe does not erase HTTP pressure")
 		})
 	}
-	m := AccountPerformance{DegradationPercent: floatPtrDegradation(100), QualitySamples: 1, UpstreamError: upstreamstats.Evidence{Source: "process_local_http_responses", Total: 25, Failures: 20, RateLimited: 16}}
+	m := AccountPerformance{DegradationPercent: degradation429Float(100), QualitySamples: 1, UpstreamError: upstreamstats.Evidence{Source: "process_local_http_responses", Total: 25, Failures: 20, RateLimited: 16}}
 	off := false
 	c.ProbeEnabled = &off
 	require.Equal(t, "upstream_429", c.TriggerReason(m))
@@ -49,13 +51,13 @@ func TestOAuthDegradation429Conditions(t *testing.T) {
 	c.ThresholdPercent = nil
 	require.NoError(t, c.Validate(), "429-only does not require a probe threshold")
 	require.Equal(t, "upstream_429", c.TriggerReason(m))
-	c.UpstreamErrorThresholdPercent = floatPtrDegradation(81)
+	c.UpstreamErrorThresholdPercent = degradation429Float(81)
 	require.Empty(t, c.TriggerReason(m))
 	c.UpstreamErrorThresholdPercent = nil
-	c.Upstream429ShareThresholdPercent = floatPtrDegradation(81)
+	c.Upstream429ShareThresholdPercent = degradation429Float(81)
 	require.Empty(t, c.TriggerReason(m))
 	for _, invalid := range []float64{0, -1, 101, math.NaN(), math.Inf(1)} {
-		c.Upstream429ShareThresholdPercent = floatPtrDegradation(invalid)
+		c.Upstream429ShareThresholdPercent = degradation429Float(invalid)
 		require.Error(t, c.Validate())
 	}
 	var legacy OAuthDegradationConfig
@@ -69,7 +71,7 @@ func TestOAuthDegradation429Conditions(t *testing.T) {
 func TestOAuthDegradation429NeverTreatsAuthenticationAsRateLimiting(t *testing.T) {
 	c := DefaultOAuthDegradationConfig()
 	c.Enabled = true
-	c.ThresholdPercent = floatPtrDegradation(9)
+	c.ThresholdPercent = degradation429Float(9)
 	for _, tc := range []struct {
 		name    string
 		other   int
