@@ -111,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           trap 'git diff -- "*.go" > "$RUNNER_TEMP/vip-credit-format.patch"' EXIT
-          git diff --name-only 6fa7fb86eae7c732794450646dc13831dce87ff1 HEAD -- '*.go' | xargs -r gofmt -w
+          git diff --name-only --diff-filter=ACMRT -z 6fa7fb86eae7c732794450646dc13831dce87ff1 HEAD -- '*.go' | xargs -0 -r gofmt -w
           (cd backend/cmd/server && go run -mod=mod github.com/google/wire/cmd/wire)
           git diff -- '*.go' > "$RUNNER_TEMP/vip-credit-format.patch"
           git diff --exit-code -- '*.go'
