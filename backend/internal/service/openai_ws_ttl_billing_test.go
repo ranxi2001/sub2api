@@ -56,13 +56,29 @@ func TestOpenAIWSPassthroughCacheWriteTTLReachesBillingOnce(t *testing.T) {
 			ChannelUsageFields: ChannelUsageFields{OriginalModel: "gpt-6-luna", BillingModelSource: BillingModelSourceRequested},
 		})
 	}}
-	server, done := startPassthroughLifecycleServerWithHooks(t, context.Background(), svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
+	controlCtx, cancelControl := context.WithCancel(context.Background())
+	server, done := startPassthroughLifecycleServerWithHooks(t, controlCtx, svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
 		c.Set("api_key", apiKey)
 		return hooks
 	})
-	defer server.Close()
-	client := dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-6-luna","input":[]}`)
-	defer func() { _ = client.CloseNow() }()
+	var client *coderws.Conn
+	joined := false
+	t.Cleanup(func() {
+		cancelControl()
+		if client != nil {
+			_ = client.CloseNow()
+		}
+		_ = upstream.Close()
+		if !joined {
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Error("TTL proxy did not join during cleanup")
+			}
+		}
+		server.Close()
+	})
+	client = dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-6-luna","input":[]}`)
 	requirePassthroughUpstreamWrite(t, upstream, time.Second)
 	upstream.Send(`{"type":"response.completed","response":{"id":"resp_ttl_ws","model":"gpt-6-luna","status":"completed","usage":{"input_tokens":2402,"output_tokens":5,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":2399,"cache_write_tokens_details":{"ttl_30m_tokens":9,"ttl_12h_tokens":2390}}}}}`)
 	_, err := readPassthroughLifecycleFrame(t, client, time.Second)
@@ -70,6 +86,7 @@ func TestOpenAIWSPassthroughCacheWriteTTLReachesBillingOnce(t *testing.T) {
 	require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
 	select {
 	case err := <-done:
+		joined = true
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
 		t.Fatal("TTL relay did not stop")
