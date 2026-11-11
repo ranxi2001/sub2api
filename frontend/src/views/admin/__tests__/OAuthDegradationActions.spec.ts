@@ -157,3 +157,52 @@ it('retains unavailable saved group IDs until explicitly unchecked', async () =>
  expect(vi.mocked(saveAutoConfig).mock.lastCall?.[0].degradation_action?.group_ids).toEqual([5])
  w.unmount()
 })
+
+it('defaults both conditions on and saves a 429-only policy without a probe threshold', async () => {
+ const w=mount(AutoConfigView);await flushPromises()
+ expect(w.get<HTMLInputElement>('[data-testid="degradation-probe-enabled"]').element.checked).toBe(true)
+ expect(w.get<HTMLInputElement>('[data-testid="degradation-429-enabled"]').element.checked).toBe(true)
+ expect(w.get<HTMLInputElement>('[data-testid="degradation-error-threshold"]').element.value).toBe('80')
+ expect(w.get<HTMLInputElement>('[data-testid="degradation-429-threshold"]').element.value).toBe('80')
+ await w.get('[data-testid="degradation-probe-enabled"]').setValue(false)
+ await w.get('[data-testid="degradation-enabled"]').setValue(true)
+ await w.get('[data-testid="degradation-error-threshold"]').setValue('90')
+ await w.get('form').trigger('submit');await flushPromises()
+ expect(saveAutoConfig).toHaveBeenCalledWith(expect.objectContaining({degradation_action:expect.objectContaining({probe_enabled:false,upstream_429_enabled:true,threshold_percent:null,upstream_error_threshold_percent:90,upstream_429_share_threshold_percent:80})}))
+ const payload=vi.mocked(saveAutoConfig).mock.calls[0][0]
+ w.unmount();vi.mocked(getAutoConfig).mockResolvedValueOnce(payload)
+ const reload=mount(AutoConfigView);await flushPromises()
+ expect(reload.get<HTMLInputElement>('[data-testid="degradation-probe-enabled"]').element.checked).toBe(false)
+ expect(reload.find('[data-testid="degradation-threshold"]').exists()).toBe(false)
+ await reload.get('[data-testid="degradation-429-enabled"]').setValue(false)
+ vi.mocked(saveAutoConfig).mockClear()
+ await reload.get('form').trigger('submit');await flushPromises()
+ expect(saveAutoConfig).not.toHaveBeenCalled()
+ reload.unmount()
+})
+
+it('validates HTTP thresholds and retains explicit condition opt-outs', () => {
+ const cfg=oauthDegradationPayload({ ...defaultOAuthDegradationConfig(),enabled:true,probe_enabled:false,threshold_percent:null })
+ expect(oauthDegradationError(cfg)).toBe(false)
+ for(const value of [0,-1,101,NaN,Infinity]) {
+  expect(oauthDegradationError({...cfg,upstream_error_threshold_percent:value})).toBe(true)
+  expect(oauthDegradationError({...cfg,upstream_429_share_threshold_percent:value})).toBe(true)
+ }
+ expect(oauthDegradationPayload({...cfg,upstream_429_enabled:false}).upstream_429_enabled).toBe(false)
+})
+
+it('announces 429 conditions independently of the original dismissed feature', async () => {
+ const old='oauth-degradation-actions-initial-announcement',id='oauth-degradation-429-conditions-initial-announcement'
+ useNewFeatureNoticeStore().dismiss(41,old)
+ const w=mount(AutoConfigView);await flushPromises()
+ const second=mount(NewFeatureBadge,{props:{noticeId:id,userId:41}})
+ await w.get('[data-testid="degradation-action"] [data-testid="new-feature-badge"]').trigger('click')
+ expect(second.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+ w.unmount();second.unmount();setActivePinia(createPinia())
+ const reload=mount(NewFeatureBadge,{props:{noticeId:id,userId:41}})
+ expect(reload.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+ const future=mount(NewFeatureBadge,{props:{noticeId:'future-429-fixture',userId:41}})
+ expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+ expect(useNewFeatureNoticeStore().isDismissed(41,old)).toBe(true)
+ reload.unmount();future.unmount()
+})

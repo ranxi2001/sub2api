@@ -14,6 +14,7 @@ const retention = 24 * time.Hour
 var Default = NewStore(65536, time.Now())
 
 type Evidence struct {
+	RateLimited    int64     `json:"rate_limited"`
 	Percent        *float64  `json:"percent"`
 	Failures       int64     `json:"failures"`
 	Total          int64     `json:"total"`
@@ -81,6 +82,9 @@ func (s *Store) Snapshot(ids []int64, since, now time.Time) map[int64]Evidence {
 		e.Total++
 		if v.status >= 400 {
 			e.Failures++
+		}
+		if v.status == 429 {
+			e.RateLimited++
 		}
 		out[v.account] = e
 	}

@@ -52,7 +52,7 @@ export interface AutoConfigEvent {
   kind: AutoConfigEventKind
   created_at: string
   details: {
-    degradation?: { revision: string; limit_concurrency?: boolean; limit_models?: boolean; limit_groups?: boolean; models: string[] | null; group_ids?: number[]; removed_group_ids?: number[]; threshold_percent: number; degradation_percent: number; quality_samples: number; window_start: string; window_end: string; concurrency_cap: number }
+    degradation?: { trigger_reason?: string; upstream_error?: import('@/types/accountPerformance').UpstreamHTTPErrorEvidence; upstream_error_threshold_percent?: number; upstream_429_share_threshold_percent?: number; revision: string; limit_concurrency?: boolean; limit_models?: boolean; limit_groups?: boolean; models: string[] | null; group_ids?: number[]; removed_group_ids?: number[]; threshold_percent: number; degradation_percent: number; quality_samples: number; window_start: string; window_end: string; concurrency_cap: number }
     model_mapping?: Record<string, string>
     config?: AutoConfig
     priority: number

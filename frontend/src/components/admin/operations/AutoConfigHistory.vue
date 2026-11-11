@@ -126,6 +126,10 @@ function details(event: AutoConfigEvent) {
     if (e.limit_concurrency !== false) actions.push(t('autoConfig.degradation.concurrencyEvent', { before: d.previous_concurrency, after: d.concurrency }))
     if (e.limit_models !== false) actions.push(t('autoConfig.degradation.modelsEvent', { models: (e.models ?? []).join(', ') || '∅' }))
     if (e.limit_groups) actions.push(t('autoConfig.degradation.groupsEvent', { groups: groupIDs(e.group_ids), removed: groupIDs(e.removed_group_ids) }))
+    if (e.trigger_reason === 'upstream_429' && e.upstream_error) {
+      const http = e.upstream_error
+      return t('autoConfig.degradation.upstream429Event', { failures: http.failures, total: http.total, rateLimited: http.rate_limited ?? 0, errorThreshold: e.upstream_error_threshold_percent ?? 80, shareThreshold: e.upstream_429_share_threshold_percent ?? 80, actions: actions.join(' · '), start: formatDateTime(e.window_start), end: formatDateTime(e.window_end) })
+    }
     return t('autoConfig.degradation.event', { percent: e.degradation_percent, threshold: e.threshold_percent, samples: e.quality_samples, actions: actions.join(' · '), start: formatDateTime(e.window_start), end: formatDateTime(e.window_end) })
   }
   if (event.kind === 'config_saved' && d.config) return t('autoConfig.logs.savedDetail', { initial: t(d.config.enabled ? 'autoConfig.logs.on' : 'autoConfig.logs.off'), upgrade: t(d.config.upgrade_enabled ? 'autoConfig.logs.on' : 'autoConfig.logs.off'), priority: d.config.priority, load: d.config.load_factor, concurrency: d.config.concurrency })

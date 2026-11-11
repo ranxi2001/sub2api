@@ -138,6 +138,16 @@ jobs:
           git rev-parse HEAD > evidence/head.txt
           pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts src/views/admin/__tests__/AutoConfigView.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/admin/operations/__tests__/AutoConfigHistory.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee evidence/frontend.log
           pnpm --dir frontend typecheck 2>&1 | tee evidence/typecheck.log
+      - name: Install isolated browser for synthetic settings preview
+        run: |
+          npm install --prefix "$RUNNER_TEMP/quality429-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/quality429-browser/node_modules/.bin/playwright" install --with-deps chromium
+          git fetch --no-tags --depth=1 origin 90549fe897d6187d8251af44c9ece5230d2a83f4
+      - name: Render independent conditions before and after
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/quality429-browser/node_modules/playwright
+          OAUTH_DEGRADATION_SCREENSHOT_DIR: ${{ github.workspace }}/evidence/screenshots
+        run: node .github/scripts/oauth-degradation-429-browser.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
