@@ -44,7 +44,7 @@ jobs:
           git -C candidate diff --exit-code
           git -C candidate diff --check
           go version | tee evidence/toolchain.txt
-          grep -F 'go1.27.3' evidence/toolchain.txt
+          grep -F 'go1.27.4' evidence/toolchain.txt
           sha256sum candidate/backend/internal/repository/scheduler_cache_image_authorization*test.go > evidence/tests.sha256
           test -z "$(gofmt -l candidate/backend/internal/repository/scheduler_cache_image_authorization*test.go candidate/backend/internal/service/openai_images_allowlist_test.go)"
       - name: RED - identical regressions on isolated original projection
@@ -136,7 +136,7 @@ jobs:
           test -z "$(git status --porcelain)"
           git rev-parse HEAD | tee "$ISSUE765_WS_EVIDENCE/head.txt"
           go version | tee "$ISSUE765_WS_EVIDENCE/toolchain.txt"
-          grep -F 'go1.27.3' "$ISSUE765_WS_EVIDENCE/toolchain.txt"
+          grep -F 'go1.27.4' "$ISSUE765_WS_EVIDENCE/toolchain.txt"
           test -z "$(gofmt -l backend/internal/handler/openai_gateway_handler_test.go)"
           (cd backend && go test -race -shuffle=on -json -tags=unit ./internal/handler -run '^TestOpenAIResponsesWebSocket_(DisconnectBeforeFirstMessageIsInfo|RequestCanceledBeforeFirstMessageIsInfo|FirstMessageTimeoutUsesConfig)$' -count=20 -timeout=5m) > "$ISSUE765_WS_EVIDENCE/ws-first-frame.jsonl" 2> "$ISSUE765_WS_EVIDENCE/ws-first-frame.stderr"
           python3 - <<'PY'

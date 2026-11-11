@@ -1,6 +1,6 @@
 module github.com/Wei-Shaw/sub2api
 
-go 1.27.3
+go 1.27.4
 
 // The embedded engine uses gin.H only. Keep Sub2API's Context.Get(string)
 // contract; upstream's Gin 1.12 HTTP router is not included in this integration.
