@@ -105,6 +105,10 @@ jobs:
         run: make test-unit
       - name: Integration tests
         working-directory: backend
+        env:
+          # Keep real network timing fixtures isolated from other package/DB workloads.
+          # Every integration package and its existing assertions still run.
+          GOFLAGS: '-p=1'
         run: make test-integration
 
   frontend:
