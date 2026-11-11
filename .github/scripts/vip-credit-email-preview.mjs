@@ -54,6 +54,9 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
     const context = await browser.newContext({ viewport: device === 'desktop' ? { width: 1280, height: 1000 } : { width: 390, height: 844 }, timezoneId: 'UTC' })
     const page = await context.newPage()
     page.on('pageerror', e => errors.push(e.message))
+    page.on('console', message => {
+      if (message.type() === 'error') { errors.push(message.text()); console.error(message.text()) }
+    })
     await page.route('**/*', route => {
       const url = new URL(route.request().url())
       if (url.origin === origin || url.protocol === 'data:') return route.continue()
@@ -105,6 +108,7 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, baseline, baselineComponentBlob: git('rev-parse', baseline + ':frontend/src/components/admin/user/UserAutoCreditModal.vue'), cssBlob: git('rev-parse', head + ':frontend/src/style.css'), captures, geometry, interactions, errors, boundary: 'GitHub Actions Chromium, actual UserAutoCreditModal and project CSS; isolated synthetic API/auth fixture only. No real users, email, paid API, full navigation or production validation.' }, null, 2) + '\n')
   if (errors.length) throw Error(errors.join('\n'))
 } finally {
+  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, baseline, baselineComponentBlob: git('rev-parse', baseline + ':frontend/src/components/admin/user/UserAutoCreditModal.vue'), cssBlob: git('rev-parse', head + ':frontend/src/style.css'), captures, geometry, interactions, errors, boundary: 'GitHub Actions Chromium; actual component and CSS with synthetic API/auth. PNGs are evidence artifacts, not native PR attachments.' }, null, 2) + '\n')
   await browser?.close(); await server?.close()
   rmSync(entry, { force: true }); rmSync(cacheDir, { recursive: true, force: true })
 }

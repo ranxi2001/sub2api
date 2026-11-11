@@ -56,5 +56,9 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: backend
         run: |
-          CGO_ENABLED=0 go build -tags embed -trimpath -o "$RUNNER_TEMP/sub2api-vip-credit" ./cmd/server
+          vip_build_version=$(./scripts/resolve-version.sh)
+          vip_build_commit=$(git rev-parse HEAD)
+          CGO_ENABLED=0 go build -tags embed -trimpath \
+            -ldflags="-X main.Version=$vip_build_version -X main.Commit=$vip_build_commit" \
+            -o "$RUNNER_TEMP/sub2api-vip-credit" ./cmd/server
           go test -race -p 1 -tags=unit ./cmd/server ./internal/service ./internal/handler/admin -run 'TestProvideCleanup|TestAutoCreditEmail|TestNotificationEmail' -count=1 -v -timeout=5m

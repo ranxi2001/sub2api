@@ -1061,7 +1061,7 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 	NotificationEmailEventAutoCreditSuccess: {
 		Event: NotificationEmailEventAutoCreditSuccess, Label: "VIP automatic credit success",
 		Description: "Sent to the VIP account email after committed automatic credit, only when its administrator enabled notification.",
-		Category: "billing", Optional: false,
+		Category:    "billing", Optional: false,
 		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "credit_amount", "current_balance", "ledger_id"),
 	},
 	NotificationEmailEventBalanceForecast: {
@@ -1318,11 +1318,11 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 	NotificationEmailEventAutoCreditSuccess: {
 		notificationEmailDefaultLocale: {
 			Subject: "[{{site_name}}] VIP automatic credit successful",
-			HTML: notificationEmailCard("#16a34a", "VIP automatic credit successful", `<p>Hello {{recipient_name}},</p><p>An automatic credit of <strong>${{credit_amount}}</strong> has been added to your balance.</p><p>Balance after credit: <strong>${{current_balance}}</strong></p><p>Ledger ID: {{ledger_id}}</p><p>This is an advance, not a paid recharge. Please contact the administrator to arrange payment.</p>`),
+			HTML:    notificationEmailCard("#16a34a", "VIP automatic credit successful", `<p>Hello {{recipient_name}},</p><p>An automatic credit of <strong>${{credit_amount}}</strong> has been added to your balance.</p><p>Balance after credit: <strong>${{current_balance}}</strong></p><p>Ledger ID: {{ledger_id}}</p><p>This is an advance, not a paid recharge. Please contact the administrator to arrange payment.</p>`),
 		},
 		notificationEmailLocaleChinese: {
 			Subject: "[{{site_name}}] VIP 自动垫付成功",
-			HTML: notificationEmailCard("#16a34a", "VIP 自动垫付成功", `<p>{{recipient_name}}，您好：</p><p>已为您自动垫付 <strong>${{credit_amount}}</strong>。</p><p>垫付后余额：<strong>${{current_balance}}</strong></p><p>账本编号：{{ledger_id}}</p><p>本次垫付尚未支付，请联系管理员结清费用。</p>`),
+			HTML:    notificationEmailCard("#16a34a", "VIP 自动垫付成功", `<p>{{recipient_name}}，您好：</p><p>已为您自动垫付 <strong>${{credit_amount}}</strong>。</p><p>垫付后余额：<strong>${{current_balance}}</strong></p><p>账本编号：{{ledger_id}}</p><p>本次垫付尚未支付，请联系管理员结清费用。</p>`),
 		},
 	},
 	NotificationEmailEventBalanceRechargeSuccess: {
