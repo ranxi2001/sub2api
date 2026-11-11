@@ -42,7 +42,7 @@ func (r *observationQueryReader) ReadPrioritySchedulingSignals(_ context.Context
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.queries = append(r.queries, q)
-	return map[int64]PrioritySchedulingSignal{1: {Samples: 6, P90TTFTMs: 1234}}, nil
+	return map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 6, P90TTFTMs: 1234})}, nil
 }
 
 func TestPriorityObservationPublicHistoryModel(t *testing.T) {
@@ -108,7 +108,7 @@ func TestPriorityObservationCompletedCallFreshness(t *testing.T) {
 	// The reader now represents completed, persisted usage; no live/in-flight
 	// timing is injected into the cache and nil TTFT stays unknown.
 	reader.mu.Lock()
-	reader.signal = map[int64]PrioritySchedulingSignal{1: {Samples: 1, P90TTFTMs: 1200, LatencyUnknownSamples: 1, ProfitSamples: 2}}
+	reader.signal = map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 1, P90TTFTMs: 1200, LatencyUnknownSamples: 1, ProfitSamples: 2})}
 	reader.mu.Unlock()
 	require.Eventually(t, func() bool { return svc.priorityHistory(req, cfg, pool).signals[1].Samples == 1 }, time.Second, time.Millisecond)
 	var wg sync.WaitGroup
@@ -133,8 +133,8 @@ func TestPriorityObservationStickyPenaltyAndExpiry(t *testing.T) {
 	cfg.GroupIDs = []int64{group}
 	badAt := time.Now().Add(-time.Minute)
 	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{
-		1: {Samples: 20, P90TTFTMs: 20000, LatestBadLatencyAt: &badAt, QualitySamples: 10, QualityPassed: 10},
-		2: {Samples: 20, P90TTFTMs: 500, QualitySamples: 10, QualityPassed: 10},
+		1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 20000, LatestBadLatencyAt: &badAt, QualitySamples: 10, QualityPassed: 10}),
+		2: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualitySamples: 10, QualityPassed: 10}),
 	}}
 	svc := priorityGateway(cfg, reader)
 	pool := []openAIAccountCandidateScore{priorityCandidate(1, .1, 0), priorityCandidate(2, 1, 0)}

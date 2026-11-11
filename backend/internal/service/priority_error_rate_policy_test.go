@@ -23,7 +23,7 @@ func TestPriorityErrorRateWeightedRecoveryAndIsolation(t *testing.T) {
 		stats.attempts.report(priorityAttemptKey{accountID: 1, model: "m", endpoint: "/v1/responses"}, true, now)
 		stats.attempts.report(priorityAttemptKey{accountID: 2, model: "m", endpoint: "/v1/responses"}, false, now)
 	}
-	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10}
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10})
 	good, bad := priorityCandidate(1, .1, 0), priorityCandidate(2, .1, 0)
 	good.priorityErrors = scheduler.priorityErrorEvidence(req, c, good.account.ID, now)
 	bad.priorityErrors = scheduler.priorityErrorEvidence(req, c, bad.account.ID, now)
@@ -84,7 +84,7 @@ func TestPriorityErrorRateSnapshotJSONAndAdminPriority(t *testing.T) {
 	parsed, err := time.Parse(time.RFC3339Nano, observed)
 	require.NoError(t, err)
 	require.True(t, parsed.Equal(now))
-	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10}
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10})
 	bad, good := priorityCandidate(1, .1, 0), priorityCandidate(2, .1, 0)
 	bad.account.Priority = 10
 	good.account.Priority = 20
@@ -100,7 +100,7 @@ func TestPriorityErrorRateSnapshotJSONAndAdminPriority(t *testing.T) {
 func TestPriorityErrorRateUnknownQualityAndSafeExploration(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	item := priorityCandidate(1, .1, 0)
-	signal := PrioritySchedulingSignal{QualityPassed: 10, QualitySamples: 10}
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{QualityPassed: 10, QualitySamples: 10})
 	applyPriorityCandidate(c, &item, signal, time.Now())
 	require.True(t, item.priorityExploration)
 	item.priorityErrors.SmoothedRate = .8

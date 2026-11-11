@@ -283,7 +283,7 @@ func TestPriorityPenaltyReviewFreshnessDeadline(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()
 	cfg.LatencyPenaltyMode = PriorityLatencyStop
 	bad := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
-	signal := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad}
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad})
 	candidate := priorityCandidate(1, .1, 0)
 	// Usage was created at bad; persistence/history visibility arrived 8 minutes
 	// later. Read time must not restart the original ten-minute deadline.

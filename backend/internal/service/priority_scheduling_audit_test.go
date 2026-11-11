@@ -12,7 +12,7 @@ import (
 
 func TestPriorityHistorySurvivesCandidateChurn(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 9}, 2: {Samples: 6}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 9}), 2: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 6})}}
 	g := priorityGateway(c, r)
 	req := OpenAIAccountScheduleRequest{RequestedModel: "test"}
 	pool := []openAIAccountCandidateScore{priorityCandidate(1, .1, 0), priorityCandidate(2, .1, 0)}
@@ -27,7 +27,7 @@ func TestPriorityHistorySurvivesCandidateChurn(t *testing.T) {
 
 func TestPriorityHistoryRefreshFailureRetainsRecentEvidence(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 9}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 9})}}
 	g := priorityGateway(c, r)
 	req := OpenAIAccountScheduleRequest{RequestedModel: "test"}
 	pool := []openAIAccountCandidateScore{priorityCandidate(1, .1, 0)}
@@ -54,7 +54,7 @@ func TestPriorityHistoryRefreshFailureRetainsRecentEvidence(t *testing.T) {
 func TestPrioritySnapshotRecomputesAttemptEvidenceWithoutMovingSelectionTime(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	c.Enabled = true
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 9, P90TTFTMs: 100, QualitySamples: 9, QualityPassed: 9}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 9, P90TTFTMs: 100, QualitySamples: 9, QualityPassed: 9})}}
 	g := priorityGateway(c, r)
 	stats := newOpenAIAccountRuntimeStats()
 	g.openaiAccountStats = stats
@@ -92,7 +92,7 @@ func TestPrioritySnapshotRecomputesAttemptEvidenceWithoutMovingSelectionTime(t *
 func TestPrioritySnapshotRefreshesWithoutAnotherSelection(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	c.Enabled = true
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 9, P90TTFTMs: 100, QualitySamples: 9, QualityPassed: 9}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 9, P90TTFTMs: 100, QualitySamples: 9, QualityPassed: 9})}}
 	g := priorityGateway(c, r)
 	scheduler := &defaultOpenAIAccountScheduler{service: g}
 	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: "test", UseUpstreamTokenCost: true}
@@ -108,7 +108,7 @@ func TestPrioritySnapshotRefreshesWithoutAnotherSelection(t *testing.T) {
 func TestPriorityExplorationCanFinishPartialEvidence(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	c.Enabled = true
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 6, P90TTFTMs: 100, ProfitSamples: 2, QualitySamples: 6, QualityPassed: 6}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 6, P90TTFTMs: 100, ProfitSamples: 2, QualitySamples: 6, QualityPassed: 6})}}
 	g := priorityGateway(c, r)
 	scheduler := &defaultOpenAIAccountScheduler{service: g}
 	req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: "test", UseUpstreamTokenCost: true}
@@ -133,7 +133,7 @@ func TestPriorityUnknownLoadDoesNotPanic(t *testing.T) {
 
 func TestPriorityHistoryScopeIsolationAndExpiry(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 9}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 9})}}
 	g := priorityGateway(c, r)
 	id := int64(11)
 	req := OpenAIAccountScheduleRequest{RequestedModel: "test", GroupID: &id}
@@ -163,7 +163,7 @@ func TestPriorityHistoryScopeIsolationAndExpiry(t *testing.T) {
 func TestPrioritySnapshotOwnsScoringInputsAndOutput(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	c.Enabled = true
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 9, P90TTFTMs: 100}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 9, P90TTFTMs: 100})}}
 	g := priorityGateway(c, r)
 	scheduler := &defaultOpenAIAccountScheduler{service: g}
 	id := int64(11)
@@ -215,7 +215,7 @@ func TestPriorityHistoryBoundsAccountUnionAndScopes(t *testing.T) {
 func TestPriorityStickyDoesNotEscapeToKnownRisk(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	c.Enabled = true
-	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{2: {QualityPassed: 0, QualitySamples: 10}}}
+	r := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{2: withAccountPerformanceFixture(PrioritySchedulingSignal{QualityPassed: 0, QualitySamples: 10})}}
 	g := priorityGateway(c, r)
 	accounts := []Account{{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 30, GroupIDs: []int64{11, 12, 13}}, {ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 30, GroupIDs: []int64{11}}}
 	g.accountRepo = schedulerTestOpenAIAccountRepo{accounts: accounts}
@@ -227,7 +227,7 @@ func TestPriorityStickyDoesNotEscapeToKnownRisk(t *testing.T) {
 	scheduler := &defaultOpenAIAccountScheduler{service: g}
 	require.False(t, scheduler.shouldRebalancePrioritySticky(context.Background(), req, &accounts[0]))
 	g.priorityScheduling.mu.Lock()
-	g.priorityScheduling.entries[priorityHistoryKey(req, c)].signals[2] = PrioritySchedulingSignal{QualityPassed: 10, QualitySamples: 10}
+	g.priorityScheduling.entries[priorityHistoryKey(req, c)].signals[2] = withAccountPerformanceFixture(PrioritySchedulingSignal{QualityPassed: 10, QualitySamples: 10})
 	g.priorityScheduling.mu.Unlock()
 	require.True(t, scheduler.shouldRebalancePrioritySticky(context.Background(), req, &accounts[0]), "the same compatible idle peer may attract traffic once its known risk is gone")
 }
@@ -307,7 +307,7 @@ func BenchmarkPriorityHistoryWarm(b *testing.B) {
 	for i := range pool {
 		id := int64(i + 1)
 		pool[i] = priorityCandidate(id, .1, 0)
-		signals[id] = PrioritySchedulingSignal{Samples: 10}
+		signals[id] = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 10})
 		accounts[id] = time.Now()
 	}
 	g.priorityScheduling.entries = map[string]*prioritySignalEntry{priorityHistoryKey(req, c): {signals: signals, accounts: accounts, observed: time.Now(), expires: time.Now().Add(time.Hour)}}
@@ -321,7 +321,7 @@ func BenchmarkPriorityHistoryWarm(b *testing.B) {
 func TestPriorityBreakEvenRoundingIsNotLoss(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	item := priorityCandidate(1, .1, 0)
-	signal := PrioritySchedulingSignal{ProfitSamples: 10, Revenue: .3, BaseCost: 3}
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{ProfitSamples: 10, Revenue: .3, BaseCost: 3})
 	score := scorePriorityCandidate(c, item, signal, time.Now())
 	require.NotNil(t, score.Profit)
 	require.Zero(t, *score.Profit)
