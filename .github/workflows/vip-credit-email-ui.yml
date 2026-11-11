@@ -50,8 +50,10 @@ jobs:
           path: ${{ runner.temp }}/vip-credit-ui
           if-no-files-found: error
       - name: Official frontend production build
+        if: ${{ !cancelled() }}
         run: pnpm --dir frontend run build
       - name: Backend production embed build and worker lifecycle race
+        if: ${{ !cancelled() }}
         working-directory: backend
         run: |
           CGO_ENABLED=0 go build -tags embed -trimpath -o "$RUNNER_TEMP/sub2api-vip-credit" ./cmd/server

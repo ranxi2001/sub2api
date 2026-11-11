@@ -32,6 +32,7 @@ return {config,status:200,statusText:'OK',headers:{},data:{code:0,data:structure
 };
 await import('/src/__fixtures__/vip-auto-credit.ts');
 `, { flag: 'wx' })
+  process.chdir(root)
   server = await createServer({ root, configFile: false, cacheDir,
     resolve: { alias: { '@': join(root, 'src') } },
     plugins: [{ name: 'vip-credit-baseline', enforce: 'pre', load(id) {

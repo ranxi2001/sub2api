@@ -85,8 +85,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          trap 'git diff > "$RUNNER_TEMP/vip-credit-format.patch"' EXIT
           git diff --name-only 6fa7fb86eae7c732794450646dc13831dce87ff1 HEAD -- '*.go' | xargs -r gofmt -w
-          (cd backend/cmd/server && go run github.com/google/wire/cmd/wire)
+          (cd backend/cmd/server && go run -mod=mod github.com/google/wire/cmd/wire)
           git diff > "$RUNNER_TEMP/vip-credit-format.patch"
           git diff --exit-code
       - uses: actions/upload-artifact@v7
