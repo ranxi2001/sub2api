@@ -15,7 +15,7 @@ await loadLocaleMessages('zh')
 i18n.global.locale.value = 'zh'
 const scenario = new URLSearchParams(location.search).get('scenario') || 'pricing'
 const state = window.__v0221 = { requests: [], saved: [], pending: [], unexpected: [] }
-const usage = { antigravity_quota: { 'claude-opus-5-5': { utilization: 71, reset_time: '2026-12-01T12:00:00Z' } } }
+const usage = { antigravity_quota: { 'gemini-3-flash': { utilization: 71, reset_time: '2026-12-01T12:00:00Z' } } }
 const account = { id: 9101, name: 'Synthetic quota account', platform: 'antigravity', type: 'oauth', status: 'active', schedulable: true, concurrency: 2, priority: 1, rate_multiplier: 1, credentials: {}, extra: {}, group_ids: [] }
 const key = { id: 9102, name: 'Synthetic key', key: 'sk-fixture-not-a-secret', status: 'active', user_id: 41, group_id: 1, quota: 100, quota_used: 12, created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z' }
 apiClient.defaults.adapter = async request => {
@@ -33,7 +33,7 @@ apiClient.defaults.adapter = async request => {
   else if (path.endsWith('/admin-api-key')) data = { exists: false, masked_key: '' }
   else if (path.endsWith('/proxies')) data = { items: [] }
   else if (path.endsWith('/groups/all') || path.endsWith('/proxies/all') || path.endsWith('/payment/providers') || path.endsWith('/groups/available')) data = []
-  else if (/\/admin\/accounts\/\d+\/usage$/.test(path)) data = request.params?.force ? { antigravity_quota: { 'claude-opus-5-5': { utilization: 9, reset_time: '2026-12-02T12:00:00Z' } } } : usage
+  else if (/\/admin\/accounts\/\d+\/usage$/.test(path)) data = request.params?.force ? { antigravity_quota: { 'gemini-3-flash': { utilization: 9, reset_time: '2026-12-02T12:00:00Z' } } } : usage
   else if (path === '/keys') data = { items: [key], total: 1, page: 1, page_size: 20, pages: 1 }
   else if (path === '/keys/concurrency') data = { queue_policy: { max_waiting: 10, timeout_seconds: 30 }, items: [{ id: 9102, current_concurrency: 0, current_waiting: 0 }] }
   else if (path.endsWith('/user-group-rates')) data = {}

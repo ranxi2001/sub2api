@@ -51,7 +51,7 @@ try {
           await page.goto(`http://127.0.0.1:4199/${tag}.html?scenario=${scenario}`)
           await page.waitForFunction(() => window.__v0221Ready)
           if (scenario === 'pricing') await page.locator('.cursor-pointer.select-none').first().click()
-          if (scenario === 'usage') await page.waitForFunction(() => window.__v0221.requests.some(row => /\/usage$/.test(row.path)))
+          if (scenario === 'usage') await page.waitForFunction(() => window.__v0221.requests.some(row => /\/usage$/.test(row.path)) && document.body.innerText.includes('71'))
           if (scenario === 'keys') await page.waitForFunction(() => window.__v0221.pending.length > 0)
           if (scenario === 'settings') {
             await page.locator('form').first().waitFor()
@@ -66,7 +66,7 @@ try {
           }
           if (mode === 'after' && scenario === 'usage') {
             await page.getByTestId('antigravity-active-query').click()
-            await page.waitForFunction(() => window.__v0221.requests.some(row => row.params?.force === true && row.params?.source === 'active'))
+            await page.waitForFunction(() => window.__v0221.requests.some(row => row.params?.force === 'true' && row.params?.source === 'active'))
           }
           if (mode === 'after' && scenario === 'settings') {
             const dock = page.locator('.settings-save-dock')

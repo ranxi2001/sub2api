@@ -211,13 +211,9 @@ gateway:
 - **📖 免责声明**：本项目仅供技术学习与研究使用，作者不对因使用本项目导致的账户封禁、服务中断、数据丢失或其他任何直接或间接损失承担责任。
 - **🚫 无商业授权**：本项目从未授权任何个人或组织基于本项目开展任何形式的商业化运营。任何以本项目名义或基于本项目从事的商业行为均与本项目及其开发者无关，由此产生的一切纠纷、损失和法律责任由行为主体自行承担。
 
-## OpenAI Image Output Formats
+## OpenAI 图片输出格式
 
-On `/v1/images/generations` and `/v1/images/edits`, OAuth / Setup Token requests for GPT Image 1.5, 2, 2.5 and 2.6 (after model mapping) use Codex-native Images endpoints. Pre-2.6 models retain Responses fallback for endpoint 404/405; 2.6 does not fall back. `output_format` and `output_compression` are forwarded, but upstream account and endpoint capabilities determine the output. A 4xx rejection or HTTP 200 containing PNG data and `output_format: "png"` is possible even when requesting JPEG or SVG.
-
-A JPEG format mismatch has also been reported for `gpt-image-2.5-flare`.
-
-Compare the returned `output_format` (including per-image values) with the request and verify the actual image format before saving or serving it. Filename extensions and MIME types must match actual output. A successful image response retains its status, content and usage even when the format differs; automatically retrying may generate and bill another image.
+OAuth / Setup Token 的 GPT Image 1.5、2、2.5、2.6 图片请求以映射后模型调用 Codex 原生端点；2.6 之前的模型保留端点 404/405 时回退 Responses，2.6 不回退。`output_format` / `output_compression` 透传不保证上游按指定格式输出：请求 JPEG/SVG 仍可能返回 4xx 或 HTTP 200、`output_format: "png"` 及 PNG 内容，包括已报告的 `gpt-image-2.5-flare` JPEG 请求。保存或交付前，应核对返回字段（含图片项字段）和真实图片格式，以实际格式设置扩展名和 MIME。成功响应保留状态、内容及 usage；格式不符仍可能计费，自动重试可能重复生成并计费。
 
 ## 许可证
 

@@ -35,8 +35,8 @@
             type="number" step="any" min="0" class="input mt-0.5 text-xs" />
         </div>
         <div v-if="props.platform === 'openai'">
-          <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheWrite12hPriceShort') }} <span class="text-gray-300">$/M</span></label>
-          <input :value="interval.cache_write_12h_price" @input="emitField('cache_write_12h_price', ($event.target as HTMLInputElement).value)"
+          <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheWrite12hPriceShort') }} <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h" :user-id="noticeUserId" /> <span class="text-gray-300">$/M</span></label>
+          <input data-testid="interval-cache-write-12h-price" :value="interval.cache_write_12h_price" @input="emitField('cache_write_12h_price', ($event.target as HTMLInputElement).value)"
             type="number" step="any" min="0" class="input mt-0.5 text-xs" />
         </div>
         <div>
@@ -104,6 +104,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import Icon from '@/components/icons/Icon.vue'
 import type { IntervalFormEntry } from './types'
 import type { BillingMode } from '@/api/admin/channels'
@@ -111,6 +113,7 @@ import type { BillingMode } from '@/api/admin/channels'
 const { t } = useI18n()
 
 const props = defineProps<{
+  noticeUserId?: number | null
   interval: IntervalFormEntry
   mode: BillingMode
   platform?: string

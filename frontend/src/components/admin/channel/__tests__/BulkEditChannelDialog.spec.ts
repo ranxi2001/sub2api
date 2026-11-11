@@ -28,6 +28,7 @@ function price(platform: string, model: string, input = 0.000002): ChannelModelP
     input_price: input,
     output_price: null,
     cache_write_price: null,
+    cache_write_12h_price: 0.000005,
     cache_read_price: 0,
     image_input_price: null,
     image_output_price: null,
@@ -123,7 +124,7 @@ describe('BulkEditChannelDialog', () => {
     expect(Object.keys(payload)).toEqual(['model_pricing'])
     expect(payload.model_pricing).toHaveLength(2)
     expect(payload.model_pricing[0]).toMatchObject({ platform: 'anthropic', models: ['fresh-other'], input_price: 0.000007 })
-    expect(payload.model_pricing[1]).toMatchObject({ platform: 'openai', models: ['example-priced'], input_price: 0, output_price: null, cache_read_price: 0 })
+    expect(payload.model_pricing[1]).toMatchObject({ platform: 'openai', models: ['example-priced'], input_price: 0, output_price: null, cache_write_12h_price: 0.000005, cache_read_price: 0 })
     expect(payload.model_pricing.every((entry: ChannelModelPricing) => entry.id === undefined)).toBe(true)
     wrapper.unmount()
   })

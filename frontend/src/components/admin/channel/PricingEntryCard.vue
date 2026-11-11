@@ -129,7 +129,7 @@
             </div>
             <div v-if="props.platform === 'openai'">
               <label class="text-xs text-gray-400" :title="t('admin.channels.form.cacheWrite12hHint')">{{ t('admin.channels.form.cacheWrite12hPrice') }} <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h" :user-id="noticeUserId" /></label>
-              <input :value="entry.cache_write_12h_price" @input="emitField('cache_write_12h_price', ($event.target as HTMLInputElement).value)"
+              <input data-testid="cache-write-12h-price" :value="entry.cache_write_12h_price" @input="emitField('cache_write_12h_price', ($event.target as HTMLInputElement).value)"
                 type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
@@ -174,7 +174,7 @@
               </button>
             </div>
             <div v-if="entry.intervals && entry.intervals.length > 0" class="mt-2 space-y-2">
-              <IntervalRow
+              <IntervalRow :notice-user-id="noticeUserId"
                 v-for="(iv, idx) in entry.intervals"
                 :key="idx"
                 :interval="iv"
@@ -216,7 +216,7 @@
             </button>
           </div>
           <div v-if="entry.intervals && entry.intervals.length > 0" class="mt-2 space-y-2">
-            <IntervalRow
+            <IntervalRow :notice-user-id="noticeUserId"
               v-for="(iv, idx) in entry.intervals"
               :key="idx"
               :interval="iv"
@@ -252,7 +252,7 @@
             </button>
           </div>
           <div v-if="entry.intervals && entry.intervals.length > 0" class="mt-2 space-y-2">
-            <IntervalRow
+            <IntervalRow :notice-user-id="noticeUserId"
               v-for="(iv, idx) in entry.intervals"
               :key="idx"
               :interval="iv"
