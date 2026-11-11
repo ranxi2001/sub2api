@@ -38,6 +38,11 @@ func TestOpenAIWSPassthroughCacheWriteTTLReachesBillingOnce(t *testing.T) {
 	svc.toolCorrector = NewCodexToolCorrector()
 	svc.openaiWSPassthroughDialer = &stagedPassthroughDialer{conn: upstream}
 	account := passthroughLifecycleAccount()
+	account.GroupIDs = []int64{groupID}
+	// Keep the production pre-send admission guard enabled and provide its
+	// authoritative reader, rather than bypassing it in a billing fixture.
+	svc.accountRepo = &stubOpenAIAccountRepo{accounts: []Account{*account}}
+	apiKey := &APIKey{ID: 1, Status: StatusActive, GroupID: i64p(groupID), Group: &Group{ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 0.5}}
 	billingResults := make(chan error, 4)
 	hooks := &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, err error) {
 		if err != nil {
@@ -46,12 +51,15 @@ func TestOpenAIWSPassthroughCacheWriteTTLReachesBillingOnce(t *testing.T) {
 		}
 		billingResults <- svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 			Result: result,
-			APIKey: &APIKey{ID: 1, GroupID: i64p(groupID), Group: &Group{ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 0.5}},
+			APIKey: apiKey,
 			User:   &User{ID: 1}, Account: account,
 			ChannelUsageFields: ChannelUsageFields{OriginalModel: "gpt-6-luna", BillingModelSource: BillingModelSourceRequested},
 		})
 	}}
-	server, done := startPassthroughLifecycleServer(t, context.Background(), svc, account, hooks)
+	server, done := startPassthroughLifecycleServerWithHooks(t, context.Background(), svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
+		c.Set("api_key", apiKey)
+		return hooks
+	})
 	defer server.Close()
 	client := dialPassthroughLifecycleClientWithPayload(t, server, `{"type":"response.create","model":"gpt-6-luna","input":[]}`)
 	defer func() { _ = client.CloseNow() }()
