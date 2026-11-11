@@ -139,3 +139,41 @@ func TestQwenNativeContinuationStaysWithResponseOwnerWithoutSessionHeader(t *tes
 	require.Error(t, err)
 	require.Nil(t, selected)
 }
+
+type qwenConcurrentFirstTurnCache struct {
+	*schedulerTestGatewayCache
+	firstRead bool
+}
+
+func (c *qwenConcurrentFirstTurnCache) GetSessionAccountID(ctx context.Context, groupID int64, key string) (int64, error) {
+	if !c.firstRead {
+		c.firstRead = true
+		c.sessionBindings[key] = 947101 // Another first turn claims immediately after our miss.
+		return 0, ErrStickySessionNotFound
+	}
+	return c.schedulerTestGatewayCache.GetSessionAccountID(ctx, groupID, key)
+}
+
+func (c *qwenConcurrentFirstTurnCache) CompareAndSwapSessionAccountID(_ context.Context, _ int64, swap SessionAccountBindingSwap) (bool, error) {
+	if c.sessionBindings[swap.SessionHash] != swap.ExpectedAccountID {
+		return false, nil
+	}
+	c.sessionBindings[swap.SessionHash] = swap.AccountID
+	return true, nil
+}
+
+func TestQwenStrictConcurrentFirstTurnDoesNotEscapeNewOwner(t *testing.T) {
+	f := newStickyEscapeRebindFixture()
+	f.request.Platform = PlatformQwen
+	f.cache.sessionBindings = map[string]int64{}
+	f.service.cache = &qwenConcurrentFirstTurnCache{schedulerTestGatewayCache: f.cache}
+	for i := range f.accounts {
+		f.accounts[i].Platform = PlatformQwen
+		f.accounts[i].Type = AccountTypeAPIKey
+		f.accounts[i].Credentials = map[string]any{qwenStrictSessionCredential: true}
+	}
+	selected, _, err := f.scheduler.Select(context.Background(), f.request)
+	require.Error(t, err)
+	require.Nil(t, selected)
+	require.Equal(t, int64(947101), f.cache.sessionBindings["openai:rebind-session"])
+}
