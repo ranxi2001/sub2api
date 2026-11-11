@@ -159,6 +159,42 @@ describe('priority analysis evidence presentation', () => {
 })
 
 describe('priority explicit scope filters', () => {
+  it.each([
+    { configured: [], groups: [{ id: 31, name: 'MiMo' }, { id: 42, name: 'GPT Standard' }], expected: 42 },
+    { configured: [999, 17], groups: directory.filter(group => group.platform === 'openai'), expected: 17 },
+    { configured: [999], groups: [{ id: 42, name: 'GPT Standard' }], expected: 42 },
+    { configured: [], groups: [{ id: 31, name: 'OpenAI text' }], expected: 31 },
+    { configured: [], groups: [], expected: 0 },
+  ])('initializes the group and model catalog together: $configured -> $expected', async ({ configured, groups, expected }) => {
+    const original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options: any) => {
+      if (url === '/admin/priority-scheduling/config') return { data: { ...config, group_ids: configured } }
+      if (url === '/admin/groups/all' && options?.params?.platform === 'openai') return { data: groups }
+      if (url === '/admin/priority-scheduling/models') return { data: { models: [`model-for-${options?.params?.group_id ?? 0}`] } }
+      return original(url, options)
+    })
+    render(); await flushPromises()
+    const scope = { model: `model-for-${expected}`, minutes: 60, ...(expected ? { group_id: expected } : {}) }
+    expect(reads()).toHaveLength(1)
+    expect(reads()[0]?.[1]).toMatchObject({ params: scope })
+    expect((wrapper!.vm as any).selectedGroup).toBe(expected)
+    expect((wrapper!.vm as any).availableModels).toEqual([scope.model])
+    expect(vi.mocked(apiClient.put)).not.toHaveBeenCalled()
+    expect(vi.mocked(apiClient.post)).not.toHaveBeenCalled()
+  })
+
+  it('keeps an explicit ungrouped choice when refreshing after the default selection', async () => {
+    const original = vi.mocked(apiClient.get).getMockImplementation()!
+    vi.mocked(apiClient.get).mockImplementation(async (url, options) => url === '/admin/priority-scheduling/config'
+      ? { data: { ...config, group_ids: [] } } : original(url, options))
+    render(); await flushPromises()
+    expect((wrapper!.vm as any).selectedGroup).toBe(11)
+    await choose('priority-group-filter', 'priorityScheduling.filters.ungrouped')
+    await wrapper!.get('[data-testid="latency-refresh"]').trigger('click'); await flushPromises()
+    expect((wrapper!.vm as any).selectedGroup).toBe(0)
+    expect((reads().at(-1)?.[1] as any).params).toEqual({ model: 'fixture-model', minutes: 60 })
+  })
+
   it('followup F1 offers Composite through the real strict platform catalog and retains public alias across switches', async () => {
     render(); await flushPromises()
     const catalogReads = vi.mocked(apiClient.get).mock.calls.filter(([url]) => url === '/admin/groups/all')

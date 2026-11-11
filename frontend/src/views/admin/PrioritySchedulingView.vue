@@ -467,13 +467,24 @@ async function save() {
 async function loadCatalog(initial = false) {
   if (!canRead()) return
   invalidateCatalog()
-  const version = generation, request = ++catalogRequestGeneration, group = selectedGroup.value
+  const version = generation, request = ++catalogRequestGeneration
+  let group = selectedGroup.value
   const controller = new AbortController(); catalogController = controller
   catalogLoading.value = true; catalogError.value = false
   try {
-    const [openaiGroups, compositeGroups, catalogModels] = await Promise.all([getGroups('openai', controller.signal), getGroups('composite', controller.signal), getPriorityModels(selectedGroup.value || undefined, controller.signal)])
+    const [openaiGroups, compositeGroups, models] = await Promise.all([getGroups('openai', controller.signal), getGroups('composite', controller.signal), getPriorityModels(group || undefined, controller.signal)])
     if (!active(version) || request !== catalogRequestGeneration || group !== selectedGroup.value) return
     availableGroups.value = [...new Map([...openaiGroups, ...compositeGroups].map(group => [group.id, group])).values()]
+    let catalogModels = models
+    if (initial && !initialized.value) {
+      const configuredGroup = draft.value?.group_ids?.find(id => availableGroups.value.some(group => group.id === id))
+      const defaultGroup = configuredGroup ?? openaiGroups.find(group => /gpt/i.test(group.name))?.id ?? openaiGroups[0]?.id ?? 0
+      if (defaultGroup !== group) {
+        selectedGroup.value = group = defaultGroup
+        catalogModels = await getPriorityModels(group || undefined, controller.signal)
+        if (!active(version) || request !== catalogRequestGeneration || group !== selectedGroup.value) return
+      }
+    }
     availableModels.value = catalogModels
     if (initial && !selectedModel.value) selectedModel.value = draft.value?.models?.find(model => catalogModels.includes(model)) ?? catalogModels[0] ?? ''
   } catch {
