@@ -1,0 +1,27 @@
+{
+  "head": "f04d0851eea2d8f2a862648b0cc4027d609b1dfc",
+  "baseline": "87d01c39e",
+  "captures": [
+    {
+      "file": "zh-before.png",
+      "source": "87d01c39ee4cda151534812b172e7acdf959a50e",
+      "lang": "zh"
+    },
+    {
+      "file": "zh-after.png",
+      "source": "f04d0851eea2d8f2a862648b0cc4027d609b1dfc",
+      "lang": "zh"
+    },
+    {
+      "file": "en-before.png",
+      "source": "87d01c39ee4cda151534812b172e7acdf959a50e",
+      "lang": "en"
+    },
+    {
+      "file": "en-after.png",
+      "source": "f04d0851eea2d8f2a862648b0cc4027d609b1dfc",
+      "lang": "en"
+    }
+  ],
+  "api": "synthetic, no production access"
+}
