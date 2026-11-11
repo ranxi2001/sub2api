@@ -73,7 +73,7 @@ func TestImageEditFormForwardingPreservesMappingAndUploads(t *testing.T) {
 			c, parsed := imageFormContext(t, openAIImagesEditsEndpoint, contentType, body)
 			account := b64BackfillAccount(false)
 			account.Credentials["base_url"] = "https://rpm.tosky.io/v1"
-			account.Credentials["model_mapping"] = map[string]any{"gpt-image-2": "mapped-image-model"}
+			account.Credentials["model_mapping"] = map[string]any{"gpt-image-2": "gpt-image-1"}
 			upstream := imageFormUpstream()
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 			result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
@@ -86,7 +86,7 @@ func TestImageEditFormForwardingPreservesMappingAndUploads(t *testing.T) {
 			require.EqualValues(t, len(upstream.bodies[0]), req.ContentLength)
 			require.NoError(t, req.ParseMultipartForm(1<<20))
 			defer func() { _ = req.MultipartForm.RemoveAll() }()
-			for k, want := range map[string]string{"model": "mapped-image-model", "prompt": "原样保留\nblue", "stream": "false", "size": "2048x2048", "output_compression": "0"} {
+			for k, want := range map[string]string{"model": "gpt-image-1", "prompt": "原样保留\nblue", "stream": "false", "size": "2048x2048", "output_compression": "0"} {
 				require.Equal(t, []string{want}, req.MultipartForm.Value[k], k)
 			}
 			require.Len(t, req.MultipartForm.File["image"], 1)
