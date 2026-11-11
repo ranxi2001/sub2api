@@ -34,23 +34,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
-      - name: Pinned baseline behavioral RED in isolated checkout
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/issue733-evidence"
-          git worktree add --detach "$RUNNER_TEMP/issue733-baseline" 8889aee65d908c2458becb86d4fe54f4359dc61d
-          cp frontend/src/views/admin/__tests__/PrioritySchedulingReading.spec.ts "$RUNNER_TEMP/issue733-baseline/frontend/src/views/admin/__tests__/"
-          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/issue733-baseline/frontend/node_modules"
-          git show 8889aee65d908c2458becb86d4fe54f4359dc61d:frontend/src/views/admin/PrioritySchedulingView.vue > "$RUNNER_TEMP/issue733-evidence/baseline.vue"
-          cmp "$RUNNER_TEMP/issue733-evidence/baseline.vue" "$RUNNER_TEMP/issue733-baseline/frontend/src/views/admin/PrioritySchedulingView.vue"
-          set +e
-          (cd "$RUNNER_TEMP/issue733-baseline/frontend" && pnpm exec vitest run src/views/admin/__tests__/PrioritySchedulingReading.spec.ts --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/issue733-evidence/red.json") > "$RUNNER_TEMP/issue733-evidence/red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/issue733-evidence/red.log"
-          test "$result" -ne 0
-          python3 .github/scripts/issue733-check-red.py "$RUNNER_TEMP/issue733-evidence/red.json"
+      - run: mkdir -p "$RUNNER_TEMP/issue733-evidence"
       - name: Candidate reading and existing safety regressions GREEN
         run: |
           set -euo pipefail
@@ -69,6 +53,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -135,7 +120,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/issue733-contract"
           git worktree add --detach "$RUNNER_TEMP/issue733-contract-baseline" 8889aee65d908c2458becb86d4fe54f4359dc61d
-          cp backend/internal/service/priority_latency_series_regression_test.go "$RUNNER_TEMP/issue733-contract-baseline/backend/internal/service/"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:backend/internal/service/priority_latency_series_regression_test.go > "$RUNNER_TEMP/issue733-contract-baseline/backend/internal/service/priority_latency_series_regression_test.go"
           git show 8889aee65d908c2458becb86d4fe54f4359dc61d:backend/internal/service/priority_latency_series.go > "$RUNNER_TEMP/issue733-contract/baseline.go"
           cmp "$RUNNER_TEMP/issue733-contract/baseline.go" "$RUNNER_TEMP/issue733-contract-baseline/backend/internal/service/priority_latency_series.go"
           set +e

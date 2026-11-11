@@ -66,7 +66,7 @@ func (p *priorityLatencyPool) members(current map[int64]struct{}, fallback bool)
 }
 
 func priorityLatencyMeasured(c PrioritySchedulingConfig, score PrioritySchedulingScore) bool {
-	return score.Samples >= c.MinSamples && score.SelectedTTFTMs != nil && *score.SelectedTTFTMs > 0
+	return score.Samples >= c.MinSamples && validPerformanceMetric(score.SelectedTTFTMs)
 }
 
 func (s *defaultOpenAIAccountScheduler) preparePriorityLatencyRequest(ctx context.Context, req OpenAIAccountScheduleRequest) (OpenAIAccountScheduleRequest, error) {
@@ -94,7 +94,6 @@ func (s *defaultOpenAIAccountScheduler) preparePriorityLatencyRequest(ctx contex
 	admission.members(allowed, fallback)
 	for i := range pool {
 		item := &pool[i]
-		item.priorityErrors = s.priorityErrorEvidence(req, cfg, item.account.ID, now)
 		applyPriorityCandidate(cfg, item, history.signals[item.account.ID], now)
 		admission.accounts = append(admission.accounts, openAIAccountCandidateScore{account: &Account{ID: item.account.ID}})
 	}

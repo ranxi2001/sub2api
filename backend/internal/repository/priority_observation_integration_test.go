@@ -72,30 +72,24 @@ func TestPriorityObservationPersistedPublicAliasAndGroup(t *testing.T) {
 	})
 	got, err := committedReader.ReadPrioritySchedulingSignals(ctx, query)
 	require.NoError(t, err)
-	require.Equal(t, 1, got[account.ID].Samples)
-	require.Equal(t, 1, got[account.ID].LatencyUnknownSamples, "NULL TTFT remains unknown")
 	require.Equal(t, 2, got[account.ID].ProfitSamples)
-	require.Equal(t, 1, got[account.ID].QualitySamples)
-	require.Equal(t, 1, got[account.ID].QualityPassed)
-	require.InDelta(t, 1234, got[account.ID].P90TTFTMs, .01)
+	require.NotNil(t, got[account.ID].Performance)
+	require.Nil(t, got[account.ID].Performance.AvgTTFTMs, "untraced legacy usage is not valid performance evidence")
+	require.Equal(t, 1, got[account.ID].Performance.QualitySamples)
 	query.QualityModel = "different-route"
 	qualityOther, err := committedReader.ReadPrioritySchedulingSignals(ctx, query)
 	require.NoError(t, err)
-	require.Zero(t, qualityOther[account.ID].QualitySamples)
-	require.Equal(t, 1, qualityOther[account.ID].Samples)
-	query.QualityModel = "channel-route"
+	require.Equal(t, got[account.ID].Performance.QualitySamples, qualityOther[account.ID].Performance.QualitySamples, "account performance pools probe models")
 	query.Model = "other-public"
 	other, err := committedReader.ReadPrioritySchedulingSignals(ctx, query)
 	require.NoError(t, err)
-	require.Equal(t, 1, other[account.ID].Samples)
-	require.Zero(t, other[account.ID].LatencyUnknownSamples)
-	query.Model = "public-composite"
-	query.GroupID = nil
+	require.Equal(t, 1, other[account.ID].ProfitSamples)
+	query.Model, query.GroupID = "public-composite", nil
 	other, err = committedReader.ReadPrioritySchedulingSignals(ctx, query)
 	require.NoError(t, err)
-	require.Equal(t, 1, other[account.ID].Samples)
+	require.Equal(t, 1, other[account.ID].ProfitSamples)
 	query.Model = "channel-route"
 	other, err = committedReader.ReadPrioritySchedulingSignals(ctx, query)
 	require.NoError(t, err)
-	require.Zero(t, other[account.ID].Samples, "routing identity cannot borrow a different public model")
+	require.Zero(t, other[account.ID].ProfitSamples, "financial history retains public model identity")
 }

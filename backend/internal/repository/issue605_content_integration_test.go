@@ -57,8 +57,8 @@ func TestIssue605UsageContentBatchAndLayeredSQL(t *testing.T) {
 	effort := "xhigh"
 	signals, err := repo.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{AccountIDs: []int64{a.ID}, Model: "fixture", UsageSince: now.Add(-time.Minute), UsageUntil: now.Add(time.Minute), QualitySince: now.Add(-time.Minute), ObservationEffort: &effort})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, signals[a.ID].Samples)
-	require.Equal(t, 100.0, signals[a.ID].P90TTFTMs, "different effort must not enter the priority history latency population")
+	require.EqualValues(t, 1, signals[a.ID].ProfitSamples)
+	require.Nil(t, signals[a.ID].Performance.AvgTTFTMs, "incomplete trace evidence remains unknown in shared account performance")
 	// A failed earlier attempt on another account must not enter the billed
 	// account's typed latency population, even though upload components remain.
 	mixed := requesttiming.Snapshot{TotalMS: 1000, Attempts: []requesttiming.Attempt{

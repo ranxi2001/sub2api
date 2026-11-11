@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div ref="readingRoot" class="min-w-0 space-y-5">
-      <header><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1></header>
+      <header class="flex items-center gap-3"><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityAccountPerformance" :user-id="auth.user?.id" /></header>
       <SmartOpsNav />
       <div v-if="error" role="alert" class="text-red-600">{{ error }} <button v-if="!draft" class="underline" @click="load">{{ t('priorityScheduling.retry') }}</button></div>
       <p v-if="notice" role="status" class="text-emerald-600">{{ notice }}</p>
@@ -27,13 +27,9 @@
               <p class="text-xs leading-5 text-gray-500">{{ t('priorityScheduling.errorRateHint') }}</p>
             </section>
             <section>
-              <div class="mb-3 grid gap-3 sm:grid-cols-2">
-                <label><span class="field-title">{{ t('priorityScheduling.latencyPercentile') }}</span><select v-model.number="draft.latency_percentile" data-testid="latency-percentile" class="input w-full"><option v-for="q in [50,70,90,95]" :key="q" :value="q">P{{ q }}</option></select></label>
-                <label><span class="field-title">{{ t('priorityScheduling.latencyMeasurement') }}</span><select v-model="draft.latency_measurement" data-testid="latency-measurement" class="input w-full"><option value="legacy_forward">{{ t('priorityScheduling.legacyForward') }}</option><option value="attributed_v1">{{ t('priorityScheduling.attributedV1') }}</option></select></label>
-              </div>
               <label class="mb-3 block"><span class="field-title">{{ t('priorityScheduling.latencyPenaltyMode') }}</span><select v-model="draft.latency_penalty_mode" data-testid="latency-penalty-mode" class="input w-full"><option value="deprioritize">{{ t('priorityScheduling.latencyPenaltyModes.deprioritize') }}</option><option value="stop">{{ t('priorityScheduling.latencyPenaltyModes.stop') }}</option></select><small class="mt-2 block text-gray-500">{{ t('priorityScheduling.latencyPenaltyModeHint') }}</small></label>
-              <p class="mb-3 text-xs leading-5 text-gray-500">{{ t('priorityScheduling.measurementHint') }}</p>
-              <h2 class="mb-3 font-medium">{{ t('priorityScheduling.thresholds') }}</h2><div class="grid gap-3 sm:grid-cols-2"><label v-for="field in fields" :key="field.key"><span class="field-title">{{ t(`priorityScheduling.${field.key}`) }}</span><input v-model.number="draft[field.key]" type="number" :data-testid="field.key" :min="field.min" :max="field.max" step="1" required class="input w-full" /></label></div><p class="mt-3 text-xs leading-5 text-gray-500">{{ t('priorityScheduling.latencyPenaltyHint') }}</p></section>
+
+              <h2 class="mb-3 font-medium">{{ t('priorityScheduling.thresholds') }}</h2><div class="grid gap-3 sm:grid-cols-2"><label v-for="field in fields" :key="field.key"><span class="field-title">{{ t(`priorityScheduling.${field.key}`) }} <NewFeatureBadge v-if="field.key === 'target_tps'" :notice-id="NEW_FEATURE_NOTICES.priorityAccountPerformance" :user-id="auth.user?.id" compact /></span><input v-model.number="draft[field.key]" type="number" :data-testid="field.key" :min="field.min" :max="field.max" step="1" required class="input w-full" /></label></div></section>
           </div>
           <div class="grid gap-5 sm:grid-cols-2"><label><span class="field-title">{{ t('priorityScheduling.groupIds') }}</span><input v-model="groups" class="input w-full" data-testid="groups" /><small class="text-gray-500">{{ t('priorityScheduling.groupHint') }}</small></label><label><span class="field-title">{{ t('priorityScheduling.models') }}</span><textarea v-model="modelsText" class="input w-full" rows="3" /><small class="text-gray-500">{{ t('priorityScheduling.modelHint') }}</small></label></div>
           <button class="btn btn-primary" type="submit">{{ t(saving ? 'priorityScheduling.saving' : 'priorityScheduling.save') }}</button>
@@ -43,44 +39,9 @@
       <section class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="priority-filters">
         <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.model') }}</span><Select v-model="selectedModel" data-testid="priority-model-filter" :disabled="!initialized" :options="modelOptions" :searchable="true" :creatable="true" :aria-label="t('priorityScheduling.model')" /></label>
         <label class="min-w-0"><span class="field-title">{{ t('priorityScheduling.group') }}</span><Select v-model="selectedGroup" data-testid="priority-group-filter" :disabled="!initialized" :options="groupOptions" :searchable="true" :aria-label="t('priorityScheduling.group')" /></label>
-        <label><span class="field-title">{{ t('priorityScheduling.window_minutes') }}</span><select id="priority-latency-window" v-model.number="latencyMinutes" :disabled="!initialized" class="input w-full" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select></label>
-        <div class="flex items-end"><button class="btn btn-secondary w-full" :disabled="refreshing || catalogLoading" data-testid="latency-refresh" @click="loadLatency">{{ t('priorityScheduling.refresh') }}</button></div>
+        <label><span class="field-title">{{ t('priorityScheduling.window_minutes') }}</span><select id="priority-profit-window" v-model.number="financeMinutes" :disabled="!initialized" class="input w-full" data-testid="latency-window"><option :value="15">15m</option><option :value="60">60m</option><option :value="180">180m</option></select></label>
+        <div class="flex items-end"><button class="btn btn-secondary w-full" :disabled="refreshing || catalogLoading" data-testid="latency-refresh" @click="refresh">{{ t('priorityScheduling.refresh') }}</button></div>
         <p v-if="catalogError" class="text-sm text-red-600 sm:col-span-2 lg:col-span-4" role="alert">{{ t('priorityScheduling.filters.catalogError') }}</p>
-      </section>
-      <section class="card latency-panel overflow-hidden" data-testid="latency-panel">
-        <header class="flex flex-wrap items-center justify-between gap-3 p-5">
-          <button type="button" data-testid="latency-toggle" class="flex items-center gap-2 text-lg font-semibold" :aria-expanded="latencyExpanded" aria-controls="priority-latency-content" @click="latencyExpanded = !latencyExpanded">
-            <Icon :name="latencyExpanded ? 'chevronDown' : 'chevronRight'" size="md" />{{ t('priorityScheduling.latencyPanel.title') }}
-            <span class="text-sm font-normal text-gray-500">({{ latency ? latencyRows.length : '—' }})</span>
-          </button>
-
-        </header>
-        <p data-testid="latency-status" :role="latencyError ? 'alert' : 'status'" class="reading-status px-5 pb-3 text-xs" :class="latencyError ? 'text-red-600' : 'text-gray-500'">{{ t(latencyError ? (latency ? 'priorityScheduling.reading.stale' : 'priorityScheduling.latencyPanel.error') : latencyLoading ? (latency ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.loading') : latency ? 'priorityScheduling.filters.updated' : 'priorityScheduling.filters.choose') }}</p>
-        <div id="priority-latency-content" data-latency-content v-show="latencyExpanded" class="latency-content border-t border-gray-100 dark:border-dark-700">
-          <details class="px-5 py-3 text-xs text-gray-500"><summary class="cursor-pointer">{{ t('priorityScheduling.reading.diagnostics') }}</summary><p class="mt-2 leading-5">{{ t('priorityScheduling.latencyPanel.hint') }}</p></details>
-          <p v-if="latency" class="px-5 pb-3 text-xs text-gray-500">{{ new Date(latency.at).toLocaleString() }} · {{ latency.model }} · {{ t('priorityScheduling.group') }}: {{ latency.group_id ?? '—' }} · P{{ latency.latency_percentile ?? 90 }} · {{ latency.latency_measurement ?? 'legacy_forward' }} · {{ latency.bucket_minutes }}m</p>
-          <div class="flex flex-wrap items-center justify-between gap-3 px-5 pb-3">
-            <span class="text-sm font-medium">{{ t('priorityScheduling.account') }} ({{ latency ? latencyRows.length : '—' }})</span>
-            <label class="flex items-center gap-2 text-sm sm:hidden">{{ t('priorityScheduling.reading.pageSize') }}<select v-model.number="latencyPageSize" class="input" data-testid="latency-mobile-size"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select></label>
-          </div>
-          <DataTable :key="displayScope(snapshot) + ':' + latencyMinutes" data-testid="latency-table" data-reading-scroll="latency" class="reading-table" :columns="latencyColumns" :data="latencyPageRows" row-key="account_id" :loading="latencyLoading && !latency">
-            <template #cell-account="{ row }"><div class="account-cell" :data-reading-account="row.account_id"><strong class="font-medium" :title="row.account_name">{{ row.account_name }}</strong><small class="block text-gray-400">#{{ row.account_id }}</small></div></template>
-            <template #cell-p50="{ row }">{{ formatMs(row.p50_ttft_ms) }}</template>
-            <template #cell-p90="{ row }"><span :class="latencyClass(row.p90_ttft_ms)">{{ formatMs(row.p90_ttft_ms) }}</span></template>
-            <template #cell-p99="{ row }">{{ formatMs(row.p99_ttft_ms) }}</template>
-            <template #cell-errorRate="{ row }">{{ formatRate(row.error_rate) }}</template>
-            <template #empty><p class="text-sm text-gray-500">{{ t(latencyError ? 'priorityScheduling.latencyPanel.error' : latencyLoading ? 'priorityScheduling.loading' : !latency ? 'priorityScheduling.filters.choose' : 'priorityScheduling.latencyPanel.empty') }}</p></template>
-          </DataTable>
-          <Pagination v-if="latencyRows.length" data-testid="latency-pagination" :total="latencyRows.length" v-model:page="latencyPage" v-model:page-size="latencyPageSize" />
-          <details class="border-t border-gray-100 dark:border-dark-700" data-testid="bucket-details">
-            <summary class="cursor-pointer px-5 py-3 text-sm font-medium">{{ t('priorityScheduling.reading.buckets') }}</summary>
-            <DataTable :key="displayScope(snapshot) + ':' + latencyMinutes" data-testid="latency-buckets" data-reading-scroll="buckets" class="reading-table bucket-table" :columns="bucketColumns" :data="latencyPageRows" row-key="account_id">
-              <template #cell-account="{ row }"><span :data-reading-account="row.account_id" class="account-cell block truncate" :title="row.account_name">{{ row.account_name }}</span></template>
-              <template v-for="bucket in latencyBuckets" :key="bucket" #[`cell-${bucket}`]="{ row }"><span class="tabular-nums" :class="latencyClass(bucketLatency(row, bucket) ?? 0)">{{ bucketText(row, bucket) }}</span></template>
-              <template #empty><p class="text-sm text-gray-500">{{ t(latencyError ? 'priorityScheduling.latencyPanel.error' : latencyLoading ? 'priorityScheduling.loading' : !latency ? 'priorityScheduling.filters.choose' : 'priorityScheduling.latencyPanel.empty') }}</p></template>
-            </DataTable>
-          </details>
-        </div>
       </section>
       <section class="card p-5">
         <header class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('priorityScheduling.filters.candidates') }}</h2><div class="flex flex-wrap items-center gap-2"><button class="btn btn-secondary" :disabled="recomputeLoading" data-testid="recompute" @click="recompute">{{ t(recomputeLoading ? 'priorityScheduling.recompute.running' : 'priorityScheduling.filters.recomputeLatest') }}</button><button class="btn btn-secondary" :disabled="refreshing" @click="refresh">{{ t('priorityScheduling.refresh') }}</button></div></header>
@@ -95,7 +56,7 @@
           <p v-if="snapshot.history_error && snapshot.history_ready" class="text-sm text-amber-600">{{ t('priorityScheduling.historyRetry') }}</p>
           <p v-if="snapshot.evaluated_at && snapshot.evaluated_at !== snapshot.at" data-testid="priority-evaluated-at" class="mb-3 text-xs text-gray-500">{{ t('priorityScheduling.evaluatedAt') }}: {{ new Date(snapshot.evaluated_at).toLocaleString() }}<template v-if="snapshot.history_observed_at"> · {{ t('priorityScheduling.historyObservedAt') }}: {{ new Date(snapshot.history_observed_at).toLocaleString() }}</template></p>
           <p v-if="snapshot.latency_fallback" role="status" class="mb-3 text-sm text-amber-600" data-testid="priority-latency-fallback">{{ t('priorityScheduling.latencyFallback') }}</p>
-          <p class="mb-3 text-xs text-gray-500">P{{ snapshot.latency_percentile ?? 90 }} · {{ snapshot.latency_measurement ?? 'legacy_forward' }} · {{ t('priorityScheduling.window_minutes') }}: {{ snapshot.window_minutes ?? '—' }} · {{ t('priorityScheduling.configRevision') }}: {{ snapshot.config_revision ?? '—' }}<template v-if="snapshot.history_window_end"> · {{ t('priorityScheduling.windowEnd') }}: {{ new Date(snapshot.history_window_end).toLocaleString() }}</template></p>
+          <p class="mb-3 text-xs text-gray-500">{{ t('priorityScheduling.performanceSource') }} · {{ t('priorityScheduling.window_minutes') }}: {{ snapshot.window_minutes ?? '—' }} · {{ t('priorityScheduling.configRevision') }}: {{ snapshot.config_revision ?? '—' }}<template v-if="snapshot.history_window_end"> · {{ t('priorityScheduling.windowEnd') }}: {{ new Date(snapshot.history_window_end).toLocaleString() }}</template></p>
           <p data-testid="candidate-status" :role="snapshotError ? 'alert' : 'status'" class="reading-status mb-3 text-xs" :class="snapshotError ? 'text-red-600' : 'text-gray-500'">{{ t(snapshotError ? 'priorityScheduling.reading.stale' : refreshing ? 'priorityScheduling.reading.refreshing' : 'priorityScheduling.filters.updated') }}</p>
           <div class="mb-3 flex flex-wrap items-center justify-between gap-3"><span class="text-sm font-medium">{{ t('priorityScheduling.account') }} ({{ candidateRows.length }})</span><label class="flex items-center gap-2 text-sm sm:hidden">{{ t('priorityScheduling.reading.pageSize') }}<select v-model.number="candidatePageSize" class="input" data-testid="candidate-mobile-size"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select></label></div>
           <div v-if="candidateRows.length" data-testid="priority-candidate-scroll" class="overflow-x-auto">
@@ -104,10 +65,8 @@
             <template #cell-tier="{ row }"><div><span :class="candidateTier(row) === 'eligible' ? 'text-emerald-600' : ['degraded', 'recovery'].includes(candidateTier(row)) ? 'text-amber-600' : 'text-gray-500'">{{ candidateTierLabel(row) }}</span></div></template>
             <template #cell-priority="{ row }"><div>{{ row.priority }}</div></template>
             <template #cell-score="{ row }"><div>{{ row.score.toFixed(1) }}</div></template>
-            <template #cell-errorRate="{ row }"><div><span v-if="isHistoricalAnalysis">{{ t('priorityScheduling.analysis.notCollected') }}</span><span v-else-if="row.error_rate == null">{{ t('priorityScheduling.errorNoSamples') }}</span><span v-else>{{ (row.error_rate * 100).toFixed(1) }}%</span></div></template>
-            <template #cell-quality="{ row }"><div>{{ row.quality_samples ? `${row.quality_passed}/${row.quality_samples}` : '—' }}</div></template>
-            <template #cell-latency="{ row }"><div>P{{ row.latency_percentile ?? 90 }}: {{ row.samples && selectedLatency(row) != null ? `${Math.round(selectedLatency(row)!)} ms` : t('priorityScheduling.unknown') }}</div></template>
-            <template #cell-load="{ row }"><div>{{ isHistoricalAnalysis ? t('priorityScheduling.analysis.notCollected') : row.load_percent == null ? '—' : `${row.load_percent}%` }}</div></template>
+            <template #cell-performance="{ row }"><AccountPerformanceCell :metrics="row.performance" :unavailable="!!snapshotError" :can-configure="false" /></template>
+
             <template #cell-rate="{ row }"><div>{{ row.rate == null ? '—' : `${row.rate.toFixed(3)}×` }}</div></template>
             <template #cell-profit="{ row }"><div><template v-if="row.economics_source === 'usage'"><span :class="(row.profit ?? 0) < 0 ? 'text-red-600' : 'text-emerald-600'">${{ row.profit?.toFixed(4) }} · {{ row.margin == null ? '—' : `${(row.margin * 100).toFixed(1)}%` }}</span></template><span v-else class="text-xs text-gray-500">{{ t(`priorityScheduling.economics.${row.economics_source || 'unknown'}`) }}</span></div></template>
             <template #cell-details="{ row }">
@@ -121,26 +80,12 @@
                   <small v-if="row.reasons.includes('latency_above_target') && snapshot.latency_penalty_mode !== 'stop'" class="block font-medium text-amber-600">{{ t('priorityScheduling.softPenalty') }}</small>
                   <small v-if="row.latency_recovery" class="block font-medium text-amber-600">{{ t('priorityScheduling.recoveryNote') }}</small>
                   <small v-if="row.latency_penalty_until && !row.latency_recovery" class="block text-gray-400">{{ t('priorityScheduling.latencyPenaltyUntil') }}: {{ new Date(row.latency_penalty_until).toLocaleString() }}</small>
-                  <small v-for="reason in row.reasons" :key="reason" class="block text-gray-400">{{ t(isHistoricalAnalysis && reason === 'load_unknown' ? 'priorityScheduling.analysis.loadNotCollected' : `priorityScheduling.reasons.${reason}`) }}</small>
+                  <small v-for="reason in row.reasons" :key="reason" class="block text-gray-400">{{ t(`priorityScheduling.reasons.${reason}`) }}</small>
                   <small v-if="row.selection_weight != null" class="block text-gray-400">{{ t(isHistoricalAnalysis ? 'priorityScheduling.analysis.estimatedWeight' : 'priorityScheduling.selectionWeight') }}: {{ row.selection_weight.toFixed(2) }}</small>
                   <small v-if="row.exploration_eligible" class="block text-gray-400">{{ t('priorityScheduling.explorationEligible') }}</small>
-                  <div :data-testid="`error-rate-${row.account_id}`" :title="t('priorityScheduling.errorRateHint')">
-                    <span v-if="isHistoricalAnalysis">{{ t('priorityScheduling.analysis.notCollected') }}</span>
-                    <template v-else>
-                      <span v-if="row.error_rate == null">{{ t('priorityScheduling.errorNoSamples') }}</span><span v-else>{{ (row.error_rate * 100).toFixed(1) }}%</span>
-                      <small v-if="(row.error_successes ?? 0) + (row.error_failures ?? 0) > 0" class="block text-gray-400">{{ t('priorityScheduling.errorAttempts') }}: {{ row.error_failures ?? 0 }} / {{ (row.error_successes ?? 0) + (row.error_failures ?? 0) }}</small>
-                      <small v-if="errorSamplesLow(row)" class="block text-amber-600">{{ t('priorityScheduling.errorInsufficientSamples') }}</small>
-                      <small v-if="validObservationTime(row.error_observed_at)" class="block text-gray-400">{{ t('priorityScheduling.errorObservedAt') }}: {{ new Date(row.error_observed_at!).toLocaleString() }}</small>
-                      <small class="block text-gray-400">{{ t('priorityScheduling.errorWindow') }}: {{ row.error_window_minutes && row.error_window_minutes > 0 ? row.error_window_minutes : '—' }} min · {{ row.error_endpoint || '—' }}</small>
-                      <small v-if="row.error_penalty != null" class="block text-gray-400">{{ t('priorityScheduling.errorPenalty') }}: {{ row.error_penalty.toFixed(3) }} · {{ t('priorityScheduling.baseScore') }}: {{ row.base_score?.toFixed(1) ?? '—' }}</small>
-                      <small class="block text-gray-400">{{ t('priorityScheduling.errorLocalScope') }}</small>
-                    </template>
-                  </div>
-                  <small class="block text-gray-400">{{ row.samples }} {{ t('priorityScheduling.samples') }}</small>
-                  <small v-if="row.samples < (snapshot.min_samples ?? 5) || row.samples < tailSampleFloor(row.latency_percentile ?? 90)" class="block text-amber-600">{{ t('priorityScheduling.lowSamples') }}</small>
-                  <small class="block text-gray-400">{{ t('priorityScheduling.unknown') }}: {{ row.latency_unknown_samples ?? '—' }}</small>
-                  <small class="block text-gray-400">P90: {{ row.samples ? `${Math.round(row.p90_ttft_ms)} ms` : '—' }}</small>
-                  <small class="block text-gray-400">{{ t('priorityScheduling.experienceP90') }}: {{ row.experience_samples ? `${Math.round(row.experience_p90_ms ?? 0)} ms (${row.experience_samples})` : '—' }}</small>
+                  <small class="block">{{ t('priorityScheduling.baseScore') }}: {{ row.base_score?.toFixed(1) ?? '—' }} · {{ t('priorityScheduling.errorPenalty') }}: {{ row.error_penalty?.toFixed(3) ?? '—' }}</small>
+                  <small v-if="row.performance" class="block">{{ t('accountPerformance.samples', { tps: row.performance.tps_samples, ttft: row.performance.ttft_samples, quality: row.performance.quality_samples }) }}</small>
+                  <small v-if="row.performance" class="block">{{ new Date(row.performance.window_start).toLocaleString() }} – {{ new Date(row.performance.window_end).toLocaleString() }}</small>
                   <div v-if="row.economics_source === 'usage'"><small class="block text-gray-400">${{ row.revenue.toFixed(4) }} − ${{ row.theoretical_cost.toFixed(4) }}</small></div>
                 </div>
               </details>
@@ -160,7 +105,7 @@
           <p v-if="!changedDiffRows.length" class="text-sm text-gray-500">{{ t('priorityScheduling.recompute.noChange') }}</p>
           <div v-else class="overflow-x-auto">
             <table class="w-full whitespace-nowrap text-left text-sm">
-              <thead><tr><th v-for="key in ['account','rank','score','weight','tier','p90','errors']" :key="key" class="px-3 py-2 text-xs font-medium text-gray-500">{{ t(`priorityScheduling.recompute.${key}`) }}</th></tr></thead>
+              <thead><tr><th v-for="key in ['account','rank','score','weight','tier','average','errors']" :key="key" class="px-3 py-2 text-xs font-medium text-gray-500">{{ t(`priorityScheduling.recompute.${key}`) }}</th></tr></thead>
               <tbody>
                 <tr v-for="row in changedDiffRows" :key="row.account_id" class="border-t border-gray-100 dark:border-dark-700">
                   <td class="px-3 py-2"><strong class="font-medium">{{ row.account_name }}</strong><small class="block text-gray-400">#{{ row.account_id }}</small></td>
@@ -168,7 +113,7 @@
                   <td class="px-3 py-2 tabular-nums">{{ row.old_score.toFixed(1) }} → {{ row.new_score.toFixed(1) }}</td>
                   <td class="px-3 py-2 tabular-nums">{{ row.old_weight.toFixed(2) }} → {{ row.new_weight.toFixed(2) }}</td>
                   <td class="px-3 py-2">{{ tierLabel(row.new_tier) }}</td>
-                  <td class="px-3 py-2 tabular-nums">{{ formatMs(row.old_p90_ttft_ms) }} → {{ formatMs(row.new_p90_ttft_ms) }}</td>
+                  <td class="px-3 py-2 tabular-nums">{{ formatMs(row.old_avg_ttft_ms) }} → {{ formatMs(row.new_avg_ttft_ms) }}</td>
                   <td class="px-3 py-2 tabular-nums">{{ row.old_error_samples }} → {{ row.new_error_samples }}</td>
                 </tr>
               </tbody>
@@ -218,8 +163,11 @@ import { useAuthStore } from '@/stores/auth'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
-import Icon from '@/components/icons/Icon.vue'
 import Select from '@/components/common/Select.vue'
+import AccountPerformanceCell from '@/components/account/AccountPerformanceCell.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { performanceWindowMinutes } from '@/types/accountPerformance'
 import { getAll as getGroups } from '@/api/admin/groups'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { getConfiguredTablePageSizeOptions } from '@/utils/tablePreferences'
@@ -228,63 +176,35 @@ import {
   getPriorityConfig, savePriorityConfig, getPrioritySnapshot, getPriorityAnalysis, getPriorityModels,
   recomputePriorityScheduling, getPriorityStickyBindings, clearPriorityStickyBindings,
   type PrioritySchedulingConfig, type PrioritySnapshot, type PriorityCandidate,
-  type PriorityLatencySeries, type PriorityLatencyAccount,
   type PrioritySchedulingRecomputeResult, type PriorityStickyBindings,
 } from '@/api/admin/priorityScheduling'
-function selectedLatency(row: PriorityCandidate) {
-  if (row.selected_ttft_ms !== undefined) return row.selected_ttft_ms
-  return (row.latency_percentile ?? 90) === 90 && (row.latency_measurement ?? 'legacy_forward') === 'legacy_forward' ? row.p90_ttft_ms : null
-}
-function errorSamplesLow(row: PriorityCandidate) {
-  const observed = (row.error_successes ?? 0) + (row.error_failures ?? 0)
-  return observed > 0 && observed < (row.error_prior_samples ?? 0)
-}
-const tailSampleFloor = (q: number) => Math.max(20, Math.ceil(500 / (100 - q)))
 const { t } = useI18n(), auth = useAuthStore()
 const draft = ref<PrioritySchedulingConfig | null>(null), snapshot = ref<PrioritySnapshot | null>(null)
 const mutationSnapshot = ref<PrioritySnapshot | null>(null)
-// Historical analysis deliberately omits live capacity and process-local attempts.
-// Translate that coverage here without changing scheduler tiers or recompute data.
 const isHistoricalAnalysis = computed(() => snapshot.value?.selection_policy === 'read_only_analysis')
-function candidateTier(row: PriorityCandidate) {
-  if (!isHistoricalAnalysis.value) return row.tier
-  if (row.tier === 'degraded') return 'degraded'
-  if (row.latency_recovery || row.reasons.includes('latency_recovery')) return 'recovery'
-  if (!snapshot.value?.history_ready ||
-      (snapshot.value.history_status && snapshot.value.history_status !== 'ready') ||
-      (row.history_status && row.history_status !== 'ready')) return 'insufficient'
-  if (row.tier === 'eligible' ||
-      (row.tier === 'insufficient' && row.reasons.length === 1 && row.reasons[0] === 'load_unknown')) return 'eligible'
-  return 'insufficient'
-}
+function candidateTier(row: PriorityCandidate) { return row.tier }
 function candidateTierLabel(row: PriorityCandidate) {
   return t(`priorityScheduling.${isHistoricalAnalysis.value ? 'analysis' : 'tiers'}.${candidateTier(row)}`)
-}
-function validObservationTime(value?: string) {
-  return !!value && !value.startsWith('0001-01-01') && Number.isFinite(Date.parse(value))
 }
 const selectedModel = ref(''), selectedGroup = ref(0)
 const catalogLoading = ref(false), catalogError = ref(false)
 const availableModels = ref<string[]>([]), availableGroups = ref<{ id: number; name: string }[]>([])
 const modelOptions = computed(() => [...new Set([...availableModels.value, ...(selectedModel.value ? [selectedModel.value] : [])])].sort().map(value => ({ value, label: value })))
 const groupOptions = computed(() => [{ value: 0, label: t('priorityScheduling.filters.ungrouped') }, ...availableGroups.value.map(group => ({ value: group.id, label: `${group.name} (#${group.id})` }))])
-const scopeQuery = () => ({ model: selectedModel.value, ...(selectedGroup.value > 0 ? { group_id: selectedGroup.value } : {}), minutes: latencyMinutes.value })
-const scopeKey = () => JSON.stringify([auth.user?.id, auth.user?.role, selectedModel.value, selectedGroup.value, latencyMinutes.value])
+const scopeQuery = () => ({ model: selectedModel.value, ...(selectedGroup.value > 0 ? { group_id: selectedGroup.value } : {}), minutes: financeMinutes.value })
+const scopeKey = () => JSON.stringify([auth.user?.id, auth.user?.role, selectedModel.value, selectedGroup.value, financeMinutes.value])
 const groups = ref(''), modelsText = ref(''), error = ref(''), snapshotError = ref(''), notice = ref('')
 const loading = ref(false), saving = ref(false), refreshing = ref(false)
-const latency = ref<PriorityLatencySeries | null>(null), latencyMinutes = ref(60), latencyLoading = ref(false), latencyError = ref('')
+const financeMinutes = ref(60)
 const recomputeResult = ref<PrioritySchedulingRecomputeResult | null>(null), recomputeLoading = ref(false), recomputeError = ref('')
 const stickyGroupID = ref(2), sticky = ref<PriorityStickyBindings | null>(null), stickyLoading = ref(false), stickyError = ref(''), stickyNotice = ref('')
 const modes = ['experience', 'balanced', 'profit', 'custom'] as const
 const presets = { experience: [40,35,20,5], balanced: [30,25,25,20], profit: [20,15,20,45] }
 const weightKeys = ['quality_weight','latency_weight','load_weight','cost_weight'] as const
 const fields = [
-  { key: 'error_rate_window_minutes', min: 1, max: 60 },
-  { key: 'error_rate_prior_samples', min: 1, max: 1000 },
-  { key: 'recovery_exploration_percent', min: 0, max: 10 },
-  { key: 'target_ttft_ms', min: 100, max: 120000 }, { key: 'latency_penalty_minutes', min: 0, max: 1440 }, { key: 'max_load_percent', min: 10, max: 100 },
+  { key: 'target_ttft_ms', min: 100, max: 120000 }, { key: 'target_tps', min: 1, max: 1000000 },
   { key: 'min_quality_percent', min: 0, max: 100 }, { key: 'window_minutes', min: 5, max: 1440 },
-  { key: 'min_samples', min: 1, max: 1000 }, { key: 'quality_max_age_hours', min: 1, max: 168 }
+  { key: 'min_samples', min: 1, max: 1000 }, { key: 'max_load_percent', min: 10, max: 100 }
 ] as const
 let alive = true, generation = 0, recomputeRequestGeneration = 0, stickyRequestGeneration = 0, snapshotRequestGeneration = 0
 let catalogRequestGeneration = 0
@@ -299,15 +219,14 @@ function stopHistoryRefresh() { clearTimeout(historyTimer); historyTimer = undef
 function invalidateAnalysis() {
   stopHistoryRefresh(); snapshotRequestGeneration++
   analysisController?.abort(); analysisController = undefined
-  refreshing.value = false; latencyLoading.value = false
+  refreshing.value = false
 }
 const active = (version: number) => alive && generation === version
 const readingRoot = ref<HTMLElement | null>(null)
-const latencyExpanded = ref(false)
-const latencyPage = ref(1), candidatePage = ref(1)
-const latencyPageSize = ref(getPersistedPageSize()), candidatePageSize = ref(getPersistedPageSize())
-const pageSizeOptions = computed(() => [...new Set([...getConfiguredTablePageSizeOptions(), latencyPageSize.value, candidatePageSize.value])].sort((a, b) => a - b))
-const candidateOrder = ref<number[]>([]), latencyOrder = ref<number[]>([])
+const candidatePage = ref(1)
+const candidatePageSize = ref(getPersistedPageSize())
+const pageSizeOptions = computed(() => [...new Set([...getConfiguredTablePageSizeOptions(), candidatePageSize.value])].sort((a, b) => a - b))
+const candidateOrder = ref<number[]>([])
 // Keep existing accounts in their reading order, append new IDs, remove deleted IDs.
 function reconcileOrder(previous: number[], rows: { account_id: number }[]) {
   const ids = new Set(rows.map(row => row.account_id))
@@ -318,16 +237,12 @@ function orderedRows<T extends { account_id: number }>(rows: T[], order: number[
   const byID = new Map(rows.map(row => [row.account_id, row]))
   return order.flatMap(id => { const row = byID.get(id); return row ? [row] : [] })
 }
-const latencyRows = computed(() => orderedRows(latency.value?.accounts ?? [], latencyOrder.value))
 const candidateRows = computed(() => orderedRows(snapshot.value?.candidates ?? [], candidateOrder.value))
-const latencyPageRows = computed(() => latencyRows.value.slice((latencyPage.value - 1) * latencyPageSize.value, latencyPage.value * latencyPageSize.value))
 const candidatePageRows = computed(() => candidateRows.value.slice((candidatePage.value - 1) * candidatePageSize.value, candidatePage.value * candidatePageSize.value))
-const candidateColumns = computed(() => ['account','tier','priority','score','errorRate','quality','latency','load','rate','profit','details'].map(key => ({ key, label: t(key === 'details' ? 'priorityScheduling.reading.diagnostics' : `priorityScheduling.${key}`), class: key === 'account' || key === 'profit' ? 'w-48' : key === 'latency' ? 'w-40' : 'w-28' })))
-const latencyColumns = computed(() => ['account','samples','p50','p90','p99','errors','slow','errorRate'].map(key => ({ key: key === 'errors' ? 'error_samples' : key === 'slow' ? 'slow_samples' : key, label: t(`priorityScheduling.latencyPanel.${key}`) })))
-const bucketColumns = computed(() => [{ key: 'account', label: t('priorityScheduling.account') }, ...latencyBuckets.value.map(bucket => ({ key: bucket, label: formatBucket(bucket) }))])
+const performanceMinutes = computed(() => performanceWindowMinutes(candidateRows.value[0]?.performance))
+const candidateColumns = computed(() => ['account','tier','priority','score','performance','rate','profit','details'].map(key => ({ key, label: key === 'performance' ? t('accountPerformance.column', { minutes: performanceMinutes.value }) : t(key === 'details' ? 'priorityScheduling.reading.diagnostics' : `priorityScheduling.${key}`), class: ['account','profit','performance'].includes(key) ? 'w-56' : 'w-28' })))
 function clampPage(page: number, size: number, total: number) { return Math.max(1, Math.min(page, Math.ceil(total / size))) }
 watch([candidateRows, candidatePageSize], () => { candidatePage.value = clampPage(candidatePage.value, candidatePageSize.value, candidateRows.value.length) })
-watch([latencyRows, latencyPageSize], () => { latencyPage.value = clampPage(latencyPage.value, latencyPageSize.value, latencyRows.value.length) })
 // Capture both scroll axes and the first visible account before a reactive patch.
 // Do not move a reader who scrolled again while Vue was patching.
 function readingAnchors(el: HTMLElement) {
@@ -341,7 +256,7 @@ function readingAnchors(el: HTMLElement) {
   })
 }
 function readingRestore() {
-  const saved = [...(readingRoot.value?.querySelectorAll<HTMLElement>('[data-reading-scroll], [data-latency-content]') ?? [])].map(el => {
+  const saved = [...(readingRoot.value?.querySelectorAll<HTMLElement>('[data-reading-scroll]') ?? [])].map(el => {
     const bounds = el.getBoundingClientRect()
     const rows = readingAnchors(el)
     const row = rows.find(item => item.getBoundingClientRect().bottom > bounds.top + 48) ?? rows.at(-1)
@@ -361,17 +276,8 @@ function displayScope(value: PrioritySnapshot | null | undefined) {
   if (!value) return ''
   return JSON.stringify([auth.user?.id, auth.user?.role, value.model, value.group_id, value.config_revision, value.mode, value.selection_policy, value.window_minutes, value.min_samples, value.latency_percentile, value.latency_measurement, value.latency_penalty_mode])
 }
-function clearLatency() {
-  latency.value = null; latencyOrder.value = []
-  latencyLoading.value = false; latencyError.value = ''; latencyPage.value = 1
-}
 const canRead = () => alive && auth.user?.role === 'admin'
 
-const latencyBuckets = computed(() => {
-  const buckets = new Set<string>()
-  for (const account of latencyPageRows.value) for (const bucket of account.buckets ?? []) buckets.add(bucket.bucket)
-  return [...buckets].sort()
-})
 const changedDiffRows = computed(() => (recomputeResult.value?.diff ?? []).filter(row => row.changed))
 const stickyVisible = computed(() => sticky.value?.group_id === Number(stickyGroupID.value) ? sticky.value : null)
 function snapshotScope(value: PrioritySnapshot | null | undefined) {
@@ -386,46 +292,13 @@ const recomputeCanClearSticky = computed(() => {
     snapshotScope(result.before) === snapshotScope(result.after) && snapshotScope(result.after) === snapshotScope(mutationSnapshot.value) &&
     result.after.history_status === 'ready' && result.after.history_ready && !result.after.history_refreshing && !result.after.history_error
 })
-function metricValue(item: { selected_ttft_ms?: number; p50_ttft_ms: number; p70_ttft_ms?: number; p90_ttft_ms: number; p95_ttft_ms?: number; p99_ttft_ms: number }, percentile: number) {
-  if (item.selected_ttft_ms != null) return item.selected_ttft_ms
-  if (percentile === 50) return item.p50_ttft_ms
-  if (percentile === 70) return item.p70_ttft_ms ?? item.p90_ttft_ms
-  if (percentile === 95) return item.p95_ttft_ms ?? item.p90_ttft_ms
-  if (percentile === 99) return item.p99_ttft_ms
-  return item.p90_ttft_ms
-}
-
-function bucketLatency(account: PriorityLatencyAccount, bucket: string) {
-  const value = (account.buckets ?? []).find(item => item.bucket === bucket)
-  return value ? value.selected_ttft_ms != null && value.selected_ttft_ms > 0 ? value.selected_ttft_ms : metricValue(value, account.latency_percentile ?? latency.value?.latency_percentile ?? 90) : null
-}
-function bucketText(account: PriorityLatencyAccount, bucket: string) {
-  const value = bucketLatency(account, bucket)
-  return value == null || value <= 0 ? '—' : String(Math.round(value))
-}
-function formatBucket(value: string) {
-  const date = new Date(value)
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-}
-function formatMs(value: number) {
-  return value > 0 ? `${Math.round(value)} ms` : '—'
-}
-function formatRate(value: number) {
-  return value > 0 ? `${(value * 100).toFixed(1)}%` : '—'
-}
-function latencyClass(value: number) {
-  const target = latency.value?.target_ttft_ms
-  if (!value || !target) return 'text-gray-400'
-  if (value <= target) return 'text-emerald-600'
-  if (value <= target * 2) return 'text-amber-600'
-  return 'text-red-600'
-}
+function formatMs(value?: number | null) { return value != null && value >= 0 ? `${Math.round(value)} ms` : '—' }
 function tierLabel(tier?: string) {
   return t(`priorityScheduling.tiers.${tier || 'insufficient'}`)
 }
 function accountName(accountID: number) {
   return snapshot.value?.candidates.find(row => row.account_id === accountID)?.account_name ??
-    latency.value?.accounts.find(row => row.account_id === accountID)?.account_name ?? `#${accountID}`
+    `#${accountID}`
 }
 async function load() {
   if (!canRead() || loading.value) return
@@ -434,7 +307,7 @@ async function load() {
     const config = await getPriorityConfig()
     if (!active(version)) return
     const { teams: _legacyTeams, ...currentConfig } = config as PrioritySchedulingConfig & { teams?: unknown }
-    draft.value = { ...currentConfig, error_rate_weight: currentConfig.error_rate_weight ?? 0, error_rate_window_minutes: currentConfig.error_rate_window_minutes ?? 10, error_rate_prior_samples: currentConfig.error_rate_prior_samples ?? 5, latency_percentile: currentConfig.latency_percentile ?? 90, latency_measurement: currentConfig.latency_measurement ?? 'legacy_forward', recovery_exploration_percent: currentConfig.recovery_exploration_percent ?? 0, latency_penalty_mode: currentConfig.latency_penalty_mode ?? 'deprioritize', latency_penalty_minutes: currentConfig.latency_penalty_minutes ?? 10, balance_protocols: currentConfig.balance_protocols ?? true, oauth_quota_priority: currentConfig.oauth_quota_priority ?? false, oauth_quota_threshold: currentConfig.oauth_quota_threshold ?? 90 }; groups.value = (config.group_ids ?? []).join(', '); modelsText.value = (config.models ?? []).join('\n')
+    draft.value = { ...currentConfig, target_tps: currentConfig.target_tps ?? 30, error_rate_weight: currentConfig.error_rate_weight ?? 0, error_rate_window_minutes: currentConfig.error_rate_window_minutes ?? 10, error_rate_prior_samples: currentConfig.error_rate_prior_samples ?? 5, latency_percentile: currentConfig.latency_percentile ?? 90, latency_measurement: currentConfig.latency_measurement ?? 'legacy_forward', recovery_exploration_percent: currentConfig.recovery_exploration_percent ?? 0, latency_penalty_mode: currentConfig.latency_penalty_mode ?? 'deprioritize', latency_penalty_minutes: currentConfig.latency_penalty_minutes ?? 10, balance_protocols: currentConfig.balance_protocols ?? true, oauth_quota_priority: currentConfig.oauth_quota_priority ?? false, oauth_quota_threshold: currentConfig.oauth_quota_threshold ?? 90 }; groups.value = (config.group_ids ?? []).join(', '); modelsText.value = (config.models ?? []).join('\n')
     const configuredGroup = config.group_ids?.[0]
     if (configuredGroup && configuredGroup > 0) stickyGroupID.value = configuredGroup
   } catch { if (active(version)) error.value = t('priorityScheduling.error') }
@@ -467,13 +340,24 @@ async function save() {
 async function loadCatalog(initial = false) {
   if (!canRead()) return
   invalidateCatalog()
-  const version = generation, request = ++catalogRequestGeneration, group = selectedGroup.value
+  const version = generation, request = ++catalogRequestGeneration
+  let group = selectedGroup.value
   const controller = new AbortController(); catalogController = controller
   catalogLoading.value = true; catalogError.value = false
   try {
-    const [openaiGroups, compositeGroups, catalogModels] = await Promise.all([getGroups('openai', controller.signal), getGroups('composite', controller.signal), getPriorityModels(selectedGroup.value || undefined, controller.signal)])
+    const [openaiGroups, compositeGroups, models] = await Promise.all([getGroups('openai', controller.signal), getGroups('composite', controller.signal), getPriorityModels(group || undefined, controller.signal)])
     if (!active(version) || request !== catalogRequestGeneration || group !== selectedGroup.value) return
     availableGroups.value = [...new Map([...openaiGroups, ...compositeGroups].map(group => [group.id, group])).values()]
+    let catalogModels = models
+    if (initial && !initialized.value) {
+      const configuredGroup = draft.value?.group_ids?.find(id => availableGroups.value.some(group => group.id === id))
+      const defaultGroup = configuredGroup ?? openaiGroups.find(group => /gpt/i.test(group.name))?.id ?? openaiGroups[0]?.id ?? 0
+      if (defaultGroup !== group) {
+        selectedGroup.value = group = defaultGroup
+        catalogModels = await getPriorityModels(group || undefined, controller.signal)
+        if (!active(version) || request !== catalogRequestGeneration || group !== selectedGroup.value) return
+      }
+    }
     availableModels.value = catalogModels
     if (initial && !selectedModel.value) selectedModel.value = draft.value?.models?.find(model => catalogModels.includes(model)) ?? catalogModels[0] ?? ''
   } catch {
@@ -495,10 +379,8 @@ async function refresh() {
   await loadSnapshot(0)
 }
 function validAnalysis(value: Awaited<ReturnType<typeof getPriorityAnalysis>>, query: ReturnType<typeof scopeQuery>) {
-  const current = value?.snapshot, series = value?.latency
-  return !!current && !!series && current.model === query.model && current.group_id === (query.group_id ?? null) && current.window_minutes === query.minutes &&
-    series.model === current.model && series.group_id === current.group_id && series.config_revision === current.config_revision &&
-    series.latency_percentile === current.latency_percentile && series.latency_measurement === current.latency_measurement &&
+  const current = value?.snapshot
+  return !!current && current.model === query.model && current.group_id === (query.group_id ?? null) && current.window_minutes === query.minutes &&
     current.history_ready && !current.history_error && current.history_status === 'ready'
 }
 async function loadSnapshot(attempt: number) {
@@ -506,28 +388,26 @@ async function loadSnapshot(attempt: number) {
   const request = ++snapshotRequestGeneration, key = scopeKey(), query = scopeQuery()
   const priorScope = displayScope(snapshot.value)
   recomputeRequestGeneration++; recomputeLoading.value = false
-  const version = generation; refreshing.value = true; snapshotError.value = ''; latencyLoading.value = true
+  const version = generation; refreshing.value = true; snapshotError.value = ''
   const controller = new AbortController(); analysisController = controller
   try {
     const result = await getPriorityAnalysis(query, controller.signal)
     if (!active(version) || request !== snapshotRequestGeneration || key !== scopeKey()) return
     if (!validAnalysis(result, query)) throw new Error('invalid analysis scope')
     const restore = readingRestore()
-    if (displayScope(result.snapshot) !== priorScope) { clearLatency(); candidateOrder.value = []; candidatePage.value = 1 }
+    if (displayScope(result.snapshot) !== priorScope) { candidateOrder.value = []; candidatePage.value = 1 }
     snapshot.value = result.snapshot
     candidateOrder.value = reconcileOrder(candidateOrder.value, result.snapshot.candidates)
-    latencyOrder.value = reconcileOrder(latencyOrder.value, result.latency.accounts)
-    latency.value = result.latency; latencyError.value = ''
     void restore()
-    scheduleHistoryRefresh(version, 5000, attempt)
+    scheduleHistoryRefresh(version, 30000, attempt)
   } catch {
     if (active(version) && request === snapshotRequestGeneration && key === scopeKey()) {
-      snapshotError.value = t('priorityScheduling.error'); latencyError.value = t('priorityScheduling.latencyPanel.error')
+      snapshotError.value = t('priorityScheduling.error')
       scheduleHistoryRefresh(version, 15000, 0)
     }
   } finally {
     if (analysisController === controller) analysisController = undefined
-    if (active(version) && request === snapshotRequestGeneration) { refreshing.value = false; latencyLoading.value = false }
+    if (active(version) && request === snapshotRequestGeneration) { refreshing.value = false }
   }
 }
 function scheduleHistoryRefresh(version: number, delay: number, attempt: number) {
@@ -535,13 +415,9 @@ function scheduleHistoryRefresh(version: number, delay: number, attempt: number)
   if (!canRead() || !active(version)) return
   historyTimer = setTimeout(() => {
     if (!active(version)) return
-    if (document.visibilityState === 'hidden') { scheduleHistoryRefresh(version, 5000, attempt); return }
+    if (document.visibilityState === 'hidden') { scheduleHistoryRefresh(version, 30000, attempt); return }
     void loadSnapshot(attempt)
   }, delay)
-}
-async function loadLatency() {
-  // One backend read captures the same scope/config/window for both tables.
-  await refresh()
 }
 async function loadSticky(requestedGroupID?: number) {
   if (!canRead()) return
@@ -624,18 +500,18 @@ watch(stickyGroupID, () => {
   sticky.value = null; stickyError.value = ''; stickyNotice.value = ''; stickyLoading.value = false
 }, { flush: 'sync' })
 const initialized = ref(false)
-watch([selectedModel, selectedGroup, latencyMinutes], () => {
+watch([selectedModel, selectedGroup, financeMinutes], () => {
   if (!initialized.value) return
   invalidateAnalysis()
   recomputeRequestGeneration++; recomputeResult.value = null; recomputeLoading.value = false
-  clearLatency(); snapshot.value = null; candidateOrder.value = []; candidatePage.value = 1; snapshotError.value = ''
+  snapshot.value = null; candidateOrder.value = []; candidatePage.value = 1; snapshotError.value = ''
   void loadSnapshot(0)
 }, { flush: 'sync' })
 watch(selectedGroup, () => { if (initialized.value) void loadCatalog() })
 watch(() => auth.user ? `${auth.user.id}:${auth.user.role}` : '', () => {
   invalidateAnalysis(); invalidateCatalog(); generation++; initialized.value = false; draft.value = null; snapshot.value = null; mutationSnapshot.value = null; selectedModel.value = ''; selectedGroup.value = 0; availableModels.value = []; availableGroups.value = []; catalogLoading.value = false; catalogError.value = false
   groups.value = modelsText.value = error.value = notice.value = snapshotError.value = ''
-  clearLatency(); candidateOrder.value = []; candidatePage.value = 1; latencyExpanded.value = false
+  candidateOrder.value = []; candidatePage.value = 1
   recomputeResult.value = null; recomputeError.value = ''; recomputeLoading.value = false
   recomputeRequestGeneration++; stickyRequestGeneration++; snapshotRequestGeneration++
   sticky.value = null; stickyError.value = ''; stickyNotice.value = ''; stickyLoading.value = false; stickyGroupID.value = 2
@@ -645,7 +521,6 @@ onMounted(async () => {
   const version = generation
   await load()
   if (!active(version) || !canRead()) return
-  selectedGroup.value = draft.value?.group_ids?.[0] ?? 0
   await loadCatalog(true)
   if (!active(version) || !canRead()) return
   initialized.value = true
@@ -658,14 +533,9 @@ onBeforeUnmount(() => { invalidateAnalysis(); invalidateCatalog(); alive = false
 .reading-status { min-height: 3rem; }
 .field-title { @apply mb-2 block text-xs font-medium text-gray-600 dark:text-gray-300; }
 input[type=checkbox] { @apply h-4 w-4 rounded text-primary-600; }
-.latency-panel { transition-property: background-color, border-color, box-shadow; display: flex; flex-direction: column; max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem); }
-.latency-panel > header, .latency-panel > p { flex-shrink: 0; }
-.latency-content { min-height: 0; max-height: min(48rem, 70vh); max-height: min(48rem, 70dvh); overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
-.latency-content .reading-table { max-height: min(18rem, 32vh); max-height: min(18rem, 32dvh); }
 .reading-table { max-height: min(32rem, 55vh); max-height: min(32rem, 55dvh); overflow: auto; overscroll-behavior: contain; overflow-anchor: none; }
 .reading-table :deep(table) { table-layout: fixed; min-width: 76rem; }
 .candidate-table :deep(table) { min-width: 83rem; }
-.bucket-table :deep(table) { table-layout: auto; min-width: 100%; }
 .account-cell { width: 10rem; max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
 .account-cell > strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .diagnostic-copy { max-width: 17rem; white-space: normal; overflow-wrap: anywhere; }

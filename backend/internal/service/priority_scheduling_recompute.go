@@ -25,6 +25,8 @@ type PrioritySchedulingDiffRow struct {
 	OldTier         string   `json:"old_tier,omitempty"`
 	NewTier         string   `json:"new_tier,omitempty"`
 	OldP90TTFTMs    float64  `json:"old_p90_ttft_ms"`
+	OldAvgTTFTMs    *float64 `json:"old_avg_ttft_ms"`
+	NewAvgTTFTMs    *float64 `json:"new_avg_ttft_ms"`
 	NewP90TTFTMs    float64  `json:"new_p90_ttft_ms"`
 	OldSamples      int      `json:"old_samples"`
 	NewSamples      int      `json:"new_samples"`
@@ -143,6 +145,8 @@ func diffPrioritySnapshots(before, after *PrioritySchedulingSnapshot) []Priority
 			OldTier:         old.Tier,
 			NewTier:         candidate.Tier,
 			OldP90TTFTMs:    old.P90TTFTMs,
+			OldAvgTTFTMs:    old.SelectedTTFTMs,
+			NewAvgTTFTMs:    candidate.SelectedTTFTMs,
 			NewP90TTFTMs:    candidate.P90TTFTMs,
 			OldSamples:      old.Samples,
 			NewSamples:      candidate.Samples,
@@ -154,7 +158,7 @@ func diffPrioritySnapshots(before, after *PrioritySchedulingSnapshot) []Priority
 			!almostEqual(row.OldScore, row.NewScore, 0.01) ||
 			!almostEqual(row.OldWeight, row.NewWeight, 0.001) ||
 			row.OldTier != row.NewTier ||
-			!almostEqual(row.OldP90TTFTMs, row.NewP90TTFTMs, 1) ||
+			!almostEqualOptional(row.OldAvgTTFTMs, row.NewAvgTTFTMs, 1) ||
 			row.OldSamples != row.NewSamples ||
 			row.OldErrorSamples != row.NewErrorSamples
 		rows = append(rows, row)
@@ -185,4 +189,11 @@ func diffPrioritySnapshots(before, after *PrioritySchedulingSnapshot) []Priority
 
 func almostEqual(a, b, tolerance float64) bool {
 	return math.Abs(a-b) <= tolerance
+}
+
+func almostEqualOptional(a, b *float64, tolerance float64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return almostEqual(*a, *b, tolerance)
 }

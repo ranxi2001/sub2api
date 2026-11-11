@@ -76,7 +76,7 @@ func priorityRecomputeEpochFixture(reader *priorityRecomputeBarrierReader) (*Ope
 	cfg.TargetTTFTMs = 1000
 	request := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: "recompute-epoch-model", UseUpstreamTokenCost: true}
 	candidates := []openAIAccountCandidateScore{priorityCandidate(8871, 1, 1)}
-	old := PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 6000, QualityPassed: 2, QualitySamples: 10, ProfitSamples: 20, Revenue: 1, BaseCost: 2}
+	old := withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 6000, QualityPassed: 2, QualitySamples: 10, ProfitSamples: 20, Revenue: 1, BaseCost: 2})
 	now := time.Now()
 	key := priorityHistoryKey(request, cfg)
 	settings := &SettingService{settingRepo: &prioritySettingStub{}}
@@ -173,7 +173,7 @@ func TestPriorityRecomputeIncompleteReadPreservesWholeObservation(t *testing.T) 
 	reader := newPriorityRecomputeBarrierReader([]PrioritySchedulingSignal{{}}, nil)
 	// One returned account looks healthy, but a second queried account is omitted.
 	// No part of this incomplete result may replace the previous observation.
-	reader.rows = []map[int64]PrioritySchedulingSignal{{8871: {Samples: 30, P90TTFTMs: 100, QualityPassed: 30, QualitySamples: 30}}}
+	reader.rows = []map[int64]PrioritySchedulingSignal{{8871: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 30, P90TTFTMs: 100, QualityPassed: 30, QualitySamples: 30})}}
 	svc, cfg, request, candidates, old := priorityRecomputeEpochFixture(reader)
 	peer := priorityCandidate(8872, 1, 1)
 	candidates = append(candidates, peer)

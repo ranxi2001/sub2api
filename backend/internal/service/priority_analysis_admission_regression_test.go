@@ -39,7 +39,7 @@ func (r *analysisBarrierHistory) ReadPrioritySchedulingSignals(ctx context.Conte
 	}
 	rows := make(map[int64]PrioritySchedulingSignal)
 	for _, id := range q.AccountIDs {
-		rows[id] = PrioritySchedulingSignal{Samples: 1, P90TTFTMs: 100}
+		rows[id] = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 1, P90TTFTMs: 100})
 	}
 	return rows, nil
 }

@@ -29,7 +29,7 @@ func availabilityFixture(t *testing.T, latencies ...float64) (*OpenAIGatewayServ
 		account.Status, account.Schedulable = StatusActive, true
 		account.GroupIDs = []int64{11}
 		accounts[i] = *account
-		signals[id] = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: latency, LatestBadLatencyAt: &bad, QualitySamples: 10, QualityPassed: 10}
+		signals[id] = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: latency, LatestBadLatencyAt: &bad, QualitySamples: 10, QualityPassed: 10})
 	}
 	svc.accountRepo = schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}
 	svc.usageLogRepo = &priorityReaderStub{signal: signals}
@@ -87,7 +87,7 @@ func TestPriorityLatencyAvailabilityPoolBoundaries(t *testing.T) {
 				require.NotNil(t, snapshot)
 				for _, score := range snapshot.Candidates {
 					require.True(t, score.LatencyStopped)
-					require.NotNil(t, score.LatencyPenaltyUntil)
+					require.Nil(t, score.LatencyPenaltyUntil, "mean-based admission has no independent timer")
 				}
 			}
 		})
@@ -283,7 +283,7 @@ func TestPriorityLatencyAvailabilityNativeFallback(t *testing.T) {
 				a.ID = id
 				accounts = append(accounts, a)
 				pool = append(pool, openAIAccountCandidateScore{account: &accounts[len(accounts)-1]})
-				signals[id] = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 15000 + float64(id)*1000, LatestBadLatencyAt: &bad}
+				signals[id] = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 15000 + float64(id)*1000, LatestBadLatencyAt: &bad})
 			}
 			svc.accountRepo = schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}
 			svc.usageLogRepo = &priorityReaderStub{signal: signals}
@@ -331,7 +331,7 @@ func TestPriorityLatencyAvailabilityConfiguredMetric(t *testing.T) {
 	for i := range repo.accounts {
 		value := 21000 - float64(i)*1000
 		id := repo.accounts[i].ID
-		signals[id] = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: float64(i + 1), SelectedTTFTMs: &value, LatencyPercentile: 95, LatencyMeasurement: "attributed_v1", LatencyEvidenceVersion: 1, LatestBadLatencyAt: &bad}
+		signals[id] = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: float64(i + 1), SelectedTTFTMs: &value, LatencyPercentile: 95, LatencyMeasurement: "attributed_v1", LatencyEvidenceVersion: 1, LatestBadLatencyAt: &bad})
 		pool = append(pool, openAIAccountCandidateScore{account: &repo.accounts[i]})
 	}
 	svc.usageLogRepo = &priorityReaderStub{signal: signals}

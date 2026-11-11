@@ -38,7 +38,7 @@ func TestPriorityLifecyclePassthroughPhysicalWriteFence(t *testing.T) {
 		now := time.Now()
 		if armed.CompareAndSwap(true, false) {
 			setModeSignal(svc, req, account.ID, func(v *PrioritySchedulingSignal) {
-				*v = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &now}
+				*v = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &now})
 			})
 			published.Store(true)
 		}

@@ -126,7 +126,7 @@ func (r *priorityRecomputeScopeRegressionReader) ReadPrioritySchedulingSignals(_
 	})
 	result := make(map[int64]PrioritySchedulingSignal, len(query.AccountIDs))
 	for _, id := range query.AccountIDs {
-		result[id] = PrioritySchedulingSignal{Samples: 10, P90TTFTMs: float64(id)}
+		result[id] = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 10, P90TTFTMs: float64(id)})
 	}
 	return result, nil
 }

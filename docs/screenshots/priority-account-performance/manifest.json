@@ -1,0 +1,71 @@
+{
+  "head": "80712d1833a077faee4da72fb0e0926f45c53cfb",
+  "baseline": "6fa7fb86eae7c732794450646dc13831dce87ff1",
+  "run": "42983409965",
+  "synthetic": true,
+  "actualComponents": [
+    "PrioritySchedulingView",
+    "AccountPerformanceCell",
+    "Select",
+    "DataTable",
+    "Pagination"
+  ],
+  "mocks": [
+    "backend",
+    "auth",
+    "layout",
+    "navigation"
+  ],
+  "productionCalls": 0,
+  "paidCalls": 0,
+  "shots": [
+    {
+      "sha256": "42fbe17862f786fdb3048b7408f3ad000e333fed828802c2654d55d5c1b42670",
+      "name": "before-default-gpt-group.png",
+      "head": "6fa7fb86eae7c732794450646dc13831dce87ff1",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "scope": "default-group-baseline",
+      "synthetic": true,
+      "source": "42983409965"
+    },
+    {
+      "sha256": "ae020fab2f95246095a987d6b331436eacbbcb52d4fecd0c1b2ff4f1c5bf498a",
+      "name": "after-default-gpt-group.png",
+      "head": "80712d1833a077faee4da72fb0e0926f45c53cfb",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "scope": "candidate",
+      "synthetic": true,
+      "source": "42983409965"
+    },
+    {
+      "sha256": "9941f5d6a2627173e0bb3602d648a2d24e5c9b22fb6168a42526f941079c8810",
+      "name": "after-shared-performance.png",
+      "head": "80712d1833a077faee4da72fb0e0926f45c53cfb",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "scope": "candidate",
+      "synthetic": true,
+      "source": "42983409965"
+    },
+    {
+      "sha256": "2f350c680b70dc3caea9dfeb508d45c9c721d2ed5acd9022d9e2c87d6e7cd136",
+      "name": "after-mobile.png",
+      "head": "80712d1833a077faee4da72fb0e0926f45c53cfb",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "scope": "candidate",
+      "synthetic": true,
+      "source": "42983409965"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { apiClient } from '../client'
+import type { AccountPerformance } from '@/types/accountPerformance'
 export interface PrioritySchedulingConfig {
   error_rate_weight?: number
   error_rate_window_minutes?: number
@@ -17,6 +18,7 @@ export interface PrioritySchedulingConfig {
   latency_percentile?: 50 | 70 | 90 | 95
   latency_measurement?: 'legacy_forward' | 'attributed_v1'
   recovery_exploration_percent?: number
+  target_tps?: number
   target_ttft_ms: number
   max_load_percent: number
   min_quality_percent: number
@@ -28,6 +30,7 @@ export interface PrioritySchedulingConfig {
 }
 export type PriorityHistoryStatus = 'ready' | 'stale' | 'partial' | 'loading' | 'error' | 'unavailable' | 'limited'
 export interface PriorityCandidate {
+  performance?: AccountPerformance
   error_rate?: number | null
   upstream_error_rate?: number
   error_smoothed_rate?: number
@@ -83,6 +86,7 @@ export interface PriorityCandidate {
   quality_samples: number
 }
 export interface PrioritySnapshot {
+  performance_source?: string
   latency_percentile?: number
   latency_measurement?: string
   latency_penalty_mode?: 'deprioritize' | 'stop'
@@ -158,6 +162,8 @@ export interface PrioritySchedulingDiffRow {
   new_weight: number
   old_tier?: string
   new_tier?: string
+  old_avg_ttft_ms?: number | null
+  new_avg_ttft_ms?: number | null
   old_p90_ttft_ms: number
   new_p90_ttft_ms: number
   old_samples: number
