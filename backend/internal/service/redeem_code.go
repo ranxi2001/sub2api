@@ -18,6 +18,9 @@ type RedeemCode struct {
 	CreatedAt time.Time
 	ExpiresAt *time.Time
 
+	// AutoCredit is populated only for the admin balance-history projection.
+	AutoCredit *AutoCreditBalanceHistory
+
 	GroupID      *int64
 	ValidityDays int
 

@@ -16,6 +16,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/utils/__tests__/smartOpsSidebar.spec.ts \
 	src/components/settings/BalanceForecastSettings.spec.ts \
 	src/components/admin/user/__tests__/UserAutoCreditModal.spec.ts \
+	src/components/admin/user/__tests__/UserBalanceHistoryModal.spec.ts \
 	src/components/common/__tests__/VipAutoCreditNotice.spec.ts \
 	src/components/admin/user/__tests__/ApiKeyModelPolicyDialog.spec.ts \
 	src/components/admin/user/__tests__/ApiKeyModelPolicyNotices.spec.ts \

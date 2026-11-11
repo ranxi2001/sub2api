@@ -561,7 +561,8 @@ type RedeemCode struct {
 type AdminRedeemCode struct {
 	RedeemCode
 
-	Notes string `json:"notes"`
+	Notes      string                            `json:"notes"`
+	AutoCredit *service.AutoCreditBalanceHistory `json:"auto_credit,omitempty"`
 }
 
 type NullableTimeField struct {
