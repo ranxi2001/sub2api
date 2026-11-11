@@ -102,7 +102,7 @@ jobs:
             backend/internal/service/priority_scheduling_recompute.go \
             backend/internal/service/priority_scheduling_snapshot.go \
             backend/internal/service/priority_scheduling.go | tee "$RUNNER_TEMP/pr598-c0c-red/production.txt"
-          test "$(git hash-object backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go)" = "$(git -C "$baseline" hash-object backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go)"
+          test "$(git rev-parse d79c1044914e7924c38cc4a239e42ff8980698e6:backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go)" = "$(git -C "$baseline" hash-object backend/internal/service/priority_scheduling_recompute_epoch_regression_test.go)"
           set +e
           (cd "$baseline/backend" && go test -tags=unit ./internal/service -run '^TestPriorityRecompute(RefreshFailurePreservesCachedRiskForScheduler|WaitsForFreshReadAfterInflightReader)$' -count=1 -v -timeout=10s) > "$RUNNER_TEMP/pr598-c0c-red/service.log" 2>&1
           result=$?
