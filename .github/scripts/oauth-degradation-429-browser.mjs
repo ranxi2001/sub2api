@@ -16,20 +16,20 @@ const previous=path.join(frontend,'src/components/admin/operations/OAuthDegradat
 await fs.mkdir(output,{recursive:true})
 await fs.writeFile(previous,execFileSync('git',['show',`${baseline}:${component}`],{cwd:root}))
 const html=`<!doctype html><meta charset="utf-8"><div id="app"></div><script type="module">
-import {createApp,ref} from 'vue';import {createPinia} from 'pinia';
+import {createApp,ref,h} from 'vue';import {createPinia} from 'pinia';
 import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';import '/src/style.css';
 import {defaultOAuthDegradationConfig} from '/src/utils/oauthDegradation.ts';
 const {default:Card}=new URLSearchParams(location.search).has('before')?await import('/src/components/admin/operations/OAuthDegradation429Before.vue'):await import('/src/components/admin/operations/OAuthDegradationCard.vue');
 await loadLocaleMessages('zh');i18n.global.locale.value='zh';
-createApp({components:{Card},setup(){return{cfg:ref({...defaultOAuthDegradationConfig(),enabled:true,threshold_percent:9,limit_models:false})}},template:'<main class="mx-auto max-w-4xl p-5"><p class="mb-3 text-sm text-gray-500">CI 组件预览 · 虚构配置 · 非生产</p><Card v-model="cfg" :user-id="41" /></main>'}).use(createPinia()).use(i18n).mount('#app');</script>`
+createApp({setup(){const cfg=ref({...defaultOAuthDegradationConfig(),enabled:true,threshold_percent:9,limit_models:false});return ()=>h('main',{class:'mx-auto max-w-4xl p-5'},[h('p',{class:'mb-3 text-sm text-gray-500'},'CI 组件预览 · 虚构配置 · 非生产'),h(Card,{modelValue:cfg.value,'onUpdate:modelValue':value=>cfg.value=value,userId:41})])}}).use(createPinia()).use(i18n).mount('#app');</script>`
 process.chdir(frontend)
-const server=await createServer({root:frontend,configFile:false,envFile:false,plugins:[vue(),{name:'429-fixture',configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url?.split('?')[0]!=='/')return next();res.setHeader('Content-Type','text/html');void vite.transformIndexHtml('/',html).then(v=>res.end(v))})}}],resolve:{alias:{'@':path.join(frontend,'src')}},server:{host:'127.0.0.1',port:0}})
+const server=await createServer({root:frontend,configFile:false,envFile:false,define:{__INTLIFY_JIT_COMPILATION__:true},plugins:[vue(),{name:'429-fixture',configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url?.split('?')[0]!=='/')return next();res.setHeader('Content-Type','text/html');void vite.transformIndexHtml('/',html).then(v=>res.end(v))})}}],resolve:{alias:{'@':path.join(frontend,'src')}},server:{host:'127.0.0.1',port:0}})
 let browser
 try {
  await server.listen()
  browser=await chromium.launch({headless:true})
  const page=await browser.newPage({viewport:{width:1100,height:1000}})
- const errors=[];page.on('pageerror',e=>errors.push(e.message))
+ const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error(e.message)})
  const url=`http://127.0.0.1:${server.httpServer.address().port}`
  await page.goto(url+'/?before');await page.locator('[data-testid="degradation-threshold"]').waitFor()
  await page.locator('[data-testid="degradation-action"]').screenshot({path:path.join(output,'before.png')})
