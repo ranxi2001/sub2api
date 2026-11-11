@@ -3,7 +3,7 @@ import { findModelConflict, validateIntervals, validateReasoningEffortMultiplier
 
 export const MAX_PRICING_FILE_BYTES = 2 * 1024 * 1024
 const FORMAT = 'sub2api-channel-pricing'
-const priceFields = ['input_price', 'output_price', 'cache_write_price', 'cache_write_1h_price', 'cache_read_price', 'per_request_price'] as const
+const priceFields = ['input_price', 'output_price', 'cache_write_price', 'cache_write_1h_price', 'cache_write_12h_price', 'cache_read_price', 'per_request_price'] as const
 const multiplierFields = ['input_multiplier', 'output_multiplier', 'cache_write_multiplier', 'cache_read_multiplier'] as const
 
 type Translate = (key: string, params?: Record<string, unknown>) => string

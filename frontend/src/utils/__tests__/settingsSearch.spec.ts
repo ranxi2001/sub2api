@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parse } from 'vue/compiler-sfc'
 import source from '@/views/admin/SettingsView.vue?raw'
+import smartOpsSource from '@/components/settings/SmartOpsSidebarSettings.vue?raw'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 import { buildFeatureSearchEntries, searchFeatures } from '../featureSearch'
@@ -41,6 +42,10 @@ describe('settings feature search', () => {
       if (id?.type === 6 && id.value?.content.startsWith('settings-section-')) {
         expect(anchors.has(id.value.content)).toBe(false)
         anchors.set(id.value.content, tab)
+      }
+      if (node.tag === 'SmartOpsSidebarSettings') {
+        const childRoot = parse(smartOpsSource).descriptor.template!.ast!
+        for (const child of childRoot.children) visit(child, tab)
       }
       for (const child of node.children) visit(child, tab)
     }

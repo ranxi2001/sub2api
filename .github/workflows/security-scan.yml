@@ -9,12 +9,19 @@ on:
 permissions:
   contents: read
 
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   backend-security:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -34,6 +41,10 @@ jobs:
     runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:

@@ -36,6 +36,11 @@ func testCollectionDB(t *testing.T) {
 	model.FillDefaultConf()
 	model.RefreshC()
 	require.NoError(t, belog.Init(filepath.Join(dir, "logs")))
+	// httptest ports can be reused across cases. A prior node's cached
+	// identity/cooldown must not suppress this case's different loopback RPC.
+	evmNodes.Lock()
+	evmNodes.states = make(map[string]evmNodeState)
+	evmNodes.Unlock()
 	lookbackDone = sync.Map{}
 	lookbackEpochs = sync.Map{}
 	replayCursors.items = make(map[model.Network]*replayCursor)

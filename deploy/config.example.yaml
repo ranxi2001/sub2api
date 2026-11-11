@@ -319,6 +319,10 @@ gateway:
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456
+  # Shared ingress buffer budget; final bodies stay reserved throughout long responses.
+  # Unset: 1/4 of min(RAM, cgroup limit, GOMEMLIMIT), at least 1 GiB.
+  # 显式值含 0 保留；0 禁用。未设置时按内存自动计算；参见 EDGE_SECURITY.md。
+  # request_body_memory_budget_bytes: 1073741824
   # Pure-text endpoint body limit (embeddings and alpha/search), default 32 MiB.
   # 纯文本端点请求体上限（embeddings、alpha/search），默认 32 MiB。
   text_max_body_size: 33554432

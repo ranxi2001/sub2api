@@ -26,7 +26,7 @@ const FORMAT = 'sub2api-channel-pricing-bundle'
 const SINGLE_PLATFORM_FORMAT = 'sub2api-channel-pricing'
 const COLLECTION_FORMAT = 'sub2api-channel-pricing-collection'
 const PRICE_UNIT = 'USD_per_million_tokens'
-const TOKEN_PRICE_FIELDS = ['input_price', 'output_price', 'cache_write_price', 'cache_write_1h_price', 'cache_read_price'] as const
+const TOKEN_PRICE_FIELDS = ['input_price', 'output_price', 'cache_write_price', 'cache_write_1h_price', 'cache_write_12h_price', 'cache_read_price'] as const
 
 interface PricingTotals { rules: number; models: number }
 interface PlatformRecord { platform: GroupPlatform; model_pricing: unknown[] }
@@ -150,6 +150,7 @@ export function channelPricingToPlatforms(pricing: ChannelModelPricing[]): Prici
       output_price: perTokenToMTok(row.output_price),
       cache_write_price: perTokenToMTok(row.cache_write_price),
       cache_write_1h_price: perTokenToMTok(row.cache_write_1h_price),
+      cache_write_12h_price: perTokenToMTok(row.cache_write_12h_price),
       cache_read_price: perTokenToMTok(row.cache_read_price),
       fast_multiplier: row.fast_multiplier ?? null,
       flex_multiplier: row.flex_multiplier ?? null,

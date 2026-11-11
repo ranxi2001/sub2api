@@ -118,13 +118,18 @@
                 type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
-              <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheWrite5mPrice') }}</label>
+              <label class="text-xs text-gray-400">{{ t(props.platform === 'openai' ? 'admin.channels.form.cacheWrite30mPrice' : 'admin.channels.form.cacheWrite5mPrice') }}</label>
               <input :value="entry.cache_write_price" @input="emitField('cache_write_price', ($event.target as HTMLInputElement).value)"
                 type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
-            <div>
+            <div v-if="props.platform !== 'openai'">
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.cacheWrite1hPrice') }}</label>
               <input :value="entry.cache_write_1h_price" @input="emitField('cache_write_1h_price', ($event.target as HTMLInputElement).value)"
+                type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
+            </div>
+            <div v-if="props.platform === 'openai'">
+              <label class="text-xs text-gray-400" :title="t('admin.channels.form.cacheWrite12hHint')">{{ t('admin.channels.form.cacheWrite12hPrice') }} <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h" :user-id="noticeUserId" /></label>
+              <input data-testid="cache-write-12h-price" :value="entry.cache_write_12h_price" @input="emitField('cache_write_12h_price', ($event.target as HTMLInputElement).value)"
                 type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div>
@@ -169,10 +174,11 @@
               </button>
             </div>
             <div v-if="entry.intervals && entry.intervals.length > 0" class="mt-2 space-y-2">
-              <IntervalRow
+              <IntervalRow :notice-user-id="noticeUserId"
                 v-for="(iv, idx) in entry.intervals"
                 :key="idx"
                 :interval="iv"
+                :platform="props.platform"
                 :mode="entry.billing_mode"
                 :enable-multipliers="enableTierMultipliers"
                 @update="updateInterval(idx, $event)"
@@ -210,7 +216,7 @@
             </button>
           </div>
           <div v-if="entry.intervals && entry.intervals.length > 0" class="mt-2 space-y-2">
-            <IntervalRow
+            <IntervalRow :notice-user-id="noticeUserId"
               v-for="(iv, idx) in entry.intervals"
               :key="idx"
               :interval="iv"
@@ -246,7 +252,7 @@
             </button>
           </div>
           <div v-if="entry.intervals && entry.intervals.length > 0" class="mt-2 space-y-2">
-            <IntervalRow
+            <IntervalRow :notice-user-id="noticeUserId"
               v-for="(iv, idx) in entry.intervals"
               :key="idx"
               :interval="iv"
@@ -301,6 +307,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import IntervalRow from './IntervalRow.vue'
@@ -315,6 +323,7 @@ import channelsAPI from '@/api/admin/channels'
 const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
+  noticeUserId?: number | null
   entry: PricingFormEntry
   platform?: string
   hideTokenIntervals?: boolean
@@ -370,6 +379,7 @@ function addInterval() {
     min_tokens: 0, max_tokens: null, tier_label: '',
     input_price: null, output_price: null, cache_write_price: null,
     cache_write_1h_price: null,
+    cache_write_12h_price: null,
     cache_read_price: null, per_request_price: null,
     input_multiplier: null, output_multiplier: null,
     cache_write_multiplier: null, cache_read_multiplier: null,
@@ -387,6 +397,7 @@ function addMediaTier() {
     min_tokens: 0, max_tokens: null, tier_label: labels[intervals.length] || '',
     input_price: null, output_price: null, cache_write_price: null,
     cache_write_1h_price: null,
+    cache_write_12h_price: null,
     cache_read_price: null, per_request_price: null,
     input_multiplier: null, output_multiplier: null,
     cache_write_multiplier: null, cache_read_multiplier: null,
@@ -420,7 +431,7 @@ async function onModelsUpdate(newModels: string[]) {
   // 检查是否所有价格字段都为空
   const e = props.entry
   const hasPrice = e.input_price != null || e.output_price != null ||
-                   e.cache_write_price != null || e.cache_write_1h_price != null || e.cache_read_price != null
+                   e.cache_write_price != null || e.cache_write_1h_price != null || e.cache_write_12h_price != null || e.cache_read_price != null
   if (hasPrice) return
 
   // 查询第一个新增模型的默认价格
@@ -434,6 +445,7 @@ async function onModelsUpdate(newModels: string[]) {
         output_price: perTokenToMTok(result.output_price ?? null),
         cache_write_price: perTokenToMTok(result.cache_write_price ?? null),
         cache_write_1h_price: perTokenToMTok(result.cache_write_1h_price ?? null),
+        cache_write_12h_price: perTokenToMTok(result.cache_write_12h_price ?? null),
         cache_read_price: perTokenToMTok(result.cache_read_price ?? null),
         image_input_price: perTokenToMTok(result.image_input_price ?? null),
         image_output_price: perTokenToMTok(result.image_output_price ?? null),

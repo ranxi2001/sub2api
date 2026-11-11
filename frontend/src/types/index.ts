@@ -1608,6 +1608,19 @@ export interface UsageProgress {
 }
 
 // Antigravity 单个模型的配额信息
+export interface AntigravityQuotaWindow {
+  window: string // '5h' or 'weekly'
+  utilization: number // 0-100
+  resets_at: string | null
+}
+
+export interface AntigravityQuotaGroup {
+  key: string // bucket prefix: 'gemini' or '3p' (Claude and GPT)
+  name: string
+  description?: string
+  windows: AntigravityQuotaWindow[]
+}
+
 export interface AntigravityModelQuota {
   utilization: number // 使用率 0-100
   reset_time: string  // 重置时间 ISO8601
@@ -1671,6 +1684,7 @@ export interface AccountUsageInfo {
   gemini_pro_minute?: UsageProgress | null
   gemini_flash_minute?: UsageProgress | null
   antigravity_quota?: Record<string, AntigravityModelQuota> | null
+  antigravity_quota_groups?: AntigravityQuotaGroup[] | null
   grok_request_quota?: GrokQuotaWindow | null
   grok_token_quota?: GrokQuotaWindow | null
   grok_retry_after_seconds?: number | null
@@ -2008,6 +2022,8 @@ export interface UsageLog {
   cache_read_tokens: number
   cache_creation_5m_tokens: number
   cache_creation_1h_tokens: number
+  cache_creation_30m_tokens?: number
+  cache_creation_12h_tokens?: number
 
   input_cost: number
   output_cost: number

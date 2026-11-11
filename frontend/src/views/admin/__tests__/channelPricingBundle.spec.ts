@@ -9,11 +9,11 @@ import { MAX_PRICING_FILE_BYTES, serializeChannelPricing } from '../channelPrici
 const t = (key: string) => key
 const pricing = (): PricingFormEntry => ({
   models: ['shared-model'], billing_mode: 'token',
-  input_price: 2, output_price: 8, cache_write_price: 0, cache_write_1h_price: null,
+  input_price: 2, output_price: 8, cache_write_price: 0, cache_write_1h_price: null, cache_write_12h_price: 0,
   cache_read_price: 0.2, image_input_price: 5, image_output_price: 10, per_request_price: 0.04,
   fast_multiplier: 2, flex_multiplier: 0.5, reasoning_effort_multipliers: { high: 1.5 },
   intervals: [{ min_tokens: 1000, max_tokens: null, tier_label: 'long', input_price: 4,
-    output_price: 16, cache_write_price: 0, cache_write_1h_price: null, cache_read_price: 0.4,
+    output_price: 16, cache_write_price: 0, cache_write_1h_price: null, cache_write_12h_price: 0, cache_read_price: 0.4,
     input_multiplier: 2, output_multiplier: 1.5, cache_write_multiplier: null,
     cache_read_multiplier: null, per_request_price: 0.1, sort_order: 0 }],
   time_pricing: { timezone: 'Asia/Shanghai', weekdays_only: true,
@@ -32,7 +32,7 @@ const collection = () => JSON.parse(serializePricingCollection(bundles(), t))
 const apiPricing = (platform: string): ChannelModelPricing => ({
   id: 42, platform, models: ['shared-model'], billing_mode: 'token',
   input_price: 0.000002, output_price: 0.000008, cache_write_price: 0,
-  cache_write_1h_price: null, cache_read_price: 0.0000002,
+  cache_write_1h_price: null, cache_write_12h_price: 0, cache_read_price: 0.0000002,
   image_input_price: 0.000005, image_output_price: 0.00001, per_request_price: 0.04,
   fast_multiplier: 2, flex_multiplier: 0.5, reasoning_effort_multipliers: { high: 1.5 },
   intervals: [{ ...formIntervalsToAPI(pricing().intervals)[0], id: 43 }],

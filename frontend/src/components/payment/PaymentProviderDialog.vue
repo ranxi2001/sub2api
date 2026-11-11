@@ -174,6 +174,7 @@
           <div v-for="field in resolvedFields" :key="field.key">
             <label class="input-label">
               {{ field.label }}
+              <NewFeatureBadge v-if="field.key === 'refundSuccessCode' && userId != null" :notice-id="NEW_FEATURE_NOTICES.easyPayRefundSuccessCode" :user-id="userId" />
               <span v-if="field.optional" class="text-xs text-gray-400">({{ t('common.optional') }})</span>
               <span v-else class="text-red-500"> *</span>
             </label>

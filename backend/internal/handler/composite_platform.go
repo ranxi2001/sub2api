@@ -174,6 +174,13 @@ func prepareOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey
 	}
 	requestModel := clientRequestedModel(c, gjson.GetBytes(body, "model").String())
 	bindRequestedReasoningEffort(c, body, requestModel)
+	isCNTarget := service.IsCNProvider(effectiveAPIKeyPlatform(c, apiKey))
+	if isCNTarget {
+		effort := gjson.GetBytes(body, "output_config.effort")
+		if effort.Type != gjson.String || strings.TrimSpace(effort.String()) == "" {
+			return body, nil
+		}
+	}
 	maxEffort, mappings, overLimit, ok := openAIReasoningEffortPolicyForRequest(c, apiKey)
 	if !ok {
 		return body, nil
@@ -190,7 +197,8 @@ func prepareOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey
 		// An explicit ultra model suffix is a client preference, not a bridge
 		// default. Enforce it before conversion or account/model normalization.
 		requested := service.CanonicalRequestedReasoningEffort(nil, requestModel)
-		if requested == nil || *requested != "ultra" {
+		if requested == nil || *requested != "ultra" || gjson.GetBytes(body, "thinking.type").String() == "disabled" {
+			c.Request = c.Request.WithContext(service.WithOpenAIReasoningEffortPolicyForMessages(c.Request.Context(), body, maxEffort, mappings, overLimit, requestModel))
 			return body, nil
 		}
 		payload, err := sjson.SetBytes(body, "output_config.effort", "ultra")
@@ -205,6 +213,6 @@ func prepareOpenAIReasoningEffortPolicyForMessagesRequest(c *gin.Context, apiKey
 		// turn ultra -> high -> low instead of applying one mapping.
 		return updated, nil
 	}
-	c.Request = c.Request.WithContext(service.WithOpenAIReasoningEffortPolicy(c.Request.Context(), maxEffort, mappings, overLimit, requestModel))
+	c.Request = c.Request.WithContext(service.WithOpenAIReasoningEffortPolicyForMessages(c.Request.Context(), body, maxEffort, mappings, overLimit, requestModel))
 	return body, nil
 }

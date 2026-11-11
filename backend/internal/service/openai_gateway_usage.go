@@ -190,10 +190,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
 	cacheCreationTokens := result.Usage.CacheCreationInputTokens
+	cache30m, cache12h := result.Usage.CacheCreation30mInputTokens, result.Usage.CacheCreation12hInputTokens
 	if excelBPSCacheCreationBilledAsInput(account, result) {
 		// Total input already includes cache creation. Retain those tokens in the
 		// ordinary input bucket without changing the original upstream usage.
 		cacheCreationTokens = 0
+		cache30m, cache12h = 0, 0
 	}
 	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - cacheCreationTokens
 	if actualInputTokens < 0 {
@@ -202,13 +204,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// Calculate cost
 	tokens := UsageTokens{
-		InputTokens:          actualInputTokens,
-		ImageInputTokens:     max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
-		ImageCacheReadTokens: result.Usage.ImageCacheReadTokens,
-		OutputTokens:         result.Usage.OutputTokens,
-		CacheCreationTokens:  cacheCreationTokens,
-		CacheReadTokens:      result.Usage.CacheReadInputTokens,
-		ImageOutputTokens:    result.Usage.ImageOutputTokens,
+		InputTokens:            actualInputTokens,
+		ImageInputTokens:       max(result.Usage.ImageInputTokens-result.Usage.ImageCacheReadTokens, 0),
+		ImageCacheReadTokens:   result.Usage.ImageCacheReadTokens,
+		OutputTokens:           result.Usage.OutputTokens,
+		CacheCreationTokens:    cacheCreationTokens,
+		CacheReadTokens:        result.Usage.CacheReadInputTokens,
+		ImageOutputTokens:      result.Usage.ImageOutputTokens,
+		CacheCreation30mTokens: cache30m,
+		CacheCreation12hTokens: cache12h,
 	}
 
 	// Keep candidate fallback, response-model selection and Free Fast on one policy snapshot.
@@ -450,6 +454,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		InputTokens:              actualInputTokens,
 		OutputTokens:             result.Usage.OutputTokens,
 		CacheCreationTokens:      cacheCreationTokens,
+		CacheCreation30mTokens:   cache30m,
+		CacheCreation12hTokens:   cache12h,
 		CacheReadTokens:          result.Usage.CacheReadInputTokens,
 		ImageInputTokens:         result.Usage.ImageInputTokens,
 		ImageOutputTokens:        result.Usage.ImageOutputTokens,

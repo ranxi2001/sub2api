@@ -98,7 +98,7 @@
                   </button>
                 </div>
                 <p v-if="section.entries.length === 0" class="text-xs text-amber-700 dark:text-amber-300">{{ t('admin.channels.bulkEdit.emptyPlatform') }}</p>
-                <PricingEntryCard
+                <PricingEntryCard :notice-user-id="noticeUserId"
                   v-for="(entry, index) in section.entries"
                   :key="index"
                   :entry="entry"
@@ -167,6 +167,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { platformLabel as catalogPlatformLabel } from '@/utils/platformColors'
 
 const props = defineProps<{
+  noticeUserId?: number | null
   show: boolean
   channels: Channel[]
   initialPricing?: PricingBundle
@@ -249,6 +250,7 @@ function addPricingEntry(section: PricingPlatform) {
     output_price: null,
     cache_write_price: null,
     cache_write_1h_price: null,
+    cache_write_12h_price: null,
     cache_read_price: null,
     fast_multiplier: null,
     flex_multiplier: null,
@@ -331,6 +333,7 @@ function pricingToAPI(platforms: PricingPlatform[]): ChannelModelPricing[] {
     output_price: mTokToPerToken(entry.output_price),
     cache_write_price: mTokToPerToken(entry.cache_write_price),
     cache_write_1h_price: mTokToPerToken(entry.cache_write_1h_price),
+    cache_write_12h_price: mTokToPerToken(entry.cache_write_12h_price),
     cache_read_price: mTokToPerToken(entry.cache_read_price),
     image_input_price: mTokToPerToken(entry.image_input_price),
     image_output_price: mTokToPerToken(entry.image_output_price),

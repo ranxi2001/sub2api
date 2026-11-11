@@ -914,7 +914,7 @@ describe('EditAccountModal Grok OAuth upstream config', () => {
     pending.resolve({ models: ['new-catalog-id'], discovery_source: 'upstream' })
     await flushPromises()
     const selector = wrapper.findComponent({ name: 'ModelWhitelistSelector' })
-    expect(selector.props('modelValue')).toEqual(['keep-local', 'new-catalog-id'])
+    expect(selector.props('modelValue')).toEqual(['new-catalog-id'])
     expect(getByIdMock.mock.calls.length).toBe(getCount + 1)
     expect((wrapper.get('[data-testid="grok-diagnostics-sync"]').element as HTMLButtonElement).disabled).toBe(false)
     expect(showSuccessMock).toHaveBeenCalledTimes(1)
@@ -964,8 +964,8 @@ describe('EditAccountModal Grok OAuth upstream config', () => {
   })
 
   it.each([
-    ['oauth', 'success', { models: ['new-catalog-id'], discovery_source: 'upstream' }, ['keep-local', 'new-catalog-id']],
-    ['apikey', 'success', { models: ['new-catalog-id'], discovery_source: 'upstream' }, ['keep-local', 'new-catalog-id']],
+    ['oauth', 'success', { models: ['new-catalog-id'], discovery_source: 'upstream' }, ['new-catalog-id']],
+    ['apikey', 'success', { models: ['new-catalog-id'], discovery_source: 'upstream' }, ['new-catalog-id']],
     ['oauth', 'fallback', {
       models: ['composer-2.5'],
       discovery_source: 'configured_fallback',
@@ -983,22 +983,22 @@ describe('EditAccountModal Grok OAuth upstream config', () => {
         { code: 'upstream_model_metadata_incomplete', message: 'incomplete' },
         { code: 'upstream_model_metadata_partial', message: 'partial' }
       ]
-    }, ['keep-local', 'new-catalog-id']],
+    }, ['new-catalog-id']],
     ['apikey', 'incomplete', {
       models: ['new-catalog-id'],
       discovery_source: 'upstream',
       warnings: [{ code: 'upstream_model_metadata_incomplete', message: 'incomplete' }]
-    }, ['keep-local', 'new-catalog-id']],
+    }, ['new-catalog-id']],
     ['oauth', 'partial', {
       models: ['new-catalog-id'],
       discovery_source: 'upstream',
       warnings: [{ code: 'upstream_model_metadata_partial', message: 'partial' }]
-    }, ['keep-local', 'new-catalog-id']],
+    }, ['new-catalog-id']],
     ['apikey', 'partial', {
       models: ['new-catalog-id'],
       discovery_source: 'upstream',
       warnings: [{ code: 'upstream_model_metadata_partial', message: 'partial' }]
-    }, ['keep-local', 'new-catalog-id']]
+    }, ['new-catalog-id']]
   ] as const)('syncs a saved %s whitelist once for %s', async (type, outcome, result, expectedModels) => {
     const account = { ...buildGrokOAuthAccount({ model_mapping: { 'keep-local': 'keep-local' } }), type }
     syncUpstreamModelsMock.mockResolvedValue(result)
@@ -1083,7 +1083,7 @@ describe('EditAccountModal Grok OAuth upstream config', () => {
     expect((wrapper.get('input[placeholder="admin.accounts.actualModel"]').element as HTMLInputElement).value).toBe('grok-4.7')
   })
 
-  it('persists the edited oauth base URL and appended whitelist without diagnostics', async () => {
+  it('persists the edited oauth base URL and reconciled whitelist without diagnostics', async () => {
     const account = buildGrokOAuthAccount({
       base_url: 'https://my-relay.example.com',
       model_mapping: { 'keep-local': 'keep-local' }
@@ -1103,7 +1103,6 @@ describe('EditAccountModal Grok OAuth upstream config', () => {
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload?.credentials?.base_url).toBe('https://draft.example.com')
     expect(payload?.credentials?.model_mapping).toEqual({
-      'keep-local': 'keep-local',
       'new-catalog-id': 'new-catalog-id'
     })
     expect(payload?.credentials?.grok_model_diagnostics).toBeUndefined()

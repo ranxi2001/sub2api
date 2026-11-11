@@ -1,0 +1,160 @@
+name: Upstream v0.2.21 full integration
+
+on:
+  push:
+    branches: [cherry/upstream-v0.2.21]
+  pull_request:
+    branches: [production]
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  backend:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Compile production server and all adapters
+        working-directory: backend
+        run: go build ./cmd/server
+      - name: Isolated queue and retry timer discrimination
+        working-directory: backend
+        run: >-
+          go test -tags=unit ./internal/handler
+          -run '^TestPR610(BridgeRejectedFieldRetryKeepsLegacyDenominator|RealBridgeRetryDenominator)$'
+          -count=3 -v -timeout=5m
+      - name: Race and resource lifecycle packages
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/pkg/apicompat ./internal/pkg/openai ./internal/pkg/antigravity ./internal/pkg/claude ./internal/pkg/sysutil ./internal/securityaudit ./internal/service/openai_ws_v2 ./internal/pkg/httputil -count=1 -v -timeout=20m
+      - name: Gateway, authentication, pricing and scheduling regressions
+        working-directory: backend
+        run: >-
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository ./internal/server/middleware ./internal/payment/provider ./internal/config
+          -run 'Test(GPT61|OrphanCleanup|Issue715|WSNodeOwner|Messages|NativeImages|AsyncImage|RequestBody|OpenAI|AnthropicCompat|AuthServiceRefresh|RefreshTokenCache|GatewayServiceNewSelection|Antigravity|ConvertGeminiToClaude|GeminiResponseToChatCompletions|Claude52|NewModelPricing|PricingSync|EasyPay|ExecuteEasyPay|UpdatePaymentConfig|AutoRequestBody|LoadRequestBody|PoolCapacity|AgentRecovery|UsageLog|ChannelCacheWrite|ApplyMigrationsFS)'
+          -count=1 -v -timeout=30m
+      - name: Migration source contracts
+        working-directory: backend
+        run: go test ./migrations -count=1 -v -timeout=5m
+  frontend:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install locked frontend dependencies remotely
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        working-directory: frontend
+        run: pnpm run lint:check
+      - name: Typecheck
+        working-directory: frontend
+        run: pnpm run typecheck
+      - name: Complete frontend suite
+        working-directory: frontend
+        run: pnpm run test:run
+      - name: Production frontend build
+        working-directory: frontend
+        run: pnpm run build
+  behavioral-proof:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        defect: [auth, slot, metadata, session, ttl, memory, sealed, refund, glm, terra]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Require candidate GREEN and effective old-behavior RED
+        run: python3 .github/scripts/upstream-v0221-red.py '${{ matrix.defect }}'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: v0221-proof-${{ matrix.defect }}-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/v0221-proof-${{ matrix.defect }}/
+          if-no-files-found: error
+  orphan-allocation-proof:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Require predicate and copy/decode RED, then repeated normal/race GREEN
+        run: python3 .github/upstream-v0221-orphan-alloc-proof.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: v0221-orphan-alloc-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/v0221-orphan-alloc-proof/
+          if-no-files-found: error
+  generated:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify committed Ent generation and module metadata
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/v0221-generated"
+          (cd backend && go generate ./ent)
+          git diff --binary -- backend/ent backend/go.mod backend/go.sum > "$RUNNER_TEMP/v0221-generated/generated.patch"
+          git diff --exit-code -- backend/ent backend/go.mod backend/go.sum
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: v0221-generated-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/v0221-generated/
+          if-no-files-found: error

@@ -79,8 +79,8 @@ func TestOpenAIResponsesCodexPageContextReachesUpstream(t *testing.T) {
 				require.Equal(t, http.StatusOK, w.Code, "%s; upstream error: %s", w.Body.String(), c.GetString(service.OpsUpstreamErrorMessageKey))
 				require.NotEmpty(t, upstream.body)
 				require.Equal(t, "user", gjson.GetBytes(upstream.body, "input.0.role").String())
-				require.Equal(t, `{"page_id":null}`, gjson.GetBytes(upstream.body, "input.0.content.0.text").String())
-				require.Equal(t, "Companion Page snapshot part 1 of 1:\n{\"page_id\":null,\"document_view\":null}", gjson.GetBytes(upstream.body, "input.1.content.0.text").String())
+				require.Equal(t, "<external_codex_apps_open_page>\n"+`{"page_id":null}`+"\n</external_codex_apps_open_page>", gjson.GetBytes(upstream.body, "input.0.content.0.text").String())
+				require.Equal(t, "<external_codex_apps_selected_page_part_1_of_1>\nCompanion Page snapshot part 1 of 1:\n{\"page_id\":null,\"document_view\":null}\n</external_codex_apps_selected_page_part_1_of_1>", gjson.GetBytes(upstream.body, "input.1.content.0.text").String())
 				require.False(t, gjson.GetBytes(upstream.body, `input.#(type=="function_call_output")`).Exists())
 				require.Contains(t, w.Body.String(), "resp_page_context")
 			})
@@ -104,7 +104,7 @@ func TestNormalizeCodexPageContextPreservesHistoryAndOrder(t *testing.T) {
 		require.Equal(t, "message", item.Get("type").String())
 		require.Equal(t, "user", item.Get("role").String())
 		require.Equal(t, "input_text", item.Get("content.0.type").String())
-		require.Equal(t, gjson.GetBytes(body, "input."+index+".output").String(), item.Get("content.0.text").String())
+		require.Equal(t, "<external_"+gjson.GetBytes(body, "input."+index+".name").String()+">\n"+gjson.GetBytes(body, "input."+index+".output").String()+"\n</external_"+gjson.GetBytes(body, "input."+index+".name").String()+">", item.Get("content.0.text").String())
 		require.False(t, item.Get("id").Exists())
 		require.False(t, item.Get("internal_chat_message_metadata_passthrough").Exists())
 	}
@@ -150,7 +150,7 @@ func TestNormalizeCodexPageContextRecognizesOnlyKnownEnvelopes(t *testing.T) {
 			got, changed := normalizeCodexPageContext(body)
 			require.Equal(t, tt.change, changed)
 			if changed {
-				require.Equal(t, tt.output, gjson.GetBytes(got, "input.0.content.0.text").String())
+				require.Equal(t, "<external_"+tt.tool+">\n"+tt.output.(string)+"\n</external_"+tt.tool+">", gjson.GetBytes(got, "input.0.content.0.text").String())
 			} else {
 				require.Equal(t, body, got)
 			}

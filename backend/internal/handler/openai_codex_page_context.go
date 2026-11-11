@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -38,7 +39,7 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 			"role": "user",
 			"content": []any{map[string]any{
 				"type": "input_text",
-				"text": item.Get("output").String(),
+				"text": "<external_" + item.Get("name").String() + ">\n" + item.Get("output").String() + "\n</external_" + item.Get("name").String() + ">",
 			}},
 		})
 		if err != nil {
@@ -76,10 +77,7 @@ func isCodexPageContext(item gjson.Result) bool {
 	}
 	name := item.Get("name").String()
 	if name == "codex_apps_open_page" {
-		page := gjson.Parse(output.String())
-		pageID := page.Get("page_id")
-		return page.IsObject() && hasUniqueJSONMembers([]byte(output.String())) && pageID.Exists() &&
-			(pageID.Type == gjson.Null || (pageID.Type == gjson.String && strings.TrimSpace(pageID.String()) != ""))
+		return validCodexPageSnapshot(output.String())
 	}
 	const prefix = "codex_apps_selected_page_part_"
 	if !strings.HasPrefix(name, prefix) {
@@ -97,6 +95,27 @@ func isCodexPageContext(item gjson.Result) bool {
 	}
 	// Snapshot parts may split a JSON document, so validate the matching envelope
 	// rather than requiring each part to be independently valid JSON.
-	header := "Companion Page snapshot part " + part + " of " + total + ":\n"
-	return strings.HasPrefix(output.String(), header) && strings.TrimSpace(strings.TrimPrefix(output.String(), header)) != ""
+	header, snapshot, hasNewline := strings.Cut(output.String(), "\n")
+	wantHeader := "Companion Page snapshot part " + part + " of " + total + ":"
+	return hasNewline && strings.TrimSuffix(header, "\r") == wantHeader && strings.TrimSpace(snapshot) != "" &&
+		(totalNumber > 1 || validCodexPageSnapshot(snapshot))
+}
+
+func validCodexPageSnapshot(text string) bool {
+	if !hasUniqueJSONMembers([]byte(text)) {
+		return false
+	}
+	var snapshot map[string]json.RawMessage
+	if json.Unmarshal([]byte(text), &snapshot) != nil {
+		return false
+	}
+	id, exists := snapshot["page_id"]
+	if !exists {
+		return false
+	}
+	if bytes.Equal(bytes.TrimSpace(id), []byte("null")) {
+		return true
+	}
+	var value string
+	return json.Unmarshal(id, &value) == nil && strings.TrimSpace(value) != ""
 }

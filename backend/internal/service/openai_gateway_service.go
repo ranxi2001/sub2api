@@ -230,14 +230,16 @@ type OpenAIUsage struct {
 	// upstream. Missing counters must never become zero-cache protection samples.
 	CacheReadKnown bool `json:"-"`
 	// Preserve request modality when a terminal usage omits earlier media details.
-	cacheReadMediaObserved   bool
-	InputTokens              int `json:"input_tokens"`
-	ImageInputTokens         int `json:"image_input_tokens,omitempty"`
-	ImageCacheReadTokens     int `json:"image_cache_read_tokens,omitempty"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
+	cacheReadMediaObserved      bool
+	InputTokens                 int `json:"input_tokens"`
+	ImageInputTokens            int `json:"image_input_tokens,omitempty"`
+	ImageCacheReadTokens        int `json:"image_cache_read_tokens,omitempty"`
+	OutputTokens                int `json:"output_tokens"`
+	CacheCreation30mInputTokens int `json:"cache_creation_30m_input_tokens,omitempty"`
+	CacheCreation12hInputTokens int `json:"cache_creation_12h_input_tokens,omitempty"`
+	CacheCreationInputTokens    int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens        int `json:"cache_read_input_tokens,omitempty"`
+	ImageOutputTokens           int `json:"image_output_tokens,omitempty"`
 }
 
 // OpenAIForwardResult represents the result of forwarding
