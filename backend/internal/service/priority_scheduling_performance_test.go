@@ -37,10 +37,14 @@ func TestPriorityUnifiedPerformanceScoreAndLiveSelection(t *testing.T) {
 	pool := []openAIAccountCandidateScore{priorityCandidate(1, .1, 0), priorityCandidate(2, .1, 0)}
 	gateway.prioritySignals(request, cfg, pool)
 	require.Eventually(t, func() bool { _, ready := gateway.prioritySignals(request, cfg, pool); return ready }, time.Second, time.Millisecond)
-	for i := range pool {
-		applyPriorityCandidate(cfg, &pool[i], reader.signal[pool[i].account.ID], time.Now())
-	}
-	require.Greater(t, pool[1].score, pool[0].score)
+	scheduler := &defaultOpenAIAccountScheduler{service: gateway}
+	plan := openAIAccountLoadPlan{candidates: pool, topK: 1}
+	require.True(t, scheduler.applyPriorityScheduling(request, &plan))
+	require.True(t, plan.priorityScheduling)
+	require.Greater(t, plan.candidates[1].score, plan.candidates[0].score)
+	snapshot := gateway.PrioritySchedulingSnapshot()
+	require.Equal(t, "account_performance", snapshot.PerformanceSource)
+	require.Equal(t, fast.Performance.AvgTPS, snapshot.Candidates[0].Performance.AvgTPS)
 }
 
 func TestPriorityUnifiedPerformanceIgnoresLegacyMeasurements(t *testing.T) {

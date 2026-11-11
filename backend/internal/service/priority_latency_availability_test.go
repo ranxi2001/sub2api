@@ -87,7 +87,7 @@ func TestPriorityLatencyAvailabilityPoolBoundaries(t *testing.T) {
 				require.NotNil(t, snapshot)
 				for _, score := range snapshot.Candidates {
 					require.True(t, score.LatencyStopped)
-					require.NotNil(t, score.LatencyPenaltyUntil)
+					require.Nil(t, score.LatencyPenaltyUntil, "mean-based admission has no independent timer")
 				}
 			}
 		})
