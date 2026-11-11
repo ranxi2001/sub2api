@@ -111,6 +111,11 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	// Capacity shedding describes this request, not account health. Keep the
 	// account schedulable while the request-local retry budget handles recovery.
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIRequestScopedCapacityResponse(statusCode, headers, responseBody) {
+		// This upstream response still breaks an IP-401 streak even though its
+		// request-scoped failure must not disable the selected credential.
+		if s != nil && s.rateLimitService != nil {
+			s.rateLimitService.resetOpenAIIPUnauthorizedStreak(account)
+		}
 		// An explicit model-scoped rule overrides the default retry policy without
 		// turning a request-level overload into an account-wide health failure.
 		model := firstRequestedModel(canonicalModel)
