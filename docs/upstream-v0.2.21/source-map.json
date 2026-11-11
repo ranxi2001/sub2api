@@ -444,12 +444,12 @@
         {
           "path": "frontend/src/constants/newFeatureNotices.ts",
           "baseline_blob": "837d6a076d360f220ba909753b75b9a35f753bdd",
-          "fork_blob": "71d9a7239dcc7abb9f3ff40b1052246ff3d58be0"
+          "fork_blob": "ef70c9c190d4d15d6609835ee7cbed0f7b953649"
         },
         {
           "path": "frontend/src/components/common/__tests__/NewFeatureBadge.spec.ts",
           "baseline_blob": "bff898104c759c24c36cd4510265adbffaebce27",
-          "fork_blob": "a219224d1437636da31a18d82892784930470e95"
+          "fork_blob": "bc88b90749fb4f7a22b33eb1c346ec5bf389c5f1"
         }
       ]
     },
@@ -3463,7 +3463,7 @@
         {
           "path": "frontend/src/constants/newFeatureNotices.ts",
           "baseline_blob": "837d6a076d360f220ba909753b75b9a35f753bdd",
-          "fork_blob": "71d9a7239dcc7abb9f3ff40b1052246ff3d58be0"
+          "fork_blob": "ef70c9c190d4d15d6609835ee7cbed0f7b953649"
         }
       ]
     },
@@ -4515,7 +4515,7 @@
         {
           "path": "frontend/src/constants/newFeatureNotices.ts",
           "baseline_blob": "837d6a076d360f220ba909753b75b9a35f753bdd",
-          "fork_blob": "71d9a7239dcc7abb9f3ff40b1052246ff3d58be0"
+          "fork_blob": "ef70c9c190d4d15d6609835ee7cbed0f7b953649"
         }
       ]
     },
@@ -4854,7 +4854,7 @@
       "additional_fork_files": []
     }
   ],
-  "mapped_head": "652ceb6bdc5d4ba211a587f423a528dbacca62ed",
+  "mapped_head": "6541ea4559797cec55348dbd04cc3cd395fad108",
   "pr": "https://github.com/ranxi2001/sub2api/pull/789",
   "dependencies": [
     {
@@ -5428,6 +5428,24 @@
         ".github/workflows/security-scan.yml"
       ],
       "scope": "Owner supplementary runner / Docker integration workflow; retained CI infrastructure."
+    }
+  ],
+  "validated_previous_head": "ee8e891b92525d285effb9c1bff4f82d01a7970d",
+  "latest_target_base": "ac23b5a84c8f2df7b7219f94db6998e4ef664aa6",
+  "production_base_integrations": [
+    {
+      "merge_commit": "652ceb6bdc5d4ba211a587f423a528dbacca62ed",
+      "base": "90549fe897d6187d8251af44c9ece5230d2a83f4",
+      "scope": "owner opt-in image-edit form compatibility and runner infrastructure"
+    },
+    {
+      "merge_commit": "6541ea4559797cec55348dbd04cc3cd395fad108",
+      "base": "ac23b5a84c8f2df7b7219f94db6998e4ef664aa6",
+      "scope": "owner unified priority-performance scheduling; retained both independent notice registrations/dismissal regressions",
+      "resolution_files": [
+        "frontend/src/components/common/__tests__/NewFeatureBadge.spec.ts",
+        "frontend/src/constants/newFeatureNotices.ts"
+      ]
     }
   ]
 }
