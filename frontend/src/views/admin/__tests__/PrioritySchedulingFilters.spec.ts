@@ -170,7 +170,10 @@ describe('priority explicit scope filters', () => {
     vi.mocked(apiClient.get).mockImplementation(async (url, options: any) => {
       if (url === '/admin/priority-scheduling/config') return { data: { ...config, group_ids: configured } }
       if (url === '/admin/groups/all' && options?.params?.platform === 'openai') return { data: groups }
-      if (url === '/admin/priority-scheduling/models') return { data: { models: [`model-for-${options?.params?.group_id ?? 0}`] } }
+      if (url === '/admin/priority-scheduling/models') {
+        if (options?.params?.group_id === 999) throw Error('fixture deleted group')
+        return { data: { models: [`model-for-${options?.params?.group_id ?? 0}`] } }
+      }
       return original(url, options)
     })
     render(); await flushPromises()

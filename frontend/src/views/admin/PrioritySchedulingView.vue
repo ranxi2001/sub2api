@@ -656,7 +656,6 @@ onMounted(async () => {
   const version = generation
   await load()
   if (!active(version) || !canRead()) return
-  selectedGroup.value = draft.value?.group_ids?.[0] ?? 0
   await loadCatalog(true)
   if (!active(version) || !canRead()) return
   initialized.value = true

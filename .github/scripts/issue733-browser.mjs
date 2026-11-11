@@ -19,6 +19,9 @@ const baselineBytes = execFileSync('git', ['show', `${baseline}:${file}`])
 const baselinePath = path.join(out, 'BaselinePrioritySchedulingView.vue')
 await fs.writeFile(baselinePath, baselineBytes)
 assert.deepEqual(await fs.readFile(baselinePath), execFileSync('git', ['show', `${baseline}:${file}`]))
+const defaultGroupBaseline = '6fa7fb86eae7c732794450646dc13831dce87ff1'
+const defaultGroupBaselinePath = path.join(out, 'DefaultGroupBaseline.vue')
+await fs.writeFile(defaultGroupBaselinePath, execFileSync('git', ['show', `${defaultGroupBaseline}:${file}`]))
 const requireFrontend = createRequire(path.join(frontend, 'package.json'))
 const { createServer } = requireFrontend('vite')
 const vueModule = requireFrontend('@vitejs/plugin-vue'), vue = vueModule.default || vueModule
@@ -35,7 +38,7 @@ const modules = {
 function html() {
   return `<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="app"></div><script type="module">
 import {createApp,h} from 'vue';import {createI18n} from 'vue-i18n';
-import Candidate from '/src/views/admin/PrioritySchedulingView.vue';import Baseline from '/@fs/${baselinePath}';const params=new URLSearchParams(location.search);const View=params.has('baseline')?Baseline:Candidate;
+import Candidate from '/src/views/admin/PrioritySchedulingView.vue';import Baseline from '/@fs/${baselinePath}';import DefaultGroupBaseline from '/@fs/${defaultGroupBaselinePath}';const params=new URLSearchParams(location.search);const View=params.has('defaultGroupBaseline')?DefaultGroupBaseline:params.has('baseline')?Baseline:Candidate;
 import zh from '/src/i18n/locales/zh/index.ts';import en from '/src/i18n/locales/en/index.ts';import '/src/style.css';
 const app=createApp({render:()=>h(View)});app.use(createI18n({legacy:false,locale:params.get('locale')||'zh',messages:{zh,en}}));app.mount('#app');window.fixtureView=()=>app._instance.subTree.component.setupState;window.fixtureUnmount=()=>app.unmount();</script></html>`
 }
@@ -60,7 +63,7 @@ const server = await createServer({ root: frontend, configFile: false, plugins: 
 await server.listen()
 const browser = await chromium.launch({ headless: true })
 const shots = [], measurements = [], errors = [], requests = [], networkFailures = []
-const state = { count: 75, tick: 0, reverse: false, latencyError: false, snapshotError: false, model: 'demo-model', group: 11, revision: 'demo-v1', endpoint: '/v1/responses', delay: 0 }
+const state = { count: 75, tick: 0, reverse: false, latencyError: false, snapshotError: false, model: 'demo-model', group: 11, revision: 'demo-v1', endpoint: '/v1/responses', delay: 0, defaultGroupScenario: false }
 const config = { enabled: true, mode: 'balanced', group_ids: [11], models: ['demo-model'], window_minutes: 60, min_samples: 5, target_ttft_ms: 3000, latency_penalty_minutes: 10, latency_penalty_mode: 'deprioritize', max_load_percent: 80, min_quality_percent: 90, quality_max_age_hours: 24, quality_weight: 30, latency_weight: 25, load_weight: 25, cost_weight: 20, latency_percentile: 90, latency_measurement: 'legacy_forward', balance_protocols: true, oauth_quota_priority: false, oauth_quota_threshold: 90, error_rate_weight: 0, error_rate_window_minutes: 10, error_rate_prior_samples: 5, recovery_exploration_percent: 0 }
 const now = () => new Date(Date.UTC(2026, 10, 8, 9, state.tick)).toISOString()
 const accounts = () => Array.from({ length: state.count }, (_, i) => ({ account_id: i + 1, account_name: `Demo account ${String(i + 1).padStart(3, '0')}`, score: 80 - i / 10 + state.tick, tier: i % 9 === 0 ? 'degraded' : 'eligible', reasons: i % 9 === 0 ? ['latency_above_target'] : [], priority: i % 3, concurrency: 10, load_factor: 10, load_percent: (i * 7) % 80, waiting: 0, rate: 0.5, revenue: 2.5, theoretical_cost: 0.5, profit: 2, margin: 0.8, economics_source: 'usage', profit_samples: 30, samples: 30, p90_ttft_ms: 1200 + i * 20 + state.tick, quality_passed: 29, quality_samples: 30, error_rate: 0.03, error_successes: 29, error_failures: 1, error_window_minutes: 10, error_endpoint: state.endpoint, error_observed_at: now(), bound_groups: 2, selection_weight: 2.5 }))
@@ -72,13 +75,16 @@ async function routeBackend(page) {
     const url = new URL(route.request().url()), endpoint = url.pathname.split('/').at(-1)
     requests.push({ endpoint, query: url.search, method: route.request().method() })
     let body, status = 200
-    if (url.pathname === '/fixture/admin/groups/all') body = [{id:11,name:'Demo group',platform:'openai'},{id:17,name:'Archive group',platform:'openai'},{id:23,name:'Composite group',platform:'composite'},{id:29,name:'Anthropic group',platform:'anthropic'}].filter(group=>!url.searchParams.get('platform')||group.platform===url.searchParams.get('platform'))
+    if (url.pathname === '/fixture/admin/groups/all') body = [{id:11,name:'Demo group',platform:'openai'},{id:17,name:state.defaultGroupScenario?'GPT Demo group':'Archive group',platform:'openai'},{id:23,name:'Composite group',platform:'composite'},{id:29,name:'Anthropic group',platform:'anthropic'}].filter(group=>!url.searchParams.get('platform')||group.platform===url.searchParams.get('platform'))
     else if (endpoint === 'models') body = {models:['demo-model','archive-model','not-in-latest-pool']}
     else if (endpoint === 'config') body = config
     else if (endpoint === 'analysis') {
       const model=url.searchParams.get('model'), group=Number(url.searchParams.get('group_id'))||null, minutes=Number(url.searchParams.get('minutes'))
       assert(['demo-model','archive-model','not-in-latest-pool','public-alias'].includes(model)); assert([null,11,17,23].includes(group)); assert([15,60,180].includes(minutes))
       body={snapshot:{...snap(),model,group_id:group,window_minutes:minutes},latency:{...latency(minutes),model,group_id:group}}
+      if (state.defaultGroupScenario && group === null) {
+        body.snapshot.candidates = []; body.latency.accounts = []
+      }
       if(state.latencyError||state.snapshotError)status=503
       if(heldLatency){const hold=heldLatency;heldLatency=null;hold.started();await hold.promise}
     }
@@ -106,7 +112,7 @@ async function newPage(viewport = { width: 1440, height: 1000 }) {
 async function screenshot(page, name, scope) {
   await page.evaluate(() => document.fonts.ready)
   await page.screenshot({ path: path.join(out, name), fullPage: false })
-  shots.push({ sha256: createHash('sha256').update(await fs.readFile(path.join(out,name))).digest('hex'), name, head: scope === 'baseline' ? baseline : head, viewport: page.viewportSize(), scope, synthetic: true, source: process.env.GITHUB_RUN_ID })
+  shots.push({ sha256: createHash('sha256').update(await fs.readFile(path.join(out,name))).digest('hex'), name, head: scope === 'baseline' ? baseline : scope === 'default-group-baseline' ? defaultGroupBaseline : head, viewport: page.viewportSize(), scope, synthetic: true, source: process.env.GITHUB_RUN_ID })
 }
 async function refresh(page) { await page.evaluate(() => window.fixtureView().refresh()); await page.waitForFunction(() => !window.fixtureView().latencyLoading) }
 async function setPager(page, name, pageSize, pageNumber) {
@@ -126,6 +132,18 @@ async function geometry(page) {
   }))
 }
 try {
+  config.group_ids = []; state.defaultGroupScenario = true; state.count = 3
+  for (const before of [true, false]) {
+    const page = await newPage()
+    await page.goto('http://127.0.0.1:4183/.issue733-fixture/index.html' + (before ? '?defaultGroupBaseline=1' : ''), { waitUntil: 'networkidle' })
+    await page.waitForFunction(() => window.fixtureView().snapshot && !window.fixtureView().refreshing)
+    const observed = await page.evaluate(() => ({ group: window.fixtureView().selectedGroup, candidates: window.fixtureView().snapshot.candidates.length }))
+    assert.deepEqual(observed, { group: before ? 0 : 17, candidates: before ? 0 : 3 })
+    await screenshot(page, `${before ? 'before' : 'after'}-default-gpt-group.png`, before ? 'default-group-baseline' : 'candidate')
+    measurements.push({ phase: 'default-gpt-group', before, ...observed })
+    await page.close()
+  }
+  config.group_ids = [11]; state.defaultGroupScenario = false; state.count = 75
   const old = await newPage()
   await old.goto('http://127.0.0.1:4183/.issue733-fixture/index.html?baseline=1', { waitUntil: 'networkidle' })
   await old.getByTestId('latency-toggle').click()
