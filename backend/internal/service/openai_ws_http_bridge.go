@@ -354,7 +354,7 @@ func (c *openAIWSToolCallReplayCollector) addItem(item gjson.Result) {
 	c.items = append(c.items, json.RawMessage(raw))
 }
 
-func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
+func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string, source ...[]byte) []byte {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = http.StatusText(statusCode)
@@ -362,14 +362,22 @@ func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
 	if message == "" {
 		message = "upstream request failed"
 	}
+	errorBody := map[string]any{"type": "upstream_error", "message": message}
+	if len(source) > 0 {
+		// Preserve only the standard error identity fields, not an arbitrary
+		// upstream envelope. The caller already sanitized the message.
+		for _, field := range []string{"code", "type", "param"} {
+			value := gjson.GetBytes(source[0], "error."+field)
+			if value.Type == gjson.String && value.String() != "" {
+				errorBody[field] = value.String()
+			}
+		}
+	}
 	event := map[string]any{
 		"type":            "error",
 		"sequence_number": 0,
 		"status":          statusCode,
-		"error": map[string]any{
-			"type":    "upstream_error",
-			"message": message,
-		},
+		"error":           errorBody,
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -456,6 +464,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 	strictSession := smartProtocolStrict(ctx)
 	statefulSession := smartProtocolStateful(ctx)
+	preserveAgentHistory := s.preserveOpenAIAgentHistory(payload)
 	if statefulSession && gjson.GetBytes(payload, "store").Type != gjson.True {
 		return nil, denyOpenAITurn("http_session_requires_storage")
 	}
@@ -680,13 +689,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if shouldFailover && (turn == 1 || resp.StatusCode == http.StatusTooManyRequests) {
 				return nil, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMsg, false).WithGrokForbiddenPolicy(account)
 			}
-		} else if !strictSession && shouldFailover && (turn == 1 || resp.StatusCode == http.StatusTooManyRequests) {
+		} else if !strictSession && !preserveAgentHistory && shouldFailover && (turn == 1 || resp.StatusCode == http.StatusTooManyRequests) {
 			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, respBody)
 		}
 		if account.Platform != PlatformGrok && (shouldFailover || shouldCooldownOpenAITransientUpstreamError(resp.StatusCode, respBody)) {
 			s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, actualModel)
 		}
 		clientError := buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg)
+		if preserveAgentHistory {
+			clientError = buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg, respBody)
+		}
 		if writeErr := writeClientMessage(clientError); writeErr == nil {
 			markOpenAIWSClientVisibleFailure(c, "error", clientError)
 		}
@@ -957,7 +969,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 			// A disconnected client needs this attempt drained for usage, not replayed,
 			// even when only non-semantic heartbeats were delivered.
-			if !strictSession && !clientDisconnected && !wroteDownstream && shouldFailover && (turn == 1 || statusCode == http.StatusTooManyRequests) {
+			if !strictSession && !preserveAgentHistory && !clientDisconnected && !wroteDownstream && shouldFailover && (turn == 1 || statusCode == http.StatusTooManyRequests) {
 				if account.Platform == PlatformGrok {
 					return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false).WithGrokForbiddenPolicy(account)
 				}

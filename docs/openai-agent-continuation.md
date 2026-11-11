@@ -2,6 +2,8 @@
 
 本页说明 #727 已合入源码的归属保护，关联 [Issue #715](https://github.com/ranxi2001/sub2api/issues/715)。源码合并、Release 和实例部署分别核实；不能只凭版本号认为当前实例已启用这些路径，也不能把离线回归当作真实供应商的格式兼容证明。
 
+下文描述默认严格策略。管理员可通过默认 `false` 的 `gateway.disable_encrypted_agent_owner_binding` 显式允许完整已交付历史尝试其他合格账号；配置方法、交付安全、统一节点切换与回 strict 的混合 owner 限制见[加密 agent 历史账号策略](encrypted-agent-owner-policy.md)。开关不保证上游密文兼容，也不允许重放不确定交付的任务。
+
 ## 保留任务后再判断故障
 
 `unsupported_encrypted_agent_message` 表示某一层不能消费代理任务的加密格式。它不等同于 reasoning 的 `invalid_encrypted_content`，也不证明故障来自 BPS；先确定同一故障请求的端点、实际通道和部署 SHA。

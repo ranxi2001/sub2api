@@ -151,6 +151,11 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	ctx := r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, source, r.session, model)
 	r.request = openAIAgentRecoveryFromContext(ctx)
+	if r.request.disableOwnerBinding && (openAIAgentRecoveryBound(ctx) || len(r.request.items) > 0) {
+		// Record current-turn replay safety even when a later delivery/pointer
+		// check refuses the send. The initial warmup context cannot replace it.
+		r.preventReplay()
+	}
 	for _, key := range r.request.keys {
 		if r.known[key] && !r.request.known[key] {
 			return openAIAgentRecoveryError("owner_unavailable")
@@ -162,14 +167,14 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	// established transport. Final fresh admission and the captured wire remain
 	// authoritative; managed/other credentials are excluded by prepare below.
 	r.request.disallowLearning = r.request.disallowLearning || account.IsExcelBPSEnabledForModel(model) || account.IsPrismBrowserEnabledForModel(model)
-	if r.request.owner != nil && r.request.disallowLearning {
+	if (r.request.owner != nil || r.request.preservesHistory()) && r.request.disallowLearning {
 		return openAIAgentRecoveryError("route_changed")
 	}
 	if err := r.service.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
 		return err
 	}
 	previous := gjson.GetBytes(source, "previous_response_id").String()
-	if r.request.owner != nil && previous != "" {
+	if (r.request.owner != nil || r.request.disableOwnerBinding) && previous != "" {
 		owner, err := r.service.getOpenAIWSStateStore().GetResponseAccount(ctx, r.request.groupID, previous)
 		if err != nil || owner != account.ID || gjson.GetBytes(payload, "previous_response_id").String() != previous {
 			return openAIAgentRecoveryError("owner_unavailable")
@@ -256,7 +261,12 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		r.finish(completed)
 		if completed {
 			for _, key := range request.keys {
-				r.known[key] = true
+				// Opt-out consumption does not publish new input ownership. Only
+				// remember inputs that already had completed records; otherwise a
+				// later turn would mistake an ordinary miss for record loss.
+				if !request.disableOwnerBinding || request.known[key] {
+					r.known[key] = true
+				}
 			}
 			for _, item := range request.outputs {
 				r.known[request.itemKey(item)] = true

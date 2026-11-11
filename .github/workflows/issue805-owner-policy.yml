@@ -1,0 +1,104 @@
+name: Issue805 owner policy
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/issue805-owner-policy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue805-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          redis-server --version
+      - name: Pinned production business RED in disposable worktree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/issue805-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue805-evidence/candidate.txt"
+          baseline=2cfdda4aeae1f482efd8a2ca6551b7f40f6e9d66
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git worktree add --detach "$RUNNER_TEMP/issue805-red" "$EXPECTED_HEAD_SHA"
+          cd "$RUNNER_TEMP/issue805-red"
+          # Retain candidate tests, restore every changed production Go blob.
+          while IFS= read -r target; do
+            case "$target" in *_test.go) continue ;; esac
+            if git cat-file -e "$baseline:$target" 2>/dev/null; then
+              mkdir -p "$(dirname "$target")"
+              git show "$baseline:$target" > "$target"
+              expected=$(git rev-parse "$baseline:$target")
+              actual=$(git hash-object "$target")
+              echo "$target baseline=present expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+              test "$expected" = "$actual"
+            else
+              # Candidate-only production must not survive in the baseline.
+              # This directory is disposable; the candidate checkout stays clean.
+              candidate=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
+              rm -- "$target"
+              echo "$target baseline=absent candidate=$candidate actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+              test ! -e "$target"
+            fi
+          done < <(git diff --no-renames --name-only "$baseline" "$EXPECTED_HEAD_SHA" -- 'backend/**/*.go')
+          git diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          # Also prove the unchanged core blobs on the initial test-only head.
+          for target in backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_ws_agent_recovery.go; do
+            expected=$(git rev-parse "$baseline:$target")
+            actual=$(git hash-object "$target")
+            echo "$target baseline=present expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+            test "$expected" = "$actual"
+          done
+          git diff --stat > "$RUNNER_TEMP/issue805-evidence/red-diff.txt"
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue805HTTPCompletedHistorySelectsAlternative$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue805-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue805-evidence/red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|panic:|--- SKIP:' "$RUNNER_TEMP/issue805-evidence/red.log"
+          grep -q -- '--- FAIL: TestIssue805HTTPCompletedHistorySelectsAlternative/stream=false' "$RUNNER_TEMP/issue805-evidence/red.log"
+          grep -q -- '--- FAIL: TestIssue805HTTPCompletedHistorySelectsAlternative/stream=true' "$RUNNER_TEMP/issue805-evidence/red.log"
+          grep -q 'opt-out must dispatch complete A history to eligible B without clearing Redis' "$RUNNER_TEMP/issue805-evidence/red.log"
+      - name: Exact clean candidate GREEN and race
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          cd backend
+          go test -race -tags=unit ./internal/handler ./internal/service ./internal/config -run '^TestIssue805' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/issue805-evidence/green.log"
+          ! grep -Eiq 'no tests to run|--- SKIP:' "$RUNNER_TEMP/issue805-evidence/green.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue805-${{ env.EXPECTED_HEAD_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue805-evidence/
