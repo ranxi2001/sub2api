@@ -187,7 +187,7 @@ git switch -c fix/describe-the-change project/production
 
 ### 环境与依赖
 
-工具链以当前 checkout 的 [backend/go.mod](backend/go.mod)、[CI](.github/workflows/backend-ci.yml)、[frontend/package.json](frontend/package.json) 和锁文件为准。本指南编写时，后端 CI 使用 Go 1.27.3 与 golangci-lint v2.14.0；前端要求 Node.js >=22，CI 使用 Node.js 22 和 pnpm 9，与锁定的 vue-i18n / @intlify/message-compiler 11.4.16（Node.js >=22）一致，frontend/package.json 的 engines 与所有前端工作流保持一致；Docker 前端构建阶段使用 Node.js 24。版本要求变化时一并更新说明，不沿用旧教程中的最低版本。
+工具链以当前 checkout 的 [backend/go.mod](backend/go.mod)、[CI](.github/workflows/backend-ci.yml)、[frontend/package.json](frontend/package.json) 和锁文件为准。本指南编写时，后端 CI 使用 Go 1.27.4 与 golangci-lint v2.14.0；前端要求 Node.js >=22，CI 使用 Node.js 22 和 pnpm 9，与锁定的 vue-i18n / @intlify/message-compiler 11.4.16（Node.js >=22）一致，frontend/package.json 的 engines 与所有前端工作流保持一致；Docker 前端构建阶段使用 Node.js 24。版本要求变化时一并更新说明，不沿用旧教程中的最低版本。
 
 运行应用需要独立的 PostgreSQL/Redis 测试环境，配置与初始化方式见 [部署说明](deploy/README.md)。部分集成测试通过 testcontainers 启动依赖，需要可用的 Docker；缺少 Docker 或测试环境变量可能导致用例跳过，检查日志中的 skip 信息，不能仅凭退出码声称全部覆盖。
 
