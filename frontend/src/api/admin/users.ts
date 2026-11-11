@@ -255,7 +255,18 @@ export async function getUserUsageStats(
 /**
  * Balance history item returned from the API
  */
+export interface AutoCreditBalanceHistory {
+  ledger_id: number
+  amount: string
+  balance_before: string
+  balance_after: string
+  status: 'pending' | 'settled'
+  settled_at: string | null
+  settled_by: number | null
+}
+
 export interface BalanceHistoryItem {
+  auto_credit?: AutoCreditBalanceHistory
   id: number
   code: string
   type: string

@@ -184,6 +184,7 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git rev-parse HEAD | tee evidence/head.txt
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends postgresql redis-server
           for attempt in 1 2 3 4 5; do

@@ -457,7 +457,7 @@
               </button>
             </div>
             <div v-if="creditAuth.isAdmin && row.auto_credit_outstanding && !/^0(?:\.0+)?$/.test(row.auto_credit_outstanding)" class="mt-1 flex items-center gap-1">
-              <button type="button" class="text-left text-xs font-semibold text-amber-700 dark:text-amber-300" @click="autoCreditUser = row">{{ t('autoCredit.debt', { amount: row.auto_credit_outstanding }) }}</button>
+              <button type="button" class="text-left text-xs font-semibold text-amber-700 dark:text-amber-300" @click="autoCreditUser = row">{{ t('autoCredit.debt', { amount: Number(row.auto_credit_outstanding).toFixed(2) }) }}</button>
               <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.vipAutoCredit" :user-id="creditAuth.user?.id" compact />
             </div>
           </template>

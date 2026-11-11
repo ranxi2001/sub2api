@@ -2,6 +2,14 @@
 
 Auto credit is an administrator-authorized advance recorded as a receivable,
 not a channel payment. It never creates paid orders or changes total_recharged.
+The administrator's user balance history also includes every issued advance,
+including historical and settled entries, under the `auto_credit` type filter.
+Each entry shows its amount, original issue time, ledger ID, balances and
+collection status. Displayed amounts and balances use two decimal places across
+the user list, credit dialog, collection confirmation and balance history.
+Ledger values and editable configuration retain their original precision. Collection updates that entry rather than adding another
+recharge. These advances remain excluded from `total_recharged`; no backfill or
+balance mutation is needed to display old records.
 The fixed ledger note is `自动充值需索取费用`.
 
 Administrators open **VIP auto credit** on a user row. Pending debt is also shown

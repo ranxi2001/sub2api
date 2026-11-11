@@ -37,6 +37,7 @@ jobs:
         run: pnpm --dir frontend exec vitest run src/components/admin/user/__tests__/UserAutoCreditModal.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
       - name: Prepare capture browser remotely
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/vip-browser" --no-save --ignore-scripts playwright@1.56.1
           node "$RUNNER_TEMP/vip-browser/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Actual component before and after with CSS geometry and synthetic save and reload
