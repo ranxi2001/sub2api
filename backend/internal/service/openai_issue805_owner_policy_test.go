@@ -58,7 +58,10 @@ func TestIssue805AlternativeStillNeedsNormalAdmission(t *testing.T) {
 				{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, GroupIDs: []int64{715}},
 				{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, GroupIDs: []int64{715}, Credentials: map[string]any{}, Concurrency: 1},
 			}
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}}
+			// The real repository's group query only returns group members.
+			// Preserve that contract instead of using the intentionally broad
+			// generic scheduler stub for the group-revocation case.
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}}
 			issue715LearnRoute(t, svc, &accounts[0], issue715OpaqueBody)
 			svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
 			reset := time.Now().Add(time.Hour)
@@ -102,6 +105,20 @@ func TestIssue805AlternativeStillNeedsNormalAdmission(t *testing.T) {
 			require.Nil(t, selected)
 		})
 	}
+}
+
+func TestIssue805FinalAdmissionStillRechecksGroup(t *testing.T) {
+	accounts := []Account{{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, GroupIDs: []int64{715}}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}}
+	svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+	selected := accounts[0]
+	_, err := svc.admitOpenAITurnForGroup(context.Background(), 715, true, &selected, "gpt-6-astra")
+	require.NoError(t, err, "the originally selected account must qualify before revocation")
+	accounts[0].GroupIDs = []int64{716}
+	_, err = svc.admitOpenAITurnForGroup(context.Background(), 715, true, &selected, "gpt-6-astra")
+	var denied *OpenAITurnAdmissionError
+	require.ErrorAs(t, err, &denied)
+	require.Equal(t, "group_membership_changed", denied.Reason, "opt-out cannot bypass final fresh admission")
 }
 
 func TestIssue805FinalSendPreservesHistoryAndDeliveryFences(t *testing.T) {
