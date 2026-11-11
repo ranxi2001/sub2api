@@ -125,9 +125,11 @@ func (r *pelicanGroupTestRepository) Claim(ctx context.Context, plan *service.Pe
 		result, err = r.db.ExecContext(ctx, `UPDATE pelican_group_test_plans SET running_until = $3
  WHERE id = $1 AND (running_until IS NULL OR running_until < $2)`, plan.ID, now, until)
 	} else {
+		// Claim/Finish leave updated_at unchanged. Bind the listed nominal
+		// round too, so a delayed snapshot cannot consume a later due round.
 		result, err = r.db.ExecContext(ctx, `UPDATE pelican_group_test_plans SET running_until = $3, next_run_at = $4
- WHERE id = $1 AND enabled = true AND next_run_at <= $2 AND (running_until IS NULL OR running_until < $2) AND updated_at = $5`,
-			plan.ID, now, until, *next, plan.UpdatedAt)
+ WHERE id = $1 AND enabled = true AND next_run_at <= $2 AND (running_until IS NULL OR running_until < $2) AND updated_at = $5 AND next_run_at = $6`,
+			plan.ID, now, until, *next, plan.UpdatedAt, plan.NextRunAt)
 	}
 	if err != nil {
 		return false, err

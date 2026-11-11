@@ -165,6 +165,64 @@ func TestPelicanGroupTestRepo_PlansDueAndLease(t *testing.T) {
 	require.False(t, removed)
 }
 
+func TestPelicanGroupTestRepo_StaleNominalRoundCannotClaimLaterRound(t *testing.T) {
+	ctx := context.Background()
+	repo := NewPelicanGroupTestRepository(integrationDB)
+	group := createPelicanGroupTestGroups(t, "nominal-round")[0]
+	nominal := time.Date(2026, 11, 12, 8, 0, 0, 0, time.UTC)
+	created, err := repo.CreatePlan(ctx, newPelicanGroupTestPlan(group.ID, true, nominal))
+	require.NoError(t, err)
+	readDue := func(now time.Time) *service.PelicanGroupTestPlan {
+		t.Helper()
+		plans, err := repo.ListDue(ctx, now)
+		require.NoError(t, err)
+		for _, plan := range plans {
+			if plan.ID == created.ID {
+				return plan
+			}
+		}
+		t.Fatal("fixture plan must be due")
+		return nil
+	}
+	// Two replicas list T before either claims it. Claim/Finish do not edit
+	// updated_at, so version equality alone cannot protect nominal identity.
+	first, stale := readDue(nominal), readDue(nominal)
+	next := nominal.Add(30 * time.Minute)
+	until := nominal.Add(15 * time.Minute)
+	claimed, err := repo.Claim(ctx, first, nominal, until, &next)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, repo.Finish(ctx, first.ID, until, nominal.Add(time.Minute)))
+
+	later := next.Add(time.Minute)
+	laterUntil := later.Add(15 * time.Minute)
+	following := next.Add(30 * time.Minute)
+	current := readDue(later)
+	require.Equal(t, stale.UpdatedAt, current.UpdatedAt)
+	require.True(t, current.NextRunAt.Equal(next))
+	require.Nil(t, current.RunningUntil)
+	claimed, err = repo.Claim(ctx, stale, later, laterUntil, &following)
+	require.NoError(t, err)
+	require.False(t, claimed, "stale nominal round must not claim a later due round")
+	unchanged, err := repo.GetPlan(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, unchanged.NextRunAt.Equal(next))
+	require.Nil(t, unchanged.RunningUntil)
+
+	claimed, err = repo.Claim(ctx, current, later, laterUntil, &following)
+	require.NoError(t, err)
+	require.True(t, claimed, "fresh snapshot must claim its matching nominal time")
+	running, err := repo.GetPlan(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, running.NextRunAt.Equal(following))
+	require.True(t, running.RunningUntil.Equal(laterUntil))
+	// The first round's completion cannot clear the new round's lease.
+	require.NoError(t, repo.Finish(ctx, created.ID, until, later))
+	running, err = repo.GetPlan(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, running.RunningUntil.Equal(laterUntil))
+}
+
 func TestPelicanGroupTestRepo_ResultsHistory(t *testing.T) {
 	ctx := context.Background()
 	repo := NewPelicanGroupTestRepository(integrationDB)
