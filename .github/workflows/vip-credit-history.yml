@@ -1,0 +1,47 @@
+name: VIP credit history UI
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - '**admin_balance_history**'
+      - '**UserBalanceHistoryModal*'
+      - '.github/scripts/vip-credit-history-preview.mjs'
+      - '.github/workflows/vip-credit-history.yml'
+permissions:
+  contents: read
+jobs:
+  history-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vitest run src/components/admin/user/__tests__/UserBalanceHistoryModal.spec.ts
+      - name: Prepare browser
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          npm install --prefix "$RUNNER_TEMP/vip-history-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/vip-history-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Capture actual component before and after and verify filter
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vip-history-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/vip-credit-history-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/vip-history-ui"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vip-history-ui-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/vip-history-ui
+          if-no-files-found: error
+      - name: Frontend production build
+        run: pnpm --dir frontend run build
