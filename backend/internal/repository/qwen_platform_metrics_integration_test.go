@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -29,7 +30,7 @@ func TestQwenPlatformMetricsAreSeparateFromOpenAI(t *testing.T) {
 		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM users WHERE id=$1", user.ID)
 	})
 	for _, pair := range [][2]int64{{qwen.ID, qwenGroup.ID}, {openai.ID, openaiGroup.ID}} {
-		_, err := integrationDB.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,created_at) VALUES($1,$2,$3,$4,$5,'alias',$6)`, user.ID, key.ID, pair[0], pair[1], "qwen-separation", start)
+		_, err := integrationDB.ExecContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,created_at) VALUES($1,$2,$3,$4,$5,'alias',$6)`, user.ID, key.ID, pair[0], pair[1], fmt.Sprintf("qwen-separation-%d", pair[0]), start)
 		require.NoError(t, err)
 	}
 	// Both an upstream error and pre-selection capacity error belong to qwen.
