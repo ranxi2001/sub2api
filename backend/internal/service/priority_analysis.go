@@ -84,8 +84,7 @@ func ReadPriorityAnalysis(ctx context.Context, accounts AccountRepository, usage
 		return nil, err
 	}
 	reader, ok := usage.(PrioritySchedulingSignalReader)
-	seriesReader, seriesOK := usage.(PriorityLatencySeriesReader)
-	if accounts == nil || !ok || !seriesOK {
+	if accounts == nil || !ok {
 		return nil, ErrPriorityLatencySeriesUnavailable
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -118,23 +117,15 @@ func ReadPriorityAnalysis(ctx context.Context, accounts AccountRepository, usage
 	revision := priorityConfigRevision(cfg)
 	cfg.WindowMinutes = q.Minutes
 	signals := map[int64]PrioritySchedulingSignal{}
-	var buckets []PriorityLatencyBucket
 	if len(ids) > 0 {
 		signals, err = reader.ReadPrioritySchedulingSignals(ctx, PrioritySchedulingQuery{AccountIDs: ids, Model: q.Model, QualityModel: routeModel, GroupID: q.GroupID, UsageSince: since, UsageUntil: now, QualitySince: now.Add(-time.Duration(cfg.QualityMaxAgeHours) * time.Hour), LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, TargetTTFTMs: cfg.TargetTTFTMs})
 		if err != nil {
 			return nil, fmt.Errorf("priority analysis history: %w", err)
 		}
-		buckets, err = seriesReader.ReadPriorityLatencySeries(ctx, PriorityLatencySeriesQuery{AccountIDs: ids, Model: q.Model, GroupID: q.GroupID, Since: since, Until: now, BucketMinutes: 5, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, SlowTTFTMs: cfg.TargetTTFTMs})
-		if err != nil {
-			return nil, fmt.Errorf("priority analysis latency: %w", err)
-		}
+
 	}
-	snapshot := &PrioritySchedulingSnapshot{At: now, EvaluatedAt: now, Model: q.Model, GroupID: q.GroupID, Mode: cfg.Mode, SelectionPolicy: "read_only_analysis", ConfigRevision: revision, WindowMinutes: q.Minutes, MinSamples: cfg.MinSamples, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, LatencyPenaltyMode: cfg.LatencyPenaltyMode, HistoryReady: true, HistoryStatus: "ready", HistoryObservedAt: &now, HistoryWindowEnd: &now, Candidates: make([]PrioritySchedulingScore, 0, len(ids))}
+	snapshot := &PrioritySchedulingSnapshot{At: now, EvaluatedAt: now, Model: q.Model, GroupID: q.GroupID, Mode: cfg.Mode, SelectionPolicy: "read_only_analysis", PerformanceSource: "account_performance", ConfigRevision: revision, WindowMinutes: q.Minutes, MinSamples: cfg.MinSamples, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, LatencyPenaltyMode: cfg.LatencyPenaltyMode, HistoryReady: true, HistoryStatus: "ready", HistoryObservedAt: &now, HistoryWindowEnd: &now, Candidates: make([]PrioritySchedulingScore, 0, len(ids))}
 	series := &PriorityLatencySeries{ConfigRevision: revision, TargetTTFTMs: cfg.TargetTTFTMs, At: now, Model: q.Model, GroupID: q.GroupID, BucketMinutes: 5, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, Accounts: make([]PriorityLatencyAccountSeries, 0, len(ids))}
-	byAccount := make(map[int64][]PriorityLatencyBucket)
-	for _, b := range buckets {
-		byAccount[b.AccountID] = append(byAccount[b.AccountID], b)
-	}
 	for i := range selected {
 		a := &selected[i]
 		item := openAIAccountCandidateScore{account: a}
@@ -148,29 +139,7 @@ func ReadPriorityAnalysis(ctx context.Context, accounts AccountRepository, usage
 		score.SelectionWeight = prioritySelectionWeight(item, now)
 		score.BoundGroups = priorityAccountGroupCount(a)
 		snapshot.Candidates = append(snapshot.Candidates, score)
-		rows := byAccount[a.ID]
-		if rows == nil {
-			rows = []PriorityLatencyBucket{}
-		}
-		row := PriorityLatencyAccountSeries{AccountID: a.ID, AccountName: a.Name, Samples: score.Samples, P50TTFTMs: score.P50TTFTMs, P70TTFTMs: score.P70TTFTMs, P90TTFTMs: score.P90TTFTMs, P95TTFTMs: score.P95TTFTMs, P99TTFTMs: score.P99TTFTMs, LatencyPercentile: cfg.LatencyPercentile, LatencyMeasurement: cfg.LatencyMeasurement, SlowSamples: score.SlowSamples, ErrorSamples: score.ErrorSamples, Buckets: rows}
-		if score.SelectedTTFTMs != nil {
-			row.SelectedTTFTMs = *score.SelectedTTFTMs
-		}
-		// Both counts use this persisted window, not the scheduler's in-memory
-		// attempt estimator (which may describe a different endpoint or window).
-		if total := row.Samples + row.ErrorSamples; total > 0 {
-			row.ErrorRate = float64(row.ErrorSamples) / float64(total)
-		}
-		var weighted float64
-		var samples int
-		for _, b := range rows {
-			weighted += b.MeanTTFTMs * float64(b.Samples)
-			samples += b.Samples
-		}
-		if samples > 0 {
-			row.MeanTTFTMs = weighted / float64(samples)
-		}
-		series.Accounts = append(series.Accounts, row)
+
 	}
 	slices.SortStableFunc(snapshot.Candidates, comparePrioritySnapshotScores)
 	return &PriorityAnalysis{Snapshot: snapshot, Latency: series}, nil

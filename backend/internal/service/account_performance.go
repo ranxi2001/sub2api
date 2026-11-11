@@ -74,6 +74,19 @@ type AccountPerformance struct {
 	WindowEnd          time.Time              `json:"window_end"`
 }
 
+// Shared validation for display evidence and scheduling. Unknown is not zero.
+func validPerformanceMetric(value *float64) bool {
+	return value != nil && !math.IsNaN(*value) && !math.IsInf(*value, 0) && *value >= 0
+}
+
+func performanceUpstreamErrorRate(e upstreamstats.Evidence) *float64 {
+	if e.Source != "process_local_http_responses" || e.Total <= 0 || e.Failures < 0 || e.Failures > e.Total || !validPerformanceMetric(e.Percent) || *e.Percent > 100 {
+		return nil
+	}
+	value := float64(e.Failures) / float64(e.Total)
+	return &value
+}
+
 func (m AccountPerformance) Breaches() []string {
 	var reasons []string
 	if m.Config.TPS.Breached(m.AvgTPS) {

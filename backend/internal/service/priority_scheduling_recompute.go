@@ -25,6 +25,8 @@ type PrioritySchedulingDiffRow struct {
 	OldTier         string   `json:"old_tier,omitempty"`
 	NewTier         string   `json:"new_tier,omitempty"`
 	OldP90TTFTMs    float64  `json:"old_p90_ttft_ms"`
+	OldAvgTTFTMs    *float64 `json:"old_avg_ttft_ms"`
+	NewAvgTTFTMs    *float64 `json:"new_avg_ttft_ms"`
 	NewP90TTFTMs    float64  `json:"new_p90_ttft_ms"`
 	OldSamples      int      `json:"old_samples"`
 	NewSamples      int      `json:"new_samples"`
@@ -143,6 +145,8 @@ func diffPrioritySnapshots(before, after *PrioritySchedulingSnapshot) []Priority
 			OldTier:         old.Tier,
 			NewTier:         candidate.Tier,
 			OldP90TTFTMs:    old.P90TTFTMs,
+			OldAvgTTFTMs:    old.SelectedTTFTMs,
+			NewAvgTTFTMs:    candidate.SelectedTTFTMs,
 			NewP90TTFTMs:    candidate.P90TTFTMs,
 			OldSamples:      old.Samples,
 			NewSamples:      candidate.Samples,

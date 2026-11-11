@@ -13,7 +13,7 @@ const priorityOAuthQuotaMaxAge = 5 * time.Minute
 func priorityOAuthQuotaSpare(c PrioritySchedulingConfig, item openAIAccountCandidateScore, score PrioritySchedulingScore, now time.Time) int {
 	a := item.account
 	if !c.OAuthQuotaPriority || a == nil || !a.IsOpenAIOAuth() || !a.IsSchedulable() ||
-		item.priorityUnhealthy || (c.ErrorRateWeight > 0 && score.SmoothedRate > .2) || score.Tier == "degraded" || score.LatencyRecovery || score.LatestQualityPassed == nil || !*score.LatestQualityPassed ||
+		item.priorityUnhealthy || (c.ErrorRateWeight > 0 && score.SmoothedRate > .2) || score.Tier == "degraded" || score.LatencyRecovery || score.QualitySamples == 0 || float64(score.QualityPassed)*100/float64(score.QualitySamples) < float64(c.MinQualityPercent) ||
 		score.QualitySamples == 0 || !item.loadKnown || item.loadInfo == nil || item.loadInfo.WaitingCount > 0 || a.Concurrency <= 0 {
 		return 0
 	}
