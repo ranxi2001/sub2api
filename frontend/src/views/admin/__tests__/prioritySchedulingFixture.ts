@@ -3,7 +3,7 @@ import { reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import PrioritySchedulingView from '../PrioritySchedulingView.vue'
 import { apiClient } from '@/api/client'
-import type { PriorityAnalysis, PrioritySchedulingConfig } from '@/api/admin/priorityScheduling'
+import type { PriorityAnalysis, PriorityCandidate, PrioritySchedulingConfig } from '@/api/admin/priorityScheduling'
 import { emptyPerformanceConfig, type AccountPerformance } from '@/types/accountPerformance'
 
 const fixture = vi.hoisted(() => ({ auth: null as any }))
@@ -20,7 +20,7 @@ export function performance(id = 1): AccountPerformance {
 }
 export function analysis(params: any, count = 3, revision = 'v1'): PriorityAnalysis {
   const common = { at: '2026-11-11T01:00:00Z', model: params.model, group_id: params.group_id ?? null, config_revision: revision }
-  const candidates = Array.from({ length: count }, (_, i) => ({ account_id: i + 1, account_name: `Fixture ${i + 1}`, score: 75, base_score: 76, error_penalty: .9875, tier: 'eligible', reasons: [], priority: 1, concurrency: 50, load_factor: 1, load_percent: null, waiting: 0, rate: .1, revenue: 5, theoretical_cost: 1, profit: 4, margin: .8, economics_source: 'usage', profit_samples: 20, samples: 20, p90_ttft_ms: 0, quality_samples: 20, quality_passed: 19, performance: performance(i + 1) }))
+  const candidates = Array.from({ length: count }, (_, i): PriorityCandidate => ({ account_id: i + 1, account_name: `Fixture ${i + 1}`, score: 75, base_score: 76, error_penalty: .9875, tier: 'eligible', reasons: [], priority: 1, concurrency: 50, load_factor: 1, load_percent: null, waiting: 0, rate: .1, revenue: 5, theoretical_cost: 1, profit: 4, margin: .8, economics_source: 'usage', profit_samples: 20, samples: 20, p90_ttft_ms: 0, quality_samples: 20, quality_passed: 19, performance: performance(i + 1) }))
   return { snapshot: { ...common, mode: 'balanced', performance_source: 'account_performance', selection_policy: 'read_only_analysis', history_ready: true, history_status: 'ready', window_minutes: params.minutes, candidates }, latency: { ...common, bucket_minutes: 5, accounts: [] } }
 }
 export function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason?: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
