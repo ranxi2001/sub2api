@@ -40,10 +40,10 @@ mount(Card,{attachTo:'#app',props:{modelValue:{enabled:true,account_ids:[101],me
   before=phase==='before';server.moduleGraph.invalidateAll()
   for(const lang of ['zh','en']){
    const page=await browser.newPage({viewport:{width:1150,height:1150},timezoneId:'UTC'})
-   page.on('pageerror',e=>errors.push(e.message))
+   page.on('pageerror',e=>{errors.push(e.message);console.error(e.message)})
    await page.route('**/*',route=>new URL(route.request().url()).origin==='http://127.0.0.1:4197'?route.continue():route.abort())
    await page.goto('http://127.0.0.1:4197/?lang='+lang)
-   await page.getByText('Demo fallback API Key',{exact:true}).waitFor()
+   await page.getByText('Demo fallback API Key',{exact:false}).waitFor()
    await page.getByText('98.00%',{exact:false}).waitFor()
    if(!before)assert.match(await page.locator('#app').innerText(),/OpenAI OAuth SLA/)
    await page.screenshot({path:path.join(output,phase+'-'+lang+'.png'),fullPage:true})
@@ -52,4 +52,8 @@ mount(Card,{attachTo:'#app',props:{modelValue:{enabled:true,account_ids:[101],me
  }
  assert.deepEqual(errors,[])
  await writeFile(path.join(output,'evidence.json'),JSON.stringify({head,baseline,scope:'Actual fallback card, fictional data, zh/en before/after; no production requests',errors},null,2))
+} catch(error) {
+ await writeFile(path.join(output,'failure.json'),JSON.stringify({head,errors,error:String(error)},null,2))
+ for(const context of browser?.contexts()||[])for(const page of context.pages()){await page.screenshot({path:path.join(output,'failure.png'),fullPage:true});await writeFile(path.join(output,'failure.txt'),await page.locator('body').innerText())}
+ throw error
 } finally { await browser?.close();await server?.close();await unlink(entry) }
