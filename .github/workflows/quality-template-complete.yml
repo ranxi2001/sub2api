@@ -104,6 +104,7 @@ jobs:
           pnpm --dir frontend exec vitest run src/api/admin/__tests__/scheduledTests.spec.ts src/utils/__tests__/qualityRulePatch.spec.ts src/components/admin/operations/__tests__/QualityOwnershipReview.spec.ts src/views/admin/__tests__/AccountQualityView.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts 2>&1 | tee evidence/green-ui.log
       - name: Install isolated browser
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/quality-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/quality-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Complete template actual view offline browser interaction

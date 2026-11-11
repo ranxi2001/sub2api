@@ -1,3 +1,6 @@
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach as setupPiniaBeforeEach } from 'vitest'
+setupPiniaBeforeEach(() => setActivePinia(createPinia()))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ScheduledTestsPanel from '../ScheduledTestsPanel.vue'

@@ -1,7 +1,11 @@
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach as setupPiniaBeforeEach } from 'vitest'
+setupPiniaBeforeEach(() => setActivePinia(createPinia()))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import IQTestModal from '../IQTestModal.vue'
 import TestModelSelect from '../TestModelSelect.vue'
+import { apiClient } from '@/api/client'
 
 const { probeOpenAICodexState, getAvailableModels, getModelReasoning } = vi.hoisted(() => ({
   probeOpenAICodexState: vi.fn(), getAvailableModels: vi.fn(), getModelReasoning: vi.fn()
@@ -82,6 +86,39 @@ describe('IQTestModal', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('freezes one random question across samples and stores its version with the actual prompt', async () => {
+    const question = { id: 'pelican-bicycle', version: 'svg-motion-v1', round_id: 'manual:00000000000000000000000000000000', source: 'builtin:svg-motion', prompt: 'Draw fixture', criteria: ['Fixture rubric'] }
+    vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { prompt: question.prompt, actual_prompt: 'Draw fixture\n\nHTML only', pelican_question: question } })
+    const wrapper = mountModal()
+    const vm = wrapper.vm as any
+    vm.selectQuestion('pelican')
+    vm.selectPromptMode('random')
+    await flushPromises()
+    vm.parallelCount = 2
+    await vm.startTest()
+    const requests = vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes('/pelican-test'))
+    expect(requests).toHaveLength(2)
+    for (const [, options] of requests) {
+      expect(JSON.parse(options!.body as string)).toMatchObject({ prompt: 'Draw fixture\n\nHTML only', prompt_mode: 'random', pelican_question: question })
+    }
+    const record = JSON.parse(localStorage.getItem('sub2api-pelican-test:42')!)[0]
+    expect(record.pelicanQuestion).toEqual(question)
+    expect(record.actualPrompt).toBe('Draw fixture\n\nHTML only')
+    vm.prompt = 'Later edit'
+    expect(record.prompt).toBe('Draw fixture')
+    await wrapper.setProps({ account: { id: 43, name: 'Second fixture', platform: 'openai', type: 'oauth', status: 'active' } as any })
+    vm.selectQuestion('pelican')
+    vm.selectPromptMode('random')
+    await flushPromises()
+    await vm.startTest()
+    const comparison = vi.mocked(global.fetch).mock.calls.find(([url]) => String(url).includes('/43/pelican-test'))
+    expect(JSON.parse(comparison![1]!.body as string).pelican_question).toEqual(question)
+    expect(apiClient.get).toHaveBeenCalledTimes(1)
+    const secondRecord = JSON.parse(localStorage.getItem('sub2api-pelican-test:43')!)[0]
+    expect(secondRecord.pelicanQuestion).toEqual(record.pelicanQuestion)
+    wrapper.unmount()
   })
 
   it('keeps all eight configured model IDs when discovery only returns six', async () => {

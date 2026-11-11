@@ -1,3 +1,6 @@
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach as setupPiniaBeforeEach } from 'vitest'
+setupPiniaBeforeEach(() => setActivePinia(createPinia()))
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PelicanTestFields from '../PelicanTestFields.vue'
@@ -15,11 +18,11 @@ describe('PelicanTestFields question kinds', () => {
     const question = wrapper.findAllComponents(SelectStub)[0]
     expect(question.props('options').map((o: { value: string }) => o.value)).toEqual(['candy', 'pelican', 'state_probe'])
     question.vm.$emit('update:modelValue', 'state_probe')
-    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ ...config, question_kind: 'state_probe', prompt: '', parallel_count: 1, reasoning_effort: 'high' }])
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ ...config, prompt_mode: 'custom', question_kind: 'state_probe', prompt: '', parallel_count: 1, reasoning_effort: 'high' }])
     wrapper.unmount()
   })
   it('hides the question and parallel fields for probe plans and restores them for candy', async () => {
-    const wrapper = render({ ...config, question_kind: 'state_probe', prompt: '', parallel_count: 1 })
+    const wrapper = render({ ...config, prompt_mode: 'custom', question_kind: 'state_probe', prompt: '', parallel_count: 1 })
     expect(wrapper.find('[data-testid="state-probe-hint"]').exists()).toBe(true)
     expect(wrapper.find('text-area-stub').exists()).toBe(false)
     expect(wrapper.findAllComponents(SelectStub)).toHaveLength(1)

@@ -98,6 +98,7 @@ type PelicanGroupTestPlanInput struct {
 	CronExpression  string `json:"cron_expression"`
 	Enabled         bool   `json:"enabled"`
 	Prompt          string `json:"prompt"`
+	PromptMode      string `json:"prompt_mode,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort"`
 	ParallelCount   int    `json:"parallel_count"`
 }
@@ -246,7 +247,7 @@ func (s *PelicanGroupTestService) planFromInput(ctx context.Context, input Pelic
 		return nil, infraerrors.BadRequest("INVALID_PELICAN_GROUP_TEST", "model is required (maximum 100 bytes)")
 	}
 	prompt := strings.TrimSpace(input.Prompt)
-	if prompt == "" || len(prompt) > 32000 {
+	if (prompt == "" && input.PromptMode != PelicanPromptModeRandom) || len(prompt) > 32000 {
 		return nil, infraerrors.BadRequest("INVALID_PELICAN_GROUP_TEST", "prompt is required (maximum 32000 bytes)")
 	}
 	effort := normalizePelicanReasoningEffort(input.ReasoningEffort)
@@ -270,7 +271,10 @@ func (s *PelicanGroupTestService) planFromInput(ctx context.Context, input Pelic
 	}
 	plan.NextRunAt = &next
 	plan.Enabled = input.Enabled
-	plan.PelicanConfig = &PelicanTestConfig{QuestionKind: "pelican", Prompt: prompt, ReasoningEffort: effort, ParallelCount: parallel, ModelID: plan.ModelID}
+	plan.PelicanConfig = &PelicanTestConfig{QuestionKind: "pelican", PromptMode: input.PromptMode, Prompt: prompt, ReasoningEffort: effort, ParallelCount: parallel, ModelID: plan.ModelID}
+	if err := validatePelicanPromptMode(plan.PelicanConfig); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_PELICAN_GROUP_TEST", err.Error())
+	}
 	return plan, nil
 }
 
@@ -295,6 +299,7 @@ func (s *PelicanGroupTestService) RunNow(ctx context.Context, id int64) error {
 	if !claimed {
 		return ErrPelicanGroupTestPlanRunning
 	}
+	plan.PelicanConfig = freezePelicanQuestion(plan.PelicanConfig, "manual-group:"+now.UTC().Format(time.RFC3339Nano), nil)
 	s.runs.Add(1)
 	go func() {
 		defer s.runs.Done()
@@ -342,6 +347,10 @@ func (s *PelicanGroupTestService) runScheduled(ctx context.Context, plan *Pelica
 		logger.LegacyPrintf("service.pelican_group_test", "plan=%d invalid schedule: %v", plan.ID, err)
 		return
 	}
+	roundTime := now
+	if plan.NextRunAt != nil {
+		roundTime = *plan.NextRunAt
+	}
 	// The persisted lease keeps ticks and server replicas from running a plan twice and
 	// expires by itself after a crash.
 	until := now.Add(pelicanGroupTestLease).Truncate(time.Microsecond)
@@ -352,6 +361,7 @@ func (s *PelicanGroupTestService) runScheduled(ctx context.Context, plan *Pelica
 	if err != nil || !claimed {
 		return
 	}
+	plan.PelicanConfig = freezePelicanQuestion(plan.PelicanConfig, "scheduled:"+roundTime.UTC().Format(time.RFC3339Nano), nil)
 	s.execute(plan, until)
 }
 

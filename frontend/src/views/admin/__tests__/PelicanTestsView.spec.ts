@@ -1,3 +1,6 @@
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach as setupPiniaBeforeEach } from 'vitest'
+setupPiniaBeforeEach(() => setActivePinia(createPinia()))
 import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PelicanTestsView from '../PelicanTestsView.vue'
@@ -192,7 +195,7 @@ describe('PelicanTestsView', () => {
     expect(selects[0].findAll('option').map((option) => option.text())).toEqual(['GPT PRO号池 · OpenAI', 'Claude Max · Anthropic'])
     await selects[0].setValue('6')
     await editor.get('[data-testid="pelican-test-model"]').setValue('claude-opus-5-5')
-    await selects[2].setValue('0 * * * *')
+    await editor.get('[data-testid="pelican-test-schedule"]').setValue('0 * * * *')
     expect(editor.find('[data-testid="pelican-test-cron"]').exists()).toBe(false)
     await editor.trigger('submit')
     await flushPromises()
@@ -202,6 +205,24 @@ describe('PelicanTestsView', () => {
     }))
     expect(api.createPlan.mock.calls[0][0].prompt).toContain('鹈鹕')
     expect(wrapper.find('[data-testid="pelican-test-editor"]').exists()).toBe(false)
+  })
+
+  it('saves a random group rule without a custom prompt or result metadata', async () => {
+    api.createPlan.mockResolvedValue(plan())
+    wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-testid="pelican-tests-create"]').trigger('click')
+    await flushPromises()
+    const editor = wrapper.get('[data-testid="pelican-test-editor"]')
+    await editor.findAll('select')[0].setValue('6')
+    await editor.get('[data-testid="pelican-test-model"]').setValue('fixture-model')
+    await editor.get('[data-testid="pelican-test-prompt"]').setValue('')
+    await editor.get('[data-testid="pelican-mode-select"]').setValue('random')
+    expect(editor.find('[data-testid="pelican-test-prompt"]').exists()).toBe(false)
+    await editor.trigger('submit')
+    await flushPromises()
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ prompt_mode: 'random', prompt: '', model_id: 'fixture-model' }))
+    expect(api.createPlan.mock.calls[0][0]).not.toHaveProperty('pelican_question')
   })
 
   it('asks for the missing fields before creating', async () => {
@@ -253,7 +274,7 @@ describe('PelicanTestsView', () => {
     await flushPromises()
     expect(api.updatePlan).toHaveBeenCalledWith(7, {
       group_id: 4, model_id: 'gpt-6-astra', cron_expression: '*/30 * * * *', enabled: false,
-      prompt: 'draw a pelican', reasoning_effort: 'high', parallel_count: 2,
+      prompt: 'draw a pelican', prompt_mode: 'custom', reasoning_effort: 'high', parallel_count: 2,
     })
 
     api.updatePlan.mockClear()

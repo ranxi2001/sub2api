@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  pelicanRandomQuestionBank: 'pelican-random-question-bank',
   antigravityUsageQuery: 'antigravity-usage-query-initial-announcement',
   openaiCacheWriteTTL12h: 'openai-cache-write-12h-initial-announcement',
   easyPayRefundSuccessCode: 'easypay-refund-success-code-initial-announcement',

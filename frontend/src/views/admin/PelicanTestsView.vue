@@ -248,7 +248,8 @@
             <label class="field-label mt-0" for="pelican-test-prompt">{{ t('pelicanTests.editor.prompt') }}</label>
             <button type="button" class="link-button text-xs" @click="editor.form.prompt = PELICAN_PROMPT">{{ t('pelicanTests.editor.resetPrompt') }}</button>
           </div>
-          <textarea id="pelican-test-prompt" v-model="editor.form.prompt" rows="3" maxlength="32000" class="input w-full" data-testid="pelican-test-prompt" />
+          <PelicanPromptMode v-model="editor.form.prompt_mode" />
+          <textarea v-if="editor.form.prompt_mode !== 'random'" id="pelican-test-prompt" v-model="editor.form.prompt" rows="3" maxlength="32000" class="input w-full" data-testid="pelican-test-prompt" />
           <p class="field-hint">{{ t('pelicanTests.editor.promptHint') }}</p>
         </div>
         <div class="grid gap-4 sm:grid-cols-2">
@@ -296,6 +297,7 @@
       @close="preview = null"
     >
       <div v-if="preview" class="flex min-h-0 flex-1 flex-col gap-3" data-testid="pelican-result-preview">
+        <PelicanQuestionSnapshot :question="preview.result.pelican_config?.pelican_question" :actual-prompt="preview.result.pelican_config?.actual_prompt || preview.result.pelican_config?.prompt" />
         <div class="min-h-0 flex-1 overflow-hidden rounded-xl border border-gray-200 bg-gray-100 dark:border-dark-700 dark:bg-dark-900">
           <PelicanArtworkPreview v-if="preview.status === 'ready'" :html="preview.html" :title="previewTitle" />
           <div v-else class="flex h-full items-center justify-center p-6 text-sm text-gray-500">
@@ -332,6 +334,8 @@
 </template>
 
 <script setup lang="ts">
+import PelicanPromptMode from '@/components/admin/account/PelicanPromptMode.vue'
+import PelicanQuestionSnapshot from '@/components/admin/account/PelicanQuestionSnapshot.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -585,6 +589,7 @@ function inputFrom(plan: PelicanGroupTestPlan): PelicanGroupTestPlanInput {
     cron_expression: plan.cron_expression,
     enabled: plan.enabled,
     prompt: plan.pelican_config?.prompt || PELICAN_PROMPT,
+    prompt_mode: plan.pelican_config?.prompt_mode || 'custom',
     reasoning_effort: plan.pelican_config?.reasoning_effort || 'medium',
     parallel_count: plan.pelican_config?.parallel_count || 1,
   }
@@ -603,7 +608,7 @@ async function savePlan() {
   const current = editor.value
   if (!current || savingPlan.value) return
   const form = current.form
-  if (!form.group_id || !form.model_id.trim() || !form.prompt.trim() || !form.cron_expression.trim()) {
+  if (!form.group_id || !form.model_id.trim() || (form.prompt_mode !== 'random' && !form.prompt.trim()) || !form.cron_expression.trim()) {
     fail(null, t('pelicanTests.editor.required'))
     return
   }
@@ -681,7 +686,7 @@ async function openPreview(result: PelicanGroupTestResult) {
     const full = await pelicanTestsAPI.getResult(result.id)
     if (preview.value?.result.id !== result.id) return
     const html = extractPelicanHtml(full.response_text || '')
-    preview.value = { result, html, status: html ? 'ready' : 'invalid' }
+    preview.value = { result: full, html, status: html ? 'ready' : 'invalid' }
   } catch {
     if (preview.value?.result.id === result.id) preview.value = { result, html: '', status: 'error' }
   }

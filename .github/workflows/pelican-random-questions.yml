@@ -1,0 +1,47 @@
+name: Pelican random question evidence
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/pelican*'
+      - 'frontend/src/components/admin/account/Pelican*'
+      - 'frontend/src/components/admin/account/IQTestModal.vue'
+      - '.github/scripts/pelican-question-browser.mjs'
+      - '.github/workflows/pelican-random-questions.yml'
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - run: bash .github/scripts/ci-ubuntu-mirrors.sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Targeted component, history, and round assertions
+        run: pnpm --dir frontend exec vitest run src/utils/__tests__/pelicanQuestionRound.spec.ts src/components/admin/account/__tests__/IQTestModal.spec.ts src/components/admin/account/__tests__/PelicanPromptMode.spec.ts src/components/admin/account/__tests__/PelicanTestFields.spec.ts src/components/admin/account/__tests__/ScheduledTestsPanel.pelican.spec.ts src/components/admin/account/__tests__/PelicanRecordsDashboard.spec.ts src/views/admin/__tests__/PelicanTestsView.spec.ts
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pelican-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/pelican-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual controls and snapshot with fixture data
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/pelican-browser/node_modules/playwright
+          PELICAN_SCREENSHOT_DIR: ${{ github.workspace }}/evidence
+        run: node .github/scripts/pelican-question-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pelican-random-question-ui-${{ github.run_id }}
+          path: evidence/

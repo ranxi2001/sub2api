@@ -101,6 +101,7 @@ jobs:
           --maxWorkers=1 --minWorkers=1
       - name: Install isolated mock browser
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/oauth-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/oauth-browser/node_modules/.bin/playwright" install --with-deps chromium
       - run: git fetch --no-tags --depth=1 origin 7eb2e271acdc4b36d62f1b542b16b5abb5b1bb09
