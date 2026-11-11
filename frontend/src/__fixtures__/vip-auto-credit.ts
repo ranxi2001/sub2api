@@ -9,7 +9,7 @@ import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import en from '@/i18n/locales/en/autoCredit'
 import zh from '@/i18n/locales/zh/autoCredit'
-import type { AdminUser, User } from '@/types'
+import type { AdminUser } from '@/types'
 import '../style.css'
 localStorage.setItem('auth_user', JSON.stringify({ id: 41, role: 'admin', email: 'admin@example.invalid' }))
 localStorage.setItem('auth_token', 'offline-fixture-only')
@@ -17,7 +17,7 @@ const pinia = createPinia()
 const app = createApp({
   setup() {
     const auth = useAuthStore()
-    auth.$patch({ user: { id: 41, role: 'admin', email: 'admin@example.invalid' } as User, token: 'offline-fixture-only' })
+    auth.$patch({ user: { id: 41, role: 'admin', email: 'admin@example.invalid' }, token: 'offline-fixture-only' })
     const show = ref(true)
     const user = { id: 2, email: 'vip-fixture@example.invalid' } as AdminUser
     return () => h('main', { class: 'min-h-screen bg-gray-100 p-6' }, [
