@@ -97,3 +97,13 @@ func TestPriorityUnifiedPerformanceAverageControlsAdmission(t *testing.T) {
 
 // Keep the interface contract explicit: callers share the repository signal path.
 var _ PrioritySchedulingSignalReader = (*priorityReaderStub)(nil)
+
+func TestPriorityUnifiedPerformanceSnapshotOwnsMetricPointers(t *testing.T) {
+	cfg := DefaultPrioritySchedulingConfig()
+	signal := performanceFixture(30, 4000, 0)
+	score := scorePriorityCandidate(cfg, priorityCandidate(1, .1, 0), signal, time.Now())
+	*score.Performance.AvgTPS = 999
+	*score.Performance.AvgTTFTMs = 999
+	require.Equal(t, 30.0, *signal.Performance.AvgTPS)
+	require.Equal(t, 4000.0, *signal.Performance.AvgTTFTMs)
+}

@@ -322,7 +322,8 @@ type PrioritySchedulingSnapshot struct {
 func scorePriorityCandidate(c PrioritySchedulingConfig, item openAIAccountCandidateScore, signal PrioritySchedulingSignal, _ time.Time) PrioritySchedulingScore {
 	// The aliases remain in snapshots for older clients. Scoring uses the
 	// account-performance metrics, never a separate model/quantile population.
-	metrics := signal.Performance
+	metrics := cloneAccountPerformance(signal.Performance)
+	signal.Performance = metrics
 	signal.Samples, signal.QualitySamples, signal.QualityPassed = 0, 0, 0
 	signal.SelectedTTFTMs = nil
 	signal.LatencyPercentile, signal.LatencyMeasurement = 0, "account_performance"

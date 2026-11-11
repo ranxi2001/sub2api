@@ -158,7 +158,7 @@ func diffPrioritySnapshots(before, after *PrioritySchedulingSnapshot) []Priority
 			!almostEqual(row.OldScore, row.NewScore, 0.01) ||
 			!almostEqual(row.OldWeight, row.NewWeight, 0.001) ||
 			row.OldTier != row.NewTier ||
-			!almostEqual(row.OldP90TTFTMs, row.NewP90TTFTMs, 1) ||
+			!almostEqualOptional(row.OldAvgTTFTMs, row.NewAvgTTFTMs, 1) ||
 			row.OldSamples != row.NewSamples ||
 			row.OldErrorSamples != row.NewErrorSamples
 		rows = append(rows, row)
@@ -189,4 +189,11 @@ func diffPrioritySnapshots(before, after *PrioritySchedulingSnapshot) []Priority
 
 func almostEqual(a, b, tolerance float64) bool {
 	return math.Abs(a-b) <= tolerance
+}
+
+func almostEqualOptional(a, b *float64, tolerance float64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return almostEqual(*a, *b, tolerance)
 }

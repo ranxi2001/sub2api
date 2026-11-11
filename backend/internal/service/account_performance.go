@@ -74,6 +74,31 @@ type AccountPerformance struct {
 	WindowEnd          time.Time              `json:"window_end"`
 }
 
+// Snapshot callers own the returned evidence; do not expose cache pointers.
+func cloneAccountPerformance(in *AccountPerformance) *AccountPerformance {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	clone := func(p *float64) *float64 {
+		if p == nil {
+			return nil
+		}
+		value := *p
+		return &value
+	}
+	out.AvgTPS, out.AvgTTFTMs, out.DegradationPercent = clone(in.AvgTPS), clone(in.AvgTTFTMs), clone(in.DegradationPercent)
+	out.UpstreamError.Percent = clone(in.UpstreamError.Percent)
+	for _, bounds := range []*PerformanceBounds{&out.Config.TPS, &out.Config.TTFT, &out.Config.Degradation, &out.Config.UpstreamError} {
+		bounds.Min, bounds.Max = clone(bounds.Min), clone(bounds.Max)
+	}
+	if in.PausedAt != nil {
+		value := *in.PausedAt
+		out.PausedAt = &value
+	}
+	return &out
+}
+
 // Shared validation for display evidence and scheduling. Unknown is not zero.
 func validPerformanceMetric(value *float64) bool {
 	return value != nil && !math.IsNaN(*value) && !math.IsInf(*value, 0) && *value >= 0
