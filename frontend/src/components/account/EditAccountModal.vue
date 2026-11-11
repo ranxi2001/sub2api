@@ -5357,8 +5357,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   loadAccountSchedulingThresholdOverride(newAccount.platform, credentials)
 
   // Load header override state for eligible account platforms/types
-  qwenSessionCache.value = credentials.qwen_session_cache_enabled === true
-  qwenStrictAffinity.value = credentials.qwen_strict_session_affinity === true
+  qwenSessionCache.value = credentials?.qwen_session_cache_enabled === true
+  qwenStrictAffinity.value = credentials?.qwen_strict_session_affinity === true
   headerOverrideEnabled.value = false
   headerOverrideRows.value = []
   if (newAccount.credentials && isHeaderOverrideCapable(newAccount.platform, newAccount.type)) {
