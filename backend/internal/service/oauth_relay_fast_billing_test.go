@@ -72,18 +72,17 @@ func TestOAuthRelayFastBillingAudit(t *testing.T) {
 }
 
 // Exercise the same terminal-response observation, pricing and durable charge
-// staging path used by HTTP/SSE and WS results, including credential shadows.
+// staging path used by HTTP/SSE and WS results.
 func TestOAuthRelayFastRecordUsage(t *testing.T) {
 	for _, tc := range []struct {
-		name                          string
-		enabled, freeFast, parentFlag bool
-		wantTier                      string
-		costFactor, chargeFactor      float64
+		name                     string
+		enabled, freeFast        bool
+		wantTier                 string
+		costFactor, chargeFactor float64
 	}{
-		{"ordinary API retains downgrade", false, false, false, "default", 1, 1},
-		{"trusted relay charges fast", true, false, false, "priority", 2, 2},
-		{"free fast still applies", true, true, false, "priority", 2, 1},
-		{"parent credential opts in", false, false, true, "priority", 2, 2},
+		{"ordinary API retains downgrade", false, false, "default", 1, 1},
+		{"trusted relay charges fast", true, false, "priority", 2, 2},
+		{"free fast still applies", true, true, "priority", 2, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			group := ultrafastUsageGroup()
@@ -92,14 +91,6 @@ func TestOAuthRelayFastRecordUsage(t *testing.T) {
 				FastMultiplier: ultrafastUsageFloat(2)}}
 			svc, input, repo, _ := ultrafastUsageHarness(t, group, false)
 			input.Account.Extra[OpenAIOAuthRelayFastBillingKey] = tc.enabled
-			if tc.parentFlag {
-				parentID := int64(2001)
-				input.Account.ParentAccountID = &parentID
-				svc.accountRepo = &openAIRecordUsageAccountRepoStub{account: &Account{
-					ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
-					Extra: map[string]any{OpenAIOAuthRelayFastBillingKey: true},
-				}}
-			}
 			input.Result = ultrafastUsageResult(t, "gpt-6.1-sol", "priority", "default", 10000, 8000, 1000, 500)
 			require.NoError(t, svc.RecordUsage(context.Background(), input))
 			event := ultrafastUsageEvent(t, repo)
@@ -112,4 +103,19 @@ func TestOAuthRelayFastRecordUsage(t *testing.T) {
 			require.InDelta(t, wantCharge, event.Command.APIKeyQuotaCost, 1e-10)
 		})
 	}
+}
+
+// The compatibility flag must not broaden the existing OAuth-only shadow
+// credential contract or stage a charge for an invalid API-key parent.
+func TestOAuthRelayFastRejectsAPIKeyShadowParent(t *testing.T) {
+	svc, input, repo, _ := ultrafastUsageHarness(t, ultrafastUsageGroup(), false)
+	parentID := int64(2001)
+	input.Account.ParentAccountID = &parentID
+	svc.accountRepo = &openAIRecordUsageAccountRepoStub{account: &Account{
+		ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Extra: map[string]any{OpenAIOAuthRelayFastBillingKey: true},
+	}}
+	input.Result = ultrafastUsageResult(t, "gpt-6.1-sol", "priority", "default", 10000, 8000, 1000, 500)
+	require.ErrorContains(t, svc.RecordUsage(context.Background(), input), "is not OpenAI OAuth")
+	require.Empty(t, repo.events)
 }
