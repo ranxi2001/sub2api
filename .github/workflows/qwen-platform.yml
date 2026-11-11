@@ -1,0 +1,41 @@
+name: Qwen platform acceptance
+on:
+  push:
+    branches: [feat/qwen-platform]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Qwen form and announcement regressions
+        run: pnpm --dir frontend exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/credentialsBuilder.platformCatalog.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/constants/__tests__/platforms.spec.ts
+      - name: Prepare isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/fallback-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/fallback-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Capture Qwen account creation
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/qwen-platform-${{ github.sha }}
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/fallback-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/qwen-platform-preview.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: qwen-platform-${{ github.sha }}
+          path: ${{ runner.temp }}/qwen-platform-${{ github.sha }}
+          if-no-files-found: error

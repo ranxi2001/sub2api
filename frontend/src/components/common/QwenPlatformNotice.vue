@@ -1,7 +1,7 @@
 <template>
   <p class="mt-2 flex items-start gap-2 text-sm text-gray-500" data-testid="qwen-platform-notice">
     <span>{{ t('common.qwenPlatformHint') }}</span>
-    <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.qwenPlatform" :user-id="userId" />
+    <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.qwenPlatform" :user-id="userId" />
   </p>
 </template>
 
