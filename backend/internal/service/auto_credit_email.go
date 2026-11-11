@@ -102,13 +102,14 @@ func (w *AutoCreditEmailWorker) run(ctx context.Context) {
 
 func (w *AutoCreditEmailWorker) ProcessNext(ctx context.Context) (bool, error) {
 	return w.repo.DeliverNext(ctx, func(sendCtx context.Context, event AutoCreditEmail) error {
+		// The locked ledger outbox owns deduplication and acknowledgment. Omit
+		// the generic source marker: its post-SMTP settings write could fail on
+		// normal shutdown after acceptance and cause an avoidable resend.
 		return w.sender.Send(sendCtx, NotificationEmailSendInput{
 			Event:          NotificationEmailEventAutoCreditSuccess,
 			UserID:         event.UserID,
 			RecipientEmail: event.RecipientEmail,
 			RecipientName:  event.RecipientEmail,
-			SourceType:     "auto_credit_ledger",
-			SourceID:       strconv.FormatInt(event.LedgerID, 10),
 			Variables:      map[string]string{"credit_amount": event.Amount, "current_balance": event.BalanceAfter, "ledger_id": strconv.FormatInt(event.LedgerID, 10)},
 		})
 	})

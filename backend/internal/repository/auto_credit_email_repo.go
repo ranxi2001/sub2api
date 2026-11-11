@@ -49,13 +49,19 @@ func (r *autoCreditEmailOutboxRepository) DeliverNext(ctx context.Context, send 
 	// Do not let parent cancellation release the lock while SMTP is still in
 	// flight. Stop joins the sender; SMTP itself has bounded I/O deadlines.
 	// This transaction never locks/writes users, ledger or billing tables.
-	conn, err := r.db.Conn(ctx)
+	claimCtx, claimCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer claimCancel()
+	conn, err := r.db.Conn(claimCtx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = conn.Close() }()
-	txCtx, txCancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
+	txCtx, txCancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer txCancel()
+	// Bound connection/BEGIN/claim, then detach that cancellation before SMTP.
+	// No lease or transaction deadline may expire while a sender is active.
+	stopClaimCancellation := context.AfterFunc(claimCtx, txCancel)
+	defer stopClaimCancellation()
 	tx, err := conn.BeginTx(txCtx, nil)
 	if err != nil {
 		return false, err
@@ -63,13 +69,17 @@ func (r *autoCreditEmailOutboxRepository) DeliverNext(ctx context.Context, send 
 	defer func() { _ = tx.Rollback() }()
 	var event service.AutoCreditEmail
 	var attempts int
-	err = tx.QueryRowContext(ctx, `SELECT o.ledger_id,l.user_id,o.recipient_email,l.amount::text,l.balance_after::text,o.attempts FROM auto_credit_email_outbox o JOIN auto_credit_ledger l ON l.id=o.ledger_id WHERE o.sent_at IS NULL AND o.available_at<=NOW() ORDER BY o.available_at,o.ledger_id LIMIT 1 FOR UPDATE OF o SKIP LOCKED`).Scan(&event.LedgerID, &event.UserID, &event.RecipientEmail, &event.Amount, &event.BalanceAfter, &attempts)
+	err = tx.QueryRowContext(claimCtx, `SELECT o.ledger_id,l.user_id,o.recipient_email,l.amount::text,l.balance_after::text,o.attempts FROM auto_credit_email_outbox o JOIN auto_credit_ledger l ON l.id=o.ledger_id WHERE o.sent_at IS NULL AND o.available_at<=NOW() ORDER BY o.available_at,o.ledger_id LIMIT 1 FOR UPDATE OF o SKIP LOCKED`).Scan(&event.LedgerID, &event.UserID, &event.RecipientEmail, &event.Amount, &event.BalanceAfter, &attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
+	if !stopClaimCancellation() {
+		return false, claimCtx.Err()
+	}
+	claimCancel()
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}

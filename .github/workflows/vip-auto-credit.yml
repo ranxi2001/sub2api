@@ -61,6 +61,26 @@ jobs:
           grep -q -- '--- FAIL: TestVipCreditEmailConfigCompatibility' "$RUNNER_TEMP/vip-credit-logs/red.log"
           grep -q -- '--- FAIL: TestVipCreditEmailCommittedLedger' "$RUNNER_TEMP/vip-credit-logs/red.log"
           grep -q -- '--- FAIL: TestVipCreditEmailSMTPTemplateAndRetry' "$RUNNER_TEMP/vip-credit-logs/red.log"
+      - name: Behavioral RED for SMTP acceptance during shutdown against reviewed worker
+        if: github.head_ref == 'feat/vip-credit-email' || github.ref_name == 'feat/vip-credit-email'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres -T template0 -E UTF8 vip_credit_shutdown_red
+          export VIP_CREDIT_TEST_DSN='host=127.0.0.1 port=5432 user=postgres password=fixture-only dbname=vip_credit_shutdown_red sslmode=disable'
+          target=backend/internal/service/auto_credit_email.go
+          cp "$target" "$RUNNER_TEMP/auto_credit_email.green.go"
+          trap 'cp "$RUNNER_TEMP/auto_credit_email.green.go" "$target"' EXIT
+          git show 7b7620487b88cd62b968c51aeebdffb3c1f9e7fe:"$target" > "$target"
+          set +e
+          (cd backend && go test -p 1 -tags=vipcreditintegration ./internal/repository -run '^TestVipCreditEmailSMTPTemplateAndRetry$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log"
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|undefined:|no tests to run' "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log"
+          grep -q -- '--- FAIL: TestVipCreditEmailSMTPTemplateAndRetry' "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log"
+          grep -q 'accepted SMTP during Stop must acknowledge the outbox' "$RUNNER_TEMP/vip-credit-logs/shutdown-red.log"
       - name: Exact same regressions GREEN, real PostgreSQL ledger, admission, mail, concurrency and upgrades
         working-directory: backend
         shell: bash

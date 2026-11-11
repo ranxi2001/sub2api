@@ -230,6 +230,8 @@ type creditSMTPFixture struct {
 	mu         sync.Mutex
 	messages   []string
 	recipients []string
+	accepted   chan struct{}
+	release    chan struct{}
 }
 
 func (s *creditSMTPFixture) serve() {
@@ -245,7 +247,7 @@ func (s *creditSMTPFixture) serve() {
 }
 func (s *creditSMTPFixture) handle(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
 	line := func(v string) { _, _ = rw.WriteString(v + "\r\n"); _ = rw.Flush() }
 	line("220 localhost ESMTP")
@@ -284,7 +286,13 @@ func (s *creditSMTPFixture) handle(conn net.Conn) {
 			s.mu.Lock()
 			s.messages = append(s.messages, body.String())
 			s.recipients = append(s.recipients, recipient)
+			accepted, release := s.accepted, s.release
+			s.accepted, s.release = nil, nil
 			s.mu.Unlock()
+			if accepted != nil {
+				close(accepted)
+				<-release
+			}
 			line("250 accepted")
 		case strings.HasPrefix(cmd, "QUIT"):
 			line("221 bye")
@@ -439,6 +447,72 @@ func TestVipCreditEmailSMTPTemplateAndRetry(t *testing.T) {
 		require.Contains(t, preview.HTML, "300.00000000")
 		require.Contains(t, preview.HTML, "42")
 	}
+	// Cancel the worker while real SMTP is waiting to acknowledge DATA. Its
+	// accepted result must still be acknowledged, and another node must remain
+	// excluded even after the five-second claim preparation budget has elapsed.
+	_, err = db.Exec(`UPDATE users SET status='active' WHERE id=$1`, uid)
+	require.NoError(t, err)
+	_, err = repo.Settle(ctx, uid, state.Entries[0].ID, uid)
+	require.NoError(t, err)
+	cmd.RequestID += "-shutdown"
+	applied, err = NewUsageBillingRepository(nil, db).Apply(ctx, cmd)
+	require.NoError(t, err)
+	require.True(t, applied.AutoCreditIssued)
+	accepted, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseSMTP := func() { releaseOnce.Do(func() { close(release) }) }
+	smtp.mu.Lock()
+	smtp.accepted, smtp.release = accepted, release
+	smtp.mu.Unlock()
+	activeContext := make(chan context.Context, 1)
+	stopping := service.NewAutoCreditEmailWorker(NewAutoCreditEmailOutboxRepository(claimDB), emailFixtureSender(func(c context.Context, in service.NotificationEmailSendInput) error {
+		activeContext <- c
+		return mailService.Send(c, in)
+	}))
+	t.Cleanup(func() { releaseSMTP(); stopping.Stop() })
+	stopping.Start()
+	var sendingContext context.Context
+	select {
+	case sendingContext = <-activeContext:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown SMTP sender did not start")
+	}
+	select {
+	case <-accepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown SMTP fixture did not receive DATA")
+	}
+	stopDone := make(chan struct{})
+	go func() { stopping.Stop(); close(stopDone) }()
+	select {
+	case <-sendingContext.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not cancel delivery context")
+	}
+	<-time.After(6 * time.Second)
+	otherNode := service.NewAutoCreditEmailWorker(NewAutoCreditEmailOutboxRepository(db), mailService)
+	found, err = otherNode.ProcessNext(ctx)
+	require.NoError(t, err)
+	require.False(t, found, "a canceled in-flight SMTP sender must retain exclusive ownership")
+	releaseSMTP()
+	select {
+	case <-stopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not join accepted SMTP delivery")
+	}
+	smtp.mu.Lock()
+	smtp.accepted, smtp.release = nil, nil
+	messageCount := len(smtp.messages)
+	smtp.mu.Unlock()
+	require.Equal(t, 3, messageCount)
+	state, err = repo.Get(ctx, uid, "all")
+	require.NoError(t, err)
+	require.NoError(t, db.QueryRow(`SELECT attempts,sent_at FROM auto_credit_email_outbox WHERE ledger_id=$1`, state.Entries[0].ID).Scan(&attempts, &sent))
+	require.NotNil(t, sent, "accepted SMTP during Stop must acknowledge the outbox")
+	require.Zero(t, attempts, "normal shutdown must not schedule an accepted message for retry")
+	found, err = otherNode.ProcessNext(ctx)
+	require.NoError(t, err)
+	require.False(t, found, "accepted shutdown delivery must never be resent")
 	// Template infrastructure supports custom English as well as official zh.
 	_, err = mailService.UpdateTemplate(ctx, service.NotificationEmailEventAutoCreditSuccess, "en", "Advance {{ledger_id}}", "<p>{{credit_amount}} / {{current_balance}}</p>")
 	require.NoError(t, err)
