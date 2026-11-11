@@ -2,6 +2,8 @@
 
 Frozen source: `dab829a4e9b7d1cc307189aea8b0319eb29e29d0..10ba8f9b4dc2e6023d4a9879ab77b21841babd10`; baseline `6fa7fb86eae7c732794450646dc13831dce87ff1`. 82 commits = 44 leaves + 38 merges. Only leaves are imported. Source blob and baseline blob IDs are in [source-map.json](source-map.json).
 
+Feature checkboxes below mean source coverage; dynamic acceptance remains a separate checklist and is tied to its tested SHA.
+
 ## Release-note requirements
 
 - [x] R01: 支持 Claude Fable 5.2 与 Mythos 5.2：包括模型目录、Anthropic 预设、Bedrock 映射、OpenCode 配置和兜底定价（$8/$40 每百万 token，Fast 模式 2 倍）
@@ -89,9 +91,9 @@ Frozen source: `dab829a4e9b7d1cc307189aea8b0319eb29e29d0..10ba8f9b4dc2e6023d4a98
 - [ ] Full backend compilation and production adapter/unit/integration coverage on exact published head.
 - [ ] Frontend lint, typecheck, complete tests and build on exact published head.
 - [ ] Critical old-code behavioral RED / current GREEN; compile failures are not RED.
-- [x] Race/resource lifecycle, migration and security gates.
+- [ ] Race/resource lifecycle, migration and security gates on the latest head.
 - [ ] New admin feature notice registration, shared dismissal and A→B→C regressions.
-- [x] Real CSS baseline/candidate screenshots, sanitized native PR attachment URLs, hashes and readback.
+- [x] Real CSS baseline/candidate screenshots, sanitized native PR attachment URLs, hashes and readback (3a46 fixed source, frontend tree unchanged; current rerun pending).
 - [ ] Full pagination of check runs (filter=all), traditional statuses, attempts and raw failure logs.
 - [ ] Supervisor independent review; sole writer cannot self-certify it.
 
