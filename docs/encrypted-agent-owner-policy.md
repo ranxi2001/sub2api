@@ -1,7 +1,5 @@
 # 加密 agent 历史账号策略
 
-本文对应 Draft 中的策略实现；远程业务验收尚未完成，部署前必须核对该提交的实际 CI 证据。
-
 默认仍按已登记的账号和原生 Responses 路线恢复加密 `agent_message`。原账号限流或过载时，保留原等待提示和恢复时间。管理员可显式允许完整历史尝试普通账号池中的其他合格账号：
 
 ```yaml
@@ -29,4 +27,4 @@ gateway:
 
 ## 验证边界
 
-Issue805 回归夹具使用隔离的真实 Redis、虚构密文和真实 localhost HTTP/WS 网络连接，拟验证 HTTP JSON/SSE、WS `ctx_pool`、`passthrough` 和 `http_bridge`。实际覆盖结果必须以对应提交的 GitHub CI 日志为准；queued 不代表已执行。即使合成上游接受 B，也只证明策略与发送行为，不证明真实供应商的跨账号加密兼容；不需要调用付费上游或读取生产凭据。
+Issue805 回归夹具使用隔离的真实 Redis、虚构密文和真实 localhost HTTP/WS 网络连接，包含 HTTP JSON/SSE、WS `ctx_pool`、`passthrough` 和 `http_bridge` 场景。实际执行结果以对应提交的 GitHub CI 日志为准。即使合成上游接受 B，也只证明策略与发送行为，不证明真实供应商的跨账号加密兼容；不需要调用付费上游或读取生产凭据。
