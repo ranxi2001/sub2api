@@ -29,7 +29,7 @@ func (r *opsRepository) GetDashboardOverview(ctx context.Context, filter *servic
 	}
 
 	mode := filter.QueryMode
-	if !mode.IsValid() {
+	if !mode.IsValid() || filter.OpenAIOAuthOnly {
 		mode = service.OpsQueryModeRaw
 	}
 
@@ -931,7 +931,7 @@ SELECT
   COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)), 0) AS upstream_excl,
   COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 429), 0) AS upstream_429,
   COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 529), 0) AS upstream_529
-FROM ` + opsMetricErrorRowsSQL(where)
+FROM ` + opsMetricErrorRowsForFilterSQL(where, filter)
 
 	if err := r.db.QueryRowContext(ctx, q, args...).Scan(
 		&errorTotal,
@@ -967,6 +967,11 @@ func (r *opsRepository) queryPeakRates(ctx context.Context, filter *service.OpsD
 	usageJoin, usageWhere, usageArgs, next := buildUsageWhere(filter, start, end, 1)
 	errorWhere, errorArgs, _ := buildErrorWhere(filter, start, end, next)
 
+	errorSource := "ops_error_logs " + errorWhere
+	if filter != nil && filter.OpenAIOAuthOnly {
+		errorSource = opsMetricErrorRowsForFilterSQL(errorWhere, filter) + " WHERE TRUE"
+	}
+
 	q := `
 WITH usage_buckets AS (
   SELECT
@@ -980,8 +985,7 @@ WITH usage_buckets AS (
 ),
 error_buckets AS (
   SELECT date_trunc('minute', created_at) AS bucket, COUNT(*) AS err_cnt
-  FROM ops_error_logs
-  ` + errorWhere + `
+  FROM ` + errorSource + `
     AND COALESCE(status_code, 0) >= 400
   GROUP BY 1
 ),
@@ -1040,7 +1044,9 @@ func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 		clauses = append(clauses, fmt.Sprintf("ul.group_id = $%d", idx))
 		idx++
 	}
-	if platform != "" {
+	if filter != nil && filter.OpenAIOAuthOnly {
+		clauses = append(clauses, openAIOAuthAccountSQL("ul.account_id"))
+	} else if platform != "" {
 		// Prefer group.platform when available; fall back to account.platform so we don't
 		// drop rows where group_id is NULL.
 		join = "LEFT JOIN groups g ON g.id = ul.group_id LEFT JOIN accounts a ON a.id = ul.account_id"
@@ -1079,7 +1085,7 @@ func buildErrorWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 		clauses = append(clauses, fmt.Sprintf("group_id = $%d", idx))
 		idx++
 	}
-	if platform != "" {
+	if platform != "" && !filter.OpenAIOAuthOnly {
 		args = append(args, platform)
 		clauses = append(clauses, fmt.Sprintf("platform = $%d", idx))
 		idx++
