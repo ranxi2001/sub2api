@@ -91,3 +91,27 @@ func TestResponseLongWindowAndCapacityValidity(t *testing.T) {
 		t.Fatal("eviction must invalidate affected windows")
 	}
 }
+
+func TestResponse429ShareUsesSameWindowAndAccounts(t *testing.T) {
+	now := time.Now()
+	s := NewStore(30, now.Add(-time.Hour))
+	for i := 0; i < 25; i++ {
+		status := 200
+		if i < 16 {
+			status = 429
+		} else if i < 20 {
+			status = 503
+		}
+		s.Record(7, status, now)
+	}
+	s.Record(7, 429, now.Add(-2*time.Hour))
+	s.Record(8, 429, now)
+	s.Record(7, 429, now.Add(time.Minute))
+	e := s.Snapshot([]int64{7}, now.Add(-time.Hour), now)[7]
+	if e.Total != 25 || e.Failures != 20 || e.RateLimited != 16 || e.Percent == nil || *e.Percent != 80 {
+		t.Fatalf("inconsistent evidence: %+v", e)
+	}
+	if later := s.Snapshot([]int64{7}, now.Add(2*time.Minute), now.Add(time.Hour))[7]; later.RateLimited != 0 {
+		t.Fatal("expired 429 samples must leave the window")
+	}
+}

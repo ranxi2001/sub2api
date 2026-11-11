@@ -140,3 +140,12 @@ describe('AutoConfigHistory', () => {
     expect(getAutoConfigEvents).not.toHaveBeenCalled()
   })
 })
+
+it('shows HTTP evidence without presenting absent probe verdicts as a threshold breach', async () => {
+ const e=event(15,'degradation_applied')
+ e.details.degradation={revision:'fixture',models:[],threshold_percent:9,degradation_percent:0,quality_samples:0,window_start:'start',window_end:'end',concurrency_cap:6,trigger_reason:'upstream_429',upstream_error:{source:'process_local_http_responses',total:25,failures:20,rate_limited:16,percent:80,observed_since:'start',window_complete:false},upstream_error_threshold_percent:80,upstream_429_share_threshold_percent:80}
+ vi.mocked(getAutoConfigEvents).mockResolvedValue({items:[e],has_more:false})
+ const w=render();await flushPromises()
+ expect(w.text()).toContain('错误 20/25');expect(w.text()).toContain('429 16/20')
+ expect(w.text()).not.toContain('0% ≥ 9%')
+})

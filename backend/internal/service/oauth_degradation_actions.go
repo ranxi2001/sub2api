@@ -8,19 +8,27 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 )
 
 const OAuthDegradationActionExtraKey = "oauth_degradation_action"
 
+const OAuthDegradationMinHTTPResponses int64 = 20
+
+// Nil fields preserve default-on conditions for saved configurations.
 type OAuthDegradationConfig struct {
-	Enabled           bool     `json:"enabled"`
-	LimitConcurrency  *bool    `json:"limit_concurrency"`
-	LimitModels       *bool    `json:"limit_models"`
-	LimitGroups       bool     `json:"limit_groups"`
-	GroupIDs          []int64  `json:"group_ids"`
-	ThresholdPercent  *float64 `json:"threshold_percent"`
-	TargetConcurrency int      `json:"target_concurrency"`
-	Models            []string `json:"models"`
+	ProbeEnabled                     *bool    `json:"probe_enabled"`
+	Upstream429Enabled               *bool    `json:"upstream_429_enabled"`
+	UpstreamErrorThresholdPercent    *float64 `json:"upstream_error_threshold_percent"`
+	Upstream429ShareThresholdPercent *float64 `json:"upstream_429_share_threshold_percent"`
+	Enabled                          bool     `json:"enabled"`
+	LimitConcurrency                 *bool    `json:"limit_concurrency"`
+	LimitModels                      *bool    `json:"limit_models"`
+	LimitGroups                      bool     `json:"limit_groups"`
+	GroupIDs                         []int64  `json:"group_ids"`
+	ThresholdPercent                 *float64 `json:"threshold_percent"`
+	TargetConcurrency                int      `json:"target_concurrency"`
+	Models                           []string `json:"models"`
 }
 
 func DefaultOAuthDegradationConfig() OAuthDegradationConfig {
@@ -37,15 +45,36 @@ func (c OAuthDegradationConfig) RestrictsModels() bool {
 func (c OAuthDegradationConfig) HasActions() bool {
 	return c.RestrictsConcurrency() || c.RestrictsModels() || c.LimitGroups
 }
+func (c OAuthDegradationConfig) UsesProbe() bool { return c.ProbeEnabled == nil || *c.ProbeEnabled }
+func (c OAuthDegradationConfig) UsesUpstream429() bool {
+	return c.Upstream429Enabled == nil || *c.Upstream429Enabled
+}
+func (c OAuthDegradationConfig) HTTPErrorThreshold() float64 {
+	if c.UpstreamErrorThresholdPercent != nil {
+		return *c.UpstreamErrorThresholdPercent
+	}
+	return 80
+}
+func (c OAuthDegradationConfig) HTTP429ShareThreshold() float64 {
+	if c.Upstream429ShareThresholdPercent != nil {
+		return *c.Upstream429ShareThresholdPercent
+	}
+	return 80
+}
 func (c OAuthDegradationConfig) Validate() error {
 	bad := func() error {
-		return infraerrors.BadRequest("OAUTH_DEGRADATION_INVALID", "select at least one degradation action, a finite threshold (0–100), and valid settings for each selected action")
+		return infraerrors.BadRequest("OAUTH_DEGRADATION_INVALID", "select at least one condition and action; probe threshold must be 0–100 and HTTP thresholds greater than 0 and at most 100")
 	}
-	if c.Enabled && (c.ThresholdPercent == nil || !c.HasActions()) {
+	if c.Enabled && ((c.UsesProbe() && c.ThresholdPercent == nil) || (!c.UsesProbe() && !c.UsesUpstream429()) || !c.HasActions()) {
 		return bad()
 	}
 	if p := c.ThresholdPercent; p != nil && (math.IsNaN(*p) || math.IsInf(*p, 0) || *p < 0 || *p > 100) {
 		return bad()
+	}
+	for _, p := range []float64{c.HTTPErrorThreshold(), c.HTTP429ShareThreshold()} {
+		if math.IsNaN(p) || math.IsInf(p, 0) || p <= 0 || p > 100 {
+			return bad()
+		}
 	}
 	if c.RestrictsConcurrency() && (c.TargetConcurrency < 1 || c.TargetConcurrency > 10000) {
 		return bad()
@@ -69,27 +98,46 @@ func (c OAuthDegradationConfig) Validate() error {
 	}
 	return nil
 }
-func (c OAuthDegradationConfig) Triggered(m AccountPerformance) bool {
+func (c OAuthDegradationConfig) Triggered(m AccountPerformance) bool { return c.TriggerReason(m) != "" }
+
+// HTTP pressure is independent of completed probe rounds. Never invent a probe
+// sample or a wrong-answer verdict when the upstream could not answer.
+func (c OAuthDegradationConfig) TriggerReason(m AccountPerformance) string {
+	if c.Validate() != nil || !c.Enabled {
+		return ""
+	}
 	p := m.DegradationPercent
-	return c.Validate() == nil && c.Enabled && c.ThresholdPercent != nil && m.QualitySamples > 0 && p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 100 && *p >= *c.ThresholdPercent
+	if c.UsesProbe() && c.ThresholdPercent != nil && m.QualitySamples > 0 && p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 100 && *p >= *c.ThresholdPercent {
+		return "probe_degradation"
+	}
+	e := m.UpstreamError
+	if c.UsesUpstream429() && e.Source == "process_local_http_responses" && e.Total >= OAuthDegradationMinHTTPResponses && e.Failures > 0 && e.Failures <= e.Total && e.RateLimited > 0 && e.RateLimited <= e.Failures &&
+		100*float64(e.Failures)/float64(e.Total) >= c.HTTPErrorThreshold() && 100*float64(e.RateLimited)/float64(e.Failures) >= c.HTTP429ShareThreshold() {
+		return "upstream_429"
+	}
+	return ""
 }
 
 type OAuthDegradationState struct {
-	Revision           string    `json:"revision"`
-	NativeControls     bool      `json:"native_controls,omitempty"`
-	LimitConcurrency   *bool     `json:"limit_concurrency"`
-	LimitModels        *bool     `json:"limit_models"`
-	LimitGroups        bool      `json:"limit_groups"`
-	GroupIDs           []int64   `json:"group_ids"`
-	RemovedGroupIDs    []int64   `json:"removed_group_ids"`
-	Models             []string  `json:"models"`
-	ConcurrencyCap     int       `json:"concurrency_cap"`
-	ThresholdPercent   float64   `json:"threshold_percent"`
-	DegradationPercent float64   `json:"degradation_percent"`
-	QualitySamples     int       `json:"quality_samples"`
-	WindowStart        time.Time `json:"window_start"`
-	WindowEnd          time.Time `json:"window_end"`
-	AppliedAt          time.Time `json:"applied_at"`
+	TriggerReason                    string                  `json:"trigger_reason,omitempty"`
+	UpstreamError                    *upstreamstats.Evidence `json:"upstream_error,omitempty"`
+	UpstreamErrorThresholdPercent    float64                 `json:"upstream_error_threshold_percent,omitempty"`
+	Upstream429ShareThresholdPercent float64                 `json:"upstream_429_share_threshold_percent,omitempty"`
+	Revision                         string                  `json:"revision"`
+	NativeControls                   bool                    `json:"native_controls,omitempty"`
+	LimitConcurrency                 *bool                   `json:"limit_concurrency"`
+	LimitModels                      *bool                   `json:"limit_models"`
+	LimitGroups                      bool                    `json:"limit_groups"`
+	GroupIDs                         []int64                 `json:"group_ids"`
+	RemovedGroupIDs                  []int64                 `json:"removed_group_ids"`
+	Models                           []string                `json:"models"`
+	ConcurrencyCap                   int                     `json:"concurrency_cap"`
+	ThresholdPercent                 float64                 `json:"threshold_percent"`
+	DegradationPercent               float64                 `json:"degradation_percent"`
+	QualitySamples                   int                     `json:"quality_samples"`
+	WindowStart                      time.Time               `json:"window_start"`
+	WindowEnd                        time.Time               `json:"window_end"`
+	AppliedAt                        time.Time               `json:"applied_at"`
 
 	// Admission preserves the current native switch after an unrepresentable
 	// model scope paused it. This audit flag never overrides a manual resume.

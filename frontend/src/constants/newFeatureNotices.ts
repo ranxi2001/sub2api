@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  oauthDegradation429: 'oauth-degradation-429-conditions-initial-announcement',
   oauthDegradationActions: 'oauth-degradation-actions-initial-announcement',
   openaiAPIKeyFallback: 'openai-apikey-fallback-initial-announcement',
   dashboardAccountConcurrency: 'dashboard-account-concurrency-initial-announcement',

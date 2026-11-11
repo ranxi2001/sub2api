@@ -16,6 +16,7 @@ export interface PerformanceConfig {
  upstream_error: PerformanceBounds
 }
 export interface UpstreamHTTPErrorEvidence {
+ rate_limited?: number
  percent: number | null
  failures: number
  total: number
