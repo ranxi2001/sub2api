@@ -1,9 +1,9 @@
 export default {
   apikeyFallback: {
     title: 'Fallback handling',
-    hint: 'Independent of initial configuration. Automatically enable scheduling for selected API Key accounts when all OpenAI OAuth accounts are unavailable, or when the chosen OpenAI metric falls below your threshold within the selected window. Either condition can trigger fallback.',
+    hint: 'Independent of initial configuration. Automatically enable scheduling for selected API Key accounts when all OpenAI OAuth accounts are unavailable, or when the chosen OpenAI OAuth metric falls below your threshold within the selected window. Either condition can trigger fallback.',
     metric: 'Metric',
-    metrics: { sla: 'OpenAI SLA', health_score: 'OpenAI health score' },
+    metrics: { sla: 'OpenAI OAuth SLA', health_score: 'OpenAI OAuth request health score' },
     threshold: 'Enable fallback below this threshold',
     scoreUnit: 'points',
     window: 'Data window (minutes)',
@@ -21,7 +21,7 @@ export default {
     unavailableAccount: 'Missing, ineligible or inactive account',
     chooseAccounts: 'Select at least one available OpenAI API Key account.',
     invalid: 'Choose a valid metric, a threshold from 0 to 100, an integer window from 1 to 1440 minutes, and up to 100 distinct valid accounts.',
-    recoveryHint: 'Metrics use the same definitions as operations monitoring and include OpenAI only. No metric trigger runs without valid samples. This rule only enables accounts: disable fallback accounts manually after recovery. Turning off the rule also leaves already enabled accounts running.',
+    recoveryHint: 'Metrics include only requests attributable to OpenAI OAuth accounts. API Key traffic, compatible providers such as Qwen, and unattributed errors are excluded. Health scores exclude global infrastructure and background jobs. No metric trigger runs without valid samples. This rule only enables accounts: disable fallback accounts manually after recovery. Turning off the rule also leaves already enabled accounts running.',
     status: 'Latest check',
     refreshStatus: 'Refresh status',
     statusFailed: 'Could not refresh status. The previous check is still shown.',
@@ -32,7 +32,7 @@ export default {
     samples: 'Valid samples:',
     lastTrigger: 'Last trigger:',
     lastEnabled: 'Last enabled at:',
-    reasons: { oauth_unavailable: 'All OAuth accounts unavailable', metric_below_threshold: 'Selected metric below threshold' },
+    reasons: { oauth_unavailable: 'All OAuth accounts unavailable', metric_below_threshold: 'OAuth request metric below threshold' },
     errors: { accounts_unavailable: 'Could not read account state.', metric_unavailable: 'Could not read the monitored metric.', account_enable_failed: 'Some fallback accounts could not be enabled. Check their state.' }
   },
  degradation: {

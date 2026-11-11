@@ -40,6 +40,7 @@ const (
 	// 另有 ClinePass 订阅）。
 	PlatformCline     = "cline"
 	PlatformMistral   = "mistral"
+	PlatformQwen      = "qwen"
 	PlatformComposite = "composite"
 )
 

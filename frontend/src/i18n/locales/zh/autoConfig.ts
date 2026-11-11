@@ -1,9 +1,9 @@
 export default {
   apikeyFallback: {
     title: '兜底处置',
-    hint: '独立于首次配置。OpenAI OAuth 账号全部不可调度，或选定周期内的 OpenAI 指标低于所填阈值时，自动开启勾选 API Key 账号的调度；两项条件满足任意一项即可。',
+    hint: '独立于首次配置。OpenAI OAuth 账号全部不可调度，或选定周期内的 OpenAI OAuth 指标低于所填阈值时，自动开启勾选 API Key 账号的调度；两项条件满足任意一项即可。',
     metric: '监控指标',
-    metrics: { sla: 'OpenAI SLA', health_score: 'OpenAI 健康状况分数' },
+    metrics: { sla: 'OpenAI OAuth SLA', health_score: 'OpenAI OAuth 请求健康分数' },
     threshold: '低于此阈值时开启',
     scoreUnit: '分',
     window: '数据周期（分钟）',
@@ -21,7 +21,7 @@ export default {
     unavailableAccount: '账号不存在、不符合条件或已停用',
     chooseAccounts: '请至少勾选一个可用的 OpenAI API Key 账号。',
     invalid: '请选择有效指标、0～100 的阈值、1～1440 的整数分钟周期，以及最多 100 个不同的有效账号。',
-    recoveryHint: '指标与运维监控使用相同口径，仅统计 OpenAI；没有有效样本时不触发指标条件。规则只自动开启账号，恢复后需手动关闭兜底账号；停用本规则也不会关闭已开启的账号。',
+    recoveryHint: '仅统计可归因于 OpenAI OAuth 账号的请求；API Key、Qwen 等兼容接口流量及无法归属的错误不参与指标计算。健康分数不包含全站基础设施和后台任务。没有有效样本时不触发指标条件。规则只自动开启账号，恢复后需手动关闭兜底账号；停用本规则也不会关闭已开启的账号。',
     status: '最近检查',
     refreshStatus: '刷新状态',
     statusFailed: '状态刷新失败，仍显示上一次检查结果。',
@@ -32,7 +32,7 @@ export default {
     samples: '有效样本：',
     lastTrigger: '最近触发原因：',
     lastEnabled: '最近开启时间：',
-    reasons: { oauth_unavailable: 'OAuth 账号全部不可调度', metric_below_threshold: '所选指标低于阈值' },
+    reasons: { oauth_unavailable: 'OAuth 账号全部不可调度', metric_below_threshold: 'OAuth 请求指标低于阈值' },
     errors: { accounts_unavailable: '账号状态读取失败。', metric_unavailable: '监控指标读取失败。', account_enable_failed: '部分兜底账号开启失败，请检查账号状态。' }
   },
  degradation: {

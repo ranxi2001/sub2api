@@ -1,5 +1,6 @@
 export default {
   common: {
+    qwenPlatformHint: '千问 Qwen 使用 OpenAI 兼容接口，按独立平台统计。已有 OpenAI 账号和分组不会自动迁移。',
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',
