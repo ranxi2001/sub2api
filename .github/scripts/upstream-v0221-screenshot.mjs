@@ -55,7 +55,8 @@ try {
           if (scenario === 'keys') await page.waitForFunction(() => window.__v0221.pending.length > 0)
           if (scenario === 'settings') {
             await page.locator('form').first().waitFor()
-            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight * 0.55))
+            await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight * 0.55, behavior: 'instant' }))
+            await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))) })
           }
           let originalAccount
           if (scenario === 'accounts') {
@@ -90,10 +91,52 @@ try {
             assert.ok(bounds.top >= 0 && bounds.bottom <= bounds.height)
             manifest.results.push({ mode, scenario, dock: bounds })
           }
+          const measureDock = async phase => {
+            if (scenario !== 'settings' || mode !== 'after') return
+            const observed = await page.evaluate(() => {
+              const dock = document.querySelector('.settings-save-dock'), button = dock.querySelector('button[type="submit"]')
+              const rect = element => { const r = element.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } }
+              const buttonRect = rect(button), hit = document.elementFromPoint((buttonRect.left + buttonRect.right) / 2, (buttonRect.top + buttonRect.bottom) / 2)
+              const ancestors = []; for (let node = dock.parentElement; node; node = node.parentElement) { const css = getComputedStyle(node); ancestors.push({ tag: node.tagName, overflowX: css.overflowX, overflowY: css.overflowY, transform: css.transform, contain: css.contain }) }
+              return { dock: rect(dock), button: buttonRect, width: innerWidth, height: innerHeight, scrollY, scrollHeight: document.scrollingElement.scrollHeight, position: getComputedStyle(dock).position, hit: button === hit || button.contains(hit), ancestors }
+            })
+            manifest.results.push({ mode, scenario, phase, observed })
+            for (const rect of [observed.dock, observed.button]) assert.ok(rect.left >= 0 && rect.right <= observed.width && rect.top >= 0 && rect.bottom <= observed.height, `${phase}: ${JSON.stringify(observed)}`)
+            assert.equal(observed.hit, true, `${phase}: actual submit centre must remain clickable`)
+            return observed.button
+          }
+          await measureDock('desktop-light-settled')
           await page.evaluate(() => document.documentElement.classList.add('dark'))
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+          await measureDock('desktop-dark-settled')
           await shot('dark')
           await page.setViewportSize({ width: 430, height: 950 })
+          if (scenario === 'settings') {
+            await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight * 0.55, behavior: 'instant' }))
+            await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+          }
+          await measureDock('mobile-resized-settled')
           await shot('mobile')
+          if (scenario === 'settings' && mode === 'after') {
+            await page.reload()
+            await page.waitForFunction(() => window.__v0221Ready)
+            await page.locator('form').first().waitFor()
+            await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))) })
+            for (const [phase, ratio] of [['top', 0], ['middle', 0.55], ['end', 1]]) {
+              await page.evaluate(value => window.scrollTo({ top: document.body.scrollHeight * value, behavior: 'instant' }), ratio)
+              await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+              const rect = await measureDock('mobile-fresh-' + phase)
+              if (phase === 'middle') {
+                await page.mouse.click((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)
+                await page.waitForFunction(() => window.__v0221.pendingSettings.length > 0)
+                assert.equal(await page.locator('.settings-save-dock button[type="submit"]').isDisabled(), true)
+                await page.evaluate(() => window.__v0221.pendingSettings.splice(0).forEach(resolve => resolve()))
+                await page.waitForFunction(() => !document.querySelector('.settings-save-dock button[type="submit"]').disabled)
+                assert.ok(await page.evaluate(() => window.__v0221.saved.some(row => row.path === '/admin/settings')))
+                await shot('mobile-saved')
+              }
+            }
+          }
           if (scenario === 'keys') {
             await page.evaluate(() => window.__v0221.pending.splice(0).forEach(resolve => resolve()))
             await page.waitForFunction(() => document.body.innerText.includes('$3.7500'))

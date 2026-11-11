@@ -15,7 +15,7 @@ import '/src/style.css'
 await loadLocaleMessages('zh')
 i18n.global.locale.value = 'zh'
 const scenario = new URLSearchParams(location.search).get('scenario') || 'pricing'
-const state = window.__v0221 = { requests: [], saved: [], pending: [], pendingAccounts: [], accountLists: 0, unexpected: [] }
+const state = window.__v0221 = { requests: [], saved: [], pending: [], pendingSettings: [], pendingAccounts: [], accountLists: 0, unexpected: [] }
 if (scenario === 'accounts') {
   localStorage.setItem('account-auto-refresh', JSON.stringify({ enabled: false, interval_seconds: 60 }))
   localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats', 'proxy', 'notes', 'scheduler_score', 'rate_multiplier', 'upstream_billing_rate', 'performance']))
@@ -32,6 +32,7 @@ apiClient.defaults.adapter = async request => {
     try { payload = JSON.parse(payload) } catch { /* Form data remains a synthetic string. */ }
     state.saved.push({ path, payload })
   }
+  if (path === '/admin/settings' && request.method === 'put') await new Promise(resolve => state.pendingSettings.push(resolve))
   if (path === '/admin/accounts') {
     state.accountLists++
     if (state.accountLists > 1) await new Promise(resolve => state.pendingAccounts.push(resolve))
