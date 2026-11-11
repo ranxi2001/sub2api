@@ -707,7 +707,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	// For a new Qwen session, retain the original empty observation until the
 	// atomic claim. Learning a concurrent first turn's owner here would turn a
 	// capacity escape into an authorized overwrite of that fresh binding.
-	if !req.StickyWeighted && !(req.Platform == PlatformQwen && req.StickyAccountID == 0 && stickyKnown) {
+	if !req.StickyWeighted && (req.Platform != PlatformQwen || req.StickyAccountID != 0 || !stickyKnown) {
 		selection, _, err := s.selectBySessionHash(ctx, req)
 		if err != nil {
 			return nil, decision, err
