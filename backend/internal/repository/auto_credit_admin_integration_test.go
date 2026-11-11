@@ -62,9 +62,12 @@ func TestVipCreditAdminAPIWithRealRepository(t *testing.T) {
 	require.Equal(t, 403, call("GET", path, "").Code)
 	require.Equal(t, 403, call("PUT", path, `{}`).Code)
 	role = service.RoleAdmin
+	for _, invalid := range []string{"null", `"true"`, "1", "{}"} {
+		require.Equal(t, 400, call("PUT", path, `{"version":0,"notify_email":`+invalid+`}`).Code)
+	}
 	require.Equal(t, 400, call("PUT", path, `{"enabled":true}`).Code)
 	require.Equal(t, 400, call("PUT", path, `{"version":0,"threshold":"0"}`).Code)
-	saved := call("PUT", path, `{"version":0,"enabled":true,"threshold":"1","amount":"5.00000001","cap":"10.00000002"}`)
+	saved := call("PUT", path, `{"version":0,"enabled":true,"notify_email":true,"threshold":"1","amount":"5.00000001","cap":"10.00000002"}`)
 	require.Equal(t, 200, saved.Code, saved.Body.String())
 	require.Equal(t, 409, call("PUT", path, `{"version":0,"enabled":false}`).Code)
 	_, err := repository.NewAutoCreditRepository(db).Evaluate(context.Background(), uid)
@@ -75,6 +78,7 @@ func TestVipCreditAdminAPIWithRealRepository(t *testing.T) {
 		Data service.AutoCreditState `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(got.Body.Bytes(), &envelope))
+	require.True(t, envelope.Data.Config.NotifyEmail)
 	require.Equal(t, "5.00000001", envelope.Data.Outstanding)
 	require.Len(t, envelope.Data.Entries, 1)
 	settle := fmt.Sprintf("%s/%d/settle", path, envelope.Data.Entries[0].ID)
