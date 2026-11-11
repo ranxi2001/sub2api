@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 	"github.com/stretchr/testify/require"
@@ -63,4 +64,35 @@ func TestOAuthDegradation429Conditions(t *testing.T) {
 	require.True(t, legacy.UsesUpstream429())
 	require.Equal(t, 80.0, legacy.HTTPErrorThreshold())
 	require.Equal(t, 80.0, legacy.HTTP429ShareThreshold())
+}
+
+func TestOAuthDegradation429NeverTreatsAuthenticationAsRateLimiting(t *testing.T) {
+	c := DefaultOAuthDegradationConfig()
+	c.Enabled = true
+	c.ThresholdPercent = floatPtrDegradation(9)
+	for _, tc := range []struct {
+		name    string
+		other   int
+		limited int
+		want    bool
+	}{
+		{"401 only", 401, 0, false}, {"403 only", 403, 0, false}, {"529 only", 529, 0, false},
+		{"401 dominant", 401, 4, false}, {"401 dilutes below threshold", 401, 15, false},
+		{"429 at agreed share despite other errors", 401, 16, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			store := upstreamstats.NewStore(20, now)
+			for i := 0; i < 20; i++ {
+				status := tc.other
+				if i < tc.limited {
+					status = 429
+				}
+				store.Record(1, status, now)
+			}
+			evidence := store.Snapshot([]int64{1}, now.Add(-time.Hour), now)[1]
+			require.Equal(t, int64(tc.limited), evidence.RateLimited)
+			require.Equal(t, tc.want, c.Triggered(AccountPerformance{UpstreamError: evidence}))
+		})
+	}
 }

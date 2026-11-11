@@ -25,6 +25,24 @@ func TestOAuthDegradation429PostgresWithoutProbeVerdicts(t *testing.T) {
 		require.NoError(t, err)
 	}
 	save()
+	// Authentication failures can raise the error rate but cannot supply 429 evidence.
+	for _, limited := range []int{0, 4} {
+		a := degradationAccountFixture(t, 20, nil, nil, time.Minute)
+		now := time.Now()
+		for i := 0; i < 20; i++ {
+			status := 401
+			if i < limited {
+				status = 429
+			}
+			upstreamstats.Default.Record(a.ID, status, now)
+		}
+		require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, now))
+		got, err := repo.GetByID(ctx, a.ID)
+		require.NoError(t, err)
+		require.False(t, got.HasOAuthDegradationAction())
+		require.Equal(t, 20, got.Concurrency)
+	}
+
 	for _, rounds := range [][]string{nil, {"unknown"}, {"correct"}} {
 		a := degradationAccountFixture(t, 20, nil, rounds, time.Minute)
 		now := time.Now()
