@@ -1269,7 +1269,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const labels = (testid: string) =>
       wrapper.get(`[data-testid="${testid}"]`).findAll('button').map(button => button.text().trim())
     expect(labels('platform-row-cn')).toEqual(['Kimi', 'Zhipu GLM', 'DeepSeek', 'MiniMax'])
-    expect(labels('platform-row-aggregators')).toEqual(['OpenCode', 'Command Code', 'Cline', 'Mistral'])
+    expect(labels('platform-row-aggregators')).toEqual(['OpenCode', 'Command Code', 'Cline', 'Mistral', '千问 Qwen'])
   })
 
   it('creates a Cline account without an account type and with only the Chat Completions endpoint', async () => {
@@ -1294,6 +1294,27 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.credentials).not.toHaveProperty('protocol_rules')
     expect(payload?.credentials?.api_base_urls).not.toHaveProperty('responses')
     expect(payload?.credentials?.api_base_urls).not.toHaveProperty('anthropic')
+  })
+
+  it('creates Qwen with an independent platform and Chat Completions credentials', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-qwen"]').trigger('click')
+    expect(wrapper.find('[data-testid="generic-account-mode"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Qwen fixture')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture-qwen-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'qwen', type: 'apikey',
+      credentials: {
+        api_key: 'fixture-qwen-key', account_mode: 'payg', api_protocol: 'adaptive',
+        base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        api_base_urls: { chat_completions: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+      },
+    })
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials.api_base_urls).not.toHaveProperty('responses')
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('model_mapping')
   })
 
   it('creates Mistral through the catalog with API key and only its native Chat endpoint', async () => {

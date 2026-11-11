@@ -31,6 +31,7 @@ describe('NewFeatureBadge', () => {
     ['pricing transfer', NEW_FEATURE_NOTICES.channelPricingTransfer],
     ['stream event timing', NEW_FEATURE_NOTICES.streamFirstEventTiming],
     ['Mistral budget usage', NEW_FEATURE_NOTICES.mistralBudgetUsage],
+    ['Qwen platform', NEW_FEATURE_NOTICES.qwenPlatform],
     ['image header timeout groups', NEW_FEATURE_NOTICES.openaiImageHeaderTimeoutGroups],
     ['profit operations time ranges', NEW_FEATURE_NOTICES.profitOperationsTimeRanges],
     ['quality retest rest', NEW_FEATURE_NOTICES.qualityRetestRest],

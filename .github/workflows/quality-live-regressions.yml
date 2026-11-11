@@ -37,7 +37,13 @@ jobs:
           set -euo pipefail
           sources=(backend/internal/service/quality_supported_models.go backend/internal/service/openai_codex_models_service.go backend/internal/service/pelican_scheduled.go)
           for source in "${sources[@]}"; do cp "$source" "$RUNNER_TEMP/$(basename "$source")"; done
-          trap 'for source in "${sources[@]}"; do cp "$RUNNER_TEMP/$(basename "$source")" "$source"; done' EXIT
+          # This later regression calls eligibleQualityModels, absent from the pinned
+          # original sources. Keep it out of the historical overlay only; exercise
+          # it explicitly with current sources in the next step.
+          later_test=backend/internal/service/oauth_degradation_scope_test.go
+          cp "$later_test" "$RUNNER_TEMP/oauth-degradation-scope-current.go"
+          trap 'for source in "${sources[@]}"; do cp "$RUNNER_TEMP/$(basename "$source")" "$source"; done; cp "$RUNNER_TEMP/oauth-degradation-scope-current.go" "$later_test"' EXIT
+          rm "$later_test"
           git fetch --no-tags --depth=1 origin e082313679d5269eef3e3cce4101c22692695371
           for source in "${sources[@]}"; do git show "e082313679d5269eef3e3cce4101c22692695371:$source" > "$source"; done
           set +e
@@ -55,7 +61,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test -tags=unit ./internal/service -run 'Test(QualityLive|QualitySupportedModels|QualityUnsupportedResponse|QualityModelSync|CandyConfiguredModels|FetchOpenAIAccountModels|FetchCodexModelsManifest|OpenAIModelsList)' -count=1 -v 2>&1 | tee ../evidence/green-service.log
+          go test -tags=unit ./internal/service -run 'Test(QualityLive|QualitySupportedModels|QualityUnsupportedResponse|QualityModelSync|CandyConfiguredModels|FetchOpenAIAccountModels|FetchCodexModelsManifest|OpenAIModelsList|OAuthDegradationNativeModelEditRestoresQualityChecks)' -count=1 -v 2>&1 | tee ../evidence/green-service.log
       - name: Original storage behavior must fail restoration boundary regressions
         shell: bash
         run: |

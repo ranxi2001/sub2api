@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  qwenPlatform: 'qwen-platform-initial-announcement',
   oauthDegradation429: 'oauth-degradation-429-conditions-initial-announcement',
   priorityAccountPerformance: 'priority-account-performance-scoring-initial-announcement',
   oauthDegradationActions: 'oauth-degradation-actions-initial-announcement',
