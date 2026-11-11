@@ -1,6 +1,16 @@
 export default {
   common: {
     qwenPlatformHint: '千问 Qwen 使用 OpenAI 兼容接口，按独立平台统计。已有 OpenAI 账号和分组不会自动迁移。',
+    qwenCache: {
+      title: '千问缓存与会话',
+      enable: '开启官方 Responses 会话缓存',
+      cacheHint: '启用后使用 Responses 转发并开启上游会话缓存；客户端需通过 previous_response_id 续接。缓存写入可能计费，命中以实际用量为准。关闭后沿用原协议设置。',
+      strict: '严格保持会话粘性',
+      strictHint: '需要稳定的 session_id 或 prompt_cache_key。同一会话固定账号；满载等待，重试失败返回错误，不切到其他渠道。绑定到期后可重新分配。',
+      tokenPlan: '使用 Token Plan 地址',
+      payg: '使用官方按量付费地址',
+      endpointHint: '按钮替换当前接入地址；API Key 必须与套餐地址配套。已有 OpenAI 账号不会自动迁移。'
+    },
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',

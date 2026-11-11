@@ -9,6 +9,7 @@ export const NEW_FEATURE_NOTICES = {
   easyPayRefundSuccessCode: 'easypay-refund-success-code-initial-announcement',
   settingsSaveDock: 'settings-save-dock-initial-announcement',
   qwenPlatform: 'qwen-platform-initial-announcement',
+  qwenCache: 'qwen-cache-strict-session-initial-announcement',
   oauthDegradation429: 'oauth-degradation-429-conditions-initial-announcement',
   priorityAccountPerformance: 'priority-account-performance-scoring-initial-announcement',
   oauthDegradationActions: 'oauth-degradation-actions-initial-announcement',

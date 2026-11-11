@@ -1668,6 +1668,9 @@ func (w GatewayOpenAIWSSchedulerScoreWeights) IsValid() bool {
 
 // GatewayOpenAISchedulerConfig OpenAI 高级调度器配置。
 type GatewayOpenAISchedulerConfig struct {
+	// StrictSessionAffinityGroupIDs pins text sessions in these groups to one
+	// account for the sticky TTL, including failures and capacity pressure.
+	StrictSessionAffinityGroupIDs []int64 `mapstructure:"strict_session_affinity_group_ids"`
 	// StickyEscapeEnabled: 是否允许 session_hash sticky 在账号健康度劣化时临时逃逸
 	StickyEscapeEnabled bool `mapstructure:"sticky_escape_enabled"`
 	// StickyEscapeTTFTMs: TTFT EWMA 超过该阈值时跳过 sticky
@@ -3005,6 +3008,7 @@ func setEnvReachableDefaults() {
 	// disable sticky escape, so register the effective default instead. An
 	// explicit false in config or env still wins.
 	viper.SetDefault("gateway.openai_scheduler.sticky_escape_enabled", true)
+	viper.SetDefault("gateway.openai_scheduler.strict_session_affinity_group_ids", []int64{})
 	viper.SetDefault("gateway.openai_scheduler.sticky_escape_error_rate", 0.0)
 	viper.SetDefault("gateway.openai_scheduler.sticky_escape_ttft_ms", 0)
 
@@ -4015,6 +4019,14 @@ func (c *Config) Validate() error {
 	}
 	if totalWeightSum := weights.TotalWeightSum(); math.IsNaN(totalWeightSum) || math.IsInf(totalWeightSum, 0) {
 		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights total-weight sum must be finite")
+	}
+	if len(c.Gateway.OpenAIScheduler.StrictSessionAffinityGroupIDs) > 100 {
+		return fmt.Errorf("gateway.openai_scheduler.strict_session_affinity_group_ids supports at most 100 groups")
+	}
+	for _, id := range c.Gateway.OpenAIScheduler.StrictSessionAffinityGroupIDs {
+		if id <= 0 {
+			return fmt.Errorf("gateway.openai_scheduler.strict_session_affinity_group_ids must contain positive IDs")
+		}
 	}
 	if c.Gateway.OpenAIScheduler.StickyEscapeTTFTMs <= 0 {
 		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_ttft_ms must be positive")

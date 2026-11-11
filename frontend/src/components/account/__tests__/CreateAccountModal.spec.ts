@@ -1317,6 +1317,27 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('model_mapping')
   })
 
+  it('saves Qwen cache options and replaces both endpoint fields with the Token Plan preset', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-button-qwen"]').trigger('click')
+    await wrapper.get('[data-testid="qwen-session-cache"]').setValue(true)
+    await wrapper.get('[data-testid="qwen-strict-affinity"]').setValue(true)
+    await wrapper.get('[data-testid="qwen-token-plan-url"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Qwen cache fixture')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('fixture-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'qwen', type: 'apikey', credentials: {
+        base_url: 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1',
+        api_base_urls: { chat_completions: 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1' },
+        qwen_session_cache_enabled: true,
+        qwen_strict_session_affinity: true
+      }
+    })
+  })
+
   it('creates Mistral through the catalog with API key and only its native Chat endpoint', async () => {
     const wrapper = mountModal()
     await wrapper.get('[data-testid="platform-button-mistral"]').trigger('click')

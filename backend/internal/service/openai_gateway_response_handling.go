@@ -1875,6 +1875,8 @@ func openAICacheReadTokensFromUsage(value gjson.Result) int {
 
 func openAICacheCreationTokensFromUsage(value gjson.Result) int {
 	for _, nested := range []gjson.Result{
+		value.Get("input_tokens_details.cache_creation_input_tokens"),
+		value.Get("prompt_tokens_details.cache_creation_input_tokens"),
 		value.Get("input_tokens_details.cache_write_tokens"),
 		value.Get("prompt_tokens_details.cache_write_tokens"),
 		value.Get("input_tokens_details.cache_creation_tokens"),

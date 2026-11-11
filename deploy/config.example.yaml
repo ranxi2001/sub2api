@@ -549,6 +549,10 @@ gateway:
       upstream_cost: 0.0
   # OpenAI 高级调度器补充配置
   openai_scheduler:
+    # 指定分组的 OpenAI 文本会话严格固定账号。默认空；不改变其他分组。
+    # 已绑定账号满载时等待，停用/失败时返回错误，不跨账号回退；需稳定 session_id/prompt_cache_key。
+    # 绑定沿用 sticky_session_ttl_seconds；配置在所有处理该分组请求的节点保持一致。
+    strict_session_affinity_group_ids: []
     # 是否允许 session_hash sticky 在账号健康度恶化时临时逃逸；false 可一键回退旧行为
     sticky_escape_enabled: true
     # TTFT EWMA 超过该阈值（毫秒）时跳过 sticky，默认 15s，避免轻微抖动就逃逸

@@ -2607,6 +2607,11 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 			wantErr: "gateway.openai_scheduler.sticky_escape_ttft_ms",
 		},
 		{
+			name:    "strict session group IDs must be positive",
+			mutate:  func(c *Config) { c.Gateway.OpenAIScheduler.StrictSessionAffinityGroupIDs = []int64{0} },
+			wantErr: "gateway.openai_scheduler.strict_session_affinity_group_ids",
+		},
+		{
 			name:    "sticky_escape_error_rate 不能小于 0",
 			mutate:  func(c *Config) { c.Gateway.OpenAIScheduler.StickyEscapeErrorRate = -0.1 },
 			wantErr: "gateway.openai_scheduler.sticky_escape_error_rate",

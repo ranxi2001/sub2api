@@ -1708,6 +1708,9 @@ func (a *Account) GetAPIProtocol() string {
 	if a == nil || !a.IsMultiProtocolAPIKey() {
 		return APIProtocolChatCompletions
 	}
+	if a.QwenSessionCacheEnabled() {
+		return APIProtocolResponses
+	}
 	switch strings.TrimSpace(a.GetCredential("api_protocol")) {
 	case APIProtocolAdaptive:
 		return APIProtocolAdaptive

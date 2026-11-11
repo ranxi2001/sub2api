@@ -82,6 +82,7 @@ type OpenAIAccountScheduleRequest struct {
 	StickyWeighted          bool
 	SubscriptionPriority    bool
 	PreserveStickyBinding   bool
+	StrictSessionAffinity   bool
 	// DisableStickyEscape keeps task-owner lookups on their account even when
 	// generic sticky health or concurrency heuristics would prefer another.
 	DisableStickyEscape bool
@@ -451,12 +452,31 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}
 	ctx = withOpenAIStickyBindingSnapshot(ctx, req.GroupID, req.SessionHash, req.StickyAccountID, stickyKnown)
+	req.StrictSessionAffinity = s.service.strictOpenAISessionAffinity(req.GroupID, req.Platform, req.RequiredImageCapability)
+	if req.Platform == PlatformQwen && req.StickyAccountID > 0 && req.RequiredImageCapability == "" {
+		owner, ownerErr := s.service.accountRepo.GetByID(ctx, req.StickyAccountID)
+		if ownerErr != nil || owner == nil {
+			return nil, decision, strictSessionUnavailable("Qwen session owner is unavailable")
+		}
+		req.StrictSessionAffinity = req.StrictSessionAffinity || owner.QwenStrictSessionAffinity()
+	}
 
 	start := time.Now()
 	latencyOwnerID := int64(0)
 	// 命名返回值保证 defer 写入的耗时同时返回给调用方。
 	defer func() {
 		if err == nil && selection != nil && selection.Account != nil {
+			if selection.Account.QwenStrictSessionAffinity() && !req.StrictSessionAffinity && req.RequiredImageCapability == "" {
+				if bindErr := s.service.claimStrictSessionAccount(ctx, req, selection.Account.ID); bindErr != nil {
+					if selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
+					selection = nil
+					err = bindErr
+					decision = OpenAIAccountScheduleDecision{}
+					return
+				}
+			}
 			denied := s.service.priorityLatencyAdmission(req, selection.Account)
 			if recoveryErr := s.service.checkOpenAIAgentRecoveryAccount(ctx, selection.Account); recoveryErr != nil {
 				denied = recoveryErr
@@ -486,6 +506,9 @@ func (s *defaultOpenAIAccountScheduler) Select(
 
 	if err := s.checkOpenAIAgentRecoveryCooldown(ctx, req, recovery); err != nil {
 		return nil, decision, err
+	}
+	if req.StrictSessionAffinity {
+		return s.selectStrictSessionAccount(ctx, req)
 	}
 
 	if priorityHardStopApplies(s.service.prioritySchedulingRuntimeConfig(), req) {
@@ -807,11 +830,11 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	// Ordinary affinity is a preference. A current measured latency penalty
 	// must enter the same scored pool as a freely routed request, independently
 	// of the optional EWMA/capacity escape setting. Ownership paths stay pinned.
-	if s.shouldYieldPriorityLatencySticky(req, account) {
+	if !req.StrictSessionAffinity && s.shouldYieldPriorityLatencySticky(req, account) {
 		return nil, true, nil
 	}
 	escapeCfg := s.service.openAIStickyEscapeConfig()
-	if escapeCfg.enabled && s.shouldRebalancePrioritySticky(ctx, req, account) {
+	if escapeCfg.enabled && !req.StrictSessionAffinity && s.shouldRebalancePrioritySticky(ctx, req, account) {
 		slog.Info("sticky_escape_triggered", "account_id", accountID, "reason", "priority_capacity_imbalance")
 		return nil, true, nil
 	}
@@ -2842,7 +2865,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		stickyAccountID, stickyReadErr = s.getStickySessionAccountID(ctx, groupID, sessionHash)
 	}
 	ctx = withOpenAIStickyBindingSnapshot(ctx, groupID, sessionHash, stickyAccountID, stickyReadErr == nil || errors.Is(stickyReadErr, ErrStickySessionNotFound))
-	scheduler := s.getOpenAIAccountScheduler(ctx, openAIAgentRecoveryBound(ctx) || (platform == PlatformOpenAI && requiredImageCapability == "" && useUpstreamTokenCost && priorityApplies(priority, OpenAIAccountScheduleRequest{GroupID: groupID, RequestedModel: requestedModel, HistoryModel: observation.model})))
+	scheduler := s.getOpenAIAccountScheduler(ctx, platform == PlatformQwen || s.strictOpenAISessionAffinity(groupID, platform, requiredImageCapability) || openAIAgentRecoveryBound(ctx) || (platform == PlatformOpenAI && requiredImageCapability == "" && useUpstreamTokenCost && priorityApplies(priority, OpenAIAccountScheduleRequest{GroupID: groupID, RequestedModel: requestedModel, HistoryModel: observation.model})))
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if selection, hit, err := s.selectLegacyAccountByPreviousResponse(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform); err != nil {
