@@ -58,6 +58,35 @@ func TestOAuthCompatibilityMessageHistoryAvoidsRedundantDecode(t *testing.T) {
 	}
 }
 
+// Escaped message strings must be scanned without decoding or copying them.
+func TestOrphanCleanupFastRejectionLargeEscapedContent(t *testing.T) {
+	const childEnv = "SUB2API_OPENAI_ORPHAN_ESCAPED_ALLOC_TEST_CHILD"
+	if os.Getenv(childEnv) != "1" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.CommandContext(ctx, executable, "-test.run=^"+regexp.QuoteMeta(t.Name())+"$", "-test.count=1")
+		cmd.Env = append(os.Environ(), childEnv+"=1")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("isolated escaped allocation test failed: %v\n%s", err, output)
+		}
+		return
+	}
+	escaped := strings.Repeat(`\n\"`, 1<<16)
+	body := []byte(`{"vendor":"` + escaped + `","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"` + escaped + `"}]}]}`)
+	allocations := testing.AllocsPerRun(5, func() {
+		if openAIResponsesMayNeedOrphanCleanup(body) {
+			t.Fatal("escaped message-only input unexpectedly requires orphan cleanup")
+		}
+	})
+	if allocations != 0 {
+		t.Fatalf("escaped message-only scan allocated %.0f times; want zero", allocations)
+	}
+}
+
 // Exercise a large message-only Responses history through OAuth compatibility.
 func BenchmarkOAuthResponsesCompatibilityMessageHistory(b *testing.B) {
 	request := syntheticOAuthMessageHistory()

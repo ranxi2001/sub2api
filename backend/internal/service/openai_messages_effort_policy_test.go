@@ -179,31 +179,38 @@ func TestMessagesGLMMappedEffortPolicyHTTP(t *testing.T) {
 		name      string
 		model     string
 		target    string
+		forced    string
+		scope     string
 		ceiling   string
 		overLimit string
 		want      string
 		status    int
 		explicit  bool
 	}{
-		{name: "mapped low normalized", target: "low", want: "high"},
+		{name: "mapped low preserved after normalization", target: "low", want: "low"},
+		{name: "fixed key effort wins mapping", forced: "low", target: "high", want: "low"},
+		{name: "fixed key effort capped once", forced: "max", ceiling: "medium", want: "medium"},
+		{name: "fixed key effort denied above ceiling", forced: "high", ceiling: "low", overLimit: ReasoningEffortOverLimitDeny, status: 403},
+		{name: "requested model scoped mapping", target: "low", scope: "claude-sonnet-4-5", want: "low"},
+		{name: "foreign model scope leaves none", target: "low", scope: "other-model", want: "none"},
 		{name: "unmapped none below low ceiling", ceiling: "low", overLimit: ReasoningEffortOverLimitDeny, want: "none"},
 		{name: "unmapped none below minimal ceiling", ceiling: "minimal", overLimit: ReasoningEffortOverLimitDeny, want: "none"},
 		{name: "glm53 unmapped none below low ceiling", model: "glm-5.3", ceiling: "low", overLimit: ReasoningEffortOverLimitDeny, want: "none"},
 		{name: "mapped minimal preserved", target: "minimal", want: "minimal"},
 		{name: "mapped max preserved", target: "max", want: "max"},
-		{name: "normalized effort cannot meet low ceiling", target: "low", ceiling: "low", status: 403},
+		{name: "mapped low meets low ceiling", target: "low", ceiling: "low", want: "low"},
 		{name: "mapped minimal below low ceiling", target: "minimal", ceiling: "low", want: "minimal"},
 		{name: "mapped minimal meets minimal ceiling", target: "minimal", ceiling: "minimal", want: "minimal"},
-		{name: "normalized effort cannot meet medium ceiling", target: "low", ceiling: "medium", status: 403},
-		{name: "max capped to legal high", target: "max", ceiling: "xhigh", want: "high"},
+		{name: "mapped low below medium ceiling", target: "low", ceiling: "medium", want: "low"},
+		{name: "max capped to xhigh", target: "max", ceiling: "xhigh", want: "xhigh"},
 		{name: "glm53 low preserved", model: "glm-5.3", target: "low", ceiling: "low", want: "low"},
 		{name: "glm53 minimal preserved", model: "glm-5.3", target: "minimal", want: "minimal"},
 		{name: "glm53 minimal below low ceiling", model: "glm-5.3", target: "minimal", ceiling: "low", want: "minimal"},
-		{name: "glm53 medium ceiling uses legal low", model: "glm-5.3", target: "max", ceiling: "medium", want: "low"},
+		{name: "glm53 max capped to medium", model: "glm-5.3", target: "max", ceiling: "medium", want: "medium"},
 		{name: "glm53 minimal meets minimal ceiling", model: "glm-5.3", target: "minimal", ceiling: "minimal", want: "minimal"},
-		{name: "normalized effort denied", target: "low", ceiling: "low", overLimit: ReasoningEffortOverLimitDeny, status: 403},
+		{name: "mapped effort denied", target: "high", ceiling: "low", overLimit: ReasoningEffortOverLimitDeny, status: 403},
 		{name: "mapping denied", target: "deny", status: 403},
-		{name: "mapping applied once", target: "low", ceiling: "high", want: "high", explicit: true},
+		{name: "mapping applied once", target: "low", ceiling: "high", want: "low", explicit: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			model := test.model
@@ -227,9 +234,17 @@ func TestMessagesGLMMappedEffortPolicyHTTP(t *testing.T) {
 			requestContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(body)))
 			mappings := []ReasoningEffortMapping{{From: "high", To: "max"}}
 			if test.target != "" {
-				mappings = append(mappings, ReasoningEffortMapping{From: "none", To: test.target})
+				mapping := ReasoningEffortMapping{From: "none", To: test.target}
+				if test.scope != "" {
+					mapping.Model = test.scope
+					mapping.MatchType = "exact"
+				}
+				mappings = append(mappings, mapping)
 			}
 			ctx := WithOpenAIReasoningEffortPolicyForMessages(requestContext.Request.Context(), body, test.ceiling, mappings, test.overLimit)
+			if test.forced != "" {
+				ctx = WithAPIKeyOpenAIReasoningEffortPolicy(ctx, test.forced, test.ceiling, mappings, test.overLimit)
+			}
 			result, err := svc.ForwardAsAnthropic(ctx, requestContext, account, body, "", "")
 			if test.status != 0 {
 				require.Error(t, err)

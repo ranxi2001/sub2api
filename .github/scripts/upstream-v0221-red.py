@@ -9,6 +9,7 @@ import sys
 
 BASE = '6fa7fb86eae7c732794450646dc13831dce87ff1'
 CASES = {
+    'glm': ('internal/service', '^TestMessagesGLMMappedEffortPolicyHTTP$', 'backend/internal/service/openai_reasoning_effort_policy.go', 'applyOpenAIReasoningEffortPolicyForGLMFromContext'),
     'auth': ('internal/service', '^TestAuthServiceRefreshTokenPairConsumesTokenOnce$', 'backend/internal/service/auth_service.go', None),
     'slot': ('internal/service', '^TestGatewayServiceNewSelectionResultReleasesSlotOnHydrationError$', 'backend/internal/service/gateway_scheduling.go', None),
     'metadata': ('internal/service', '^TestRelayStallsMetadataBeforeCapacityFailure$', 'backend/internal/service/openai_gateway_passthrough.go', 'openAIStreamEventIsMetadata'),
@@ -70,9 +71,10 @@ def main():
     directory.mkdir(parents=True, exist_ok=True)
     source = pathlib.Path(target)
     candidate = source.read_text()
-    baseline = subprocess.check_output(['git', 'show', BASE + ':' + target], text=True)
-    evidence = {'case': case, 'candidate': expected, 'baseline': BASE, 'target': target,
-                'candidate_blob': git('hash-object', target), 'baseline_blob': git('rev-parse', BASE + ':' + target),
+    baseline_ref = '811346e0256a75a978951beff0657a6a3bcf4a60' if case == 'glm' else BASE
+    baseline = subprocess.check_output(['git', 'show', baseline_ref + ':' + target], text=True)
+    evidence = {'case': case, 'candidate': expected, 'baseline': baseline_ref, 'target': target,
+                'candidate_blob': git('hash-object', target), 'baseline_blob': git('rev-parse', baseline_ref + ':' + target),
                 'command': 'go test -json -tags=unit ./' + package + ' -run ' + pattern + ' -count=1 -timeout=5m'}
     evidence['green'] = run_case(package, pattern, directory, 'green')
     if function in ('ttl-counterfactual', 'memory-counterfactual'):

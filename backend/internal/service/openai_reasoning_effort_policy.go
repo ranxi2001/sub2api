@@ -495,42 +495,12 @@ func WithAPIKeyOpenAIReasoningEffortPolicy(ctx context.Context, forced, maxEffor
 	return context.WithValue(ctx, apiKeyForcedReasoningEffortContextKey{}, forced)
 }
 
-func applyOpenAIReasoningEffortPolicyForGLMFromContext(ctx context.Context, body []byte, model string) ([]byte, bool, error) {
-	if ctx == nil || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "glm-") {
-		return ApplyOpenAIReasoningEffortPolicyFromContext(ctx, body)
-	}
-	policy, ok := ctx.Value(openAIReasoningEffortPolicyContextKey{}).(openAIReasoningEffortPolicy)
-	if !ok {
-		return body, false, nil
-	}
-	forced, _ := ctx.Value(apiKeyForcedReasoningEffortContextKey{}).(string)
-	mapped, changed, err := ApplyAPIKeyOpenAIReasoningEffortPolicy(body, forced, "", policy.mappings, policy.overLimit, policy.requestModel)
-	if err != nil {
-		return body, false, err
-	}
-	normalized, normalizationChanged := NormalizeGLMOpenAIReasoningEffort(mapped, model)
-	maxEffort, overLimit := policy.maxEffort, policy.overLimit
-	if maxRank, hasMax := reasoningEffortRank(maxEffort); hasMax {
-		legalCeiling := ""
-		for _, effort := range []string{"low", "high", "max"} {
-			if effort == "low" && !isGLM53Model(model) {
-				continue
-			}
-			if rank, _ := reasoningEffortRank(effort); rank <= maxRank {
-				legalCeiling = effort
-			}
-		}
-		if legalCeiling == "" {
-			overLimit = ReasoningEffortOverLimitDeny
-		} else if NormalizeMaxReasoningEffortOverLimit(overLimit) != ReasoningEffortOverLimitDeny {
-			maxEffort = legalCeiling
-		}
-	}
-	capped, ceilingChanged, err := ApplyOpenAIReasoningEffortPolicy(normalized, maxEffort, nil, overLimit, policy.requestModel)
-	if err != nil {
-		return body, false, err
-	}
-	return capped, changed || normalizationChanged || ceilingChanged, nil
+// The caller normalizes native GLM effort before applying the configured policy.
+// A mapped downgrade is final: normalizing it again can raise low to high and
+// reject a ceiling that the configured value already satisfies. Keep fixed-key
+// precedence and model-scoped mappings in the shared policy implementation.
+func applyOpenAIReasoningEffortPolicyForGLMFromContext(ctx context.Context, body []byte, _ string) ([]byte, bool, error) {
+	return ApplyOpenAIReasoningEffortPolicyFromContext(ctx, body)
 }
 
 func mapReasoningEffort(raw string, mappings []ReasoningEffortMapping, requestModel string) (string, bool) {
