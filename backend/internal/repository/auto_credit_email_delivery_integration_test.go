@@ -371,6 +371,13 @@ func TestVipCreditEmailSMTPTemplateAndRetry(t *testing.T) {
 	// Disabling after issuance changes future issues, not this committed event.
 	_, err = NewAutoCreditRepository(db).Save(ctx, uid, uid, service.AutoCreditPatch{Version: 2, NotifyEmail: boolPtr(false)})
 	require.NoError(t, err)
+	// Collection may precede a delayed notification. Confirm the historical
+	// issue without adding another receipt or claiming it is still unpaid.
+	issuedState, err := NewAutoCreditRepository(db).Get(ctx, uid, "all")
+	require.NoError(t, err)
+	_, err = NewAutoCreditRepository(db).Settle(ctx, uid, issuedState.Entries[0].ID, uid)
+	require.NoError(t, err)
+	require.Equal(t, 1, emailReceiptCount(t, db, uid))
 	found, err = w.ProcessNext(ctx)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -389,7 +396,7 @@ func TestVipCreditEmailSMTPTemplateAndRetry(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(body), "300.00000000")
 	require.Contains(t, string(body), "垫付")
-	require.Contains(t, string(body), "尚未支付")
+	require.NotContains(t, string(body), "尚未支付")
 	require.Contains(t, string(body), "vip-recipient@example.invalid")
 	require.NotContains(t, string(body), "张三")
 	require.NotContains(t, string(body), "Alex")
