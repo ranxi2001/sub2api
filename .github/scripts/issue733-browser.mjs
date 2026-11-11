@@ -37,10 +37,10 @@ const modules = {
 }
 function html() {
   return `<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="app"></div><script type="module">
-import {createApp,h} from 'vue';import {createI18n} from 'vue-i18n';
+import {createApp,h} from 'vue';import {createI18n} from 'vue-i18n';import {createPinia} from 'pinia';
 import Candidate from '/src/views/admin/PrioritySchedulingView.vue';import Baseline from '/@fs/${baselinePath}';import DefaultGroupBaseline from '/@fs/${defaultGroupBaselinePath}';const params=new URLSearchParams(location.search);const View=params.has('defaultGroupBaseline')?DefaultGroupBaseline:params.has('baseline')?Baseline:Candidate;
 import zh from '/src/i18n/locales/zh/index.ts';import en from '/src/i18n/locales/en/index.ts';import '/src/style.css';
-const app=createApp({render:()=>h(View)});app.use(createI18n({legacy:false,locale:params.get('locale')||'zh',messages:{zh,en}}));app.mount('#app');window.fixtureView=()=>app._instance.subTree.component.setupState;window.fixtureUnmount=()=>app.unmount();</script></html>`
+const app=createApp({render:()=>h(View)});app.use(createPinia());app.use(createI18n({legacy:false,locale:params.get('locale')||'zh',messages:{zh,en}}));app.mount('#app');window.fixtureView=()=>app._instance.subTree.component.setupState;window.fixtureUnmount=()=>app.unmount();</script></html>`
 }
 const fixtureDir = path.join(frontend, '.issue733-fixture')
 const fixtureHTML = path.join(fixtureDir, 'index.html')

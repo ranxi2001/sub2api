@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { reactive } from 'vue'
+import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import PrioritySchedulingView from '../PrioritySchedulingView.vue'
 import { apiClient } from '@/api/client'
@@ -26,7 +27,7 @@ export function analysis(params: any, count = 3, revision = 'v1'): PriorityAnaly
 }
 export function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason?: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 export let wrapper: ReturnType<typeof mount> | undefined
-export function render() { wrapper = mount(PrioritySchedulingView, { attachTo: document.body }); return wrapper }
+export function render() { wrapper = mount(PrioritySchedulingView, { attachTo: document.body, global: { plugins: [createPinia()] } }); return wrapper }
 export function unmount() { wrapper?.unmount(); wrapper = undefined }
 export const reads = () => vi.mocked(apiClient.get).mock.calls.filter(([url]) => url === '/admin/priority-scheduling/analysis')
 export async function choose(id: string, label: string) {

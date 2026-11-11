@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div ref="readingRoot" class="min-w-0 space-y-5">
-      <header><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1></header>
+      <header class="flex items-center gap-3"><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityAccountPerformance" :user-id="auth.user?.id" /></header>
       <SmartOpsNav />
       <div v-if="error" role="alert" class="text-red-600">{{ error }} <button v-if="!draft" class="underline" @click="load">{{ t('priorityScheduling.retry') }}</button></div>
       <p v-if="notice" role="status" class="text-emerald-600">{{ notice }}</p>
@@ -29,7 +29,7 @@
             <section>
               <label class="mb-3 block"><span class="field-title">{{ t('priorityScheduling.latencyPenaltyMode') }}</span><select v-model="draft.latency_penalty_mode" data-testid="latency-penalty-mode" class="input w-full"><option value="deprioritize">{{ t('priorityScheduling.latencyPenaltyModes.deprioritize') }}</option><option value="stop">{{ t('priorityScheduling.latencyPenaltyModes.stop') }}</option></select><small class="mt-2 block text-gray-500">{{ t('priorityScheduling.latencyPenaltyModeHint') }}</small></label>
 
-              <h2 class="mb-3 font-medium">{{ t('priorityScheduling.thresholds') }}</h2><div class="grid gap-3 sm:grid-cols-2"><label v-for="field in fields" :key="field.key"><span class="field-title">{{ t(`priorityScheduling.${field.key}`) }}</span><input v-model.number="draft[field.key]" type="number" :data-testid="field.key" :min="field.min" :max="field.max" step="1" required class="input w-full" /></label></div></section>
+              <h2 class="mb-3 font-medium">{{ t('priorityScheduling.thresholds') }}</h2><div class="grid gap-3 sm:grid-cols-2"><label v-for="field in fields" :key="field.key"><span class="field-title">{{ t(`priorityScheduling.${field.key}`) }} <NewFeatureBadge v-if="field.key === 'target_tps'" :notice-id="NEW_FEATURE_NOTICES.priorityAccountPerformance" :user-id="auth.user?.id" compact /></span><input v-model.number="draft[field.key]" type="number" :data-testid="field.key" :min="field.min" :max="field.max" step="1" required class="input w-full" /></label></div></section>
           </div>
           <div class="grid gap-5 sm:grid-cols-2"><label><span class="field-title">{{ t('priorityScheduling.groupIds') }}</span><input v-model="groups" class="input w-full" data-testid="groups" /><small class="text-gray-500">{{ t('priorityScheduling.groupHint') }}</small></label><label><span class="field-title">{{ t('priorityScheduling.models') }}</span><textarea v-model="modelsText" class="input w-full" rows="3" /><small class="text-gray-500">{{ t('priorityScheduling.modelHint') }}</small></label></div>
           <button class="btn btn-primary" type="submit">{{ t(saving ? 'priorityScheduling.saving' : 'priorityScheduling.save') }}</button>
@@ -165,6 +165,8 @@ import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import AccountPerformanceCell from '@/components/account/AccountPerformanceCell.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { performanceWindowMinutes } from '@/types/accountPerformance'
 import { getAll as getGroups } from '@/api/admin/groups'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
