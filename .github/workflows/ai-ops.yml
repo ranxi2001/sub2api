@@ -44,6 +44,7 @@ jobs:
         run: pnpm --dir frontend run typecheck
       - name: Install isolated synthetic browser
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/ai-ops-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/ai-ops-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Actual AI operations pages with synthetic data
@@ -86,6 +87,7 @@ jobs:
           docker version > ../evidence/docker-version.txt
           docker info > ../evidence/docker-info.txt
           if ! command -v gdb >/dev/null; then
+            bash ../.github/scripts/ci-ubuntu-mirrors.sh
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends gdb
           fi

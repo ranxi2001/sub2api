@@ -53,6 +53,7 @@ jobs:
         run: pnpm exec vitest run src/components/settings/ServerlessSettings.spec.ts src/views/admin/__tests__/SettingsView.spec.ts
       - name: Install isolated screenshot tool
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/serverless-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/serverless-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Render the actual settings component with fictional fixtures
