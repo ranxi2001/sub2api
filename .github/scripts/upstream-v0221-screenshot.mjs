@@ -34,7 +34,7 @@ try {
         css: { postcss: { plugins: [require('tailwindcss')({ ...tailwind, content: [...paths, join(root, 'src/**/*.{vue,js,ts}')] }), require('autoprefixer')()] } },
         build: { outDir: buildDir, emptyOutDir: true, minify: false, target: 'esnext', rollupOptions: { input: paths[0] } } })
       server = await preview({ root, configFile: false, build: { outDir: buildDir }, preview: { host: '127.0.0.1', port: 4199, strictPort: true } })
-      for (const scenario of ['pricing', 'usage', 'payment', 'settings', 'keys']) {
+      for (const scenario of ['pricing', 'usage', 'payment', 'settings', 'keys', 'accounts']) {
         const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', timezoneId: 'UTC' })
         page.on('pageerror', error => manifest.errors.push(`${mode}/${scenario}: ${error.message}`))
         await page.route('**/*', route => {
@@ -56,6 +56,17 @@ try {
           if (scenario === 'settings') {
             await page.locator('form').first().waitFor()
             await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight * 0.55))
+          }
+          let originalAccount
+          if (scenario === 'accounts') {
+            await page.getByText('Synthetic quota account', { exact: true }).first().waitFor()
+            originalAccount = await page.getByText('Synthetic quota account', { exact: true }).first().elementHandle()
+            await page.locator('button.btn-primary').filter({ hasText: '创建' }).first().locator('..').locator('button.btn-secondary').first().click()
+            await page.waitForFunction(() => window.__v0221.pendingAccounts.length > 0)
+            if (mode === 'after') {
+              assert.equal(await originalAccount.evaluate(element => element.isConnected), true)
+              assert.equal(await page.locator('[aria-busy="true"][inert]').count() > 0, true)
+            } else assert.equal(await page.getByText('Synthetic quota account', { exact: true }).count(), 0)
           }
           await shot('light')
           if (mode === 'after' && scenario === 'pricing') {
@@ -86,6 +97,12 @@ try {
             await page.evaluate(() => window.__v0221.pending.splice(0).forEach(resolve => resolve()))
             await page.waitForFunction(() => document.body.innerText.includes('$3.7500'))
             await shot('usage-loaded')
+          }
+          if (scenario === 'accounts') {
+            await page.evaluate(() => window.__v0221.pendingAccounts.splice(0).forEach(resolve => resolve()))
+            await page.getByText('Synthetic refreshed account', { exact: true }).first().waitFor()
+            await shot('refreshed')
+            manifest.results.push({ mode, scenario, old_row_retained: mode === 'after' })
           }
           manifest.results.push({ mode, scenario, requests: await page.evaluate(() => window.__v0221.requests), saved: await page.evaluate(() => window.__v0221.saved) })
         } catch (error) {
