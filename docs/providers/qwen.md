@@ -1,6 +1,6 @@
 # 千问 Qwen 平台
 
-新增账号和分组时选择“千问 Qwen”（`qwen`）。平台复用 OpenAI 兼容网关，使用 API Key 和 Chat Completions 上游协议；Responses / Messages 入站使用现有协议转换。普通请求、流式请求、模型映射、自定义请求头和自定义上游地址沿用兼容网关能力。
+新增账号和分组时选择“千问 Qwen”（`qwen`）。平台复用 OpenAI 兼容网关，使用 API Key 和 Chat Completions 上游协议；Responses / Messages 入站使用现有协议转换。新建账号默认不限制模型，避免旧目录限制新模型；可手动设置白名单或模型映射。普通请求、流式请求、模型映射、自定义请求头和自定义上游地址沿用兼容网关能力。
 
 默认地址为 `https://dashscope.aliyuncs.com/compatible-mode/v1`。阿里云目前建议使用工作空间专属地址，例如 `https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；填写真实工作空间 ID，并匹配 Key 所属区域。国际区域或供应站使用其实际兼容地址。参考[阿里云 OpenAI 兼容说明](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)。本次不提供千问 OAuth、Coding Plan、余额查询或原生 Responses 能力声明。
 

@@ -1314,6 +1314,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       },
     })
     expect(createAccountMock.mock.calls[0]?.[0]?.credentials.api_base_urls).not.toHaveProperty('responses')
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('model_mapping')
   })
 
   it('creates Mistral through the catalog with API key and only its native Chat endpoint', async () => {
