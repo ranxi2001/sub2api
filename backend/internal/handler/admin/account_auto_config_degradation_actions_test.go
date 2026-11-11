@@ -103,4 +103,20 @@ func TestAutoConfigDegradationIndependentActionsRoundTrip(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(out.Body.Bytes(), &response))
 	require.Equal(t, saved.DegradationAction, response.Data.DegradationAction)
+	// New independent conditions survive both the HTTP round trip and old editors.
+	saved = save(`{"degradation_action":{"probe_enabled":false,"threshold_percent":null,"upstream_429_enabled":true,"upstream_error_threshold_percent":85,"upstream_429_share_threshold_percent":90}}`, http.StatusOK)
+	require.False(t, saved.DegradationAction.UsesProbe())
+	require.True(t, saved.DegradationAction.UsesUpstream429())
+	require.Nil(t, saved.DegradationAction.ThresholdPercent)
+	require.Equal(t, 85.0, saved.DegradationAction.HTTPErrorThreshold())
+	require.Equal(t, 90.0, saved.DegradationAction.HTTP429ShareThreshold())
+	saved = save(`{"priority":8}`, http.StatusOK)
+	require.False(t, saved.DegradationAction.UsesProbe())
+	require.Equal(t, 90.0, saved.DegradationAction.HTTP429ShareThreshold())
+	save(`{"degradation_action":{"upstream_429_enabled":false}}`, http.StatusBadRequest)
+	save(`{"degradation_action":{"upstream_error_threshold_percent":0}}`, http.StatusBadRequest)
+	saved = save(`{"degradation_action":{"probe_enabled":true,"threshold_percent":9,"upstream_429_enabled":false}}`, http.StatusOK)
+	require.True(t, saved.DegradationAction.UsesProbe())
+	require.False(t, saved.DegradationAction.UsesUpstream429())
+
 }

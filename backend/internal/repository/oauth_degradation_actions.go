@@ -107,7 +107,8 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 		return err
 	}
 	m, found := metrics[id]
-	if !found || !c.DegradationAction.Triggered(m) {
+	reason := c.DegradationAction.TriggerReason(m)
+	if !found || reason == "" {
 		return nil
 	}
 	models := make([]string, 0, len(c.DegradationAction.Models))
@@ -173,7 +174,20 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 		next = min(next, c.DegradationAction.TargetConcurrency)
 	}
 	limitConcurrency, limitModels := c.DegradationAction.RestrictsConcurrency(), c.DegradationAction.RestrictsModels()
-	state := service.OAuthDegradationState{NativeControls: true, NativeSchedulingPaused: nativeSchedulingPaused, LimitConcurrency: &limitConcurrency, LimitModels: &limitModels, LimitGroups: c.DegradationAction.LimitGroups, GroupIDs: append([]int64{}, c.DegradationAction.GroupIDs...), RemovedGroupIDs: removedGroups, Revision: c.Revision, Models: models, ConcurrencyCap: next, ThresholdPercent: *c.DegradationAction.ThresholdPercent, DegradationPercent: *m.DegradationPercent, QualitySamples: m.QualitySamples, WindowStart: m.WindowStart, WindowEnd: m.WindowEnd, AppliedAt: now}
+	state := service.OAuthDegradationState{NativeControls: true, NativeSchedulingPaused: nativeSchedulingPaused, LimitConcurrency: &limitConcurrency, LimitModels: &limitModels, LimitGroups: c.DegradationAction.LimitGroups, GroupIDs: append([]int64{}, c.DegradationAction.GroupIDs...), RemovedGroupIDs: removedGroups, Revision: c.Revision, Models: models, ConcurrencyCap: next, QualitySamples: m.QualitySamples, WindowStart: m.WindowStart, WindowEnd: m.WindowEnd, AppliedAt: now}
+	state.TriggerReason = reason
+	if c.DegradationAction.ThresholdPercent != nil {
+		state.ThresholdPercent = *c.DegradationAction.ThresholdPercent
+	}
+	if m.DegradationPercent != nil {
+		state.DegradationPercent = *m.DegradationPercent
+	}
+	if reason == "upstream_429" {
+		state.UpstreamError = &m.UpstreamError
+		state.UpstreamErrorThresholdPercent = c.DegradationAction.HTTPErrorThreshold()
+		state.Upstream429ShareThresholdPercent = c.DegradationAction.HTTP429ShareThreshold()
+	}
+
 	if a.Extra == nil {
 		a.Extra = make(map[string]any)
 	}
