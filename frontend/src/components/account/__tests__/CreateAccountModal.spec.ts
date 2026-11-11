@@ -1,6 +1,12 @@
 vi.mock('@/api/admin/upstreamChannels', () => ({ listUpstreamChannels: vi.fn(), readChannelBindings: vi.fn(), bindChannelAccounts: vi.fn() }))
 import { readChannelBindings, listUpstreamChannels } from '@/api/admin/upstreamChannels'
 import UpstreamChannelSelector from '../UpstreamChannelSelector.vue'
+import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/accountTokenGuard'
+
+vi.mock('@/api/admin/accountTokenGuard', async original => ({
+  ...await original<typeof import('@/api/admin/accountTokenGuard')>(),
+  startTwoFALogin: vi.fn(), getTwoFALogin: vi.fn(), deleteTwoFALogin: vi.fn(),
+}))
 
 vi.mock('@/api/admin/credentialEncryption', () => ({
   getCredentialEncryption: vi.fn().mockResolvedValue({ configured: true, source: 'server_config' }),
@@ -175,12 +181,14 @@ const ModelWhitelistSelectorStub = defineComponent({
   >models</button>`,
 })
 
-function mountModal(groups: any[] = []) {
+function mountModal(groups: any[] = [], realDialog = false) {
   return mount(CreateAccountModal, {
+    attachTo: realDialog ? document.body : undefined,
     props: { show: true, proxies: [], groups },
     global: {
       stubs: {
-        BaseDialog: BaseDialogStub,
+        BaseDialog: realDialog ? false : BaseDialogStub,
+        teleport: true,
         OAuthAuthorizationFlow: OAuthAuthorizationFlowStub,
         ConfirmDialog: true,
         Select: true,
@@ -584,6 +592,173 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createCredentialOperationsMock.mock.calls[1]?.[0]).toMatchObject({
       account_id: 42, password: login.password, totp_secret: login.mfa_secret, enabled: true, auto_relogin_enabled: true,
     })
+  })
+
+  it('keeps parallel 2FA imports and enrollment identities isolated until each enrollment completes', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const callback = wrapper.getComponent(OpenAITwoFAImport).props('importCredential')
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>(yes => { resolve = yes })
+      return { promise, resolve }
+    }
+    type Result = { created: number; failed: number; items: { action: string; account_id: number }[] }
+    const imports = [deferred<Result>(), deferred<Result>()]
+    const enrollments = [deferred<void>(), deferred<void>()]
+    importCodexSessionMock.mockImplementationOnce(() => imports[0]!.promise).mockImplementationOnce(() => imports[1]!.promise)
+    createCredentialOperationsMock.mockImplementation((entry: { account_id: number }) => enrollments[entry.account_id - 41]!.promise)
+    const logins = [41, 42].map(id => ({ email: `fixture-${id}@example.test`, password: `synthetic-${id}`, mfa_secret: `synthetic-secret-${id}` }))
+    const controller = new AbortController()
+    const completed: number[] = []
+    const tasks = logins.map((login, i) => callback({ synthetic_account: i + 41 }, login.email, login, controller.signal).then(() => completed.push(i)))
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(2)
+    expect(createCredentialOperationsMock).not.toHaveBeenCalled()
+    imports[1]!.resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 42 }] })
+    await flushPromises()
+    expect(createCredentialOperationsMock).toHaveBeenCalledTimes(1)
+    expect(createCredentialOperationsMock).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 42, login_email: logins[1]!.email, password: logins[1]!.password, totp_secret: logins[1]!.mfa_secret }), { signal: controller.signal })
+    expect(completed).toEqual([])
+    imports[0]!.resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 41 }] })
+    await flushPromises()
+    expect(createCredentialOperationsMock).toHaveBeenLastCalledWith(expect.objectContaining({ account_id: 41, login_email: logins[0]!.email, password: logins[0]!.password, totp_secret: logins[0]!.mfa_secret }), { signal: controller.signal })
+    enrollments[1]!.resolve()
+    await flushPromises()
+    expect(completed).toEqual([1])
+    enrollments[0]!.resolve()
+    await Promise.all(tasks)
+    expect(completed).toEqual([1, 0])
+    expect(wrapper.emitted('created')).toHaveLength(2)
+  })
+
+  it('does not enroll or announce success when stopped while a 2FA import response is pending', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    let resolve!: (result: unknown) => void
+    importCodexSessionMock.mockImplementationOnce(() => new Promise(yes => { resolve = yes }))
+    const controller = new AbortController()
+    const login = { email: 'fixture@example.test', password: 'synthetic', mfa_secret: 'synthetic-secret' }
+    const task = wrapper.getComponent(OpenAITwoFAImport).props('importCredential')({ synthetic_account: 41 }, login.email, login, controller.signal)
+    const rejection = expect(task).rejects.toThrow()
+    expect(importCodexSessionMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
+    controller.abort()
+    resolve({ created: 1, failed: 0, items: [{ action: 'created', account_id: 41 }] })
+    await rejection
+    expect(createCredentialOperationsMock).not.toHaveBeenCalled()
+    expect(wrapper.emitted('created')).toBeUndefined()
+  })
+
+  it.each(['deferred', 'failed'] as const)('2FA controlled Close/reopen preserves jobs through %s DELETE and allows cleanup recovery', async initialMode => {
+    const emails = ['a', 'b', 'c', 'd', 'e'].map(name => `${name}@example.test`)
+    const input = emails.map(email => `${email}----synthetic-password----synthetic-secret`).join('\n')
+    const live = new Map<string, string>()
+    let peak = 0
+    let sequence = 0
+    let mode: 'deferred' | 'failed' | 'confirmed' = initialMode
+    let retire!: () => void
+    const retirement = new Promise<void>(resolve => { retire = resolve })
+    vi.mocked(startTwoFALogin).mockReset().mockImplementation(async entry => {
+      const id = `fixture-${++sequence}`
+      live.set(id, entry.email)
+      peak = Math.max(peak, live.size)
+      return { id, status: 'running' }
+    })
+    vi.mocked(getTwoFALogin).mockReset().mockRejectedValue(Error('synthetic polling failure'))
+    vi.mocked(deleteTwoFALogin).mockReset().mockImplementation(async id => {
+      if (mode === 'failed') throw { status: 503 }
+      if (mode === 'deferred') await retirement
+      live.delete(id)
+    })
+    // Actual CreateAccountModal + BaseDialog + importer. Match AccountsView's
+    // controlled close listener instead of manually unmounting just the child.
+    const wrapper = mountModal([], true)
+    await wrapper.setProps({ onClose: () => { void wrapper.setProps({ show: false }) } })
+    const enter = async () => {
+      await selectButtonByText(wrapper, 'OpenAI')
+      await wrapper.get('[data-testid="openai-two-fa"]').trigger('click')
+      await wrapper.get('form#create-account-form').trigger('submit.prevent')
+      await flushPromises()
+      const importer = wrapper.getComponent(OpenAITwoFAImport)
+      await importer.get('textarea').setValue(input)
+      await importer.get('[data-testid="two-fa-start"]').trigger('click')
+      await flushPromises()
+      return importer
+    }
+    try {
+      const original = await enter()
+      expect(startTwoFALogin).toHaveBeenCalledTimes(3)
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+      await wrapper.get('[aria-label="Close modal"]').trigger('click')
+      await flushPromises()
+      // Reopen exactly as the owner would. The reviewed implementation has
+      // already dropped its rows here, and the next submission reaches six.
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+      if (!wrapper.findComponent(OpenAITwoFAImport).exists()) await enter()
+      expect(live.size).toBe(3)
+      expect(peak).toBe(3)
+      expect(startTwoFALogin).toHaveBeenCalledTimes(3)
+      expect(wrapper.getComponent(OpenAITwoFAImport).vm.$.uid).toBe(original.vm.$.uid)
+      expect(wrapper.emitted('close')).toBeUndefined()
+      expect(original.get('[data-testid="two-fa-owned-jobs"]').text()).toContain('tokenGuard.twoFA.ownedJobs')
+      expect(original.get('[data-testid="two-fa-start"]').attributes('disabled')).toBeUndefined()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await selectButtonByText(wrapper, 'common.back')
+      await flushPromises()
+      expect(wrapper.props('show')).toBe(true)
+      expect(wrapper.emitted('close')).toBeUndefined()
+
+      // Idle polling failures still offer explicit cleanup, so the Close fence
+      // has a visible recovery path without re-submitting any login.
+      await original.get('[data-testid="two-fa-stop"]').trigger('click')
+      await flushPromises()
+      expect(deleteTwoFALogin).toHaveBeenCalledTimes(3)
+      await wrapper.get('[aria-label="Close modal"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.props('show')).toBe(true)
+      expect(wrapper.getComponent(OpenAITwoFAImport).vm.$.uid).toBe(original.vm.$.uid)
+      expect(startTwoFALogin).toHaveBeenCalledTimes(3)
+      if (initialMode === 'failed') {
+        expect(original.get('[data-testid="two-fa-start"]').attributes('disabled')).toBeUndefined()
+        expect(original.get('[data-testid="two-fa-stop"]').attributes('disabled')).toBeUndefined()
+        expect(original.find('[data-testid="two-fa-owned-jobs"]').exists()).toBe(true)
+        mode = 'deferred'
+        await original.get('[data-testid="two-fa-stop"]').trigger('click')
+        await flushPromises()
+        expect(deleteTwoFALogin).toHaveBeenCalledTimes(6)
+      }
+      // Unconfirmed retirement cannot release the modal.
+      expect(live.size).toBe(3)
+      retire()
+      await flushPromises()
+      expect(live.size).toBe(0)
+      expect(original.find('[data-testid="two-fa-owned-jobs"]').exists()).toBe(false)
+      await wrapper.get('[aria-label="Close modal"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.props('show')).toBe(false)
+      expect(wrapper.emitted('close')).toHaveLength(1)
+      expect(wrapper.findComponent(OpenAITwoFAImport).exists()).toBe(false)
+      await wrapper.setProps({ show: true })
+      mode = 'confirmed'
+      const reopened = await enter()
+      expect(reopened.vm.$.uid).not.toBe(original.vm.$.uid)
+      expect(startTwoFALogin).toHaveBeenCalledTimes(6)
+      expect(live.size).toBe(3)
+      expect(new Set(live.values()).size).toBe(3)
+      expect(peak).toBe(3)
+      await reopened.get('[data-testid="two-fa-stop"]').trigger('click')
+      await flushPromises()
+      expect(live.size).toBe(0)
+    } finally {
+      mode = 'confirmed'
+      retire()
+      wrapper.unmount()
+      await flushPromises()
+    }
   })
 
   it('sets month and year expiry presets without submitting the account form', async () => {

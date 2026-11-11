@@ -28,10 +28,11 @@ export async function listByAccount(accountId: number): Promise<ScheduledTestPla
  * @param req - Plan creation request
  * @returns Created plan
  */
-export async function create(req: CreateScheduledTestPlanRequest): Promise<ScheduledTestPlan> {
+export async function create(req: CreateScheduledTestPlanRequest, options?: { signal?: AbortSignal }): Promise<ScheduledTestPlan> {
   const { data } = await apiClient.post<ScheduledTestPlan>(
     '/admin/scheduled-test-plans',
-    req
+    req,
+    options
   )
   return data
 }

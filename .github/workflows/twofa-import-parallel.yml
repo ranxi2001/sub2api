@@ -1,0 +1,302 @@
+name: 2FA import bounded parallel
+
+on:
+  push:
+    branches: [feat/twofa-import-bounded-parallel]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: twofa-import-parallel-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_BASE: 8132f162a0ad76acd60b701ac4694fd70d2d75f1
+  EXPECTED_HEAD: ${{ github.sha }}
+
+jobs:
+  baseline-red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install locked dependencies on remote runner only
+        run: pnpm --dir frontend install --frozen-lockfile
+      - name: Isolate exact production sources and retain new mounted regression
+        run: |
+          set -euo pipefail
+          mkdir -p evidence "$RUNNER_TEMP/twofa-red"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code
+          git rev-parse HEAD > evidence/head.txt
+          git rev-parse "$SOURCE_BASE" > evidence/base.txt
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/twofa-red"
+          cmp frontend/package.json "$RUNNER_TEMP/twofa-red/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/twofa-red/frontend/pnpm-lock.yaml"
+          component=frontend/src/components/account/OpenAITwoFAImport.vue
+          git rev-parse "$SOURCE_BASE:$component" > evidence/baseline-component-blob.txt
+          git hash-object "$RUNNER_TEMP/twofa-red/$component" > evidence/red-component-blob.txt
+          cmp evidence/baseline-component-blob.txt evidence/red-component-blob.txt
+          cp frontend/src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts "$RUNNER_TEMP/twofa-red/frontend/src/components/account/__tests__/"
+          sha256sum frontend/src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts > evidence/test-input.sha256
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/twofa-red/frontend/node_modules"
+      - name: Prove assertion RED rather than a compilation or setup failure
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'pnpm exec vitest run src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts --reporter=verbose --reporter=json --outputFile.json=<evidence>/red.json' > evidence/red-command.txt
+          set +e
+          (cd "$RUNNER_TEMP/twofa-red/frontend" && pnpm exec vitest run src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/red.json") > evidence/red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red.log
+          printf '%s\n' "$result" > evidence/red-exit.txt
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs'
+          import assert from 'node:assert/strict'
+          const report = JSON.parse(readFileSync('evidence/red.json', 'utf8'))
+          assert.equal(report.numRuntimeErrorTestSuites ?? 0, 0)
+          assert(report.testResults.every(suite => suite.assertionResults.length > 0))
+          assert.doesNotMatch(readFileSync('evidence/red.log', 'utf8'), /\[vitest\]|Transform failed|Unhandled Error|SyntaxError/)
+          assert(report.numPassedTests > 0)
+          const regression = report.testResults.flatMap(suite => suite.assertionResults).find(test => test.title.startsWith('overlaps exactly three'))
+          assert.equal(regression?.status, 'failed')
+          assert.match(regression.failureMessages.join('\n'), /AssertionError/)
+          assert.match(regression.failureMessages.join('\n'), /3 times.*1 times|1 times.*3 times/s)
+          JS
+      - name: Prove ownership regressions against the independently reviewed implementation
+        env:
+          REVIEW_BASE: 4f49ecf6f2a2eb008cd9510503ceace46590e93f
+        run: |
+          set -euo pipefail
+          review_tree="$RUNNER_TEMP/twofa-ownership-red"
+          mkdir -p "$review_tree"
+          git archive "$REVIEW_BASE" | tar -x -C "$review_tree"
+          cmp frontend/package.json "$review_tree/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$review_tree/frontend/pnpm-lock.yaml"
+          component=frontend/src/components/account/OpenAITwoFAImport.vue
+          git rev-parse "$REVIEW_BASE:$component" > evidence/review-baseline-component-blob.txt
+          git hash-object "$review_tree/$component" > evidence/ownership-red-component-blob.txt
+          cmp evidence/review-baseline-component-blob.txt evidence/ownership-red-component-blob.txt
+          printf '%s\n' "$REVIEW_BASE" > evidence/review-base.txt
+          cp frontend/src/components/account/__tests__/OpenAITwoFAImport.ownership.spec.ts "$review_tree/frontend/src/components/account/__tests__/"
+          sha256sum frontend/src/components/account/__tests__/OpenAITwoFAImport.ownership.spec.ts > evidence/ownership-tests.sha256
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$review_tree/frontend/node_modules"
+          command=(pnpm exec vitest run src/components/account/__tests__/OpenAITwoFAImport.ownership.spec.ts --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/ownership-red.json")
+          printf '%q ' "${command[@]}" > evidence/ownership-red-command.txt
+          set +e
+          (cd "$review_tree/frontend" && "${command[@]}") > evidence/ownership-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/ownership-red.log
+          printf '%s\n' "$result" > evidence/ownership-red-exit.txt
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs'
+          import assert from 'node:assert/strict'
+          const report = JSON.parse(readFileSync('evidence/ownership-red.json', 'utf8'))
+          assert.equal(report.numRuntimeErrorTestSuites ?? 0, 0)
+          assert(report.testResults.every(suite => suite.assertionResults.length > 0))
+          assert.doesNotMatch(readFileSync('evidence/ownership-red.log', 'utf8'), /\[vitest\]|Transform failed|Unhandled Error|SyntaxError/)
+          const tests = report.testResults.flatMap(suite => suite.assertionResults)
+          for (const prefix of ['retains live polling-failed', 'keeps Stop busy', 'fences failed DELETE', 'recovers accepted start IDs through real Axios']) {
+            const regression = tests.find(test => test.title.startsWith(prefix))
+            assert.equal(regression?.status, 'failed', prefix)
+            assert.match(regression.failureMessages.join('\n'), /AssertionError/, prefix)
+          }
+          JS
+      - name: Prove actual modal Close-reopen regression against fixed-head review
+        env:
+          MODAL_REVIEW_BASE: 3facaf7966def4e640590a23b8db3bf648d53ed9
+        run: |
+          set -euo pipefail
+          modal_tree="$RUNNER_TEMP/twofa-modal-red"
+          mkdir -p "$modal_tree"
+          git archive "$MODAL_REVIEW_BASE" | tar -x -C "$modal_tree"
+          cmp frontend/package.json "$modal_tree/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$modal_tree/frontend/pnpm-lock.yaml"
+          printf '%s\n' "$MODAL_REVIEW_BASE" > evidence/modal-review-base.txt
+          for component in OpenAITwoFAImport.vue CreateAccountModal.vue; do
+            source="frontend/src/components/account/$component"
+            git rev-parse "$MODAL_REVIEW_BASE:$source" > "evidence/modal-base-$component.blob"
+            git hash-object "$modal_tree/$source" > "evidence/modal-red-$component.blob"
+            cmp "evidence/modal-base-$component.blob" "evidence/modal-red-$component.blob"
+          done
+          cp frontend/src/components/account/__tests__/CreateAccountModal.spec.ts "$modal_tree/frontend/src/components/account/__tests__/"
+          sha256sum frontend/src/components/account/__tests__/CreateAccountModal.spec.ts > evidence/modal-tests.sha256
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$modal_tree/frontend/node_modules"
+          command=(pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts -t '2FA controlled Close/reopen' --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/modal-red.json")
+          printf '%q ' "${command[@]}" > evidence/modal-red-command.txt
+          set +e
+          (cd "$modal_tree/frontend" && "${command[@]}") > evidence/modal-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/modal-red.log
+          printf '%s\n' "$result" > evidence/modal-red-exit.txt
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs'
+          import assert from 'node:assert/strict'
+          const report = JSON.parse(readFileSync('evidence/modal-red.json', 'utf8'))
+          assert.equal(report.numRuntimeErrorTestSuites ?? 0, 0)
+          assert.doesNotMatch(readFileSync('evidence/modal-red.log', 'utf8'), /\[vitest\]|Transform failed|Unhandled Error|SyntaxError/)
+          const tests = report.testResults.flatMap(suite => suite.assertionResults).filter(test => test.title.startsWith('2FA controlled Close/reopen'))
+          assert.equal(tests.length, 2)
+          for (const test of tests) {
+            assert.equal(test.status, 'failed')
+            assert.match(test.failureMessages.join('\n'), /AssertionError/)
+            assert.match(test.failureMessages.join('\n'), /expected 6 to be 3/)
+          }
+          JS
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: twofa-red-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+  candidate-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Record clean candidate identity
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code
+          git rev-parse HEAD > evidence/head.txt
+          git rev-parse "$SOURCE_BASE" > evidence/base.txt
+          git diff --check "$SOURCE_BASE" HEAD
+          git diff --name-only "$SOURCE_BASE" HEAD > evidence/changed-files.txt
+          git diff --name-only -z "$SOURCE_BASE" HEAD | xargs -0 sha256sum > evidence/changed-files.sha256
+      - name: Install locked dependencies on remote runner only
+        run: pnpm --dir frontend install --frozen-lockfile
+      - name: Mounted regressions and affected integration boundaries
+        run: |
+          set -o pipefail
+          tests=(src/components/account/__tests__/OpenAITwoFAImport.parallel.spec.ts src/components/account/__tests__/OpenAITwoFAImport.ownership.spec.ts src/components/account/__tests__/OpenAITwoFAImport.spec.ts src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts src/components/account/__tests__/UpstreamChannelBinding.spec.ts src/components/account/__tests__/CredentialEncryptionSetup.spec.ts src/api/admin/__tests__/accountTokenGuard.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts)
+          command=(pnpm --dir frontend exec vitest run "${tests[@]}" --reporter=verbose --reporter=json --outputFile.json="$GITHUB_WORKSPACE/evidence/green.json")
+          printf '%q ' "${command[@]}" > evidence/green-command.txt
+          set +e
+          "${command[@]}" 2>&1 | tee evidence/green.log
+          result=$?
+          printf '%s\n' "$result" > evidence/green-exit.txt
+          exit "$result"
+      - name: Lint changed frontend sources without mutation
+        if: always()
+        run: |
+          set -o pipefail
+          printf '%s\n' 'git diff --name-only -z "$SOURCE_BASE" HEAD -- frontend/src/*.ts frontend/src/*.vue | sed -z s#frontend/##g | (cd frontend && xargs -0 pnpm exec eslint)' > evidence/lint-command.txt
+          set +e
+          git diff --name-only -z "$SOURCE_BASE" HEAD -- 'frontend/src/*.ts' 'frontend/src/*.vue' | sed -z 's#frontend/##g' | (cd frontend && xargs -0 pnpm exec eslint) 2>&1 | tee evidence/lint.log
+          result=$?
+          printf '%s\n' "$result" > evidence/lint-exit.txt
+          exit "$result"
+      - name: Frontend typecheck
+        if: always()
+        run: |
+          set -o pipefail
+          printf '%s\n' 'pnpm --dir frontend run typecheck' > evidence/typecheck-command.txt
+          set +e
+          pnpm --dir frontend run typecheck 2>&1 | tee evidence/typecheck.log
+          result=$?
+          printf '%s\n' "$result" > evidence/typecheck-exit.txt
+          exit "$result"
+      - name: Frontend production build
+        if: always()
+        run: |
+          set -o pipefail
+          printf '%s\n' 'pnpm --dir frontend run build' > evidence/build-command.txt
+          set +e
+          pnpm --dir frontend run build 2>&1 | tee evidence/build.log
+          result=$?
+          printf '%s\n' "$result" > evidence/build-exit.txt
+          exit "$result"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: twofa-green-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+  rendered-before-after:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Preserve complete baseline frontend tree
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/twofa-before" "$RUNNER_TEMP/twofa-screenshots"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/twofa-before"
+          cmp frontend/package.json "$RUNNER_TEMP/twofa-before/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/twofa-before/frontend/pnpm-lock.yaml"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/twofa-before/frontend/node_modules"
+          git rev-parse HEAD > "$RUNNER_TEMP/twofa-screenshots/head.txt"
+          git rev-parse "$SOURCE_BASE" > "$RUNNER_TEMP/twofa-screenshots/base.txt"
+      - name: Install isolated screenshot browser on remote runner only
+        run: |
+          npm install --prefix "$RUNNER_TEMP/twofa-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/twofa-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual components with project CSS and synthetic API promises
+        env:
+          BASELINE_ROOT: ${{ runner.temp }}/twofa-before/frontend
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/twofa-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/twofa-screenshots
+        run: |
+          set -o pipefail
+          printf '%s\n' 'node .github/scripts/twofa-import-screenshot.mjs' > "$SCREENSHOT_DIR/command.txt"
+          node .github/scripts/twofa-import-screenshot.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+          git diff --exit-code
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: twofa-screenshots-${{ github.sha }}
+          path: ${{ runner.temp }}/twofa-screenshots
+          if-no-files-found: error
+          retention-days: 30

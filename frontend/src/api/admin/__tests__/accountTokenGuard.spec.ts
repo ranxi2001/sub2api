@@ -4,10 +4,10 @@ import {
   formatTokenGuardReloginText,
   parseTwoFALoginText,
   parseTokenGuardReloginText,
-  startTwoFALogin
+  startTwoFALogin, getTwoFALogin
 } from '../accountTokenGuard'
 
-vi.mock('../../client', () => ({ apiClient: { post: vi.fn() } }))
+vi.mock('../../client', () => ({ apiClient: { post: vi.fn(), get: vi.fn() } }))
 
 describe('token guard re-login credential format', () => {
   it('parses the account----password----2FA format', () => {
@@ -33,7 +33,20 @@ describe('initial 2FA login input', () => {
     await startTwoFALogin(entry)
     expect(apiClient.post).toHaveBeenCalledWith('/admin/account-ops/token-guard/two-fa-login', {
       ...entry, credential_target: 'operations',
-    })
+    }, undefined)
+  })
+  it('forwards the batch cancellation signal to login start and polling', async () => {
+    const controller = new AbortController()
+    const options = { signal: controller.signal }
+    const entry = { email: 'fixture@example.test', password: 'synthetic', mfa_secret: 'synthetic' }
+    vi.mocked(apiClient.post).mockResolvedValue({ data: { id: 'fixture', status: 'running' } })
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { id: 'fixture', status: 'running' } })
+    await startTwoFALogin(entry, options)
+    await getTwoFALogin('fixture', options)
+    expect(apiClient.post).toHaveBeenLastCalledWith('/admin/account-ops/token-guard/two-fa-login', { ...entry, credential_target: 'operations' }, options)
+    expect(apiClient.get).toHaveBeenLastCalledWith('/admin/account-ops/token-guard/two-fa-login/fixture', options)
+    controller.abort()
+    expect(options.signal.aborted).toBe(true)
   })
   it('supports both separators and passwords containing commas', () => {
     expect(parseTwoFALoginText('USER@example.com----p,a!ss----SECRET\nsecond@example.com,password,SECRET')).toEqual([
