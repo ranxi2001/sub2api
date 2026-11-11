@@ -375,8 +375,7 @@ func (s *ScheduledTestRunnerService) runPelicanSample(ctx context.Context, plan 
 	started := time.Now()
 	// Own the result metadata; rule/client evidence is not proof of the input
 	// assembled by the answer executor. Probes do not send a question prompt.
-	snapshot := *plan.PelicanConfig
-	snapshot.ActualPrompt = ""
+	var snapshot PelicanTestConfig
 	failure := func(message string) *ScheduledTestResult {
 		finished := time.Now()
 		return &ScheduledTestResult{Status: "failed", ErrorMessage: message, StartedAt: started, FinishedAt: finished, LatencyMs: finished.Sub(started).Milliseconds(), PelicanConfig: &snapshot}
@@ -387,6 +386,8 @@ func (s *ScheduledTestRunnerService) runPelicanSample(ctx context.Context, plan 
 			logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d account=%d sample panicked", plan.ID, plan.AccountID)
 		}
 	}()
+	snapshot = *plan.PelicanConfig
+	snapshot.ActualPrompt = ""
 	if plan.PelicanConfig.QuestionKind == QualityRandomQuestionKind && (plan.PelicanConfig.RandomQuestion == nil || plan.PelicanConfig.Prompt == "" || plan.PelicanConfig.Quality == nil || plan.PelicanConfig.Quality.ExpectedAnswer == "") {
 		return failure("random_question_not_prepared")
 	}

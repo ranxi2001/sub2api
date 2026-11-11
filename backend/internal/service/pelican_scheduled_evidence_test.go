@@ -141,3 +141,13 @@ func TestPelicanSamplePreflightDoesNotInventActualPrompt(t *testing.T) {
 		})
 	}
 }
+
+func TestPelicanSampleContainsMissingConfigPanic(t *testing.T) {
+	plan := pelicanPlan()
+	plan.PelicanConfig = nil
+	runner := &ScheduledTestRunnerService{}
+	result := runner.runPelicanSample(context.Background(), plan)
+	require.Equal(t, "failed", result.Status)
+	require.Contains(t, result.ErrorMessage, "scheduled_test_panic")
+	require.Empty(t, result.PelicanConfig.ActualPrompt)
+}
