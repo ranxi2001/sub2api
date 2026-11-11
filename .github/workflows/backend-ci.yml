@@ -52,6 +52,7 @@ jobs:
           go version | grep -q 'go1.27.4'
       - name: Install Redis for isolated snapshot adapter checks
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           if ! command -v redis-server >/dev/null; then
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends redis-server

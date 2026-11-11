@@ -30,6 +30,7 @@ jobs:
       - run: pnpm --dir frontend exec vitest run src/components/admin/user/__tests__/UserBalanceHistoryModal.spec.ts
       - name: Prepare browser
         run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/vip-history-browser" --no-save --ignore-scripts playwright@1.56.1
           node "$RUNNER_TEMP/vip-history-browser/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Capture actual component before and after and verify filter
