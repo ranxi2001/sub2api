@@ -686,7 +686,7 @@ async function openPreview(result: PelicanGroupTestResult) {
     const full = await pelicanTestsAPI.getResult(result.id)
     if (preview.value?.result.id !== result.id) return
     const html = extractPelicanHtml(full.response_text || '')
-    preview.value = { result, html, status: html ? 'ready' : 'invalid' }
+    preview.value = { result: full, html, status: html ? 'ready' : 'invalid' }
   } catch {
     if (preview.value?.result.id === result.id) preview.value = { result, html: '', status: 'error' }
   }

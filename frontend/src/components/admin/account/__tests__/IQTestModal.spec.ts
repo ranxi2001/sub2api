@@ -108,6 +108,16 @@ describe('IQTestModal', () => {
     expect(record.actualPrompt).toBe('Draw fixture\n\nHTML only')
     vm.prompt = 'Later edit'
     expect(record.prompt).toBe('Draw fixture')
+    await wrapper.setProps({ account: { id: 43, name: 'Second fixture', platform: 'openai', type: 'oauth', status: 'active' } as any })
+    vm.selectQuestion('pelican')
+    vm.selectPromptMode('random')
+    await flushPromises()
+    await vm.startTest()
+    const comparison = vi.mocked(global.fetch).mock.calls.find(([url]) => String(url).includes('/43/pelican-test'))
+    expect(JSON.parse(comparison![1]!.body as string).pelican_question).toEqual(question)
+    expect(apiClient.get).toHaveBeenCalledTimes(1)
+    const secondRecord = JSON.parse(localStorage.getItem('sub2api-pelican-test:43')!)[0]
+    expect(secondRecord.pelicanQuestion).toEqual(record.pelicanQuestion)
     wrapper.unmount()
   })
 
