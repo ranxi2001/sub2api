@@ -25,7 +25,7 @@ jobs:
           /bin/sh deploy/test-caddyfile-cache.sh
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -90,18 +90,31 @@ jobs:
         if: github.head_ref == 'fix/moderation-user-quick-enable' || github.ref_name == 'fix/moderation-user-quick-enable'
         working-directory: backend
         run: go test -tags=unit ./internal/handler/admin ./internal/server/middleware ./internal/service ./internal/repository -run 'TestUserQuickEnable|TestAdminService_UserQuickEnable|TestModerationRecoveryUnbanDoesNotClaimOtherDisable' -count=1 -v
-      - name: Usage trend local bucket regressions
-        working-directory: backend
-        run: go test -tags=integration ./internal/repository -run '^TestUsageTrendAggregateTimezone' -count=1 -v
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify Go version
+        run: go version | grep -q 'go1.27.4'
+      - name: Usage trend local bucket regressions
+        working-directory: backend
+        run: go test -tags=integration ./internal/repository -run '^TestUsageTrendAggregateTimezone' -count=1 -v
       - name: Integration tests
         working-directory: backend
         run: make test-integration
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -123,7 +136,7 @@ jobs:
         run: make test-frontend
 
   golangci-lint:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -216,7 +229,7 @@ jobs:
           grep -Eq "$diagnostic" "$RUNNER_TEMP/pr612-red.log"
 
   release-helpers:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -246,7 +259,7 @@ jobs:
       - run: python -m unittest discover -s deploy/connection-diagnostics -p 'test_collect.py'
 
   prism-adapter:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:

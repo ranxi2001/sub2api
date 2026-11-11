@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   backend-security:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -31,7 +31,7 @@ jobs:
           govulncheck ./...
 
   frontend-security:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
       - name: Set up pnpm
