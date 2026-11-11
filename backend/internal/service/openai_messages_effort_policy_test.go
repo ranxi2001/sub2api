@@ -241,9 +241,10 @@ func TestMessagesGLMMappedEffortPolicyHTTP(t *testing.T) {
 				}
 				mappings = append(mappings, mapping)
 			}
-			ctx := WithOpenAIReasoningEffortPolicyForMessages(requestContext.Request.Context(), body, test.ceiling, mappings, test.overLimit)
+			requestModel := gjson.GetBytes(body, "model").String()
+			ctx := WithOpenAIReasoningEffortPolicyForMessages(requestContext.Request.Context(), body, test.ceiling, mappings, test.overLimit, requestModel)
 			if test.forced != "" {
-				ctx = WithAPIKeyOpenAIReasoningEffortPolicy(ctx, test.forced, test.ceiling, mappings, test.overLimit)
+				ctx = WithAPIKeyOpenAIReasoningEffortPolicy(ctx, test.forced, test.ceiling, mappings, test.overLimit, requestModel)
 			}
 			result, err := svc.ForwardAsAnthropic(ctx, requestContext, account, body, "", "")
 			if test.status != 0 {

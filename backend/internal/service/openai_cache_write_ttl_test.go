@@ -199,3 +199,77 @@ func TestOpenAICacheWriteTTLPrices(t *testing.T) {
 		require.InDelta(t, 9e-6+2390*2e-6, *cost, 1e-12)
 	})
 }
+
+// Group cards take precedence over channel cards for both the real charge and
+// the public schedule. Explicit zero and an absent 12h field stay distinct.
+func TestOpenAICacheWriteTTLGroupPricingAndSchedule(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		long      *float64
+		effective float64
+	}{
+		{"explicit group price", float64Ptr(3e-6), 3e-6},
+		{"explicit free group price", float64Ptr(0), 0},
+		{"legacy flat group price", nil, 2e-6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			channel := []ChannelModelPricing{{
+				Platform: PlatformOpenAI, Models: []string{"gpt-6-luna"}, BillingMode: BillingModeToken,
+				CacheWritePrice: float64Ptr(1e-6), CacheWrite12hPrice: float64Ptr(9e-6),
+			}}
+			bs, resolver := newTokenCostTestEnv(t, PlatformOpenAI, channel, nil)
+			group := &Group{ID: 100, Platform: PlatformOpenAI, ModelPricing: []ChannelModelPricing{{
+				Models: []string{"gpt-6-luna"}, BillingMode: BillingModeToken,
+				CacheWritePrice: float64Ptr(2e-6), CacheWrite12hPrice: tc.long,
+			}}}
+			ctx := WithResolvedTargetPlatform(context.Background(), PlatformOpenAI)
+			resolved := resolver.Resolve(ctx, PricingInput{Model: "gpt-6-luna", GroupID: &group.ID, Group: group})
+			require.Equal(t, PricingSourceGroup, resolved.Source)
+			requirePrice(t, tc.long, resolved.BasePricing.CacheCreation12hPricePerToken, "resolved group 12h")
+			tokens := UsageTokens{CacheCreationTokens: 2399, CacheCreation30mTokens: 9, CacheCreation12hTokens: 2390}
+			cost, err := bs.CalculateTokenCostForRequest(TokenCostRequest{
+				Ctx: ctx, Model: "gpt-6-luna", Group: group, Tokens: tokens, RateMultiplier: 0.5,
+				Resolver: resolver, Resolved: resolved,
+			})
+			require.NoError(t, err)
+			want := 9*2e-6 + 2390*tc.effective
+			require.InDelta(t, want, cost.CacheCreationCost, 1e-12)
+			require.InDelta(t, want*0.5, cost.ActualCost, 1e-12)
+			schedule, err := bs.ResolveContextPricingSchedule(ctx, resolver, ContextPricingScheduleInput{
+				Model: "gpt-6-luna", Group: group, Platform: PlatformOpenAI,
+			})
+			require.NoError(t, err)
+			require.Len(t, schedule.Tiers, 1)
+			requirePrice(t, tc.long, schedule.Tiers[0].CacheWrite12h, "schedule group 12h")
+			display := plazaPricingFromSchedule(&group.ModelPricing[0], schedule)
+			requirePrice(t, tc.long, display.CacheWrite12hPrice, "plaza group 12h")
+			requirePrice(t, float64Ptr(9e-6), channel[0].CacheWrite12hPrice, "channel remains unchanged")
+		})
+	}
+}
+
+// A change confined to 12h must remain a separate context tier and reach the
+// model-plaza projection; equal generic cache rates do not make tiers equal.
+func TestOpenAICacheWriteTTLChannelScheduleKeepsDistinctLongRates(t *testing.T) {
+	channel := []ChannelModelPricing{{
+		Platform: PlatformOpenAI, Models: []string{"gpt-6-luna"}, BillingMode: BillingModeToken,
+		CacheWritePrice: float64Ptr(1e-6), CacheWrite12hPrice: float64Ptr(2e-6),
+		Intervals: []PricingInterval{
+			{MinTokens: 0, MaxTokens: intPtr(10000), CacheWrite12hPrice: float64Ptr(2e-6)},
+			{MinTokens: 10000, CacheWrite12hPrice: float64Ptr(3e-6)},
+		},
+	}}
+	bs, resolver := newTokenCostTestEnv(t, PlatformOpenAI, channel, nil)
+	group := enabledGroup(PlatformOpenAI)
+	schedule, err := bs.ResolveContextPricingSchedule(context.Background(), resolver, ContextPricingScheduleInput{
+		Model: "gpt-6-luna", Group: group, Platform: PlatformOpenAI,
+	})
+	require.NoError(t, err)
+	require.Len(t, schedule.Tiers, 2, "12h-only change must prevent tier merging")
+	requirePrice(t, float64Ptr(2e-6), schedule.Tiers[0].CacheWrite12h, "lower 12h")
+	requirePrice(t, float64Ptr(3e-6), schedule.Tiers[1].CacheWrite12h, "upper 12h")
+	display := plazaPricingFromSchedule(&channel[0], schedule)
+	requirePrice(t, float64Ptr(2e-6), display.CacheWrite12hPrice, "plaza base 12h")
+	require.Len(t, display.Intervals, 2)
+	requirePrice(t, float64Ptr(3e-6), display.Intervals[1].CacheWrite12hPrice, "plaza upper 12h")
+}
