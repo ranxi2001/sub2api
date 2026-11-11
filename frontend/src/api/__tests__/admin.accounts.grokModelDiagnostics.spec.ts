@@ -62,8 +62,8 @@ describe('admin account grok model diagnostics API', () => {
 
     await expect(syncUpstreamModels(25)).resolves.toEqual(result)
     expect(post).toHaveBeenCalledTimes(1)
-    expect(post).toHaveBeenCalledWith('/admin/accounts/25/models/sync-upstream')
-    expect(post.mock.calls[0]).toHaveLength(1)
+    expect(post).toHaveBeenCalledWith('/admin/accounts/25/models/sync-upstream', undefined, undefined)
+    expect(post.mock.calls[0]).toHaveLength(3)
   })
 
   it('leaves omitted diagnostics and discovery source absent for older responses', async () => {
@@ -76,6 +76,6 @@ describe('admin account grok model diagnostics API', () => {
     expect(account).not.toHaveProperty('grok_model_diagnostics')
     expect(synced).not.toHaveProperty('discovery_source')
     expect(synced).not.toHaveProperty('grok_model_diagnostics')
-    expect(post).toHaveBeenLastCalledWith('/admin/accounts/3/models/sync-upstream')
+    expect(post).toHaveBeenLastCalledWith('/admin/accounts/3/models/sync-upstream', undefined, undefined)
   })
 })

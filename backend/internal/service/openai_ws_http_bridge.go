@@ -879,10 +879,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		if openai.ResponseStartsSemanticOutput(upstreamMessage, eventType) {
 			tokenEventCount++
-			if firstTokenMs == nil {
-				ms := int(requesttiming.Now(ctx).Sub(turnStart).Milliseconds())
-				firstTokenMs = &ms
-			}
+		}
+		if firstTokenMs == nil && openAIWSFirstTokenEventFunc(s.openAITTFTMode(ctx))(eventType, upstreamMessage) {
+			ms := int(requesttiming.Now(ctx).Sub(turnStart).Milliseconds())
+			firstTokenMs = &ms
 		}
 		if openAIWSMessageShouldParseUsage(eventType, upstreamMessage) {
 			parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
