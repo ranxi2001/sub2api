@@ -29,7 +29,8 @@ func TestPriorityObservationResponsesEndpoint(t *testing.T) {
 	require.Equal(t, "/v1/responses", evidence.Endpoint)
 	svc.priorityScheduling.latestInput = newPrioritySnapshotInput(req, DefaultPrioritySchedulingConfig(), []openAIAccountCandidateScore{{account: account}}, time.Now())
 	snapshot := svc.PrioritySchedulingSnapshot()
-	require.Equal(t, int64(1), snapshot.Candidates[0].Successes)
+	require.Zero(t, snapshot.Candidates[0].Successes, "passive endpoint evidence must not substitute for account performance")
+	require.Nil(t, snapshot.Candidates[0].Performance)
 }
 
 type observationQueryReader struct {
@@ -193,7 +194,7 @@ func TestPriorityObservationStickyPenaltyAndExpiry(t *testing.T) {
 	selected, decision = selectTurn("penalty-owner", "resp_penalty_owner", nil)
 	require.Equal(t, int64(1), selected.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
-	// Re-reading old data does not renew its ten-minute duration.
+	// An old timestamp alone does not recover the shared rolling mean.
 	svc.priorityScheduling.mu.Lock()
 	entry := svc.priorityScheduling.entries[priorityHistoryKey(req, cfg)]
 	expired := time.Now().Add(-11 * time.Minute)
@@ -205,11 +206,20 @@ func TestPriorityObservationStickyPenaltyAndExpiry(t *testing.T) {
 	require.Equal(t, int64(2), selected.Account.ID, "expiry must not move the escaped session back to its previous account")
 	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
 	require.Equal(t, int64(2), cache.sessionBindings["openai:sticky-penalty"])
+	// A newly observed healthy mean restores the fallback without moving the
+	// escaped session back to its former owner.
+	svc.priorityScheduling.mu.Lock()
+	signal = entry.signals[1]
+	signal.Performance = cloneAccountPerformance(signal.Performance)
+	recoveredTTFT := 500.0
+	signal.Performance.AvgTTFTMs = &recoveredTTFT
+	entry.signals[1] = signal
+	svc.priorityScheduling.mu.Unlock()
 	selected, _ = selectTurn("penalty-recovered", "", map[int64]struct{}{2: {}})
 	require.Equal(t, int64(1), selected.Account.ID, "the recovered account remains available to a new session")
 	fallback, fallbackErr = scheduler.tryFallbackToWeightedSticky(ctx, weightedReq)
 	require.NoError(t, fallbackErr)
-	require.NotNil(t, fallback, "expiry also restores the weighted sticky fallback")
+	require.NotNil(t, fallback, "a recovered shared mean restores the weighted sticky fallback")
 	require.Equal(t, int64(1), fallback.Account.ID)
 	require.Equal(t, int64(1), cache.sessionBindings["openai:weighted-penalty"])
 	require.Equal(t, int64(2), cache.sessionBindings["openai:sticky-penalty"], "recovery in another session must not undo the replacement binding")
