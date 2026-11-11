@@ -1,0 +1,59 @@
+name: Upstream v0.2.21 rendered evidence
+on:
+  push:
+    branches: [cherry/upstream-v0.2.21]
+  pull_request:
+    branches: [production]
+permissions:
+  contents: read
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  SOURCE_BASE: 6fa7fb86eae7c732794450646dc13831dce87ff1
+jobs:
+  rendered:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact candidate
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Preserve complete baseline archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/v0221-baseline"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/v0221-baseline"
+          cmp frontend/package.json "$RUNNER_TEMP/v0221-baseline/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/v0221-baseline/frontend/pnpm-lock.yaml"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/v0221-baseline/frontend/node_modules"
+      - name: Install isolated browser remotely
+        run: |
+          npm install --prefix "$RUNNER_TEMP/v0221-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/v0221-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual baseline and candidate components with real CSS
+        env:
+          BASELINE_ROOT: ${{ runner.temp }}/v0221-baseline/frontend
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/v0221-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/v0221-ui
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCREENSHOT_DIR"
+          node .github/scripts/upstream-v0221-screenshot.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: v0221-ui-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/v0221-ui
+          if-no-files-found: error
