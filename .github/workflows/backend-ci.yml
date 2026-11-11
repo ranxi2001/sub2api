@@ -189,9 +189,10 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Assert exact candidate head
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
           path: red
+      - name: Assert exact candidate head
+        working-directory: red
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
       - uses: actions/setup-go@v6
         with:
           go-version-file: red/backend/go.mod
