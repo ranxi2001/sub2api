@@ -67,6 +67,8 @@ try {
           if (mode === 'after' && scenario === 'usage') {
             await page.getByTestId('antigravity-active-query').click()
             await page.waitForFunction(() => window.__v0221.requests.some(row => row.params?.force === 'true' && row.params?.source === 'active'))
+            await page.waitForFunction(() => document.body.innerText.includes('9%'))
+            await shot('query-refreshed')
           }
           if (mode === 'after' && scenario === 'settings') {
             const dock = page.locator('.settings-save-dock')
@@ -82,6 +84,7 @@ try {
           await shot('mobile')
           if (scenario === 'keys') {
             await page.evaluate(() => window.__v0221.pending.splice(0).forEach(resolve => resolve()))
+            await page.waitForFunction(() => document.body.innerText.includes('$3.7500'))
             await shot('usage-loaded')
           }
           manifest.results.push({ mode, scenario, requests: await page.evaluate(() => window.__v0221.requests), saved: await page.evaluate(() => window.__v0221.saved) })

@@ -38,7 +38,7 @@ jobs:
         working-directory: backend
         run: >-
           go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository ./internal/server/middleware ./internal/payment/provider ./internal/config
-          -run 'Test(Messages|NativeImages|AsyncImage|RequestBody|OpenAI|AnthropicCompat|AuthServiceRefresh|RefreshTokenCache|GatewayServiceNewSelection|Antigravity|ConvertGeminiToClaude|GeminiResponseToChatCompletions|Claude52|NewModelPricing|PricingSync|EasyPay|ExecuteEasyPay|UpdatePaymentConfig|AutoRequestBody|LoadRequestBody|PoolCapacity|AgentRecovery|UsageLog|ChannelCacheWrite|ApplyMigrationsFS)'
+          -run 'Test(Issue715|WSNodeOwner|Messages|NativeImages|AsyncImage|RequestBody|OpenAI|AnthropicCompat|AuthServiceRefresh|RefreshTokenCache|GatewayServiceNewSelection|Antigravity|ConvertGeminiToClaude|GeminiResponseToChatCompletions|Claude52|NewModelPricing|PricingSync|EasyPay|ExecuteEasyPay|UpdatePaymentConfig|AutoRequestBody|LoadRequestBody|PoolCapacity|AgentRecovery|UsageLog|ChannelCacheWrite|ApplyMigrationsFS)'
           -count=1 -v -timeout=30m
       - name: Migration source contracts
         working-directory: backend

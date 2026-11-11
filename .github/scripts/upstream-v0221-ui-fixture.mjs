@@ -49,7 +49,7 @@ const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '
 await router.push(scenario === 'settings' ? '/admin/settings?tab=general' : scenario === 'keys' ? '/keys' : '/admin/channels')
 await router.isReady()
 const pricing = ref({ models: ['gpt-6-synthetic'], billing_mode: 'token', input_price: 2, output_price: 8, cache_write_price: 2.5, cache_write_1h_price: null, cache_write_12h_price: 5, cache_read_price: 0.2, fast_multiplier: 2, flex_multiplier: null, reasoning_effort_multipliers: null, image_input_price: null, image_output_price: null, per_request_price: null, intervals: [], time_pricing: { timezone: 'UTC', weekdays_only: false, periods: [] } })
-const provider = { id: 9103, provider_key: 'easypay', name: 'Synthetic EasyPay', enabled: true, refund_enabled: true, allow_user_refund: false, payment_mode: 'qrcode', supported_types: ['alipay'], config: { gateway: 'https://pay.example.invalid', pid: 'synthetic-merchant', key: 'synthetic-placeholder', refundSuccessCode: '1' }, limits: '' }
+const provider = { id: 9103, provider_key: 'easypay', name: 'Synthetic EasyPay', enabled: true, refund_enabled: true, allow_user_refund: false, payment_mode: 'qrcode', supported_types: ['alipay'], config: { apiBase: 'https://pay.example.invalid', pid: 'synthetic-merchant', pkey: 'synthetic-placeholder', refundSuccessCode: '1' }, limits: '' }
 const options = [{ value: 'easypay', label: 'EasyPay' }, { value: 'alipay', label: 'Alipay' }]
 const App = {
   setup() {
