@@ -25,6 +25,7 @@ func (h *SettingHandler) SavePriorityScheduling(c *gin.Context) {
 	defaults := service.DefaultPrioritySchedulingConfig()
 	var request struct {
 		service.PrioritySchedulingConfig
+		TargetTPS                  *float64 `json:"target_tps"`
 		ErrorRateWeight            *float64 `json:"error_rate_weight"`
 		ErrorRateWindowMinutes     *int     `json:"error_rate_window_minutes"`
 		ErrorRatePriorSamples      *int     `json:"error_rate_prior_samples"`
@@ -43,12 +44,13 @@ func (h *SettingHandler) SavePriorityScheduling(c *gin.Context) {
 		return
 	}
 	cfg := request.PrioritySchedulingConfig
-	if request.ErrorRateWeight == nil || request.ErrorRateWindowMinutes == nil || request.ErrorRatePriorSamples == nil || request.OAuthQuotaPriority == nil || request.OAuthQuotaThreshold == nil || request.BalanceProtocols == nil || request.LatencyPenaltyMode == nil || request.LatencyPenaltyMinutes == nil || request.LatencyPercentile == nil || request.LatencyMeasurement == nil || request.RecoveryExplorationPercent == nil {
+	if request.TargetTPS == nil || request.ErrorRateWeight == nil || request.ErrorRateWindowMinutes == nil || request.ErrorRatePriorSamples == nil || request.OAuthQuotaPriority == nil || request.OAuthQuotaThreshold == nil || request.BalanceProtocols == nil || request.LatencyPenaltyMode == nil || request.LatencyPenaltyMinutes == nil || request.LatencyPercentile == nil || request.LatencyMeasurement == nil || request.RecoveryExplorationPercent == nil {
 		current, err := h.settingService.GetPrioritySchedulingConfig(c.Request.Context())
 		if err != nil {
 			response.Error(c, http.StatusServiceUnavailable, "Priority scheduling configuration unavailable")
 			return
 		}
+		cfg.TargetTPS = current.TargetTPS
 		cfg.ErrorRateWeight = current.ErrorRateWeight
 		cfg.ErrorRateWindowMinutes = current.ErrorRateWindowMinutes
 		cfg.ErrorRatePriorSamples = current.ErrorRatePriorSamples
@@ -60,6 +62,9 @@ func (h *SettingHandler) SavePriorityScheduling(c *gin.Context) {
 		cfg.LatencyPercentile = current.LatencyPercentile
 		cfg.LatencyMeasurement = current.LatencyMeasurement
 		cfg.RecoveryExplorationPercent = current.RecoveryExplorationPercent
+	}
+	if request.TargetTPS != nil {
+		cfg.TargetTPS = *request.TargetTPS
 	}
 	if request.ErrorRateWeight != nil {
 		cfg.ErrorRateWeight = *request.ErrorRateWeight

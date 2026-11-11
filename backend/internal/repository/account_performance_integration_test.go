@@ -113,6 +113,17 @@ func TestAccountPerformancePostgresWindowAndSuccessfulAverages(t *testing.T) {
 	require.Nil(t, metrics[empty.ID].AvgTTFTMs)
 	require.Nil(t, metrics[empty.ID].DegradationPercent)
 
+	// Priority scheduling must consume exactly the existing account metrics,
+	// independent of its public model and financial window.
+	for _, model := range []string{"synthetic-performance", "other-public-model"} {
+		signals, readErr := usage.ReadPrioritySchedulingSignals(ctx, service.PrioritySchedulingQuery{AccountIDs: []int64{account.ID, empty.ID}, Model: model, UsageSince: now.Add(-15 * time.Minute), UsageUntil: now})
+		require.NoError(t, readErr)
+		for id, expected := range metrics {
+			require.NotNil(t, signals[id].Performance)
+			require.Equal(t, expected, *signals[id].Performance)
+		}
+	}
+
 	// A saved global window immediately changes both latency sample sets.
 	_, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES($1,'15') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, service.SettingKeyAccountPerformanceWindowMinutes)
 	require.NoError(t, err)

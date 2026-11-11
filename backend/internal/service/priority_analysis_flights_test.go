@@ -65,12 +65,12 @@ func TestPriorityAnalysisCoalescesAndOwnsMutableResponses(t *testing.T) {
 	first := finishAnalysis(t, done[0])
 	require.NoError(t, first.err)
 	first.value.Snapshot.Candidates[0].AccountName = "mutated"
-	first.value.Latency.Accounts[0].Buckets[0].Samples = 999
+	*first.value.Snapshot.Candidates[0].Performance.AvgTTFTMs = 999
 	for _, pending := range done[1:] {
 		other := finishAnalysis(t, pending)
 		require.NoError(t, other.err)
 		require.Equal(t, "fixture", other.value.Snapshot.Candidates[0].AccountName)
-		require.Equal(t, 1, other.value.Latency.Accounts[0].Buckets[0].Samples)
+		require.Equal(t, 100.0, *other.value.Snapshot.Candidates[0].Performance.AvgTTFTMs)
 	}
 	analysisDrained(t, svc)
 	_, err := svc.PriorityAnalysis(ctx, q)

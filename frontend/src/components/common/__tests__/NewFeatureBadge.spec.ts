@@ -24,6 +24,7 @@ describe('NewFeatureBadge', () => {
 
   it.each([
     ['VIP automatic credit email', NEW_FEATURE_NOTICES.vipAutoCreditEmail],
+    ['priority account performance', NEW_FEATURE_NOTICES.priorityAccountPerformance],
     ['dashboard account concurrency', NEW_FEATURE_NOTICES.dashboardAccountConcurrency],
     ['key risk', NEW_FEATURE_NOTICES.keyRisk],
     ['API key usage dates', NEW_FEATURE_NOTICES.apiKeyUsageDateRange],

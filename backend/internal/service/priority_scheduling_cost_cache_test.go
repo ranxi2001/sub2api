@@ -10,10 +10,10 @@ import (
 func TestPrioritySchedulingCostRefreshReusesHistoryAndChangesSelection(t *testing.T) {
 	c := DefaultPrioritySchedulingConfig()
 	c.Enabled, c.Mode = true, "profit"
-	signal := PrioritySchedulingSignal{
+	signal := withAccountPerformanceFixture(PrioritySchedulingSignal{
 		Samples: 20, P90TTFTMs: 500, QualityPassed: 10, QualitySamples: 10,
 		ProfitSamples: 20, Revenue: 1, BaseCost: 8,
-	}
+	})
 	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: signal, 2: signal}}
 	gateway := priorityGateway(c, reader)
 	scheduler := &defaultOpenAIAccountScheduler{service: gateway}
