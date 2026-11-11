@@ -77,7 +77,9 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if middleware2.RejectRequestBodyReadError(c, err) { return }
+		if middleware2.RejectRequestBodyReadError(c, err) {
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			imageTaskJSONError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -103,7 +105,9 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 
 	taskCtx, recorder, cancel, err := newAsyncImageContext(c, body, h.tasks.ExecutionTimeout())
 	if err != nil {
-		if !middleware2.RejectRequestBodyMemoryOverload(c, err) { imageTaskError(c, service.ErrImageTaskUnavailable) }
+		if !middleware2.RejectRequestBodyMemoryOverload(c, err) {
+			imageTaskError(c, service.ErrImageTaskUnavailable)
+		}
 		return
 	}
 	task, err := h.tasks.Create(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID})

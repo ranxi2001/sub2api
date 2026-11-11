@@ -208,6 +208,12 @@ export default {
       groupCountTotal: '{count} groups total',
       platforms: {
         anthropic: 'Anthropic',
+        antigravityGemini5h: 'G·5h',
+        antigravityGeminiWeekly: 'G·wk',
+        antigravityArgon5h: 'A·5h',
+        antigravityArgonWeekly: 'A·wk',
+        antigravityOther5h: 'C·5h',
+        antigravityOtherWeekly: 'C·wk',
         claude: 'Claude',
         openai: 'OpenAI',
         gemini: 'Gemini',

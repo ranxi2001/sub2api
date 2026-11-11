@@ -1913,6 +1913,7 @@ const loadApiKeys = async () => {
       return
     }
     usageFailed.value = true
+    usageLoading.value = false
     appStore.showError(t('keys.failedToLoad'))
   } finally {
     if (abortController === controller) {

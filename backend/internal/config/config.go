@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamroute"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/sysutil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamroute"
 	"github.com/spf13/viper"
 	"golang.org/x/net/http/httpguts"
 )
@@ -3709,7 +3709,9 @@ func (c *Config) Validate() error {
 	if c.Idempotency.CleanupBatchSize <= 0 {
 		return fmt.Errorf("idempotency.cleanup_batch_size must be positive")
 	}
-	if c.Gateway.RequestBodyMemoryBudgetBytes < 0 { return fmt.Errorf("gateway.request_body_memory_budget_bytes must not be negative") }
+	if c.Gateway.RequestBodyMemoryBudgetBytes < 0 {
+		return fmt.Errorf("gateway.request_body_memory_budget_bytes must not be negative")
+	}
 
 	if c.Gateway.MaxBodySize <= 0 {
 		return fmt.Errorf("gateway.max_body_size must be positive")

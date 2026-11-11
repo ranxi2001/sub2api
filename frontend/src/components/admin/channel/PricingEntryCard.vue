@@ -128,7 +128,7 @@
                 type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
             <div v-if="props.platform === 'openai'">
-              <label class="text-xs text-gray-400" :title="t('admin.channels.form.cacheWrite12hHint')">{{ t('admin.channels.form.cacheWrite12hPrice') }}</label>
+              <label class="text-xs text-gray-400" :title="t('admin.channels.form.cacheWrite12hHint')">{{ t('admin.channels.form.cacheWrite12hPrice') }} <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h" :user-id="noticeUserId" /></label>
               <input :value="entry.cache_write_12h_price" @input="emitField('cache_write_12h_price', ($event.target as HTMLInputElement).value)"
                 type="number" step="any" min="0" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.pricePlaceholder')" />
             </div>
@@ -307,6 +307,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import IntervalRow from './IntervalRow.vue'
@@ -321,6 +323,7 @@ import channelsAPI from '@/api/admin/channels'
 const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
+  noticeUserId?: number | null
   entry: PricingFormEntry
   platform?: string
   hideTokenIntervals?: boolean

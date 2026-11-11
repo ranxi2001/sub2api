@@ -1439,7 +1439,7 @@ describe('user KeysView column settings', () => {
       const wrapper = await mountView()
 
       expect(wrapper.find('[data-test="usage-pending"]').exists()).toBe(false)
-      expect(wrapper.get('[data-test="usage"]').text()).toContain('$0.0000')
+      expect(wrapper.get('[data-test="usage"]').text()).toContain('—')
       consoleError.mockRestore()
     })
   })

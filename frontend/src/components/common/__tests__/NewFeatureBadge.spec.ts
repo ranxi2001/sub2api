@@ -23,6 +23,10 @@ describe('NewFeatureBadge', () => {
 
 
   it.each([
+    ['Antigravity usage query', NEW_FEATURE_NOTICES.antigravityUsageQuery],
+    ['OpenAI cache write TTL', NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h],
+    ['EasyPay refund code', NEW_FEATURE_NOTICES.easyPayRefundSuccessCode],
+    ['settings save dock', NEW_FEATURE_NOTICES.settingsSaveDock],
     ['dashboard account concurrency', NEW_FEATURE_NOTICES.dashboardAccountConcurrency],
     ['key risk', NEW_FEATURE_NOTICES.keyRisk],
     ['API key usage dates', NEW_FEATURE_NOTICES.apiKeyUsageDateRange],

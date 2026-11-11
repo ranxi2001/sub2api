@@ -6,9 +6,9 @@ import (
 	"compress/zlib"
 	"context"
 	"encoding/binary"
-	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"errors"
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"io"
 	"net/http"
 	"strings"
@@ -94,7 +94,9 @@ func (b *requestBodyBuffer) release(ctx context.Context) {
 
 func readRequestBodyWithBudget(req *http.Request, limits ...int64) (result requestBodyBuffer, resultErr error) {
 	maxDecodedBytes := int64(maxDecompressedBodySize)
-	if len(limits) > 0 && limits[0] > 0 { maxDecodedBytes = limits[0] }
+	if len(limits) > 0 && limits[0] > 0 {
+		maxDecodedBytes = limits[0]
+	}
 	defer func() {
 		if resultErr == nil && req != nil {
 			requestcapture.FromContext(req.Context()).ClientRequest(result.data, req.Header.Get("Content-Type"), req.Header)
@@ -240,7 +242,9 @@ func decompressRequestBody(encoding string, raw []byte) ([]byte, error) {
 
 func decompressRequestBodyWithBudget(ctx context.Context, encoding string, raw []byte, limits ...int64) (requestBodyBuffer, error) {
 	maxDecodedBytes := int64(maxDecompressedBodySize)
-	if len(limits) > 0 && limits[0] > 0 { maxDecodedBytes = limits[0] }
+	if len(limits) > 0 && limits[0] > 0 {
+		maxDecodedBytes = limits[0]
+	}
 
 	var reader io.Reader
 	switch encoding {
@@ -309,7 +313,9 @@ func normalizeLenientJSONRequestBody(ctx context.Context, body []byte, maxNormal
 		return requestBodyBuffer{}, &http.MaxBytesError{Limit: maxNormalizedBytes}
 	}
 
-	if len(body) >= 64<<10 && !hasJSONControlBytes(body) { return requestBodyBuffer{data: body}, nil }
+	if len(body) >= 64<<10 && !hasJSONControlBytes(body) {
+		return requestBodyBuffer{data: body}, nil
+	}
 
 	normalizedSize := int64(len(body))
 	inString := false
@@ -404,4 +410,3 @@ func hasJSONControlBytes(body []byte) bool {
 	}
 	return false
 }
-

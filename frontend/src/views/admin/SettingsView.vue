@@ -9513,6 +9513,7 @@
 
         <!-- Save dock — sticky so long tabs never require scrolling to the end -->
         <div v-show="activeTab !== 'backup'" class="settings-save-dock">
+          <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.settingsSaveDock" :user-id="authStore.user?.id" />
           <button
             type="submit"
             :disabled="saving || loadFailed"

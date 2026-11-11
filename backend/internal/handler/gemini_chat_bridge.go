@@ -90,7 +90,9 @@ func ServeGeminiViaChatCompletions(c *gin.Context, chat gin.HandlerFunc) {
 	}
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if middleware.RejectRequestBodyReadError(c, err) { return }
+		if middleware.RejectRequestBodyReadError(c, err) {
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
 			return

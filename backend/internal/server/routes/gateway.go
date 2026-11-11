@@ -684,7 +684,9 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 
 		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 		if err != nil {
-			if middleware.RejectRequestBodyReadError(c, err) { return }
+			if middleware.RejectRequestBodyReadError(c, err) {
+				return
+			}
 			status := http.StatusBadRequest
 			message := "Failed to read request body"
 			var maxErr *http.MaxBytesError

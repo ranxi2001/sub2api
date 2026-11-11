@@ -477,7 +477,6 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:     true,
 	}
 
-
 	// Gemini 3.1 Pro
 	s.fallbackPrices["gemini-3.1-pro"] = &ModelPricing{
 		InputPricePerToken:         2e-6,   // $2 per MTok

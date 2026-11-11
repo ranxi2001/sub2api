@@ -1811,15 +1811,15 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 		value.Get("prompt_tokens_details.image_tokens"),
 	)
 	return OpenAIUsage{
-		InputTokens:              int(inputTokens),
-		ImageInputTokens:         imageInputTokens,
-		OutputTokens:             int(outputTokens),
-		CacheCreationInputTokens: cacheCreationTokens,
+		InputTokens:                 int(inputTokens),
+		ImageInputTokens:            imageInputTokens,
+		OutputTokens:                int(outputTokens),
+		CacheCreationInputTokens:    cacheCreationTokens,
 		CacheCreation30mInputTokens: cache30m,
 		CacheCreation12hInputTokens: cache12h,
-		CacheReadInputTokens:     cacheReadTokens,
-		CacheReadKnown:           openAICacheReadKnownFromUsage(value),
-		ImageOutputTokens:        int(imageOutputTokens),
+		CacheReadInputTokens:        cacheReadTokens,
+		CacheReadKnown:              openAICacheReadKnownFromUsage(value),
+		ImageOutputTokens:           int(imageOutputTokens),
 	}, true
 }
 

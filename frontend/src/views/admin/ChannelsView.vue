@@ -504,7 +504,7 @@
                 {{ t('admin.channels.form.noPricingRules', 'No pricing rules yet. Click "Add" to create one.') }}
               </div>
               <div v-else class="space-y-2">
-                <PricingEntryCard
+                <PricingEntryCard :notice-user-id="authStore.user?.id"
                   v-for="(entry, idx) in section.model_pricing"
                   :key="idx"
                   :entry="entry"
@@ -636,7 +636,7 @@
                     {{ t('admin.channels.form.noPricingRules') }}
                   </div>
                   <div v-else class="space-y-2">
-                    <PricingEntryCard
+                    <PricingEntryCard :notice-user-id="authStore.user?.id"
                       v-for="(entry, pIdx) in rule.pricing"
                       :key="pIdx"
                       :entry="entry"
@@ -674,7 +674,7 @@
       </template>
     </BaseDialog>
 
-    <BulkEditChannelDialog
+    <BulkEditChannelDialog :notice-user-id="authStore.user?.id"
       :show="showBulkEdit"
       :channels="bulkEditChannels"
       :initial-pricing="bulkInitialPricing"

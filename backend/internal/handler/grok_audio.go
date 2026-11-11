@@ -1,10 +1,10 @@
 package handler
 
 import (
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"context"
 	"encoding/json"
 	"errors"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"io"
 	"net/http"
 	"net/url"
@@ -295,7 +295,9 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 
 	body, err := readGrokVoiceGatewayBody(c)
 	if err != nil {
-		if middleware2.RejectRequestBodyReadError(c, err) { return }
+		if middleware2.RejectRequestBodyReadError(c, err) {
+			return
+		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}

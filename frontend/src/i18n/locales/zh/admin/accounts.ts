@@ -487,6 +487,12 @@ export default {
       deleteConfirm: "确定要删除账号 '{name}' 吗？此操作无法撤销。",
       failedToClearRateLimit: '清除速率限制失败',
       platforms: {
+        antigravityGemini5h: 'G·5h',
+        antigravityGeminiWeekly: 'G·周',
+        antigravityArgon5h: 'A·5h',
+        antigravityArgonWeekly: 'A·周',
+        antigravityOther5h: 'C·5h',
+        antigravityOtherWeekly: 'C·周',
         claude: 'Claude',
         openai: 'OpenAI',
         anthropic: 'Anthropic',
