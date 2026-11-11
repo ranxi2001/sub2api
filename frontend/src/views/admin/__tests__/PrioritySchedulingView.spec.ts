@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import AccountPerformanceCell from '@/components/account/AccountPerformanceCell.vue'
 import { client as apiClient, settle as flushPromises, analysis, overrideGet, performance, render, wrapper } from './prioritySchedulingFixture'
+import AccountPerformanceCell from '@/components/account/AccountPerformanceCell.vue'
 
 describe('priority scheduling shares account performance', () => {
   it('renders the existing component and the exact evidence used by the server score', async () => {
