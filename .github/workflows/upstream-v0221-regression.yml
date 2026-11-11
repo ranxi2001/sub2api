@@ -1,0 +1,78 @@
+name: Upstream v0.2.21 full integration
+
+on:
+  push:
+    branches: [cherry/upstream-v0.2.21]
+  pull_request:
+    branches: [production]
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  backend:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Compile production server and all adapters
+        working-directory: backend
+        run: go build ./cmd/server
+      - name: Race and resource lifecycle packages
+        working-directory: backend
+        run: go test -race -tags=unit ./internal/pkg/apicompat ./internal/pkg/antigravity ./internal/pkg/claude ./internal/pkg/sysutil ./internal/securityaudit ./internal/service/openai_ws_v2 ./internal/pkg/httputil -count=1 -v -timeout=20m
+      - name: Gateway, authentication, pricing and scheduling regressions
+        working-directory: backend
+        run: >-
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/repository ./internal/server/middleware ./internal/payment/provider ./internal/config
+          -run 'Test(OpenAI|AnthropicCompat|AuthServiceRefresh|RefreshTokenCache|GatewayServiceNewSelection|Antigravity|ConvertGeminiToClaude|GeminiResponseToChatCompletions|Claude52|NewModelPricing|PricingSync|EasyPay|ExecuteEasyPay|UpdatePaymentConfig|AutoRequestBody|LoadRequestBody|PoolCapacity|AgentRecovery|UsageLog|ChannelCacheWrite|ApplyMigrationsFS)'
+          -count=1 -v -timeout=30m
+      - name: Migration source contracts
+        working-directory: backend
+        run: go test ./migrations -count=1 -v -timeout=5m
+  frontend:
+    if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install locked frontend dependencies remotely
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        working-directory: frontend
+        run: pnpm run lint:check
+      - name: Typecheck
+        working-directory: frontend
+        run: pnpm run typecheck
+      - name: Complete frontend suite
+        working-directory: frontend
+        run: pnpm run test:run
+      - name: Production frontend build
+        working-directory: frontend
+        run: pnpm run build
