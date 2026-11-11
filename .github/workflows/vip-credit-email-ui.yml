@@ -1,0 +1,58 @@
+name: VIP credit email UI and production builds
+on:
+  push:
+    branches: [feat/vip-credit-email]
+  pull_request:
+    branches: [production]
+    paths:
+      - '**auto_credit_email**'
+      - '**autoCredit*'
+      - '**UserAutoCreditModal*'
+      - '.github/*/vip-credit-email*'
+permissions:
+  contents: read
+jobs:
+  ui-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Notification UI and A to B to C persistence regressions
+        run: pnpm --dir frontend exec vitest run src/components/admin/user/__tests__/UserAutoCreditModal.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
+      - name: Prepare capture browser remotely
+        run: |
+          npm install --prefix "$RUNNER_TEMP/vip-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/vip-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Actual component before and after with CSS geometry and synthetic save and reload
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vip-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/vip-credit-email-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/vip-credit-ui"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vip-credit-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/vip-credit-ui
+          if-no-files-found: error
+      - name: Official frontend production build
+        run: pnpm --dir frontend run build
+      - name: Backend production embed build and worker lifecycle race
+        working-directory: backend
+        run: |
+          CGO_ENABLED=0 go build -tags embed -trimpath -o "$RUNNER_TEMP/sub2api-vip-credit" ./cmd/server
+          go test -race -p 1 -tags=unit ./cmd/server ./internal/service ./internal/handler/admin -run 'TestProvideCleanup|TestAutoCreditEmail|TestNotificationEmail' -count=1 -v -timeout=5m

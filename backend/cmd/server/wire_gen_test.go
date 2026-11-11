@@ -54,6 +54,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 
 	cleanup := provideCleanup(
 		nil, // balance forecast owner
+		nil, // auto credit email worker
 		nil, // default/full runtime configuration
 		nil, // request capture manager
 		nil, // entClient

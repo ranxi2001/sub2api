@@ -57,6 +57,12 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
 }
 
+func ProvideAutoCreditEmailWorker(repo AutoCreditEmailOutboxRepository, mail *NotificationEmailService, cfg *config.Config) *AutoCreditEmailWorker {
+	w := NewAutoCreditEmailWorker(repo, mail)
+	startBackgroundService(cfg, w)
+	return w
+}
+
 // ProvideAuthService wires the optional captcha providers into AuthService while
 // keeping NewAuthService's public constructor compatible with existing tests.
 func ProvideAuthService(
@@ -1039,6 +1045,7 @@ func ProvideAPIKeyServiceWithGroupProtection(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	ProvideAutoCreditEmailWorker,
 	ProvideAccountPerformanceService,
 	ProvideRequestCaptureManager,
 	// Core services

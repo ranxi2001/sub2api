@@ -1,6 +1,8 @@
 export default {
   title: 'VIP auto credit',
   enabled: 'Enable for this user',
+  notifyEmail: 'Email this VIP user after successful automatic credit',
+  notifyEmailHelp: 'Off by default. Each new successful advance is emailed to this VIP account’s email address. Saving does not send email.',
   threshold: 'Balance trigger threshold (USD)',
   amount: 'Fixed credit amount (USD)',
   cap: 'Uncollected limit (USD)',

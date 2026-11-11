@@ -76,7 +76,7 @@ func readAutoCredit(ctx context.Context, q creditQuerier, uid int64, status stri
 		return nil, service.ErrAutoCreditInvalid
 	}
 	s := &service.AutoCreditState{Entries: []service.AutoCreditEntry{}}
-	err := q.QueryRowContext(ctx, `SELECT enabled,threshold::text,amount::text,cap::text,version FROM auto_credit_config WHERE user_id=$1`, uid).Scan(&s.Config.Enabled, &s.Config.Threshold, &s.Config.Amount, &s.Config.Cap, &s.Config.Version)
+	err := q.QueryRowContext(ctx, `SELECT enabled,threshold::text,amount::text,cap::text,version,notify_email FROM auto_credit_config WHERE user_id=$1`, uid).Scan(&s.Config.Enabled, &s.Config.Threshold, &s.Config.Amount, &s.Config.Cap, &s.Config.Version, &s.Config.NotifyEmail)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -171,6 +171,9 @@ func (r *autoCreditRepository) Save(ctx context.Context, uid, actor int64, p ser
 	if p.Enabled != nil {
 		c.Enabled = *p.Enabled
 	}
+	if p.NotifyEmail != nil {
+		c.NotifyEmail = *p.NotifyEmail
+	}
 	if c.Threshold, err = patchCreditMoney(p.Threshold, c.Threshold); err != nil {
 		return nil, err
 	}
@@ -184,7 +187,7 @@ func (r *autoCreditRepository) Save(ctx context.Context, uid, actor int64, p ser
 		return nil, service.ErrAutoCreditInvalid
 	}
 	c.Version++
-	_, err = tx.ExecContext(ctx, `INSERT INTO auto_credit_config(user_id,enabled,threshold,amount,cap,version) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id) DO UPDATE SET enabled=$2,threshold=$3,amount=$4,cap=$5,version=$6`, uid, c.Enabled, c.Threshold, c.Amount, c.Cap, c.Version)
+	_, err = tx.ExecContext(ctx, `INSERT INTO auto_credit_config(user_id,enabled,threshold,amount,cap,version,notify_email) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE SET enabled=$2,threshold=$3,amount=$4,cap=$5,version=$6,notify_email=$7`, uid, c.Enabled, c.Threshold, c.Amount, c.Cap, c.Version, c.NotifyEmail)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +242,12 @@ func evaluateAutoCredit(ctx context.Context, tx *sql.Tx, uid int64, balance, sta
 	}
 	// Existing worker delivers credential-free, cross-instance auth evictions.
 	if _, err = tx.ExecContext(ctx, `INSERT INTO auth_cache_invalidation_outbox(cache_key) SELECT encode(sha256(convert_to(key,'UTF8')),'hex') FROM api_keys WHERE user_id=$1 AND deleted_at IS NULL AND key<>''`, uid); err != nil {
+		return nil, err
+	}
+	// The durable receipt and money commit together. Failure follows the same
+	// rollback policy as ledger/audit/cache receipts; never silently drop mail.
+	// Snapshot only the VIP user's address, never an administrator fallback.
+	if _, err = tx.ExecContext(ctx, `INSERT INTO auto_credit_email_outbox(ledger_id,recipient_email) SELECT $2,u.email FROM users u JOIN auto_credit_config c ON c.user_id=u.id WHERE u.id=$1 AND c.notify_email ON CONFLICT(ledger_id) DO NOTHING`, uid, lid); err != nil {
 		return nil, err
 	}
 	return result, nil

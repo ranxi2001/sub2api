@@ -1,6 +1,8 @@
 export default {
   title: 'VIP 自动垫付',
   enabled: '为此用户启用',
+  notifyEmail: '自动垫付成功后邮件通知此 VIP 用户',
+  notifyEmailHelp: '默认关闭。每笔新增垫付成功后，通知此 VIP 账号的邮箱；保存设置不会发送邮件。',
   threshold: '余额触发阈值（美元）',
   amount: '固定单笔金额（美元）',
   cap: '未收款上限（美元）',

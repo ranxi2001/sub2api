@@ -20,6 +20,21 @@ function render(locale = 'en') {
 }
 beforeEach(() => { vi.clearAllMocks(); mocks.role = 'admin'; mocks.getAutoCredit.mockResolvedValue(state()); mocks.saveAutoCredit.mockResolvedValue(state()); mocks.settleAutoCredit.mockResolvedValue({ ...state(), entries: [], outstanding: '0.00000000' }) })
 describe('VIP auto credit', () => {
+  it.each(['en', 'zh'])('defaults legacy notifications off and persists explicit true/false in %s', async locale => {
+    const w = render(locale); await flushPromises()
+    expect((w.get('[name="notify_email"]').element as HTMLInputElement).checked).toBe(false)
+    mocks.saveAutoCredit.mockImplementation(async (_id, config) => ({ ...state(), config }))
+    await w.get('[name="notify_email"]').setValue(true)
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.saveAutoCredit).toHaveBeenLastCalledWith(2, expect.objectContaining({ notify_email: true, threshold: '1.00000001', amount: '5.00000001', cap: '10.00000001' }))
+    expect((w.get('[name="notify_email"]').element as HTMLInputElement).checked).toBe(true)
+    mocks.getAutoCredit.mockResolvedValue({ ...state(), config: { ...state().config, notify_email: true } })
+    await w.setProps({ show: false }); await w.setProps({ show: true }); await flushPromises()
+    expect((w.get('[name="notify_email"]').element as HTMLInputElement).checked).toBe(true)
+    await w.get('[name="notify_email"]').setValue(false)
+    await w.get('form').trigger('submit'); await flushPromises()
+    expect(mocks.saveAutoCredit).toHaveBeenLastCalledWith(2, expect.objectContaining({ notify_email: false }))
+  })
   it.each(['en', 'zh'])('loads and saves exact strings with version in %s', async locale => {
     const w = render(locale); await flushPromises()
     expect(w.text()).toContain('5.00000001')
