@@ -1,0 +1,6 @@
+{
+  "head": "9f0580844f86234223cfa114bca60a54e5dab2c7",
+  "baseline": "90549fe89",
+  "component": "frontend/src/components/admin/operations/OAuthDegradationCard.vue",
+  "scope": "Actual Vue component, project CSS, synthetic configuration; no production API"
+}
