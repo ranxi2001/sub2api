@@ -31,6 +31,12 @@ jobs:
       - name: Compile production server and all adapters
         working-directory: backend
         run: go build ./cmd/server
+      - name: Isolated queue and retry timer discrimination
+        working-directory: backend
+        run: >-
+          go test -tags=unit ./internal/handler
+          -run '^TestPR610(BridgeRejectedFieldRetryKeepsLegacyDenominator|RealBridgeRetryDenominator)$'
+          -count=3 -v -timeout=5m
       - name: Race and resource lifecycle packages
         working-directory: backend
         run: go test -race -tags=unit ./internal/pkg/apicompat ./internal/pkg/antigravity ./internal/pkg/claude ./internal/pkg/sysutil ./internal/securityaudit ./internal/service/openai_ws_v2 ./internal/pkg/httputil -count=1 -v -timeout=20m
