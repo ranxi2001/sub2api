@@ -30,7 +30,7 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
       - name: Targeted component, history, and round assertions
-        run: pnpm --dir frontend exec vitest run src/components/admin/account/__tests__/IQTestModal.spec.ts src/components/admin/account/__tests__/PelicanPromptMode.spec.ts src/components/admin/account/__tests__/PelicanTestFields.spec.ts src/components/admin/account/__tests__/ScheduledTestsPanel.pelican.spec.ts src/components/admin/account/__tests__/PelicanRecordsDashboard.spec.ts src/views/admin/__tests__/PelicanTestsView.spec.ts
+        run: pnpm --dir frontend exec vitest run src/utils/__tests__/pelicanQuestionRound.spec.ts src/components/admin/account/__tests__/IQTestModal.spec.ts src/components/admin/account/__tests__/PelicanPromptMode.spec.ts src/components/admin/account/__tests__/PelicanTestFields.spec.ts src/components/admin/account/__tests__/ScheduledTestsPanel.pelican.spec.ts src/components/admin/account/__tests__/PelicanRecordsDashboard.spec.ts src/views/admin/__tests__/PelicanTestsView.spec.ts
       - name: Install isolated browser
         run: |
           npm install --prefix "$RUNNER_TEMP/pelican-browser" --no-save --ignore-scripts playwright@1.56.1

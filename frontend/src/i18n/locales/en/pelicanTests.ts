@@ -1,5 +1,5 @@
 export default {
-  questionBank: {'mode': 'SVG prompt mode', 'random': 'Random bank (shared round)', 'custom': 'Custom prompt', 'hint': 'All accounts and samples in a round share one question. Prepare the next round to draw again. Review results manually against the question criteria; no automatic grading.', 'next': 'Prepare next round', 'snapshot': 'Question and review criteria', 'legacy': 'This older record has no question version or review criteria.', 'error': 'Could not prepare the question. Please retry.'},
+  questionBank: {'mode': 'SVG prompt mode', 'random': 'Random bank (shared round)', 'custom': 'Custom prompt', 'hint': 'All accounts and samples in a round share one question. Prepare the next round to draw again. Review results manually against the question criteria; no automatic grading.', 'next': 'Prepare next round', 'snapshot': 'Question and review criteria', 'legacy': 'No question version or review criteria were recorded (older record or custom prompt).', 'error': 'Could not prepare the question. Please retry.'},
   cost: {
     today: 'Today {amount}',
     total: 'Total {amount}',

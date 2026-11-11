@@ -431,7 +431,7 @@ const reasoningOptions = computed(() => reasoningLevels.value.map((value) => ({
   value,
   label: ({ low: t('admin.accounts.pelicanTest.reasoningLow'), medium: t('admin.accounts.pelicanTest.reasoningMedium'), high: t('admin.accounts.pelicanTest.reasoningHigh'), none: t('admin.accounts.pelicanTest.reasoningNone'), minimal: t('admin.accounts.pelicanTest.reasoningMinimal'), xhigh: t('admin.accounts.pelicanTest.reasoningXHigh'), max: t('admin.accounts.pelicanTest.reasoningMax'), ultra: t('admin.accounts.pelicanTest.reasoningUltra') } as Record<string, string>)[value] || value
 })))
-const canStart = computed(() => Boolean(props.account && !preparingQuestion.value && (promptMode.value === 'random' ? questionSnapshot.value?.pelican_question : prompt.value.trim()) && modelId.value.trim() && normalizeCount() > 0))
+const canStart = computed(() => Boolean(props.account && !preparingQuestion.value && (promptMode.value === 'random' ? (questionSnapshot.value?.actual_prompt && questionSnapshot.value.pelican_question?.round_id.startsWith('manual:')) : prompt.value.trim()) && modelId.value.trim() && normalizeCount() > 0))
 const hasDownloadable = computed(() => runs.value.some((run) => Boolean(run.output)))
 const probeSupported = computed(() => props.account?.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'setup-token'))
 const canStartProbe = computed(() => Boolean(props.account && probeSupported.value))

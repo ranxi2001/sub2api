@@ -127,7 +127,10 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		return false
 	}
 	// Result-only metadata must not mutate the stored rule or shared plan config.
-	snapshot := *freezePelicanQuestion(plan.PelicanConfig, "scheduled:"+roundTime.UTC().Format(time.RFC3339Nano), nil)
+	snapshot := *plan.PelicanConfig
+	if snapshot.PromptMode == PelicanPromptModeRandom {
+		snapshot = *freezePelicanQuestion(plan.PelicanConfig, "scheduled:"+roundTime.UTC().Format(time.RFC3339Nano), nil)
+	}
 	snapshot.QualityRestoreDiagnostic = nil
 	plan.QualityRestoreDiagnostic = nil
 	snapshot.TriggerSource = plan.TriggerSource

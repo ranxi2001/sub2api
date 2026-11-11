@@ -608,7 +608,7 @@ async function savePlan() {
   const current = editor.value
   if (!current || savingPlan.value) return
   const form = current.form
-  if (!form.group_id || !form.model_id.trim() || !form.prompt.trim() || !form.cron_expression.trim()) {
+  if (!form.group_id || !form.model_id.trim() || (form.prompt_mode !== 'random' && !form.prompt.trim()) || !form.cron_expression.trim()) {
     fail(null, t('pelicanTests.editor.required'))
     return
   }
