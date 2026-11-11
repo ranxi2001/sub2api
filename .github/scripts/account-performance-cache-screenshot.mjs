@@ -65,7 +65,7 @@ try {
   if (!text[0].includes('70.0%') || !text[1].includes('0.0%') || !text[2].includes('未采集')) throw Error('Cache states rendered incorrectly')
   await capture('after.png')
   await page.locator('[data-testid="cache-help"]').first().click()
-  await page.getByText(/最近60分钟有效请求缓存命中率的算术平均/).waitFor()
+  await page.getByRole('tooltip').filter({ hasText: '最近60分钟有效请求缓存命中率的算术平均' }).waitFor()
   await capture('formula.png')
   await page.keyboard.press('Escape')
   await page.locator('[data-metric="cache"] [data-testid="new-feature-badge"]').first().click()
