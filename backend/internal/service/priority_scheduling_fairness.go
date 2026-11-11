@@ -148,13 +148,6 @@ func (s *defaultOpenAIAccountScheduler) shouldRebalancePrioritySticky(ctx contex
 		if req.SubscriptionPriority && sticky.IsOpenAIChatGPTSubscription() && !account.IsOpenAIChatGPTSubscription() {
 			continue
 		}
-		errorRate := 0.0
-		if s.stats != nil {
-			errorRate, _, _ = s.stats.snapshot(account.ID)
-		}
-		if errorRate > 0.2 {
-			continue
-		}
 		eligible = append(eligible, account)
 		loads = append(loads, AccountWithConcurrency{ID: account.ID, MaxConcurrency: max(1, account.Concurrency)})
 	}
@@ -177,9 +170,6 @@ func (s *defaultOpenAIAccountScheduler) shouldRebalancePrioritySticky(ctx contex
 			item := &historyPool[i]
 			item.loadInfo = loadMap[item.account.ID]
 			item.loadKnown = item.loadInfo != nil
-			if s.stats != nil {
-				item.errorRate, _, _ = s.stats.snapshot(item.account.ID)
-			}
 			if rpm, ok := accountRPMStateFromContext(ctx, item.account); ok {
 				item.rpmEnabled, item.rpmLimit, item.rpmCurrent = rpm.Enabled, rpm.Limit, rpm.Current
 			}

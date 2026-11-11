@@ -32,13 +32,13 @@ func (r *latencyModeReader) ReadPrioritySchedulingSignals(_ context.Context, q P
 		signal := PrioritySchedulingSignal{}
 		if q.Model == "public-model" && q.GroupID != nil && *q.GroupID == 11 && !r.noSamples {
 			bad := time.Now().Add(-time.Minute)
-			signal = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualitySamples: 10, QualityPassed: 10}
+			signal = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualitySamples: 10, QualityPassed: 10})
 			if id == 1 || r.allSlow {
 				signal.P90TTFTMs = 16000
 				signal.LatestBadLatencyAt = &bad
 			}
 		}
-		out[id] = signal
+		out[id] = withAccountPerformanceFixture(signal)
 	}
 	return out, nil
 }
@@ -83,7 +83,7 @@ func setModeSignal(svc *OpenAIGatewayService, req OpenAIAccountScheduleRequest, 
 	entry := svc.priorityScheduling.entries[priorityHistoryKey(req, cfg)]
 	signal := entry.signals[id]
 	change(&signal)
-	entry.signals[id] = signal
+	entry.signals[id] = withAccountPerformanceFixture(signal)
 }
 func TestPriorityLatencyModesDefaultAndSharedHistory(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()
@@ -280,7 +280,7 @@ func TestPriorityLatencyModesInFlightBoundary(t *testing.T) {
 	upstream.resp.Body = &latencyInFlightBody{Reader: strings.NewReader(wire), start: func() {
 		setModeSignal(svc, req, 1, func(v *PrioritySchedulingSignal) {
 			bad := time.Now()
-			*v = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad}
+			*v = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad})
 		})
 	}}
 	ctx := WithPrioritySchedulingObservation(context.Background(), &group, "public-model", "/v1/responses")
@@ -323,7 +323,7 @@ func TestPriorityLatencyModesFeatureScopeAndUnmeasured(t *testing.T) {
 		})
 	}
 	setModeSignal(svc, req, 1, func(v *PrioritySchedulingSignal) {
-		*v = PrioritySchedulingSignal{Samples: 0, LatencyUnknownSamples: 20}
+		*v = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 0, LatencyUnknownSamples: 20})
 	})
 	require.NoError(t, svc.priorityLatencyAdmission(req, pool[0].account), "unknown timing must not become a measured hard stop")
 }
@@ -375,7 +375,7 @@ func TestPriorityLatencyModesStreamOutputContinues(t *testing.T) {
 		require.True(t, c.Writer.Written(), "activate the penalty after client output has started")
 		setModeSignal(svc, req, 1, func(v *PrioritySchedulingSignal) {
 			bad := time.Now()
-			*v = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad}
+			*v = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad})
 		})
 	}}
 	ctx := WithPrioritySchedulingObservation(context.Background(), &group, "public-model", "/v1/responses")
@@ -429,7 +429,7 @@ func TestPriorityLatencyModesPassthroughNewTurnAndOutput(t *testing.T) {
 			stop := func() {
 				setModeSignal(svc, req, account.ID, func(v *PrioritySchedulingSignal) {
 					bad := time.Now()
-					*v = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad}
+					*v = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad})
 				})
 			}
 			if initialStop {

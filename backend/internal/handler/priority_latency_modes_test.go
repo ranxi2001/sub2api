@@ -40,10 +40,10 @@ func (r *penaltyModeSettings) Set(_ context.Context, _ string, value string) err
 type penaltyModeUsage struct{ service.UsageLogRepository }
 
 func (r penaltyModeUsage) ReadPrioritySchedulingSignals(_ context.Context, q service.PrioritySchedulingQuery) (map[int64]service.PrioritySchedulingSignal, error) {
-	bad := time.Now().Add(-time.Minute)
+	average := 16000.0
 	out := map[int64]service.PrioritySchedulingSignal{}
 	for _, id := range q.AccountIDs {
-		out[id] = service.PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad}
+		out[id] = service.PrioritySchedulingSignal{Performance: &service.AccountPerformance{AvgTTFTMs: &average, TTFTSamples: 20}}
 	}
 	return out, nil
 }

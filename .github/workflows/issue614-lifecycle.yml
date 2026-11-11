@@ -36,7 +36,7 @@ jobs:
           git diff --exit-code HEAD
           git rev-parse HEAD > "$RUNNER_TEMP/issue614-proof/head.txt"
           git worktree add --detach "$RUNNER_TEMP/issue614-red" "$BASELINE"
-          cp backend/internal/service/priority_lifecycle_prewrite_test.go "$RUNNER_TEMP/issue614-red/backend/internal/service/"
+          git show d79c1044914e7924c38cc4a239e42ff8980698e6:backend/internal/service/priority_lifecycle_prewrite_test.go > "$RUNNER_TEMP/issue614-red/backend/internal/service/priority_lifecycle_prewrite_test.go"
           set +e
           (cd "$RUNNER_TEMP/issue614-red/backend" && go test -tags=unit ./internal/service -run '^TestPriorityLifecyclePassthroughPhysicalWriteFence$' -count=1 -v -timeout=12m) > "$RUNNER_TEMP/issue614-proof/red.log" 2>&1
           result=$?

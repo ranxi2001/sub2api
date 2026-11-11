@@ -125,8 +125,8 @@ func TestOpenAIStickyPriorityLatencyYieldRebindsWithEscapeDisabled(t *testing.T)
 	priority.TargetTTFTMs = 15000
 	badAt := time.Now().Add(-time.Minute)
 	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{
-		947101: {Samples: 20, P90TTFTMs: 25000, LatestBadLatencyAt: &badAt, QualitySamples: 10, QualityPassed: 10},
-		947102: {Samples: 20, P90TTFTMs: 500, QualitySamples: 10, QualityPassed: 10},
+		947101: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 25000, LatestBadLatencyAt: &badAt, QualitySamples: 10, QualityPassed: 10}),
+		947102: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualitySamples: 10, QualityPassed: 10}),
 	}}
 	f.service.settingService = priorityGateway(priority, reader).settingService
 	f.service.usageLogRepo = reader

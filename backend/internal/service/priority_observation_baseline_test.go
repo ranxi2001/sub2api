@@ -79,7 +79,7 @@ func TestPriorityObservationBaselineSticky(t *testing.T) {
 	cfg := DefaultPrioritySchedulingConfig()
 	cfg.Enabled = true
 	bad := time.Now().Add(-time.Minute)
-	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 20, P90TTFTMs: 20000, LatestBadLatencyAt: &bad, QualitySamples: 10, QualityPassed: 10}, 2: {Samples: 20, P90TTFTMs: 500, QualitySamples: 10, QualityPassed: 10}}}
+	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 20000, LatestBadLatencyAt: &bad, QualitySamples: 10, QualityPassed: 10}), 2: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500, QualitySamples: 10, QualityPassed: 10})}}
 	svc := priorityGateway(cfg, reader)
 	pool := []openAIAccountCandidateScore{priorityCandidate(1, .1, 0), priorityCandidate(2, 1, 0)}
 	accounts := make([]Account, 0, 2)
@@ -116,7 +116,7 @@ func TestPriorityObservationBaselineHardStop(t *testing.T) {
 		field.SetString("stop")
 	}
 	bad := time.Now().Add(-time.Minute)
-	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: {Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad}}}
+	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 16000, LatestBadLatencyAt: &bad})}}
 	svc := priorityGateway(cfg, reader)
 	candidate := priorityCandidate(1, .1, 0)
 	candidate.account.Status = StatusActive
@@ -124,7 +124,7 @@ func TestPriorityObservationBaselineHardStop(t *testing.T) {
 	peer := priorityCandidate(2, 1, 0)
 	peer.account.Status = StatusActive
 	peer.account.Schedulable = true
-	reader.signal[2] = PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500}
+	reader.signal[2] = withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 500})
 	svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{*candidate.account, *peer.account}}
 	svc.cache = &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:baseline-hard": 1}}
 	svc.cfg = newSchedulerTestOpenAIWSV2Config()

@@ -16,8 +16,8 @@ func TestPriorityComparableCapacityFavorsLowerLatency(t *testing.T) {
 	cfg.Mode = "profit"
 	cfg.TargetTTFTMs = 9000
 	reader := &priorityReaderStub{signal: map[int64]PrioritySchedulingSignal{
-		1: {Samples: 20, P90TTFTMs: 27000, QualitySamples: 10, QualityPassed: 10},
-		2: {Samples: 20, P90TTFTMs: 42000, QualitySamples: 10, QualityPassed: 10},
+		1: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 27000, QualitySamples: 10, QualityPassed: 10}),
+		2: withAccountPerformanceFixture(PrioritySchedulingSignal{Samples: 20, P90TTFTMs: 42000, QualitySamples: 10, QualityPassed: 10}),
 	}}
 	gateway := priorityGateway(cfg, reader)
 	scheduler := &defaultOpenAIAccountScheduler{service: gateway}
