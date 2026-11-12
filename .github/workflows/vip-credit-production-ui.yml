@@ -1,0 +1,44 @@
+name: VIP collection production UI
+on:
+  push:
+    branches: [fix/vip-receipt-overlay-20261113]
+  pull_request:
+    branches: [production]
+    paths:
+      - '**UserAutoCreditModal*'
+      - '.github/scripts/vip-credit-production-preview.mjs'
+      - '.github/workflows/vip-credit-production-ui.yml'
+permissions:
+  contents: read
+jobs:
+  production-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Prepare isolated browser
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          npm install --prefix "$RUNNER_TEMP/vip-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/vip-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Production collection interactions
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vip-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/vip-credit-production-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/vip-production-ui"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vip-production-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/vip-production-ui
+          if-no-files-found: error
