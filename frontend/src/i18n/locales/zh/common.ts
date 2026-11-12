@@ -75,6 +75,8 @@ export default {
     close: '关闭',
     toggleMenu: '切换菜单',
     userMenu: '用户菜单',
+    userId: '用户 ID',
+    copyUserId: '复制用户 ID：{id}',
     pageNotFound: '页面不存在',
     enabled: '已启用',
     disabled: '已禁用',

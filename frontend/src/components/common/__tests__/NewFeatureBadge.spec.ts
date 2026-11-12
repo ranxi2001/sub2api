@@ -23,6 +23,7 @@ describe('NewFeatureBadge', () => {
 
 
   it.each([
+    ['user ID copy', NEW_FEATURE_NOTICES.userIdCopy],
     ['Antigravity usage query', NEW_FEATURE_NOTICES.antigravityUsageQuery],
     ['OpenAI cache write TTL', NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h],
     ['EasyPay refund code', NEW_FEATURE_NOTICES.easyPayRefundSuccessCode],

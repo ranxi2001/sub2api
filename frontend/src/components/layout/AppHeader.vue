@@ -139,6 +139,23 @@
                   {{ displayName }}
                 </div>
                 <div class="text-xs text-gray-500 dark:text-dark-400">{{ user.email }}</div>
+                <div class="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    :aria-label="t('common.copyUserId', { id: user.id })"
+                    :title="t('common.copyUserId', { id: user.id })"
+                    class="inline-flex min-w-0 items-center gap-1.5 rounded text-xs text-gray-500 transition-colors hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-dark-400 dark:hover:text-primary-400"
+                    @click="copyToClipboard(String(user.id))"
+                  >
+                    <span>{{ t('common.userId') }}: {{ user.id }}</span>
+                    <Icon name="copy" size="sm" class="shrink-0" aria-hidden="true" />
+                  </button>
+                  <NewFeatureBadge
+                    v-if="authStore.isAdmin"
+                    :notice-id="NEW_FEATURE_NOTICES.userIdCopy"
+                    :user-id="user.id"
+                  />
+                </div>
               </div>
 
               <!-- Balance (mobile only) -->
@@ -260,7 +277,10 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useClipboard } from '@/composables/useClipboard'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 import { resolveRouteMetaKeys } from '@/router/title'
@@ -274,6 +294,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
 const onboardingStore = useOnboardingStore()
+const { copyToClipboard } = useClipboard()
 
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
