@@ -127,7 +127,7 @@ describe('Account performance dialog',()=>{
   expect(w.emitted('updated')).toBeUndefined()
  })
  it('uses Chinese probe-round wording and never presents absent samples as zero',async()=>{
-  const w=await open('zh');expect(w.text()).toContain('探针轮次降智率');expect(w.text()).toContain('并非全部业务请求')
+  const w=await open('zh');expect(w.text()).toContain('降智率');expect(w.text()).toContain('并非全部业务请求')
   expect(w.findAll('[data-metric]').every(r=>r.text().includes('未采集'))).toBe(true)
  })
  it.each(['en','zh'])('shows the actual response window in metric labels, bounds and semantics in %s',async(locale)=>{

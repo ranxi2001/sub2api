@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div ref="readingRoot" class="min-w-0 space-y-5">
-      <header class="flex items-center gap-3"><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityAccountPerformance" :user-id="auth.user?.id" /></header>
+      <header class="flex flex-wrap items-center gap-3"><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityAccountPerformance" :user-id="auth.user?.id" /><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityCacheWeight" :user-id="auth.user?.id" /></header>
       <SmartOpsNav />
       <div v-if="error" role="alert" class="text-red-600">{{ error }} <button v-if="!draft" class="underline" @click="load">{{ t('priorityScheduling.retry') }}</button></div>
       <p v-if="notice" role="status" class="text-emerald-600">{{ notice }}</p>
@@ -20,7 +20,12 @@
           <div class="grid gap-5 lg:grid-cols-2">
             <section class="min-w-0 space-y-4">
               <label class="block"><span class="field-title">{{ t('priorityScheduling.strategy') }}</span><select v-model="draft.mode" class="input w-full" data-testid="mode"><option v-for="mode in modes" :key="mode" :value="mode">{{ t(`priorityScheduling.modes.${mode}`) }}</option></select></label>
-              <div class="grid grid-cols-2 gap-3"><label v-for="(weight, index) in weightKeys" :key="weight"><span class="field-title">{{ t(`priorityScheduling.${weight}`) }}</span><input v-if="draft.mode === 'custom'" v-model.number="draft[weight]" type="number" min="0" max="100" step="0.1" required class="input w-full" /><div v-else class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">{{ presets[draft.mode][index] }}%</div></label></div>
+              <div class="grid grid-cols-2 gap-3"><label v-for="(weight, index) in weightKeys" :key="weight"><span class="field-title">{{ t(`priorityScheduling.${weight}`) }}</span><input v-if="draft.mode === 'custom'" v-model.number="draft[weight]" type="number" min="0" max="100" step="0.1" required class="input w-full" /><div v-else class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">{{ presets[draft.mode][index] }}</div></label></div>
+              <label class="block">
+                <span class="field-title">{{ t('priorityScheduling.cache_weight') }} <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityCacheWeight" :user-id="auth.user?.id" compact /></span>
+                <input v-model.number="draft.cache_weight" data-testid="cache-weight" type="number" min="0" max="100" step="0.1" required class="input w-full" />
+              </label>
+              <p data-testid="cache-weight-hint" class="text-xs leading-5 text-gray-500">{{ t('priorityScheduling.cacheWeightHint') }}</p>
               <p class="text-sm leading-6 text-gray-500">{{ t('priorityScheduling.rule') }}</p>
               <p class="text-xs leading-5 text-gray-500">{{ t('priorityScheduling.costHint') }}</p>
               <label><span class="field-title">{{ t('priorityScheduling.error_rate_weight') }}</span><input v-model.number="draft.error_rate_weight" data-testid="error-rate-weight" type="number" min="0" max="100" step="1" required class="input w-full" /></label>
@@ -307,7 +312,7 @@ async function load() {
     const config = await getPriorityConfig()
     if (!active(version)) return
     const { teams: _legacyTeams, ...currentConfig } = config as PrioritySchedulingConfig & { teams?: unknown }
-    draft.value = { ...currentConfig, target_tps: currentConfig.target_tps ?? 30, error_rate_weight: currentConfig.error_rate_weight ?? 0, error_rate_window_minutes: currentConfig.error_rate_window_minutes ?? 10, error_rate_prior_samples: currentConfig.error_rate_prior_samples ?? 5, latency_percentile: currentConfig.latency_percentile ?? 90, latency_measurement: currentConfig.latency_measurement ?? 'legacy_forward', recovery_exploration_percent: currentConfig.recovery_exploration_percent ?? 0, latency_penalty_mode: currentConfig.latency_penalty_mode ?? 'deprioritize', latency_penalty_minutes: currentConfig.latency_penalty_minutes ?? 10, balance_protocols: currentConfig.balance_protocols ?? true, oauth_quota_priority: currentConfig.oauth_quota_priority ?? false, oauth_quota_threshold: currentConfig.oauth_quota_threshold ?? 90 }; groups.value = (config.group_ids ?? []).join(', '); modelsText.value = (config.models ?? []).join('\n')
+    draft.value = { ...currentConfig, cache_weight: currentConfig.cache_weight ?? 0, target_tps: currentConfig.target_tps ?? 30, error_rate_weight: currentConfig.error_rate_weight ?? 0, error_rate_window_minutes: currentConfig.error_rate_window_minutes ?? 10, error_rate_prior_samples: currentConfig.error_rate_prior_samples ?? 5, latency_percentile: currentConfig.latency_percentile ?? 90, latency_measurement: currentConfig.latency_measurement ?? 'legacy_forward', recovery_exploration_percent: currentConfig.recovery_exploration_percent ?? 0, latency_penalty_mode: currentConfig.latency_penalty_mode ?? 'deprioritize', latency_penalty_minutes: currentConfig.latency_penalty_minutes ?? 10, balance_protocols: currentConfig.balance_protocols ?? true, oauth_quota_priority: currentConfig.oauth_quota_priority ?? false, oauth_quota_threshold: currentConfig.oauth_quota_threshold ?? 90 }; groups.value = (config.group_ids ?? []).join(', '); modelsText.value = (config.models ?? []).join('\n')
     const configuredGroup = config.group_ids?.[0]
     if (configuredGroup && configuredGroup > 0) stickyGroupID.value = configuredGroup
   } catch { if (active(version)) error.value = t('priorityScheduling.error') }
