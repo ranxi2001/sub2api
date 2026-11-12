@@ -10,7 +10,7 @@ import { updateQualityPreset, previewQualityOwnership, restoreQualityOwnership, 
 import { useAccountQualityStore } from '@/stores/accountQuality'
 import { useAuthStore } from '@/stores/auth'
 import type { ScheduledTestPlan } from '@/types'
-import { defaultQualityBPS } from '@/utils/qualityRulePatch'
+import { defaultQualityBPS, qualityRuleFields } from '@/utils/qualityRulePatch'
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('@/stores/auth', async () => {
   const { reactive } = await import('vue')
@@ -312,6 +312,62 @@ describe('quality operations', () => {
     expect(vm.showForm).toBe(false)
     expect(runQualityPlan).not.toHaveBeenCalled(); expect(createQualityPreset).not.toHaveBeenCalled(); expect(createQualityTemplate).not.toHaveBeenCalled()
     assertUnchanged(); wrapper.unmount()
+  })
+
+  it.each(['preset', 'account'] as const)('selects imported %s fields in the preview and explains the remaining save step', async origin => {
+    const { wrapper, vm, source, assertUnchanged, assertNoWrite } = await openReuseCase({ mode: 'bulk', origin })
+    const submit = () => wrapper.get('.editor-footer button[form="quality-rule-form"]')
+    expect(wrapper.get('[data-testid="quality-reuse-empty-fields"]').text()).toBe('qualityOps.reuseSelectFieldsHint')
+    expect(wrapper.get('[data-testid="quality-bulk-save-hint"]').text()).toBe('qualityOps.reuseSelectFieldsHint')
+    expect(submit().attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="quality-reuse-select-all"]').trigger('click')
+    expect(vm.bulkFields).toEqual([...qualityRuleFields])
+    expect(wrapper.find('[data-testid="quality-reuse-empty-fields"]').exists()).toBe(false)
+    for (const field of qualityRuleFields) expect(wrapper.get<HTMLInputElement>(`[data-testid="quality-bulk-field-${field}"]`).element.checked).toBe(true)
+    expect(wrapper.get('[data-testid="quality-bulk-save-hint"]').text()).toBe('qualityOps.reuseConfirmRequired')
+    await wrapper.get('[data-testid="quality-reuse-confirm"]').setValue(true)
+    expect(submit().attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="quality-reuse-clear-fields"]').trigger('click')
+    expect(vm.reuseConfirmed).toBe(false)
+    expect(submit().attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="quality-reuse-field-schedule"]').setValue(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="quality-bulk-field-schedule"]').element.checked).toBe(true)
+    expect(vm.bulkFields).toEqual(['schedule'])
+    assertNoWrite()
+    await wrapper.get('[data-testid="quality-reuse-confirm"]').setValue(true)
+    expect(wrapper.find('[data-testid="quality-bulk-save-hint"]').exists()).toBe(false)
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(vi.mocked(scheduledTests.update).mock.calls).toEqual([1, 2].map(id => [id, { cron_expression: source.cron_expression, preserve_quality_state: true }]))
+    assertUnchanged(); wrapper.unmount()
+  })
+
+  it('applies a two-model observation preset to 17 rules after selecting all fields and confirming', async () => {
+    const targets = Array.from({ length: 17 }, (_, index) => ({ ...rules()[0], id: index + 1, account_id: index + 1,
+      pelican_config: { ...rules()[0].pelican_config!, rule_name: `Target ${index + 1}` } }))
+    const saved = { ...preset(), enabled: true, cron_expression: '*/2 * * * *', max_results: 100,
+      pelican_config: { ...preset().pelican_config, question_kind: 'candy' as const, prompt: 'Synthetic question', model_ids: ['preset-model', 'second-model'],
+        quality: { ...preset().pelican_config.quality!, expected_answer: '42', judge: { kind: 'jev' as const, group_id: 0, model_id: '', prompt: 'Compare answers' } } } }
+    vi.mocked(listQualityPlans).mockResolvedValue(targets)
+    vi.mocked(listQualityPresets).mockResolvedValue([saved])
+    const wrapper = mountView(); await flushPromises()
+    for (const target of targets) await wrapper.get(`[data-plan-id="${target.id}"] .rule-checkbox input`).setValue(true)
+    await wrapper.get('[data-testid="quality-bulk-edit"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="quality-preset-select"]').setValue('17')
+    await wrapper.get('[data-testid="quality-apply-preset"]').trigger('click')
+    await wrapper.get('[data-testid="quality-reuse-select-all"]').trigger('click')
+    expect(wrapper.findAll('[data-reuse-target]')).toHaveLength(17)
+    expect(scheduledTests.update).not.toHaveBeenCalled()
+    expect(wrapper.get('.editor-footer button[form="quality-rule-form"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="quality-reuse-confirm"]').setValue(true)
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    expect(scheduledTests.create).not.toHaveBeenCalled()
+    expect(scheduledTests.update).toHaveBeenCalledTimes(17)
+    for (const [id, body] of vi.mocked(scheduledTests.update).mock.calls) expect(body).toMatchObject({
+      model_id: saved.model_id, cron_expression: saved.cron_expression, enabled: true, max_results: 100, preserve_quality_state: true,
+      pelican_config: { rule_name: `Target ${id}`, model_ids: ['preset-model', 'second-model'], quality: { action: 'observe_only', auto_restore: false } },
+    })
+    expect(runQualityPlan).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it.each(reuseCases)('cancels $mode after applying $origin without any write or source mutation', async testCase => {
