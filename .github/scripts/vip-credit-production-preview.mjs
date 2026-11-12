@@ -36,7 +36,9 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
   writeFileSync(html, `<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/${entryName}.js"></script></html>`, { flag: 'wx' })
   process.chdir(root)
   await build({ root, build: { outDir: join(temporary, 'dist'), target: 'esnext', rollupOptions: { input: html } } })
-  server = await preview({ root, build: { outDir: join(temporary, 'dist') }, preview: { host: '127.0.0.1', port: 4301, strictPort: true } })
+  // The official config is needed for compilation only. Loading its checker
+  // plugin again for static preview leaves development workers running.
+  server = await preview({ root, configFile: false, build: { outDir: join(temporary, 'dist') }, preview: { host: '127.0.0.1', port: 4301, strictPort: true } })
   browser = await chromium.launch({ headless: true })
   for (const lang of ['zh', 'en']) for (const device of ['desktop', 'mobile']) {
     const context = await browser.newContext({ viewport: device === 'desktop' ? { width: 1280, height: 900 } : { width: 390, height: 844 } })
@@ -58,6 +60,9 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
     await page.getByTestId('confirm-settlement').click()
     await page.waitForFunction(() => window.settlements.length === 1 && !document.querySelector('[data-testid="settle-100"]'))
     assert.match(await page.getByTestId('outstanding').innerText(), /5700\.00/)
+    assert.deepEqual(errors, [])
+    result.settlementRequests = await page.evaluate(() => window.settlements)
+    result.completed = true
     await context.close()
   }
 } finally {
@@ -66,3 +71,4 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
   await new Promise(resolveClose => server ? server.httpServer.close(resolveClose) : resolveClose())
   rmSync(entry, { force: true }); rmSync(html, { force: true }); rmSync(temporary, { recursive: true, force: true })
 }
+console.log('Production collection regression completed; browser and preview closed.')
