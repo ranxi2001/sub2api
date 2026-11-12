@@ -9,6 +9,7 @@ on:
       - '**autoCredit*'
       - '**UserAutoCreditModal*'
       - '.github/*/vip-credit-email*'
+      - '.github/scripts/vip-credit-settlement-preview.mjs'
 permissions:
   contents: read
 jobs:
@@ -44,6 +45,10 @@ jobs:
         env:
           SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vip-browser/node_modules/playwright/index.mjs
         run: node .github/scripts/vip-credit-email-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/vip-credit-ui"
+      - name: Settlement confirmation visibility and explicit collection regression
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/vip-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/vip-credit-settlement-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/vip-credit-ui/settlement"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
