@@ -29,24 +29,73 @@ func TestIssue817QuotaEvidence(t *testing.T) {
 		{"weekly_exhausted", func(a *Account) { a.Extra["codex_7d_used_percent"] = 100.0 }, false},
 		{"over_100", func(a *Account) { a.Extra["codex_7d_used_percent"] = 101.0 }, false},
 		{"unknown", func(a *Account) { a.Extra = nil }, true},
-		{"undated", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; delete(a.Extra, "codex_usage_updated_at") }, true},
-		{"invalid_date", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Extra["codex_usage_updated_at"] = "unknown" }, true},
-		{"future_date", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Extra["codex_usage_updated_at"] = now.Add(time.Hour).Format(time.RFC3339) }, true},
-		{"stale_without_reset", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Extra["codex_usage_updated_at"] = now.Add(-3 * time.Hour).Format(time.RFC3339) }, true},
-		{"old_but_current_week", func(a *Account) { a.Extra["codex_7d_used_percent"] = 100.0; a.Extra["codex_usage_updated_at"] = now.Add(-3 * time.Hour).Format(time.RFC3339); a.Extra["codex_7d_reset_at"] = now.Add(time.Hour).Format(time.RFC3339) }, false},
-		{"five_hour_reset", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Extra["codex_5h_reset_at"] = now.Format(time.RFC3339) }, true},
-		{"weekly_reset", func(a *Account) { a.Extra["codex_7d_used_percent"] = 100.0; a.Extra["codex_7d_reset_at"] = now.Add(-time.Second).Format(time.RFC3339) }, true},
-		{"relative_reset", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Extra["codex_usage_updated_at"] = now.Add(-time.Hour).Format(time.RFC3339); a.Extra["codex_5h_reset_after_seconds"] = 3600 }, true},
+		{"undated", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			delete(a.Extra, "codex_usage_updated_at")
+		}, true},
+		{"invalid_date", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Extra["codex_usage_updated_at"] = "unknown"
+		}, true},
+		{"future_date", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Extra["codex_usage_updated_at"] = now.Add(time.Hour).Format(time.RFC3339)
+		}, true},
+		{"stale_without_reset", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Extra["codex_usage_updated_at"] = now.Add(-3 * time.Hour).Format(time.RFC3339)
+		}, true},
+		{"old_but_current_week", func(a *Account) {
+			a.Extra["codex_7d_used_percent"] = 100.0
+			a.Extra["codex_usage_updated_at"] = now.Add(-3 * time.Hour).Format(time.RFC3339)
+			a.Extra["codex_7d_reset_at"] = now.Add(time.Hour).Format(time.RFC3339)
+		}, false},
+		{"five_hour_reset", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Extra["codex_5h_reset_at"] = now.Format(time.RFC3339)
+		}, true},
+		{"weekly_reset", func(a *Account) {
+			a.Extra["codex_7d_used_percent"] = 100.0
+			a.Extra["codex_7d_reset_at"] = now.Add(-time.Second).Format(time.RFC3339)
+		}, true},
+		{"relative_reset", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Extra["codex_usage_updated_at"] = now.Add(-time.Hour).Format(time.RFC3339)
+			a.Extra["codex_5h_reset_after_seconds"] = 3600
+		}, true},
 		{"nan", func(a *Account) { a.Extra["codex_5h_used_percent"] = math.NaN() }, true},
 		{"infinite", func(a *Account) { a.Extra["codex_5h_used_percent"] = math.Inf(1) }, true},
 		{"bad_percent", func(a *Account) { a.Extra["codex_5h_used_percent"] = "unknown" }, true},
-		{"other_platform", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Platform = PlatformAnthropic }, true},
-		{"api_key", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Type = AccountTypeAPIKey }, true},
-		{"other_identity", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Credentials = map[string]any{"chatgpt_account_id": "fixture-a"}; a.Extra["chatgpt_account_id"] = "fixture-b" }, true},
-		{"live_429", func(a *Account) { reset := now.Add(time.Minute); a.RateLimitResetAt = &reset; a.Extra = nil }, false},
-		{"expired_429", func(a *Account) { reset := now; a.RateLimitResetAt = &reset }, true},
-		{"auto_pause_disabled_still_exhausted", func(a *Account) { a.Extra["codex_5h_used_percent"] = 100.0; a.Extra["auto_pause_5h_disabled"] = true }, false},
-		{"below_full_even_with_lower_pause_threshold", func(a *Account) { a.Extra["codex_5h_used_percent"] = 99.0; a.Extra["auto_pause_5h_threshold"] = 50 }, true},
+		{"other_platform", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Platform = PlatformAnthropic
+		}, true},
+		{"api_key", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Type = AccountTypeAPIKey
+		}, true},
+		{"other_identity", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Credentials = map[string]any{"chatgpt_account_id": "fixture-a"}
+			a.Extra["chatgpt_account_id"] = "fixture-b"
+		}, true},
+		{"live_429", func(a *Account) {
+			reset := now.Add(time.Minute)
+			a.RateLimitResetAt = &reset
+			a.Extra = nil
+		}, false},
+		{"expired_429", func(a *Account) {
+			reset := now
+			a.RateLimitResetAt = &reset
+		}, true},
+		{"auto_pause_disabled_still_exhausted", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 100.0
+			a.Extra["auto_pause_5h_disabled"] = true
+		}, false},
+		{"below_full_even_with_lower_pause_threshold", func(a *Account) {
+			a.Extra["codex_5h_used_percent"] = 99.0
+			a.Extra["auto_pause_5h_threshold"] = 50
+		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := issue817Account(now)
@@ -116,12 +165,12 @@ func (r *issue817Claims) FinishPelican(ctx context.Context, id int64, until, fin
 
 func TestIssue817RunnerRechecksQuotaAfterClaim(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		statuses []string
-		manual   bool
-		unlinked bool
+		name      string
+		statuses  []string
+		manual    bool
+		unlinked  bool
 		lookupErr bool
-		wantRun  bool
+		wantRun   bool
 	}{
 		{"normal_only_five_hour", []string{"active"}, false, false, false, false},
 		{"normal_only_weekly", []string{"active"}, false, false, false, false},
