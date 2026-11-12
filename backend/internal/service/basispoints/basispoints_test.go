@@ -79,10 +79,13 @@ func TestPrepareWireShapeAndDeterminism(t *testing.T) {
 	if entry["type"] != "compaction" || fmt.Sprint(entry["compact_threshold"]) != "920000" {
 		t.Fatalf("unexpected default compaction threshold: %+v", entry)
 	}
-	for _, field := range []string{"tools", "reasoning", "include", "service_tier", "instructions"} {
+	for _, field := range []string{"tools", "reasoning", "include", "instructions"} {
 		if _, exists := first[field]; exists {
 			t.Fatalf("unsupported field leaked: %s", field)
 		}
+	}
+	if first["service_tier"] != "priority" {
+		t.Fatal("explicit priority tier must reach BPS")
 	}
 	other, _ := mustPrepare(t, source, "account-2/key-1", nil)
 	if first["prompt_cache_key"] == other["prompt_cache_key"] {

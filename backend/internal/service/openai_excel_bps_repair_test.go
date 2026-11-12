@@ -76,7 +76,7 @@ func TestExcelBPSToolCorrectionPreservesRouteAndUsage(t *testing.T) {
 				}
 				svc := openAIClientToolsTestService(upstream)
 				svc.httpUpstream = checked
-				body := []byte(fmt.Sprintf(`{"model":"gpt-5.6-sol","stream":%t,"reasoning":{"effort":"max"},"input":"test correction","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}]}`, stream))
+				body := []byte(fmt.Sprintf(`{"model":"gpt-5.6-sol","stream":%t,"reasoning":{"effort":"max"},"input":"test correction","service_tier":"priority","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}]}`, stream))
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
@@ -112,6 +112,7 @@ func TestExcelBPSToolCorrectionPreservesRouteAndUsage(t *testing.T) {
 					require.True(t, checked.bodies[i].closed.Load())
 					require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.bodies[i], "model").String())
 					require.Equal(t, "xhigh", gjson.GetBytes(upstream.bodies[i], "reasoning_effort").String())
+					require.Equal(t, "priority", gjson.GetBytes(upstream.bodies[i], "service_tier").String())
 					require.False(t, gjson.GetBytes(upstream.bodies[i], "tools").Exists())
 					require.Equal(t, fmt.Sprint(i+1), gjson.GetBytes(upstream.bodies[i], "metadata.agent_iteration").String())
 					require.Equal(t, gjson.GetBytes(upstream.bodies[0], "metadata.task_id").String(), gjson.GetBytes(upstream.bodies[i], "metadata.task_id").String())
