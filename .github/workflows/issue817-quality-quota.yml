@@ -10,6 +10,7 @@ on:
       - 'backend/internal/service/pelican_scheduled.go'
       - 'backend/internal/service/scheduled_test_port.go'
       - 'backend/internal/repository/quality_template_quota*'
+      - 'backend/internal/repository/quality_quota_ownership*'
       - 'backend/internal/repository/quality_rule_template_repo.go'
       - 'backend/internal/repository/account_quality.go'
       - 'backend/internal/repository/scheduled_test_repo.go'
@@ -44,7 +45,7 @@ jobs:
       - name: Record source formatting diff for static follow-up
         shell: bash
         run: |
-          gofmt -d backend/internal/service/quality_quota_filter*.go backend/internal/service/scheduled_test_port.go backend/internal/repository/quality_template_quota*.go > evidence/format.diff
+          gofmt -d backend/internal/service/quality_quota_filter*.go backend/internal/service/scheduled_test_port.go backend/internal/repository/quality_template_quota*.go backend/internal/repository/quality_quota_ownership*.go > evidence/format.diff
           cat evidence/format.diff
       - name: Original runner must fail the unchanged execution regression
         shell: bash
