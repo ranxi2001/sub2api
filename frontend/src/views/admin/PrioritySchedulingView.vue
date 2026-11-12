@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div ref="readingRoot" class="min-w-0 space-y-5">
-      <header class="flex items-center gap-3"><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityAccountPerformance" :user-id="auth.user?.id" /><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityCacheWeight" :user-id="auth.user?.id" /></header>
+      <header class="flex flex-wrap items-center gap-3"><h1 class="text-2xl font-semibold">{{ t('priorityScheduling.title') }}</h1><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityAccountPerformance" :user-id="auth.user?.id" /><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.priorityCacheWeight" :user-id="auth.user?.id" /></header>
       <SmartOpsNav />
       <div v-if="error" role="alert" class="text-red-600">{{ error }} <button v-if="!draft" class="underline" @click="load">{{ t('priorityScheduling.retry') }}</button></div>
       <p v-if="notice" role="status" class="text-emerald-600">{{ notice }}</p>

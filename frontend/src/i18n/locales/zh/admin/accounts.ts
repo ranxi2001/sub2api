@@ -1019,7 +1019,7 @@ export default {
         excelBPSModelsHint: '按账号映射后的模型名称匹配。仅勾选模型走 Excel / BPS；未选模型保留原 Codex、WS 和自动透传设置。不勾选任何模型时不使用 BPS。勾选 gpt-image-2 后，文生图和单图改图（非流式、png 输出、无蒙版）也走 BPS；流式、蒙版、透明背景等 BPS 不支持的请求自动走 Codex。生图模型中 BPS 目前仅支持 gpt-image-2，勾选其他生图模型不生效；「对所有模型启用」不包含生图模型。',
         excelBPSNotice: '保存后新开 Codex 会话。所选模型强制 HTTP/SSE，忽略 WS mode 与自动透传；仅支持 Responses、客户端工具和 HTTPS 图片链接，不支持 base64 图片。max / ultra 按 xhigh 发送，模型权限以上游为准。',
         autoBPS: '降智后自动开启 BPS',
-        autoBPSDesc: "按下方配置的检测间隔用质量检测检测（默认每 2 分钟，走正常协议，不经过 BPS），达到条件时按勾选的选项自动开启 BPS。这是一条质量运维规则，也可在 智能运维 → 质量运维 查看记录和修改。",
+        autoBPSDesc: "按下方配置的检测间隔用质量检测（默认每 2 分钟，走正常协议，不经过 BPS），达到条件时按勾选的选项自动开启 BPS。这是一条质量运维规则，也可在 智能运维 → 质量运维 查看记录和修改。",
         autoBPSLoading: '正在读取本账号的自动开启 BPS 规则…',
         autoBPSLoadFailed: '读取自动开启 BPS 规则失败：{error}。本次保存不会改动这条规则。',
         autoBPSPauseHint: '关闭后规则暂停检测，设置和记录都保留，再打开按原设置继续；已经开启的 BPS 不会被关闭。',
