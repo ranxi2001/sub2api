@@ -942,8 +942,11 @@ describe("admin SettingsView payment visible method controls", () => {
     await tabBadge("gateway").trigger("click");
     await flushPromises();
 
-    // Gateway has independent announcements; dismissing one leaves the other
-    // in normal flow until it is dismissed as well.
+    // Gateway has three independent announcements. Each dismissal removes only
+    // that notice and leaves the remaining notices in the normal tab flow.
+    expect(tabBadge("gateway").exists()).toBe(true);
+    await tabBadge("gateway").trigger("click");
+    await flushPromises();
     expect(tabBadge("gateway").exists()).toBe(true);
     await tabBadge("gateway").trigger("click");
     await flushPromises();
