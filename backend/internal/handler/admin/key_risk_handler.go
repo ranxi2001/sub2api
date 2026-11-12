@@ -16,9 +16,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// keyRiskAPIKeys reuses the normal key update and auth-cache invalidation path.
+// keyRiskAPIKeys evicts the normal auth caches after the atomic restriction commits.
 type keyRiskAPIKeys interface {
-	Update(context.Context, int64, int64, service.UpdateAPIKeyRequest) (*service.APIKey, error)
+	InvalidateAuthCacheByKey(context.Context, string)
 }
 
 func (h *SettingHandler) SetKeyRiskAPIKeys(keys *service.APIKeyService) {
@@ -141,10 +141,10 @@ func (h *SettingHandler) ActOnKeyRisk(c *gin.Context) {
 			response.Error(c, 503, "API key service unavailable")
 			return
 		}
-		var keyID, ownerID int64
-		keyID, ownerID, e = h.keyRisk.RestrictionTarget(ctx, id, req.Generation)
+		var key string
+		key, e = h.keyRisk.RestrictIPWhitelist(ctx, id, req.Generation, networks)
 		if e == nil {
-			_, e = h.keyRiskKeys.Update(ctx, keyID, ownerID, service.UpdateAPIKeyRequest{IPWhitelist: &networks})
+			h.keyRiskKeys.InvalidateAuthCacheByKey(ctx, key)
 		}
 	case "notify":
 		queued, e = h.keyRisk.NotifyUsers(ctx, id, actor.UserID)

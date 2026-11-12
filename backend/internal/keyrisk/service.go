@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	ippkg "github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/lib/pq"
 )
 
@@ -523,15 +524,42 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
 	return true, e
 }
 
-// RestrictionTarget binds an administrator action to one current key episode.
-// Ownership is checked again by APIKeyService.Update before writing its ACL.
-func (s *Service) RestrictionTarget(ctx context.Context, event, generation int64) (int64, int64, error) {
+// RestrictIPWhitelist validates and locks the episode and its live owned key until
+// the whitelist is committed. The returned credential is only for cache eviction.
+func (s *Service) RestrictIPWhitelist(ctx context.Context, event, generation int64, networks []string) (string, error) {
+	if len(networks) == 0 || len(networks) > 256 || len(ippkg.ValidateIPPatterns(networks)) > 0 {
+		return "", errors.New("invalid allowed networks")
+	}
+	raw, err := json.Marshal(networks)
+	if err != nil {
+		return "", err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
 	var keyID, owner int64
-	err := s.DB.QueryRowContext(ctx, `SELECT k.id,k.user_id FROM key_risk_events e
+	err = tx.QueryRowContext(ctx, `SELECT k.id,k.user_id FROM key_risk_events e
  JOIN api_keys k ON e.subject=k.id::text
  WHERE e.id=$1 AND e.generation=$2 AND e.rule='key_ip_spread' AND e.state='pending'
- AND k.deleted_at IS NULL AND k.status='active' AND (k.expires_at IS NULL OR k.expires_at>now())
+ AND k.deleted_at IS NULL AND k.status='active' AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp())
  AND e.evidence->'key_ids' @> jsonb_build_array(k.id)
- AND e.evidence->'user_ids' @> jsonb_build_array(k.user_id)`, event, generation).Scan(&keyID, &owner)
-	return keyID, owner, err
+ AND e.evidence->'user_ids' @> jsonb_build_array(k.user_id)
+ FOR UPDATE OF e,k`, event, generation).Scan(&keyID, &owner)
+	if err != nil {
+		return "", err
+	}
+	// Recheck expiry after any lock wait. No blacklist snapshot is written back.
+	var key string
+	err = tx.QueryRowContext(ctx, `UPDATE api_keys SET ip_whitelist=$1,updated_at=now()
+ WHERE id=$2 AND user_id=$3 AND deleted_at IS NULL AND status='active'
+ AND (expires_at IS NULL OR expires_at>clock_timestamp()) RETURNING key`, string(raw), keyID, owner).Scan(&key)
+	if err != nil {
+		return "", err
+	}
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+	return key, nil
 }
