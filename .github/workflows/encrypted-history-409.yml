@@ -1,0 +1,42 @@
+name: Encrypted history 409 Beta
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_409_omit_history*'
+      - 'backend/internal/handler/openai_409_omit_history*'
+      - 'frontend/src/components/settings/EncryptedHistory409Settings.vue'
+      - '.github/scripts/encrypted-history-409-preview.mjs'
+      - '.github/workflows/encrypted-history-409.yml'
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/omit-history-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/omit-history-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Capture actual setting component
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/omit-history-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/encrypted-history-409-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/omit-history-ui"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: encrypted-history-409-ui-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/omit-history-ui
+          if-no-files-found: error

@@ -5533,21 +5533,10 @@
                   />
                 </div>
 
-              <div class="flex items-start justify-between gap-4 border-b border-gray-100 pb-5 dark:border-dark-700 md:col-span-2">
-                <div>
-                  <div class="flex items-center gap-2">
-                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.gatewayForwarding.omitEncryptedHistory409") }}
-                    </label>
-                    <span class="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Beta</span>
-                    <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.openai409OmitEncryptedHistory" :user-id="authStore.user?.id" />
-                  </div>
-                  <p class="mt-1 max-w-2xl text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.gatewayForwarding.omitEncryptedHistory409Hint") }}
-                  </p>
-                </div>
-                <Toggle v-model="form.openai_409_omit_encrypted_history_enabled" data-testid="openai-409-omit-encrypted-history-toggle" />
-              </div>
+              <EncryptedHistory409Settings
+                v-model="form.openai_409_omit_encrypted_history_enabled"
+                :user-id="authStore.user?.id"
+              />
 
               <!-- OpenAI Responses 首 token 统计 -->
               <div class="border-b border-gray-100 pb-5 dark:border-dark-700 md:col-span-2">
@@ -9609,6 +9598,7 @@
 </template>
 
 <script setup lang="ts">
+import EncryptedHistory409Settings from "@/components/settings/EncryptedHistory409Settings.vue";
 import { excelBPSImageLimits } from "@/utils/excelBPSImageLimits";
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { listPlatformIds } from "@/constants/platformCatalog";
