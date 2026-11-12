@@ -61,7 +61,10 @@ func riskActionRequest(t *testing.T, h *SettingHandler, role, body string) *http
 func TestKeyRiskRestrictionOnlyUpdatesCurrentKeysWhitelist(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	})
 	updater := &keyRiskKeyUpdater{}
 	h := &SettingHandler{keyRisk: &keyrisk.Service{DB: db}, keyRiskKeys: updater}
 	payload := `{"action":"restrict","generation":2,"confirm":true,"allowed_networks":["192.0.2.1","::ffff:192.0.2.1","198.51.100.18/24"]}`
@@ -79,7 +82,10 @@ func TestKeyRiskRestrictionOnlyUpdatesCurrentKeysWhitelist(t *testing.T) {
 func TestKeyRiskRejectsUnsafeAndStaleRestrictionActions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	})
 	updater := &keyRiskKeyUpdater{}
 	h := &SettingHandler{keyRisk: &keyrisk.Service{DB: db}, keyRiskKeys: updater}
 	for _, payload := range []string{

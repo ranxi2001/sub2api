@@ -23,7 +23,7 @@ func allowedSourceFindings(ctx context.Context, tx *sql.Tx, findings []Finding) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type acl struct{ allow, deny *ippkg.CompiledIPRules }
 	rules := map[int64]acl{}
 	for rows.Next() {
