@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { nextTick } from 'vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
@@ -12,9 +12,19 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
 beforeEach(() => localStorage.clear())
 
+function findNoticeBadge(wrapper: VueWrapper, noticeId: string) {
+  return wrapper.findAllComponents(NewFeatureBadge).find(badge => badge.props('noticeId') === noticeId)
+}
+
+function isNoticeVisible(wrapper: VueWrapper, noticeId: string) {
+  return findNoticeBadge(wrapper, noticeId)?.find('[data-testid="new-feature-badge"]').exists() ?? false
+}
+
 describe('BEpusdt announcement at provider entries', () => {
   it.each(['card', 'dialog'])('dismisses from the %s without editing the provider and persists across sessions', async (entry) => {
     const oldId = NEW_FEATURE_NOTICES.protocolFeatureSwitches
+    const bepusdtId = NEW_FEATURE_NOTICES.bepusdtPayment
+    const feesId = NEW_FEATURE_NOTICES.paymentProviderFees
     localStorage.setItem('sub2api:new-feature-notices:v1:41', JSON.stringify([oldId]))
     const pinia = createPinia()
     const card = mount(ProviderCard, {
@@ -48,12 +58,18 @@ describe('BEpusdt announcement at provider entries', () => {
     })
     ;(dialog.vm as unknown as { reset: (key: string) => void }).reset('bepusdt')
     await nextTick()
-    expect(card.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
-    expect(dialog.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
-    await (entry === 'card' ? card : dialog).get('[data-testid="new-feature-badge"]').trigger('click')
+    expect(isNoticeVisible(card, bepusdtId)).toBe(true)
+    expect(isNoticeVisible(dialog, bepusdtId)).toBe(true)
+    expect(isNoticeVisible(card, feesId)).toBe(true)
+    expect(isNoticeVisible(dialog, feesId)).toBe(true)
+    const badgeToDismiss = findNoticeBadge(entry === 'card' ? card : dialog, bepusdtId)
+    expect(badgeToDismiss).toBeDefined()
+    await badgeToDismiss!.get('[data-testid="new-feature-badge"]').trigger('click')
     await nextTick()
-    expect(card.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
-    expect(dialog.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+    expect(isNoticeVisible(card, bepusdtId)).toBe(false)
+    expect(isNoticeVisible(dialog, bepusdtId)).toBe(false)
+    expect(isNoticeVisible(card, feesId)).toBe(true)
+    expect(isNoticeVisible(dialog, feesId)).toBe(true)
     for (const event of ['toggleField', 'toggleType', 'edit', 'delete']) {
       expect(card.emitted(event)).toBeUndefined()
     }
@@ -63,15 +79,18 @@ describe('BEpusdt announcement at provider entries', () => {
     dialog.unmount()
 
     const newSession = createPinia()
-    for (const noticeId of [oldId, NEW_FEATURE_NOTICES.bepusdtPayment, 'future-payment-announcement-C']) {
+    const futureId = 'future-payment-announcement-C'
+    for (const noticeId of [oldId, bepusdtId, feesId, futureId]) {
       const badge = mount(NewFeatureBadge, {
         props: { userId: 41, noticeId }, global: { plugins: [newSession] },
       })
-      expect(badge.find('[data-testid="new-feature-badge"]').exists()).toBe(noticeId === 'future-payment-announcement-C')
+      expect(badge.find('[data-testid="new-feature-badge"]').exists()).toBe([feesId, futureId].includes(noticeId))
     }
-    const otherAdmin = mount(NewFeatureBadge, {
-      props: { userId: 42, noticeId: NEW_FEATURE_NOTICES.bepusdtPayment }, global: { plugins: [newSession] },
-    })
-    expect(otherAdmin.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+    for (const noticeId of [bepusdtId, feesId]) {
+      const otherAdmin = mount(NewFeatureBadge, {
+        props: { userId: 42, noticeId }, global: { plugins: [newSession] },
+      })
+      expect(otherAdmin.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+    }
   })
 })
