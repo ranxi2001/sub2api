@@ -33,6 +33,7 @@ describe('NewFeatureBadge', () => {
     ['priority account performance', NEW_FEATURE_NOTICES.priorityAccountPerformance],
     ['dashboard account concurrency', NEW_FEATURE_NOTICES.dashboardAccountConcurrency],
     ['key risk', NEW_FEATURE_NOTICES.keyRisk],
+    ['key source restrictions', NEW_FEATURE_NOTICES.keyRiskSources],
     ['API key usage dates', NEW_FEATURE_NOTICES.apiKeyUsageDateRange],
     ['pricing transfer', NEW_FEATURE_NOTICES.channelPricingTransfer],
     ['stream event timing', NEW_FEATURE_NOTICES.streamFirstEventTiming],

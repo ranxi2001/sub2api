@@ -52,7 +52,7 @@ func (s *Service) UserNotices(ctx context.Context, user, before int64) ([]UserNo
  e.first_seen,e.last_seen,r.acknowledged_at,
  (SELECT count(*) FROM key_risk_deliveries d WHERE d.event_id=r.event_id AND d.generation=r.generation AND d.user_id=r.user_id)
  FROM key_risk_recipients r JOIN key_risk_events e ON e.id=r.event_id AND e.generation=r.generation
- WHERE r.user_id=$1 AND ($2::bigint=0 OR e.id<$2) ORDER BY e.id DESC LIMIT 50`, user, before)
+ WHERE e.rule='key_ip_spread' AND r.user_id=$1 AND ($2::bigint=0 OR e.id<$2) ORDER BY e.id DESC LIMIT 50`, user, before)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (s *Service) Acknowledge(ctx context.Context, user, event, generation int64
 	// already crossed the SMTP boundary cannot be recalled; later sends are muted.
 	result, err := s.DB.ExecContext(ctx, `UPDATE key_risk_recipients r SET acknowledged_at=COALESCE(r.acknowledged_at,now()),
  acknowledgement=COALESCE(r.acknowledgement,jsonb_build_object('notice_version',1,'rule',e.rule,'last_seen',e.last_seen,'key_ids',to_jsonb(r.key_ids)))
- FROM key_risk_events e WHERE r.event_id=e.id AND e.generation=r.generation AND e.state='pending'
+ FROM key_risk_events e WHERE r.event_id=e.id AND e.generation=r.generation AND e.state='pending' AND e.rule='key_ip_spread'
  AND r.user_id=$1 AND r.event_id=$2 AND r.generation=$3`, user, event, generation)
 	if err != nil {
 		return err

@@ -22,6 +22,7 @@ export const NEW_FEATURE_NOTICES = {
   qualityRetestRest: 'quality-retest-rest-initial-announcement',
   qualityOAuth401Cleanup: 'quality-oauth-401-cleanup-initial-announcement',
   keyRisk: 'key-risk-notices-acknowledgement-initial-announcement',
+  keyRiskSources: 'key-risk-per-key-source-restriction-initial-announcement',
   mistralBudgetUsage: 'mistral-budget-usage-initial-announcement',
   deepSeekSearch: 'deepseek-search-provider-initial-announcement',
   groupAntiDistillation: 'group-openai-anti-distillation-initial-announcement',

@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { useNewFeatureNoticeStore } from '../newFeatureNotices'
 
 describe('new feature notice preferences', () => {
@@ -34,5 +35,18 @@ describe('new feature notice preferences', () => {
       'protocol-switches',
       'other-feature',
     ])
+  })
+  it('announces key source restrictions independently and preserves dismissals across reloads', () => {
+    const store = useNewFeatureNoticeStore()
+    store.dismiss(41, NEW_FEATURE_NOTICES.keyRisk)
+    expect(store.isDismissed(41, NEW_FEATURE_NOTICES.keyRiskSources)).toBe(false)
+    store.dismiss(41, NEW_FEATURE_NOTICES.keyRiskSources)
+    expect(store.isDismissed(41, NEW_FEATURE_NOTICES.keyRiskSources)).toBe(true)
+    setActivePinia(createPinia())
+    const reloaded = useNewFeatureNoticeStore()
+    expect(reloaded.isDismissed(41, NEW_FEATURE_NOTICES.keyRisk)).toBe(true)
+    expect(reloaded.isDismissed(41, NEW_FEATURE_NOTICES.keyRiskSources)).toBe(true)
+    expect(reloaded.isDismissed(41, 'future-key-risk-feature')).toBe(false)
+    expect(reloaded.isDismissed(42, NEW_FEATURE_NOTICES.keyRiskSources)).toBe(false)
   })
 })

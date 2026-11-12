@@ -15,11 +15,12 @@
           @click="selectTab(tab.id)"
         >{{ tab.label }}</button>
         <NewFeatureBadge v-if="tab.id === 'keys'" :notice-id="NEW_FEATURE_NOTICES.keyRisk" :user-id="auth.user?.id" />
+        <NewFeatureBadge v-if="tab.id === 'keys'" :notice-id="NEW_FEATURE_NOTICES.keyRiskSources" :user-id="auth.user?.id" />
         </div>
       </div>
       <KeepAlive>
         <IPRiskSettings v-if="activeTab === 'config'" expanded />
-        <KeyRiskPanel v-else-if="activeTab === 'keys'" @configure="selectTab('config')" />
+        <KeyRiskPanel v-else-if="activeTab === 'keys'" :admin-id="auth.user?.id" @configure="selectTab('config')" />
         <IPAuditPanel v-else class="card px-4 sm:px-6 lg:px-8" @configure="selectTab('config')" />
       </KeepAlive>
     </div>
