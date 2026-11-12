@@ -75,6 +75,8 @@ export default {
     close: 'Close',
     toggleMenu: 'Toggle menu',
     userMenu: 'User menu',
+    userId: 'User ID',
+    copyUserId: 'Copy user ID: {id}',
     pageNotFound: 'Page not found',
     enabled: 'Enabled',
     disabled: 'Disabled',
