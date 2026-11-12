@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +24,9 @@ func TestAPIKeyLongContextFinalAdmissionResponse(t *testing.T) {
 				err := fmt.Errorf("final send: %w", policyErr)
 				h := &OpenAIGatewayHandler{}
 				h.handleTurnAdmissionError(c, err, stream)
-				require.Contains(t, w.Body.String(), code)
+				require.Contains(t, w.Body.String(), service.APIKeyContextLengthExceededCode)
+				require.NotContains(t, w.Body.String(), "context_unverifiable")
+				require.NotContains(t, w.Body.String(), "stored input item")
 				require.NotContains(t, w.Body.String(), "admission_unavailable")
 				require.True(t, service.HasOpsClientBusinessLimited(c))
 				if !stream {
@@ -38,6 +42,18 @@ func TestAPIKeyLongContextFinalAdmissionResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAPIKeyContextPolicyChangeDoesNotExposeConfiguration(t *testing.T) {
+	err := infraerrors.ServiceUnavailable(service.APIKeyContextPolicyChangedReason, "private administrator settings")
+	status, errType, code, message := queueAuthRejectedResponse(err)
+	require.Equal(t, http.StatusServiceUnavailable, status)
+	require.Equal(t, "api_error", errType)
+	require.Equal(t, "server_error", code)
+	require.Equal(t, service.APIKeyContextPolicyRetryMessage, message)
+	closeErr := openAIWSQueueAuthRejectedClose(err, err)
+	require.Equal(t, coderws.StatusTryAgainLater, closeErr.StatusCode())
+	require.Equal(t, service.APIKeyContextPolicyRetryMessage, closeErr.Reason())
 }
 
 func TestAPIKeyLongContextAnthropicFinalAdmissionResponse(t *testing.T) {

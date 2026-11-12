@@ -61,6 +61,10 @@ func (APIKey) Fields() []ent.Field {
 		field.Bool("allow_long_context").
 			Default(true).
 			Comment("Administrator-managed permission to use long context requests"),
+		field.Int("context_token_limit").
+			Default(0).
+			NonNegative().
+			Comment("Administrator-managed input token ceiling; zero inherits the long context policy"),
 		field.Time("last_used_at").
 			Optional().
 			Nillable().

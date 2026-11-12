@@ -582,7 +582,7 @@ func TestIssue715HTTPRecoveryCannotBypassLongContextPermission(t *testing.T) {
 	key.(*service.APIKey).AllowLongContext = false
 	handler.Responses(c)
 	require.Equal(t, 400, rec.Code)
-	require.Equal(t, "context_unverifiable", gjson.Get(rec.Body.String(), "error.code").String())
+	require.Equal(t, "context_length_exceeded", gjson.Get(rec.Body.String(), "error.code").String())
 	require.Equal(t, []int64{1}, upstream.ids, "compatibility ownership must not override API-key permissions")
 }
 

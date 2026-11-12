@@ -16,7 +16,7 @@ func (s *OpenAIGatewayService) checkAPIKeyLongContextBeforeSend(ctx context.Cont
 	key := getAPIKeyFromContext(c)
 	// Background account probes have no API key and may omit the request URL.
 	// They do not inherit a customer's per-key policy.
-	if key == nil || key.AllowLongContext {
+	if !key.RequiresContextCheck() {
 		return nil
 	}
 	ws := GetOpenAIClientTransport(c) == OpenAIClientTransportWS
@@ -27,7 +27,7 @@ func (s *OpenAIGatewayService) checkAPIKeyLongContextBeforeSend(ctx context.Cont
 	if err := s.CheckAPIKeyLongContext(ctx, key, body, model); err != nil {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		if ws {
-			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "long context is disabled for this API key; send complete visible text", err)
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, APIKeyContextLengthExceededMessage, err)
 		}
 		return &OpenAITurnAdmissionError{Reason: err.Error(), cause: err}
 	}

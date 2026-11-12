@@ -33,6 +33,7 @@ export const NEW_FEATURE_NOTICES = {
   protocolFeatureSwitches: 'protocol-feature-switches-initial-announcement',
   apiKeyModelPolicy: 'api-key-model-policy-initial-announcement',
   apiKeyLongContext: 'api-key-long-context-control-initial-announcement',
+  apiKeyContextTokenLimit: 'api-key-context-token-limit-initial-announcement',
   apiKeyUsageDateRange: 'api-key-usage-date-range-initial-announcement',
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   profitOperationsTimeRanges: 'profit-operations-time-ranges-initial-announcement',

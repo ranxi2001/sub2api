@@ -29,7 +29,7 @@ func (h *OpenAIGatewayHandler) handleAnthropicAPIKeyLongContextError(c *gin.Cont
 		h.anthropicStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", contextErr.Error(), true)
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{
-			"type": "invalid_request_error", "code": contextErr.Code, "message": contextErr.Error(),
+			"type": "invalid_request_error", "code": service.APIKeyContextLengthExceededCode, "message": contextErr.Error(),
 		}})
 	}
 	return true

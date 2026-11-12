@@ -161,6 +161,20 @@ func (_c *APIKeyCreate) SetNillableAllowLongContext(v *bool) *APIKeyCreate {
 	return _c
 }
 
+// SetContextTokenLimit sets the "context_token_limit" field.
+func (_c *APIKeyCreate) SetContextTokenLimit(v int) *APIKeyCreate {
+	_c.mutation.SetContextTokenLimit(v)
+	return _c
+}
+
+// SetNillableContextTokenLimit sets the "context_token_limit" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableContextTokenLimit(v *int) *APIKeyCreate {
+	if v != nil {
+		_c.SetContextTokenLimit(*v)
+	}
+	return _c
+}
+
 // SetLastUsedAt sets the "last_used_at" field.
 func (_c *APIKeyCreate) SetLastUsedAt(v time.Time) *APIKeyCreate {
 	_c.mutation.SetLastUsedAt(v)
@@ -451,6 +465,10 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultAllowLongContext
 		_c.mutation.SetAllowLongContext(v)
 	}
+	if _, ok := _c.mutation.ContextTokenLimit(); !ok {
+		v := apikey.DefaultContextTokenLimit
+		_c.mutation.SetContextTokenLimit(v)
+	}
 	if _, ok := _c.mutation.Quota(); !ok {
 		v := apikey.DefaultQuota
 		_c.mutation.SetQuota(v)
@@ -542,6 +560,14 @@ func (_c *APIKeyCreate) check() error {
 	}
 	if _, ok := _c.mutation.AllowLongContext(); !ok {
 		return &ValidationError{Name: "allow_long_context", err: errors.New(`ent: missing required field "APIKey.allow_long_context"`)}
+	}
+	if _, ok := _c.mutation.ContextTokenLimit(); !ok {
+		return &ValidationError{Name: "context_token_limit", err: errors.New(`ent: missing required field "APIKey.context_token_limit"`)}
+	}
+	if v, ok := _c.mutation.ContextTokenLimit(); ok {
+		if err := apikey.ContextTokenLimitValidator(v); err != nil {
+			return &ValidationError{Name: "context_token_limit", err: fmt.Errorf(`ent: validator failed for field "APIKey.context_token_limit": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.Quota(); !ok {
 		return &ValidationError{Name: "quota", err: errors.New(`ent: missing required field "APIKey.quota"`)}
@@ -636,6 +662,10 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.AllowLongContext(); ok {
 		_spec.SetField(apikey.FieldAllowLongContext, field.TypeBool, value)
 		_node.AllowLongContext = value
+	}
+	if value, ok := _c.mutation.ContextTokenLimit(); ok {
+		_spec.SetField(apikey.FieldContextTokenLimit, field.TypeInt, value)
+		_node.ContextTokenLimit = value
 	}
 	if value, ok := _c.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)
@@ -946,6 +976,24 @@ func (u *APIKeyUpsert) SetAllowLongContext(v bool) *APIKeyUpsert {
 // UpdateAllowLongContext sets the "allow_long_context" field to the value that was provided on create.
 func (u *APIKeyUpsert) UpdateAllowLongContext() *APIKeyUpsert {
 	u.SetExcluded(apikey.FieldAllowLongContext)
+	return u
+}
+
+// SetContextTokenLimit sets the "context_token_limit" field.
+func (u *APIKeyUpsert) SetContextTokenLimit(v int) *APIKeyUpsert {
+	u.Set(apikey.FieldContextTokenLimit, v)
+	return u
+}
+
+// UpdateContextTokenLimit sets the "context_token_limit" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateContextTokenLimit() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldContextTokenLimit)
+	return u
+}
+
+// AddContextTokenLimit adds v to the "context_token_limit" field.
+func (u *APIKeyUpsert) AddContextTokenLimit(v int) *APIKeyUpsert {
+	u.Add(apikey.FieldContextTokenLimit, v)
 	return u
 }
 
@@ -1436,6 +1484,27 @@ func (u *APIKeyUpsertOne) SetAllowLongContext(v bool) *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) UpdateAllowLongContext() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateAllowLongContext()
+	})
+}
+
+// SetContextTokenLimit sets the "context_token_limit" field.
+func (u *APIKeyUpsertOne) SetContextTokenLimit(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetContextTokenLimit(v)
+	})
+}
+
+// AddContextTokenLimit adds v to the "context_token_limit" field.
+func (u *APIKeyUpsertOne) AddContextTokenLimit(v int) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddContextTokenLimit(v)
+	})
+}
+
+// UpdateContextTokenLimit sets the "context_token_limit" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateContextTokenLimit() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateContextTokenLimit()
 	})
 }
 
@@ -2137,6 +2206,27 @@ func (u *APIKeyUpsertBulk) SetAllowLongContext(v bool) *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) UpdateAllowLongContext() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdateAllowLongContext()
+	})
+}
+
+// SetContextTokenLimit sets the "context_token_limit" field.
+func (u *APIKeyUpsertBulk) SetContextTokenLimit(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetContextTokenLimit(v)
+	})
+}
+
+// AddContextTokenLimit adds v to the "context_token_limit" field.
+func (u *APIKeyUpsertBulk) AddContextTokenLimit(v int) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.AddContextTokenLimit(v)
+	})
+}
+
+// UpdateContextTokenLimit sets the "context_token_limit" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateContextTokenLimit() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateContextTokenLimit()
 	})
 }
 

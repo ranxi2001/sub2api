@@ -802,6 +802,7 @@ export interface ApiKey {
   model_mapping?: Record<string, string>
   reasoning_effort?: string
   allow_long_context?: boolean
+  context_token_limit?: number
 }
 
 export interface ApiKeyConcurrencySnapshot {

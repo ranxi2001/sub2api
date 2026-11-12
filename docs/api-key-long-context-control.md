@@ -1,56 +1,40 @@
-# 单个 API Key 的长上下文开关
+# API Key 输入上下文限制
 
-管理员在「用户管理 → API Keys → 密钥模型与上下文设置」调整「允许长上下文」。管理员编辑自己的密钥时也有相同入口。已有和新建密钥默认允许，关闭只影响选中的密钥；普通用户的创建、编辑接口不接受该管理字段。
+管理员在用户密钥列表或自己的密钥编辑页打开“密钥模型与上下文设置”，为当前 Key 设置“输入上下文上限（Token）”。普通用户的创建、编辑接口不接受此设置。
 
-## 关闭后的行为
+| 设置 | 行为 |
+| --- | --- |
+| 正整数 | 只对当前 Key 使用该输入上限，优先于“允许长上下文”开关和模型价卡阈值。上游模型自身限制仍生效。 |
+| 留空或 `0` | 沿用原规则：允许长上下文时不做此项本地限制；关闭时按模型长上下文阈值检查，缺少阈值时默认 200,000 Token。 |
 
-文本推理请求在转发前进行本地 Token 估算，包含完整会话历史、系统指令、工具定义和工具结果。缓存命中的文本也属于输入上下文，不因命中缓存而豁免。
+范围是 `0` 至 `2147483647` 的整数。管理接口 `PUT /api/v1/admin/api-keys/:id` 使用字段 `context_token_limit`：省略或 `null` 保留已有值，`0` 清除独立上限。值持久化于 PostgreSQL `api_keys.context_token_limit`；程序启动时执行嵌入的 `341_api_key_context_token_limit.sql`，已有 Key 默认为 `0`。“允许长上下文”字段和原有 `333_api_key_allow_long_context.sql` 保持兼容；鉴权缓存与区域快照升级到 v34，区域节点需刷新快照。旧二进制忽略新增上限，回滚时需评估该限制失效。
 
-使用模型价卡中已有的长上下文阈值，保留达到阈值或超过阈值的模型差异；例如部分 OpenAI 模型超过 272,000 Token、部分 xAI 模型达到 200,000 Token 进入长上下文范围。模型没有可识别阈值时采用 200,000 Token 上限。Key 映射、渠道映射和合成路由不会解除限制；关闭账号或分组的长上下文计费也不会解除准入限制。
+检查按完整输入的本地保守估算执行，包括历史、缓存文本和工具定义；转发前会重新检查模型转换、映射和注入后的正文。超限请求在发往模型服务前终止。排队请求或持久 WebSocket 的设置变更需要重新进入鉴权，避免沿用旧上限。它是单次请求输入上限，不是累计用量或输出长度上限，也不改变计费。
 
-本地估算复用项目的 Tokenizer，可能与供应商实际用量不同。该开关用于限制长上下文请求，不是费用额度，也不改变现有计费规则。
+应用限制时，引用历史、远程附件、加密摘要等缺少完整可见文本的请求延续原有拒绝规则。独立上限不豁免这些内容；本地估算与上游实际 Token 数可能不同。
 
-引用上游保存的历史、会话、缓存或文件时，服务端缺少核对实际上下文所需的完整内容。因此关闭开关的密钥会拒绝这类请求，返回 `context_unverifiable`；客户端需发送完整可见文本，或请管理员开启长上下文。该规则也适用于加密/压缩历史、远程文档和多模态附件，避免将引用字符串的长度当作全部输入。
+## 客户端错误与 Codex
 
-Anthropic 的 `redacted_thinking` 属于不可见的加密历史，也会被拒绝。工具参数和 Gemini 函数结果中的业务字段（例如 `file_id`）按完整 JSON 文本计数，不作为协议引用；工具结果中的真实文档、图片等附件仍受上述限制。排队心跳已开始 SSE 响应时，最终转发检查会发送协议对应的错误事件，HTTP 状态保留已提交的值。
-
-## 请求与配置
-
-- HTTP 覆盖 Responses（含 compact）、Chat Completions、Messages、Gemini 原生文本生成及对应路由别名；模型发现和 Token 计数入口保留原行为。
-- WebSocket 检查首轮和每个后续轮次；发送前再次检查实际载荷，包含程序补充的历史引用和重放内容。有状态会话更新会被受限密钥拒绝。
-- 已排队请求或长连接发现开关变化时重新准入；WebSocket 应重新连接。已发送的请求保留其入场配置。
-- 图片、音频、视频和 embeddings 独立入口保留原行为；文本推理请求内含附件时仍需接受可见上下文检查。
-
-管理接口为 `PUT /api/v1/admin/api-keys/{id}`：
+对外不返回管理员开关、Key 策略、具体配置上限或内部计数原因。OpenAI HTTP 请求返回 `400`：
 
 ```json
 {
-  "allow_long_context": false
+  "error": {
+    "type": "invalid_request_error",
+    "code": "context_length_exceeded",
+    "message": "Your input exceeds the context window of this model. Please adjust your input and try again."
+  }
 }
 ```
 
-省略字段保留原值，传 `true` 恢复允许。配置持久化在 PostgreSQL `api_keys.allow_long_context`，迁移文件为 `333_api_key_allow_long_context.sql`，默认 `true`。配置成功提交后失效对应鉴权缓存；鉴权及区域快照版本升级为 v33。
+已开始的 Responses SSE 流和 WebSocket 使用标准 `response.failed` 事件，错误位于 `response.error`，包含同一 `code` 与通用文案。WebSocket 发出事件后关闭连接。Anthropic 和 Gemini 入口保留各自协议的错误结构，文案同样不包含内部策略。
 
-部署包含该迁移的新版二进制或 Docker 镜像后，应用启动时自动执行迁移，沿用 `schema_migrations` 的执行记录。区域鉴权部署需重新发布 v33 快照。回退二进制会保留新增列和设置，但旧版本不执行该开关策略。
+Codex 可把此标准错误识别为上下文窗口耗尽；这不保证所有客户端版本都在本次失败请求中立即压缩重试。建议在客户端将 `model_auto_compact_token_limit` 配置在服务端上限以下，并为系统提示、工具和估算差异留出余量。即使客户端发起压缩，请求和后续摘要仍受同一 Key 的限制，尤其是不可计量的加密摘要；没有为压缩端点放行或伪造 usage。
 
-## 新功能提示
+## 管理员新功能提示
 
-提示 ID 为 `api-key-long-context-control-initial-announcement`，在用户管理的密钥设置入口、管理员自己的密钥编辑入口和弹窗的开关旁共用。点击任一位置后同步隐藏提示，记录保存在当前浏览器、当前管理员的 `localStorage` 中，刷新或重新登录后保留。关闭提示不会改变长上下文开关，也不会影响旧的模型策略公告。
+独立上限使用新 ID `api-key-context-token-limit-initial-announcement`，共用于用户管理密钥入口、管理员自己的密钥编辑入口、弹窗上限字段。点击任一标签同步隐藏，使用当前浏览器、当前管理员的 localStorage 保存关闭状态。原模型策略和长上下文开关的公告 ID 保留。
 
-## 验证
+## 验证范围
 
-本功能使用本地测试数据验证保存与默认值、普通用户写入隔离、缓存和区域快照、HTTP 提前拒绝、模型阈值、隐式历史引用、WebSocket 多轮及配置变化后的重连。实际供应商 Token 数与线上数据库迁移需在部署环境另行验证。
-
-本次定向后端回归通过 936 个顶层测试，含子用例共 1,890 项通过，零失败。`TestAPIKeyConcurrencyUpgradePaths` 因未配置临时 PostgreSQL 的 `SUB2API_UPGRADE_TEST_POSTGRES_URL` 而跳过；SQLite repository 测试已覆盖默认值、更新持久化及事务回滚。在 `backend` 目录执行：
-
-```bash
-go test -p 1 -tags=unit \
-  ./internal/service ./internal/repository ./internal/handler/... \
-  ./internal/server/middleware ./internal/server/routes \
-  -run 'APIKey|LongContext|ResponsesWebSocket|Composite|GroupModelAllowlist|TurnAdmission|AdmissionModelRejection|GatewayForwardErrorAlreadyCommunicated|GeminiCachedContentsCreate_Unknown' \
-  -count=1
-```
-
-CI 回归另覆盖后台账号探针缺少请求 URL、受限 Key 缺少 URL 时的 HTTP/WebSocket 校验、缓存重试、会话引用、API 响应字段及中间件顺序。后台账号探针不绑定客户 Key，保持原有探测行为；客户 Key 关闭开关时仍在最终发送前检查。完整后端单元、集成与并发回归的结果以对应 PR 提交的 CI 为准。
-
-前端定向回归的 7 个文件、113 项测试通过，覆盖弹窗保存/回显/密钥隔离、管理员公告多入口同步、刷新与登录持久性、未来公告及中英文 key 完整性。修改的 12 个前端文件通过 ESLint，`pnpm run build` 通过 i18n 检查、Vue 类型检查和 Vite 构建。前端尚未执行完整测试集；生产数据库升级和真实供应商调用需另行验证。
+定向回归覆盖整数边界、正数覆盖与 0 继承、Key 隔离、普通用户写入隔离、数据库读取和更新掩码、鉴权与区域快照、变更后的重新准入，以及 HTTP/SSE/WebSocket 标准错误和无上游发送。前端回归覆盖保存、清空、重新打开、切换 Key、新功能公告多入口同步及刷新/重新登录持久性。真实 Codex 客户端自动压缩、生产数据库迁移与真实供应商调用未作为本地测试执行，CI 结果以对应提交为准。

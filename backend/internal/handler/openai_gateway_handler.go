@@ -3032,7 +3032,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 	if err := h.gatewayService.CheckAPIKeyLongContext(c.Request.Context(), apiKey, firstMessage, reqModel, service.MapAPIKeyModel(apiKey, reqModel)); err != nil {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, apiKeyLongContextWSCloseReason(err))
+		rejectAPIKeyLongContextWS(wsConn, err)
 		return
 	}
 	// Start the connection's single frame reader after the temporary
@@ -3173,7 +3173,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	wsForwardModel := openAIChannelForwardModel(channelMappingWS, wsRouteModel)
 	if err := h.gatewayService.CheckAPIKeyLongContext(ctx, apiKey, firstMessage, reqModel, wsRouteModel, wsForwardModel); err != nil {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, apiKeyLongContextWSCloseReason(err))
+		rejectAPIKeyLongContextWS(wsConn, err)
 		return
 	}
 
@@ -3971,6 +3971,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					reason = "OpenAI OAuth RPM limit reached; reconnect after the current minute resets"
 				}
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, reason)
+				return
+			}
+			var contextErr *service.APIKeyLongContextError
+			if errors.As(err, &contextErr) {
+				releaseTurnSlots()
+				rejectAPIKeyLongContextWS(wsConn, err)
 				return
 			}
 			if service.IsOpenAIWSSessionPreemptedError(err) {

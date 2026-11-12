@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/tidwall/gjson"
@@ -34,13 +34,20 @@ type APIKeyLongContextError struct {
 	Limit           int
 	EstimatedTokens int
 	Reason          string
+	wsFailureSent   atomic.Bool
 }
 
+// Public errors deliberately omit per-key policy, thresholds and internal reasons.
+// OpenAI clients use this code to recognize an exhausted context window.
+const APIKeyContextLengthExceededCode = "context_length_exceeded"
+const APIKeyContextLengthExceededMessage = "Your input exceeds the context window of this model. Please adjust your input and try again."
+
+// Internal revalidation reason; never expose it on a gateway response.
+const APIKeyContextPolicyChangedReason = "API_KEY_CONTEXT_POLICY_CHANGED"
+const APIKeyContextPolicyRetryMessage = "The server is temporarily unavailable. Please try again."
+
 func (e *APIKeyLongContextError) Error() string {
-	if e.Code == "context_length_exceeded" {
-		return fmt.Sprintf("Long context is disabled for this API key; estimated input exceeds the %d-token limit. Shorten or compact the conversation", e.Limit)
-	}
-	return "Long context is disabled for this API key; send the complete text history without remote context references or attachments: " + e.Reason
+	return APIKeyContextLengthExceededMessage
 }
 
 // CheckAPIKeyLongContext checks a complete HTTP request or Responses WS frame.
@@ -52,7 +59,7 @@ func (s *GatewayService) CheckAPIKeyLongContext(ctx context.Context, key *APIKey
 	var billing *BillingService
 	if s != nil {
 		billing = s.billingService
-		if key != nil && !key.AllowLongContext {
+		if key.RequiresContextCheck() {
 			// Channels may lower the effective model's context boundary. Include
 			// their target without changing the requested model or request body.
 			models = append([]string(nil), models...)
@@ -76,7 +83,7 @@ func (s *OpenAIGatewayService) CheckAPIKeyLongContext(ctx context.Context, key *
 }
 
 func checkAPIKeyLongContext(ctx context.Context, billing *BillingService, key *APIKey, body []byte, models ...string) error {
-	if key == nil || key.AllowLongContext {
+	if !key.RequiresContextCheck() {
 		return nil
 	}
 	if ctx == nil {
@@ -95,7 +102,7 @@ func checkAPIKeyLongContext(ctx context.Context, billing *BillingService, key *A
 		return true
 	})
 	limit := apiKeyLongContextLimit(billing, models)
-	if outboundModel, _ := ctx.Value(apiKeyLongContextOutboundModelKey{}).(string); outboundModel != "" {
+	if outboundModel, _ := ctx.Value(apiKeyLongContextOutboundModelKey{}).(string); key.ContextTokenLimit == 0 && outboundModel != "" {
 		// An unpriced account target still has the default ceiling even when
 		// another candidate (for example the public alias) has a higher tier.
 		limit = min(limit, apiKeyLongContextLimit(billing, []string{outboundModel}))
@@ -105,6 +112,9 @@ func checkAPIKeyLongContext(ctx context.Context, billing *BillingService, key *A
 			}
 			return true
 		})
+	}
+	if key.ContextTokenLimit > 0 {
+		limit = key.ContextTokenLimit
 	}
 	model := ""
 	if len(models) > 0 {

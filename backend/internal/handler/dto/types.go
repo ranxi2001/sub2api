@@ -73,9 +73,10 @@ type APIKey struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 
-	ModelMapping     map[string]string `json:"model_mapping"`
-	ReasoningEffort  string            `json:"reasoning_effort"`
-	AllowLongContext bool              `json:"allow_long_context"`
+	ModelMapping      map[string]string `json:"model_mapping"`
+	ReasoningEffort   string            `json:"reasoning_effort"`
+	ContextTokenLimit int               `json:"context_token_limit"`
+	AllowLongContext  bool              `json:"allow_long_context"`
 
 	// CurrentConcurrency is the real-time active request count for this API key.
 	CurrentConcurrency int `json:"current_concurrency"`

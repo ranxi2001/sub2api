@@ -720,6 +720,7 @@
             </button>
             <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.apiKeyModelPolicy" :user-id="authStore.user?.id" />
             <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.apiKeyLongContext" :user-id="authStore.user?.id" compact />
+            <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.apiKeyContextTokenLimit" :user-id="authStore.user?.id" compact />
           </div>
           <p class="mt-2 text-sm text-gray-500 dark:text-dark-300">{{ t('apiKeyModelPolicy.scopeHint') }}</p>
         </div>

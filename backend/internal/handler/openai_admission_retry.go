@@ -36,7 +36,7 @@ func (h *OpenAIGatewayHandler) handleTurnAdmissionError(c *gin.Context, err erro
 	var contextErr *service.APIKeyLongContextError
 	if errors.As(err, &contextErr) {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-		h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", contextErr.Code, contextErr.Error(), streamStarted, false)
+		h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", service.APIKeyContextLengthExceededCode, contextErr.Error(), streamStarted, false)
 		return
 	}
 	if errors.Is(err, service.ErrPriorityLatencyUnavailable) {

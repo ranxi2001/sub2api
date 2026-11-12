@@ -239,7 +239,7 @@ func TestIssue805HTTPKeyPermissionStillRejectsBeforeSend(t *testing.T) {
 	key.(*service.APIKey).AllowLongContext = false
 	nodes(true).Responses(c)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Equal(t, "context_unverifiable", gjson.Get(rec.Body.String(), "error.code").String())
+	require.Equal(t, "context_length_exceeded", gjson.Get(rec.Body.String(), "error.code").String())
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	require.Len(t, u.ids, 1, "policy cannot override Key permissions")

@@ -18,8 +18,9 @@ func TestAPIKeyLongContextPersistenceAndWriteIsolation(t *testing.T) {
 	stale, err := repo.GetByID(ctx, key.ID)
 	require.NoError(t, err)
 	require.True(t, stale.AllowLongContext)
+	key.ContextTokenLimit = 1234
 	key.AllowLongContext = false
-	require.NoError(t, repo.Update(ctx, key, service.APIKeyUpdateFields{AllowLongContext: true}))
+	require.NoError(t, repo.Update(ctx, key, service.APIKeyUpdateFields{AllowLongContext: true, ContextTokenLimit: true}))
 	// A user's ordinary update using the old allowed snapshot cannot re-enable it.
 	stale.Name = "renamed"
 	require.NoError(t, repo.Update(ctx, stale, service.APIKeyUpdateFields{Name: true}))
@@ -31,13 +32,16 @@ func TestAPIKeyLongContextPersistenceAndWriteIsolation(t *testing.T) {
 		got, err := read()
 		require.NoError(t, err)
 		require.False(t, got.AllowLongContext)
+		require.Equal(t, 1234, got.ContextTokenLimit)
 		require.Equal(t, "renamed", got.Name)
 	}
+	key.ContextTokenLimit = 0
 	key.AllowLongContext = true
-	require.NoError(t, repo.Update(ctx, key, service.APIKeyUpdateFields{AllowLongContext: true}))
+	require.NoError(t, repo.Update(ctx, key, service.APIKeyUpdateFields{AllowLongContext: true, ContextTokenLimit: true}))
 	got, err := repo.GetByKeyForAuth(ctx, key.Key)
 	require.NoError(t, err)
 	require.True(t, got.AllowLongContext)
+	require.Zero(t, got.ContextTokenLimit)
 }
 
 func TestAPIKeyLongContextCombinedGroupFailureRollsBack(t *testing.T) {
@@ -50,12 +54,14 @@ func TestAPIKeyLongContextCombinedGroupFailureRollsBack(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, key))
 	key.Usage5h = 8
 	require.NoError(t, repo.Update(ctx, key, service.APIKeyUpdateFields{RateLimitUsage: true}))
+	key.ContextTokenLimit = 1234
 	key.GroupIDs, key.AllowLongContext, key.Usage5h = []int64{group.ID, 999999999}, false, 0
-	err = repo.Update(ctx, key, service.APIKeyUpdateFields{GroupID: true, AllowLongContext: true, RateLimitUsage: true})
+	err = repo.Update(ctx, key, service.APIKeyUpdateFields{GroupID: true, AllowLongContext: true, ContextTokenLimit: true, RateLimitUsage: true})
 	require.Error(t, err)
 	got, err := repo.GetByID(ctx, key.ID)
 	require.NoError(t, err)
 	require.True(t, got.AllowLongContext)
+	require.Zero(t, got.ContextTokenLimit)
 	require.Equal(t, []int64{group.ID}, got.GroupIDs)
 	require.Equal(t, 8.0, got.Usage5h)
 }

@@ -46,6 +46,9 @@ func openAIWSQueueAuthRejectedClose(cause error, wrapper error) *service.OpenAIW
 	status := infraerrors.Code(cause)
 	switch {
 	case status == http.StatusServiceUnavailable, status >= 500:
+		if cause != nil && infraerrors.Reason(cause) == service.APIKeyContextPolicyChangedReason {
+			return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, service.APIKeyContextPolicyRetryMessage, wrapper)
+		}
 		message := "API key authentication is temporarily unavailable; please reconnect"
 		if cause != nil && infraerrors.Reason(cause) == "API_KEY_GROUP_CHANGED" {
 			message = "API key configuration changed; please reconnect"
@@ -74,6 +77,9 @@ const (
 // returns the same envelope as a fresh authentication attempt.
 func queueAuthRejectedResponse(err error) (int, string, string, string) {
 	ackErr := infraerrors.FromError(err)
+	if ackErr.Reason == service.APIKeyContextPolicyChangedReason {
+		return http.StatusServiceUnavailable, "api_error", "server_error", service.APIKeyContextPolicyRetryMessage
+	}
 	status := int(ackErr.Code)
 	if status < 400 || status >= 600 || (status == infraerrors.UnknownCode && ackErr.Reason == "") {
 		status = http.StatusUnauthorized
