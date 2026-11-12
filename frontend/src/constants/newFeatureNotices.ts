@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  userIdCopy: 'user-id-copy-initial-announcement',
   accountAverageCache: 'account-average-cache-initial-announcement',
   pelicanRandomQuestionBank: 'pelican-random-question-bank',
   antigravityUsageQuery: 'antigravity-usage-query-initial-announcement',

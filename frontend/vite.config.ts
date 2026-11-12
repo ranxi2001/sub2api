@@ -144,6 +144,11 @@ export default defineConfig(({ mode }) => {
               return 'vendor-stripe'
             }
 
+            // SDK 模块初始化会加载外部脚本；仅在 Airwallex 支付页按需导入。
+            if (id.includes('/@airwallex/components-sdk/')) {
+              return 'vendor-airwallex'
+            }
+
             // 其他小型第三方库合并
             return 'vendor-misc'
           }
