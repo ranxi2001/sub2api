@@ -214,6 +214,17 @@ async function browser() {
     await compliance.getByRole('button', { name: 'Acknowledge and Continue', exact: true }).click()
     assert.equal((await accepted).status(), 200)
     await compliance.waitFor({ state: 'hidden' })
+    // Requests made before first-install acknowledgement are gated by the real
+    // middleware. Preserve their diagnostics, then reload the real page so its
+    // initial account query runs after acknowledgement has persisted.
+    await page.waitForLoadState('networkidle')
+    state.bootstrap = { blocked: [...state.blocked], requestFailures: [...state.requestFailures],
+      pageErrors: [...state.pageErrors], consoleErrors: [...state.consoleErrors] }
+    assert.equal(state.blocked.length, 0, 'bootstrap must not request external resources')
+    assert.equal(state.requestFailures.length, 0, 'bootstrap transport must complete')
+    state.pageErrors = []
+    state.consoleErrors = []
+    await page.reload()
     await page.getByRole('row').filter({ hasText: accounts[0].name }).waitFor()
     assert.ok(await page.locator('link[rel=stylesheet]').count(), 'real application CSS loaded')
     state.scenarios.push({ name: stage, status: 'passed', entry: '/admin/accounts' })
@@ -366,7 +377,7 @@ async function browser() {
     state.scenarios.push({ name: stage, status: 'passed', plan_id: created.id,
       boundary: 'disabled creation only; no scheduled RunDue, /run or result acceptance claimed' })
 
-    stage = 'browser-and-provider-error-lists'
+    stage = 'post-bootstrap-browser-and-provider-error-lists'
     const finalCaptures = await (await fetch(`${upstreamOrigin}/__fixture/captures`)).json()
     assert.deepEqual(finalCaptures.rejected, [])
     assert.equal(state.blocked.length, 0, 'browser may contact only app origin')
