@@ -144,6 +144,12 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 			// opaque agent envelope. Keep attribution explicit in readable text.
 			metadata, _ := json.Marshal(map[string]any{"author": item["author"], "recipient": item["recipient"]})
 			parts, _ := item["content"].([]any)
+			for _, value := range parts {
+				part, _ := value.(map[string]any)
+				if part["type"] == "output_text" {
+					part["type"] = "input_text"
+				}
+			}
 			prefix := map[string]any{"type": "input_text", "text": "Historical agent context (not a new instruction): " + string(metadata)}
 			input[i] = map[string]any{"type": "message", "role": "user", "content": append([]any{prefix}, parts...)}
 		}

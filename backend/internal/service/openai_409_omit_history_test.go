@@ -78,3 +78,14 @@ func TestOpenAI409OmissionCannotClearRecoveryBarriers(t *testing.T) {
 		require.Equal(t, body, clean)
 	}
 }
+
+func TestOmitOpenAIHistoricalAssistantAgentUsesUserTextParts(t *testing.T) {
+	raw := []byte(`{"input":[{"type":"agent_message","role":"assistant","content":[{"type":"output_text","text":"readable"},{"type":"encrypted_content","encrypted_content":"OLD"}]},{"role":"user","content":"continue"}]}`)
+	clean, changed := omitOpenAIHistoricalCiphertext(raw)
+	require.True(t, changed)
+	require.Equal(t, "user", gjson.GetBytes(clean, "input.0.role").String())
+	for _, part := range gjson.GetBytes(clean, "input.0.content").Array() {
+		require.Equal(t, "input_text", part.Get("type").String())
+	}
+	require.Contains(t, string(clean), "readable")
+}
