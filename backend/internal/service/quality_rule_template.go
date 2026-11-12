@@ -71,6 +71,8 @@ type QualityRuleTemplateRepository interface {
 	CreatePreset(ctx context.Context, preset *QualityRulePreset) (*QualityRulePreset, error)
 	List(ctx context.Context) ([]*QualityRuleTemplate, error)
 	Get(ctx context.Context, id int64) (*QualityRuleTemplate, error)
+	// ForPlan returns the current owning template, or nil for an independent plan.
+	ForPlan(ctx context.Context, planID int64) (*QualityRuleTemplate, error)
 	Create(ctx context.Context, template *QualityRuleTemplate) (*QualityRuleTemplate, error)
 	Update(ctx context.Context, template *QualityRuleTemplate) (*QualityRuleTemplate, error)
 	// Delete removes the template and returns the rules it had created that still exist.

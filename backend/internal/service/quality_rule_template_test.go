@@ -116,6 +116,17 @@ func (r *fakeTemplateRepo) Get(_ context.Context, id int64) (*QualityRuleTemplat
 	return r.snapshot(t), nil
 }
 
+func (r *fakeTemplateRepo) ForPlan(ctx context.Context, planID int64) (*QualityRuleTemplate, error) {
+	for id, links := range r.links {
+		for _, linkedPlan := range links {
+			if linkedPlan == planID {
+				return r.Get(ctx, id)
+			}
+		}
+	}
+	return nil, nil
+}
+
 func (r *fakeTemplateRepo) Create(ctx context.Context, t *QualityRuleTemplate) (*QualityRuleTemplate, error) {
 	r.nextID++
 	stored := *t

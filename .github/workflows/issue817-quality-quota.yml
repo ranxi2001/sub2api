@@ -1,0 +1,109 @@
+name: Issue817 quality quota regressions
+
+on:
+  push:
+    branches: [fix/issue817-quality-exhausted-filter]
+  pull_request:
+    paths:
+      - 'backend/internal/service/quality_quota*'
+      - 'backend/internal/service/quality_rule_template*'
+      - 'backend/internal/service/pelican_scheduled.go'
+      - 'backend/internal/service/scheduled_test_port.go'
+      - 'backend/internal/repository/quality_template_quota*'
+      - 'backend/internal/repository/quality_quota_ownership*'
+      - 'backend/internal/repository/quality_rule_template_repo.go'
+      - 'backend/internal/repository/account_quality.go'
+      - 'backend/internal/repository/scheduled_test_repo.go'
+      - '.github/workflows/issue817-quality-quota.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue817-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Record and assert actual head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/head.txt
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Record source formatting diff for static follow-up
+        shell: bash
+        run: |
+          gofmt -d backend/internal/service/quality_quota_filter*.go backend/internal/service/scheduled_test_port.go backend/internal/repository/quality_template_quota*.go backend/internal/repository/quality_quota_ownership*.go > evidence/format.diff
+          cat evidence/format.diff
+      - name: Original runner must fail the unchanged execution regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          source=backend/internal/service/pelican_scheduled.go
+          cp "$source" "$RUNNER_TEMP/issue817-runner.go"
+          trap 'cp "$RUNNER_TEMP/issue817-runner.go" "$source"' EXIT
+          original=9837bfbfc845027a61b86cec1460785e869c4e54
+          git fetch --no-tags --depth=1 origin "$original"
+          git show "$original:$source" > "$source"
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestIssue817RunnerRechecksQuotaAfterClaim$' -count=1 -v) > evidence/red-runner.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red-runner.log
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' evidence/red-runner.log
+          grep -F -- '--- FAIL: TestIssue817RunnerRechecksQuotaAfterClaim/normal_only_five_hour' evidence/red-runner.log
+          grep -F -- '--- FAIL: TestIssue817RunnerRechecksQuotaAfterClaim/normal_only_weekly' evidence/red-runner.log
+      - name: Current service race regressions and retained quality safeguards
+        shell: bash
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service -run '^(TestIssue817|TestQuality|TestPelicanSchedule)' -count=1 -v -timeout=10m 2>&1 | tee ../evidence/green-service.log
+          ! grep -Eq 'no tests to run|--- SKIP:' ../evidence/green-service.log
+      - name: Original candidate selection must fail unchanged PostgreSQL regression
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          source=backend/internal/repository/quality_rule_template_repo.go
+          cp "$source" "$RUNNER_TEMP/issue817-template.go"
+          trap 'cp "$RUNNER_TEMP/issue817-template.go" "$source"' EXIT
+          git show "9837bfbfc845027a61b86cec1460785e869c4e54:$source" > "$source"
+          set +e
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestIssue817TemplateCandidateQuotaAndRecovery$' -count=1 -v -timeout=10m) > evidence/red-candidates.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red-candidates.log
+          test "$result" -ne 0
+          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' evidence/red-candidates.log
+          grep -F -- '--- FAIL: TestIssue817TemplateCandidateQuotaAndRecovery' evidence/red-candidates.log
+          grep -F -- 'normal-only candidates must exclude known 5h and weekly exhaustion' evidence/red-candidates.log
+      - name: Current PostgreSQL candidates, triggers, 401, ownership and leases
+        working-directory: backend
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          go test -tags=integration ./internal/repository -run '^(TestIssue817|TestQualityRuleTemplate|TestQualityRetestRest|TestQualityOAuth401|TestQualityOwnership|TestQualityIsolation|TestQualityEnableBPS)' -count=1 -v -timeout=15m 2>&1 | tee ../evidence/green-postgres.log
+          ! grep -Eq 'no tests to run|--- SKIP:' ../evidence/green-postgres.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue817-${{ github.event_name }}-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error

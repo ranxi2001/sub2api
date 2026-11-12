@@ -37,6 +37,8 @@ type PelicanTestConfig struct {
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
+	// Populated only from the repository's one-shot manual trigger marker.
+	ManualQualityRun      bool              `json:"-"`
 	QualityBatchEvaluated bool              `json:"-"`
 	QualityBatchModels    map[string]string `json:"-"`
 	// Request-only: importing configuration preserves this target's ownership.

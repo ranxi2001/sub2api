@@ -329,6 +329,13 @@ func scanPlan(row scannable, withAccountName ...bool) (*service.ScheduledTestPla
 		if err := json.Unmarshal(config, &p.PelicanConfig); err != nil {
 			return nil, err
 		}
+		var internal struct {
+			ManualQualityRun bool `json:"_manual_quality_run"`
+		}
+		if err := json.Unmarshal(config, &internal); err != nil {
+			return nil, err
+		}
+		p.ManualQualityRun = internal.ManualQualityRun
 	}
 	return p, nil
 }
@@ -368,7 +375,7 @@ func (r *scheduledTestPlanRepository) ClaimPelican(ctx context.Context, plan *se
 		return false, nil
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE scheduled_test_plans
- SET running_until = $3, next_run_at = $4
+ SET running_until = $3, next_run_at = $4, pelican_config = pelican_config - '_manual_quality_run'
  WHERE id = $1 AND enabled = true
  AND (next_run_at <= $2 OR ($7 AND pelican_config->'quality'->>'trigger_on_upstream_5xx'='true'))
  AND (NOT $7 OR (pelican_config->'quality'->>'trigger_on_upstream_5xx'='true'
