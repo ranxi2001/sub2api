@@ -8,7 +8,8 @@ RUN mkdir -p /opt/fixture/tls && \
     openssl req -x509 -newkey rsa:2048 -nodes -days 7 \
       -subj '/CN=fake-upstream' -addext 'subjectAltName=DNS:fake-upstream' \
       -addext 'basicConstraints=critical,CA:TRUE' \
-      -keyout /opt/fixture/tls/key.pem -out /opt/fixture/tls/cert.pem
+      -keyout /opt/fixture/tls/key.pem -out /opt/fixture/tls/cert.pem && \
+    chmod 644 /opt/fixture/tls/key.pem
 COPY scripts/pelican-question-e2e.mjs /opt/fixture/pelican-question-e2e.mjs
 ENV NODE_EXTRA_CA_CERTS=/opt/fixture/tls/cert.pem
 ENTRYPOINT ["node", "/opt/fixture/pelican-question-e2e.mjs"]
