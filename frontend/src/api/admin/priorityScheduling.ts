@@ -27,6 +27,7 @@ export interface PrioritySchedulingConfig {
   latency_weight: number
   load_weight: number
   cost_weight: number
+  cache_weight?: number
 }
 export type PriorityHistoryStatus = 'ready' | 'stale' | 'partial' | 'loading' | 'error' | 'unavailable' | 'limited'
 export interface PriorityCandidate {

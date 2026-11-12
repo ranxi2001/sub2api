@@ -13,16 +13,16 @@ describe('Account performance rolling window',()=>{
  it('renders exactly five metric lines and missing samples as uncollected',()=>{
   const w=render();expect(w.findAll('[data-metric]')).toHaveLength(5)
   expect(w.findAll('[data-metric]').every(r=>r.text().includes('Not collected'))).toBe(true)
-  expect(w.text()).toContain('Probe degradation · 60m')
+  expect(w.text()).toContain('Degradation rate · 60m')
   expect(w.attributes('title')).toContain('Rolling 60 minutes')
  })
  it('uses the response window for labels and tooltip and updates after refresh',async()=>{
   const window_end='2026-11-02T01:00:00Z'
   const w=render({window_start:'2026-11-02T00:45:00Z',window_end})
-  expect(w.text()).toContain('Probe degradation · 15m')
+  expect(w.text()).toContain('Degradation rate · 15m')
   expect(w.attributes('title')).toContain('Rolling 15 minutes')
   await w.setProps({metrics:{window_start:'2026-11-01T23:00:00Z',window_end}})
-  expect(w.text()).toContain('Probe degradation · 120m')
+  expect(w.text()).toContain('Degradation rate · 120m')
   expect(w.attributes('title')).toContain('Rolling 120 minutes')
  })
  it('preserves a measured zero degradation and shows independent automatic pause',()=>{

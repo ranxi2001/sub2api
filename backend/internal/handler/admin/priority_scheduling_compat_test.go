@@ -284,3 +284,58 @@ func TestPrioritySaveLatencyPenaltyModes(t *testing.T) {
 		}
 	}
 }
+
+func TestPriorityCacheWeightSaveCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		value    any
+		supplied bool
+		want     float64
+		status   int
+	}{
+		{"omitted", nil, false, 25, 200}, {"enabled", 60.0, true, 60, 200}, {"disabled", 0.0, true, 0, 200},
+		{"negative", -1.0, true, 25, 400}, {"too large", 101.0, true, 25, 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := service.DefaultPrioritySchedulingConfig()
+			raw, err := json.Marshal(cfg)
+			require.NoError(t, err)
+			var request map[string]any
+			require.NoError(t, json.Unmarshal(raw, &request))
+			request["cache_weight"] = 25.0
+			stored, err := json.Marshal(request)
+			require.NoError(t, err)
+			repo := &priorityCompatSettings{value: string(stored)}
+			settings := service.NewSettingService(repo, nil)
+			h := &SettingHandler{settingService: settings}
+			delete(request, "cache_weight")
+			if tc.supplied {
+				request["cache_weight"] = tc.value
+			}
+			body, err := json.Marshal(request)
+			require.NoError(t, err)
+			router := gin.New()
+			router.PUT("/config", h.SavePriorityScheduling)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, "/config", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+			require.Equal(t, tc.status, rec.Code, rec.Body.String())
+			saved, err := settings.GetPrioritySchedulingConfig(context.Background())
+			require.NoError(t, err)
+			encoded, err := json.Marshal(saved)
+			require.NoError(t, err)
+			var actual map[string]any
+			require.NoError(t, json.Unmarshal(encoded, &actual))
+			require.Equal(t, tc.want, actual["cache_weight"])
+		})
+	}
+	legacy := &priorityCompatSettings{value: `{"enabled":true}`}
+	current, err := service.NewSettingService(legacy, nil).GetPrioritySchedulingConfig(context.Background())
+	require.NoError(t, err)
+	raw, err := json.Marshal(current)
+	require.NoError(t, err)
+	var values map[string]any
+	require.NoError(t, json.Unmarshal(raw, &values))
+	require.Equal(t, 0.0, values["cache_weight"])
+}
