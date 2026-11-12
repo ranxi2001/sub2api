@@ -1,0 +1,109 @@
+# No service may gain a second network, host networking, published port, Docker
+# socket, production config or persistent host data mount. Images are prebuilt.
+x-runtime: &runtime
+  networks: [isolated]
+  restart: "no"
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+
+services:
+  postgres:
+    <<: *runtime
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: fixture
+      POSTGRES_PASSWORD: fixture-only-postgres
+      POSTGRES_DB: fixture
+    volumes: [pg-data:/var/lib/postgresql]
+    # The stock entrypoint changes ownership before dropping privileges.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U fixture -d fixture"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    <<: *runtime
+    image: redis:7-alpine
+    command: [redis-server, --save, "", --appendonly, "no"]
+    tmpfs: [/data]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  fake-upstream:
+    <<: *runtime
+    image: pelican-runner:${HARNESS_SHA:?required}
+    # Bind-mounted evidence belongs to the Actions runner; root has no DAC override.
+    user: "${FIXTURE_UID:?required}:${FIXTURE_GID:?required}"
+    command: [upstream]
+    read_only: true
+    volumes: ["${EVIDENCE_DIR:?required}:/evidence"]
+    healthcheck:
+      test: [CMD, node, /opt/fixture/pelican-question-e2e.mjs, upstream-health]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  app:
+    <<: *runtime
+    image: pelican-app:${APP_SHA:?required}
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    environment:
+      AUTO_SETUP: "true"
+      ADMIN_EMAIL: reviewer@example.invalid
+      ADMIN_PASSWORD: Fixture-Only-795-Password!
+      JWT_SECRET: fixture-only-jwt-795-not-a-real-secret-0123456789abcdef
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: fixture
+      DATABASE_PASSWORD: fixture-only-postgres
+      DATABASE_DBNAME: fixture
+      DATABASE_SSLMODE: disable
+      REDIS_HOST: redis
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8080"
+      SERVER_MODE: release
+      TZ: UTC
+      CONFIG_FILE: /fixture/config.yml
+    volumes:
+      - app-data:/app/data
+      - ./config.yml:/fixture/config.yml:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      fake-upstream: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -T, "3", -O, /dev/null, http://localhost:8080/health]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+  browser:
+    <<: *runtime
+    image: pelican-runner:${HARNESS_SHA:?required}
+    # Bind-mounted evidence belongs to the Actions runner; root has no DAC override.
+    user: "${FIXTURE_UID:?required}:${FIXTURE_GID:?required}"
+    command: [browser]
+    read_only: true
+    shm_size: 1gb
+    tmpfs: [/tmp]
+    environment:
+      APP_ORIGIN: http://app:8080
+      PGHOST: postgres
+      PGUSER: fixture
+      PGPASSWORD: fixture-only-postgres
+      PGDATABASE: fixture
+    volumes:
+      - "${EVIDENCE_DIR:?required}:/evidence"
+      - ./acceptance.json:/fixture/acceptance.json:ro
+    depends_on:
+      app: {condition: service_healthy}
+
+networks:
+  isolated:
+    internal: true
+    enable_ipv6: false
+volumes:
+  pg-data:
+  app-data:

@@ -1,13 +1,40 @@
 name: Pelican random question evidence
 on:
+  # A new workflow on a feature branch can run on pull_request immediately;
+  # workflow_dispatch is available only after this workflow reaches the default branch.
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:
       - 'backend/internal/service/pelican*'
+      - 'backend/internal/service/scheduled_test*'
+      - 'backend/internal/service/account_test*'
+      - 'backend/internal/handler/admin/*pelican*'
+      - 'backend/internal/handler/admin/account*'
+      - 'backend/internal/handler/admin/scheduled_test*'
+      - 'backend/internal/repository/*pelican*'
+      - 'backend/internal/repository/account*'
+      - 'backend/internal/repository/scheduled_test*'
+      - 'backend/internal/server/routes/admin*'
+      - 'backend/internal/config/**'
+      - 'backend/internal/util/urlvalidator/**'
+      - 'backend/migrations/**'
+      - 'frontend/src/api/admin/accounts*'
+      - 'frontend/src/api/admin/pelicanTests*'
+      - 'frontend/src/api/admin/scheduledTests*'
+      - 'frontend/src/views/admin/AccountsView.vue'
+      - 'frontend/src/views/admin/PelicanTestsView.vue'
+      - 'frontend/src/utils/pelican*'
+      - 'frontend/src/types/**'
+      - 'frontend/src/components/admin/account/ScheduledTestsPanel.vue'
       - 'frontend/src/components/admin/account/Pelican*'
       - 'frontend/src/components/admin/account/IQTestModal.vue'
+      - '.github/fixtures/pelican-question-e2e/**'
+      - '.github/scripts/pelican-question-e2e.mjs'
       - '.github/scripts/pelican-question-browser.mjs'
       - '.github/workflows/pelican-random-questions.yml'
+      - 'Dockerfile'
+      - '.dockerignore'
 permissions:
   contents: read
 jobs:
@@ -17,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - run: bash .github/scripts/ci-ubuntu-mirrors.sh
       - uses: pnpm/action-setup@v6
@@ -45,3 +72,102 @@ jobs:
         with:
           name: pelican-random-question-ui-${{ github.run_id }}
           path: evidence/
+  isolated-e2e:
+    name: Isolated application E2E (initial scope; full acceptance pending)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APP_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      HARNESS_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PARENT_BASE_SHA: 3e07fa89096cb58b260c032aa6de2cb2a2aa98b7
+      COMPOSE_PROJECT_NAME: pelican-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.HARNESS_SHA }}
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.APP_SHA }}
+          path: app
+          persist-credentials: false
+      - name: Record the two immutable checkout identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EVIDENCE_DIR="$RUNNER_TEMP/pelican-isolated-evidence"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf 'FIXTURE_UID=%s\nFIXTURE_GID=%s\n' "$(id -u)" "$(id -g)" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE_DIR"
+          test "$(git -C app rev-parse HEAD)" = "$APP_SHA"
+          test "$(git -C harness rev-parse HEAD)" = "$HARNESS_SHA"
+          {
+            printf 'APP_SHA=%s\nAPP_TREE=%s\n' "$APP_SHA" "$(git -C app rev-parse 'HEAD^{tree}')"
+            printf 'HARNESS_SHA=%s\nHARNESS_TREE=%s\n' "$HARNESS_SHA" "$(git -C harness rev-parse 'HEAD^{tree}')"
+            printf 'PARENT_BASE_SHA=%s\nRUN_ID=%s\nRUN_ATTEMPT=%s\n' "$PARENT_BASE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          } > "$EVIDENCE_DIR/identity.txt"
+          cp harness/.github/fixtures/pelican-question-e2e/acceptance.json "$EVIDENCE_DIR/acceptance.json"
+      - name: Build and prefetch before runtime isolation (CI only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --build-arg COMMIT="$APP_SHA" --tag "pelican-app-base:$APP_SHA" app
+          docker build --target runner --tag "pelican-runner:$HARNESS_SHA" \
+            --file harness/.github/fixtures/pelican-question-e2e/Dockerfile harness/.github
+          docker build --target app --build-arg "APP_IMAGE=pelican-app-base:$APP_SHA" \
+            --tag "pelican-app:$APP_SHA" \
+            --file harness/.github/fixtures/pelican-question-e2e/Dockerfile harness/.github
+          docker pull postgres:18-alpine
+          docker pull redis:7-alpine
+      - name: Start only the internal runtime network and real migrated application
+        working-directory: harness/.github/fixtures/pelican-question-e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose up --detach --no-build --pull never --wait --wait-timeout 180 postgres redis fake-upstream app
+          docker compose exec -T postgres psql --username fixture --dbname fixture --set ON_ERROR_STOP=1 < seed.sql
+          # Start the browser as a service (not `compose run` with a second network).
+          docker compose up --detach --no-build --pull never browser
+          docker network inspect "${COMPOSE_PROJECT_NAME}_isolated" \
+            --format '{{json .Internal}}' > "$EVIDENCE_DIR/network-internal.json"
+          test "$(cat "$EVIDENCE_DIR/network-internal.json")" = true
+          for service in postgres redis fake-upstream app browser; do
+            container_id="$(docker compose ps --all --quiet "$service")"
+            test -n "$container_id"
+            docker inspect "$container_id" --format \
+              '{"service":{{json (index .Config.Labels "com.docker.compose.service")}},"networks":{{json .NetworkSettings.Networks}},"ports":{{json .HostConfig.PortBindings}},"networkMode":{{json .HostConfig.NetworkMode}},"privileged":{{json .HostConfig.Privileged}},"user":{{json .Config.User}},"mounts":{{json .Mounts}}}' \
+              > "$EVIDENCE_DIR/network-$service.json"
+          done
+          node ../../scripts/pelican-question-e2e.mjs topology
+      - name: Wait for the browser's implemented scenarios
+        working-directory: harness/.github/fixtures/pelican-question-e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker compose ps --all --quiet browser)"
+          result="$(timeout 300s docker wait "$container_id")"
+          # Harness logs contain only scenario names/status, never response bodies or tokens.
+          docker compose logs --no-color browser
+          test "$result" = 0
+      - name: Explicit acceptance boundary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### Isolated E2E initial increment — full acceptance pending'
+            echo 'This job exercises the implemented manual scenarios and disabled group-plan creation only.'
+            echo 'Account/group scheduled RunDue, PG/API/DOM result reconciliation, immutable old snapshots,'
+            echo 'second nominal round, deterministic failed record and lease release remain unimplemented.'
+            echo 'A green initial job does not clear the Issue #795 technical or product acceptance gates.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Destroy all disposable runtime containers and volumes
+        if: always()
+        working-directory: harness/.github/fixtures/pelican-question-e2e
+        run: docker compose down --volumes --remove-orphans --timeout 10
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pelican-isolated-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.EVIDENCE_DIR }}/
+          retention-days: 7

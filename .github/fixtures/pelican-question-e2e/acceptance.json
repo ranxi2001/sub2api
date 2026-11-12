@@ -1,0 +1,29 @@
+{
+  "scope": "initial-reviewable-increment",
+  "full_acceptance_complete": false,
+  "unimplemented": [
+    "account scheduled plans created via UI, two samples per A and B",
+    "same nominal UTC time, actual account runner Claim and four PG results",
+    "account PG result IDs and payloads reconciled with history/detail APIs and expanded real DOM",
+    "group due time alignment, real RunDue/Claim and PG/list/detail/DOM reconciliation",
+    "plan UI edit followed by proof old stored/API/DOM snapshot is unchanged",
+    "second nominal time mapped to a different question, new and old scheduled records coexist",
+    "deterministic upstream refusal yields failed persisted history and released lease",
+    "restricted result/lease/due SQL projections linked to captures and API IDs"
+  ],
+  "pending_external_gates": [
+    "screenshots from successful isolated chain uploaded as PR native attachments and read back",
+    "product policy and empirical difficulty calibration; fixture output cannot prove either"
+  ],
+  "fixture_transport_difference": "Uses fixture-only HTTPS and an ephemeral fixture CA, because the enabled real account-test URL allowlist calls ValidateHTTPSURL. The audit's proposed HTTP URL is not accepted with that allowlist enabled. No application validation is disabled or modified.",
+  "implemented_scenarios": [
+    "runtime internal Docker network for app, browser, fake provider, PostgreSQL and Redis",
+    "normal login and real accounts UI with original CSS",
+    "real prepare, account A and B with two samples each in one manual round",
+    "provider payload compared with API question and real DOM snapshot",
+    "manual localStorage recovery, history expansion and fixture iframe after reload",
+    "next manual round identity changes; repeated question selection is permitted",
+    "disabled group plan created through real browser form, create API and PG"
+  ],
+  "verification_evidence": "Read scenario-results.json and the current PR head checks; this declaration does not assert runtime success."
+}
