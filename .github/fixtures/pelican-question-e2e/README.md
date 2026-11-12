@@ -1,4 +1,4 @@
-# Issue #795 隔离应用 E2E：首个待审增量
+# Issue #795 隔离应用 E2E：手动链路与禁用分组计划
 
 Refs #795。本目录只提供 CI fixture，不修改应用业务代码，不表示完整验收、真实模型兼容性或经验难度校准完成。逐场景状态由 `acceptance.json` 声明；脚本即使成功，也固定输出 `full_acceptance_complete: false`。
 
@@ -25,7 +25,7 @@ GitHub `pull_request`（base 为 `production`，包含 fixture/script/workflow �
 - [ ] 第二 nominal time T2 按现有哈希公式选到另一题，等待真实 tick，新旧记录共存；不能修改生产抽题算法。
 - [ ] arm 单次 refusal 后真正产生 failed 持久化结果、失败历史及 lease 释放；现有 refusal server 能力尚未被此增量测试。
 - [ ] 对结果/租约/到期字段进行限定 SQL 投影，与 API、capture 和场景 ID 关联。目前只有初始化实体与禁用分组计划投影，没有定时结果 SQL 证据。
-- [ ] 远程 Actions 首次运行、raw job log 定向修正、精确 head/check 回读。没有运行本地动态检查。
+- 远程 Actions、失败记录及当前 head 检查结论见 PR #809；场景结果以当次 artifact 为准。没有运行本地动态检查。
 - [ ] 隔离链路真实截图上传 PR 原生附件并回读；现有组件 job 截图仍只是组件证据，不能混同此 job。无 PNG 提交到源码。
 - [ ] 父协调者独审、完整技术验收与产品/经验难度证据。fixture 的简单 SVG 不代表题目作答合格或难度相当。
 
@@ -44,3 +44,5 @@ CI artifact 预期包含应用/harness SHA/tree、显式未完成清单、命名
 全新 fixture 正常完成引导退出与管理员声明确认，均由真实 UI 操作，不注入 localStorage 或伪造认证状态。登录 redirect 直接进入账号页，避免立即整页跳转取消初始化请求。隔离 job 同时发现 Airwallex SDK 被公共 vendor-misc 提前加载；本 PR 将该 SDK 独立分包，仍仅由现有支付页动态 import，账号页不应请求外部支付脚本。
 
 管理员确认前已发出的页面读取会被真实合规中间件拒绝。脚本保留首次初始化阶段的错误列表，确认持久化后正常刷新页面，再对鹈鹕场景执行浏览器错误零值断言；不声称首次安装全过程无控制台错误。
+
+分组计划场景从固定页面地址进入，再使用真实表单创建计划；不依赖当前管理员可定制的侧栏菜单展开/隐藏状态，也不声称已验收侧栏导航。
