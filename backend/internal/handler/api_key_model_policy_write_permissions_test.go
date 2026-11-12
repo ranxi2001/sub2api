@@ -61,7 +61,7 @@ func TestAPIKeyUserJSONCannotWriteAdministratorModelPolicy(t *testing.T) {
 	router.POST("/api/v1/api-keys", h.Create)
 	router.PUT("/api/v1/api-keys/:id", h.Update)
 
-	post := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", bytes.NewBufferString(`{"name":"created","model_mapping":{"gpt-6.1-sol":"gpt-5.6-sol"},"reasoning_effort":"ultra","allow_long_context":false}`))
+	post := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", bytes.NewBufferString(`{"name":"created","model_mapping":{"gpt-6.1-sol":"gpt-5.6-sol"},"reasoning_effort":"ultra","context_token_limit":1,"allow_long_context":false}`))
 	post.Header.Set("Content-Type", "application/json")
 	created := httptest.NewRecorder()
 	router.ServeHTTP(created, post)
@@ -69,17 +69,19 @@ func TestAPIKeyUserJSONCannotWriteAdministratorModelPolicy(t *testing.T) {
 	require.Empty(t, repo.key.ModelMapping)
 	require.Empty(t, repo.key.ReasoningEffort)
 	require.True(t, repo.key.AllowLongContext, "user creation keeps the server default")
+	require.Zero(t, repo.key.ContextTokenLimit)
 	require.Contains(t, created.Body.String(), `"model_mapping":null`)
 	require.Contains(t, created.Body.String(), `"reasoning_effort":""`)
 
 	for _, body := range []string{
-		`{"name":"renamed","model_mapping":{"gpt-6.1-sol":"different"},"reasoning_effort":"ultra","allow_long_context":true}`,
-		`{"name":"renamed","model_mapping":{},"reasoning_effort":"","allow_long_context":false}`,
-		`{"name":"renamed","ModelMapping":{},"ReasoningEffort":"ultra","AllowLongContext":true}`,
+		`{"name":"renamed","model_mapping":{"gpt-6.1-sol":"different"},"reasoning_effort":"ultra","context_token_limit":0,"allow_long_context":true}`,
+		`{"name":"renamed","model_mapping":{},"reasoning_effort":"","context_token_limit":1,"allow_long_context":false}`,
+		`{"name":"renamed","ModelMapping":{},"ReasoningEffort":"ultra","ContextTokenLimit":0,"AllowLongContext":true}`,
 	} {
 		repo.key.ModelMapping = map[string]string{"gpt-6.1-sol": "gpt-5.6-sol"}
 		repo.key.ReasoningEffort = "high"
 		repo.key.AllowLongContext = false
+		repo.key.ContextTokenLimit = 1234
 		put := httptest.NewRequest(http.MethodPut, "/api/v1/api-keys/10", bytes.NewBufferString(body))
 		put.Header.Set("Content-Type", "application/json")
 		updated := httptest.NewRecorder()
@@ -89,6 +91,7 @@ func TestAPIKeyUserJSONCannotWriteAdministratorModelPolicy(t *testing.T) {
 		require.Equal(t, map[string]string{"gpt-6.1-sol": "gpt-5.6-sol"}, repo.key.ModelMapping)
 		require.Equal(t, "high", repo.key.ReasoningEffort)
 		require.False(t, repo.key.AllowLongContext)
+		require.Equal(t, 1234, repo.key.ContextTokenLimit)
 		require.Equal(t, service.APIKeyUpdateFields{Name: true}, repo.fields)
 		require.Contains(t, updated.Body.String(), `"model_mapping":{"gpt-6.1-sol":"gpt-5.6-sol"}`)
 		require.Contains(t, updated.Body.String(), `"reasoning_effort":"high"`)

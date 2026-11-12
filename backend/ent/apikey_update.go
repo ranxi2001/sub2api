@@ -189,6 +189,27 @@ func (_u *APIKeyUpdate) SetNillableAllowLongContext(v *bool) *APIKeyUpdate {
 	return _u
 }
 
+// SetContextTokenLimit sets the "context_token_limit" field.
+func (_u *APIKeyUpdate) SetContextTokenLimit(v int) *APIKeyUpdate {
+	_u.mutation.ResetContextTokenLimit()
+	_u.mutation.SetContextTokenLimit(v)
+	return _u
+}
+
+// SetNillableContextTokenLimit sets the "context_token_limit" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableContextTokenLimit(v *int) *APIKeyUpdate {
+	if v != nil {
+		_u.SetContextTokenLimit(*v)
+	}
+	return _u
+}
+
+// AddContextTokenLimit adds value to the "context_token_limit" field.
+func (_u *APIKeyUpdate) AddContextTokenLimit(v int) *APIKeyUpdate {
+	_u.mutation.AddContextTokenLimit(v)
+	return _u
+}
+
 // SetLastUsedAt sets the "last_used_at" field.
 func (_u *APIKeyUpdate) SetLastUsedAt(v time.Time) *APIKeyUpdate {
 	_u.mutation.SetLastUsedAt(v)
@@ -625,6 +646,11 @@ func (_u *APIKeyUpdate) check() error {
 			return &ValidationError{Name: "reasoning_effort", err: fmt.Errorf(`ent: validator failed for field "APIKey.reasoning_effort": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ContextTokenLimit(); ok {
+		if err := apikey.ContextTokenLimitValidator(v); err != nil {
+			return &ValidationError{Name: "context_token_limit", err: fmt.Errorf(`ent: validator failed for field "APIKey.context_token_limit": %w`, err)}
+		}
+	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "APIKey.user"`)
 	}
@@ -675,6 +701,12 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AllowLongContext(); ok {
 		_spec.SetField(apikey.FieldAllowLongContext, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ContextTokenLimit(); ok {
+		_spec.SetField(apikey.FieldContextTokenLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedContextTokenLimit(); ok {
+		_spec.AddField(apikey.FieldContextTokenLimit, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)
@@ -1053,6 +1085,27 @@ func (_u *APIKeyUpdateOne) SetNillableAllowLongContext(v *bool) *APIKeyUpdateOne
 	if v != nil {
 		_u.SetAllowLongContext(*v)
 	}
+	return _u
+}
+
+// SetContextTokenLimit sets the "context_token_limit" field.
+func (_u *APIKeyUpdateOne) SetContextTokenLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.ResetContextTokenLimit()
+	_u.mutation.SetContextTokenLimit(v)
+	return _u
+}
+
+// SetNillableContextTokenLimit sets the "context_token_limit" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableContextTokenLimit(v *int) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetContextTokenLimit(*v)
+	}
+	return _u
+}
+
+// AddContextTokenLimit adds value to the "context_token_limit" field.
+func (_u *APIKeyUpdateOne) AddContextTokenLimit(v int) *APIKeyUpdateOne {
+	_u.mutation.AddContextTokenLimit(v)
 	return _u
 }
 
@@ -1505,6 +1558,11 @@ func (_u *APIKeyUpdateOne) check() error {
 			return &ValidationError{Name: "reasoning_effort", err: fmt.Errorf(`ent: validator failed for field "APIKey.reasoning_effort": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ContextTokenLimit(); ok {
+		if err := apikey.ContextTokenLimitValidator(v); err != nil {
+			return &ValidationError{Name: "context_token_limit", err: fmt.Errorf(`ent: validator failed for field "APIKey.context_token_limit": %w`, err)}
+		}
+	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "APIKey.user"`)
 	}
@@ -1572,6 +1630,12 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.AllowLongContext(); ok {
 		_spec.SetField(apikey.FieldAllowLongContext, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ContextTokenLimit(); ok {
+		_spec.SetField(apikey.FieldContextTokenLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedContextTokenLimit(); ok {
+		_spec.AddField(apikey.FieldContextTokenLimit, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)

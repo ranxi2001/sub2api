@@ -39,7 +39,7 @@ describe('API key model policy', () => {
     await flushPromises()
     expect(updatePolicy).toHaveBeenCalledTimes(1)
     expect(updatePolicy).toHaveBeenCalledWith(17, {
-      model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol-fast' }, reasoning_effort: 'xhigh', allow_long_context: true
+      model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol-fast' }, reasoning_effort: 'xhigh', allow_long_context: true, context_token_limit: 0
     })
     expect(wrapper.emitted('updated')).toEqual([[updated]])
     expect(wrapper.emitted('close')).toHaveLength(1)
@@ -52,7 +52,7 @@ describe('API key model policy', () => {
     updatePolicy.mockResolvedValue({ api_key: key(17, { model_mapping: {}, reasoning_effort: '' }) })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(updatePolicy).toHaveBeenCalledWith(17, { model_mapping: {}, reasoning_effort: '', allow_long_context: true })
+    expect(updatePolicy).toHaveBeenCalledWith(17, { model_mapping: {}, reasoning_effort: '', allow_long_context: true, context_token_limit: 0 })
   })
 
   it.each([
@@ -73,7 +73,7 @@ describe('API key model policy', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(updatePolicy).toHaveBeenCalledWith(17, {
-      model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol' }, reasoning_effort: 'high', allow_long_context: false
+      model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol' }, reasoning_effort: 'high', allow_long_context: false, context_token_limit: 0
     })
     await wrapper.setProps({ show: false, apiKey: updated })
     await wrapper.setProps({ show: true })
@@ -169,4 +169,39 @@ describe('API key model policy', () => {
     expect(wrapper.emitted('close')).toBeUndefined()
     expect(showSuccess).not.toHaveBeenCalled()
   })
+})
+
+describe('API key context token ceiling', () => {
+ it('loads, saves and clears the selected key ceiling', async () => {
+  const wrapper = open(key(17, { context_token_limit: 1000 }))
+  expect((wrapper.get('[data-test="context-token-limit"]').element as HTMLInputElement).value).toBe('1000')
+  await wrapper.get('[data-test="context-token-limit"]').setValue('2000')
+  const updated = key(17, { context_token_limit: 2000 })
+  updatePolicy.mockResolvedValue({ api_key: updated })
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(updatePolicy).toHaveBeenLastCalledWith(17, expect.objectContaining({ context_token_limit: 2000 }))
+  await wrapper.setProps({ show: false, apiKey: updated })
+  await wrapper.setProps({ show: true })
+  expect((wrapper.get('[data-test="context-token-limit"]').element as HTMLInputElement).value).toBe('2000')
+  await wrapper.get('[data-test="context-token-limit"]').setValue('')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  expect(updatePolicy).toHaveBeenLastCalledWith(17, expect.objectContaining({ context_token_limit: 0 }))
+ })
+ it('resets unsaved ceilings when switching keys', async () => {
+  const wrapper = open(key(17, { context_token_limit: 1000 }))
+  await wrapper.get('[data-test="context-token-limit"]').setValue('4000')
+  await wrapper.setProps({ apiKey: key(18) })
+  expect((wrapper.get('[data-test="context-token-limit"]').element as HTMLInputElement).value).toBe('')
+  await wrapper.setProps({ apiKey: key(17, { context_token_limit: 1000 }) })
+  expect((wrapper.get('[data-test="context-token-limit"]').element as HTMLInputElement).value).toBe('1000')
+ })
+ it.each(['-1', '1.5', '2147483648'])('rejects invalid ceiling %s before API writes', async value => {
+  const wrapper = open()
+  await wrapper.get('[data-test="context-token-limit"]').setValue(value)
+  await wrapper.get('form').trigger('submit')
+  expect(wrapper.get('[role="alert"]').text()).toBe('apiKeyModelPolicy.invalidContextTokenLimit')
+  expect(updatePolicy).not.toHaveBeenCalled()
+ })
 })

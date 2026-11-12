@@ -110,6 +110,11 @@ func AllowLongContext(v bool) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldAllowLongContext, v))
 }
 
+// ContextTokenLimit applies equality check predicate on the "context_token_limit" field. It's identical to ContextTokenLimitEQ.
+func ContextTokenLimit(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldContextTokenLimit, v))
+}
+
 // LastUsedAt applies equality check predicate on the "last_used_at" field. It's identical to LastUsedAtEQ.
 func LastUsedAt(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldLastUsedAt, v))
@@ -663,6 +668,46 @@ func AllowLongContextEQ(v bool) predicate.APIKey {
 // AllowLongContextNEQ applies the NEQ predicate on the "allow_long_context" field.
 func AllowLongContextNEQ(v bool) predicate.APIKey {
 	return predicate.APIKey(sql.FieldNEQ(FieldAllowLongContext, v))
+}
+
+// ContextTokenLimitEQ applies the EQ predicate on the "context_token_limit" field.
+func ContextTokenLimitEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldContextTokenLimit, v))
+}
+
+// ContextTokenLimitNEQ applies the NEQ predicate on the "context_token_limit" field.
+func ContextTokenLimitNEQ(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldContextTokenLimit, v))
+}
+
+// ContextTokenLimitIn applies the In predicate on the "context_token_limit" field.
+func ContextTokenLimitIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldContextTokenLimit, vs...))
+}
+
+// ContextTokenLimitNotIn applies the NotIn predicate on the "context_token_limit" field.
+func ContextTokenLimitNotIn(vs ...int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldContextTokenLimit, vs...))
+}
+
+// ContextTokenLimitGT applies the GT predicate on the "context_token_limit" field.
+func ContextTokenLimitGT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldContextTokenLimit, v))
+}
+
+// ContextTokenLimitGTE applies the GTE predicate on the "context_token_limit" field.
+func ContextTokenLimitGTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldContextTokenLimit, v))
+}
+
+// ContextTokenLimitLT applies the LT predicate on the "context_token_limit" field.
+func ContextTokenLimitLT(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldContextTokenLimit, v))
+}
+
+// ContextTokenLimitLTE applies the LTE predicate on the "context_token_limit" field.
+func ContextTokenLimitLTE(v int) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldContextTokenLimit, v))
 }
 
 // LastUsedAtEQ applies the EQ predicate on the "last_used_at" field.

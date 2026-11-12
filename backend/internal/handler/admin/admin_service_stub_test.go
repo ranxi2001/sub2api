@@ -826,6 +826,9 @@ func (s *stubAdminService) AdminUpdateAPIKeySettings(ctx context.Context, keyID 
 	if input.ReasoningEffort != nil {
 		result.APIKey.ReasoningEffort = *input.ReasoningEffort
 	}
+	if input.ContextTokenLimit != nil {
+		result.APIKey.ContextTokenLimit = *input.ContextTokenLimit
+	}
 	if input.AllowLongContext != nil {
 		result.APIKey.AllowLongContext = *input.AllowLongContext
 	}

@@ -50,7 +50,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$baseline"
           git worktree add --detach "$RUNNER_TEMP/issue805-red" "$EXPECTED_HEAD_SHA"
           cd "$RUNNER_TEMP/issue805-red"
-          # Retain candidate tests, restore every changed production Go blob.
+          # Restore every changed production Go blob; retain Issue805 candidate tests.
           while IFS= read -r target; do
             case "$target" in *_test.go) continue ;; esac
             if git cat-file -e "$baseline:$target" 2>/dev/null; then
@@ -70,6 +70,24 @@ jobs:
             fi
           done < <(git diff --no-renames --name-only "$baseline" "$EXPECTED_HEAD_SHA" -- 'backend/**/*.go')
           git diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          # These unrelated context-policy tests require newer production symbols.
+          # Use their baseline versions only in this disposable RED checkout so
+          # compilation can reach the unchanged Issue805 business assertions.
+          for target in backend/internal/handler/api_key_long_context_admission_test.go backend/internal/handler/api_key_long_context_ws_test.go backend/internal/handler/api_key_model_policy_write_permissions_test.go backend/internal/handler/gemini_cached_contents_billing_test.go; do
+            git show "$baseline:$target" > "$target"
+            expected=$(git rev-parse "$baseline:$target")
+            actual=$(git hash-object "$target")
+            echo "$target test=baseline expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+            test "$expected" = "$actual"
+          done
+          # The selected regression and its shared harness must remain exact
+          # candidate blobs. The clean GREEN checkout retains all new tests.
+          for target in backend/internal/handler/openai_issue805_delivery_test.go backend/internal/handler/openai_issue805_owner_policy_test.go backend/internal/handler/openai_issue805_ws_test.go backend/internal/handler/openai_issue715_recovery_test.go; do
+            expected=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
+            actual=$(git hash-object "$target")
+            echo "$target test=candidate expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+            test "$expected" = "$actual"
+          done
           # Also prove the unchanged core blobs on the initial test-only head.
           for target in backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_ws_agent_recovery.go; do
             expected=$(git rev-parse "$baseline:$target")

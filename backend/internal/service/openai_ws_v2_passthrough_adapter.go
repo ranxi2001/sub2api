@@ -1574,6 +1574,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				// frame limit; an oversized reason makes coder/websocket skip the
 				// close frame, leaving the client with EOF instead of the status code.
 				reason = truncateString(reason, 120)
+				WriteAPIKeyLongContextWSFailure(clientConn, exit.Err)
 				_ = clientConn.Close(status, reason)
 				_ = clientConn.CloseNow()
 			},

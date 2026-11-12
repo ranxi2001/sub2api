@@ -35,8 +35,8 @@ let browser, server
 try {
   writeFileSync(api, `
     const initialKeys = [
-      {id:17,user_id:99,name:'Fictional Key A',key:'fixture-only-key-a-never-issued',status:'active',group_id:null,group_ids:[],created_at:'2026-11-04T00:00:00Z',model_mapping:{'gpt-6.1-sol':'gpt-5.6-sol'},reasoning_effort:'high',allow_long_context:true},
-      {id:18,user_id:99,name:'Fictional Key B',key:'fixture-only-key-b-never-issued',status:'active',group_id:null,group_ids:[],created_at:'2026-11-04T00:00:00Z',model_mapping:{},reasoning_effort:'',allow_long_context:true},
+      {id:17,user_id:99,name:'Fictional Key A',key:'fixture-only-key-a-never-issued',status:'active',group_id:null,group_ids:[],created_at:'2026-11-04T00:00:00Z',model_mapping:{'gpt-6.1-sol':'gpt-5.6-sol'},reasoning_effort:'high',allow_long_context:true,context_token_limit:0},
+      {id:18,user_id:99,name:'Fictional Key B',key:'fixture-only-key-b-never-issued',status:'active',group_id:null,group_ids:[],created_at:'2026-11-04T00:00:00Z',model_mapping:{},reasoning_effort:'',allow_long_context:true,context_token_limit:0},
     ];
     const state={keys:structuredClone(initialKeys),writes:[],failNext:false,successes:[]};
     window.__keyPolicyFixture=state;
@@ -141,38 +141,52 @@ try {
     if (await page.locator('[data-test="mapping-source"]').inputValue() !== 'gpt-6.1-sol') throw Error('Saved source was not loaded')
     await page.locator('[data-test="mapping-target"]').fill('gpt-5.6-sol-fast')
     await page.locator('[data-test="reasoning-effort"]').selectOption('xhigh')
+    const contextLimit = page.locator('[data-test="context-token-limit"]')
+    if (await contextLimit.inputValue() !== '') throw Error('Context ceiling did not inherit by default')
+    await contextLimit.fill('100000')
     await capture(lang + '-configured')
     await savePolicy()
     const saved = await page.evaluate(() => window.__keyPolicyFixture.writes.at(-1))
-    if (saved.id !== 17 || JSON.stringify(saved.policy) !== JSON.stringify({ model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol-fast' }, reasoning_effort: 'xhigh', allow_long_context: false })) throw Error('Unexpected saved policy')
+    if (saved.id !== 17 || JSON.stringify(saved.policy) !== JSON.stringify({ model_mapping: { 'gpt-6.1-sol': 'gpt-5.6-sol-fast' }, reasoning_effort: 'xhigh', allow_long_context: false, context_token_limit: 100000 })) throw Error('Unexpected saved policy')
     await openPolicy()
     if (await page.locator('[data-test="mapping-target"]').inputValue() !== 'gpt-5.6-sol-fast') throw Error('Saved mapping did not return on reopen')
     if (await page.locator('[data-test="reasoning-effort"]').inputValue() !== 'xhigh') throw Error('Saved effort did not return on reopen')
     if (await longContextSwitch.getAttribute('aria-checked') !== 'false') throw Error('Saved long-context permission did not return on reopen')
+    if (await contextLimit.inputValue() !== '100000') throw Error('Saved context ceiling did not return on reopen')
+    if (lang === 'zh') {
+      const beforeDismiss = await page.locator('[data-testid="new-feature-badge"]').count()
+      await page.locator('label[for="api-key-context-token-limit"]').locator('..').locator('[data-testid="new-feature-badge"]').click()
+      if (await page.locator('[data-testid="new-feature-badge"]').count() !== beforeDismiss - 3) throw Error('Context ceiling notice did not dismiss at both entries and dialog')
+      if (await contextLimit.inputValue() !== '100000') throw Error('Dismissing notice changed context ceiling')
+    }
     await capture(lang + '-saved')
     await page.setViewportSize({ width: 390, height: 844 })
     await capture(lang + '-mobile')
     await page.setViewportSize({ width: 1280, height: 1100 })
     await page.locator('[data-test="model-mapping-row"] button').click()
     await page.locator('[data-test="reasoning-effort"]').selectOption('')
+    await contextLimit.fill('')
     await savePolicy()
     const cleared = await page.evaluate(() => window.__keyPolicyFixture.writes.at(-1))
-    if (JSON.stringify(cleared.policy) !== JSON.stringify({ model_mapping: {}, reasoning_effort: '', allow_long_context: false })) throw Error('Policy clear did not send explicit empty values')
+    if (JSON.stringify(cleared.policy) !== JSON.stringify({ model_mapping: {}, reasoning_effort: '', allow_long_context: false, context_token_limit: 0 })) throw Error('Policy clear did not send explicit empty values')
     const untouched = await page.evaluate(() => window.__keyPolicyFixture.keys.find(key => key.id === 18))
-    if (Object.keys(untouched.model_mapping).length || untouched.reasoning_effort !== '' || untouched.allow_long_context !== true) throw Error('Another key changed')
+    if (Object.keys(untouched.model_mapping).length || untouched.reasoning_effort !== '' || untouched.allow_long_context !== true || untouched.context_token_limit !== 0) throw Error('Another key changed')
     await openPolicy()
     if (await page.locator('[data-test="model-mapping-row"]').count() !== 0) throw Error('Cleared mapping returned after reopen')
     if (await longContextSwitch.getAttribute('aria-checked') !== 'false') throw Error('Clearing model policy changed long-context permission')
+    if (await contextLimit.inputValue() !== '') throw Error('Cleared context ceiling returned after reopen')
     await capture(lang + '-cleared')
     await page.locator('[data-test="reasoning-effort"]').selectOption('low')
+    await contextLimit.fill('200000')
     await page.evaluate(() => { window.__keyPolicyFixture.failNext = true })
     await page.locator('button[type="submit"][form="api-key-model-policy-form"]').click()
     await page.getByRole('alert').waitFor()
     if (await page.getByRole('alert').textContent() !== 'Fictional save failure') throw Error('Save failure was not shown')
     if (await page.locator('[data-test="reasoning-effort"]').inputValue() !== 'low') throw Error('Failed save discarded edits')
     if (await longContextSwitch.getAttribute('aria-checked') !== 'false') throw Error('Failed save discarded long-context permission')
+    if (await contextLimit.inputValue() !== '200000') throw Error('Failed save discarded context ceiling')
     await capture(lang + '-save-error')
-    interactions.push({ lang, real_entry: true, saved_mapping_and_effort: true, long_context_default_allowed: true, long_context_disabled_and_saved: true, reopen_readback: true, long_context_reopen_readback: true, explicit_clear: true, clear_preserves_long_context_permission: true, other_key_unchanged: true, other_key_long_context_still_allowed: true, failed_save_retains_edit: true, failed_save_retains_long_context_permission: true })
+    interactions.push({ lang, context_ceiling_saved_and_reopened: true, context_ceiling_cleared: true, failed_save_retains_context_ceiling: true, context_ceiling_notice_dismissal: lang === 'zh' ? 'three placements' : 'already dismissed', real_entry: true, saved_mapping_and_effort: true, long_context_default_allowed: true, long_context_disabled_and_saved: true, reopen_readback: true, long_context_reopen_readback: true, explicit_clear: true, clear_preserves_long_context_permission: true, other_key_unchanged: true, other_key_long_context_still_allowed: true, failed_save_retains_edit: true, failed_save_retains_long_context_permission: true })
   }
   writeFileSync(join(output, 'manifest.json'), JSON.stringify({
     source_commit: sourceCommit,

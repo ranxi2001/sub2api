@@ -24,7 +24,7 @@ func TestGatewayRoutesLongContextBlocksBeforeHandler(t *testing.T) {
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, request)
 			require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
-			require.Contains(t, response.Body.String(), "context_unverifiable")
+			require.Contains(t, response.Body.String(), "context_length_exceeded")
 		})
 	}
 }

@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -23,7 +22,7 @@ func APIKeyLongContextPolicy(check APIKeyLongContextChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		service.SetAPIKeyLongContextForwardChecker(c, check)
 		key, ok := GetAPIKeyFromContext(c)
-		if !ok || key == nil || key.AllowLongContext || c.Request == nil ||
+		if !ok || !key.RequiresContextCheck() || c.Request == nil ||
 			c.Request.Method != http.MethodPost || !apiKeyLongContextRequest(c) {
 			c.Next()
 			return
@@ -59,18 +58,15 @@ func apiKeyLongContextRequest(c *gin.Context) bool {
 func rejectAPIKeyLongContext(c *gin.Context, err error) {
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
 	MarkIngressRejected(c, IngressRejectLongContextDisabled)
-	code := "context_unverifiable"
-	var policyErr *service.APIKeyLongContextError
-	if errors.As(err, &policyErr) {
-		code = policyErr.Code
-	}
+	code := service.APIKeyContextLengthExceededCode
+	message := service.APIKeyContextLengthExceededMessage
 	path := c.Request.URL.Path
 	if strings.HasPrefix(path, "/v1beta/") || strings.HasPrefix(path, "/antigravity/v1beta/") {
-		GoogleErrorWriter(c, http.StatusBadRequest, err.Error())
+		GoogleErrorWriter(c, http.StatusBadRequest, message)
 	} else if strings.HasSuffix(path, "/messages") {
-		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error(), "code": code}})
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": message, "code": code}})
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": err.Error()}})
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": message}})
 	}
 	c.Abort()
 }

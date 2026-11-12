@@ -17,6 +17,7 @@ export interface ApiKeyModelPolicy {
   model_mapping: Record<string, string>
   reasoning_effort: string
   allow_long_context?: boolean
+  context_token_limit?: number
 }
 
 /** Update only this key's administrator-managed model policy. */

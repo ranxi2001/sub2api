@@ -484,7 +484,8 @@ func TestGeminiCachedContentsCreate_LongContextRechecksAccountMapping(t *testing
 				return
 			}
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-			require.Contains(t, rec.Body.String(), "100-token limit")
+			require.Contains(t, rec.Body.String(), service.APIKeyContextLengthExceededMessage)
+			require.NotContains(t, rec.Body.String(), "100-token limit")
 			require.Zero(t, env.upstream.methodCalls(http.MethodPost), "account mapping must be checked before cache creation")
 			require.Empty(t, env.repo.records)
 			require.Empty(t, env.usage.totals(), "a local rejection incurs no cache input or storage charge")
@@ -503,7 +504,8 @@ func TestGeminiCachedContentsCreate_UnknownAccountTargetUsesDefaultContextLimit(
 
 	rec := env.serve(http.MethodPost, "/v1beta/cachedContents", body, nil, env.h.GeminiCachedContentsCreate)
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	require.Contains(t, rec.Body.String(), "200000-token limit")
+	require.Contains(t, rec.Body.String(), service.APIKeyContextLengthExceededMessage)
+	require.NotContains(t, rec.Body.String(), "200000-token limit")
 	require.Zero(t, env.upstream.methodCalls(http.MethodPost))
 	require.Empty(t, env.repo.records)
 	require.Empty(t, env.usage.totals())

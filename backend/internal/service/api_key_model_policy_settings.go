@@ -14,6 +14,7 @@ type AdminUpdateAPIKeySettingsInput struct {
 	GroupID             *int64
 	ModelMapping        *map[string]string
 	ReasoningEffort     *string
+	ContextTokenLimit   *int
 	AllowLongContext    *bool
 	ResetRateLimitUsage bool
 }
@@ -30,6 +31,9 @@ func (s *adminServiceImpl) invalidateAdminAPIKeySettingsCaches(ctx context.Conte
 
 // Validate rejects ambiguous aliases before any group or quota mutations occur.
 func (in AdminUpdateAPIKeySettingsInput) Validate() error {
+	if in.ContextTokenLimit != nil && (*in.ContextTokenLimit < 0 || *in.ContextTokenLimit > 2_147_483_647) {
+		return infraerrors.BadRequest("INVALID_API_KEY_CONTEXT_TOKEN_LIMIT", "context_token_limit must be an integer between 0 and 2147483647")
+	}
 	if in.GroupID != nil && *in.GroupID < 0 {
 		return infraerrors.BadRequest("INVALID_GROUP_ID", "group_id must be non-negative")
 	}

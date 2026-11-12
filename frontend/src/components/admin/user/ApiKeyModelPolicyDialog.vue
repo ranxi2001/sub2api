@@ -65,7 +65,31 @@
           />
         </div>
         <p id="api-key-long-context-hint" class="mt-2 text-sm text-gray-500 dark:text-dark-300">{{ t('apiKeyModelPolicy.longContextHint') }}</p>
-        <p v-if="!allowLongContext" class="mt-2 text-sm text-amber-700 dark:text-amber-300" data-test="long-context-restrictions">{{ t('apiKeyModelPolicy.longContextRestrictions') }}</p>
+        <p v-if="!allowLongContext || Number(contextTokenLimit) > 0" class="mt-2 text-sm text-amber-700 dark:text-amber-300" data-test="long-context-restrictions">{{ t('apiKeyModelPolicy.longContextRestrictions') }}</p>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <label for="api-key-context-token-limit" class="input-label mb-0">{{ t('apiKeyModelPolicy.contextTokenLimit') }}</label>
+          <NewFeatureBadge
+            v-if="authStore.isAdmin"
+            :notice-id="NEW_FEATURE_NOTICES.apiKeyContextTokenLimit"
+            :user-id="authStore.user?.id"
+          />
+        </div>
+        <input
+          id="api-key-context-token-limit"
+          v-model="contextTokenLimit"
+          class="input mt-2"
+          type="number"
+          min="0"
+          max="2147483647"
+          step="1"
+          :disabled="saving"
+          :placeholder="t('apiKeyModelPolicy.inheritContextLimit')"
+          aria-describedby="api-key-context-token-limit-hint"
+          data-test="context-token-limit"
+        />
+        <p id="api-key-context-token-limit-hint" class="mt-2 text-sm text-gray-500 dark:text-dark-300">{{ t('apiKeyModelPolicy.contextTokenLimitHint') }}</p>
       </div>
       <p v-if="error" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
     </form>
@@ -101,6 +125,7 @@ const efforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ul
 const rows = ref<Array<{ id: number; source: string; target: string }>>([])
 const reasoningEffort = ref('')
 const allowLongContext = ref(true)
+const contextTokenLimit = ref<number | string>('')
 const saving = ref(false)
 const error = ref('')
 let nextRowID = 0
@@ -113,6 +138,7 @@ watch(() => [props.show, props.apiKey?.id] as const, () => {
   rows.value = Object.entries(props.apiKey?.model_mapping ?? {}).map(([source, target]) => ({ id: nextRowID++, source, target }))
   reasoningEffort.value = props.apiKey?.reasoning_effort ?? ''
   allowLongContext.value = props.apiKey?.allow_long_context ?? true
+  contextTokenLimit.value = props.apiKey?.context_token_limit || ''
 }, { immediate: true })
 
 onUnmounted(() => { generation++ })
@@ -162,6 +188,11 @@ async function save() {
     }
     mappings.set(row.source, row.target)
   }
+  const limit = Number(contextTokenLimit.value)
+  if (!Number.isInteger(limit) || limit < 0 || limit > 2147483647) {
+    error.value = t('apiKeyModelPolicy.invalidContextTokenLimit')
+    return
+  }
   const keyID = props.apiKey.id
   const currentGeneration = generation
   saving.value = true
@@ -169,7 +200,8 @@ async function save() {
     const result = await adminAPI.apiKeys.updateApiKeyModelPolicy(keyID, {
       model_mapping: Object.fromEntries(mappings),
       reasoning_effort: reasoningEffort.value,
-      allow_long_context: allowLongContext.value
+      allow_long_context: allowLongContext.value,
+      context_token_limit: limit
     })
     if (generation !== currentGeneration) return
     appStore.showSuccess(t('apiKeyModelPolicy.saved'))

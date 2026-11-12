@@ -18,6 +18,7 @@ func TestAPIKeyRegionalModelPolicyExportRoundtrip(t *testing.T) {
 	configured.APIKey.ModelMapping = map[string]string{"gpt-6.1-sol": "gpt-5.6-sol"}
 	configured.APIKey.ReasoningEffort = "high"
 	configured.APIKey.AllowLongContext = false
+	configured.APIKey.ContextTokenLimit = 1234
 	plain := authTestRecord()
 	plain.APIKey.ID = 11
 	plain.APIKey.Key = "sk-regional-plain-fixture"
@@ -47,15 +48,17 @@ func TestAPIKeyRegionalModelPolicyExportRoundtrip(t *testing.T) {
 	require.Equal(t, configured.APIKey.ModelMapping, key.ModelMapping)
 	require.Equal(t, "high", key.ReasoningEffort)
 	require.False(t, key.AllowLongContext)
+	require.Equal(t, 1234, key.ContextTokenLimit)
 	key.ModelMapping["gpt-6.1-sol"] = "changed"
 	require.Equal(t, "gpt-5.6-sol", doc.Entries[0].Snapshot.ModelMapping["gpt-6.1-sol"])
 	plainKey := mapper.snapshotToAPIKey(plain.APIKey.Key, doc.Entries[1].Snapshot)
 	require.Empty(t, plainKey.ModelMapping)
 	require.Empty(t, plainKey.ReasoningEffort)
 	require.True(t, plainKey.AllowLongContext)
+	require.Zero(t, plainKey.ContextTokenLimit)
 
-	doc.Entries[0].Snapshot.Version = 32
+	doc.Entries[0].Snapshot.Version = 33
 	stale, err := json.Marshal(doc)
 	require.NoError(t, err)
-	require.Error(t, RegionalAuthValidator([]int64{2})(stale), "regional snapshots predating long context permission must be refreshed")
+	require.Error(t, RegionalAuthValidator([]int64{2})(stale), "regional snapshots predating context ceilings must be refreshed")
 }

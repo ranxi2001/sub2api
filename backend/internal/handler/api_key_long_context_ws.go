@@ -1,16 +1,22 @@
 package handler
 
 import (
-	"errors"
-
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
 )
 
 // WebSocket close reasons must fit in the protocol's 123-byte limit.
 func apiKeyLongContextWSCloseReason(err error) string {
-	var policyErr *service.APIKeyLongContextError
-	if errors.As(err, &policyErr) && policyErr.Code == "context_length_exceeded" {
-		return "long context is disabled for this API key; shorten the input"
+	return service.APIKeyContextLengthExceededMessage
+}
+
+// A bare policy close looks like a disconnected stream to Responses clients.
+// Send the same terminal event as HTTP streaming before closing the socket.
+// Call only before forwarding starts or after the forwarding loop has returned.
+func rejectAPIKeyLongContextWS(conn *coderws.Conn, err error) {
+	if conn == nil {
+		return
 	}
-	return "long context is disabled for this API key; send complete visible text"
+	service.WriteAPIKeyLongContextWSFailure(conn, err)
+	closeOpenAIClientWS(conn, coderws.StatusPolicyViolation, apiKeyLongContextWSCloseReason(err))
 }

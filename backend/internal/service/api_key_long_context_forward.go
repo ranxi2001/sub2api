@@ -30,7 +30,7 @@ func checkAPIKeyLongContextBeforeForward(ctx context.Context, c *gin.Context, bi
 		return nil
 	}
 	key := getAPIKeyFromContext(c)
-	if key == nil || key.AllowLongContext {
+	if !key.RequiresContextCheck() {
 		return nil
 	}
 	if ctx == nil {
@@ -64,7 +64,7 @@ func checkAPIKeyLongContextRequestBeforeForward(ctx context.Context, c *gin.Cont
 		return nil
 	}
 	key := getAPIKeyFromContext(c)
-	if key == nil || key.AllowLongContext {
+	if !key.RequiresContextCheck() {
 		return nil
 	}
 	if req == nil || req.GetBody == nil {
@@ -108,27 +108,25 @@ func apiKeyLongContextForwardApplies(c *gin.Context) bool {
 
 func writeAPIKeyLongContextForwardError(c *gin.Context, err error) {
 	MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-	code := "context_unverifiable"
-	if policyErr, ok := err.(*APIKeyLongContextError); ok {
-		code = policyErr.Code
-	}
+	code := APIKeyContextLengthExceededCode
+	message := APIKeyContextLengthExceededMessage
 	path := c.Request.URL.Path
 	var payload gin.H
 	event := ""
 	if strings.HasPrefix(path, "/v1beta/") || strings.HasPrefix(path, "/antigravity/v1beta/") {
-		payload = gin.H{"error": gin.H{"code": http.StatusBadRequest, "message": err.Error(), "status": "INVALID_ARGUMENT"}}
+		payload = gin.H{"error": gin.H{"code": http.StatusBadRequest, "message": message, "status": "INVALID_ARGUMENT"}}
 	} else if strings.HasSuffix(path, "/messages") {
 		event = "event: error\n"
-		payload = gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "code": code, "message": err.Error()}}
+		payload = gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "code": code, "message": message}}
 	} else {
-		payload = gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": err.Error()}}
+		payload = gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": message}}
 	}
 	if c.Writer.Written() {
 		// Queue keepalives may already have committed HTTP 200. Preserve SSE
 		// framing and prevent the handler from appending its generic fallback.
-		MarkOpsStreamError(c, "invalid_request_error", err.Error(), http.StatusBadRequest)
+		MarkOpsStreamError(c, "invalid_request_error", message, http.StatusBadRequest)
 		if strings.HasSuffix(path, "/responses") || strings.HasSuffix(path, "/responses/compact") {
-			writeOpenAICompactSSEFailureMessage(c, http.StatusBadRequest, code, err.Error())
+			writeOpenAICompactSSEFailureMessage(c, http.StatusBadRequest, code, message)
 		} else {
 			data, _ := json.Marshal(payload)
 			if _, writeErr := io.WriteString(c.Writer, event+"data: "+string(data)+"\n\n"); writeErr != nil {

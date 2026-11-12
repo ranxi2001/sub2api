@@ -229,12 +229,7 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 			accountReleaseFunc()
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
 			middleware.MarkIngressRejected(c, middleware.IngressRejectLongContextDisabled)
-			code := "context_unverifiable"
-			var policyErr *service.APIKeyLongContextError
-			if errors.As(err, &policyErr) {
-				code = policyErr.Code
-			}
-			googleErrorWithType(c, http.StatusBadRequest, "invalid_request_error", code, err.Error())
+			googleErrorWithType(c, http.StatusBadRequest, "invalid_request_error", service.APIKeyContextLengthExceededCode, service.APIKeyContextLengthExceededMessage)
 			return
 		}
 		usageFields := clientRequestedUsageFields(c, channelMapping, reqModel, mappedModel)

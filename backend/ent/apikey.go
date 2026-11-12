@@ -44,6 +44,8 @@ type APIKey struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// Administrator-managed permission to use long context requests
 	AllowLongContext bool `json:"allow_long_context,omitempty"`
+	// Administrator-managed input token ceiling; zero inherits the long context policy
+	ContextTokenLimit int `json:"context_token_limit,omitempty"`
 	// Last usage time of this API key
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	// Allowed IPs/CIDRs, e.g. ["192.168.1.100", "10.0.0.0/8"]
@@ -135,7 +137,7 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
 			values[i] = new(sql.NullFloat64)
-		case apikey.FieldID, apikey.FieldUserID, apikey.FieldConcurrencyLimit, apikey.FieldGroupID:
+		case apikey.FieldID, apikey.FieldUserID, apikey.FieldConcurrencyLimit, apikey.FieldGroupID, apikey.FieldContextTokenLimit:
 			values[i] = new(sql.NullInt64)
 		case apikey.FieldKey, apikey.FieldName, apikey.FieldStatus, apikey.FieldReasoningEffort:
 			values[i] = new(sql.NullString)
@@ -237,6 +239,12 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field allow_long_context", values[i])
 			} else if value.Valid {
 				_m.AllowLongContext = value.Bool
+			}
+		case apikey.FieldContextTokenLimit:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field context_token_limit", values[i])
+			} else if value.Valid {
+				_m.ContextTokenLimit = int(value.Int64)
 			}
 		case apikey.FieldLastUsedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -427,6 +435,9 @@ func (_m *APIKey) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("allow_long_context=")
 	builder.WriteString(fmt.Sprintf("%v", _m.AllowLongContext))
+	builder.WriteString(", ")
+	builder.WriteString("context_token_limit=")
+	builder.WriteString(fmt.Sprintf("%v", _m.ContextTokenLimit))
 	builder.WriteString(", ")
 	if v := _m.LastUsedAt; v != nil {
 		builder.WriteString("last_used_at=")
