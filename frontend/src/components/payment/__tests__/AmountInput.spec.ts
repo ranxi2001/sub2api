@@ -32,6 +32,29 @@ describe('recharge amount input', () => {
     expect(wrapper.emitted('update:modelValue')).toEqual([[12.5]])
   })
 
+  it('accepts only the precision supported by the selected currency', async () => {
+    const jpy = mount(AmountInput, { props: { modelValue: null, currency: 'JPY' } })
+    const jpyInput = jpy.get('input')
+    await jpyInput.setValue('100.50')
+    expect((jpyInput.element as HTMLInputElement).value).toBe('')
+    expect(jpy.emitted('update:modelValue')).toBeUndefined()
+
+    const kwd = mount(AmountInput, { props: { modelValue: null, currency: 'KWD' } })
+    await kwd.get('input').setValue('1.234')
+    expect(kwd.emitted('update:modelValue')).toEqual([[1.234]])
+  })
+
+  it('allows correcting a previously entered amount after switching to a zero-decimal currency', async () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: null, currency: 'CNY' } })
+    const input = wrapper.get('input')
+    await input.setValue('100.50')
+    await wrapper.setProps({ currency: 'JPY' })
+    await input.setValue('100.')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([null])
+    await input.setValue('100')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([100])
+  })
+
   it('preserves decimal editing and allows clearing the amount', async () => {
     const wrapper = mountInput()
     const input = wrapper.get('input')

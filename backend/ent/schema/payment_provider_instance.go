@@ -51,6 +51,13 @@ func (PaymentProviderInstance) Fields() []ent.Field {
 		field.String("limits").
 			SchemaType(map[string]string{dialect.Postgres: "text"}).
 			Default(""),
+		// NULL inherits the site fee; an explicit zero waives the fee.
+		field.Float("fee_rate").
+			Optional().Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "decimal(5,2)"}),
+		// Missing method keys inherit the instance fee, then the site fee.
+		field.JSON("method_fee_rates", map[string]float64{}).
+			Default(func() map[string]float64 { return map[string]float64{} }),
 		field.Bool("refund_enabled").
 			Default(false),
 		field.Bool("allow_user_refund").

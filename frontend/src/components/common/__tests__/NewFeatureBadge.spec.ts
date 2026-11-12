@@ -27,6 +27,7 @@ describe('NewFeatureBadge', () => {
     ['Antigravity usage query', NEW_FEATURE_NOTICES.antigravityUsageQuery],
     ['OpenAI cache write TTL', NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h],
     ['EasyPay refund code', NEW_FEATURE_NOTICES.easyPayRefundSuccessCode],
+    ['payment provider fees', NEW_FEATURE_NOTICES.paymentProviderFees],
     ['settings save dock', NEW_FEATURE_NOTICES.settingsSaveDock],
     ['VIP automatic credit email', NEW_FEATURE_NOTICES.vipAutoCreditEmail],
     ['priority account performance', NEW_FEATURE_NOTICES.priorityAccountPerformance],

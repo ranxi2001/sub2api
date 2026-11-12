@@ -10,6 +10,7 @@ export const NEW_FEATURE_NOTICES = {
   antigravityUsageQuery: 'antigravity-usage-query-initial-announcement',
   openaiCacheWriteTTL12h: 'openai-cache-write-12h-initial-announcement',
   easyPayRefundSuccessCode: 'easypay-refund-success-code-initial-announcement',
+  paymentProviderFees: 'payment-provider-method-fees-initial-announcement',
   settingsSaveDock: 'settings-save-dock-initial-announcement',
   qwenPlatform: 'qwen-platform-initial-announcement',
   qwenCache: 'qwen-cache-strict-session-initial-announcement',

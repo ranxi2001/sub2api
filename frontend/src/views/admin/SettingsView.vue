@@ -8722,6 +8722,7 @@
                     <div class="relative">
                       <input
                         :value="form.payment_recharge_fee_rate ?? ''"
+                        data-testid="payment-global-fee-rate"
                         @input="
                           form.payment_recharge_fee_rate = Math.min(
                             100,
@@ -9062,6 +9063,7 @@
           <PaymentProviderList
             v-if="form.payment_enabled"
             :providers="providers"
+            :global-fee-rate="savedPaymentFeeRate"
             :loading="providersLoading"
             :can-create="hasAnyPaymentTypeEnabled"
             :enabled-payment-types="form.payment_enabled_types"
@@ -9554,6 +9556,7 @@
         :show="showProviderDialog"
         :saving="providerSaving"
         :editing="editingProvider"
+        :global-fee-rate="savedPaymentFeeRate"
         :all-key-options="providerKeyOptions"
         :enabled-key-options="enabledProviderKeyOptions"
         :all-payment-types="allPaymentTypes"
@@ -11730,6 +11733,7 @@ async function loadSettings() {
   loadFailed.value = false;
   try {
     const settings = await adminAPI.settings.getSettings();
+    savedPaymentFeeRate.value = settings.payment_recharge_fee_rate ?? 0;
     settings.balance_forecast_enabled ??= false;
     settings.balance_forecast_threshold_hours ??= 12;
     settings.balance_forecast_max_notifications ??= 3;
@@ -12634,6 +12638,7 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    savedPaymentFeeRate.value = updated.payment_recharge_fee_rate ?? savedPaymentFeeRate.value;
     adminSettingsStore.smartOpsHiddenMenuItems = [...(updated.smart_ops_hidden_menu_items ?? DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS)];
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
@@ -13444,6 +13449,8 @@ function slog(...args: unknown[]) {
 const providersLoading = ref(false);
 const providerSaving = ref(false);
 const providers = ref<ProviderInstance[]>([]);
+// Provider dialogs save independently; unsaved global form edits are not effective rates.
+const savedPaymentFeeRate = ref<number>();
 const showProviderDialog = ref(false);
 const showDeleteProviderDialog = ref(false);
 const editingProvider = ref<ProviderInstance | null>(null);

@@ -94,6 +94,11 @@ func Limits(v string) predicate.PaymentProviderInstance {
 	return predicate.PaymentProviderInstance(sql.FieldEQ(FieldLimits, v))
 }
 
+// FeeRate applies equality check predicate on the "fee_rate" field. It's identical to FeeRateEQ.
+func FeeRate(v float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldEQ(FieldFeeRate, v))
+}
+
 // RefundEnabled applies equality check predicate on the "refund_enabled" field. It's identical to RefundEnabledEQ.
 func RefundEnabled(v bool) predicate.PaymentProviderInstance {
 	return predicate.PaymentProviderInstance(sql.FieldEQ(FieldRefundEnabled, v))
@@ -552,6 +557,56 @@ func LimitsEqualFold(v string) predicate.PaymentProviderInstance {
 // LimitsContainsFold applies the ContainsFold predicate on the "limits" field.
 func LimitsContainsFold(v string) predicate.PaymentProviderInstance {
 	return predicate.PaymentProviderInstance(sql.FieldContainsFold(FieldLimits, v))
+}
+
+// FeeRateEQ applies the EQ predicate on the "fee_rate" field.
+func FeeRateEQ(v float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldEQ(FieldFeeRate, v))
+}
+
+// FeeRateNEQ applies the NEQ predicate on the "fee_rate" field.
+func FeeRateNEQ(v float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldNEQ(FieldFeeRate, v))
+}
+
+// FeeRateIn applies the In predicate on the "fee_rate" field.
+func FeeRateIn(vs ...float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldIn(FieldFeeRate, vs...))
+}
+
+// FeeRateNotIn applies the NotIn predicate on the "fee_rate" field.
+func FeeRateNotIn(vs ...float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldNotIn(FieldFeeRate, vs...))
+}
+
+// FeeRateGT applies the GT predicate on the "fee_rate" field.
+func FeeRateGT(v float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldGT(FieldFeeRate, v))
+}
+
+// FeeRateGTE applies the GTE predicate on the "fee_rate" field.
+func FeeRateGTE(v float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldGTE(FieldFeeRate, v))
+}
+
+// FeeRateLT applies the LT predicate on the "fee_rate" field.
+func FeeRateLT(v float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldLT(FieldFeeRate, v))
+}
+
+// FeeRateLTE applies the LTE predicate on the "fee_rate" field.
+func FeeRateLTE(v float64) predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldLTE(FieldFeeRate, v))
+}
+
+// FeeRateIsNil applies the IsNil predicate on the "fee_rate" field.
+func FeeRateIsNil() predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldIsNull(FieldFeeRate))
+}
+
+// FeeRateNotNil applies the NotNil predicate on the "fee_rate" field.
+func FeeRateNotNil() predicate.PaymentProviderInstance {
+	return predicate.PaymentProviderInstance(sql.FieldNotNull(FieldFeeRate))
 }
 
 // RefundEnabledEQ applies the EQ predicate on the "refund_enabled" field.

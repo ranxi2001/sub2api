@@ -16,6 +16,10 @@ import (
 // instances and returns limits for each, plus the global widest range.
 // Stripe sub-types (card, link) are aggregated under "stripe".
 func (s *PaymentConfigService) GetAvailableMethodLimits(ctx context.Context) (*MethodLimitsResponse, error) {
+	globalFee, err := s.globalPaymentFeeRate(ctx)
+	if err != nil {
+		return nil, err
+	}
 	instances, err := s.entClient.PaymentProviderInstance.Query().
 		Where(paymentproviderinstance.EnabledEQ(true)).All(ctx)
 	if err != nil {
@@ -34,6 +38,7 @@ func (s *PaymentConfigService) GetAvailableMethodLimits(ctx context.Context) (*M
 		ml := pcAggregateMethodLimits(pt, insts)
 		ml.DisplayName = s.pcAggregateMethodDisplayName(pt, insts)
 		ml.Currency = currency
+		pcApplyMethodFees(&ml, insts, globalFee)
 		resp.Methods[ml.PaymentType] = ml
 	}
 	resp.GlobalMin, resp.GlobalMax = pcComputeGlobalRange(resp.Methods)
@@ -77,6 +82,10 @@ func (s *PaymentConfigService) pcApplyEnabledVisibleMethodInstances(ctx context.
 
 // GetMethodLimits returns per-payment-type limits from enabled provider instances.
 func (s *PaymentConfigService) GetMethodLimits(ctx context.Context, types []string) ([]MethodLimits, error) {
+	globalFee, err := s.globalPaymentFeeRate(ctx)
+	if err != nil {
+		return nil, err
+	}
 	instances, err := s.entClient.PaymentProviderInstance.Query().
 		Where(paymentproviderinstance.EnabledEQ(true)).All(ctx)
 	if err != nil {
@@ -97,6 +106,7 @@ func (s *PaymentConfigService) GetMethodLimits(ctx context.Context, types []stri
 		ml := pcAggregateMethodLimits(pt, matching)
 		ml.DisplayName = s.pcAggregateMethodDisplayName(pt, matching)
 		ml.Currency = currency
+		pcApplyMethodFees(&ml, matching, globalFee)
 		result = append(result, ml)
 	}
 	return result, nil
@@ -232,6 +242,9 @@ func pcGroupByPaymentType(instances []*dbent.PaymentProviderInstance) map[string
 	for _, inst := range instances {
 		// Stripe provider: all sub-types → single "stripe" group
 		if inst.ProviderKey == payment.TypeStripe {
+			if len(payment.StripeInstanceMethods(inst.SupportedTypes)) == 0 {
+				continue
+			}
 			add(payment.TypeStripe, inst)
 			continue
 		}

@@ -131,13 +131,23 @@ type UpdatePaymentConfigRequest struct {
 
 // MethodLimits holds per-payment-type limits.
 type MethodLimits struct {
-	PaymentType string  `json:"payment_type"`
-	DisplayName string  `json:"display_name,omitempty"`
-	Currency    string  `json:"currency"`
-	FeeRate     float64 `json:"fee_rate"`
-	DailyLimit  float64 `json:"daily_limit"`
-	SingleMin   float64 `json:"single_min"`
-	SingleMax   float64 `json:"single_max"`
+	PaymentType string                    `json:"payment_type"`
+	DisplayName string                    `json:"display_name,omitempty"`
+	Currency    string                    `json:"currency"`
+	FeeRate     float64                   `json:"fee_rate"`
+	FeeRateMin  float64                   `json:"fee_rate_min"`
+	FeeRateMax  float64                   `json:"fee_rate_max"`
+	SubMethods  map[string]MethodFeeRates `json:"sub_methods,omitempty"`
+	DailyLimit  float64                   `json:"daily_limit"`
+	SingleMin   float64                   `json:"single_min"`
+	SingleMax   float64                   `json:"single_max"`
+}
+
+// MethodFeeRates describes the effective fee range across eligible instances.
+type MethodFeeRates struct {
+	FeeRate    float64 `json:"fee_rate"`
+	FeeRateMin float64 `json:"fee_rate_min"`
+	FeeRateMax float64 `json:"fee_rate_max"`
 }
 
 // MethodLimitsResponse is the full response for the user-facing /limits API.
@@ -149,28 +159,32 @@ type MethodLimitsResponse struct {
 }
 
 type CreateProviderInstanceRequest struct {
-	ProviderKey     string            `json:"provider_key"`
-	Name            string            `json:"name"`
-	Config          map[string]string `json:"config"`
-	SupportedTypes  []string          `json:"supported_types"`
-	Enabled         bool              `json:"enabled"`
-	PaymentMode     string            `json:"payment_mode"`
-	SortOrder       int               `json:"sort_order"`
-	Limits          string            `json:"limits"`
-	RefundEnabled   bool              `json:"refund_enabled"`
-	AllowUserRefund bool              `json:"allow_user_refund"`
+	FeeRate         *float64            `json:"fee_rate"`
+	MethodFeeRates  MethodFeeRatesPatch `json:"method_fee_rates"`
+	ProviderKey     string              `json:"provider_key"`
+	Name            string              `json:"name"`
+	Config          map[string]string   `json:"config"`
+	SupportedTypes  []string            `json:"supported_types"`
+	Enabled         bool                `json:"enabled"`
+	PaymentMode     string              `json:"payment_mode"`
+	SortOrder       int                 `json:"sort_order"`
+	Limits          string              `json:"limits"`
+	RefundEnabled   bool                `json:"refund_enabled"`
+	AllowUserRefund bool                `json:"allow_user_refund"`
 }
 
 type UpdateProviderInstanceRequest struct {
-	Name            *string           `json:"name"`
-	Config          map[string]string `json:"config"`
-	SupportedTypes  []string          `json:"supported_types"`
-	Enabled         *bool             `json:"enabled"`
-	PaymentMode     *string           `json:"payment_mode"`
-	SortOrder       *int              `json:"sort_order"`
-	Limits          *string           `json:"limits"`
-	RefundEnabled   *bool             `json:"refund_enabled"`
-	AllowUserRefund *bool             `json:"allow_user_refund"`
+	FeeRate         NullableFeeRateField `json:"fee_rate"`
+	MethodFeeRates  MethodFeeRatesPatch  `json:"method_fee_rates"`
+	Name            *string              `json:"name"`
+	Config          map[string]string    `json:"config"`
+	SupportedTypes  []string             `json:"supported_types"`
+	Enabled         *bool                `json:"enabled"`
+	PaymentMode     *string              `json:"payment_mode"`
+	SortOrder       *int                 `json:"sort_order"`
+	Limits          *string              `json:"limits"`
+	RefundEnabled   *bool                `json:"refund_enabled"`
+	AllowUserRefund *bool                `json:"allow_user_refund"`
 }
 type CreatePlanRequest struct {
 	GroupID       int64    `json:"group_id"`

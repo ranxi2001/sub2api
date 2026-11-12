@@ -3,6 +3,7 @@
 package ent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -33,6 +34,10 @@ type PaymentProviderInstance struct {
 	SortOrder int `json:"sort_order,omitempty"`
 	// Limits holds the value of the "limits" field.
 	Limits string `json:"limits,omitempty"`
+	// FeeRate holds the value of the "fee_rate" field.
+	FeeRate *float64 `json:"fee_rate,omitempty"`
+	// MethodFeeRates holds the value of the "method_fee_rates" field.
+	MethodFeeRates map[string]float64 `json:"method_fee_rates,omitempty"`
 	// RefundEnabled holds the value of the "refund_enabled" field.
 	RefundEnabled bool `json:"refund_enabled,omitempty"`
 	// AllowUserRefund holds the value of the "allow_user_refund" field.
@@ -49,8 +54,12 @@ func (*PaymentProviderInstance) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case paymentproviderinstance.FieldMethodFeeRates:
+			values[i] = new([]byte)
 		case paymentproviderinstance.FieldEnabled, paymentproviderinstance.FieldRefundEnabled, paymentproviderinstance.FieldAllowUserRefund:
 			values[i] = new(sql.NullBool)
+		case paymentproviderinstance.FieldFeeRate:
+			values[i] = new(sql.NullFloat64)
 		case paymentproviderinstance.FieldID, paymentproviderinstance.FieldSortOrder:
 			values[i] = new(sql.NullInt64)
 		case paymentproviderinstance.FieldProviderKey, paymentproviderinstance.FieldName, paymentproviderinstance.FieldConfig, paymentproviderinstance.FieldSupportedTypes, paymentproviderinstance.FieldPaymentMode, paymentproviderinstance.FieldLimits:
@@ -125,6 +134,21 @@ func (_m *PaymentProviderInstance) assignValues(columns []string, values []any) 
 				return fmt.Errorf("unexpected type %T for field limits", values[i])
 			} else if value.Valid {
 				_m.Limits = value.String
+			}
+		case paymentproviderinstance.FieldFeeRate:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field fee_rate", values[i])
+			} else if value.Valid {
+				_m.FeeRate = new(float64)
+				*_m.FeeRate = value.Float64
+			}
+		case paymentproviderinstance.FieldMethodFeeRates:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field method_fee_rates", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.MethodFeeRates); err != nil {
+					return fmt.Errorf("unmarshal field method_fee_rates: %w", err)
+				}
 			}
 		case paymentproviderinstance.FieldRefundEnabled:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -209,6 +233,14 @@ func (_m *PaymentProviderInstance) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("limits=")
 	builder.WriteString(_m.Limits)
+	builder.WriteString(", ")
+	if v := _m.FeeRate; v != nil {
+		builder.WriteString("fee_rate=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("method_fee_rates=")
+	builder.WriteString(fmt.Sprintf("%v", _m.MethodFeeRates))
 	builder.WriteString(", ")
 	builder.WriteString("refund_enabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.RefundEnabled))
