@@ -1,0 +1,15 @@
+# Fixture only; AUTO_SETUP writes its own temporary /app/data/config.yaml.
+# Environment supplies server/database/redis/JWT fields for normal config load.
+security:
+  url_allowlist:
+    enabled: true
+    upstream_hosts: [fake-upstream]
+    pricing_hosts: [fake-upstream]
+    crs_hosts: [fake-upstream]
+    allow_private_hosts: true
+    allow_insecure_http: false
+# No SMTP configuration. Background downloads fail closed on the internal network.
+# Use the real packaged pricing fallback; no fake pricing endpoint is served.
+pricing:
+  remote_url: https://fake-upstream:4199/disabled-pricing
+  hash_url: https://fake-upstream:4199/disabled-pricing-hash
