@@ -76,7 +76,8 @@ describe('VIP auto credit', () => {
     expect(w.findAll('[role="alertdialog"]')).toHaveLength(1)
     expect(w.findAll('article')[1]!.get('[role="alertdialog"]').text()).toContain('$12.00')
     await w.get('[data-testid="confirm-settlement"]').trigger('click'); await flushPromises()
-    expect(mocks.settleAutoCredit).toHaveBeenCalledExactlyOnceWith(2, 8)
+    expect(mocks.settleAutoCredit).toHaveBeenCalledTimes(1)
+    expect(mocks.settleAutoCredit).toHaveBeenCalledWith(2, 8)
     expect(w.find('[role="alertdialog"]').exists()).toBe(false)
   })
   it('keeps settlement failures visible beside the confirmation and prevents duplicate submits', async () => {
