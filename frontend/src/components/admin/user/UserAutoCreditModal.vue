@@ -6,7 +6,7 @@
         <p class="break-all font-medium">{{ user?.email }}</p>
         <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.vipAutoCredit" :user-id="auth.user?.id" />
       </div>
-      <div v-if="error" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{{ error }}</div>
+      <div v-if="error && !confirming" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{{ error }}</div>
       <p v-if="loading">{{ t('autoCredit.loading') }}</p>
       <template v-if="state">
         <div class="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
@@ -49,17 +49,18 @@
             <p class="mt-1 text-xs text-gray-500">{{ entry.created_at }} · {{ t('autoCredit.beforeAfter', { before: Number(entry.balance_before).toFixed(2), after: Number(entry.balance_after).toFixed(2) }) }}</p>
             <p class="mt-2 break-words text-sm">{{ entry.note }}</p>
             <p v-if="entry.settled_by" class="mt-1 text-xs text-gray-500">{{ t('autoCredit.collectedBy', { id: entry.settled_by }) }} · {{ entry.settled_at }}</p>
-            <button v-if="entry.status === 'pending'" type="button" :data-testid="`settle-${entry.id}`" class="btn btn-secondary mt-3" :disabled="busy || loading" @click="confirming = entry">{{ t('autoCredit.settle') }}</button>
+            <button v-if="entry.status === 'pending'" type="button" :data-testid="`settle-${entry.id}`" class="btn btn-secondary mt-3" :disabled="busy || loading" @click="requestSettlement(entry)">{{ t('autoCredit.settle') }}</button>
+            <div v-if="confirming?.id === entry.id" ref="confirmationPanels" tabindex="-1" role="alertdialog" :aria-label="t('autoCredit.settle')" class="mt-3 rounded-xl border-2 border-amber-500 bg-amber-50 p-4 dark:bg-amber-950/40">
+              <p>{{ t('autoCredit.confirmation', { id: entry.id, amount: Number(entry.amount).toFixed(2) }) }}</p>
+              <p v-if="error" role="alert" class="mt-2 text-sm text-red-700 dark:text-red-300">{{ error }}</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button type="button" data-testid="confirm-settlement" class="btn btn-primary" :disabled="busy" @click="settle">{{ t('autoCredit.confirm') }}</button>
+                <button type="button" class="btn btn-secondary" :disabled="busy" data-testid="cancel-settlement" @click="cancelSettlement">{{ t('autoCredit.cancel') }}</button>
+              </div>
+            </div>
           </article>
           <button v-if="state.has_more" type="button" data-testid="older-history" class="btn btn-secondary" :disabled="busy || loading" @click="load(true)">{{ t('autoCredit.more') }}</button>
         </section>
-        <div v-if="confirming" role="alertdialog" :aria-label="t('autoCredit.settle')" class="rounded-xl border-2 border-amber-500 bg-amber-50 p-4 dark:bg-amber-950/40">
-          <p>{{ t('autoCredit.confirmation', { id: confirming.id, amount: Number(confirming.amount).toFixed(2) }) }}</p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button type="button" data-testid="confirm-settlement" class="btn btn-primary" :disabled="busy" @click="settle">{{ t('autoCredit.confirm') }}</button>
-            <button type="button" class="btn btn-secondary" :disabled="busy" @click="confirming = null">{{ t('autoCredit.cancel') }}</button>
-          </div>
-        </div>
       </template>
       <button type="button" class="btn btn-secondary" :disabled="busy || loading" @click="load()">{{ t('autoCredit.reload') }}</button>
     </div>
@@ -67,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
@@ -88,7 +89,22 @@ const error = ref('')
 const loading = ref(false)
 const busy = ref(false)
 const confirming = ref<AutoCreditEntry | null>(null)
+const confirmationPanels = ref<HTMLElement[]>([])
 let generation = 0
+async function requestSettlement(entry: AutoCreditEntry) {
+  if (!auth.isAdmin || busy.value || loading.value || entry.status !== 'pending') return
+  error.value = ''
+  confirming.value = entry
+  await nextTick()
+  const panel = confirmationPanels.value[0]
+  panel?.focus({ preventScroll: true })
+  panel?.scrollIntoView({ block: 'nearest' })
+}
+function cancelSettlement() {
+  if (busy.value) return
+  confirming.value = null
+  error.value = ''
+}
 function message(e: unknown): string {
   if (e && typeof e === 'object' && 'reason' in e) {
     if (e.reason === 'AUTO_CREDIT_INVALID') return t('autoCredit.invalid')
