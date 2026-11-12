@@ -272,7 +272,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return derefAccounts(cached), useMixed, nil
+			return derefSchedulableAccounts(cached), useMixed, nil
 		}
 		if !s.writesSnapshots() {
 			return nil, useMixed, ErrSchedulerCacheNotReady
@@ -318,7 +318,13 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		}
 	}
 
-	return accounts, useMixed, nil
+	eligible := make([]Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account.IsSchedulable() {
+			eligible = append(eligible, account)
+		}
+	}
+	return eligible, useMixed, nil
 }
 
 func (s *SchedulerSnapshotService) GetAccount(ctx context.Context, accountID int64) (result *Account, resultErr error) {
@@ -1648,42 +1654,28 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 	if s.accountRepo == nil {
 		return nil, ErrSchedulerCacheNotReady
 	}
-	groupID := bucket.GroupID
-	if s.isRunModeSimple() {
-		groupID = 0
+	var groupID *int64
+	if !s.isRunModeSimple() && bucket.GroupID > 0 {
+		groupID = &bucket.GroupID
 	}
-
+	platforms := []string{bucket.Platform}
 	if useMixed {
-		platforms := []string{bucket.Platform, PlatformAntigravity}
-		var accounts []Account
-		var err error
-		if groupID > 0 {
-			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, groupID, platforms)
-		} else if s.isRunModeSimple() {
-			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, platforms)
-		} else {
-			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, platforms)
-		}
-		if err != nil {
-			return nil, err
-		}
-		filtered := make([]Account, 0, len(accounts))
-		for _, acc := range accounts {
-			if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
-				continue
-			}
-			filtered = append(filtered, acc)
-		}
-		return filtered, nil
+		platforms = append(platforms, PlatformAntigravity)
 	}
-
-	if groupID > 0 {
-		return s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, bucket.Platform)
+	// Cache the configured pool, as model availability does. Time-based blocks
+	// must be checked on each read so expiry needs no write or outbox event.
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, platforms, s.isRunModeSimple())
+	if err != nil || !useMixed {
+		return accounts, err
 	}
-	if s.isRunModeSimple() {
-		return s.accountRepo.ListSchedulableByPlatform(ctx, bucket.Platform)
+	filtered := make([]Account, 0, len(accounts))
+	for _, acc := range accounts {
+		if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
+			continue
+		}
+		filtered = append(filtered, acc)
 	}
-	return s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, bucket.Platform)
+	return filtered, nil
 }
 
 func (s *SchedulerSnapshotService) loadAccountsForRebuild(
@@ -1840,13 +1832,13 @@ func dedupeBuckets(in []SchedulerBucket) []SchedulerBucket {
 	return out
 }
 
-func derefAccounts(accounts []*Account) []Account {
+func derefSchedulableAccounts(accounts []*Account) []Account {
 	if len(accounts) == 0 {
 		return []Account{}
 	}
 	out := make([]Account, 0, len(accounts))
 	for _, account := range accounts {
-		if account == nil {
+		if account == nil || !account.IsSchedulable() {
 			continue
 		}
 		out = append(out, *account)
