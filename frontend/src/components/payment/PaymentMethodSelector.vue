@@ -30,10 +30,10 @@
               {{ methodLabel(method) }}
             </span>
             <span
-              v-if="method.fee_rate > 0"
+              v-if="(method.fee_rate_max ?? method.fee_rate) > 0"
               class="text-[10px] tracking-wide text-gray-500 dark:text-dark-400"
             >
-              {{ t('payment.fee') }} {{ method.fee_rate }}%
+              {{ t('payment.fee') }} {{ methodFeeLabel(method) }}%
             </span>
           </span>
         </span>
@@ -57,6 +57,8 @@ export interface PaymentMethodOption {
   type: string
   display_name?: string
   fee_rate: number
+  fee_rate_min?: number
+  fee_rate_max?: number
   available: boolean
 }
 
@@ -98,6 +100,12 @@ function methodIcon(type: string): string {
 
 function methodLabel(method: PaymentMethodOption): string {
   return method.display_name || t(`payment.methods.${method.type}`, method.type)
+}
+
+function methodFeeLabel(method: PaymentMethodOption): string {
+  const min = method.fee_rate_min ?? method.fee_rate
+  const max = method.fee_rate_max ?? min
+  return min === max ? String(min) : `${min}–${max}`
 }
 
 function methodSelectedClass(type: string): string {

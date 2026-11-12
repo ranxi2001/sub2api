@@ -74,6 +74,7 @@ func wxpayJSAPIAppIDFromContext(ctx context.Context) string {
 type instanceCandidate struct {
 	inst      *dbent.PaymentProviderInstance
 	dailyUsed float64 // includes PENDING orders
+	quote     *InstanceQuote
 }
 
 // SelectInstance picks an enabled instance for the given provider key and payment type.
@@ -99,6 +100,14 @@ func (lb *DefaultLoadBalancer) SelectInstance(
 
 	// Step 2: batch-fetch daily usage for all candidates.
 	candidates := lb.attachDailyUsage(ctx, instances)
+	if quoter := quoteContext(ctx).quote; quoter != nil {
+		for i := range candidates {
+			candidates[i].quote, err = quoter(candidates[i].inst)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Step 3: filter by limits.
 	available := filterByLimits(candidates, paymentType, orderAmount)
@@ -111,7 +120,12 @@ func (lb *DefaultLoadBalancer) SelectInstance(
 
 	// Step 4: pick by strategy.
 	selected := lb.pickByStrategy(available, strategy)
-	return lb.buildSelection(selected.inst)
+	selection, err := lb.buildSelection(selected.inst)
+	if err != nil {
+		return nil, err
+	}
+	selection.Quote = selected.quote
+	return selection, nil
 }
 
 // queryEnabledInstances returns enabled instances that support paymentType.
@@ -138,6 +152,18 @@ func (lb *DefaultLoadBalancer) queryEnabledInstances(
 	var matched []*dbent.PaymentProviderInstance
 	expectedWxpayJSAPIAppID := wxpayJSAPIAppIDFromContext(ctx)
 	for _, inst := range instances {
+		if inst.ProviderKey == TypeStripe {
+			if len(StripeInstanceMethods(inst.SupportedTypes)) == 0 {
+				continue
+			}
+			subtype := quoteContext(ctx).subtype
+			if subtype == "" && paymentType != TypeStripe && IsStripePaymentSubtype(paymentType) {
+				subtype = paymentType
+			}
+			if subtype != "" && !StripeInstanceSupportsSubtype(inst.SupportedTypes, subtype) {
+				continue
+			}
+		}
 		// BEpusdt networks require explicit opt-in, including when none are selected.
 		if inst.ProviderKey == TypeBEpusdt && (strings.TrimSpace(inst.SupportedTypes) == "" || !IsBEpusdtTradeType(paymentType)) {
 			continue
@@ -225,22 +251,26 @@ func (lb *DefaultLoadBalancer) attachDailyUsage(
 func filterByLimits(candidates []instanceCandidate, paymentType PaymentType, orderAmount float64) []instanceCandidate {
 	var result []instanceCandidate
 	for _, c := range candidates {
+		candidateAmount := orderAmount
+		if c.quote != nil {
+			candidateAmount = c.quote.PayAmount
+		}
 		cl := getInstanceChannelLimits(c.inst, paymentType)
 
-		if cl.SingleMin > 0 && orderAmount < cl.SingleMin {
+		if cl.SingleMin > 0 && candidateAmount < cl.SingleMin {
 			slog.Info("order below instance single min, skipping",
-				"instance_id", c.inst.ID, "order", orderAmount, "min", cl.SingleMin)
+				"instance_id", c.inst.ID, "order", candidateAmount, "min", cl.SingleMin)
 			continue
 		}
-		if cl.SingleMax > 0 && orderAmount > cl.SingleMax {
+		if cl.SingleMax > 0 && candidateAmount > cl.SingleMax {
 			slog.Info("order above instance single max, skipping",
-				"instance_id", c.inst.ID, "order", orderAmount, "max", cl.SingleMax)
+				"instance_id", c.inst.ID, "order", candidateAmount, "max", cl.SingleMax)
 			continue
 		}
-		if cl.DailyLimit > 0 && c.dailyUsed+orderAmount > cl.DailyLimit {
+		if cl.DailyLimit > 0 && c.dailyUsed+candidateAmount > cl.DailyLimit {
 			slog.Info("instance daily remaining insufficient, skipping",
 				"instance_id", c.inst.ID, "used", c.dailyUsed,
-				"order", orderAmount, "limit", cl.DailyLimit)
+				"order", candidateAmount, "limit", cl.DailyLimit)
 			continue
 		}
 

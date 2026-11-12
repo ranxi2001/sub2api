@@ -53,12 +53,13 @@ function providerFactory(overrides: Partial<ProviderInstance> = {}): ProviderIns
   }
 }
 
-function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
+function mountDialog(options: { editing?: ProviderInstance | null; globalFeeRate?: number } = {}) {
   return mount(PaymentProviderDialog, {
     props: {
       show: true,
       saving: false,
       editing: options.editing ?? null,
+      globalFeeRate: options.globalFeeRate,
       allKeyOptions: [
         { value: 'easypay', label: 'EasyPay' },
         { value: 'alipay', label: 'Alipay' },
@@ -95,6 +96,123 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
     },
   })
 }
+
+describe('PaymentProviderDialog fees', () => {
+  function openFeeDialog(overrides: Partial<ProviderInstance> = {}) {
+    const provider = providerFactory({
+      provider_key: 'bepusdt', name: 'Crypto', config: { mode: 'embedded' },
+      supported_types: ['usdt.bep20', 'usdt.trc20'], ...overrides,
+    })
+    const wrapper = mountDialog({ editing: provider, globalFeeRate: 2.5 })
+    ;(wrapper.vm as unknown as { loadProvider: (value: ProviderInstance) => void }).loadProvider(provider)
+    return wrapper
+  }
+
+  it.each([undefined, null, 0, 1.25, 100])('round-trips default fee %s without confusing zero and inheritance', async (rate) => {
+    const wrapper = openFeeDialog({ fee_rate: rate })
+    await nextTick()
+    expect((wrapper.get('[data-testid="provider-fee-mode"]').element as HTMLSelectElement).value).toBe(rate == null ? 'inherit' : 'custom')
+    await wrapper.get('#provider-form').trigger('submit')
+    expect(wrapper.emitted('save')?.[0]?.[0]).toMatchObject({ fee_rate: rate ?? null, method_fee_rates: {} })
+  })
+
+  it('saves distinct method fees, including free payments, and explicitly clears inheritance overrides', async () => {
+    const wrapper = openFeeDialog({ fee_rate: 2, method_fee_rates: { 'usdt.bep20': 0, 'usdt.trc20': 1.2 } })
+    await nextTick()
+    expect((wrapper.get('[data-testid="method-fee-rate-usdt.bep20"]').element as HTMLInputElement).value).toBe('0')
+    await wrapper.get('[data-testid="method-fee-rate-usdt.trc20"]').setValue('3.45')
+    await wrapper.get('#provider-form').trigger('submit')
+    expect(wrapper.emitted('save')?.[0]?.[0]).toMatchObject({ fee_rate: 2, method_fee_rates: { 'usdt.bep20': 0, 'usdt.trc20': 3.45 } })
+    await wrapper.get('[data-testid="provider-fee-mode"]').setValue('inherit')
+    await wrapper.get('[data-testid="method-fee-mode-usdt.bep20"]').setValue('inherit')
+    await wrapper.get('[data-testid="method-fee-mode-usdt.trc20"]').setValue('inherit')
+    await wrapper.get('#provider-form').trigger('submit')
+    expect(wrapper.emitted('save')?.[1]?.[0]).toMatchObject({ fee_rate: null, method_fee_rates: {} })
+  })
+
+  it.each(['', '-1', '100.01', '1.234'])('rejects invalid default and method fee %s', async (value) => {
+    const wrapper = openFeeDialog()
+    await nextTick()
+    await wrapper.get('[data-testid="provider-fee-mode"]').setValue('custom')
+    await wrapper.get('[data-testid="provider-fee-rate"]').setValue(value)
+    await wrapper.get('#provider-form').trigger('submit')
+    expect(wrapper.emitted('save')).toBeUndefined()
+    expect(wrapper.get('[role="alert"]').text()).toBe('admin.settings.payment.feeValidation')
+    await wrapper.get('[data-testid="provider-fee-mode"]').setValue('inherit')
+    await wrapper.get('[data-testid="method-fee-mode-usdt.bep20"]').setValue('custom')
+    await wrapper.get('[data-testid="method-fee-rate-usdt.bep20"]').setValue(value)
+    await wrapper.get('#provider-form').trigger('submit')
+    expect(wrapper.emitted('save')).toBeUndefined()
+  })
+
+  it('clears fee drafts when opening another provider or creating a new one', async () => {
+    const wrapper = openFeeDialog({ fee_rate: 5, method_fee_rates: { 'usdt.bep20': 4 } })
+    await nextTick()
+    ;(wrapper.vm as unknown as { reset: (key: string) => void }).reset('bepusdt')
+    await nextTick()
+    expect((wrapper.get('[data-testid="provider-fee-mode"]').element as HTMLSelectElement).value).toBe('inherit')
+    expect(wrapper.find('[data-testid="method-fee-rate-usdt.bep20"]').exists()).toBe(false)
+  })
+
+  it('preserves disabled method fees through editing and restores them on re-enablement', async () => {
+    const wrapper = openFeeDialog({ fee_rate: 2, method_fee_rates: { 'usdt.trc20': 1.25 } })
+    await nextTick()
+    await wrapper.findAll('button').find(button => button.text() === 'USDT (TRC20)')!.trigger('click')
+    await wrapper.get('[data-testid="provider-fee-rate"]').setValue('3')
+    await wrapper.get('#provider-form').trigger('submit')
+    const first = wrapper.emitted('save')?.[0]?.[0] as Partial<ProviderInstance>
+    expect(first.supported_types).toEqual(['usdt.bep20'])
+    expect(first.method_fee_rates).toEqual({ 'usdt.trc20': 1.25 })
+
+    const reopened = openFeeDialog(first)
+    await nextTick()
+    expect(reopened.find('[data-testid="method-fee-rate-usdt.trc20"]').exists()).toBe(false)
+    await reopened.findAll('input')[0].setValue('Renamed provider')
+    await reopened.get('#provider-form').trigger('submit')
+    expect(reopened.emitted('save')?.[0]?.[0]).toMatchObject({ method_fee_rates: { 'usdt.trc20': 1.25 } })
+    await reopened.findAll('button').find(button => button.text() === 'USDT (TRC20)')!.trigger('click')
+    expect((reopened.get('[data-testid="method-fee-rate-usdt.trc20"]').element as HTMLInputElement).value).toBe('1.25')
+    await reopened.get('#provider-form').trigger('submit')
+    expect(reopened.emitted('save')?.[1]?.[0]).toMatchObject({ supported_types: ['usdt.bep20', 'usdt.trc20'], method_fee_rates: { 'usdt.trc20': 1.25 } })
+  })
+
+  it('clears the override when its custom EasyPay method is deleted', async () => {
+    const wrapper = openFeeDialog({ provider_key: 'easypay', supported_types: ['alipay', 'ldc'],
+      config: { pid: 'test', apiBase: 'https://pay.example.com', customMethods: JSON.stringify([{ type: 'ldc', upstreamType: 'ldc', displayName: 'LDC Pay' }]) },
+      method_fee_rates: { alipay: 0, ldc: 1.25 },
+    })
+    await nextTick()
+    await wrapper.findAll('button').find(button => button.text() === 'common.delete')!.trigger('click')
+    await wrapper.get('#provider-form').trigger('submit')
+    expect(wrapper.emitted('save')?.[0]?.[0]).toMatchObject({ supported_types: ['alipay'], method_fee_rates: { alipay: 0 } })
+  })
+
+  it.each([
+    ['stripe', ['card', 'link', 'alipay', 'wxpay']],
+    ['airwallex', ['airwallex']],
+    ['easypay', ['alipay', 'ldc']],
+  ])('shows each configured %s method separately from shared limits', async (providerKey, types) => {
+    const wrapper = openFeeDialog({
+      provider_key: providerKey, supported_types: types,
+      config: providerKey === 'easypay' ? { customMethods: JSON.stringify([{ type: 'ldc', upstreamType: 'ldc', displayName: 'LDC Pay' }]) } : {},
+    })
+    await nextTick()
+    const selectors = wrapper.findAll('[data-testid^="method-fee-mode-"]')
+    expect(selectors.map(selector => selector.attributes('data-testid'))).toEqual(types.map(type => `method-fee-mode-${type}`))
+    expect(wrapper.find('[data-testid="method-fee-mode-stripe"]').exists()).toBe(false)
+  })
+
+  it.each([
+    ['alipay', ['alipay_direct', 'alipay']],
+    ['wxpay', ['wxpay_direct']],
+    ['alipay', []],
+    ['wxpay', []],
+  ])('normalizes legacy %s method aliases and empty official configurations', async (providerKey, types) => {
+    const wrapper = openFeeDialog({ provider_key: providerKey, supported_types: types })
+    await nextTick()
+    expect(wrapper.findAll('[data-testid^="method-fee-mode-"]').map(selector => selector.attributes('data-testid'))).toEqual([`method-fee-mode-${providerKey}`])
+  })
+})
 
 describe('PaymentProviderDialog callback URLs', () => {
   it('defaults to built-in collection and saves without gateway credentials', async () => {

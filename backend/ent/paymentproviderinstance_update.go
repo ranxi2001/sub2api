@@ -147,6 +147,39 @@ func (_u *PaymentProviderInstanceUpdate) SetNillableLimits(v *string) *PaymentPr
 	return _u
 }
 
+// SetFeeRate sets the "fee_rate" field.
+func (_u *PaymentProviderInstanceUpdate) SetFeeRate(v float64) *PaymentProviderInstanceUpdate {
+	_u.mutation.ResetFeeRate()
+	_u.mutation.SetFeeRate(v)
+	return _u
+}
+
+// SetNillableFeeRate sets the "fee_rate" field if the given value is not nil.
+func (_u *PaymentProviderInstanceUpdate) SetNillableFeeRate(v *float64) *PaymentProviderInstanceUpdate {
+	if v != nil {
+		_u.SetFeeRate(*v)
+	}
+	return _u
+}
+
+// AddFeeRate adds value to the "fee_rate" field.
+func (_u *PaymentProviderInstanceUpdate) AddFeeRate(v float64) *PaymentProviderInstanceUpdate {
+	_u.mutation.AddFeeRate(v)
+	return _u
+}
+
+// ClearFeeRate clears the value of the "fee_rate" field.
+func (_u *PaymentProviderInstanceUpdate) ClearFeeRate() *PaymentProviderInstanceUpdate {
+	_u.mutation.ClearFeeRate()
+	return _u
+}
+
+// SetMethodFeeRates sets the "method_fee_rates" field.
+func (_u *PaymentProviderInstanceUpdate) SetMethodFeeRates(v map[string]float64) *PaymentProviderInstanceUpdate {
+	_u.mutation.SetMethodFeeRates(v)
+	return _u
+}
+
 // SetRefundEnabled sets the "refund_enabled" field.
 func (_u *PaymentProviderInstanceUpdate) SetRefundEnabled(v bool) *PaymentProviderInstanceUpdate {
 	_u.mutation.SetRefundEnabled(v)
@@ -285,6 +318,18 @@ func (_u *PaymentProviderInstanceUpdate) sqlSave(ctx context.Context) (_node int
 	}
 	if value, ok := _u.mutation.Limits(); ok {
 		_spec.SetField(paymentproviderinstance.FieldLimits, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.FeeRate(); ok {
+		_spec.SetField(paymentproviderinstance.FieldFeeRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedFeeRate(); ok {
+		_spec.AddField(paymentproviderinstance.FieldFeeRate, field.TypeFloat64, value)
+	}
+	if _u.mutation.FeeRateCleared() {
+		_spec.ClearField(paymentproviderinstance.FieldFeeRate, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.MethodFeeRates(); ok {
+		_spec.SetField(paymentproviderinstance.FieldMethodFeeRates, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.RefundEnabled(); ok {
 		_spec.SetField(paymentproviderinstance.FieldRefundEnabled, field.TypeBool, value)
@@ -431,6 +476,39 @@ func (_u *PaymentProviderInstanceUpdateOne) SetNillableLimits(v *string) *Paymen
 	if v != nil {
 		_u.SetLimits(*v)
 	}
+	return _u
+}
+
+// SetFeeRate sets the "fee_rate" field.
+func (_u *PaymentProviderInstanceUpdateOne) SetFeeRate(v float64) *PaymentProviderInstanceUpdateOne {
+	_u.mutation.ResetFeeRate()
+	_u.mutation.SetFeeRate(v)
+	return _u
+}
+
+// SetNillableFeeRate sets the "fee_rate" field if the given value is not nil.
+func (_u *PaymentProviderInstanceUpdateOne) SetNillableFeeRate(v *float64) *PaymentProviderInstanceUpdateOne {
+	if v != nil {
+		_u.SetFeeRate(*v)
+	}
+	return _u
+}
+
+// AddFeeRate adds value to the "fee_rate" field.
+func (_u *PaymentProviderInstanceUpdateOne) AddFeeRate(v float64) *PaymentProviderInstanceUpdateOne {
+	_u.mutation.AddFeeRate(v)
+	return _u
+}
+
+// ClearFeeRate clears the value of the "fee_rate" field.
+func (_u *PaymentProviderInstanceUpdateOne) ClearFeeRate() *PaymentProviderInstanceUpdateOne {
+	_u.mutation.ClearFeeRate()
+	return _u
+}
+
+// SetMethodFeeRates sets the "method_fee_rates" field.
+func (_u *PaymentProviderInstanceUpdateOne) SetMethodFeeRates(v map[string]float64) *PaymentProviderInstanceUpdateOne {
+	_u.mutation.SetMethodFeeRates(v)
 	return _u
 }
 
@@ -602,6 +680,18 @@ func (_u *PaymentProviderInstanceUpdateOne) sqlSave(ctx context.Context) (_node 
 	}
 	if value, ok := _u.mutation.Limits(); ok {
 		_spec.SetField(paymentproviderinstance.FieldLimits, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.FeeRate(); ok {
+		_spec.SetField(paymentproviderinstance.FieldFeeRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedFeeRate(); ok {
+		_spec.AddField(paymentproviderinstance.FieldFeeRate, field.TypeFloat64, value)
+	}
+	if _u.mutation.FeeRateCleared() {
+		_spec.ClearField(paymentproviderinstance.FieldFeeRate, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.MethodFeeRates(); ok {
+		_spec.SetField(paymentproviderinstance.FieldMethodFeeRates, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.RefundEnabled(); ok {
 		_spec.SetField(paymentproviderinstance.FieldRefundEnabled, field.TypeBool, value)

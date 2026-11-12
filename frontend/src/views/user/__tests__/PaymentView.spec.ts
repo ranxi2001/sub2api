@@ -4,6 +4,8 @@ import PaymentView from '../PaymentView.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
 import AmountInput from '@/components/payment/AmountInput.vue'
+import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
+import StripeSubtypeSelector from '@/components/payment/StripeSubtypeSelector.vue'
 import LotteryRechargeNotice from '@/components/lottery/LotteryRechargeNotice.vue'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import en from '@/i18n/locales/en'
@@ -965,5 +967,119 @@ describe('PaymentView subscription feature flag', () => {
     expect(wrapper.text()).not.toContain('payment.rechargeAccount')
     expect(wrapper.findAllComponents(SubscriptionPlanCard).length).toBeGreaterThan(0)
     wrapper.unmount()
+  })
+})
+
+
+describe('PaymentView provider and method fees', () => {
+  const baseMethod = checkoutInfoFixture().data.methods.wxpay
+
+  async function mountRecharge(methods: CheckoutInfoResponse['methods']) {
+    vi.useRealTimers()
+    routeState.path = '/purchase'
+    routeState.query = {}
+    appStoreState.setPublicSettings(undefined)
+    window.localStorage.clear()
+    getCheckoutInfo.mockResolvedValue(checkoutInfoFixture({ methods, recharge_fee_rate: 2 }))
+    createOrder.mockReset().mockResolvedValue({})
+    const wrapper = shallowMount(PaymentView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false,
+    } } })
+    await flushPromises()
+    wrapper.findComponent(AmountInput).vm.$emit('update:modelValue', 100)
+    await flushPromises()
+    return wrapper
+  }
+
+  it('changes the fee with the selected method and keeps explicit zero free', async () => {
+    const wrapper = await mountRecharge({
+      alipay: { ...baseMethod, fee_rate: 0.6, fee_rate_min: 0.6, fee_rate_max: 0.6 },
+      wxpay: { ...baseMethod, fee_rate: 0, fee_rate_min: 0, fee_rate_max: 0 },
+    })
+    expect(wrapper.text()).toContain(formatPaymentAmount(100.6, 'CNY'))
+    wrapper.findComponent(PaymentMethodSelector).vm.$emit('select', 'wxpay')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain(formatPaymentAmount(102, 'CNY'))
+    expect(wrapper.text()).not.toContain(formatPaymentAmount(100.6, 'CNY'))
+    const submit = wrapper.findAll('button').find(b => b.text().includes('payment.createOrder'))!
+    expect(submit.text()).toContain(formatPaymentAmount(100, 'CNY'))
+  })
+
+  it('shows a payable range instead of quoting the cheapest provider as a fixed price', async () => {
+    const wrapper = await mountRecharge({ alipay: { ...baseMethod, fee_rate: 0.6, fee_rate_min: 0.6, fee_rate_max: 3 } })
+    expect(wrapper.text()).toContain(`${formatPaymentAmount(100.6, 'CNY')} – ${formatPaymentAmount(103, 'CNY')}`)
+    expect(wrapper.find('[data-testid="fee-range-hint"]').exists()).toBe(true)
+  })
+
+  it('selects a Stripe subtype before creating an order without changing its provider route', async () => {
+    const wrapper = await mountRecharge({ stripe: { ...baseMethod, currency: 'USD', fee_rate: 1, fee_rate_min: 1, fee_rate_max: 3,
+      sub_methods: {
+        card: { fee_rate: 3, fee_rate_min: 3, fee_rate_max: 3 },
+        wxpay: { fee_rate: 1, fee_rate_min: 1, fee_rate_max: 1 },
+      },
+    } })
+    expect(wrapper.text()).toContain(formatPaymentAmount(103, 'USD'))
+    wrapper.findComponent(StripeSubtypeSelector).vm.$emit('update:modelValue', 'wxpay')
+    await flushPromises()
+    expect(wrapper.text()).toContain(formatPaymentAmount(101, 'USD'))
+    const submit = wrapper.findAll('button').find(b => b.text().includes('payment.createOrder'))!
+    await submit.trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ payment_type: 'stripe', payment_subtype: 'wxpay', amount: 100 }))
+  })
+
+  it('uses each subscription method fee when checking its payable limit', async () => {
+    const wrapper = await mountSubscriptionConfirm({
+      checkout: { recharge_fee_rate: 2, methods: {
+        alipay: { ...baseMethod, single_max: 101, fee_rate: 3, fee_rate_min: 3, fee_rate_max: 3 },
+        wxpay: { ...baseMethod, single_max: 101, fee_rate: 0, fee_rate_min: 0, fee_rate_max: 0 },
+      } },
+      plan: { price: 100 },
+    })
+    const methods = wrapper.findComponent(PaymentMethodSelector).props('methods')
+    expect(methods.find(m => m.type === 'alipay')?.available).toBe(false)
+    expect(methods.find(m => m.type === 'wxpay')?.available).toBe(true)
+  })
+
+  it('blocks an amount with excess decimals after switching the payment currency', async () => {
+    const wrapper = await mountRecharge({
+      alipay: { ...baseMethod, currency: 'CNY' },
+      wxpay: { ...baseMethod, currency: 'JPY' },
+    })
+    wrapper.findComponent(AmountInput).vm.$emit('update:modelValue', 100.5)
+    await flushPromises()
+    wrapper.findComponent(PaymentMethodSelector).vm.$emit('select', 'wxpay')
+    await flushPromises()
+    expect(wrapper.text()).toContain('payment.amountPrecision')
+    const submit = wrapper.findAll('button').find(b => b.text().includes('payment.createOrder'))!
+    expect(submit.attributes('disabled')).toBeDefined()
+    await submit.trigger('click')
+    await flushPromises()
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+
+  it('keeps Stripe selected when another subtype fits the limit so the user can choose it', async () => {
+    const wrapper = await mountRecharge({
+      alipay: { ...baseMethod, single_max: 100, fee_rate: 0, fee_rate_min: 0, fee_rate_max: 0 },
+      stripe: { ...baseMethod, single_max: 100, fee_rate: 0, fee_rate_min: 0, fee_rate_max: 10,
+        sub_methods: {
+          card: { fee_rate: 10, fee_rate_min: 10, fee_rate_max: 10 },
+          alipay: { fee_rate: 0, fee_rate_min: 0, fee_rate_max: 0 },
+        },
+      },
+    })
+    const selector = wrapper.findComponent(PaymentMethodSelector)
+    expect(selector.props('methods').find(m => m.type === 'stripe')?.available).toBe(true)
+    selector.vm.$emit('select', 'stripe')
+    await flushPromises()
+    expect(selector.props('selected')).toBe('stripe')
+    const submit = wrapper.findAll('button').find(b => b.text().includes('payment.createOrder'))!
+    expect(submit.attributes('disabled')).toBeDefined()
+    wrapper.findComponent(StripeSubtypeSelector).vm.$emit('update:modelValue', 'alipay')
+    await flushPromises()
+    expect(submit.attributes('disabled')).toBeUndefined()
+    await submit.trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ payment_type: 'stripe', payment_subtype: 'alipay' }))
   })
 })

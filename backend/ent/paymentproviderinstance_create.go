@@ -118,6 +118,26 @@ func (_c *PaymentProviderInstanceCreate) SetNillableLimits(v *string) *PaymentPr
 	return _c
 }
 
+// SetFeeRate sets the "fee_rate" field.
+func (_c *PaymentProviderInstanceCreate) SetFeeRate(v float64) *PaymentProviderInstanceCreate {
+	_c.mutation.SetFeeRate(v)
+	return _c
+}
+
+// SetNillableFeeRate sets the "fee_rate" field if the given value is not nil.
+func (_c *PaymentProviderInstanceCreate) SetNillableFeeRate(v *float64) *PaymentProviderInstanceCreate {
+	if v != nil {
+		_c.SetFeeRate(*v)
+	}
+	return _c
+}
+
+// SetMethodFeeRates sets the "method_fee_rates" field.
+func (_c *PaymentProviderInstanceCreate) SetMethodFeeRates(v map[string]float64) *PaymentProviderInstanceCreate {
+	_c.mutation.SetMethodFeeRates(v)
+	return _c
+}
+
 // SetRefundEnabled sets the "refund_enabled" field.
 func (_c *PaymentProviderInstanceCreate) SetRefundEnabled(v bool) *PaymentProviderInstanceCreate {
 	_c.mutation.SetRefundEnabled(v)
@@ -233,6 +253,10 @@ func (_c *PaymentProviderInstanceCreate) defaults() {
 		v := paymentproviderinstance.DefaultLimits
 		_c.mutation.SetLimits(v)
 	}
+	if _, ok := _c.mutation.MethodFeeRates(); !ok {
+		v := paymentproviderinstance.DefaultMethodFeeRates()
+		_c.mutation.SetMethodFeeRates(v)
+	}
 	if _, ok := _c.mutation.RefundEnabled(); !ok {
 		v := paymentproviderinstance.DefaultRefundEnabled
 		_c.mutation.SetRefundEnabled(v)
@@ -296,6 +320,9 @@ func (_c *PaymentProviderInstanceCreate) check() error {
 	}
 	if _, ok := _c.mutation.Limits(); !ok {
 		return &ValidationError{Name: "limits", err: errors.New(`ent: missing required field "PaymentProviderInstance.limits"`)}
+	}
+	if _, ok := _c.mutation.MethodFeeRates(); !ok {
+		return &ValidationError{Name: "method_fee_rates", err: errors.New(`ent: missing required field "PaymentProviderInstance.method_fee_rates"`)}
 	}
 	if _, ok := _c.mutation.RefundEnabled(); !ok {
 		return &ValidationError{Name: "refund_enabled", err: errors.New(`ent: missing required field "PaymentProviderInstance.refund_enabled"`)}
@@ -367,6 +394,14 @@ func (_c *PaymentProviderInstanceCreate) createSpec() (*PaymentProviderInstance,
 	if value, ok := _c.mutation.Limits(); ok {
 		_spec.SetField(paymentproviderinstance.FieldLimits, field.TypeString, value)
 		_node.Limits = value
+	}
+	if value, ok := _c.mutation.FeeRate(); ok {
+		_spec.SetField(paymentproviderinstance.FieldFeeRate, field.TypeFloat64, value)
+		_node.FeeRate = &value
+	}
+	if value, ok := _c.mutation.MethodFeeRates(); ok {
+		_spec.SetField(paymentproviderinstance.FieldMethodFeeRates, field.TypeJSON, value)
+		_node.MethodFeeRates = value
 	}
 	if value, ok := _c.mutation.RefundEnabled(); ok {
 		_spec.SetField(paymentproviderinstance.FieldRefundEnabled, field.TypeBool, value)
@@ -535,6 +570,42 @@ func (u *PaymentProviderInstanceUpsert) SetLimits(v string) *PaymentProviderInst
 // UpdateLimits sets the "limits" field to the value that was provided on create.
 func (u *PaymentProviderInstanceUpsert) UpdateLimits() *PaymentProviderInstanceUpsert {
 	u.SetExcluded(paymentproviderinstance.FieldLimits)
+	return u
+}
+
+// SetFeeRate sets the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsert) SetFeeRate(v float64) *PaymentProviderInstanceUpsert {
+	u.Set(paymentproviderinstance.FieldFeeRate, v)
+	return u
+}
+
+// UpdateFeeRate sets the "fee_rate" field to the value that was provided on create.
+func (u *PaymentProviderInstanceUpsert) UpdateFeeRate() *PaymentProviderInstanceUpsert {
+	u.SetExcluded(paymentproviderinstance.FieldFeeRate)
+	return u
+}
+
+// AddFeeRate adds v to the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsert) AddFeeRate(v float64) *PaymentProviderInstanceUpsert {
+	u.Add(paymentproviderinstance.FieldFeeRate, v)
+	return u
+}
+
+// ClearFeeRate clears the value of the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsert) ClearFeeRate() *PaymentProviderInstanceUpsert {
+	u.SetNull(paymentproviderinstance.FieldFeeRate)
+	return u
+}
+
+// SetMethodFeeRates sets the "method_fee_rates" field.
+func (u *PaymentProviderInstanceUpsert) SetMethodFeeRates(v map[string]float64) *PaymentProviderInstanceUpsert {
+	u.Set(paymentproviderinstance.FieldMethodFeeRates, v)
+	return u
+}
+
+// UpdateMethodFeeRates sets the "method_fee_rates" field to the value that was provided on create.
+func (u *PaymentProviderInstanceUpsert) UpdateMethodFeeRates() *PaymentProviderInstanceUpsert {
+	u.SetExcluded(paymentproviderinstance.FieldMethodFeeRates)
 	return u
 }
 
@@ -735,6 +806,48 @@ func (u *PaymentProviderInstanceUpsertOne) SetLimits(v string) *PaymentProviderI
 func (u *PaymentProviderInstanceUpsertOne) UpdateLimits() *PaymentProviderInstanceUpsertOne {
 	return u.Update(func(s *PaymentProviderInstanceUpsert) {
 		s.UpdateLimits()
+	})
+}
+
+// SetFeeRate sets the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsertOne) SetFeeRate(v float64) *PaymentProviderInstanceUpsertOne {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.SetFeeRate(v)
+	})
+}
+
+// AddFeeRate adds v to the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsertOne) AddFeeRate(v float64) *PaymentProviderInstanceUpsertOne {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.AddFeeRate(v)
+	})
+}
+
+// UpdateFeeRate sets the "fee_rate" field to the value that was provided on create.
+func (u *PaymentProviderInstanceUpsertOne) UpdateFeeRate() *PaymentProviderInstanceUpsertOne {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.UpdateFeeRate()
+	})
+}
+
+// ClearFeeRate clears the value of the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsertOne) ClearFeeRate() *PaymentProviderInstanceUpsertOne {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.ClearFeeRate()
+	})
+}
+
+// SetMethodFeeRates sets the "method_fee_rates" field.
+func (u *PaymentProviderInstanceUpsertOne) SetMethodFeeRates(v map[string]float64) *PaymentProviderInstanceUpsertOne {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.SetMethodFeeRates(v)
+	})
+}
+
+// UpdateMethodFeeRates sets the "method_fee_rates" field to the value that was provided on create.
+func (u *PaymentProviderInstanceUpsertOne) UpdateMethodFeeRates() *PaymentProviderInstanceUpsertOne {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.UpdateMethodFeeRates()
 	})
 }
 
@@ -1107,6 +1220,48 @@ func (u *PaymentProviderInstanceUpsertBulk) SetLimits(v string) *PaymentProvider
 func (u *PaymentProviderInstanceUpsertBulk) UpdateLimits() *PaymentProviderInstanceUpsertBulk {
 	return u.Update(func(s *PaymentProviderInstanceUpsert) {
 		s.UpdateLimits()
+	})
+}
+
+// SetFeeRate sets the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsertBulk) SetFeeRate(v float64) *PaymentProviderInstanceUpsertBulk {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.SetFeeRate(v)
+	})
+}
+
+// AddFeeRate adds v to the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsertBulk) AddFeeRate(v float64) *PaymentProviderInstanceUpsertBulk {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.AddFeeRate(v)
+	})
+}
+
+// UpdateFeeRate sets the "fee_rate" field to the value that was provided on create.
+func (u *PaymentProviderInstanceUpsertBulk) UpdateFeeRate() *PaymentProviderInstanceUpsertBulk {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.UpdateFeeRate()
+	})
+}
+
+// ClearFeeRate clears the value of the "fee_rate" field.
+func (u *PaymentProviderInstanceUpsertBulk) ClearFeeRate() *PaymentProviderInstanceUpsertBulk {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.ClearFeeRate()
+	})
+}
+
+// SetMethodFeeRates sets the "method_fee_rates" field.
+func (u *PaymentProviderInstanceUpsertBulk) SetMethodFeeRates(v map[string]float64) *PaymentProviderInstanceUpsertBulk {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.SetMethodFeeRates(v)
+	})
+}
+
+// UpdateMethodFeeRates sets the "method_fee_rates" field to the value that was provided on create.
+func (u *PaymentProviderInstanceUpsertBulk) UpdateMethodFeeRates() *PaymentProviderInstanceUpsertBulk {
+	return u.Update(func(s *PaymentProviderInstanceUpsert) {
+		s.UpdateMethodFeeRates()
 	})
 }
 

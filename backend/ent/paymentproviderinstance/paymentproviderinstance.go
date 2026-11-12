@@ -29,6 +29,10 @@ const (
 	FieldSortOrder = "sort_order"
 	// FieldLimits holds the string denoting the limits field in the database.
 	FieldLimits = "limits"
+	// FieldFeeRate holds the string denoting the fee_rate field in the database.
+	FieldFeeRate = "fee_rate"
+	// FieldMethodFeeRates holds the string denoting the method_fee_rates field in the database.
+	FieldMethodFeeRates = "method_fee_rates"
 	// FieldRefundEnabled holds the string denoting the refund_enabled field in the database.
 	FieldRefundEnabled = "refund_enabled"
 	// FieldAllowUserRefund holds the string denoting the allow_user_refund field in the database.
@@ -52,6 +56,8 @@ var Columns = []string{
 	FieldPaymentMode,
 	FieldSortOrder,
 	FieldLimits,
+	FieldFeeRate,
+	FieldMethodFeeRates,
 	FieldRefundEnabled,
 	FieldAllowUserRefund,
 	FieldCreatedAt,
@@ -89,6 +95,8 @@ var (
 	DefaultSortOrder int
 	// DefaultLimits holds the default value on creation for the "limits" field.
 	DefaultLimits string
+	// DefaultMethodFeeRates holds the default value on creation for the "method_fee_rates" field.
+	DefaultMethodFeeRates func() map[string]float64
 	// DefaultRefundEnabled holds the default value on creation for the "refund_enabled" field.
 	DefaultRefundEnabled bool
 	// DefaultAllowUserRefund holds the default value on creation for the "allow_user_refund" field.
@@ -147,6 +155,11 @@ func BySortOrder(opts ...sql.OrderTermOption) OrderOption {
 // ByLimits orders the results by the limits field.
 func ByLimits(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLimits, opts...).ToFunc()
+}
+
+// ByFeeRate orders the results by the fee_rate field.
+func ByFeeRate(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFeeRate, opts...).ToFunc()
 }
 
 // ByRefundEnabled orders the results by the refund_enabled field.

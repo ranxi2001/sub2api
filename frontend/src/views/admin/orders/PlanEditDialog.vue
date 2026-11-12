@@ -44,6 +44,7 @@
               {{ t('payment.admin.subscriptionCnyPayPreviewWithFee', { feeRate: subscriptionCnyPreview.feeRate, total: subscriptionCnyPreview.total }) }}
             </span>
           </p>
+          <p v-if="subscriptionCnyPreview" class="mt-1 text-xs text-gray-500">{{ t('payment.providerFeeEstimateHint') }}</p>
         </div>
         <div><label class="input-label">{{ t('payment.admin.originalPrice') }}</label><input v-model.number="planForm.original_price" type="number" step="0.01" min="0" class="input" /></div>
       </div>

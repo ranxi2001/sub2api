@@ -11,6 +11,8 @@ import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
 import { apiClient } from "@/api/client";
 import NewFeatureBadge from "@/components/common/NewFeatureBadge.vue";
+import PaymentProviderDialog from "@/components/payment/PaymentProviderDialog.vue";
+import PaymentProviderList from "@/components/payment/PaymentProviderList.vue";
 import { NEW_FEATURE_NOTICES } from "@/constants/newFeatureNotices";
 
 enableAutoUnmount(afterEach);
@@ -2556,6 +2558,22 @@ describe("admin SettingsView payment visible method controls", () => {
       weightedModeText.indexOf("调度权值覆盖"),
     );
     expect(weightedModeText).toContain("计费倍率");
+  });
+
+  it("uses saved global fees for providers until settings are successfully saved", async () => {
+    getSettings.mockResolvedValue({ ...baseSettingsResponse, payment_recharge_fee_rate: 2.5 });
+    const wrapper = mountView();
+    await flushPromises();
+    await openPaymentTab(wrapper);
+    expect(wrapper.findComponent(PaymentProviderDialog).props("globalFeeRate")).toBe(2.5);
+    expect(wrapper.findComponent(PaymentProviderList).props("globalFeeRate")).toBe(2.5);
+    await wrapper.get('[data-testid="payment-global-fee-rate"]').setValue("5");
+    expect(wrapper.findComponent(PaymentProviderDialog).props("globalFeeRate")).toBe(2.5);
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ payment_recharge_fee_rate: 5 }));
+    expect(wrapper.findComponent(PaymentProviderDialog).props("globalFeeRate")).toBe(5);
+    expect(wrapper.findComponent(PaymentProviderList).props("globalFeeRate")).toBe(5);
   });
 
   it("passes translated upload and remove labels to the payment help image uploader", async () => {

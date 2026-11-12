@@ -6,6 +6,7 @@
         <div>
           <h2 class="text-base font-semibold text-gray-900 dark:text-white">
             {{ t('admin.settings.payment.providerManagement') }}
+            <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.paymentProviderFees" :user-id="userId" />
           </h2>
           <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             {{ t('admin.settings.payment.providerManagementDesc') }}
@@ -63,6 +64,7 @@
               :enabled="isEnabled(p.provider_key)"
               :available-types="getTypes(p.provider_key)"
               :user-id="userId"
+              :global-fee-rate="globalFeeRate"
               @toggle-field="(field) => emit('toggleField', p, field)"
               @toggle-type="(type) => emit('toggleType', p, type)"
               @edit="emit('edit', p)"
@@ -97,6 +99,8 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { VueDraggable } from 'vue-draggable-plus'
 import Icon from '@/components/icons/Icon.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import ProviderCard from './ProviderCard.vue'
 import type { ProviderInstance } from '@/types/payment'
 import type { TypeOption } from './providerConfig'
@@ -110,6 +114,7 @@ const props = defineProps<{
   allPaymentTypes: TypeOption[]
   redirectLabel: string
   userId?: number | null
+  globalFeeRate?: number
 }>()
 
 const emit = defineEmits<{
