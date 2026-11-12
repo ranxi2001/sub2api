@@ -38,3 +38,7 @@ CI artifact 预期包含应用/harness SHA/tree、显式未完成清单、命名
 ## 证据目录权限
 
 浏览器与假上游容器使用 CI runner 的 UID/GID，保持 `cap_drop: ALL` 和只读根文件系统。证据目录由同一 runner 创建，因此无需增加 DAC_OVERRIDE 或放宽目录权限。网络结构投影核对这两个容器的实际用户；浏览器启动失败也写入场景结果。
+
+## 首次登录与支付 SDK
+
+全新 fixture 正常完成引导退出与管理员声明确认，均由真实 UI 操作，不注入 localStorage 或伪造认证状态。登录 redirect 直接进入账号页，避免立即整页跳转取消初始化请求。隔离 job 同时发现 Airwallex SDK 被公共 vendor-misc 提前加载；本 PR 将该 SDK 独立分包，仍仅由现有支付页动态 import，账号页不应请求外部支付脚本。
