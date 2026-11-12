@@ -1,0 +1,71 @@
+name: Encrypted history 409 Beta
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_409_omit_history*'
+      - 'backend/internal/handler/openai_409_omit_history*'
+      - 'frontend/src/components/settings/EncryptedHistory409Settings.vue'
+      - '.github/scripts/encrypted-history-409-preview.mjs'
+      - '.github/workflows/encrypted-history-409.yml'
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Actual HTTP and Redis omission regressions
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OmitOpenAIHistorical|OpenAI409|UpdateSettingsOpenAI409)' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/omit-history-protocol.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: encrypted-history-409-protocol-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/omit-history-protocol.log
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/omit-history-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/omit-history-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Capture actual setting component
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/omit-history-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/encrypted-history-409-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/omit-history-ui"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: encrypted-history-409-ui-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/omit-history-ui
+          if-no-files-found: error

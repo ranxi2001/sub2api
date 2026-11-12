@@ -45,6 +45,7 @@ type openAIAgentRecoveryState struct {
 }
 
 type openAIAgentRecoveryRequest struct {
+	omittedHistory      bool // explicit Beta sanitization; preserve the resulting input and prohibit replay
 	disableOwnerBinding bool
 	previousResponseID  string
 	inputDigest         [32]byte
@@ -146,7 +147,7 @@ func (r *openAIAgentRecoveryRequest) ownerBindingRequired() bool {
 }
 
 func (r *openAIAgentRecoveryRequest) preservesHistory() bool {
-	return r != nil && r.disableOwnerBinding && len(r.items) > 0
+	return r != nil && (r.omittedHistory || (r.disableOwnerBinding && len(r.items) > 0))
 }
 
 func openAIAgentRecoveryPreservesHistory(ctx context.Context) bool {

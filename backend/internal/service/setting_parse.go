@@ -217,10 +217,11 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 
 		// Grok compatibility defaults: cross-client mapping stays enabled unless
 		// operators explicitly disable it.
-		SettingKeyGrokDefaultTextModel:           "grok-4.6",
-		SettingKeyGrokCrossClientModelMapEnabled: "true",
-		SettingKeyGrokDefaultBaseURLMode:         GrokDefaultBaseURLModeCLI,
-		SettingKeyGrokVideoSourceURLEnabled:      "false",
+		SettingKeyGrokDefaultTextModel:                 "grok-4.6",
+		SettingKeyGrokCrossClientModelMapEnabled:       "true",
+		SettingKeyGrokDefaultBaseURLMode:               GrokDefaultBaseURLModeCLI,
+		SettingKeyGrokVideoSourceURLEnabled:            "false",
+		SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "false",
 
 		// Available channels feature (default disabled; opt-in)
 		SettingKeyAvailableChannelsEnabled: "false",
@@ -889,6 +890,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.GrokCrossClientModelMapEnabled = !isFalseSettingValue(settings[SettingKeyGrokCrossClientModelMapEnabled])
 	result.GrokDefaultBaseURLMode = normalizeGrokDefaultBaseURLMode(settings[SettingKeyGrokDefaultBaseURLMode])
 	result.GrokVideoSourceURLEnabled = settings[SettingKeyGrokVideoSourceURLEnabled] == "true"
+	result.OpenAI409OmitEncryptedHistoryEnabled = settings[SettingKeyOpenAI409OmitEncryptedHistoryEnabled] == "true"
 
 	// Available channels feature (default: disabled; strict true)
 	result.AvailableChannelsEnabled = settings[SettingKeyAvailableChannelsEnabled] == "true"

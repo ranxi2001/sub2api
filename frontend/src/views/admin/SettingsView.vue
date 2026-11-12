@@ -53,6 +53,12 @@
                 />
                 <NewFeatureBadge
                   v-if="tab.key === 'gateway'"
+                  :notice-id="NEW_FEATURE_NOTICES.openai409OmitEncryptedHistory"
+                  :user-id="authStore.user?.id"
+                  class="settings-tab-badge"
+                />
+                <NewFeatureBadge
+                  v-if="tab.key === 'gateway'"
                   :notice-id="NEW_FEATURE_NOTICES.deepSeekSearch"
                   :user-id="authStore.user?.id"
                   class="settings-tab-badge"
@@ -5527,6 +5533,11 @@
                   />
                 </div>
 
+              <EncryptedHistory409Settings
+                v-model="form.openai_409_omit_encrypted_history_enabled"
+                :user-id="authStore.user?.id"
+              />
+
               <!-- OpenAI Responses 首 token 统计 -->
               <div class="border-b border-gray-100 pb-5 dark:border-dark-700 md:col-span-2">
                 <label
@@ -9590,6 +9601,7 @@
 </template>
 
 <script setup lang="ts">
+import EncryptedHistory409Settings from "@/components/settings/EncryptedHistory409Settings.vue";
 import { excelBPSImageLimits } from "@/utils/excelBPSImageLimits";
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { listPlatformIds } from "@/constants/platformCatalog";
@@ -10636,6 +10648,7 @@ const form = reactive<SettingsForm>({
   grok_cross_client_model_map_enabled: false,
   grok_default_base_url_mode: "cli",
   grok_video_source_url_enabled: false,
+  openai_409_omit_encrypted_history_enabled: false,
   // Identity patch (Claude -> Gemini)
   enable_identity_patch: true,
   identity_patch_prompt: "",
@@ -12406,6 +12419,7 @@ async function saveSettings() {
         form.grok_cross_client_model_map_enabled,
       grok_default_base_url_mode: form.grok_default_base_url_mode,
       grok_video_source_url_enabled: form.grok_video_source_url_enabled,
+      openai_409_omit_encrypted_history_enabled: form.openai_409_omit_encrypted_history_enabled,
       enable_identity_patch: form.enable_identity_patch,
       identity_patch_prompt: form.identity_patch_prompt,
       min_claude_code_version: form.min_claude_code_version,
