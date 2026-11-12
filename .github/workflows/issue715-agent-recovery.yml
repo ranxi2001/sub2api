@@ -98,7 +98,7 @@ jobs:
           git rev-parse HEAD
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
-          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go backend/internal/service/openai_ws_search_activation.go)
+          added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go backend/internal/service/openai_ws_search_activation.go backend/internal/service/openai_409_omit_history.go)
           # The exact original gateway struct predates analysis admission state.
           # Pin this unrelated leaf to its pre-admission version, preserving all
           # Issue715 business-chain blobs and the retained handler regressions.
@@ -243,10 +243,12 @@ jobs:
           scheduler_compat=45e92f44470f91435bd261ea18111c271063c0ac
           scheduler_leaf=backend/internal/service/openai_account_scheduler.go
           wait_added=backend/internal/service/openai_agent_message_recovery_wait.go
+          # The Beta helper depends on fields absent in this historical recovery struct.
+          omission_added=backend/internal/service/openai_409_omit_history.go
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$ws_original"
           git fetch --no-tags --depth=1 origin "$scheduler_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "$omission_added"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
           git restore --source="$scheduler_compat" -- "$scheduler_leaf"
@@ -254,7 +256,7 @@ jobs:
           actual=$(git hash-object "$scheduler_leaf")
           echo "compatibility_leaf_baseline=$scheduler_compat path=$scheduler_leaf expected_blob=$expected tested_blob=$actual"
           test "$expected" = "$actual"
-          rm -- "$added" "${ws_added[@]}" "$wait_added"
+          rm -- "$added" "${ws_added[@]}" "$wait_added" "$omission_added"
           test ! -e "$wait_added"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")

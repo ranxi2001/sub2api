@@ -80,6 +80,13 @@ jobs:
             echo "$target test=baseline expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
             test "$expected" = "$actual"
           done
+          # This later Beta test references a setting absent from the old production
+          # baseline. Exclude only this unrelated file in RED; GREEN retains it.
+          omission_test=backend/internal/handler/openai_409_omit_history_test.go
+          git cat-file -e "$EXPECTED_HEAD_SHA:$omission_test"
+          rm -- "$omission_test"
+          test ! -e "$omission_test"
+          echo "$omission_test test=candidate-only actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
           # The selected regression and its shared harness must remain exact
           # candidate blobs. The clean GREEN checkout retains all new tests.
           for target in backend/internal/handler/openai_issue805_delivery_test.go backend/internal/handler/openai_issue805_owner_policy_test.go backend/internal/handler/openai_issue805_ws_test.go backend/internal/handler/openai_issue715_recovery_test.go; do
