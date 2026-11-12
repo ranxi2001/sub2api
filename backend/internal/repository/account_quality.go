@@ -22,7 +22,8 @@ func (r *scheduledTestPlanRepository) ListQualityPlans(ctx context.Context) ([]*
 	return scanPlans(rows, true)
 }
 func (r *scheduledTestPlanRepository) TriggerQuality(ctx context.Context, id int64) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE scheduled_test_plans SET next_run_at=NOW(), updated_at=NOW()
+	result, err := r.db.ExecContext(ctx, `UPDATE scheduled_test_plans SET next_run_at=NOW(), updated_at=NOW(),
+ pelican_config=jsonb_set(pelican_config, '{_manual_quality_run}', 'true'::jsonb)
  WHERE id=$1 AND enabled AND pelican_config->'quality' IS NOT NULL AND (running_until IS NULL OR running_until<NOW())
  AND NOT EXISTS (SELECT 1 FROM account_quality_states rest WHERE rest.plan_id=scheduled_test_plans.id
  AND COALESCE((pelican_config->'quality'->>'retest_rest_minutes')::int,0)>0

@@ -188,18 +188,23 @@ func (r *qualityRuleTemplateRepository) Delete(ctx context.Context, id int64) (p
 }
 
 // MatchingAccounts reuses the admin account list predicates so the selector's count and the
-// accounts a group rule covers always agree.
+// accounts a group rule covers agree on native status. Normal-only rules also
+// exclude known exhausted OAuth snapshots without changing the admin list.
 func (r *qualityRuleTemplateRepository) MatchingAccounts(ctx context.Context, filter service.QualityRuleAccountFilter) ([]service.QualityTemplateAccount, error) {
 	accounts := &accountRepository{client: r.client}
 	rows, err := accounts.accountListFilteredQuery("", filter.Type, strings.Join(filter.Statuses, ","), filter.Search, service.QualityTemplateGroupID(filter), "").
 		Order(dbent.Asc(dbaccount.FieldID)).
-		Select(dbaccount.FieldID, dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldExtra).
+		Select(dbaccount.FieldID, dbaccount.FieldPlatform, dbaccount.FieldType, dbaccount.FieldExtra, dbaccount.FieldCredentials, dbaccount.FieldRateLimitResetAt).
 		All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]service.QualityTemplateAccount, 0, len(rows))
+	now := time.Now()
 	for _, row := range rows {
+		if !service.QualityTemplateQuotaAvailable(filter, accountEntityToService(row), now) {
+			continue
+		}
 		out = append(out, service.QualityTemplateAccount{ID: row.ID, Platform: row.Platform, Type: row.Type, Extra: row.Extra})
 	}
 	return out, nil
