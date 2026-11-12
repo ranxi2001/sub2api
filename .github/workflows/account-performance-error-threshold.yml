@@ -76,7 +76,7 @@ jobs:
         env:
           PLAYWRIGHT_ROOT: ${{ runner.temp }}/cache-browser/node_modules/playwright
           SCREENSHOT_DIR: ${{ runner.temp }}/account-cache-ui
-          SOURCE_BASE: b5990096ae10a0b2481182f2ac45812effacda22
+          SOURCE_BASE: ${{ github.event.pull_request.base.sha || '11f250894eab310cbd4508946c44c9e2a3a2eb48' }}
         run: |
           git fetch --no-tags --depth=1 origin "$SOURCE_BASE"
           node .github/scripts/account-performance-cache-screenshot.mjs

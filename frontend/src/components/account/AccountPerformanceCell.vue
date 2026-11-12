@@ -72,7 +72,7 @@ const lines=computed(()=>[
  {key:'tps',label:t('accountPerformance.tps'),value:format(props.metrics?.avg_tps,' t/s'),color:metricColor(props.metrics?.avg_tps,tpsSeverity)},
  {key:'degradation',label:t('accountPerformance.degradation', { minutes: windowMinutes.value }),value:format(props.metrics?.degradation_percent,'%'),color:degradationColor(props.metrics?.degradation_percent)},
  {key:'ttft',label:t('accountPerformance.ttft'),value:format(props.metrics?.avg_ttft_ms,'s',1000),color:metricColor(props.metrics?.avg_ttft_ms,firstTokenSeverity)},
- {key:'cache',label:t('accountPerformance.avgCache'),value:format(cachePercent.value,'%'),color:uncollectedClass},
+ {key:'cache',label:t('accountPerformance.avgCache'),value:format(cachePercent.value,'%'),color:cachePercent.value == null ? uncollectedClass : LATENCY_TEXT_CLASSES.good},
  {key:'upstream',label:t('accountPerformance.upstreamErrorRate'),value:upstreamValue.value,color:upstreamColor.value}
 ])
 </script>
