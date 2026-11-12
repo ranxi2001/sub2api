@@ -113,6 +113,7 @@ try {
   const bulkSubmit = page.locator('.editor-footer button[form="quality-rule-form"]')
   if (!await bulkSubmit.isDisabled()) throw Error('bulk_empty_fields_save_enabled')
   await page.getByTestId('quality-reuse-preview').screenshot({path:path.join(output,'bulk-import-empty-fields.png')})
+  await page.locator('.modal-footer').screenshot({path:path.join(output,'bulk-import-save-hint.png')})
   if (!process.env.QUALITY_BULK_BEFORE) {
     if (!await page.getByTestId('quality-reuse-empty-fields').isVisible()) throw Error('bulk_empty_hint_missing')
     await page.getByTestId('quality-reuse-select-all').click()
