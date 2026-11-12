@@ -333,6 +333,9 @@ async function browser() {
     state.scenarios.push({ name: stage, status: 'passed', cards: 2 })
 
     stage = 'disabled-group-plan-real-ui-api-pg'
+    await detail.getByRole('button', { name: 'Close', exact: true }).click()
+    await panel.getByRole('button', { name: 'Close', exact: true }).click()
+    await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
     await page.locator('a[href="/admin/pelican-tests"]').first().click()
     await page.waitForURL(url => url.pathname === '/admin/pelican-tests')
     await page.getByTestId('pelican-tests-create').click()
