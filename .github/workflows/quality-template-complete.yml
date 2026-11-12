@@ -9,6 +9,7 @@ on:
       - 'frontend/src/**/AccountQualityView*'
       - 'frontend/src/utils/qualityRulePatch.ts'
       - '.github/workflows/quality-template-complete.yml'
+      - '.github/scripts/quality-template-screenshot.mjs'
 permissions:
   contents: read
 jobs:
@@ -107,6 +108,23 @@ jobs:
           bash .github/scripts/ci-ubuntu-mirrors.sh
           npm install --prefix "$RUNNER_TEMP/quality-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/quality-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Base editor bulk import screenshot
+        if: github.event_name == 'pull_request'
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/quality-browser/node_modules/playwright
+          QUALITY_SCREENSHOT_DIR: ${{ github.workspace }}/evidence/screenshots-before
+          QUALITY_HEAD_SHA: ${{ github.event.pull_request.base.sha }}
+          QUALITY_BULK_BEFORE: '1'
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source=frontend/src/views/admin/AccountQualityView.vue
+          cp "$source" "$RUNNER_TEMP/quality-bulk-current.vue"
+          trap 'cp "$RUNNER_TEMP/quality-bulk-current.vue" "$source"' EXIT
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git show "$BASE_SHA:$source" > "$source"
+          node .github/scripts/quality-template-screenshot.mjs
       - name: Complete template actual view offline browser interaction
         env:
           PLAYWRIGHT_ROOT: ${{ runner.temp }}/quality-browser/node_modules/playwright
