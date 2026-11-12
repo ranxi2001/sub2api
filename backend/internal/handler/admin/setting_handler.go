@@ -54,6 +54,7 @@ func firstNonEmpty(values ...string) string {
 // SettingHandler 系统设置处理器
 type SettingHandler struct {
 	keyRisk                  *keyrisk.Service
+	keyRiskKeys              keyRiskAPIKeys
 	ipAuditPenaltyRelease    func(context.Context, int64, int64, string) (service.SecurityPenaltySummary, error)
 	ipAuditLogs              *service.AuditLogService
 	ipAuditPenaltySummary    func(context.Context, int64) (service.SecurityPenaltySummary, error)

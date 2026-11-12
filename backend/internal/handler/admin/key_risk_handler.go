@@ -4,16 +4,26 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/iprisk"
 	"github.com/Wei-Shaw/sub2api/internal/keyrisk"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
+
+// keyRiskAPIKeys reuses the normal key update and auth-cache invalidation path.
+type keyRiskAPIKeys interface {
+	Update(context.Context, int64, int64, service.UpdateAPIKeyRequest) (*service.APIKey, error)
+}
+
+func (h *SettingHandler) SetKeyRiskAPIKeys(keys *service.APIKeyService) {
+	h.keyRiskKeys = keys
+}
 
 func (h *SettingHandler) StartKeyRisk(dsn string) (func(), error) {
 	db, e := sql.Open("postgres", dsn)
@@ -97,14 +107,17 @@ func (h *SettingHandler) ActOnKeyRisk(c *gin.Context) {
 	}
 	id, e := strconv.ParseInt(c.Param("id"), 10, 64)
 	var req struct {
-		Action string `json:"action"`
+		Action          string   `json:"action"`
+		Generation      int64    `json:"generation"`
+		Confirm         bool     `json:"confirm"`
+		AllowedNetworks []string `json:"allowed_networks"`
 	}
 	if e != nil || id <= 0 || c.ShouldBindJSON(&req) != nil {
 		response.BadRequest(c, "Invalid risk action")
 		return
 	}
 	switch req.Action {
-	case "notify", "ignored", "resolved", "pending", "block":
+	case "notify", "ignored", "resolved", "pending", "restrict":
 	default:
 		response.BadRequest(c, "Invalid risk action")
 		return
@@ -114,11 +127,24 @@ func (h *SettingHandler) ActOnKeyRisk(c *gin.Context) {
 	defer cancel()
 	queued := 0
 	switch req.Action {
-	case "block":
-		var ip string
-		e = h.keyRisk.DB.QueryRowContext(ctx, "SELECT evidence->>'ip' FROM key_risk_events WHERE id=$1 AND rule='cross_user_ip'", id).Scan(&ip)
+	case "restrict":
+		if !req.Confirm || req.Generation <= 0 {
+			response.BadRequest(c, "Explicit confirmation and current generation required")
+			return
+		}
+		networks, err := keyRiskAllowedNetworks(req.AllowedNetworks)
+		if err != nil {
+			response.BadRequest(c, "Supply 1 to 256 allowed IPs or CIDRs")
+			return
+		}
+		if h.keyRiskKeys == nil {
+			response.Error(c, 503, "API key service unavailable")
+			return
+		}
+		var keyID, ownerID int64
+		keyID, ownerID, e = h.keyRisk.RestrictionTarget(ctx, id, req.Generation)
 		if e == nil {
-			e = h.blockKeyRiskIP(ctx, c, ip)
+			_, e = h.keyRiskKeys.Update(ctx, keyID, ownerID, service.UpdateAPIKeyRequest{IPWhitelist: &networks})
 		}
 	case "notify":
 		queued, e = h.keyRisk.NotifyUsers(ctx, id, actor.UserID)
@@ -133,52 +159,24 @@ func (h *SettingHandler) ActOnKeyRisk(c *gin.Context) {
 	response.Success(c, gin.H{"queued": queued > 0, "recipients": queued})
 }
 
-// Reuse the existing admission policy rather than add any new gateway IO.
-func (h *SettingHandler) blockKeyRiskIP(ctx context.Context, c *gin.Context, raw string) error {
-	addr, err := netip.ParseAddr(raw)
-	if err != nil {
-		return err
+// A nonempty whitelist enables existing per-key admission, independent of the
+// global IP guard's enabled/observation switches. No IP-wide blacklist is changed.
+func keyRiskAllowedNetworks(raw []string) ([]string, error) {
+	if len(raw) == 0 || len(raw) > 256 {
+		return nil, fmt.Errorf("invalid allowed networks")
 	}
-	addr = addr.Unmap()
-	m := h.ipRiskManager(c)
-	if m == nil {
-		return fmt.Errorf("IP manager unavailable")
-	}
-	cfg, err := m.Config(ctx)
-	if err != nil {
-		return err
-	}
-	for _, s := range cfg.Whitelist {
-		p, e := iprisk.ParseNetwork(s)
-		if e == nil && p.Contains(addr) {
-			return fmt.Errorf("IP is allowlisted")
+	out := make([]string, 0, len(raw))
+	seen := map[string]bool{}
+	for _, value := range raw {
+		network, err := iprisk.ParseNetwork(strings.TrimSpace(value))
+		if err != nil {
+			return nil, err
+		}
+		normalized := network.String()
+		if !seen[normalized] {
+			out = append(out, normalized)
+			seen[normalized] = true
 		}
 	}
-	if err = m.CheckAdministrator(ctx, cfg, c.ClientIP(), c.GetHeader("User-Agent")); err != nil {
-		return err
-	}
-	// Normalize both sides and collapse duplicates left by older versions.
-	network, err := iprisk.ParseNetwork(raw)
-	if err != nil {
-		return err
-	}
-	replacement := iprisk.Rule{Network: network.String(), Note: "Administrator reviewed key risk", Enabled: true, ExpiresAt: time.Now().Add(24 * time.Hour).Unix()}
-	rules := make([]iprisk.Rule, 0, len(cfg.Blacklist)+1)
-	for _, rule := range cfg.Blacklist {
-		existing, e := iprisk.ParseNetwork(rule.Network)
-		if e != nil || existing != network {
-			rules = append(rules, rule)
-			continue
-		}
-		// Never shorten an existing active restriction, including permanent bans.
-		if rule.Enabled && (rule.ExpiresAt == 0 || (replacement.ExpiresAt != 0 && rule.ExpiresAt > replacement.ExpiresAt)) {
-			replacement.ExpiresAt = rule.ExpiresAt
-		}
-	}
-	cfg.Blacklist = append(rules, replacement)
-	// Check the modified policy as well, including when it targets this administrator.
-	if err = m.CheckAdministrator(ctx, cfg, c.ClientIP(), c.GetHeader("User-Agent")); err != nil {
-		return err
-	}
-	return m.Save(ctx, cfg)
+	return out, nil
 }

@@ -143,7 +143,7 @@ func (s *Service) SetState(ctx context.Context, id, actor int64, state string) e
 	if state != "ignored" && state != "resolved" && state != "pending" {
 		return errors.New("invalid state")
 	}
-	res, e := s.DB.ExecContext(ctx, `UPDATE key_risk_events SET state=$1,actor_id=$2,updated_at=now() WHERE id=$3`, state, actor, id)
+	res, e := s.DB.ExecContext(ctx, `UPDATE key_risk_events SET state=$1,actor_id=$2,updated_at=now() WHERE id=$3 AND ($1!='pending' OR rule='key_ip_spread')`, state, actor, id)
 	if e == nil {
 		n, _ := res.RowsAffected()
 		if n == 0 {
@@ -211,7 +211,7 @@ func (s *Service) NotifyUsers(ctx context.Context, id, actor int64) (int, error)
 	}
 	var raw []byte
 	var generation int64
-	e = tx.QueryRowContext(ctx, `SELECT evidence,generation FROM key_risk_events WHERE id=$1 AND state='pending' FOR UPDATE`, id).Scan(&raw, &generation)
+	e = tx.QueryRowContext(ctx, `SELECT evidence,generation FROM key_risk_events WHERE id=$1 AND state='pending' AND rule='key_ip_spread' FOR UPDATE`, id).Scan(&raw, &generation)
 	if e != nil {
 		return 0, e
 	}
@@ -293,7 +293,11 @@ func (s *Service) RunOnce(ctx context.Context) (err error) {
 		note = "coverage_incomplete: more than 10000 usage rows in window"
 		rs = rs[:10000]
 	}
-	for _, f := range Evaluate(rs, c, now) {
+	findings, e := allowedSourceFindings(ctx, tx, Evaluate(rs, c, now))
+	if e != nil {
+		return e
+	}
+	for _, f := range findings {
 		raw, _ := json.Marshal(f.Evidence)
 		var state string
 		var eventID, generation int64
@@ -302,14 +306,17 @@ func (s *Service) RunOnce(ctx context.Context) (err error) {
  generation=key_risk_events.generation + CASE WHEN key_risk_events.state='resolved' AND (
  EXCLUDED.last_seen>key_risk_events.updated_at OR
  NOT ((key_risk_events.evidence->'key_ids') @> (EXCLUDED.evidence->'key_ids')) OR
- NOT ((key_risk_events.evidence->'user_ids') @> (EXCLUDED.evidence->'user_ids'))) THEN 1 ELSE 0 END,
+ NOT ((key_risk_events.evidence->'user_ids') @> (EXCLUDED.evidence->'user_ids')) OR
+ NOT (COALESCE(key_risk_events.evidence->'ips','[]'::jsonb) @> (EXCLUDED.evidence->'ips'))) THEN 1 ELSE 0 END,
  state=CASE WHEN key_risk_events.state='resolved' AND (
  EXCLUDED.last_seen>key_risk_events.updated_at OR
  NOT ((key_risk_events.evidence->'key_ids') @> (EXCLUDED.evidence->'key_ids')) OR
- NOT ((key_risk_events.evidence->'user_ids') @> (EXCLUDED.evidence->'user_ids'))) THEN 'pending' ELSE key_risk_events.state END,
+ NOT ((key_risk_events.evidence->'user_ids') @> (EXCLUDED.evidence->'user_ids')) OR
+ NOT (COALESCE(key_risk_events.evidence->'ips','[]'::jsonb) @> (EXCLUDED.evidence->'ips'))) THEN 'pending' ELSE key_risk_events.state END,
  evidence=CASE WHEN key_risk_events.state='resolved' AND EXCLUDED.last_seen<=key_risk_events.updated_at
  AND (key_risk_events.evidence->'key_ids') @> (EXCLUDED.evidence->'key_ids')
- AND (key_risk_events.evidence->'user_ids') @> (EXCLUDED.evidence->'user_ids') THEN key_risk_events.evidence ELSE EXCLUDED.evidence END,
+ AND (key_risk_events.evidence->'user_ids') @> (EXCLUDED.evidence->'user_ids')
+ AND COALESCE(key_risk_events.evidence->'ips','[]'::jsonb) @> (EXCLUDED.evidence->'ips') THEN key_risk_events.evidence ELSE EXCLUDED.evidence END,
  last_seen=GREATEST(key_risk_events.last_seen,EXCLUDED.last_seen)
  RETURNING id,generation,state`, f.Rule, f.Subject, string(raw), f.Evidence.First, f.Evidence.Last).Scan(&eventID, &generation, &state)
 		if e != nil {
@@ -318,7 +325,7 @@ func (s *Service) RunOnce(ctx context.Context) (err error) {
 		if e = ensureRecipients(ctx, tx, eventID, generation, f.Evidence); e != nil {
 			return e
 		}
-		if c.AutoEmail && note == "" && state == "pending" && (f.Rule == "key_ip_spread_linked" || (f.Rule == "cross_user_ip" && f.Evidence.RapidSwitch)) {
+		if c.AutoEmail && note == "" && state == "pending" && f.Rule == "key_ip_spread" {
 			for _, u := range f.Evidence.UserIDs {
 				if _, e = queue(ctx, tx, u, eventID, generation, f.Evidence, now, false, c.MaxReminders); e != nil {
 					return e
@@ -445,7 +452,7 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
  AND (($2='age' AND k.created_at<$3) OR ($2='risk' AND EXISTS(
  SELECT 1 FROM key_risk_outbox_items i JOIN key_risk_events v ON v.id=i.event_id AND v.generation=i.generation
  JOIN key_risk_recipients r ON r.event_id=i.event_id AND r.generation=i.generation AND r.user_id=k.user_id
- WHERE i.outbox_id=$4 AND i.key_id=k.id AND v.state='pending' AND r.acknowledged_at IS NULL
+ WHERE i.outbox_id=$4 AND i.key_id=k.id AND v.state='pending' AND v.rule='key_ip_spread' AND r.acknowledged_at IS NULL
  AND (SELECT count(*) FROM key_risk_deliveries d WHERE d.event_id=r.event_id AND d.generation=r.generation AND d.user_id=r.user_id)<$5)))
 	 ORDER BY k.id LIMIT CASE WHEN $2='age' THEN 50 ELSE NULL END`, user, kind, time.Now().Add(-time.Duration(c.AgeDays)*24*time.Hour), id, c.MaxReminders)
 	if e != nil {
@@ -480,7 +487,7 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
 	if kind == "risk" {
 		_, e = tx.ExecContext(ctx, `INSERT INTO key_risk_deliveries(outbox_id,event_id,generation,user_id,key_ids)
  SELECT $1,i.event_id,i.generation,$2,array_agg(DISTINCT i.key_id) FROM key_risk_outbox_items i
- JOIN key_risk_events v ON v.id=i.event_id AND v.generation=i.generation AND v.state='pending'
+ JOIN key_risk_events v ON v.id=i.event_id AND v.generation=i.generation AND v.state='pending' AND v.rule='key_ip_spread'
  JOIN key_risk_recipients r ON r.event_id=i.event_id AND r.generation=i.generation AND r.user_id=$2
  WHERE i.outbox_id=$1 AND i.key_id=ANY($3) AND r.acknowledged_at IS NULL
  AND (SELECT count(*) FROM key_risk_deliveries d WHERE d.event_id=r.event_id AND d.generation=r.generation AND d.user_id=r.user_id)<$4
@@ -499,8 +506,8 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
 	subject := "API Key 安全提醒：建议轮换"
 	intro := "以下密钥已达到建议轮换周期。请登录站点创建新密钥，更新客户端后停用旧密钥。"
 	if kind == "risk" {
-		subject = "API Key 疑似泄露提醒"
-		intro = "以下密钥关联异常使用记录，可能存在泄露，也可能来自共享网络或代理。请登录站点核查，必要时替换密钥。可在站点的 API 密钥页面查看风险提醒，并选择“我已知晓，暂停本次提醒”。确认仅暂停本次事件的后续提醒，不表示密钥已安全；已开始发送的邮件可能仍会到达。"
+		subject = "API Key 跨 IP 使用风险提醒"
+		intro = "以下密钥在检测窗口内来自多个 IP。请核查是否为已授权的客户端或出口；如有异常来源，请配置此 Key 的 IP 白名单或替换密钥。可在站点的 API 密钥页面查看风险提醒，并选择“我已知晓，暂停本次提醒”。确认仅暂停本次事件的后续提醒，不表示密钥已安全；已开始发送的邮件可能仍会到达。"
 	}
 	send, stop := context.WithTimeout(ctx, 10*time.Second)
 	e = s.Mail.SendEmail(send, email, subject, "<p>"+intro+"</p><ul>"+body.String()+"</ul>")
@@ -514,4 +521,17 @@ func (s *Service) deliverOne(ctx context.Context, c Config) (bool, error) {
 	defer cancel()
 	_, e = s.DB.ExecContext(record, `WITH finished AS (UPDATE key_risk_outbox SET state=$1,updated_at=now() WHERE id=$2 AND state='sending' RETURNING id) UPDATE key_risk_deliveries SET state=$1 WHERE outbox_id IN (SELECT id FROM finished)`, state, id)
 	return true, e
+}
+
+// RestrictionTarget binds an administrator action to one current key episode.
+// Ownership is checked again by APIKeyService.Update before writing its ACL.
+func (s *Service) RestrictionTarget(ctx context.Context, event, generation int64) (int64, int64, error) {
+	var keyID, owner int64
+	err := s.DB.QueryRowContext(ctx, `SELECT k.id,k.user_id FROM key_risk_events e
+ JOIN api_keys k ON e.subject=k.id::text
+ WHERE e.id=$1 AND e.generation=$2 AND e.rule='key_ip_spread' AND e.state='pending'
+ AND k.deleted_at IS NULL AND k.status='active' AND (k.expires_at IS NULL OR k.expires_at>now())
+ AND e.evidence->'key_ids' @> jsonb_build_array(k.id)
+ AND e.evidence->'user_ids' @> jsonb_build_array(k.user_id)`, event, generation).Scan(&keyID, &owner)
+	return keyID, owner, err
 }

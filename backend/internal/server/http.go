@@ -110,6 +110,7 @@ func ProvideRouter(
 	settingService.IPRisk = iprisk.New(settingService.IPRiskStore(), redisClient, serverless.NewGeoJSResolver(redisClient), strings.EqualFold(os.Getenv("IP_RISK_DISABLED"), "true"))
 	settingService.IPRisk.Start()
 	if cfg.Runtime.Role != config.RuntimeRoleGateway && handlers.Admin != nil && handlers.Admin.Setting != nil {
+		handlers.Admin.Setting.SetKeyRiskAPIKeys(apiKeyService)
 		stop, err := handlers.Admin.Setting.StartKeyRisk(cfg.Database.DSN())
 		if err != nil {
 			slog.Warn("key risk initialization failed")

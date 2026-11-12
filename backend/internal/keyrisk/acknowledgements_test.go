@@ -25,7 +25,7 @@ func TestReminderLimitSurvivesOutboxCleanupAndRestart(t *testing.T) {
 		exec(t, s, "UPDATE key_risk_deliveries SET attempted_at=attempted_at-interval '25 hours'")
 		s = &Service{DB: s.DB, Mail: m}
 	}
-	if len(m.to) != 6 {
+	if len(m.to) != 2 {
 		t.Fatalf("wanted two notices per user, got %d", len(m.to))
 	}
 	events, err := s.Events(context.Background(), 0)
@@ -86,7 +86,7 @@ func TestAcknowledgementIsOwnedIdempotentAndSuppressesQueuedMail(t *testing.T) {
 	if err := s.deliver(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.to) != 2 {
+	if len(m.to) != 0 {
 		t.Fatalf("queued notice not suppressed: %v", m.to)
 	}
 	for _, to := range m.to {
@@ -96,7 +96,7 @@ func TestAcknowledgementIsOwnedIdempotentAndSuppressesQueuedMail(t *testing.T) {
 	}
 	events, _ = s.Events(ctx, 0)
 	if events[0].State != "pending" {
-		t.Fatal("confirmation resolved shared risk")
+		t.Fatal("confirmation resolved key risk")
 	}
 	foreign, err := s.UserNotices(ctx, 999, 0)
 	if err != nil || len(foreign) != 0 {
@@ -124,7 +124,7 @@ func TestNewEpisodeRemindsAgainWithoutErasingAcknowledgement(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(t, s)
-	if len(m.to) != 3 {
+	if len(m.to) != 1 {
 		t.Fatalf("new event was muted: %v", m.to)
 	}
 	if err := s.Acknowledge(ctx, 1, ev.ID, ev.Generation); !errors.Is(err, sql.ErrNoRows) {
@@ -155,7 +155,7 @@ func TestUncertainAttemptsCountButNeverClaimAcknowledgement(t *testing.T) {
 	exec(t, s, "DELETE FROM key_risk_outbox")
 	exec(t, s, "UPDATE key_risk_deliveries SET attempted_at=attempted_at-interval '25 hours'")
 	run(t, s)
-	if len(m.to) != 3 {
+	if len(m.to) != 1 {
 		t.Fatal("ambiguous attempts retried beyond limit")
 	}
 	ev, err := s.Events(context.Background(), 0)
@@ -201,7 +201,7 @@ func TestManualSuppressionReportsNoQueuedRecipients(t *testing.T) {
 	run(t, s)
 	events, _ := s.Events(context.Background(), 0)
 	n, err := s.NotifyUsers(context.Background(), events[0].ID, 99)
-	if err != nil || n != 3 {
+	if err != nil || n != 1 {
 		t.Fatalf("first queue: %d %v", n, err)
 	}
 	if err = s.deliver(context.Background()); err != nil {
@@ -260,7 +260,7 @@ func TestAcknowledgementDuringInFlightMailStopsLaterReminders(t *testing.T) {
 	exec(t, s, "DELETE FROM key_risk_outbox")
 	exec(t, s, "UPDATE key_risk_deliveries SET attempted_at=attempted_at-interval '25 hours'")
 	n, err := s.NotifyUsers(ctx, ev.ID, 99)
-	if err != nil || n != 2 {
+	if err != nil || n != 0 {
 		t.Fatalf("confirmed user queued again: %d %v", n, err)
 	}
 	notices, err := s.UserNotices(ctx, 1, 0)
@@ -320,7 +320,7 @@ func TestRiskDisplayNamesAndOwnerIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := events[0]
-	if event.Users[0].Name != "Customer One" || event.Users[1].Name != "two@example.invalid" {
+	if len(event.Users) != 1 || event.Users[0].Name != "Customer One" {
 		t.Fatalf("username/email fallback: %+v", event.Users)
 	}
 	if event.Keys[0].Name != "<owner one>" || event.Recipients[0].UserName != "Customer One" {
@@ -333,12 +333,12 @@ func TestRiskDisplayNamesAndOwnerIsolation(t *testing.T) {
 	if len(notices[0].Keys) != 1 || notices[0].Keys[0].ID != 11 || notices[0].Keys[0].Name != "<owner one>" {
 		t.Fatalf("private names not scoped to owner: %+v", notices)
 	}
-	exec(t, s, "DELETE FROM api_keys WHERE id=22")
+	exec(t, s, "DELETE FROM api_keys WHERE id=11")
 	events, err = s.Events(context.Background(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events[0].Keys[1].ID != 22 || events[0].Keys[1].Name != "" {
+	if events[0].Keys[0].ID != 11 || events[0].Keys[0].Name != "" {
 		t.Fatal("deleted key lost its audit ID")
 	}
 }
