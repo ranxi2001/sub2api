@@ -232,8 +232,23 @@ async function browser() {
     const dialog = () => page.getByRole('dialog').filter({ has: page.getByTestId('question-select') })
     async function openAccount(account) {
       const row = page.getByRole('row').filter({ hasText: account.name })
-      await row.getByRole('button', { name: 'More', exact: true }).click()
-      await page.locator('.action-menu-content').getByRole('button', { name: 'Intelligence test', exact: true }).click()
+      const more = row.getByRole('button', { name: 'More', exact: true })
+      // AccountsView closes its menu on table/window scroll. Let Playwright's
+      // scroll-to-button finish before opening the menu. Only menu navigation
+      // may be repeated; model submissions below are never retried.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await more.scrollIntoViewIfNeeded()
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+        await more.click()
+        try {
+          await page.locator('.action-menu-content').getByRole('button', { name: 'Intelligence test', exact: true }).click({ timeout: 5000 })
+          break
+        } catch (error) {
+          if (await dialog().isVisible()) break
+          if (attempt === 2 || await page.locator('.action-menu-content').isVisible()) throw error
+          state.menuReopens = (state.menuReopens || 0) + 1
+        }
+      }
       await dialog().getByTestId('question-select').getByRole('button').click()
       await page.getByRole('option', { name: 'Pelican riding a bicycle (HTML)', exact: true }).click()
     }
