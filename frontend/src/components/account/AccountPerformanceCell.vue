@@ -31,7 +31,7 @@ import { performanceWindowMinutes, type AccountPerformance } from '@/types/accou
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
-import { firstTokenSeverity, tpsSeverity, LATENCY_TEXT_CLASSES, type LatencySeverity } from '@/utils/latencyHealth'
+import { firstTokenSeverity, tpsSeverity, cacheRateSeverity, LATENCY_TEXT_CLASSES, type LatencySeverity } from '@/utils/latencyHealth'
 import { upstreamErrorRateColorClass } from '@/utils/opsMetricThresholds'
 const props = withDefaults(defineProps<{ metrics?: Partial<AccountPerformance>; unavailable?: boolean; canConfigure?: boolean; noticeUserId?: number | null; upstreamErrorThreshold?: number | null }>(), {canConfigure:true})
 const emit = defineEmits<{configure: []}>()
@@ -72,7 +72,7 @@ const lines=computed(()=>[
  {key:'tps',label:t('accountPerformance.tps'),value:format(props.metrics?.avg_tps,' t/s'),color:metricColor(props.metrics?.avg_tps,tpsSeverity)},
  {key:'degradation',label:t('accountPerformance.degradation', { minutes: windowMinutes.value }),value:format(props.metrics?.degradation_percent,'%'),color:degradationColor(props.metrics?.degradation_percent)},
  {key:'ttft',label:t('accountPerformance.ttft'),value:format(props.metrics?.avg_ttft_ms,'s',1000),color:metricColor(props.metrics?.avg_ttft_ms,firstTokenSeverity)},
- {key:'cache',label:t('accountPerformance.avgCache'),value:format(cachePercent.value,'%'),color:uncollectedClass},
+ {key:'cache',label:t('accountPerformance.avgCache'),value:format(cachePercent.value,'%'),color:metricColor(cachePercent.value,cacheRateSeverity)},
  {key:'upstream',label:t('accountPerformance.upstreamErrorRate'),value:upstreamValue.value,color:upstreamColor.value}
 ])
 </script>

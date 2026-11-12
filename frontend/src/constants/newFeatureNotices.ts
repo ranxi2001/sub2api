@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  priorityCacheWeight: 'priority-cache-weight-initial-announcement',
   openai409OmitEncryptedHistory: 'openai-409-omit-encrypted-history-beta',
   userIdCopy: 'user-id-copy-initial-announcement',
   accountAverageCache: 'account-average-cache-initial-announcement',

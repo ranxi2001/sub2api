@@ -28,7 +28,7 @@ try {
     import Before from '/src/components/account/${suffix}-before.vue';import After from '/src/components/account/AccountPerformanceCell.vue';
     import zh from '/src/i18n/locales/zh/index.ts';import '/src/style.css';
     const mode=new URLSearchParams(location.search).get('mode');
-    const rows=[['示例账号 A',70,2],['示例账号 B',0,3],['示例账号 C',null,0]];
+    const rows=[['示例账号 A',86.8,20],['示例账号 B',65,20],['示例账号 C',35,20],['示例账号 D',0,20],['示例账号 E',null,0]];
     createApp({render:()=>h('main',{class:'p-6 bg-white text-gray-900 dark:bg-dark-900 dark:text-gray-100'},[
       h('h1',{class:'text-xl font-semibold mb-2'},'账号管理 · 性能列组件预览'),
       h('p',{class:'text-sm text-gray-500 mb-4'},'虚构数据 · 实际组件渲染'),
@@ -48,7 +48,7 @@ try {
   await build({ root, configFile: false, cacheDir: join(output, 'vite-cache'), resolve: { alias: { '@': join(root, 'src') } }, plugins: [vue()], css: { postcss: { plugins: [tailwindcss({ ...tailwindConfig, content: [html, join(root, suffix + '.js'), join(root, 'src/**/*.{vue,js,ts}')] }), autoprefixer()] } }, build: { outDir, emptyOutDir: true, minify: false, rollupOptions: { input: html } } })
   server = await preview({ root, configFile: false, build: { outDir }, preview: { host: '127.0.0.1', port: 4198, strictPort: true } })
   browser = await chromium.launch({ headless: true })
-  const page = await browser.newPage({ viewport: { width: 760, height: 850 }, locale: 'zh-CN' })
+  const page = await browser.newPage({ viewport: { width: 760, height: 1150 }, locale: 'zh-CN' })
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/*', route => {
     if (new URL(route.request().url()).origin === 'http://127.0.0.1:4198') return route.continue()
@@ -62,7 +62,7 @@ try {
   await page.goto(url + '?mode=after')
   await page.locator('[data-metric="cache"]').first().waitFor()
   const text = await page.locator('[data-metric="cache"]').allTextContents()
-  if (!text[0].includes('70.0%') || !text[1].includes('0.0%') || !text[2].includes('未采集')) throw Error('Cache states rendered incorrectly')
+  if (!text[0].includes('86.8%') || !text[1].includes('65.0%') || !text[2].includes('35.0%') || !text[3].includes('0.0%') || !text[4].includes('未采集')) throw Error('Cache states rendered incorrectly')
   await capture('after.png')
   await page.locator('[data-testid="cache-help"]').first().click()
   await page.getByRole('tooltip').filter({ hasText: '最近60分钟有效请求缓存命中率的算术平均' }).waitFor()

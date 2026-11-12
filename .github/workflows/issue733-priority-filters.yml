@@ -126,7 +126,7 @@ jobs:
       - name: Real adapters and read-only scope unit regressions
         run: |
           set -euo pipefail
-          (cd backend && go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^(TestPriorityAnalysis|TestPriorityRecompute|TestPriorityLatencySeries)' -count=1 -v -timeout=10m) 2>&1 | tee "$RUNNER_TEMP/filters-pg/unit-green.log"
+          (cd backend && go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^(TestPriorityAnalysis|TestPriorityRecompute|TestPriorityLatencySeries|TestPriorityCacheWeight)' -count=1 -v -timeout=10m) 2>&1 | tee "$RUNNER_TEMP/filters-pg/unit-green.log"
       - name: Fixed baseline real PostgreSQL upper-bound RED
         shell: bash
         run: |

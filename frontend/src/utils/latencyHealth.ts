@@ -49,6 +49,14 @@ export const tpsSeverity = (tps: number): LatencySeverity => {
   return 'good'
 }
 
+/** Cache percentages use the same four visual levels; unknown evidence is handled by the caller. */
+export const cacheRateSeverity = (percent: number): LatencySeverity => {
+  if (percent >= 80) return 'good'
+  if (percent >= 50) return 'warn'
+  if (percent >= 20) return 'slow'
+  return 'critical'
+}
+
 export const LATENCY_TEXT_CLASSES: Record<LatencySeverity, string> = {
   good: 'text-emerald-600 dark:text-emerald-400',
   warn: 'text-amber-600 dark:text-amber-400',
