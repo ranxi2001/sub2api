@@ -83,7 +83,10 @@ type APIKeyUpdateFields struct {
 	// RateLimitUsage 覆盖 usage_5h/_1d/_7d 与三个窗口起点，
 	// 仅供"重置限流用量"路径声明；常规计费走 IncrementRateLimitUsage。
 	RateLimitUsage bool
-	// IPRules 覆盖 ip_whitelist 与 ip_blacklist。
+	// IPWhitelist / IPBlacklist only write the explicitly requested ACL column.
+	IPWhitelist bool
+	IPBlacklist bool
+	// IPRules retains the legacy opt-in to write both ACL columns.
 	IPRules bool
 }
 
@@ -980,11 +983,11 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	// 更新 IP 限制（nil 不修改，空数组清空设置）
 	if req.IPWhitelist != nil {
 		apiKey.IPWhitelist = *req.IPWhitelist
-		fields.IPRules = true
+		fields.IPWhitelist = true
 	}
 	if req.IPBlacklist != nil {
 		apiKey.IPBlacklist = *req.IPBlacklist
-		fields.IPRules = true
+		fields.IPBlacklist = true
 	}
 
 	// Update rate limit configuration
