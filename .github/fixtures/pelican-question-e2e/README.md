@@ -34,3 +34,7 @@ GitHub `pull_request`（base 为 `production`，包含 fixture/script/workflow �
 CI artifact 预期包含应用/harness SHA/tree、显式未完成清单、命名场景结果、网络结构投影、仅限 fixture 题面的 provider captures（无认证头/全量 body）、真实手动请求/题面投影、本轮 localStorage 结果投影、必要的实体/计划 PG 投影、浏览器错误/拒绝清单和截图。比较 `actual_prompt` 的边界是本 fixture 的 UTF-8 文本经过真实 service TrimSpace 后的发送值，不能外推任意输入。
 
 不导出 auth token、Cookie、完整 HAR、数据库全表、凭据列、原始应用日志或真实用户数据。不把整个运行目录当附件。fixture 密码/key/CA 都是本轮自建假值，不能用到任何其他环境。失败时也留存上述受限产物，`always()` 销毁容器、网络和一次性卷，artifact 保留七天。父协调者首次远程运行前需审查此增量，发布后仍须按原 brief 继续同一 PR 的未完成范围。
+
+## 证据目录权限
+
+浏览器与假上游容器使用 CI runner 的 UID/GID，保持 `cap_drop: ALL` 和只读根文件系统。证据目录由同一 runner 创建，因此无需增加 DAC_OVERRIDE 或放宽目录权限。网络结构投影核对这两个容器的实际用户；浏览器启动失败也写入场景结果。

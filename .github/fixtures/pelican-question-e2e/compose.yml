@@ -36,6 +36,8 @@ services:
   fake-upstream:
     <<: *runtime
     image: pelican-runner:${HARNESS_SHA:?required}
+    # Bind-mounted evidence belongs to the Actions runner; root has no DAC override.
+    user: "${FIXTURE_UID:?required}:${FIXTURE_GID:?required}"
     command: [upstream]
     read_only: true
     volumes: ["${EVIDENCE_DIR:?required}:/evidence"]
@@ -80,6 +82,8 @@ services:
   browser:
     <<: *runtime
     image: pelican-runner:${HARNESS_SHA:?required}
+    # Bind-mounted evidence belongs to the Actions runner; root has no DAC override.
+    user: "${FIXTURE_UID:?required}:${FIXTURE_GID:?required}"
     command: [browser]
     read_only: true
     shm_size: 1gb

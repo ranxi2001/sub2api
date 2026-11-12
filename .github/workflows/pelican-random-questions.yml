@@ -98,6 +98,7 @@ jobs:
           set -euo pipefail
           export EVIDENCE_DIR="$RUNNER_TEMP/pelican-isolated-evidence"
           printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf 'FIXTURE_UID=%s\nFIXTURE_GID=%s\n' "$(id -u)" "$(id -g)" >> "$GITHUB_ENV"
           mkdir -p "$EVIDENCE_DIR"
           test "$(git -C app rev-parse HEAD)" = "$APP_SHA"
           test "$(git -C harness rev-parse HEAD)" = "$HARNESS_SHA"
@@ -135,7 +136,7 @@ jobs:
             container_id="$(docker compose ps --all --quiet "$service")"
             test -n "$container_id"
             docker inspect "$container_id" --format \
-              '{"service":{{json (index .Config.Labels "com.docker.compose.service")}},"networks":{{json .NetworkSettings.Networks}},"ports":{{json .HostConfig.PortBindings}},"networkMode":{{json .HostConfig.NetworkMode}},"privileged":{{json .HostConfig.Privileged}},"mounts":{{json .Mounts}}}' \
+              '{"service":{{json (index .Config.Labels "com.docker.compose.service")}},"networks":{{json .NetworkSettings.Networks}},"ports":{{json .HostConfig.PortBindings}},"networkMode":{{json .HostConfig.NetworkMode}},"privileged":{{json .HostConfig.Privileged}},"user":{{json .Config.User}},"mounts":{{json .Mounts}}}' \
               > "$EVIDENCE_DIR/network-$service.json"
           done
           node ../../scripts/pelican-question-e2e.mjs topology

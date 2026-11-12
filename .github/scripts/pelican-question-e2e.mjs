@@ -27,6 +27,9 @@ function topology() {
     const actual = JSON.parse(readFileSync(join(evidence, `network-${service}.json`)))
     assert.equal(actual.service, service)
     assert.equal(actual.privileged, false)
+    if (['browser', 'fake-upstream'].includes(service)) {
+      assert.equal(actual.user, `${process.env.FIXTURE_UID}:${process.env.FIXTURE_GID}`)
+    }
     assert.equal(Object.keys(actual.ports || {}).length, 0, 'no published ports')
     assert.deepEqual(Object.keys(actual.networks), [`${process.env.COMPOSE_PROJECT_NAME}_isolated`])
     assert.equal(actual.networkMode, `${process.env.COMPOSE_PROJECT_NAME}_isolated`)
@@ -141,11 +144,14 @@ async function browser() {
   const declared = JSON.parse(readFileSync('/fixture/acceptance.json'))
   save('acceptance.json', declared)
   const db = new Client({ connectionTimeoutMillis: 5000, statement_timeout: 5000 })
-  const browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'en-US', serviceWorkers: 'block' })
+  let browser
+  let context
   let page
-  let stage = 'normal-authentication'
+  let stage = 'browser-startup'
   try {
+    browser = await chromium.launch({ headless: true })
+    context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'en-US', serviceWorkers: 'block' })
+    stage = 'normal-authentication'
     await db.connect()
     const { rows: accounts } = await db.query("SELECT id::text, name FROM accounts WHERE name IN ('fixture-pelican-a', 'fixture-pelican-b') ORDER BY name")
     assert.equal(accounts.length, 2)
@@ -362,8 +368,8 @@ async function browser() {
     process.exitCode = 1
   } finally {
     save('scenario-results.json', state)
-    await context.close()
-    await browser.close()
+    await context?.close()
+    await browser?.close()
     await db.end()
   }
 }
