@@ -96,6 +96,24 @@ func TestUpdateSettingsGrokVideoSourceURLSwitchRoundTrips(t *testing.T) {
 	require.Equal(t, "false", repo.values[service.SettingKeyGrokVideoSourceURLEnabled])
 }
 
+func TestUpdateSettingsOpenAI409OmitEncryptedHistorySwitchRoundTrips(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
+		service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "false",
+	})
+
+	rec := doUpdateSettings(t, h, map[string]any{"openai_409_omit_encrypted_history_enabled": true}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled])
+
+	rec = doUpdateSettings(t, h, map[string]any{"smtp_from_email": "other@example.com"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled])
+
+	rec = doUpdateSettings(t, h, map[string]any{"openai_409_omit_encrypted_history_enabled": false}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "false", repo.values[service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled])
+}
+
 func TestUpdateSettingsRejectsTwoCaptchaProviders(t *testing.T) {
 	h, _ := newStepUpSwitchTestHandler(t, map[string]string{
 		service.SettingKeyTurnstileEnabled:   "true",

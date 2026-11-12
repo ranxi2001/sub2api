@@ -555,7 +555,8 @@ const (
 	// SettingKeyGrokVideoSourceURLEnabled, when true, adds the validated xAI
 	// media URL as video.source_url to Grok video status responses. video.url
 	// stays the authenticated Sub2API content proxy. Default false.
-	SettingKeyGrokVideoSourceURLEnabled = "grok_video_source_url_enabled"
+	SettingKeyGrokVideoSourceURLEnabled            = "grok_video_source_url_enabled"
+	SettingKeyOpenAI409OmitEncryptedHistoryEnabled = "openai_409_omit_encrypted_history_enabled"
 
 	// SettingKeyAvailableChannelsEnabled is a DB-backed soft switch for the "Available Channels"
 	// user-facing aggregate view. When false: user endpoint returns an empty list and the

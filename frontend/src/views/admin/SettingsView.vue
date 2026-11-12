@@ -53,6 +53,12 @@
                 />
                 <NewFeatureBadge
                   v-if="tab.key === 'gateway'"
+                  :notice-id="NEW_FEATURE_NOTICES.openai409OmitEncryptedHistory"
+                  :user-id="authStore.user?.id"
+                  class="settings-tab-badge"
+                />
+                <NewFeatureBadge
+                  v-if="tab.key === 'gateway'"
                   :notice-id="NEW_FEATURE_NOTICES.deepSeekSearch"
                   :user-id="authStore.user?.id"
                   class="settings-tab-badge"
@@ -5527,6 +5533,22 @@
                   />
                 </div>
 
+              <div class="flex items-start justify-between gap-4 border-b border-gray-100 pb-5 dark:border-dark-700 md:col-span-2">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayForwarding.omitEncryptedHistory409") }}
+                    </label>
+                    <span class="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Beta</span>
+                    <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.openai409OmitEncryptedHistory" :user-id="authStore.user?.id" />
+                  </div>
+                  <p class="mt-1 max-w-2xl text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.omitEncryptedHistory409Hint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.openai_409_omit_encrypted_history_enabled" data-testid="openai-409-omit-encrypted-history-toggle" />
+              </div>
+
               <!-- OpenAI Responses 首 token 统计 -->
               <div class="border-b border-gray-100 pb-5 dark:border-dark-700 md:col-span-2">
                 <label
@@ -10633,6 +10655,7 @@ const form = reactive<SettingsForm>({
   grok_cross_client_model_map_enabled: false,
   grok_default_base_url_mode: "cli",
   grok_video_source_url_enabled: false,
+  openai_409_omit_encrypted_history_enabled: false,
   // Identity patch (Claude -> Gemini)
   enable_identity_patch: true,
   identity_patch_prompt: "",
@@ -12402,6 +12425,7 @@ async function saveSettings() {
         form.grok_cross_client_model_map_enabled,
       grok_default_base_url_mode: form.grok_default_base_url_mode,
       grok_video_source_url_enabled: form.grok_video_source_url_enabled,
+      openai_409_omit_encrypted_history_enabled: form.openai_409_omit_encrypted_history_enabled,
       enable_identity_patch: form.enable_identity_patch,
       identity_patch_prompt: form.identity_patch_prompt,
       min_claude_code_version: form.min_claude_code_version,
