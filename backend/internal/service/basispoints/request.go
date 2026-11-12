@@ -107,6 +107,23 @@ func prepareWithInheritedCatalog(raw []byte, scope string, replay *ReplayCache, 
 	if text(source["previous_response_id"]) != "" {
 		return nil, nil, fmt.Errorf("basispoints requires expanded history instead of previous_response_id")
 	}
+	// Preserve explicit processing tier instead of silently dropping the client's
+	// selection. BPS supports this narrower set; do not invent an upgrade.
+	serviceTier := ""
+	if value, exists := source["service_tier"]; exists && value != nil {
+		tier, ok := value.(string)
+		if !ok {
+			return nil, nil, fmt.Errorf("basispoints service_tier must be a string")
+		}
+		switch strings.ToLower(strings.TrimSpace(tier)) {
+		case "auto", "default", "priority":
+			serviceTier = strings.ToLower(strings.TrimSpace(tier))
+		case "fast":
+			serviceTier = "priority"
+		default:
+			return nil, nil, fmt.Errorf("basispoints service_tier must be auto, default or priority")
+		}
+	}
 	requested := text(source["reasoning_effort"])
 	if reasoning, ok := source["reasoning"].(object); ok {
 		requested = text(reasoning["effort"])
@@ -236,6 +253,9 @@ func prepareWithInheritedCatalog(raw []byte, scope string, replay *ReplayCache, 
 			"task_id": fingerprint([]any{scope, conversation}),
 			"turn_id": fingerprint([]any{scope, input[:turnEnd]}), "agent_iteration": fmt.Sprint(iteration),
 		},
+	}
+	if serviceTier != "" {
+		output["service_tier"] = serviceTier
 	}
 	if cacheKey != "" {
 		output["prompt_cache_key"] = "bps-" + fingerprint([]any{scope, cacheKey})

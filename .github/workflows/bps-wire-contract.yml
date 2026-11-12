@@ -1,0 +1,29 @@
+name: BPS request contract
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/basispoints/**'
+      - 'backend/internal/service/openai_excel_bps*'
+      - 'backend/internal/service/openai_gateway_request_body.go'
+      - '.github/workflows/bps-wire-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: BPS wire contract and existing protocol regressions
+        working-directory: backend
+        run: go test ./internal/service/basispoints -count=1
+      - name: Gateway identity, model, effort, tier policy and correction
+        working-directory: backend
+        run: go test -tags=unit ./internal/service -run '^Test(ExcelBPSWire|ExcelBPSToolCorrectionPreservesRouteAndUsage|ExcelBPSUsagePreservesRequestedEffortBeforeGroupMapping|ExcelBPSAccess)' -count=1 -v -timeout=10m

@@ -214,6 +214,15 @@ func newExcelBPSRequestTo(ctx context.Context, targetURL, accept string, body []
 		"X-Openai-Internal-Basispoints-Client-Product":       {"basispoints-excel-plugin"},
 		"X-Openai-Internal-Basispoints-Client-Agent-Profile": {"excel"},
 	}
+	// Derive the user only from the bearer actually sent on this request. The
+	// parent account can retain a different Codex grant or stale user metadata.
+	// Decoding projects identity; it does not assert JWT signature validation.
+	if claims, decodeErr := openai.DecodeIDToken(token); decodeErr == nil && claims.OpenAIAuth != nil {
+		userID := strings.TrimSpace(firstNonEmptyReauth(claims.OpenAIAuth.ChatGPTUserID, claims.OpenAIAuth.UserID))
+		if userID != "" && !strings.ContainsAny(userID, "\r\n") {
+			req.Header.Set("X-Openai-Account-User-Id", userID)
+		}
+	}
 	return req, nil
 }
 
@@ -277,6 +286,17 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 			return clientCanceled()
 		}
 		return nil, newExcelBPSRateLimitedFailoverError(retryAfter)
+	}
+	// BPS returns before the native forwarder's tier policy. Apply that same
+	// administrator policy before building the BPS wire body.
+	body, err := s.applyOpenAIFastPolicyToBody(ctx, account, model, body)
+	if err != nil {
+		var blocked *OpenAIFastBlockedError
+		if errors.As(err, &blocked) {
+			MarkResponseCommitted(c)
+			writeOpenAIFastPolicyBlockedResponse(c, blocked)
+		}
+		return nil, err
 	}
 	imageSettings, err := s.settingService.GetExcelBPSImageRelaySettings(ctx)
 	if err != nil {
@@ -818,7 +838,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	// The bridge sees the body after group policy mapping. Keep the original
 	// client effort for usage display, and the BPS-normalized effort for billing.
 	requestedEffort := coalesceRequestedReasoningEffort(RequestedReasoningEffortFromContext(ctx), &bridge.RequestedEffort)
-	result := &OpenAIForwardResult{Model: originalModel, UpstreamModel: model, UpstreamEndpoint: "/basispoints/api/responses", Stream: stream, ReasoningEffort: &bridge.Effort, RequestedReasoningEffort: requestedEffort, RequestID: resp.Header.Get("x-request-id")}
+	result := &OpenAIForwardResult{Model: originalModel, UpstreamModel: model, UpstreamEndpoint: "/basispoints/api/responses", Stream: stream, ReasoningEffort: &bridge.Effort, RequestedReasoningEffort: requestedEffort, ServiceTier: extractOpenAIServiceTierFromBody(upstreamBody), RequestID: resp.Header.Get("x-request-id")}
 	if stream {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
@@ -874,6 +894,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				completed = []byte(gjson.GetBytes(payload, "response").Raw)
 				result.ResponseID = gjson.GetBytes(payload, "response.id").String()
 				result.UpstreamResponseModel = gjson.GetBytes(payload, "response.model").String()
+				result.UpstreamResponseServiceTier = normalizeObservedOpenAIServiceTier(gjson.GetBytes(payload, "response.service_tier").String())
 				upstreamFailure = basispoints.ParseUpstreamFailure(payload)
 				if bridgeFailure != nil {
 					markPriorityAttemptFailure(ctx)
