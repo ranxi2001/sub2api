@@ -1,11 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func TestOmitOpenAIHistoricalCiphertextPreservesReadableContext(t *testing.T) {
@@ -88,4 +93,83 @@ func TestOmitOpenAIHistoricalAssistantAgentUsesUserTextParts(t *testing.T) {
 		require.Equal(t, "input_text", part.Get("type").String())
 	}
 	require.Contains(t, string(clean), "readable")
+}
+
+func TestOpenAI409ReplayInputTamperingStillFails(t *testing.T) {
+	for _, mode := range []string{"unchanged", "user_text", "tool_arguments", "tool_result", "call_id", "large_integer", "reasoning_removed", "visible_reasoning_removed", "order", "replay_id_reintroduced"} {
+		t.Run(mode, func(t *testing.T) {
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+			a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			issue715LearnRoute(t, svc, a, issue715OpaqueBody)
+			raw := strings.TrimSuffix(issue715OpaqueBody, "]}") + `,
+			{"type":"reasoning","id":"rs_fixture_823","status":"completed","encrypted_content":"fixture-reasoning","content":[{"type":"reasoning_text","text":"visible reasoning must survive"}]},
+			{"type":"function_call","name":"record","call_id":"call_823","arguments":"{\"value\":9007199254740993}"},
+			{"type":"function_call_output","call_id":"call_823","output":"already recorded exactly once"},
+			{"type":"message","role":"user","sequence":9007199254740993,"content":"continue with the result"}],"store":false}`
+			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+			ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(raw), "fixture-session", "gpt-6-astra")
+			next, clean, changed := svc.TryOmitOpenAI409History(ctx, c, []byte(raw), "fixture-session", "gpt-6-astra", openAIAgentRecoveryError("owner_unavailable"))
+			require.True(t, changed)
+			require.NotContains(t, string(clean), "fixture-opaque-reference")
+			require.Contains(t, string(clean), "visible reasoning must survive")
+			require.Equal(t, "9007199254740993", gjson.GetBytes(clean, "input.4.sequence").Raw)
+			require.False(t, gjson.GetBytes(clean, "input.1.id").Exists())
+			require.False(t, gjson.GetBytes(clean, "input.1.status").Exists())
+			require.True(t, gjson.GetBytes(clean, "input.1.summary").IsArray())
+			originalDigest := openAIAgentRecoveryFromContext(next).inputDigest
+			var err error
+			switch mode {
+			case "user_text":
+				clean, err = sjson.SetBytes(clean, "input.4.content", "changed user task")
+			case "tool_arguments":
+				clean, err = sjson.SetBytes(clean, "input.2.arguments", `{}`)
+			case "tool_result":
+				clean, err = sjson.SetBytes(clean, "input.3.output", "lost result")
+			case "call_id":
+				clean, err = sjson.SetBytes(clean, "input.3.call_id", "different_call")
+			case "large_integer":
+				clean, err = sjson.SetRawBytes(clean, "input.4.sequence", []byte("9007199254740992"))
+			case "reasoning_removed":
+				clean, err = sjson.DeleteBytes(clean, "input.1")
+			case "visible_reasoning_removed":
+				clean, _, err = normalizeOpenAIResponsesReasoningContentReplay(clean)
+			case "order":
+				items := gjson.GetBytes(clean, "input").Array()
+				clean, err = sjson.SetRawBytes(clean, "input.2", []byte(items[3].Raw))
+				require.NoError(t, err)
+				clean, err = sjson.SetRawBytes(clean, "input.3", []byte(items[2].Raw))
+			case "replay_id_reintroduced":
+				clean, err = sjson.SetBytes(clean, "input.1.id", "rs_untrusted_replacement")
+			}
+			require.NoError(t, err)
+			req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewReader(clean))
+			require.NoError(t, err)
+			finish, err := svc.prepareOpenAIAgentRecoveryAttempt(next, &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, req)
+			defer finish(false)
+			if mode == "unchanged" {
+				require.NoError(t, err)
+			} else {
+				var refusal *OpenAIAgentRecoveryError
+				require.ErrorAs(t, err, &refusal)
+				require.Equal(t, "wire_changed", refusal.Reason)
+			}
+			require.Equal(t, originalDigest, openAIAgentRecoveryFromContext(next).inputDigest, "send validation must not rebase the trusted snapshot")
+		})
+	}
+}
+
+func TestOpenAI409ReplayPreservesOrdinaryAndStoredReasoning(t *testing.T) {
+	for _, store := range []string{"true", "false"} {
+		svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+		issue715LearnRoute(t, svc, &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, issue715OpaqueBody)
+		body := strings.TrimSuffix(issue715OpaqueBody, "]}") + `,{"type":"reasoning","id":"rs_original","summary":[],"encrypted_content":"reasoning-cipher"},{"type":"reasoning","summary":[{"type":"summary_text","text":"readable reasoning"}]},{"role":"user","content":"continue"}],"store":` + store + `}`
+		c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+		c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+		ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(body), "fixture-session", "gpt-6-astra")
+		_, clean, changed := svc.TryOmitOpenAI409History(ctx, c, []byte(body), "fixture-session", "gpt-6-astra", openAIAgentRecoveryError("owner_unavailable"))
+		require.True(t, changed)
+		require.Equal(t, store == "true", gjson.GetBytes(clean, "input.1.id").Exists(), "stored reasoning IDs are not disposable")
+		require.JSONEq(t, gjson.Get(body, "input.2").Raw, gjson.GetBytes(clean, "input.2").Raw, "readable reasoning without ciphertext must not be discarded")
+	}
 }

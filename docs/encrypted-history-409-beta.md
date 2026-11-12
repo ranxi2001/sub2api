@@ -21,3 +21,13 @@ HTTP `/v1/responses` 在初次选号、尚未发送上游时，如果已登记�
 关闭后，后续请求恢复严格行为。无需数据库迁移或清 Redis；回退旧二进制会忽略此设置。切换不会取消在途请求，已省略的信息无法由关闭开关恢复。
 
 回归用虚构历史、隔离 Redis 和 localhost 上游验证，不代表真实供应商兼容或生产验收。参考 #812 中的 BPS 历史省略机制，本功能在项目自己的原生 Responses 路径实现，没有加载第三方插件或复制未知二进制代码。
+
+## 省略后发送校验与回放元数据（#823）
+
+省略后的完整 `input` 仍受到发送前摘要保护。固定摘要之前先执行受限的回放元数据规范化：复用原 ID 校验清理不合规的条目 ID/非配对 call_id，移除 reasoning 的 output-only status；仅当请求明确 `store:false` 且 reasoning 有非空 encrypted_content 时，移除 rs_ 回放 ID、补齐缺省或 null 的空 summary。`store:true` 的有效 reasoning ID 保留。
+
+这一步只在 Beta 确实省略旧历史时执行。后续请求仍须与固定快照一致；不会在发送前重新计算并覆盖可信快照。工具参数/结果、调用关联、数组顺序、数字精度和可读 reasoning 内容的改写仍拒绝；普通请求、Beta 默认值和 owner/交付保护不变。
+
+如果后续一般兼容逻辑会删除整个 reasoning 或可读 reasoning.content，仍会拒绝该输入，而不是静默丢弃。此时服务器记录 `openai.encrypted_history_409_refused`、`stage=input_integrity`，不含正文、凭据或密文摘要，客户端错误码保持 `encrypted_agent_recovery_wire_changed`。并非所有历史形态都保证可恢复，未知供应商接受度需另行验证。
+
+CI 使用真实 handler、隔离 Redis 和 localhost HTTP 假上游，覆盖元数据规范化后的 JSON/SSE 续接、精确一次发送、真实上游拒绝透传及完整性负例；旧 2.21.1 的同一组新增场景必须命名失败。该证据不等于线上六条历史请求已经重放，也不表示修复已发布或部署。
