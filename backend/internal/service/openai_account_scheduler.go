@@ -642,6 +642,14 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		if selection == nil || selection.Account == nil {
 			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
 		}
+		// Reject a changed producer route before entering Forward. This also
+		// gives the explicit history-omission policy a pre-send refusal to handle.
+		if recoveryErr := s.service.checkOpenAIAgentRecoveryAccount(ctx, selection.Account); recoveryErr != nil {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return nil, decision, recoveryErr
+		}
 		decision.Layer = openAIAccountScheduleLayerSessionSticky
 		decision.StickySessionHit = true
 		decision.SelectedAccountID = selection.Account.ID
