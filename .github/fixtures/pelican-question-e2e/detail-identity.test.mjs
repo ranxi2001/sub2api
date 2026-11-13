@@ -38,3 +38,19 @@ test('account: wrong request plan is rejected even when the body matches a PG ro
   assert.throws(() => bindDetailResponse(url('account', '101', '8'), bodies[0], rows),
     /request plan ID must equal PG plan ID/)
 })
+
+for (const kind of ['account', 'group']) {
+  test(`${kind}: old result IDs and marker cannot relabel the saved snapshot with the current rule or next round`, () => {
+    const changed = { ...bodies[0], pelican_config: { parallel_count: 1, prompt_mode: 'custom',
+      actual_prompt: 'edited current rule', pelican_question: { round_id: 'scheduled:next', id: 'different-question' } } }
+    assert.throws(() => bindDetailResponse(url(kind, '101'), changed, rows, kind), assert.AssertionError)
+  })
+  test(`${kind}: refusal keeps its own failed identity and partial-output marker`, () => {
+    const failed = { ...rows[0], status: 'failed' }
+    const body = { ...bodies[0], status: 'failed', response_text: `${failed.marker}: fixture refusal` }
+    assert.equal(bindDetailResponse(url(kind, '101'), body, [failed], kind).marker, failed.marker)
+    assert.throws(() => bindDetailResponse(url(kind, '101'), { ...body, status: 'success' }, [failed], kind), assert.AssertionError)
+    assert.throws(() => bindDetailResponse(url(kind, '101'), { ...body, response_text: bodies[1].response_text }, [failed], kind),
+      /request-bound response marker/)
+  })
+}
