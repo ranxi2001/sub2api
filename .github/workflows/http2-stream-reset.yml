@@ -64,10 +64,23 @@ jobs:
           # needs its diagnostic fields. This file only adds the reset marker
           # field; old transport producers below still cannot populate it.
           mapfile -t targets < <(git diff --name-only "$baseline" "$reviewed" -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go' ':!backend/internal/service/ops_upstream_context.go')
+          dto_leaf=backend/internal/service/http2_historical_dto_compat.go
+          test ! -e "$dto_leaf"
           restore_head() {
+            rm -f -- "$dto_leaf"
             for target in "${targets[@]}"; do git show "HEAD:$target" > "$target"; done
           }
           trap restore_head EXIT
+          # The retained event DTO references only this additive data type.
+          # Extract its exact candidate declaration; no classifier or producer
+          # implementation is carried into the original-source RED.
+          python3 - <<'PY'
+          import pathlib, re, subprocess
+          source = subprocess.check_output(['git', 'show', 'HEAD:backend/internal/service/openai_stream_read_error.go'], text=True)
+          declaration = re.search(r'type OpsTransportFailure struct \{\n.*?\n\}', source, re.S)
+          assert declaration is not None
+          pathlib.Path('backend/internal/service/http2_historical_dto_compat.go').write_text('package service\n\n' + declaration.group(0) + '\n')
+          PY
           for target in "${targets[@]}"; do
             if git cat-file -e "$baseline:$target" 2>/dev/null; then
               git show "$baseline:$target" > "$target"
@@ -100,6 +113,8 @@ jobs:
           done
           # Semantic spoofing was introduced by the first patch; reproduce it
           # against the compiling pre-review candidate, retaining these tests.
+          # These later candidates already declare the additive DTO themselves.
+          rm -- "$dto_leaf"
           vulnerable=c351ebea9bf144c710780da5e4db0e264e6ebb9c
           for target in "${targets[@]}"; do git show "$vulnerable:$target" > "$target"; done
           set +e
