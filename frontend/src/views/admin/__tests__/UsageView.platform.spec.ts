@@ -18,6 +18,7 @@ vi.mock('@/api/admin', () => ({ adminAPI: {
   dashboard: { getModelStats: api.models, getSnapshotV2: api.snapshot },
   groups: { list: vi.fn().mockResolvedValue({ items: [{ id: 7, name: 'Synthetic group' }] }) },
 } }))
+vi.mock('@/api/admin/ops', () => ({ listErrorLogs: vi.fn().mockResolvedValue({ items: [], total: 0 }) }))
 vi.mock('@/api/admin/usage', () => ({ adminUsageAPI: { list: api.export } }))
 vi.mock('xlsx', () => ({ utils: { aoa_to_sheet: vi.fn(() => ({})), sheet_add_aoa: vi.fn(), book_new: vi.fn(() => ({})), book_append_sheet: vi.fn() }, write: vi.fn(() => new Uint8Array()) }))
 vi.mock('file-saver', () => ({ saveAs: vi.fn() }))
@@ -45,6 +46,7 @@ async function choose(container: ReturnType<VueWrapper['get']>, label: string) {
 
 describe('admin usage platform behavior with real filters', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
     localStorage.clear()
     setActivePinia(createPinia())
     vi.clearAllMocks()
@@ -54,7 +56,11 @@ describe('admin usage platform behavior with real filters', () => {
     api.snapshot.mockResolvedValue({ trend: [], models: [], groups: [] })
     api.export.mockResolvedValue({ items: [], total: 0, pages: 0 })
   })
-  afterEach(() => wrapper?.unmount())
+  afterEach(() => {
+    wrapper?.unmount()
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
 
   it.each(['en', 'zh'])('offers every supported platform, default all, and localized labels (%s)', async locale => {
     render(locale)
