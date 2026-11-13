@@ -136,7 +136,8 @@ report. Line numbers refer to this change's source tree.
 | `openai_gateway_messages.go:641` | `handleAnthropicErrorResponse` | `handleCompatErrorResponse` |
 | `openai_gateway_passthrough.go:1024` | `handleFailoverErrorResponsePassthrough` | `handleOpenAIAccountUpstreamError` |
 | `openai_gateway_passthrough.go:1097` | `handleErrorResponsePassthrough` | `handleOpenAIAccountUpstreamError` |
-| `openai_gateway_passthrough.go:1884` | `handleOpenAIStreamTerminalAccountSideEffects` | `handleOpenAIAccountUpstreamError` |
+| `openai_gateway_passthrough.go:1851` | `handleOpenAIStreamTerminalAccountSideEffects` | `handleOpenAIStreamTerminalAccountSideEffectsWithContext` |
+| `openai_gateway_passthrough.go:1886` | `handleOpenAIStreamTerminalAccountSideEffectsWithContext` | `handleOpenAIAccountUpstreamError` |
 | `openai_gateway_responses_chat_fallback.go:179` | `forwardResponsesViaRawChatCompletions` | `handleErrorResponse` |
 | `openai_gateway_upstream_errors.go:597` | `handleFailoverSideEffects` | `handleOpenAIAccountUpstreamError` |
 | `openai_gateway_upstream_errors.go:599` | `handleFailoverSideEffects` | `handleOpenAIAccountUpstreamError` |
@@ -153,6 +154,8 @@ report. Line numbers refer to this change's source tree.
 | `openai_ws_forwarder_ingress.go:2160` | `ProxyResponsesWebSocketFromClient` | `handleOpenAIWSTerminalTransientFailure` |
 | `openai_ws_forwarder_support.go:325` | `handleOpenAIWSTerminalTransientFailure` | `handleOpenAIWSFailureAccountSideEffects` |
 | `openai_ws_forwarder_support.go:341` | `handleOpenAIWSErrorEventTransientFailure` | `handleOpenAIAccountUpstreamError` |
+| `openai_ws_forwarder_support.go:354` | `handleOpenAIWSFailureAccountSideEffects` | `handleOpenAIStreamTerminalAccountSideEffectsWithContext` |
+| `openai_ws_forwarder_support.go:360` | `handleOpenAIWSFailureAccountSideEffects` | `handleOpenAIStreamTerminalAccountSideEffectsWithContext` |
 | `openai_ws_forwarder_support.go:368` | `handleOpenAIWSFailureAccountSideEffects` | `handleOpenAIAccountUpstreamError` |
 | `openai_ws_forwarder_support.go:380` | `handleOpenAIWSDialTransientFailure` | `handleOpenAIAccountUpstreamError` |
 | `openai_ws_forwarder_support.go:723` | `persistOpenAIWSRateLimitSignal` | `handleOpenAIAccountUpstreamError` |
@@ -164,6 +167,6 @@ report. Line numbers refer to this change's source tree.
 | `openai_ws_http_bridge.go:980` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIWSFailureAccountSideEffects` |
 | `openai_ws_http_bridge.go:1088` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIWSTerminalTransientFailure` |
 | `openai_ws_v2_passthrough_adapter.go:981` | `proxyResponsesWebSocketV2Passthrough` | `handleOpenAIWSDialTransientFailure` |
-| `openai_ws_v2_passthrough_adapter.go:1596` | `proxyResponsesWebSocketV2Passthrough` | `handleOpenAIWSFailureAccountSideEffects` |
+| `openai_ws_v2_passthrough_adapter.go:1597` | `proxyResponsesWebSocketV2Passthrough` | `handleOpenAIWSFailureAccountSideEffects` |
 | `ratelimit_service.go:354` | `HandleUpstreamError` | `handleUpstreamErrorAfterStreakReset` |
 | `ratelimit_service.go:360` | `handleUpstreamErrorAfterStreakReset` | `maybeDisableOpenAISchedulingOn429` |

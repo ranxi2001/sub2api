@@ -93,7 +93,6 @@ jobs:
             test "$(git hash-object "$RUNNER_TEMP/oauth429-cache-red/$target")" = "$expected"
             printf '%s %s %s\n' "$BASELINE" "$expected" "$target" >> evidence/cache-restored-blobs.txt
           done <<'BLOBS'
-          849aec6c598b9ca5e94f218f76e7d7266505ae57 backend/internal/service/openai_gateway_service.go
           9fb1903315d1f086f4f38bd73a5a0a5f69f6542a backend/internal/service/openai_gateway_usage.go
           BLOBS
           git -C "$RUNNER_TEMP/oauth429-cache-red" diff --exit-code -- '*_test.go'
