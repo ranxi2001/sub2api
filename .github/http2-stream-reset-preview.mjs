@@ -29,7 +29,7 @@ const params=new URL(location.href).searchParams;
 const locale=params.get('locale')||'en',before=params.get('before')==='1';
 await loadLocaleMessages(locale);i18n.global.locale.value=locale;
 window.fixture={id:833,created_at:'2026-11-13T10:00:00Z',model:'example-model',inbound_endpoint:'/v1/responses',status_code:before?502:200,category:before?'upstream':'transport_error',platform:'openai',message:before?'Upstream HTTP/2 stream failed':'Upstream connection reset by peer (HTTP/2 INTERNAL_ERROR). Content may be incomplete. Do not automatically retry the same request.',reset_reason:before?undefined:'INTERNAL_ERROR',upstream_status_code:before?502:undefined,key_name:'Demo key',key_deleted:false,error_body:JSON.stringify({error:{type:'upstream_error',code:'upstream_http2_stream_error',...(before?{}:{category:'transport_error',protocol:'HTTP/2',reset_reason:'INTERNAL_ERROR'})}},null,2)};
-window.preview=mount(View,{attachTo:'#app',props:{show:false,errorId:833},global:{plugins:[i18n]}});
+window.preview=mount(View,{attachTo:'#app',props:{show:false,errorId:833,'onUpdate:show':show=>window.preview.setProps({show})},global:{plugins:[i18n]}});
 await window.preview.setProps({show:true});
 `, { flag: 'wx' })
   process.chdir(root)

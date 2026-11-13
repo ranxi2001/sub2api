@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // Use the real Go HTTP/2 reader, including its unexported StreamError type.
@@ -86,6 +87,18 @@ func TestHTTP2PeerResetBoundary(t *testing.T) {
 	require.False(t, outcomes[0].Success)
 	body := rec.Body.String()
 	require.Equal(t, 1, strings.Count(body, "event: response.failed\n"))
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "data: ") {
+			event := gjson.Parse(strings.TrimPrefix(line, "data: "))
+			if event.Get("type").String() == "response.failed" {
+				require.True(t, event.Get("sequence_number").Exists())
+				require.Positive(t, event.Get("response.created_at").Int())
+				require.Equal(t, "response", event.Get("response.object").String())
+				require.True(t, event.Get("response.output").IsArray())
+				require.Equal(t, "transport_error", event.Get("response.error.category").String())
+			}
+		}
+	}
 	require.NotContains(t, body, "event: error\n")
 	require.NotContains(t, body, "response.completed")
 	require.NotContains(t, body, "[DONE]")

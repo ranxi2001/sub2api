@@ -2678,6 +2678,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 		}
 		if !clientDisconnected && ctx.Err() == nil {
 			if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, upstreamRequestID, err); handled {
+				failureDelivered = true
 				return resultWithUsage(), resetErr
 			}
 		}

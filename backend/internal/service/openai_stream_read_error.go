@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/net/http2"
 )
 
@@ -171,7 +173,8 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 	}
 	appendOpsUpstreamError(c, event)
 	MarkOpsStreamErrorValue(c, OpsStreamError{TransportFailure: failure, ErrType: "upstream_error",
-		Code: OpenAIUpstreamHTTP2StreamErrorCode, Message: message, IntendedStatus: http.StatusBadGateway, CountTowardsSLA: true})
+		Code: OpenAIUpstreamHTTP2StreamErrorCode, Message: message, IntendedStatus: http.StatusBadGateway, CountTowardsSLA: true,
+		NonStream: !c.GetBool("ops_stream") && !strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream")})
 	fields := failure.ErrorFields()
 	// HTTP bridge WebSocket callers own their frame writer; don't write HTTP SSE
 	// to an upgraded connection. Their caller consumes the typed safe details.
@@ -181,9 +184,15 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 	if c.Writer.Written() && strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
 		eventType := "error"
 		payload := map[string]any{"error": fields}
-		if strings.HasSuffix(strings.TrimRight(c.Request.URL.Path, "/"), "/responses") {
+		path := strings.TrimRight(c.Request.URL.Path, "/")
+		if strings.HasSuffix(path, "/responses") || strings.Contains(path, "/responses/") {
 			eventType = "response.failed"
-			payload = map[string]any{"type": eventType, "sequence_number": 0, "response": map[string]any{"status": "failed", "error": fields}}
+			// Match the required fields of buildOpenAIResponseFailedSSE. Strict
+			// clients require created_at, output and sequence_number even on errors.
+			payload = map[string]any{"type": eventType, "sequence_number": 0, "response": map[string]any{
+				"id": "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""), "object": "response",
+				"created_at": time.Now().Unix(), "model": c.GetString("ops_model"), "output": []any{},
+				"status": "failed", "error": fields}}
 		} else if strings.HasSuffix(c.Request.URL.Path, "/messages") {
 			payload["type"] = "error"
 		}
@@ -195,6 +204,7 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 		if c.Writer.Written() {
 			status = c.Writer.Status()
 		}
+		c.Header("Content-Type", "application/json")
 		c.JSON(status, gin.H{"error": fields})
 	}
 	MarkResponseCommitted(c)
