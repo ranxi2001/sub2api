@@ -349,6 +349,10 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	var regionalUsagePayload []byte
 	var normalizationErr error
 	semanticFailure := false
+	var pendingErrorLines []string
+	var pendingErrorData []string
+	pendingErrorBytes := 0
+	stagingError := false
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -384,6 +388,57 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		// Error frames must be complete before becoming authoritative. In
+		// particular, gjson can find an object in truncated, invalid JSON.
+		if eventType, ok := extractOpenAISSEEventLine(line); ok && eventType == "error" {
+			stagingError = true
+		}
+		if payload, ok := extractOpenAISSEDataLine(line); ok && gjson.Get(payload, "error").IsObject() {
+			stagingError = true
+		}
+		if stagingError {
+			pendingErrorLines = append(pendingErrorLines, line)
+			pendingErrorBytes += len(line)
+			if payload, ok := extractOpenAISSEDataLine(line); ok {
+				pendingErrorData = append(pendingErrorData, payload)
+			}
+			if pendingErrorBytes > openAIFirstOutputStageMaxBytes {
+				normalizationErr = errors.New("upstream error event exceeds size limit")
+				break
+			}
+			if line != "" {
+				continue
+			}
+			payload := strings.Join(pendingErrorData, "\n")
+			if gjson.Valid(payload) && (gjson.Get(payload, "error").IsObject() || gjson.Get(payload, "type").String() == "error") {
+				writeStreamHeaders()
+				for _, pending := range pendingLines {
+					if _, writeErr := c.Writer.WriteString(pending + "\n"); writeErr != nil {
+						clientDisconnected = true
+						break
+					}
+				}
+				pendingLines = nil
+				for _, pending := range pendingErrorLines {
+					if _, writeErr := c.Writer.WriteString(pending + "\n"); writeErr != nil {
+						clientDisconnected = true
+						break
+					}
+				}
+				c.Writer.Flush()
+				clientOutputStarted = true
+				semanticFailure = true
+				break
+			}
+			// Invalid error-shaped events are not terminal evidence. Discard
+			// them; a subsequent read reset must still reach classification.
+			pendingErrorLines = nil
+			pendingErrorData = nil
+			pendingErrorBytes = 0
+			stagingError = false
+			continue
+		}
+
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			if u := extractCCStreamUsage(payload); u != nil {
 				regionalUsagePayload = []byte(payload)
@@ -399,9 +454,6 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
 			terminal.ObserveDataLine(trimmedPayload)
-			if gjson.Get(trimmedPayload, "error").IsObject() {
-				semanticFailure = true
-			}
 			if trimmedPayload == "[DONE]" && c.Request != nil {
 				regionalMeterObserveUsage(c.Request.Context(), regionalUsagePayload, "json")
 			}

@@ -283,3 +283,78 @@ func TestHTTP2PeerResetNativeUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTP2NativeSemanticErrorBeforeReset(t *testing.T) {
+	for _, mode := range []string{"responses_stream", "responses_buffered", "chat_stream", "chat_buffered"} {
+		t.Run(mode, func(t *testing.T) {
+			payload := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"synthetic\",\"content\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"partial\"}}\n\nevent: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"synthetic semantic failure\"}}\n\n"
+			resp := http2PeerResetResponse(t, "text/event-stream", payload)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			var result *OpenAIForwardResult
+			var err error
+			switch mode {
+			case "responses_stream":
+				result, err = svc.handleResponsesStreamingFromNativeAnthropic(resp, c, "model", "model", "model", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+			case "responses_buffered":
+				result, err = svc.handleResponsesBufferedFromNativeAnthropic(resp, c, "model", "model", "model", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+			case "chat_stream":
+				c.Request.URL.Path = "/v1/chat/completions"
+				result, err = svc.handleCCStreamingFromNativeAnthropic(resp, c, "model", "model", "model", nil, time.Now())
+			case "chat_buffered":
+				c.Request.URL.Path = "/v1/chat/completions"
+				result, err = svc.handleCCBufferedFromNativeAnthropic(resp, c, "model", "model", "model", nil, time.Now())
+			}
+			require.Error(t, err, "native semantic failure must not become successful completion")
+			require.NotNil(t, result)
+			require.Equal(t, 3, result.Usage.InputTokens)
+			require.Equal(t, 1, result.Usage.OutputTokens)
+			require.Contains(t, rec.Body.String(), "context_length_exceeded")
+			require.Contains(t, rec.Body.String(), "synthetic semantic failure")
+			for _, forbidden := range []string{"response.completed", "[DONE]", "upstream_http2_stream_error", "transport_error"} {
+				require.NotContains(t, rec.Body.String(), forbidden)
+			}
+			var failover *UpstreamFailoverError
+			require.NotErrorAs(t, err, &failover)
+			if strings.HasSuffix(mode, "_stream") {
+				require.Equal(t, 200, rec.Code)
+				terminal := "event: response.failed\n"
+				if strings.HasPrefix(mode, "chat_") {
+					terminal = "event: error\n"
+				}
+				require.Equal(t, 1, strings.Count(rec.Body.String(), terminal))
+			} else {
+				require.GreaterOrEqual(t, rec.Code, 400)
+			}
+		})
+	}
+}
+
+func TestHTTP2RawIncompleteErrorEventStillResets(t *testing.T) {
+	for _, fragment := range []string{"event: error\ndata: {\"error\":{\"message\":\"cut", "event: error\ndata: {\"error\":{\"message\":\"complete JSON without event boundary\"}}"} {
+		t.Run(fmt.Sprint(len(fragment)), func(t *testing.T) {
+			payload := "data: {\"id\":\"synthetic\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n" + fragment
+			resp := http2PeerResetResponse(t, "text/event-stream", payload)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			_, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).streamRawChatCompletions(c, resp, rawChatCompletionsTestAccount(), "model", "model", "model", nil, nil, time.Now(), 10)
+			require.Error(t, err)
+			code, _, classified := OpenAIUpstreamStreamReadErrorDetails(err)
+			require.True(t, classified, "incomplete raw error event must not suppress reset classification")
+			require.Equal(t, OpenAIUpstreamHTTP2StreamErrorCode, code)
+			require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error\n"))
+			require.Contains(t, rec.Body.String(), "partial")
+			require.Contains(t, rec.Body.String(), "Do not automatically retry")
+			require.NotContains(t, rec.Body.String(), "cut")
+			require.NotContains(t, rec.Body.String(), "complete JSON without event boundary")
+			for _, line := range strings.Split(rec.Body.String(), "\n") {
+				if strings.HasPrefix(line, "data: ") {
+					require.True(t, json.Valid([]byte(strings.TrimPrefix(line, "data: "))), "reset terminal must follow complete JSON events only")
+				}
+			}
+		})
+	}
+}

@@ -87,6 +87,18 @@ jobs:
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/ws-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestHTTP2PeerResetWebSocketTurnPersistence' "$RUNNER_TEMP/http2-evidence/ws-red.log"
           grep -q 'final transport marker must preserve both WebSocket turn failures' "$RUNNER_TEMP/http2-evidence/ws-red.log"
+          for target in "${targets[@]}"; do git show "fe4aadbd9ecd0fdfa689282490fa2bf6736335a7:$target" > "$target"; done
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestHTTP2(NativeSemanticErrorBeforeReset|RawIncompleteErrorEventStillResets)$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/terminal-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/terminal-red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestHTTP2NativeSemanticErrorBeforeReset' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          grep -q -- '--- FAIL: TestHTTP2RawIncompleteErrorEventStillResets' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          grep -q 'native semantic failure must not become successful completion' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          grep -q 'incomplete raw error event must not suppress reset classification' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
           restore_head
           trap - EXIT
           git diff --exit-code
@@ -97,7 +109,7 @@ jobs:
           cd backend
           go test -tags=unit ./internal/handler ./internal/service ./internal/repository -run 'TestHTTP2|Test(CC|Responses)(Buffered|Streaming)FromNativeAnthropic|TestNativeAnthropic|TestProxyOpenAIWSHTTPBridge|TestPluginSSE|TestOpenAIStreaming|TestHandleChatStreaming|TestChatCompletionsBuffered|TestAnthropicBuffered|TestForwardAsAnthropic|TestForwardResponses|TestOpenAIImagesOAuthBodyRead|TestOps.*Stream|TestOpsBridge|TestAutoConfig|Test.*RawStream|Test.*StreamTruncat|Test.*ClientCancel|Test.*ClientDisconnect|Test.*Deadline|TestClassifyOpenAIAPIKeyHealth|TestOpsErrorWhere' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/green.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/green.log"; then exit 1; fi
-          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence; do
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence TestHTTP2NativeSemanticErrorBeforeReset TestHTTP2RawIncompleteErrorEventStillResets; do
             grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/green.log"
           done
       - name: Ordinary production build
@@ -113,7 +125,7 @@ jobs:
           cd backend
           go test -race -tags=unit ./internal/handler ./internal/service -run 'TestHTTP2|TestOpenAIStreamingReadError|TestHandleChatStreamingResponse_ClassifiesHTTP2|TestAutoConfigRealRequestOutcomes|TestForwardAsAnthropic_ForceChatCompletionsStreamReadError' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/race.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/race.log"; then exit 1; fi
-          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence; do
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence TestHTTP2NativeSemanticErrorBeforeReset TestHTTP2RawIncompleteErrorEventStillResets; do
             grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/race.log"
           done
       - name: PostgreSQL persistence and monitor regressions

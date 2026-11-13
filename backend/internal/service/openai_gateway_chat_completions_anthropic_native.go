@@ -251,7 +251,10 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
-		terminalSeen = terminalSeen || event.Type == "message_stop" || event.Type == "error"
+		if event.Type == "error" {
+			return resultWithUsage(), writeNativeAnthropicSemanticFailure(c, []byte(payload), originalModel)
+		}
+		terminalSeen = terminalSeen || event.Type == "message_stop"
 
 		if event.Type == "message_start" && event.Message != nil {
 			finalResp = event.Message
@@ -517,7 +520,13 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
-		terminalSeen = terminalSeen || event.Type == "message_stop" || event.Type == "error"
+		if event.Type == "error" {
+			if clientDisconnected {
+				return resultWithUsage(), errors.New("upstream semantic stream failure")
+			}
+			return resultWithUsage(), writeNativeAnthropicSemanticFailure(c, []byte(payload), originalModel)
+		}
+		terminalSeen = terminalSeen || event.Type == "message_stop"
 
 		// Forward received usage regardless of the client stream_options.
 		// The intermediate Responses converter synthesizes usage even when absent.
@@ -547,4 +556,37 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	}
 
 	return resultWithUsage(), nil
+}
+
+// Anthropic error events are terminal semantic failures. The conversion state
+// machines do not consume them, so stop before their successful finalizers.
+func writeNativeAnthropicSemanticFailure(c *gin.Context, payload []byte, model string) error {
+	message := sanitizeUpstreamErrorMessage(extractOpenAISSEErrorMessage(payload))
+	if message == "" {
+		message = "Upstream request failed"
+	}
+	errType := strings.TrimSpace(gjson.GetBytes(payload, "error.type").String())
+	if errType == "" {
+		errType = "upstream_error"
+	}
+	code := strings.TrimSpace(gjson.GetBytes(payload, "error.code").String())
+	if code == "" {
+		code = errType
+	}
+	status := openAIStreamFailureStatus(payload, message)
+	safeBody, _ := json.Marshal(gin.H{"error": gin.H{"type": errType, "code": code, "message": message}})
+	if c.Writer.Written() {
+		MarkOpsStreamFailure(c, errType, code, message, status)
+		if strings.Contains(c.Request.URL.Path, "/responses") {
+			_, _ = fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE("", model, time.Now().Unix(), safeBody, message))
+		} else {
+			_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", safeBody)
+		}
+		c.Writer.Flush()
+	} else {
+		c.Header("Content-Type", "application/json")
+		c.Data(status, "application/json", safeBody)
+	}
+	MarkResponseCommitted(c)
+	return errors.New("upstream semantic stream failure")
 }

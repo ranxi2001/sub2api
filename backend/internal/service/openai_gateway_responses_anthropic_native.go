@@ -252,7 +252,10 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
-		terminalSeen = terminalSeen || event.Type == "message_stop" || event.Type == "error"
+		if event.Type == "error" {
+			return resultWithUsage(), writeNativeAnthropicSemanticFailure(c, []byte(payload), originalModel)
+		}
+		terminalSeen = terminalSeen || event.Type == "message_stop"
 
 		if event.Type == "message_start" && event.Message != nil {
 			finalResp = event.Message
@@ -519,7 +522,13 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
-		terminalSeen = terminalSeen || event.Type == "message_stop" || event.Type == "error"
+		if event.Type == "error" {
+			if clientDisconnected {
+				return resultWithUsage(), errors.New("upstream semantic stream failure")
+			}
+			return resultWithUsage(), writeNativeAnthropicSemanticFailure(c, []byte(payload), originalModel)
+		}
+		terminalSeen = terminalSeen || event.Type == "message_stop"
 
 		processAnthropicEvent(&event)
 	}
