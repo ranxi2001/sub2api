@@ -988,6 +988,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	defer func() {
 		_ = upstreamConn.Close()
 	}()
+	ctx = context.WithValue(ctx, openAI429WeeklyObservedAtKey{}, time.Now())
 	handshakeBinding := s.bindOpenAIWSHandshake(account, gjson.GetBytes(firstClientMessage, "model").String(), headers)
 	logOpenAIWSV2Passthrough(
 		"relay_dial_ok account_id=%d status_code=%d upstream_request_id=%s",

@@ -140,7 +140,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		if eventType == "error" {
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
 			prewarmModel, _ := reqBody["model"].(string)
-			s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, prewarmModel)
+			s.persistOpenAIWSRateLimitSignal(openAI429LeaseObservation(ctx, lease), account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, prewarmModel)
 			errMsg := strings.TrimSpace(errMsgRaw)
 			if errMsg == "" {
 				errMsg = "OpenAI websocket prewarm error"
@@ -335,6 +335,7 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 	status := openAIWSPayloadTransientStatus(payload)
 	if status != 0 {
 		if status == http.StatusTooManyRequests {
+			ctx = context.WithValue(ctx, openAI429WeeklyHeadersKey{}, headers)
 			headers = openAIWSSemantic429Headers(account, canonicalModel, headers)
 		}
 		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, payload, canonicalModel)
@@ -350,13 +351,13 @@ func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx conte
 	s.rateLimitService.observeQualityStatus(ctx, account, status)
 	switch status {
 	case http.StatusUnauthorized, http.StatusTooManyRequests, 529:
-		s.handleOpenAIStreamTerminalAccountSideEffects(nil, account, payload, message, headers, canonicalModel)
+		s.handleOpenAIStreamTerminalAccountSideEffectsWithContext(ctx, account, payload, message, headers, canonicalModel)
 		return true
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
 			return false
 		}
-		s.handleOpenAIStreamTerminalAccountSideEffects(nil, account, payload, message, headers, canonicalModel)
+		s.handleOpenAIStreamTerminalAccountSideEffectsWithContext(ctx, account, payload, message, headers, canonicalModel)
 		return true
 	}
 
@@ -716,6 +717,7 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	// 可能只是成功连接时的全局快照，不能用于普通模型的 429 账号级限流。
 	// 实际拨号 HTTP 429 使用 nil responseBody，必须保留响应头。
 	if len(responseBody) > 0 {
+		ctx = context.WithValue(ctx, openAI429WeeklyHeadersKey{}, headers)
 		headers = openAIWSSemantic429Headers(account, model, headers)
 	}
 	s.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody, model)
