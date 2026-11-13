@@ -103,6 +103,24 @@ func TestHTTP2CCIncompleteSemanticEventStillResets(t *testing.T) {
 	}
 }
 
+func TestHTTP2CCNonContextSemanticStatusUnchanged(t *testing.T) {
+	for _, mode := range []string{"responses", "messages"} {
+		t.Run(mode, func(t *testing.T) {
+			// Generic provider validation keeps the existing semantic formatter's
+			// status policy; the new 400 normalization is limited to context.
+			payload := http2FollowupCCPartial + "event: error\ndata: {\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_encrypted_content\",\"message\":\"Encrypted content could not be verified\"}}\n\n"
+			rec, c, _, err := http2FollowupCCConvert(t, mode, payload)
+			require.Error(t, err)
+			marker, ok := GetOpsStreamError(c)
+			require.True(t, ok)
+			require.Nil(t, marker.TransportFailure)
+			require.Equal(t, http.StatusBadGateway, marker.IntendedStatus)
+			require.Equal(t, "invalid_encrypted_content", marker.Code)
+			assertHTTP2FollowupTerminal(t, rec.Body.String(), mode, "invalid_encrypted_content")
+		})
+	}
+}
+
 func TestHTTP2NativeRelayRequiresCompleteTerminal(t *testing.T) {
 	for name, fragment := range map[string]string{
 		"event_only":       "event: message_stop\n",

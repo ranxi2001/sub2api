@@ -569,7 +569,8 @@ func writeNativeAnthropicSemanticFailure(c *gin.Context, payload []byte, model s
 	if errType == "" {
 		errType = "upstream_error"
 	}
-	if isOpenAIContextWindowError(message, payload) {
+	contextRejected := isOpenAIContextWindowError(message, payload)
+	if contextRejected {
 		// Some CC providers supply only the canonical code. Retain request
 		// ownership/SLA exclusion even when error.type is absent or generic.
 		errType = "invalid_request_error"
@@ -578,7 +579,10 @@ func writeNativeAnthropicSemanticFailure(c *gin.Context, payload []byte, model s
 	if code == "" {
 		code = errType
 	}
-	status := openAIStreamFailedEventSemanticStatus(payload, message)
+	status := openAIStreamFailureStatus(payload, message)
+	if contextRejected {
+		status = http.StatusBadRequest
+	}
 	body := gin.H{"error": gin.H{"type": errType, "code": code, "message": message}}
 	if strings.HasSuffix(strings.TrimRight(c.Request.URL.Path, "/"), "/messages") {
 		body["type"] = "error"
