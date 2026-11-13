@@ -166,6 +166,8 @@ try {
   // Guard against an unstyled fixture before treating any assertion as a behavioral RED.
   css=await page.evaluate(()=>({header:getComputedStyle(document.querySelector('header')).position,headerHeight:document.querySelector('header>div').getBoundingClientRect().height,padding:getComputedStyle(document.querySelector('main')).paddingTop,toolbarShrink:getComputedStyle(document.querySelector('.layout-section-fixed')).flexShrink,display:getComputedStyle(document.querySelector('.table-page-layout')).display}))
   assert.deepEqual(css,{header:'sticky',headerHeight:64,padding:'16px',toolbarShrink:'0',display:'flex'},'CSS_SETUP: actual Tailwind utilities must be compiled')
+  await page.locator('.layout-section-fixed input').focus()
+  assert.equal((await searchUsable('initial-visible-search-focus')).scrollY,0,'Focusing an already visible search must not move the page')
   for(const viewport of [{width:375,height:667},{width:390,height:844},{width:320,height:667},{width:667,height:375},{width:844,height:390},{width:1023,height:768},{width:375,height:400},{width:375,height:320},{width:1280,height:900}]){
     await page.setViewportSize(viewport);await top()
     const label=`${viewport.width}x${viewport.height}`
