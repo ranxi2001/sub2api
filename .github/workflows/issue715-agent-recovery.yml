@@ -244,12 +244,11 @@ jobs:
           scheduler_leaf=backend/internal/service/openai_account_scheduler.go
           wait_added=backend/internal/service/openai_agent_message_recovery_wait.go
           # The Beta helper depends on fields absent in this historical recovery struct.
-          omission_added=backend/internal/service/openai_409_omit_history.go
-          shadow_added=(backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go)
+          omission_added=(backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go)
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$ws_original"
           git fetch --no-tags --depth=1 origin "$scheduler_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "$omission_added" "${shadow_added[@]}"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
           git restore --source="$scheduler_compat" -- "$scheduler_leaf"
@@ -257,8 +256,8 @@ jobs:
           actual=$(git hash-object "$scheduler_leaf")
           echo "compatibility_leaf_baseline=$scheduler_compat path=$scheduler_leaf expected_blob=$expected tested_blob=$actual"
           test "$expected" = "$actual"
-          rm -- "$added" "${ws_added[@]}" "$wait_added" "$omission_added" "${shadow_added[@]}"
-          for target in "${shadow_added[@]}"; do
+          rm -- "$added" "${ws_added[@]}" "$wait_added" "${omission_added[@]}"
+          for target in "${omission_added[@]}"; do
             test ! -e "$target"
             echo "candidate-only shadow dependency removed: $target"
           done
