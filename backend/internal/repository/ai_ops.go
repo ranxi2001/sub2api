@@ -197,7 +197,7 @@ func readAIOpsAccounts(ctx context.Context, tx *sql.Tx, ids []int64) (map[int64]
 }
 
 // Final failed provider requests and successes are separate populations. The
-// dedup key prevents retries/log duplication becoming fictitious sample size;
+// API-key-scoped dedup key prevents retries/log duplication becoming fictitious sample size;
 // recovered failover rows, business rejections, 429/529 and client cancels are
 // deliberately excluded from automatic fault evidence.
 // A final failure wins over a conflicting completed usage trace for the same
@@ -220,14 +220,14 @@ var aiOpsEvidenceSQL = `WITH success_candidates AS (
  AND (NOT u.stream OR t.detail->>'terminal'='completed')
  AND COALESCE(u.image_count,0)=0 AND COALESCE(u.image_output_tokens,0)=0 AND COALESCE(u.billing_mode,'token') NOT IN ('image','video')
 ), failures AS (
- SELECT DISTINCT ON (COALESCE(NULLIF(request_id,''),'error:'||id::text))
+ SELECT DISTINCT ON (api_key_id,COALESCE(NULLIF(request_id,''),'error:'||id::text))
  request_id,client_request_id,api_key_id,model FROM ops_error_logs o WHERE account_id=$1 AND created_at>=$2 AND created_at<$3
  AND NOT is_count_tokens AND NOT ` + opsBusinessLimitedSQL("o") + ` AND ` + opsEffectiveOwnerSQL("o") + `='provider'
  AND NOT ` + opsExplicitRequestRejectionSQL("o", "400, 404, 413, 422, 500, 502, 503", append(append([]string{}, service.OpsContextLimitRejectionNeedles...), service.OpsModelCapabilityRejectionNeedles...)) + `
  AND (status_code>=400 OR error_type='transport_error') AND error_type<>'client_canceled'
  AND COALESCE(NULLIF(upstream_status_code,0),status_code) NOT IN (429,529)
  AND (COALESCE(NULLIF(upstream_status_code,0),status_code)>=500 OR error_phase IN ('connect','transport') OR error_type='transport_error')
- ORDER BY COALESCE(NULLIF(request_id,''),'error:'||id::text),created_at DESC,id DESC
+ ORDER BY api_key_id,COALESCE(NULLIF(request_id,''),'error:'||id::text),created_at DESC,id DESC
 ), successes AS (
  SELECT s.* FROM success_candidates s
  WHERE NOT EXISTS (SELECT 1 FROM failures f WHERE f.api_key_id=s.api_key_id AND (

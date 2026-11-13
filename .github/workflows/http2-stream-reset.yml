@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   regression:
-    if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity'
+    if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity' || github.head_ref == 'fix/http2-reset-review-followup-20261114' || github.ref_name == 'fix/http2-reset-review-followup-20261114'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -24,6 +24,34 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: F3 behavioral RED on pinned merged production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/http2-evidence"
+          defect=ea1f3a28d8d1839e92ac5e48c6e9d7aeb90b0fff
+          red_tree="$RUNNER_TEMP/http2-successor-red"
+          git worktree add --detach "$red_tree" "$defect"
+          test_source=backend/internal/repository/http2_ai_ops_identity_integration_test.go
+          git show "HEAD:$test_source" > "$red_tree/$test_source"
+          test "$(git hash-object "$red_tree/$test_source")" = "$(git rev-parse "HEAD:$test_source")"
+          git rev-parse HEAD HEAD^{tree} "$defect" "$defect^{tree}" "HEAD:$test_source" > "$RUNNER_TEMP/http2-evidence/f3-red-identity.txt"
+          set +e
+          (cd "$red_tree/backend" && go test -tags=integration ./internal/repository -run '^TestHTTP2AIOpsFailureIdentityScopedToAPIKey$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/http2-evidence/f3-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/f3-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/f3-red.log"; then exit 1; fi
+          for scenario in shared_request unknown_model conflicting_completed_usage; do
+            grep -q -- "--- FAIL: TestHTTP2AIOpsFailureIdentityScopedToAPIKey/$scenario" "$RUNNER_TEMP/http2-evidence/f3-red.log"
+          done
+          for diagnostic in 'F3 one success plus two different-key resets sharing X-Request-ID must be three samples' 'F3 an older different-key unknown-model failure must remain a cohort blocker' 'F3 both scoped failures must survive success exclusion'; do
+            grep -q -- "$diagnostic" "$RUNNER_TEMP/http2-evidence/f3-red.log"
+          done
+          test -z "$(git status --porcelain)"
       - name: F1 behavioral RED through the real AIOps evidence query
         shell: bash
         run: |
@@ -180,13 +208,15 @@ jobs:
         run: |
           set -euo pipefail
           cd backend
-          go test -tags=integration ./internal/repository -run 'TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure|TestHTTP2PeerResetPersistence|TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus|TestChannelMonitorV2.*Error' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/persistence.log"
+          go test -tags=integration ./internal/repository -run 'TestHTTP2AIOpsFailureIdentityScopedToAPIKey|TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure|TestHTTP2PeerResetPersistence|TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus|TestChannelMonitorV2.*Error' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/persistence.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/persistence.log"; then exit 1; fi
           grep -q -- '--- PASS: TestHTTP2PeerResetPersistence' "$RUNNER_TEMP/http2-evidence/persistence.log"
           grep -q -- '--- PASS: TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure' "$RUNNER_TEMP/http2-evidence/persistence.log"
-          go test -race -tags=integration ./internal/repository -run '^TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure$' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/f1-race.log"
+          grep -q -- '--- PASS: TestHTTP2AIOpsFailureIdentityScopedToAPIKey' "$RUNNER_TEMP/http2-evidence/persistence.log"
+          go test -race -tags=integration ./internal/repository -run '^TestHTTP2AIOps(FailureIdentityScopedToAPIKey|EvidenceIncludesCommittedTransportFailure)$' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/f1-race.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/f1-race.log"; then exit 1; fi
           grep -q -- '--- PASS: TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure' "$RUNNER_TEMP/http2-evidence/f1-race.log"
+          grep -q -- '--- PASS: TestHTTP2AIOpsFailureIdentityScopedToAPIKey' "$RUNNER_TEMP/http2-evidence/f1-race.log"
           git diff --exit-code
       - uses: actions/upload-artifact@v7
         if: always()
@@ -195,7 +225,7 @@ jobs:
           path: ${{ runner.temp }}/http2-evidence/
 
   user-surface:
-    if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity'
+    if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity' || github.head_ref == 'fix/http2-reset-review-followup-20261114' || github.ref_name == 'fix/http2-reset-review-followup-20261114'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
