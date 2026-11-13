@@ -968,6 +968,9 @@ export default {
         copilotSDKDesc: 'Preserve native Codex tools and cancel SDK turns on disconnect. Use a dedicated group with one sidecar account; Base URL and API Key belong to the sidecar.',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
+        passthroughModelFilter: 'Filter passthrough accounts by model',
+        passthroughModelFilterDesc:
+          'Use the account model whitelist and mapping source names to select this account. Mapping targets do not rename passthrough requests. An empty list allows all models. Disabled by default.',
         flattenNamespaces: 'Flatten Codex namespace tools (compatibility)',
         flattenNamespacesDesc:
           'Disabled by default: Codex namespace tool declarations are forwarded as-is on /responses, which is what the ChatGPT Codex backend expects. Enable only when this OAuth account is routed to a relay that rejects namespace tools — flattening renames them to namespace__tool, which breaks models that address collaboration tools as functions.<namespace>.<tool>. Compaction requests always flatten regardless of this switch.',
@@ -1088,7 +1091,7 @@ export default {
         testModeDefault: 'Default request',
         testModeCompact: 'Compact probe',
         testModeBPSTools: 'BPS tool roundtrip (up to 3 upstream requests)',
-        modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
+        modelRestrictionDisabledByPassthrough: 'Automatic passthrough ignores model restrictions by default. Enable "Filter passthrough accounts by model" to use them for account selection only.',
       },
       grok: {
         baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',

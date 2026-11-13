@@ -44,7 +44,7 @@ func supplementUnmappedOpenAIModels(accounts []Account, groupID *int64, models [
 		if account.hasOAuthInitialModelSelection() {
 			continue
 		}
-		if account.Platform != PlatformOpenAI || (!account.IsOpenAIPassthroughEnabled() && !account.IsOpenAIModelMappingAliases() && len(account.GetModelMapping()) != 0) {
+		if account.Platform != PlatformOpenAI || (!(account.IsOpenAIPassthroughEnabled() && !account.IsOpenAIPassthroughModelFilterEnabled()) && !account.IsOpenAIModelMappingAliases() && len(account.GetModelMapping()) != 0) {
 			continue
 		}
 		for _, model := range catalog {
