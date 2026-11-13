@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -100,14 +101,29 @@ func TestOAuth429WeeklyOnlyWSForward(t *testing.T) {
 		{"frame_with_weekly_handshake", true, false, true},
 		{"body_only_no_percentage", true, false, false},
 		{"frame_with_explicit_cache", true, true, true},
+		{"frame_low_overrides_high_cache", true, true, false},
+		{"frame_invalid_overrides_high_cache", true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := weekly429Headers("99", "0", false)
 			h.Set("x-codex-secondary-window-minutes", "0")
-			if tc.name == "body_only_no_percentage" || tc.cached {
+			if tc.name == "body_only_no_percentage" || tc.name == "frame_with_explicit_cache" {
 				h = http.Header{}
 			}
+			if tc.name == "frame_low_overrides_high_cache" {
+				h.Set("x-codex-primary-used-percent", "20")
+			}
+			if tc.name == "frame_invalid_overrides_high_cache" {
+				h.Set("x-codex-primary-used-percent", "invalid")
+			}
+			// A long handshake reset must not leak into ordinary-model temporary cooldown.
+			h.Set("x-codex-primary-reset-after-seconds", "500000")
+			if tc.name == "body_only_no_percentage" || tc.name == "frame_with_explicit_cache" {
+				h = http.Header{}
+			}
+			var peers atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				peers.Add(1)
 				if !tc.frame {
 					for k, v := range h {
 						w.Header()[k] = v
@@ -144,7 +160,7 @@ func TestOAuth429WeeklyOnlyWSForward(t *testing.T) {
 			} else {
 				delete(a.Extra, "codex_7d_used_percent")
 			}
-			repo := &weeklyOnlyWSRepo{}
+			repo := &weeklyOnlyWSRepo{openAIWSRateLimitSignalRepo: openAIWSRateLimitSignalRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{*a}}}}
 			rates := NewRateLimitService(repo, nil, cfg, nil, nil)
 			upstream := &httpUpstreamRecorder{}
 			gateway := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rates, httpUpstream: upstream, cache: &stubGatewayCache{}, cfg: cfg, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector()}
@@ -160,6 +176,11 @@ func TestOAuth429WeeklyOnlyWSForward(t *testing.T) {
 			_, err := gateway.Forward(t.Context(), c, a, []byte(`{"model":"gpt-5.1","stream":false,"input":"fictional test"}`))
 			require.Error(t, err)
 			require.Equal(t, 429, rec.Code)
+			require.Positive(t, peers.Load(), "must observe the actual upstream peer")
+			if tc.frame {
+				require.NotEmpty(t, repo.rateLimitCalls)
+				require.WithinDuration(t, time.Now().Add(2*time.Hour), repo.rateLimitCalls[len(repo.rateLimitCalls)-1], 10*time.Second, "temporary cooldown must use the event reset, not handshake quota")
+			}
 			require.Nil(t, upstream.lastReq, "WS rejection must not fall back to HTTP")
 			require.Equal(t, tc.want, len(repo.writes) > 0, "WS Forward must use weekly-only permanent scheduling policy")
 			if tc.want {
@@ -187,7 +208,7 @@ func TestOAuth429WeeklyOnlyWSClientIngress(t *testing.T) {
 	a.Credentials = openAIWSQuotaTestCredentials(AccountTypeOAuth, "")
 	a.Extra["responses_websockets_v2_enabled"] = true
 	delete(a.Extra, "codex_7d_used_percent")
-	repo := &weeklyOnlyWSRepo{}
+	repo := &weeklyOnlyWSRepo{openAIWSRateLimitSignalRepo: openAIWSRateLimitSignalRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{*a}}}}
 	rates := NewRateLimitService(repo, nil, cfg, nil, nil)
 	gateway := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rates, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{}, cfg: cfg, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool}
 	rates.SetAccountRuntimeBlocker(gateway)

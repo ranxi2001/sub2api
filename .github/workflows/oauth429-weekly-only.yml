@@ -5,6 +5,10 @@ on:
     branches: [production]
     paths:
       - 'backend/internal/service/*429*'
+      - 'backend/internal/service/openai_gateway_service.go'
+      - 'backend/internal/service/openai_gateway_usage.go'
+      - 'backend/internal/service/openai_gateway_passthrough.go'
+      - 'backend/internal/service/openai_ws_forwarder_support.go'
       - 'backend/internal/repository/oauth429_weekly_only*'
       - '.github/workflows/oauth429-weekly-only.yml'
       - '.github/scripts/oauth429-weekly-only-*'
@@ -38,13 +42,19 @@ jobs:
           git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
           git diff --exit-code
           git worktree add --detach "$RUNNER_TEMP/oauth429-red" "$CANDIDATE"
-          target=backend/internal/service/openai_disable_scheduling_429.go
-          expected=ab9d5251a4acec7c17b0adb0f21ae59a71f89067
-          test "$(git rev-parse "$BASELINE:$target")" = "$expected"
-          git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-red/$target"
-          actual=$(git hash-object "$RUNNER_TEMP/oauth429-red/$target")
-          test "$actual" = "$expected"
-          printf '%s %s %s\n' "$BASELINE" "$actual" "$target" > evidence/restored-blobs.txt
+          while read -r expected target; do
+            test "$(git rev-parse "$BASELINE:$target")" = "$expected"
+            git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-red/$target"
+            actual=$(git hash-object "$RUNNER_TEMP/oauth429-red/$target")
+            test "$actual" = "$expected"
+            printf '%s %s %s\n' "$BASELINE" "$actual" "$target" >> evidence/restored-blobs.txt
+          done <<'BLOBS'
+          ab9d5251a4acec7c17b0adb0f21ae59a71f89067 backend/internal/service/openai_disable_scheduling_429.go
+          849aec6c598b9ca5e94f218f76e7d7266505ae57 backend/internal/service/openai_gateway_service.go
+          9fb1903315d1f086f4f38bd73a5a0a5f69f6542a backend/internal/service/openai_gateway_usage.go
+          9dfffb6d6280278c5c21015ddffad12b706efa5c backend/internal/service/openai_ws_forwarder_support.go
+          aa0c3dafdf9e9e3f5ec78467fa08899c67e9ec89 backend/internal/service/openai_gateway_passthrough.go
+          BLOBS
           git -C "$RUNNER_TEMP/oauth429-red" diff --stat > evidence/red-diff.txt
           git ls-files 'backend/internal/service/*429*test.go' 'backend/internal/repository/oauth429_weekly_only*test.go' > evidence/retained-tests.txt
           while IFS= read -r test_file; do
@@ -64,6 +74,28 @@ jobs:
           set -e
           printf '%s\n' "$result" > evidence/red-exit.txt
           python3 .github/scripts/oauth429-weekly-only-evidence.py red evidence/red.jsonl "$result"
+      - name: Isolate rejected-header cache poisoning with original parser sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/oauth429-cache-red" "$CANDIDATE"
+          while read -r expected target; do
+            test "$(git rev-parse "$BASELINE:$target")" = "$expected"
+            git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-cache-red/$target"
+            test "$(git hash-object "$RUNNER_TEMP/oauth429-cache-red/$target")" = "$expected"
+            printf '%s %s %s\n' "$BASELINE" "$expected" "$target" >> evidence/cache-restored-blobs.txt
+          done <<'BLOBS'
+          849aec6c598b9ca5e94f218f76e7d7266505ae57 backend/internal/service/openai_gateway_service.go
+          9fb1903315d1f086f4f38bd73a5a0a5f69f6542a backend/internal/service/openai_gateway_usage.go
+          BLOBS
+          git -C "$RUNNER_TEMP/oauth429-cache-red" diff --exit-code -- '*_test.go'
+          git -C "$RUNNER_TEMP/oauth429-cache-red" diff --stat > evidence/cache-red-diff.txt
+          set +e
+          (cd "$RUNNER_TEMP/oauth429-cache-red/backend" && go test -json -tags=unit ./internal/service -run '^TestOAuth429WeeklyOnlySequentialCache$' -count=1 -timeout=10m) > evidence/red-cache.jsonl 2> evidence/red-cache.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/red-cache-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py red-cache evidence/red-cache.jsonl "$result"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -91,7 +123,7 @@ jobs:
           git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
           git diff --exit-code
           set +e
-          (cd backend && go test -race -json -tags=unit ./internal/service -run '^Test(OAuth429WeeklyOnly|DisableScheduling429|RateLimitDisableSchedulingOn429|OpenAIGatewayDisableSchedulingOn429|Managed429WeeklyPolicy|Weekly429Threshold|TOTPRotationOn429)' -count=1 -timeout=10m) > evidence/green.jsonl 2> evidence/green.stderr
+          (cd backend && go test -race -json -tags=unit ./internal/service -run '^Test(OAuth429WeeklyOnly|DisableScheduling429|RateLimitDisableSchedulingOn429|OpenAIGatewayDisableSchedulingOn429|Managed429WeeklyPolicy|Weekly429Threshold|TOTPRotationOn429|OpenAIStream429|CalculateOpenAI429ResetTime)' -count=1 -timeout=10m) > evidence/green.jsonl 2> evidence/green.stderr
           result=$?
           set -e
           printf '%s\n' "$result" > evidence/green-exit.txt
@@ -109,6 +141,14 @@ jobs:
           set -e
           printf '%s\n' "$result" > evidence/green-repository-exit.txt
           python3 .github/scripts/oauth429-weekly-only-evidence.py repository evidence/green-repository.jsonl "$result"
+      - name: Ordinary backend build without test tags
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          (cd backend && go build ./...) > evidence/ordinary-build.log 2>&1
+          printf 'PASS go build ./... at %s\n' "$CANDIDATE" | tee -a evidence/ordinary-build.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:

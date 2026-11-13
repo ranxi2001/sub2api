@@ -73,7 +73,13 @@ func TestOAuth429WeeklyOnlyHeaderBoundaries(t *testing.T) {
 		{"weekly_negative", weekly429Headers("-1", "100", false), false},
 		{"weekly_over_100", weekly429Headers("101", "100", false), false},
 	} {
-		t.Run(tc.name, func(t *testing.T) { assertWeeklyOnly429Write(t, tc.headers, tc.want) })
+		t.Run(tc.name, func(t *testing.T) {
+			cacheUsed := 99.0
+			if tc.name == "5h_only_100" || tc.name == "unknown_primary_100" || tc.name == "unknown_windows" {
+				cacheUsed = 20
+			}
+			assertWeeklyOnly429Write(t, tc.headers, tc.want, cacheUsed)
+		})
 	}
 	for _, reverse := range []bool{false, true} {
 		for _, neighbor := range []string{"0", "-1", "invalid", "", "absent", "300", "60"} {
@@ -121,11 +127,14 @@ func TestOAuth429WeeklyOnlyHeaderBoundaries(t *testing.T) {
 	}
 }
 
-func assertWeeklyOnly429Write(t *testing.T, headers http.Header, want bool) {
+func assertWeeklyOnly429Write(t *testing.T, headers http.Header, want bool, cachedUsage ...float64) {
 	t.Helper()
 	// A high cached value deliberately challenges the no-fallback boundary.
 	account := scheduling429Account()
 	account.Extra["codex_7d_window_minutes"] = 10080
+	if len(cachedUsage) > 0 {
+		account.Extra["codex_7d_used_percent"] = cachedUsage[0]
+	}
 	repo := &weeklyOnly429Repo{}
 	rates := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	rates.HandleUpstreamError(t.Context(), account, 429, headers, nil)
@@ -316,6 +325,60 @@ func TestOAuth429WeeklyOnlyNonweeklyHeadersAllowExplicitCache(t *testing.T) {
 				require.Equal(t, []bool{false}, repo.values)
 			}
 			require.NotEmpty(t, repo.extra, "real quota parser/persistence path must run")
+		})
+	}
+}
+
+type weeklyOnlyPersistedRepo struct {
+	weeklyOnly429Repo
+	stored *Account
+}
+
+func (r *weeklyOnlyPersistedRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	r.stored.Extra = mergeCodexUsageUpdates(r.stored.Extra, updates)
+	return nil
+}
+
+func (r *weeklyOnlyPersistedRepo) GetByID(_ context.Context, _ int64) (*Account, error) {
+	reloaded := *r.stored
+	reloaded.Extra = shallowCopyMap(r.stored.Extra)
+	return &reloaded, nil
+}
+
+func TestOAuth429WeeklyOnlySequentialCache(t *testing.T) {
+	for _, tc := range []struct {
+		name, key string
+		values    []string
+	}{
+		{"duplicate_usage", "x-codex-primary-used-percent", []string{"99", "20"}},
+		{"conflicting_window", "x-codex-primary-window-minutes", []string{"10080", "300"}},
+		{"conflicting_weekly_windows", "x-codex-secondary-window-minutes", []string{"10080"}},
+		{"invalid_weekly_usage", "x-codex-primary-used-percent", []string{"invalid"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := scheduling429Account()
+			initial := ParseCodexRateLimitHeaders(weekly429Headers("20", "0", false))
+			initial.UpdatedAt = time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+			a.Extra = mergeCodexUsageUpdates(a.Extra, buildCodexUsageExtraUpdates(initial, time.Now()))
+			repo := &weeklyOnlyPersistedRepo{stored: a}
+			rates := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			h := weekly429Headers("99", "0", false)
+			h[http.CanonicalHeaderKey(tc.key)] = tc.values
+			first, err := repo.GetByID(t.Context(), a.ID)
+			require.NoError(t, err)
+			rates.HandleUpstreamError(t.Context(), first, 429, h, nil)
+			require.Empty(t, repo.ids, "invalid weekly headers must not disable on the first request")
+			reloaded, err := repo.GetByID(t.Context(), a.ID)
+			require.NoError(t, err)
+			rates.HandleUpstreamError(t.Context(), reloaded, 429, nil, nil)
+			require.Empty(t, repo.ids, "rejected weekly headers must not poison a later headerless 429 cache")
+			// A later independently valid weekly observation restores usable evidence.
+			valid := ParseCodexRateLimitHeaders(weekly429Headers("99", "0", false))
+			require.NoError(t, repo.UpdateExtra(t.Context(), a.ID, buildCodexUsageExtraUpdates(valid, time.Now())))
+			reloaded, err = repo.GetByID(t.Context(), a.ID)
+			require.NoError(t, err)
+			rates.HandleUpstreamError(t.Context(), reloaded, 429, nil, nil)
+			require.Equal(t, []bool{false}, repo.values)
 		})
 	}
 }

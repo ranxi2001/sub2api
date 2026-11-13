@@ -15,6 +15,7 @@ const (
 	OpenAIDisableSchedulingOn429ExtraKey                  = "openai_disable_scheduling_on_429"
 	OpenAIDisableSchedulingOn4297dThresholdExtraKey       = "openai_disable_scheduling_on_429_7d_threshold_percent"
 	DefaultOpenAIDisableSchedulingOn4297dThresholdPercent = 98.0
+	openAI429WeeklyInvalidAtKey                           = "codex_7d_permanent_disable_invalid_at"
 )
 
 func openAI429WeeklyThreshold(account *Account) (float64, bool) {
@@ -33,20 +34,10 @@ func validOpenAI429Percent(value float64) bool {
 // A present but invalid/low weekly observation must never fall back to an older
 // high snapshot. The five-hour window does not participate in this policy.
 func openAI429WeeklyHeaderUsage(headers http.Header) (used float64, present, valid bool) {
-	hasObservation := false
-	for _, window := range []string{"primary", "secondary"} {
-		for _, field := range []string{"used-percent", "window-minutes", "reset-after-seconds"} {
-			_, exists := headers[http.CanonicalHeaderKey("x-codex-"+window+"-"+field)]
-			hasObservation = hasObservation || exists
-		}
-	}
-	if !hasObservation {
-		return 0, false, false
-	}
-	snapshot := ParseCodexRateLimitHeaders(headers)
-	if snapshot == nil {
-		return 0, true, false
-	}
+	return openAI429WeeklyParsedHeaderUsage(headers, ParseCodexRateLimitHeaders(headers))
+}
+
+func openAI429WeeklyParsedHeaderUsage(headers http.Header, snapshot *OpenAICodexUsageSnapshot) (used float64, present, valid bool) {
 	// A permanent pause must not rely on Normalize's legacy primary=7d
 	// assumption. Require exactly one explicitly identified weekly window.
 	prefix := ""
@@ -76,6 +67,11 @@ func openAI429WeeklyHeaderUsage(headers http.Header) (used float64, present, val
 		prefix = "x-codex-" + window + "-"
 	}
 	if prefix == "" {
+		// Nonweekly/unidentified data is not a weekly observation. It neither
+		// supplies a weekly percentage nor vetoes independently valid cache.
+		return 0, false, false
+	}
+	if snapshot == nil {
 		return 0, true, false
 	}
 	weekly := snapshot.PrimaryUsedPercent
@@ -145,6 +141,14 @@ func openAI429WeeklyUsage(account *Account, headers http.Header, now time.Time) 
 			return 0, false
 		}
 	}
+	// Header.Get/Normalize can retain a conflicting packet's first value for
+	// ordinary quota display. That packet must never become permanent evidence.
+	if raw, exists := extra[openAI429WeeklyInvalidAtKey]; exists {
+		invalidAt, err := time.Parse(time.RFC3339Nano, fmt.Sprint(raw))
+		if err != nil || !invalidAt.Before(observed) {
+			return 0, false
+		}
+	}
 	if raw, exists := extra["codex_7d_reset_at"]; exists {
 		reset, err := parseTime(fmt.Sprint(raw))
 		if err != nil || !reset.After(now) {
@@ -181,6 +185,11 @@ func openAIDisableSchedulingOn429Enabled(account *Account) bool {
 }
 
 type openAIDisableScheduling429ObservedKey struct{}
+
+// Stream cooldowns intentionally discard ordinary-model handshake quota. The
+// opt-in permanent weekly policy still needs that observation, including lows
+// and invalid evidence that must prevent fallback to an older high snapshot.
+type openAI429WeeklyHeadersKey struct{}
 
 type openAIDisableScheduling429Observation struct {
 	accountID int64
@@ -222,6 +231,9 @@ func (s *RateLimitService) maybeDisableOpenAISchedulingOn429(ctx context.Context
 		return ctx, false
 	}
 	threshold, thresholdValid := openAI429WeeklyThreshold(owner)
+	if evidence, ok := ctx.Value(openAI429WeeklyHeadersKey{}).(http.Header); ok {
+		headers = evidence
+	}
 	used, usageValid := openAI429WeeklyUsage(owner, headers, time.Now())
 	if !thresholdValid || !usageValid || used <= threshold {
 		return ctx, false

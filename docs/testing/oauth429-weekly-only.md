@@ -1,7 +1,8 @@
 # OAuth 429 weekly-only permanent disable
 
 Baseline: `f895ea743f34a4c4ab6c9d01c01e13c931625a6e`.
-Only production change: `backend/internal/service/openai_disable_scheduling_429.go`.
+Production scope: weekly policy, quota snapshot header provenance, and the three
+stream/WS sites that separate permanent-policy evidence from temporary cooldown headers.
 All public fixtures are fictional. Local work is static only; dynamic evidence is
 produced by `.github/workflows/oauth429-weekly-only.yml` on GitHub Actions.
 
@@ -14,13 +15,17 @@ unidentified quota observations fail closed without reusing cached high usage.
 The percentage is not inferred from a body `usage_limit_reached` or
 `limit_window_minutes` field. No maximum across percentages is selected.
 
-When there are no current quota observation headers, cache fallback requires
+When there is no current explicit weekly observation, cache fallback requires
 `codex_7d_window_minutes=10080` and retains account identity, percentage,
 observation, per-field provenance, staleness and reset checks. If field versions
 exist, both usage and window identity must have valid fresh versions from the same
-source observation. A partial packet cannot borrow another packet's weekly identity. Legacy
+source observation. A partial packet cannot borrow another packet's weekly identity.
+Rejected weekly headers carry an observation timestamp through parser/persistence;
+a later headerless 429 cannot trust usage from that packet. A newer valid weekly
+observation may supply fresh evidence again. Temporary quota normalization is unchanged. Legacy
 snapshots without an explicit window no longer authorize a permanent disable.
-Current unclassified/short-only quota headers continue to block cache fallback.
+Nonweekly or unidentified headers do not veto independently valid weekly cache;
+unidentified percentages themselves never count as weekly evidence.
 
 ## Execution coverage
 
@@ -30,9 +35,11 @@ Current unclassified/short-only quota headers continue to block cache fallback.
 | `TestOAuth429WeeklyOnlyHeaderBoundaries` | Both weekly positions; zero/invalid/absent/5h neighbors; 5h-only 100; missing/low/invalid weekly; duplicates and conflicts; no reuse of high cache |
 | `TestOAuth429WeeklyOnlyCachedIdentity` | Explicit identity; global/field freshness; identity mismatch; future/stale/missing versions; absolute/relative resets |
 | `TestOAuth429WeeklyOnlyCacheDoesNotRelabelUnidentifiedUsage` | Actual parser/normalizer/merge; partial usage-only and window-only packets cannot combine into weekly evidence |
+| `TestOAuth429WeeklyOnlyNonweeklyHeadersAllowExplicitCache` | Public RateLimitService: explicit fresh cached 99 with only 300-minute 100 and zero/invalid neighbor; absent/unidentified cache and equality remain closed |
+| `TestOAuth429WeeklyOnlySequentialCache` | Public error service → actual parser → per-field persist/merge → reload → headerless 429; duplicate/conflicting/invalid weekly packets cannot poison cache |
 | `TestOAuth429WeeklyOnlyPolicyGates` | Own threshold, strict equality, invalid threshold, opt-out, non429, body-only weekly classification |
 | `TestOAuth429WeeklyOnlyHTTPForward` | Actual `Forward` entry, native and OAuth passthrough HTTP paths, mocked transport response, primary/secondary weekly zero-neighbor and negative cases |
-| `TestOAuth429WeeklyOnlyWSForward` | Actual `Forward` entry, real loopback WS upstream handshake 429 and error frames, handshake quota and explicit-cache/body-only controls |
+| `TestOAuth429WeeklyOnlyWSForward` | Actual `Forward` entry, real loopback WS upstream handshake 429 and error frames, handshake quota, fresh low/invalid versus high cache, and explicit-cache/body-only controls; observes upstream peer and retains event-reset temporary cooldown |
 | `TestOAuth429WeeklyOnlyWSClientIngress` | Real loopback client socket → `ProxyResponsesWebSocketFromClient` ctx_pool path → upstream adapter fixture → secondary weekly error frame |
 | `TestOAuth429WeeklyOnlyCombinedRotation` | Actual RateLimitService and auto2FA service together, real queue method with spy storage, manual snapshot untouched |
 | `TestOAuth429WeeklyOnlyRotationPreservesScheduling` | Isolated PostgreSQL: actual permanent scheduling write, real automatic rotation repository lifecycle success/failure, manual enable/disable after queueing, successful-test recovery |
@@ -43,6 +50,10 @@ transport is mocked, the WS loopback upstream and credentials are fictional, and
 no paid calls or production writes occur. The repository lifecycle uses fictional
 worker transitions; no real 2FA enrollment runs. The combined service and durable
 repository tests are separate boundaries, not a claimed end-to-end worker test.
+
+The permanent policy receives original stream/WS headers through context before
+temporary cooldown sanitization. Ordinary-model temporary cooldowns still discard
+successful handshake quota headers and use their existing event/body policy.
 
 ## Caller coverage limits
 
@@ -123,7 +134,7 @@ report. Line numbers refer to this change's source tree.
 | `openai_gateway_messages.go:641` | `handleAnthropicErrorResponse` | `handleCompatErrorResponse` |
 | `openai_gateway_passthrough.go:1024` | `handleFailoverErrorResponsePassthrough` | `handleOpenAIAccountUpstreamError` |
 | `openai_gateway_passthrough.go:1097` | `handleErrorResponsePassthrough` | `handleOpenAIAccountUpstreamError` |
-| `openai_gateway_passthrough.go:1883` | `handleOpenAIStreamTerminalAccountSideEffects` | `handleOpenAIAccountUpstreamError` |
+| `openai_gateway_passthrough.go:1884` | `handleOpenAIStreamTerminalAccountSideEffects` | `handleOpenAIAccountUpstreamError` |
 | `openai_gateway_responses_chat_fallback.go:179` | `forwardResponsesViaRawChatCompletions` | `handleErrorResponse` |
 | `openai_gateway_upstream_errors.go:597` | `handleFailoverSideEffects` | `handleOpenAIAccountUpstreamError` |
 | `openai_gateway_upstream_errors.go:599` | `handleFailoverSideEffects` | `handleOpenAIAccountUpstreamError` |
@@ -139,10 +150,10 @@ report. Line numbers refer to this change's source tree.
 | `openai_ws_forwarder_ingress.go:1992` | `ProxyResponsesWebSocketFromClient` | `handleOpenAIWSErrorEventTransientFailure` |
 | `openai_ws_forwarder_ingress.go:2160` | `ProxyResponsesWebSocketFromClient` | `handleOpenAIWSTerminalTransientFailure` |
 | `openai_ws_forwarder_support.go:325` | `handleOpenAIWSTerminalTransientFailure` | `handleOpenAIWSFailureAccountSideEffects` |
-| `openai_ws_forwarder_support.go:340` | `handleOpenAIWSErrorEventTransientFailure` | `handleOpenAIAccountUpstreamError` |
-| `openai_ws_forwarder_support.go:367` | `handleOpenAIWSFailureAccountSideEffects` | `handleOpenAIAccountUpstreamError` |
-| `openai_ws_forwarder_support.go:379` | `handleOpenAIWSDialTransientFailure` | `handleOpenAIAccountUpstreamError` |
-| `openai_ws_forwarder_support.go:721` | `persistOpenAIWSRateLimitSignal` | `handleOpenAIAccountUpstreamError` |
+| `openai_ws_forwarder_support.go:341` | `handleOpenAIWSErrorEventTransientFailure` | `handleOpenAIAccountUpstreamError` |
+| `openai_ws_forwarder_support.go:368` | `handleOpenAIWSFailureAccountSideEffects` | `handleOpenAIAccountUpstreamError` |
+| `openai_ws_forwarder_support.go:380` | `handleOpenAIWSDialTransientFailure` | `handleOpenAIAccountUpstreamError` |
+| `openai_ws_forwarder_support.go:723` | `persistOpenAIWSRateLimitSignal` | `handleOpenAIAccountUpstreamError` |
 | `openai_ws_forwarder_v2.go:379` | `forwardOpenAIWSV2` | `handleOpenAIWSDialTransientFailure` |
 | `openai_ws_forwarder_v2.go:958` | `forwardOpenAIWSV2` | `handleOpenAIWSErrorEventTransientFailure` |
 | `openai_ws_forwarder_v2.go:1085` | `forwardOpenAIWSV2` | `handleOpenAIWSTerminalTransientFailure` |
