@@ -1,0 +1,95 @@
+name: Issue817 quota skip pending 5xx
+
+on:
+  push:
+    branches: [fix/issue817-quota-skip-followup-20261113]
+  pull_request:
+    paths:
+      - 'backend/internal/repository/quality_template_quota.go'
+      - 'backend/internal/repository/quality_quota_5xx_integration_test.go'
+      - 'backend/internal/service/quality_quota_integration_helper.go'
+      - '.github/workflows/issue817-quota-skip-followup.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue817-skip-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pending-5xx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        behavior: [red, green]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ matrix.behavior }}
+      - name: Record exact candidate and baseline blob
+        working-directory: ${{ matrix.behavior }}
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          BEHAVIOR: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/head.txt
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          if [ "$BEHAVIOR" = red ]; then
+            original=c424f8217da12cd4fb8d10aeaf1c4f2592c3f286
+            source=backend/internal/repository/quality_template_quota.go
+            git fetch --no-tags --depth=1 origin "$original"
+            git rev-parse "$original:$source" | tee evidence/original-blob.txt
+            # Only the isolated RED checkout receives the old production blob.
+            git show "$original:$source" > "$source"
+          fi
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ matrix.behavior }}/backend/go.mod
+          cache-dependency-path: ${{ matrix.behavior }}/backend/go.sum
+      - name: Real PostgreSQL plan and existing Redis trigger worker
+        working-directory: ${{ matrix.behavior }}
+        env:
+          CI: 'true'
+          BEHAVIOR: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestIssue817QuotaSkipPreservesPending5xxExecution$' -count=1 -v -timeout=10m) > evidence/pending-5xx.log 2>&1
+          result=$?
+          set -e
+          cat evidence/pending-5xx.log
+          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' evidence/pending-5xx.log
+          if [ "$BEHAVIOR" = red ]; then
+            test "$result" -ne 0
+            grep -F -- '--- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/never_run' evidence/pending-5xx.log
+            grep -F -- '--- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/previous_completed_run' evidence/pending-5xx.log
+            grep -F -- 'pending 5xx signal must execute after quota-skipped cron before acknowledgement' evidence/pending-5xx.log
+          else
+            test "$result" -eq 0
+            grep -F -- '--- PASS: TestIssue817QuotaSkipPreservesPending5xxExecution/never_run' evidence/pending-5xx.log
+            grep -F -- '--- PASS: TestIssue817QuotaSkipPreservesPending5xxExecution/previous_completed_run' evidence/pending-5xx.log
+          fi
+      - name: Retained exact lease, 401, ownership, manual and trigger contracts
+        if: matrix.behavior == 'green'
+        working-directory: green/backend
+        env:
+          CI: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=integration ./internal/repository -run '^(TestIssue817QuotaSkipPreserves401AndOwnership|TestIssue817QuotaSkipRetainsActualIsolationOwnership|TestIssue817ManualTriggerIsOneShotAndLeaseFenced|TestQuality5xxClaimKeepsCronAndCoalescesScheduledRun|TestQualityRetestRestBlocksEveryClaimUntilDeadline)$' -count=1 -v -timeout=10m 2>&1 | tee ../evidence/retained-contracts.log
+          ! grep -Eq 'no tests to run|--- SKIP:' ../evidence/retained-contracts.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue817-skip-${{ matrix.behavior }}-${{ github.event_name }}-${{ github.run_id }}
+          path: ${{ matrix.behavior }}/evidence/
+          if-no-files-found: error
