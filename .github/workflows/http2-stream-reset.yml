@@ -57,30 +57,27 @@ jobs:
           mkdir -p "$RUNNER_TEMP/http2-evidence"
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http2-evidence/head.txt"
           baseline=ccf997c73868083d96c0bec56e71c1a34d26c98a
-          # Freeze the transport repair's source set. A later production merge
-          # must not roll back unrelated schemas while retaining their new tests.
+          # Keep the historical source/test dependencies on the last fully
+          # validated pre-integration checkpoint. Copy the exact current HTTP2
+          # regressions into this disposable tree; GREEN below runs full HEAD.
           reviewed=f177caec5510f502270ff3ceb36fe43295f405f1
-          # Keep the additive Ops event DTO at HEAD: later 400 recovery code
-          # needs its diagnostic fields. This file only adds the reset marker
-          # field; old transport producers below still cannot populate it.
-          mapfile -t targets < <(git diff --name-only "$baseline" "$reviewed" -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go' ':!backend/internal/service/ops_upstream_context.go')
-          dto_leaf=backend/internal/service/http2_historical_dto_compat.go
-          test ! -e "$dto_leaf"
+          candidate=$(git rev-parse HEAD)
+          red_tree="$RUNNER_TEMP/http2-historical-red"
+          git worktree add --detach "$red_tree" "$reviewed"
+          while IFS= read -r test_source; do
+            git show "$candidate:$test_source" > "$red_tree/$test_source"
+            expected=$(git rev-parse "$candidate:$test_source")
+            actual=$(git hash-object "$red_tree/$test_source")
+            test "$expected" = "$actual"
+            echo "candidate_test=$test_source expected=$expected actual=$actual" >> "$RUNNER_TEMP/http2-evidence/red-tests.txt"
+          done < <(git ls-files 'backend/internal/handler/http2*_test.go' 'backend/internal/service/http2*_test.go' 'backend/internal/repository/http2*_test.go')
+          cd "$red_tree"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http2-evidence/red-source-checkpoint.txt"
+          mapfile -t targets < <(git diff --name-only "$baseline" "$reviewed" -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go')
           restore_head() {
-            rm -f -- "$dto_leaf"
             for target in "${targets[@]}"; do git show "HEAD:$target" > "$target"; done
           }
           trap restore_head EXIT
-          # The retained event DTO references only this additive data type.
-          # Extract its exact candidate declaration; no classifier or producer
-          # implementation is carried into the original-source RED.
-          python3 - <<'PY'
-          import pathlib, re, subprocess
-          source = subprocess.check_output(['git', 'show', 'HEAD:backend/internal/service/openai_stream_read_error.go'], text=True)
-          declaration = re.search(r'type OpsTransportFailure struct \{\n.*?\n\}', source, re.S)
-          assert declaration is not None
-          pathlib.Path('backend/internal/service/http2_historical_dto_compat.go').write_text('package service\n\n' + declaration.group(0) + '\n')
-          PY
           for target in "${targets[@]}"; do
             if git cat-file -e "$baseline:$target" 2>/dev/null; then
               git show "$baseline:$target" > "$target"
@@ -113,8 +110,6 @@ jobs:
           done
           # Semantic spoofing was introduced by the first patch; reproduce it
           # against the compiling pre-review candidate, retaining these tests.
-          # These later candidates already declare the additive DTO themselves.
-          rm -- "$dto_leaf"
           vulnerable=c351ebea9bf144c710780da5e4db0e264e6ebb9c
           for target in "${targets[@]}"; do git show "$vulnerable:$target" > "$target"; done
           set +e
@@ -150,6 +145,9 @@ jobs:
           grep -q 'incomplete raw error event must not suppress reset classification' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
           restore_head
           trap - EXIT
+          git diff --exit-code -- "${targets[@]}"
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove --force "$red_tree"
           git diff --exit-code
       - name: GREEN boundary and existing stream regressions
         shell: bash
