@@ -18,12 +18,13 @@ func TestHTTP2PeerResetPersistence(t *testing.T) {
 	end := start.Add(time.Hour)
 	now := start.Add(time.Minute)
 	model := "synthetic-http2-reset"
+	userID := int64(900833)
 	id, err := repo.InsertErrorLog(ctx, &service.OpsInsertErrorLogInput{
 		RequestID: "synthetic-http2-reset", ErrorPhase: "network", ErrorType: "transport_error",
 		ErrorOwner: "provider", ErrorSource: "upstream_transport", Severity: "error", StatusCode: 200,
 		ErrorMessage: "Upstream connection reset by peer (HTTP/2 INTERNAL_ERROR). Content may be incomplete. Do not automatically retry the same request.",
 		ErrorBody:    `{"error":{"type":"upstream_error","code":"upstream_http2_stream_error","category":"transport_error","reset_reason":"INTERNAL_ERROR"}}`,
-		Stream:       true, CreatedAt: now, Platform: "openai", Model: model,
+		UserID:       &userID, Stream: true, CreatedAt: now, Platform: "openai", Model: model,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, "DELETE FROM ops_error_logs WHERE id = $1", id) })
@@ -44,6 +45,17 @@ func TestHTTP2PeerResetPersistence(t *testing.T) {
 	require.True(t, found, "HTTP 200 transport failures must remain visible in request-error lists")
 	user := service.ToUserErrorRequestDetail(detail)
 	require.Equal(t, "transport_error", user.Category)
+	ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	phases, types := service.CategoryToFilter("transport_error")
+	owned, err := ops.ListUserErrorRequests(ctx, userID, &service.OpsErrorLogFilter{StartTime: &start, EndTime: &end, ErrorPhasesAny: phases, ErrorTypesAny: types, StatusCodes: []int{200}, Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.Len(t, owned.Items, 1, "HTTP 200 transport errors must survive user/category/status filtering")
+	require.Equal(t, id, owned.Items[0].ID)
+	ownedDetail, err := ops.GetUserErrorRequestDetail(ctx, userID, id)
+	require.NoError(t, err)
+	require.Equal(t, "transport_error", ownedDetail.Category)
+	require.Nil(t, ownedDetail.UpstreamStatusCode)
+
 	filter := &service.OpsDashboardFilter{StartTime: start, EndTime: end, Platform: "openai"}
 	total, excluded, sla, _, _, _, err := repo.queryErrorCounts(ctx, filter, start, end)
 	require.NoError(t, err)

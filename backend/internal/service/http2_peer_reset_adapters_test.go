@@ -166,6 +166,9 @@ func TestHTTP2PeerResetBufferedBoundaries(t *testing.T) {
 			require.Equal(t, 502, rec.Code)
 			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 			require.True(t, json.Valid(rec.Body.Bytes()))
+			if name == "messages_sse" {
+				require.Equal(t, "error", gjson.GetBytes(rec.Body.Bytes(), "type").String())
+			}
 			require.Contains(t, rec.Body.String(), "Do not automatically retry")
 			require.NotContains(t, rec.Body.String(), "stream ID")
 			var failover *UpstreamFailoverError

@@ -210,7 +210,7 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 		if strings.HasSuffix(path, "/responses") || strings.Contains(path, "/responses/") {
 			eventType = "response.failed"
 			payload = failedResponse()
-		} else if strings.HasSuffix(c.Request.URL.Path, "/messages") {
+		} else if strings.HasSuffix(path, "/messages") || strings.Contains(path, "/images/") {
 			payload["type"] = "error"
 		}
 		data, _ := json.Marshal(payload)
@@ -222,7 +222,11 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 			status = c.Writer.Status()
 		}
 		c.Header("Content-Type", "application/json")
-		c.JSON(status, gin.H{"error": fields})
+		payload := gin.H{"error": fields}
+		if strings.HasSuffix(strings.TrimRight(c.Request.URL.Path, "/"), "/messages") {
+			payload["type"] = "error"
+		}
+		c.JSON(status, payload)
 	}
 	MarkResponseCommitted(c)
 	return classified, true
