@@ -89,7 +89,7 @@ func TestDisableScheduling429RequiresWeeklyUsageStrictlyAboveThreshold(t *testin
 			h.Set("x-codex-primary-reset-after-seconds", "")
 			return h
 		}()},
-		{name: "reset-only response cannot reuse cached high usage", headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-reset-after-seconds", "0"); return h }()},
+		{name: "unidentified reset permits explicit weekly cache", want: true, headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-reset-after-seconds", "0"); return h }()},
 		{name: "weekly reset and window without usage cannot reuse cached high", headers: func() http.Header {
 			h := http.Header{}
 			h.Set("x-codex-primary-reset-after-seconds", "0")
@@ -97,25 +97,25 @@ func TestDisableScheduling429RequiresWeeklyUsageStrictlyAboveThreshold(t *testin
 			return h
 		}()},
 		{name: "weekly window alone cannot reuse cached high", headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-window-minutes", "10080"); return h }()},
-		{name: "short window alone cannot reuse cached high", headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-window-minutes", "300"); return h }()},
-		{name: "empty window cannot reuse cached high", headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-window-minutes", ""); return h }()},
-		{name: "empty weekly window invalidates current high usage", headers: func() http.Header {
+		{name: "short window alone permits explicit weekly cache", want: true, headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-window-minutes", "300"); return h }()},
+		{name: "empty unrelated window permits explicit weekly cache", want: true, headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-window-minutes", ""); return h }()},
+		{name: "unidentified current usage permits explicit weekly cache", want: true, headers: func() http.Header {
 			h := weekly429Headers("99", "100", false)
 			h.Set("x-codex-primary-window-minutes", "")
 			return h
 		}()},
-		{name: "nil header values still invalidate observation", headers: http.Header{http.CanonicalHeaderKey("x-codex-primary-window-minutes"): nil}},
+		{name: "nil unrelated header permits explicit weekly cache", want: true, headers: http.Header{http.CanonicalHeaderKey("x-codex-primary-window-minutes"): nil}},
 		{name: "invalid current reset", headers: func() http.Header {
 			h := weekly429Headers("99", "100", false)
 			h.Set("x-codex-primary-reset-after-seconds", "invalid")
 			return h
 		}()},
-		{name: "two short windows cannot invent weekly quota", headers: func() http.Header {
+		{name: "two short windows permit explicit weekly cache", want: true, headers: func() http.Header {
 			h := weekly429Headers("99", "100", false)
 			h.Set("x-codex-primary-window-minutes", "60")
 			return h
 		}()},
-		{name: "legacy unclassified primary may be five hour", headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-used-percent", "100"); return h }()},
+		{name: "unclassified primary does not veto explicit weekly cache", want: true, headers: func() http.Header { h := http.Header{}; h.Set("x-codex-primary-used-percent", "100"); return h }()},
 		{name: "two weekly windows are ambiguous", headers: func() http.Header {
 			h := weekly429Headers("99", "100", false)
 			h.Set("x-codex-secondary-window-minutes", "10080")
@@ -126,7 +126,7 @@ func TestDisableScheduling429RequiresWeeklyUsageStrictlyAboveThreshold(t *testin
 			h.Set("x-codex-primary-used-percent", "")
 			return h
 		}()},
-		{name: "invalid current window", headers: func() http.Header {
+		{name: "invalid unidentified window permits explicit weekly cache", want: true, headers: func() http.Header {
 			h := weekly429Headers("99", "100", false)
 			h.Set("x-codex-primary-window-minutes", "invalid")
 			return h

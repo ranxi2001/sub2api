@@ -1,0 +1,217 @@
+name: OAuth 429 weekly-only RED GREEN
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/*429*'
+      - 'backend/internal/service/openai_gateway_service.go'
+      - 'backend/internal/service/openai_gateway_usage.go'
+      - 'backend/internal/service/openai_gateway_passthrough.go'
+      - 'backend/internal/service/openai_ws_forwarder_support.go'
+      - 'backend/internal/service/openai_ws_forwarder_v2.go'
+      - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_ws_v2_passthrough_adapter.go'
+      - 'backend/internal/service/openai_plugin_transport.go'
+      - 'backend/internal/service/openai_gateway_response_handling.go'
+      - 'backend/internal/service/openai_ws_http_bridge.go'
+      - 'backend/internal/service/openai_quota_service.go'
+      - 'backend/internal/service/openai_quota_usage_snapshot.go'
+      - 'backend/internal/repository/oauth429_weekly_only*'
+      - '.github/workflows/oauth429-weekly-only.yml'
+      - '.github/scripts/oauth429-weekly-only-*'
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE: ${{ github.event.pull_request.head.sha }}
+  BASELINE: f895ea743f34a4c4ab6c9d01c01e13c931625a6e
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Restore only affected production source in disposable checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
+          git diff --exit-code
+          git worktree add --detach "$RUNNER_TEMP/oauth429-red" "$CANDIDATE"
+          while read -r expected target; do
+            test "$(git rev-parse "$BASELINE:$target")" = "$expected"
+            git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-red/$target"
+            actual=$(git hash-object "$RUNNER_TEMP/oauth429-red/$target")
+            test "$actual" = "$expected"
+            printf '%s %s %s\n' "$BASELINE" "$actual" "$target" >> evidence/restored-blobs.txt
+          done <<'BLOBS'
+          ab9d5251a4acec7c17b0adb0f21ae59a71f89067 backend/internal/service/openai_disable_scheduling_429.go
+          849aec6c598b9ca5e94f218f76e7d7266505ae57 backend/internal/service/openai_gateway_service.go
+          9fb1903315d1f086f4f38bd73a5a0a5f69f6542a backend/internal/service/openai_gateway_usage.go
+          9dfffb6d6280278c5c21015ddffad12b706efa5c backend/internal/service/openai_ws_forwarder_support.go
+          aa0c3dafdf9e9e3f5ec78467fa08899c67e9ec89 backend/internal/service/openai_gateway_passthrough.go
+          3af551183471cd0ac3b2a6baa27aa506975dce96 backend/internal/service/openai_ws_forwarder_v2.go
+          fcff9837e12c0aa9c3ea3e22724f923890681fe1 backend/internal/service/openai_ws_forwarder_ingress.go
+          aee0bb83694c375d5baf431db916ea093a1658f4 backend/internal/service/openai_ws_v2_passthrough_adapter.go
+          0f83bd1fcfcf9d585c4fda999cce71bb7154451f backend/internal/service/openai_plugin_transport.go
+          fc1490884a556ef7518786c770fbd73a237155da backend/internal/service/openai_gateway_response_handling.go
+          ed1708f3c2ee470d80ab97b377ff610050e383fc backend/internal/service/openai_ws_http_bridge.go
+          0e4455ea613b07f2775c793346bd0b8fa0257fd5 backend/internal/service/openai_quota_service.go
+          26744ab312ed9552b375487d34052fd8b7f28da1 backend/internal/service/openai_quota_usage_snapshot.go
+          BLOBS
+          git -C "$RUNNER_TEMP/oauth429-red" diff --stat > evidence/red-diff.txt
+          git ls-files 'backend/internal/service/*429*test.go' 'backend/internal/repository/oauth429_weekly_only*test.go' > evidence/retained-tests.txt
+          while IFS= read -r test_file; do
+            candidate_blob=$(git hash-object "$test_file")
+            red_blob=$(git hash-object "$RUNNER_TEMP/oauth429-red/$test_file")
+            test "$candidate_blob" = "$red_blob"
+            printf '%s %s\n' "$candidate_blob" "$test_file" >> evidence/retained-test-blobs.txt
+          done < evidence/retained-tests.txt
+          git -C "$RUNNER_TEMP/oauth429-red" diff --exit-code -- '*_test.go'
+      - name: Require behavioral RED from unchanged service regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RUNNER_TEMP/oauth429-red/backend" && go test -json -tags=unit ./internal/service -run '^TestOAuth429WeeklyOnly' -count=1 -timeout=10m) > evidence/red.jsonl 2> evidence/red.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/red-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py red evidence/red.jsonl "$result"
+      - name: Isolate rejected-header cache poisoning with original parser sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/oauth429-cache-red" "$CANDIDATE"
+          while read -r expected target; do
+            test "$(git rev-parse "$BASELINE:$target")" = "$expected"
+            git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-cache-red/$target"
+            test "$(git hash-object "$RUNNER_TEMP/oauth429-cache-red/$target")" = "$expected"
+            printf '%s %s %s\n' "$BASELINE" "$expected" "$target" >> evidence/cache-restored-blobs.txt
+          done <<'BLOBS'
+          9fb1903315d1f086f4f38bd73a5a0a5f69f6542a backend/internal/service/openai_gateway_usage.go
+          BLOBS
+          git -C "$RUNNER_TEMP/oauth429-cache-red" diff --exit-code -- '*_test.go'
+          git -C "$RUNNER_TEMP/oauth429-cache-red" diff --stat > evidence/cache-red-diff.txt
+          set +e
+          (cd "$RUNNER_TEMP/oauth429-cache-red/backend" && go test -json -tags=unit ./internal/service -run '^TestOAuth429WeeklyOnly(SequentialCache|NonweeklyPersistenceRetainsEvidence)$' -count=1 -timeout=10m) > evidence/red-cache.jsonl 2> evidence/red-cache.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/red-cache-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py red-cache evidence/red-cache.jsonl "$result"
+      - name: Retained HTTP evidence without receipt-time binding must fail expiry regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          before=d93943307125aa239fae94a6cc719e03c1c1b3ff
+          git worktree add --detach "$RUNNER_TEMP/oauth429-expiry-red" "$CANDIDATE"
+          while read -r expected target; do
+            test "$(git rev-parse "$before:$target")" = "$expected"
+            git show "$before:$target" > "$RUNNER_TEMP/oauth429-expiry-red/$target"
+            test "$(git hash-object "$RUNNER_TEMP/oauth429-expiry-red/$target")" = "$expected"
+            printf '%s %s %s\n' "$before" "$expected" "$target" >> evidence/expiry-restored-blobs.txt
+          done <<'BLOBS'
+          fc1490884a556ef7518786c770fbd73a237155da backend/internal/service/openai_gateway_response_handling.go
+          c1833fc0e65a9e4951418de52658e343f14593f0 backend/internal/service/openai_gateway_passthrough.go
+          ed1708f3c2ee470d80ab97b377ff610050e383fc backend/internal/service/openai_ws_http_bridge.go
+          BLOBS
+          git -C "$RUNNER_TEMP/oauth429-expiry-red" diff --exit-code -- '*_test.go'
+          git -C "$RUNNER_TEMP/oauth429-expiry-red" diff --stat > evidence/expiry-red-diff.txt
+          set +e
+          (cd "$RUNNER_TEMP/oauth429-expiry-red/backend" && go test -json -tags=unit ./internal/service -run '^TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation$' -count=1 -timeout=10m) > evidence/red-http-expiry.jsonl 2> evidence/red-http-expiry.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/red-http-expiry-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py red-http-expiry evidence/red-http-expiry.jsonl "$result"
+      - name: Original quota-query persistence must fail against real PostgreSQL
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/oauth429-query-red" "$CANDIDATE"
+          target=backend/internal/service/openai_quota_usage_snapshot.go
+          expected=26744ab312ed9552b375487d34052fd8b7f28da1
+          test "$(git rev-parse "$BASELINE:$target")" = "$expected"
+          git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-query-red/$target"
+          test "$(git hash-object "$RUNNER_TEMP/oauth429-query-red/$target")" = "$expected"
+          printf '%s %s %s\n' "$BASELINE" "$expected" "$target" > evidence/query-restored-blobs.txt
+          git -C "$RUNNER_TEMP/oauth429-query-red" diff --exit-code -- '*_test.go'
+          git -C "$RUNNER_TEMP/oauth429-query-red" diff --stat > evidence/query-red-diff.txt
+          set +e
+          (cd "$RUNNER_TEMP/oauth429-query-red/backend" && go test -json -tags=integration ./internal/repository -run '^TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence$' -count=1 -timeout=10m) > evidence/red-query.jsonl 2> evidence/red-query.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/red-query-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py red-query evidence/red-query.jsonl "$result"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth429-red-${{ github.event.pull_request.head.sha }}
+          path: evidence/
+          if-no-files-found: error
+  green:
+    needs: red
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Clean candidate GREEN with race detector
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
+          git diff --exit-code
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/service -run '^Test(OAuth429WeeklyOnly|DisableScheduling429|RateLimitDisableSchedulingOn429|OpenAIGatewayDisableSchedulingOn429|Managed429WeeklyPolicy|Weekly429Threshold|TOTPRotationOn429|OpenAIStream429|OpenAIQuotaRecovery|CalculateOpenAI429ResetTime)' -count=1 -timeout=10m) > evidence/green.jsonl 2> evidence/green.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/green-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py green evidence/green.jsonl "$result"
+      - name: Durable scheduling and rotation lifecycle on isolated PostgreSQL
+        if: success() || failure()
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -json -tags=integration ./internal/repository -run '^TestOAuth429WeeklyOnly' -count=1 -timeout=10m) > evidence/green-repository.jsonl 2> evidence/green-repository.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/green-repository-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py repository evidence/green-repository.jsonl "$result"
+      - name: Ordinary backend build without test tags
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          (cd backend && go build ./...) > evidence/ordinary-build.log 2>&1
+          printf 'PASS go build ./... at %s\n' "$CANDIDATE" | tee -a evidence/ordinary-build.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth429-green-${{ github.event.pull_request.head.sha }}
+          path: evidence/
+          if-no-files-found: error

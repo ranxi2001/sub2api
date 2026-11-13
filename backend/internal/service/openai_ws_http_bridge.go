@@ -710,6 +710,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
+	ctx = bindOpenAI429ResponseObservation(ctx, resp, c)
 	defer func() { _ = resp.Body.Close() }()
 	// upstreamCtx cancellation interrupts the transport read. Keep Body.Close
 	// on this reader's goroutine: compressed bodies cannot close during Read.
