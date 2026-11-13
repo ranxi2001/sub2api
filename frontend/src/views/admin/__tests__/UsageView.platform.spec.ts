@@ -98,6 +98,27 @@ describe('admin usage platform behavior with real filters', () => {
     expect(api.list.mock.lastCall?.[0].group_id).toBeUndefined()
   })
 
+  it('pins platform and group across every export page while the visible filters change', async () => {
+    render()
+    await flushPromises()
+    await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'OpenAI')
+    const vm = wrapper.vm as any
+    vm.filters.group_id = 7
+    let release!: (value: unknown) => void
+    api.export.mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+    api.export.mockResolvedValueOnce({ items: [{ model: 'fixture-model', total_cost: 1 }], total: 101 })
+    const exporting = vm.exportToExcel()
+    await flushPromises()
+    await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'Gemini')
+    vm.filters.group_id = 8
+    release({ items: Array.from({ length: 100 }, () => ({ model: 'fixture-model', total_cost: 1 })), total: 101 })
+    await exporting
+    expect(api.export).toHaveBeenCalledTimes(2)
+    for (const [index, call] of api.export.mock.calls.entries()) {
+      expect(call[0]).toMatchObject({ platform: 'openai', group_id: 7, page: index + 1, page_size: 100, exact_total: true })
+    }
+  })
+
   it('clears the detail-only platform when switching tabs and disables unsupported cleanup', async () => {
     render()
     await flushPromises()

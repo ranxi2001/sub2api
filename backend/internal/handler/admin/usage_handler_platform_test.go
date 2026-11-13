@@ -37,3 +37,39 @@ func TestAdminUsagePlatformFilter(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardPlatformFiltersAndCaches(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	for _, endpoint := range []string{"trend", "models", "groups", "snapshot"} {
+		t.Run(endpoint, func(t *testing.T) {
+			resetDashboardReadCachesForTest()
+			repo := &dashboardUsageRepoCapture{}
+			router := newDashboardRequestTypeTestRouter(repo)
+			for _, platform := range []string{"", "openai", "gemini", "unknown"} {
+				url := "/admin/dashboard/" + endpoint + "?start_date=2026-11-01&end_date=2026-11-07&include_stats=false&include_group_stats=true&platform=" + platform
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				switch endpoint {
+				case "trend":
+					require.Equal(t, platform, repo.trendPlatform)
+				case "models":
+					require.Equal(t, platform, repo.modelPlatform)
+				case "groups":
+					require.Equal(t, platform, repo.groupPlatform)
+				case "snapshot":
+					require.Equal(t, platform, repo.trendPlatform)
+					require.Equal(t, platform, repo.modelPlatform)
+					require.Equal(t, platform, repo.groupPlatform)
+				}
+				header := "X-Snapshot-Cache"
+				// The response is cached independently for each platform.
+				require.Equal(t, "miss", rec.Header().Get(header))
+				repeated := httptest.NewRecorder()
+				router.ServeHTTP(repeated, httptest.NewRequest(http.MethodGet, url, nil))
+				require.Equal(t, http.StatusOK, repeated.Code)
+				require.Equal(t, "hit", repeated.Header().Get(header))
+			}
+		})
+	}
+}

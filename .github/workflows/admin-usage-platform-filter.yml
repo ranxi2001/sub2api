@@ -37,28 +37,27 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Generate Ent snapshot field remotely
+      - name: Verify generated Ent code
         working-directory: backend
         run: |
           go generate ./ent
-          git diff -- ent > "$RUNNER_TEMP/platform-ent.patch"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: platform-ent-${{ github.sha }}
-          path: ${{ runner.temp }}/platform-ent.patch
+          git diff --exit-code -- ent
       - name: Affected backend unit tests
         working-directory: backend
         shell: bash
         run: |
           set -o pipefail
-          go test -tags=unit ./internal/repository ./internal/service ./internal/handler/admin -run 'Test(Usage|AdminUsage|PrepareUsage|GatewayServiceRecordUsage|OpenAIGatewayServiceRecordUsage|Dashboard|FinalizeLive|BatchImage)' -count=1 -v -timeout=15m | tee "$RUNNER_TEMP/platform-unit.log"
+          go test -tags=unit ./internal/repository ./internal/service ./internal/handler/admin -run 'Test(Usage|AdminUsage|PrepareUsage|GatewayServiceRecordUsage|OpenAIGatewayServiceRecordUsage|Dashboard|FinalizeLive|BatchImage)' -count=1 -v -timeout=15m 2>&1 | tee "$RUNNER_TEMP/platform-unit.log"
           ! grep -E -- '--- SKIP:|no tests to run' "$RUNNER_TEMP/platform-unit.log"
+      - name: Build backend
+        working-directory: backend
+        run: go build ./cmd/server
       - name: Historical platform SQL regression (disposable PostgreSQL)
         working-directory: backend
         shell: bash
         run: |
           set -o pipefail
-          go test -tags=integration ./internal/repository -run 'TestUsage(Log|Platform)' -count=1 -v -timeout=15m | tee "$RUNNER_TEMP/platform-sql.log"
+          go test -tags=integration ./internal/repository -run 'TestUsage(Log|Platform)' -count=1 -v -timeout=15m 2>&1 | tee "$RUNNER_TEMP/platform-sql.log"
           ! grep -E -- '--- SKIP:|no tests to run' "$RUNNER_TEMP/platform-sql.log"
       - uses: actions/upload-artifact@v7
         if: always()

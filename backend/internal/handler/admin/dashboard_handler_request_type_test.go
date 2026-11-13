@@ -15,6 +15,9 @@ import (
 
 type dashboardUsageRepoCapture struct {
 	service.UsageLogRepository
+	trendPlatform         string
+	modelPlatform         string
+	groupPlatform         string
 	trendRequestType      *int16
 	trendStream           *bool
 	trendNativeCompaction *bool
@@ -40,6 +43,7 @@ func (s *dashboardUsageRepoCapture) GetUsageTrendWithUsageFilters(
 	s.trendStream = filters.Stream
 	s.trendNativeCompaction = filters.NativeCompactionV2
 	s.trendMismatch = filters.UpstreamModelMismatch
+	s.trendPlatform = filters.Platform
 	return []usagestats.TrendDataPoint{}, nil
 }
 
@@ -68,6 +72,7 @@ func (s *dashboardUsageRepoCapture) GetModelStatsWithUsageFiltersBySource(
 	s.modelStream = filters.Stream
 	s.modelNativeCompaction = filters.NativeCompactionV2
 	s.modelMismatch = filters.UpstreamModelMismatch
+	s.modelPlatform = filters.Platform
 	return []usagestats.ModelStat{}, nil
 }
 
@@ -78,6 +83,7 @@ func (s *dashboardUsageRepoCapture) GetGroupStatsWithUsageFilters(
 ) ([]usagestats.GroupStat, error) {
 	s.groupNativeCompaction = filters.NativeCompactionV2
 	s.groupMismatch = filters.UpstreamModelMismatch
+	s.groupPlatform = filters.Platform
 	return []usagestats.GroupStat{}, nil
 }
 
@@ -113,6 +119,7 @@ func newDashboardRequestTypeTestRouter(repo *dashboardUsageRepoCapture) *gin.Eng
 	dashboardSvc := service.NewDashboardService(repo, nil, nil, nil)
 	handler := NewDashboardHandler(dashboardSvc, nil)
 	router := gin.New()
+	router.GET("/admin/dashboard/snapshot", handler.GetSnapshotV2)
 	router.GET("/admin/dashboard/trend", handler.GetUsageTrend)
 	router.GET("/admin/dashboard/models", handler.GetModelStats)
 	router.GET("/admin/dashboard/groups", handler.GetGroupStats)
