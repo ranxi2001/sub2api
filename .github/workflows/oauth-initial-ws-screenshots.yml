@@ -1,4 +1,4 @@
-name: OAuth initial WS screenshots
+name: PR838 temporary scheduling UI evidence
 
 on:
   push:
@@ -36,13 +36,13 @@ jobs:
           node "$RUNNER_TEMP/oauth-ws-browser/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Capture actual component with fictional data
         env:
-          EVIDENCE_DIR: ${{ runner.temp }}/oauth-initial-ws-${{ github.sha }}
+          EVIDENCE_DIR: ${{ runner.temp }}/pr838-temp-unsched-${{ github.sha }}
           SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/oauth-ws-browser/node_modules/playwright/index.mjs
-        run: node .github/scripts/oauth-initial-ws-preview.mjs "$GITHUB_WORKSPACE" "$EVIDENCE_DIR"
+        run: node .github/scripts/temp-unsched-preview.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: oauth-initial-ws-${{ github.sha }}
-          path: ${{ runner.temp }}/oauth-initial-ws-${{ github.sha }}
+          name: pr838-temp-unsched-${{ github.sha }}
+          path: ${{ runner.temp }}/pr838-temp-unsched-${{ github.sha }}
           if-no-files-found: error
           retention-days: 30
