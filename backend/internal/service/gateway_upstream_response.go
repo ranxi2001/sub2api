@@ -363,7 +363,7 @@ func (s *GatewayService) readUpstreamErrorBody(resp *http.Response) ([]byte, err
 
 const anthropicRequestTooLargeMessage = "Request body is too large. Anthropic Messages requests are limited to 32 MiB. Reduce the request size and try again."
 
-var errAnthropicRequestTooLarge = errors.New(anthropicRequestTooLargeMessage)
+var errAnthropicRequestTooLarge = errors.New("anthropic request body too large")
 
 func isAnthropicRequestTooLarge(account *Account, resp *http.Response) bool {
 	if account == nil || account.Platform != PlatformAnthropic || resp == nil || resp.StatusCode != http.StatusRequestEntityTooLarge {

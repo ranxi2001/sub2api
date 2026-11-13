@@ -36,6 +36,11 @@ func observeAutoConfigRequest(c *gin.Context, ops *service.OpsService, w *opsCap
 		}
 		ops.ObserveConcurrencyResult(service.AccountConcurrencyResult{AccountID: id, StartedAt: started})
 	}
+	// Earlier attempts still report their own failures. The final request-size
+	// rejection says nothing about the selected account's concurrency capacity.
+	if isOpsRequestSizeRejection(c) {
+		return
+	}
 	id := c.GetInt64(opsAccountIDKey)
 	if id <= 0 || failed[id] || service.IsPrismBrowserAttempt(c, id) {
 		return

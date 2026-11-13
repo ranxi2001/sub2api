@@ -1703,8 +1703,20 @@ func applyOpsStreamErrorSnapshot(entry *service.OpsInsertErrorLogInput, streamEr
 	}
 }
 
+// Only the trusted local marker identifies this final request outcome; an
+// arbitrary upstream error body cannot opt out of account observations.
+func isOpsRequestSizeRejection(c *gin.Context) bool {
+	errType, _ := service.OpsLocalErrorType(c)
+	return service.IsOpsRequestScopedError(c) && errType == "request_too_large"
+}
+
 func shouldSkipFinalOpsFailure(c *gin.Context) bool {
 	if c == nil {
+		return false
+	}
+	// A preceding repair attempt's rule belongs to that attempt, not the final
+	// request-size rejection. Retain its event and SkipMonitoring snapshot.
+	if isOpsRequestSizeRejection(c) {
 		return false
 	}
 	if v, ok := c.Get(service.OpsSkipPassthroughKey); ok {
