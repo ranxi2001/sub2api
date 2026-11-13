@@ -136,6 +136,14 @@ func TestOpenAI409WSTicketBoundEgress(t *testing.T) {
 			defer client.CloseNow() //nolint:errcheck // Fixture teardown.
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6-astra","input":[{"role":"user","content":"Continue the readable coding task without repeating completed work."}]}`)))
 			_, terminal, err := client.Read(ctx)
+			if err != nil {
+				select {
+				case gatewayErr := <-done:
+					t.Fatalf("ticket fixture downstream read failed: %v; gateway: %v", err, gatewayErr)
+				case <-ctx.Done():
+					t.Fatalf("ticket fixture downstream read failed: %v; gateway did not finish", err)
+				}
+			}
 			require.NoError(t, err)
 			require.Equal(t, "response.completed", gjson.GetBytes(terminal, "type").String())
 			require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
