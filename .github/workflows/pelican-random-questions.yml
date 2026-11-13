@@ -31,6 +31,7 @@ on:
       - 'frontend/src/components/admin/account/IQTestModal.vue'
       - '.github/fixtures/pelican-question-e2e/**'
       - '.github/scripts/pelican-question-e2e.mjs'
+      - '.github/scripts/pelican-detail-identity.mjs'
       - '.github/scripts/pelican-question-browser.mjs'
       - '.github/workflows/pelican-random-questions.yml'
       - 'Dockerfile'
@@ -73,7 +74,7 @@ jobs:
           name: pelican-random-question-ui-${{ github.run_id }}
           path: evidence/
   isolated-e2e:
-    name: Isolated application E2E (manual and account schedules; full acceptance pending)
+    name: Isolated application E2E (manual, account and group schedules; full acceptance pending)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -108,6 +109,15 @@ jobs:
             printf 'PARENT_BASE_SHA=%s\nRUN_ID=%s\nRUN_ATTEMPT=%s\n' "$PARENT_BASE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           } > "$EVIDENCE_DIR/identity.txt"
           cp harness/.github/fixtures/pelican-question-e2e/acceptance.json "$EVIDENCE_DIR/acceptance.json"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Synthetic detail identity gate (does not replace real E2E)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test harness/.github/fixtures/pelican-question-e2e/detail-identity.test.mjs \
+            | tee "$EVIDENCE_DIR/detail-identity-synthetic.tap"
       - name: Build and prefetch before runtime isolation (CI only)
         shell: bash
         run: |
@@ -146,7 +156,7 @@ jobs:
         run: |
           set -euo pipefail
           container_id="$(docker compose ps --all --quiet browser)"
-          result="$(timeout 480s docker wait "$container_id")"
+          result="$(timeout 660s docker wait "$container_id")"
           # Harness logs contain only scenario names/status, never response bodies or tokens.
           docker compose logs --no-color browser
           test "$result" = 0
@@ -155,10 +165,12 @@ jobs:
         shell: bash
         run: |
           {
-            echo '### Isolated E2E manual and account schedules — full acceptance pending'
+            echo '### Isolated E2E manual, account and group schedules — full acceptance pending'
             echo 'Implemented: manual scenarios, disabled group-plan creation, UI-created A/B account schedules,'
             echo 'same nominal time, real Claim leases, four PG results and provider/history/detail/DOM reconciliation.'
-            echo 'Group RunDue, historical snapshots after editing, second nominal round,'
+            echo 'Also implemented: UI-enabled group plan, actual RunDue/Claim, two results and PG/provider/list/detail/DOM reconciliation.'
+            echo 'Group routing is checked against the actual chosen accounts, without assuming equal distribution.'
+            echo 'Historical snapshots after editing, second nominal round,'
             echo 'deterministic failed record and failure lease release remain unimplemented.'
             echo 'Read this candidate artifact and checks; earlier SHA results do not validate new scenarios.'
             echo 'A green job does not clear all Issue #795 technical or product acceptance gates.'

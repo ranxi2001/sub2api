@@ -6,6 +6,7 @@ import { createServer } from 'node:https'
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { bindDetailResponse } from './pelican-detail-identity.mjs'
 
 const evidence = process.env.EVIDENCE_DIR || '/evidence'
 const upstreamOrigin = 'https://fake-upstream:4199'
@@ -590,12 +591,22 @@ async function browser() {
         // API request substitutes, fabricated store state or fulfilled routes.
         const details = new Map()
         const pending = []
+        const detailErrors = []
         const observeDetail = response => {
           const path = new URL(response.url()).pathname
           const match = path.match(/^\/api\/v1\/admin\/scheduled-test-plans\/(\d+)\/results\/(\d+)$/)
           if (!match || !expected.some(row => row.plan_id === match[1] && row.id === match[2])) return
-          pending.push((async () => ({ status: response.status(), value: unwrap(await response.json()) }))()
-            .catch(error => ({ read_error: error.name })))
+          pending.push((async () => {
+            assert.equal(response.status(), 200)
+            const value = unwrap(await response.json())
+            const binding = bindDetailResponse(response.request().url(), value, expected)
+            const record = { status: response.status(), value, binding }
+            details.set(binding.request_result_id, record)
+            return record
+          })().catch(error => {
+            detailErrors.push({ name: error.name, message: error.message })
+            return { read_error: error.name }
+          }))
         }
         page.on('response', observeDetail)
         try {
@@ -618,29 +629,42 @@ async function browser() {
             assert.deepEqual(item.pelican_config, row.pelican_config)
           }
           const panel = page.getByTestId('records-panel')
-          // Scoped history hides result IDs in its text. Link cards to IDs via
-          // their fetched detail HTML's unique provider marker, then assert the
-          // expanded snapshot and iframe from that same selected card.
+          // Validate URL -> body -> PG for every response BEFORE selecting any
+          // marker-based card. Swapped bodies must fail before a screenshot can
+          // be mislabeled. The map is keyed only by validated request identity.
+          const detailDeadline = Date.now() + 20_000
+          while (details.size < expected.length && detailErrors.length === 0 && Date.now() < detailDeadline) {
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          assert.deepEqual(detailErrors, [], 'detail URL/body/PG identity validation must pass before DOM binding')
+          assert.equal(details.size, expected.length)
           for (const row of expected) {
-            const card = panel.getByTestId('pelican-record-card').filter({ has: page.locator(`iframe[srcdoc*="${row.marker}"]`) })
+            const { binding } = details.get(row.id)
+            assert.equal(binding.request_plan_id, row.plan_id)
+            assert.equal(binding.request_result_id, row.id)
+            assert.equal(binding.marker, row.marker)
+            const card = panel.getByTestId('pelican-record-card').filter({ has: page.locator(`iframe[srcdoc*="${binding.marker}"]`) })
             await card.waitFor({ state: 'visible' })
             assert.equal(await card.count(), 1)
             await card.getByRole('button').click()
             const detail = page.getByTestId('record-detail')
             await checkSnapshot(detail, row.pelican_config)
             assert.equal(await detail.frameLocator('iframe').locator('p').innerText(), row.marker)
-            await page.screenshot({ path: join(evidence, `account-scheduled-${account.id}-${row.id}.png`), fullPage: true })
+            await page.screenshot({ path: join(evidence, `account-scheduled-${account.id}-${binding.request_result_id}.png`), fullPage: true })
             await detail.getByRole('button', { name: 'Close', exact: true }).click()
           }
           await panel.getByRole('button', { name: 'Close', exact: true }).click()
           for (const response of await Promise.all(pending)) {
             assert.equal(response.read_error, undefined, 'real detail response must be readable')
             assert.equal(response.status, 200)
-            details.set(String(response.value.id), response.value)
+            // Includes duplicate/poll responses: each must retain its own URL
+            // binding, rather than trusting an unordered set of body IDs.
+            assert.deepEqual(response.binding, bindDetailResponse(`http://app:8080${response.binding.request_path}`, response.value, expected))
           }
+          assert.deepEqual(detailErrors, [], 'all observed detail responses must keep their URL identity')
           assert.equal(details.size, 2)
           for (const row of expected) {
-            const api = details.get(row.id)
+            const api = details.get(row.id)?.value
             assert.ok(api)
             assert.equal(String(api.plan_id), row.plan_id)
             assert.equal(api.status, row.status)
@@ -650,9 +674,10 @@ async function browser() {
           save(`account-scheduled-history-${account.id}.json`, {
             history: historyBody.items.map(item => ({ id: item.id, plan_id: item.plan_id, account_id: item.account_id,
               status: item.status, pelican_config: item.pelican_config })),
-            detail: [...details.values()].map(item => ({ id: item.id, plan_id: item.plan_id,
-              status: item.status, pelican_config: item.pelican_config, marker: item.response_text.match(/fixture795-\d+/)?.[0] })),
-            expanded_dom: expected.map(row => ({ result_id: row.id, marker: row.marker, snapshot: row.pelican_config })),
+            detail: [...details.values()].map(({ value: item, binding }) => ({ id: item.id, plan_id: item.plan_id,
+              status: item.status, pelican_config: item.pelican_config, marker: binding.marker, request_binding: binding })),
+            expanded_dom: expected.map(row => ({ result_id: row.id, marker: row.marker, snapshot: row.pelican_config,
+              request_binding: details.get(row.id).binding })),
           })
         } finally {
           page.off('response', observeDetail)
@@ -672,6 +697,243 @@ async function browser() {
       }
     }
 
+    stage = 'group-scheduled-ui-enable'
+    await page.goto(`${origin}/admin/pelican-tests`)
+    const groupPlanId = String(created.id)
+    const groupId = groups[0].id
+    const groupPlanPath = `/api/v1/admin/pelican-group-tests/${groupPlanId}`
+    // Keep the already-tested disabled creation intact. Edit only its schedule
+    // through the real form before enabling, to avoid an unintended due tick.
+    await page.getByTestId(`pelican-plan-edit-${groupPlanId}`).click()
+    const groupEditor = page.getByTestId('pelican-test-editor')
+    assert.equal(await groupEditor.getByTestId('pelican-test-enabled').getAttribute('aria-checked'), 'false')
+    await groupEditor.getByTestId('pelican-test-schedule').getByRole('button').click()
+    await page.getByRole('option', { name: 'Custom', exact: true }).click()
+    await groupEditor.getByTestId('pelican-test-cron').fill('0 0 1 1 *')
+    const groupEditResponse = page.waitForResponse(response => new URL(response.url()).pathname === groupPlanPath && response.request().method() === 'PUT')
+    await page.getByTestId('pelican-test-save').click()
+    const groupEdited = await groupEditResponse
+    assert.equal(groupEdited.status(), 200)
+    const groupEditedBody = unwrap(await groupEdited.json())
+    assert.equal(groupEditedBody.enabled, false)
+    assert.equal(groupEditedBody.cron_expression, '0 0 1 1 *')
+    await groupEditor.waitFor({ state: 'hidden' })
+    // savePlan closes the editor before its list reload completes. Wait until
+    // the actual row carries the new schedule, so toggle cannot resend stale input.
+    await page.getByTestId(`pelican-plan-${groupPlanId}`).locator('.plan-meta').getByText('0 0 1 1 *', { exact: true }).waitFor()
+    const groupEnableResponse = page.waitForResponse(response => new URL(response.url()).pathname === groupPlanPath && response.request().method() === 'PUT')
+    await page.getByTestId(`pelican-plan-toggle-${groupPlanId}`).click()
+    const groupEnabled = await groupEnableResponse
+    assert.equal(groupEnabled.status(), 200)
+    const groupEnabledBody = unwrap(await groupEnabled.json())
+    assert.equal(String(groupEnabledBody.id), groupPlanId)
+    assert.equal(String(groupEnabledBody.group_id), groupId)
+    assert.equal(groupEnabledBody.enabled, true)
+    assert.equal(groupEnabledBody.model_id, model)
+    assert.equal(groupEnabledBody.cron_expression, '0 0 1 1 *')
+    assert.deepEqual(groupEnabledBody.pelican_config, groupEditedBody.pelican_config)
+    assert.equal(groupEnabledBody.pelican_config.prompt_mode, 'random')
+    assert.equal(groupEnabledBody.pelican_config.parallel_count, 2)
+    assert.ok(!groupEnabledBody.pelican_config.pelican_question)
+    await page.getByTestId(`pelican-plan-${groupPlanId}`).getByRole('button', { name: 'Pause', exact: true }).waitFor()
+    const groupPlanSQL = `SELECT p.id::text, p.group_id::text, p.enabled, p.model_id,
+      p.cron_expression, p.pelican_config,
+      to_char(p.next_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS next_run_at,
+      p.running_until::text, p.last_run_at::text, p.running_until > now() AS lease_active
+      FROM pelican_group_test_plans p JOIN groups g ON g.id = p.group_id
+      WHERE p.id = $1::bigint AND g.id = $2::bigint AND g.name = 'fixture-pelican-group'`
+    const groupResultSQL = `SELECT r.id::text, r.plan_id::text, p.group_id::text,
+      r.account_id::text, r.account_name, r.status, r.pelican_config,
+      jsonb_array_length(r.attempts) AS attempt_count,
+      substring(r.response_text from 'fixture795-[0-9]+') AS marker
+      FROM pelican_group_test_results r JOIN pelican_group_test_plans p ON p.id = r.plan_id
+      WHERE r.plan_id = $1::bigint AND p.group_id = $2::bigint ORDER BY r.id`
+    const readGroupPlan = async () => {
+      const { rows } = await db.query(groupPlanSQL, [groupPlanId, groupId])
+      assert.equal(rows.length, 1)
+      return rows[0]
+    }
+    const readGroupResults = async () => (await db.query(groupResultSQL, [groupPlanId, groupId])).rows
+    const enabledGroupPlan = await readGroupPlan()
+    assert.equal(enabledGroupPlan.enabled, true)
+    assert.equal(enabledGroupPlan.model_id, model)
+    assert.equal(enabledGroupPlan.cron_expression, '0 0 1 1 *')
+    assert.deepEqual(enabledGroupPlan.pelican_config, groupEnabledBody.pelican_config)
+    assert.equal(enabledGroupPlan.last_run_at, null)
+    assert.equal(enabledGroupPlan.running_until, null)
+    assert.ok(Date.parse(enabledGroupPlan.next_run_at) > Date.now())
+    assert.deepEqual(await readGroupResults(), [])
+    save('group-scheduled-enabled.json', {
+      api: { id: groupEnabledBody.id, group_id: groupEnabledBody.group_id, enabled: groupEnabledBody.enabled,
+        model_id: groupEnabledBody.model_id, cron_expression: groupEnabledBody.cron_expression,
+        pelican_config: groupEnabledBody.pelican_config }, pg: enabledGroupPlan,
+    })
+    state.scenarios.push({ name: stage, status: 'passed', plan_id: groupPlanId, group_id: groupId })
+
+    stage = 'group-scheduled-due-and-real-claim'
+    const beforeGroup = await capturesNow()
+    assert.deepEqual(beforeGroup.rejected, [])
+    assert.equal(beforeGroup.captures.length, 8, 'only manual and account-scheduled samples precede this round')
+    const groupCaptureStart = beforeGroup.captures.length
+    await fixtureControl('hold-scheduled')
+    let groupRepliesReleased = false
+    try {
+      // Only this fixture plan's nominal due field is changed. Enabling and
+      // schedule configuration above went through the actual authenticated UI.
+      const due = await db.query(`WITH nominal AS (
+          SELECT date_trunc('second', now()) - interval '1 second' + interval '0.654321 second' AS t
+        ) UPDATE pelican_group_test_plans p SET next_run_at = nominal.t
+        FROM nominal, groups g
+        WHERE p.id = $1::bigint AND p.group_id = $2::bigint AND g.id = p.group_id
+          AND g.name = 'fixture-pelican-group' AND g.deleted_at IS NULL AND g.status = 'active'
+          AND p.enabled AND p.model_id = $3 AND p.cron_expression = '0 0 1 1 *'
+          AND p.pelican_config->>'prompt_mode' = 'random'
+          AND p.pelican_config->>'parallel_count' = '2'
+          AND p.running_until IS NULL AND p.last_run_at IS NULL AND p.next_run_at > now()
+          AND NOT EXISTS (SELECT 1 FROM pelican_group_test_results r WHERE r.plan_id = p.id)
+        RETURNING p.id::text, to_char(p.next_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS nominal_time`,
+      [groupPlanId, groupId, model])
+      assert.equal(due.rowCount, 1)
+      const groupNominalTime = due.rows[0].nominal_time
+      save('group-scheduled-due.json', due.rows[0])
+      let groupClaim
+      const claimDeadline = Date.now() + 90_000
+      while (Date.now() < claimDeadline) {
+        const plan = await readGroupPlan()
+        const provider = await capturesNow()
+        assert.deepEqual(provider.rejected, [])
+        const sent = provider.captures.slice(groupCaptureStart)
+        assert.ok(sent.length <= 2, 'group success fixture must not duplicate or retry submissions')
+        save('group-scheduled-wait.json', { nominal_time: groupNominalTime, plan, received_samples: sent.length })
+        if (sent.length === 2 && plan.lease_active) {
+          assert.deepEqual(await readGroupResults(), [], 'held provider replies cannot yet yield group results')
+          assert.ok(Date.parse(plan.next_run_at) > Date.parse(groupNominalTime))
+          groupClaim = plan
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      assert.ok(groupClaim, 'real group RunDue/Claim must send two samples within 90 seconds')
+      save('group-scheduled-claimed.json', { nominal_time: groupNominalTime, plan: groupClaim })
+      const release = await fixtureControl('release-scheduled')
+      groupRepliesReleased = true
+      assert.equal(release.released, 2)
+      state.scenarios.push({ name: stage, status: 'passed', plan_id: groupPlanId, nominal_time: groupNominalTime })
+
+      stage = 'group-scheduled-pg-provider-reconciliation'
+      let groupResults
+      let completedGroupPlan
+      const resultsDeadline = Date.now() + 30_000
+      while (Date.now() < resultsDeadline) {
+        const results = await readGroupResults()
+        const plan = await readGroupPlan()
+        assert.ok(results.length <= 2)
+        if (results.length === 2 && plan.running_until === null && plan.last_run_at !== null) {
+          groupResults = results
+          completedGroupPlan = plan
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      assert.ok(groupResults, 'two real group results and successful-run lease completion are required')
+      assert.ok(Date.parse(completedGroupPlan.next_run_at) > Date.parse(groupNominalTime))
+      const groupProvider = await capturesNow()
+      assert.deepEqual(groupProvider.rejected, [])
+      const groupSent = groupProvider.captures.slice(groupCaptureStart)
+      assert.equal(groupSent.length, 2)
+      assert.equal(new Set(groupResults.map(row => row.marker)).size, 2)
+      const groupSnapshot = groupResults[0].pelican_config
+      assert.equal(groupSnapshot.prompt_mode, 'random')
+      assert.equal(groupSnapshot.parallel_count, 2)
+      assert.equal(groupSnapshot.model_id, model)
+      assert.equal(groupSnapshot.pelican_question.round_id, `scheduled:${groupNominalTime}`)
+      assert.equal(groupSnapshot.pelican_question.source, 'builtin:svg-motion')
+      assert.ok(groupSnapshot.pelican_question.id && groupSnapshot.pelican_question.version && groupSnapshot.actual_prompt)
+      for (const row of groupResults) {
+        assert.equal(row.plan_id, groupPlanId)
+        assert.equal(row.group_id, groupId)
+        assert.equal(row.status, 'success')
+        assert.equal(row.attempt_count, 0)
+        assert.match(row.marker, /^fixture795-\d+$/)
+        assert.deepEqual(row.pelican_config, groupSnapshot)
+        const accountIndex = accounts.findIndex(account => account.id === row.account_id)
+        assert.ok(accountIndex >= 0, 'gateway must route to a fixture account')
+        assert.equal(row.account_name, accounts[accountIndex].name)
+        const capture = groupSent.find(item => item.marker === row.marker)
+        assert.ok(capture)
+        assert.equal(capture.alias, accountIndex === 0 ? 'a' : 'b')
+        assert.equal(capture.model, model)
+        assert.equal(capture.prompt, row.pelican_config.actual_prompt.trim())
+        assert.equal(capture.refused, false)
+        // Both samples may legitimately choose the same account. No balance or
+        // equal-route assertion: record and reconcile the actual chosen account.
+      }
+      save('group-scheduled-results.json', { nominal_time: groupNominalTime, plan: completedGroupPlan, pg: groupResults, provider: groupSent })
+      state.scenarios.push({ name: stage, status: 'passed', plan_id: groupPlanId, result_ids: groupResults.map(row => row.id) })
+
+      stage = 'group-scheduled-list-detail-dom'
+      // PelicanTestsView polls its real list API. Wait for a poll containing this
+      // run, without injecting a store update or issuing a substitute request.
+      const listed = await page.waitForResponse(async response => {
+        if (new URL(response.url()).pathname !== '/api/v1/admin/pelican-group-test-results'
+          || response.request().method() !== 'GET' || response.status() !== 200) return false
+        const body = unwrap(await response.json())
+        return Array.isArray(body.items) && groupResults.every(row => body.items.some(item => String(item.id) === row.id))
+      }, { timeout: 25_000 })
+      const list = unwrap(await listed.json())
+      assert.equal(list.total, 2)
+      assert.equal(list.items.length, 2)
+      const groupAPIProjection = item => ({ id: String(item.id), plan_id: String(item.plan_id),
+        group_id: String(item.group_id), account_id: String(item.account_id), account_name: item.account_name,
+        status: item.status, pelican_config: item.pelican_config, attempt_count: item.attempts.length })
+      const expectedAPIProjection = row => {
+        const { marker, ...projection } = row
+        return projection
+      }
+      const detailProjection = []
+      const domProjection = []
+      for (const row of groupResults) {
+        const item = list.items.find(item => String(item.id) === row.id)
+        assert.deepEqual(groupAPIProjection(item), expectedAPIProjection(row))
+        assert.equal(item.group_name, groups[0].name)
+        const domRow = page.getByTestId(`pelican-result-${row.id}`)
+        await domRow.waitFor({ state: 'visible' })
+        assert.equal(await domRow.locator('td').nth(1).innerText(), groups[0].name)
+        assert.equal(await domRow.locator('td').nth(2).innerText(), model)
+        assert.equal(await domRow.locator('td').nth(3).innerText(), row.account_name)
+        assert.equal(await domRow.locator('.result-badge').innerText(), 'Success')
+        const detailResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/admin/pelican-group-test-results/${row.id}` && response.request().method() === 'GET')
+        await page.getByTestId(`pelican-result-view-${row.id}`).click()
+        const response = await detailResponse
+        assert.equal(response.status(), 200)
+        const full = unwrap(await response.json())
+        const requestBinding = bindDetailResponse(response.request().url(), full, [row], 'group')
+        assert.deepEqual(groupAPIProjection(full), expectedAPIProjection(row))
+        assert.equal(full.response_text.match(/fixture795-\d+/)?.[0], row.marker)
+        const preview = page.getByTestId('pelican-result-preview')
+        await preview.getByTestId('pelican-artwork-preview').locator('iframe').waitFor({ state: 'visible' })
+        await checkSnapshot(preview, row.pelican_config)
+        assert.equal(await preview.frameLocator('iframe').locator('p').innerText(), row.marker)
+        await page.screenshot({ path: join(evidence, `group-scheduled-${groupPlanId}-${row.id}.png`), fullPage: true })
+        detailProjection.push({ ...groupAPIProjection(full), marker: row.marker, request_binding: requestBinding })
+        domProjection.push({ result_id: row.id, plan_id: groupPlanId, group_id: groupId,
+          account_id: row.account_id, marker: row.marker, snapshot: row.pelican_config, request_binding: requestBinding })
+        await page.getByRole('dialog').filter({ has: preview }).getByRole('button', { name: 'Close', exact: true }).click()
+        await preview.waitFor({ state: 'hidden' })
+      }
+      save('group-scheduled-api-dom.json', { list: list.items.map(groupAPIProjection), detail: detailProjection, expanded_dom: domProjection })
+      assert.deepEqual(await readGroupResults(), groupResults, 'viewing group history must not mutate saved results')
+      assert.deepEqual(forbiddenRuns, [], 'group RunDue cannot be substituted with manual /run')
+      assert.equal(manualRequests.length, 4, 'group results cannot come from extra manual account tests')
+      assert.equal((await capturesNow()).captures.length, groupCaptureStart + 2)
+      state.scenarios.push({ name: stage, status: 'passed', plan_id: groupPlanId, result_ids: groupResults.map(row => row.id) })
+    } finally {
+      if (!groupRepliesReleased) {
+        try { await fixtureControl('release-scheduled') }
+        catch (error) { save('group-scheduled-release-error.json', { name: error.name }) }
+      }
+    }
+
     stage = 'post-bootstrap-browser-and-provider-error-lists'
     const finalCaptures = await (await fetch(`${upstreamOrigin}/__fixture/captures`)).json()
     assert.deepEqual(finalCaptures.rejected, [])
@@ -680,7 +942,7 @@ async function browser() {
     assert.equal(state.consoleErrors.length, 0, 'no browser console errors')
     assert.equal(state.requestFailures.length, 0, 'no failed browser requests')
     state.scenarios.push({ name: stage, status: 'passed' })
-    console.log('Implemented manual and account-scheduled E2E scenarios passed; full acceptance remains incomplete.')
+    console.log('Implemented manual, account and group scheduled E2E scenarios passed; full acceptance remains incomplete.')
   } catch (error) {
     state.scenarios.push({ name: stage, status: 'failed', error: { name: error.name, message: error.message.slice(0, 2000) } })
     if (page) {
