@@ -57,13 +57,19 @@ jobs:
           mkdir -p "$RUNNER_TEMP/http2-evidence"
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http2-evidence/head.txt"
           baseline=ccf997c73868083d96c0bec56e71c1a34d26c98a
-          mapfile -t targets < <(git diff --name-only "$baseline" HEAD -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go')
+          # Freeze the transport repair's source set. A later production merge
+          # must not roll back unrelated schemas while retaining their new tests.
+          reviewed=f177caec5510f502270ff3ceb36fe43295f405f1
+          mapfile -t targets < <(git diff --name-only "$baseline" "$reviewed" -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go')
           restore_head() {
             for target in "${targets[@]}"; do git show "HEAD:$target" > "$target"; done
           }
           trap restore_head EXIT
           for target in "${targets[@]}"; do
-            if git cat-file -e "$baseline:$target" 2>/dev/null; then git show "$baseline:$target" > "$target"; fi
+            if git cat-file -e "$baseline:$target" 2>/dev/null; then
+              git show "$baseline:$target" > "$target"
+              test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+            fi
           done
           git diff --stat > "$RUNNER_TEMP/http2-evidence/overlay.txt"
           set +e
