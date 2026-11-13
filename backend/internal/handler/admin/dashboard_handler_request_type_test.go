@@ -15,6 +15,9 @@ import (
 
 type dashboardUsageRepoCapture struct {
 	service.UsageLogRepository
+	trendFilters          usagestats.UsageLogFilters
+	modelFilters          usagestats.UsageLogFilters
+	groupFilters          usagestats.UsageLogFilters
 	trendPlatform         string
 	modelPlatform         string
 	groupPlatform         string
@@ -44,6 +47,7 @@ func (s *dashboardUsageRepoCapture) GetUsageTrendWithUsageFilters(
 	s.trendNativeCompaction = filters.NativeCompactionV2
 	s.trendMismatch = filters.UpstreamModelMismatch
 	s.trendPlatform = filters.Platform
+	s.trendFilters = filters
 	return []usagestats.TrendDataPoint{}, nil
 }
 
@@ -73,6 +77,7 @@ func (s *dashboardUsageRepoCapture) GetModelStatsWithUsageFiltersBySource(
 	s.modelNativeCompaction = filters.NativeCompactionV2
 	s.modelMismatch = filters.UpstreamModelMismatch
 	s.modelPlatform = filters.Platform
+	s.modelFilters = filters
 	return []usagestats.ModelStat{}, nil
 }
 
@@ -84,6 +89,7 @@ func (s *dashboardUsageRepoCapture) GetGroupStatsWithUsageFilters(
 	s.groupNativeCompaction = filters.NativeCompactionV2
 	s.groupMismatch = filters.UpstreamModelMismatch
 	s.groupPlatform = filters.Platform
+	s.groupFilters = filters
 	return []usagestats.GroupStat{}, nil
 }
 

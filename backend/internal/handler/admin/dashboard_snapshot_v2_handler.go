@@ -223,6 +223,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 			filters.BillingType,
 			filters.UpstreamModelMismatch,
 			filters.Platform,
+			filters.Model,
 		)
 		if err != nil {
 			return nil, errors.New("failed to get model statistics")
@@ -245,6 +246,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 			filters.BillingType,
 			filters.UpstreamModelMismatch,
 			filters.Platform,
+			filters.Model,
 		)
 		if err != nil {
 			return nil, errors.New("failed to get group statistics")

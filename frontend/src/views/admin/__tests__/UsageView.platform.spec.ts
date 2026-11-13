@@ -5,11 +5,17 @@ import { createI18n } from 'vue-i18n'
 import UsageView from '../UsageView.vue'
 import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
+import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'
+import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
+import UserBreakdownSubTable from '@/components/charts/UserBreakdownSubTable.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 
-const api = vi.hoisted(() => ({ list: vi.fn(), stats: vi.fn(), export: vi.fn(), models: vi.fn(), snapshot: vi.fn() }))
+const api = vi.hoisted(() => ({ list: vi.fn(), stats: vi.fn(), export: vi.fn(), models: vi.fn(), snapshot: vi.fn(), breakdown: vi.fn() }))
+vi.mock('vue-chartjs', () => ({ Doughnut: { template: '<div />' } }))
+vi.mock('@/api/admin/dashboard', () => ({ getUserBreakdown: api.breakdown }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 41 } }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ cachedPublicSettings: {}, showError: vi.fn(), showSuccess: vi.fn(), showWarning: vi.fn() }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
@@ -24,14 +30,14 @@ vi.mock('xlsx', () => ({ utils: { aoa_to_sheet: vi.fn(() => ({})), sheet_add_aoa
 vi.mock('file-saver', () => ({ saveAs: vi.fn() }))
 
 let wrapper: VueWrapper
-function render(locale = 'en', observerMode = false) {
+function render(locale = 'en', observerMode = false, realCharts = false) {
   wrapper = mount(UsageView, { props: { observerMode }, global: {
     plugins: [createPinia(), createI18n({ legacy: false, locale, messages: { zh, en } })],
     stubs: { AppLayout: { template: '<main><slot /></main>' }, Teleport: true,
       UsageStatsCards: true, UsageTable: true, UsageCleanupDialog: true, UsageExportProgress: true,
       UserBalanceHistoryModal: true, OpsErrorLogTable: true, OpsErrorDetailModal: true,
       UsageConnections: true, LatencyObservabilityPanel: true, UserTokenRanking: true,
-      TokenUsageTrend: true, ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+      TokenUsageTrend: true, ModelDistributionChart: !realCharts, GroupDistributionChart: !realCharts, EndpointDistributionChart: !realCharts,
     },
   } })
   return wrapper
@@ -126,6 +132,55 @@ describe('admin usage platform behavior with real filters', () => {
     for (const [index, call] of api.export.mock.calls.entries()) {
       expect(call[0]).toMatchObject({ platform: 'openai', group_id: 7, page: index + 1, page_size: 100, exact_total: true })
     }
+  })
+
+  it.each([
+    ['model', ModelDistributionChart],
+    ['group', GroupDistributionChart],
+    ['endpoint', EndpointDistributionChart],
+  ])('clears expanded %s breakdowns and fences delayed responses across platform and scope changes', async (_name, component) => {
+    const totals = { requests: 1, total_tokens: 30, input_tokens: 10, output_tokens: 20, cache_creation_tokens: 0, cache_read_tokens: 0, cost: 2, actual_cost: 1 }
+    api.models.mockResolvedValue({ models: [{ ...totals, model: 'fixture-model' }] })
+    api.snapshot.mockResolvedValue({ trend: [], groups: [{ ...totals, group_id: 7, group_name: 'Synthetic group' }] })
+    api.stats.mockResolvedValue({ total_requests: 1, endpoints: [{ ...totals, endpoint: '/v1/responses' }] })
+    const user = (email: string) => ({ ...totals, user_id: 42, email })
+    api.breakdown.mockResolvedValueOnce({ users: [user('before@example.invalid')] })
+    render('en', false, true)
+    await vi.advanceTimersByTimeAsync(120)
+    await flushPromises()
+    const chart = wrapper.getComponent(component as any)
+    const row = () => chart.get('tbody tr')
+    await row().trigger('click')
+    await flushPromises()
+    expect(chart.text()).toContain('before@example.invalid')
+    await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'OpenAI')
+    expect(chart.findComponent(UserBreakdownSubTable).exists()).toBe(false)
+    await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'All platforms')
+    expect(chart.findComponent(UserBreakdownSubTable).exists()).toBe(false)
+
+    let releaseOld!: (value: unknown) => void
+    api.breakdown.mockReturnValueOnce(new Promise(resolve => { releaseOld = resolve }))
+    await row().trigger('click')
+    await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'OpenAI')
+    await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'All platforms')
+    api.breakdown.mockResolvedValueOnce({ users: [user('current@example.invalid')] })
+    await row().trigger('click')
+    await flushPromises()
+    releaseOld({ users: [user('stale@example.invalid')] })
+    await flushPromises()
+    expect(chart.text()).toContain('current@example.invalid')
+    expect(chart.text()).not.toContain('stale@example.invalid')
+
+    await row().trigger('click')
+    let releaseScope!: (value: unknown) => void
+    api.breakdown.mockReturnValueOnce(new Promise(resolve => { releaseScope = resolve }))
+    await row().trigger('click')
+    ;(wrapper.vm as any).filters.user_id = 43
+    wrapper.findComponent(UsageFilters).vm.$emit('change')
+    await flushPromises()
+    releaseScope({ users: [user('stale-scope@example.invalid')] })
+    await flushPromises()
+    expect(chart.findComponent(UserBreakdownSubTable).exists()).toBe(false)
   })
 
   it('clears the detail-only platform when switching tabs and disables unsupported cleanup', async () => {

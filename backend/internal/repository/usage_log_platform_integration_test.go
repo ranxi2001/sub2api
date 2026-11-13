@@ -34,12 +34,20 @@ func TestUsagePlatformHistoricalQuery(t *testing.T) {
 	for i, platform := range append(append([]string{}, platforms...), "") {
 		for j, groupID := range []int64{group.ID, other.ID} {
 			log := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID,
-				GroupID: &groupID, RequestID: fmt.Sprintf("platform-%d-%d", i, j), Model: "fixture-model",
+				GroupID: &groupID, RequestID: fmt.Sprintf("platform-%d-%d", i, j), Model: "internal-route", RequestedModel: "fixture-model",
 				InputTokens: 10, OutputTokens: 20, TotalCost: 2, ActualCost: 1, CreatedAt: start.Add(time.Minute)}
+			upstream := "upstream-fixture"
+			log.UpstreamModel = &upstream
 			raw, err := json.Marshal(map[string]string{"Platform": platform})
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(raw, log))
 			_, err = repo.Create(ctx, log)
+			require.NoError(t, err)
+			otherModel := *log
+			otherModel.ID = 0
+			otherModel.RequestID += "-other-model"
+			otherModel.Model, otherModel.RequestedModel = "different-model", "different-model"
+			_, err = repo.Create(ctx, &otherModel)
 			require.NoError(t, err)
 		}
 	}
@@ -51,7 +59,7 @@ func TestUsagePlatformHistoricalQuery(t *testing.T) {
 	for _, platform := range append(append([]string{}, platforms...), "unknown", "") {
 		t.Run(platform, func(t *testing.T) {
 			filters := usagestats.UsageLogFilters{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID,
-				GroupID: group.ID, Model: "fixture-model", StartTime: &start, EndTime: &end, ExactTotal: true}
+				GroupID: group.ID, Model: "fixture-model", ModelFilterSource: usagestats.ModelSourceRequested, StartTime: &start, EndTime: &end, ExactTotal: true}
 			raw, err := json.Marshal(map[string]string{"Platform": platform})
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(raw, &filters))
@@ -77,10 +85,12 @@ func TestUsagePlatformHistoricalQuery(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, trend, 1)
 			require.Equal(t, want, trend[0].Requests)
-			models, err := repo.GetModelStatsWithUsageFiltersBySource(ctx, start, end, filters, usagestats.ModelSourceRequested)
-			require.NoError(t, err)
-			require.Len(t, models, 1)
-			require.Equal(t, want, models[0].Requests)
+			for _, source := range []string{usagestats.ModelSourceRequested, usagestats.ModelSourceUpstream, usagestats.ModelSourceMapping} {
+				models, err := repo.GetModelStatsWithUsageFiltersBySource(ctx, start, end, filters, source)
+				require.NoError(t, err)
+				require.Len(t, models, 1)
+				require.Equal(t, want, models[0].Requests, "selected requested model must survive every chart grouping source")
+			}
 			groups, err := repo.GetGroupStatsWithUsageFilters(ctx, start, end, filters)
 			require.NoError(t, err)
 			require.Len(t, groups, 1)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,6 +70,45 @@ func TestDashboardPlatformFiltersAndCaches(t *testing.T) {
 				router.ServeHTTP(repeated, httptest.NewRequest(http.MethodGet, url, nil))
 				require.Equal(t, http.StatusOK, repeated.Code)
 				require.Equal(t, "hit", repeated.Header().Get(header))
+			}
+		})
+	}
+}
+
+func TestDashboardPlatformModelCacheScope(t *testing.T) {
+	t.Cleanup(resetDashboardReadCachesForTest)
+	for _, endpoint := range []string{"trend", "models", "groups", "snapshot"} {
+		t.Run(endpoint, func(t *testing.T) {
+			resetDashboardReadCachesForTest()
+			repo := &dashboardUsageRepoCapture{}
+			router := newDashboardRequestTypeTestRouter(repo)
+			for _, platform := range []string{"openai", "gemini"} {
+				for _, model := range []string{"requested-a", "requested-b"} {
+					url := "/admin/dashboard/" + endpoint + "?start_date=2026-11-01&end_date=2026-11-07&include_stats=false&include_group_stats=true&platform=" + platform + "&model=" + model
+					rec := httptest.NewRecorder()
+					router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+					require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+					require.Equal(t, "miss", rec.Header().Get("X-Snapshot-Cache"))
+					filters := []usagestats.UsageLogFilters{}
+					switch endpoint {
+					case "trend":
+						filters = append(filters, repo.trendFilters)
+					case "models":
+						filters = append(filters, repo.modelFilters)
+					case "groups":
+						filters = append(filters, repo.groupFilters)
+					case "snapshot":
+						filters = append(filters, repo.trendFilters, repo.modelFilters, repo.groupFilters)
+					}
+					for _, filter := range filters {
+						require.Equal(t, platform, filter.Platform)
+						require.Equal(t, model, filter.Model)
+						require.Equal(t, usagestats.ModelSourceRequested, filter.ModelFilterSource)
+					}
+					repeated := httptest.NewRecorder()
+					router.ServeHTTP(repeated, httptest.NewRequest(http.MethodGet, url, nil))
+					require.Equal(t, "hit", repeated.Header().Get("X-Snapshot-Cache"))
+				}
 			}
 		})
 	}

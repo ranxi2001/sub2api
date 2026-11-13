@@ -37,6 +37,11 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Build and start committed backend before generation
+        working-directory: backend
+        run: |
+          go build -o "$RUNNER_TEMP/sub2api-platform" ./cmd/server
+          "$RUNNER_TEMP/sub2api-platform" -version
       - name: Verify generated Ent code
         working-directory: backend
         run: |
@@ -49,15 +54,12 @@ jobs:
           set -o pipefail
           go test -tags=unit ./internal/repository ./internal/service ./internal/handler/admin -run 'Test(Usage|AdminUsage|PrepareUsage|GatewayServiceRecordUsage|OpenAIGatewayServiceRecordUsage|Dashboard|FinalizeLive|BatchImage)' -count=1 -v -timeout=15m 2>&1 | tee "$RUNNER_TEMP/platform-unit.log"
           if grep -Eq -- '--- SKIP:|no tests to run' "$RUNNER_TEMP/platform-unit.log"; then exit 1; fi
-      - name: Build backend
-        working-directory: backend
-        run: go build ./cmd/server
       - name: Historical platform SQL regression (disposable PostgreSQL)
         working-directory: backend
         shell: bash
         run: |
           set -o pipefail
-          go test -tags=integration ./internal/repository -run 'TestUsage(Log|Platform)|TestRegionalSubscriptionCanonicalUsesDurableFundingMetadata|TestRegionalLegacyUnknownAllocation'  -count=1 -v -timeout=15m 2>&1 | tee "$RUNNER_TEMP/platform-sql.log"
+          go test -tags=integration ./internal/repository -run 'TestUsage(Log|Platform)|TestRegionalSubscriptionCanonicalUsesDurableFundingMetadata|TestRegionalLegacyUnknownAllocation' -count=1 -v -timeout=15m 2>&1 | tee "$RUNNER_TEMP/platform-sql.log"
           if grep -Eq -- '--- SKIP:|no tests to run' "$RUNNER_TEMP/platform-sql.log"; then exit 1; fi
       - uses: actions/upload-artifact@v7
         if: always()
