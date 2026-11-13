@@ -146,6 +146,7 @@ export async function completeScheduledRounds(c) {
   }
 
   async function round(kind, label, refuse = false) {
+    state.active_gate = `${label}-${kind}`
     const before = await readers[kind]()
     const beforePlans = await planReaders[kind]()
     assert.ok(beforePlans.every(p => p.running_until === null && p.last_run_at !== null))
@@ -213,7 +214,7 @@ export async function completeScheduledRounds(c) {
         assert.ok(Date.parse(p.last_run_at) > Date.parse(beforePlans.find(old => old.id === p.id).last_run_at))
         assert.ok(Date.parse(p.next_run_at) > Date.parse(nominal))
       }
-      assert.deepEqual(results.filter(row => before.some(old => old.id === row.id)), before, 'all saved snapshots remain byte-for-byte equivalent as JSON')
+      assert.deepEqual(results.filter(row => before.some(old => old.id === row.id)), before, 'all previously saved JSON values remain unchanged')
       const fresh = results.filter(row => !before.some(old => old.id === row.id))
       const provider = await capturesNow()
       assert.deepEqual(provider.rejected, [])
@@ -252,8 +253,129 @@ export async function completeScheduledRounds(c) {
 
   await round('account', 'second-nominal')
   await round('group', 'second-nominal')
-  // Subsequent increments add UI editing and failure/recovery to this same
-  // runner; partial scope stays explicit in acceptance.json until implemented.
+
+  async function editAccount(mode) {
+    state.active_gate = `ui-edit-account-${mode}`
+    await page.goto(`${origin}/admin/accounts`)
+    await openAccount(accounts[0])
+    await dialog().getByRole('button', { name: 'Scheduled tests', exact: true }).click()
+    await dialog().getByRole('button', { name: 'Edit Plan', exact: true }).click()
+    const form = dialog().locator('div.border-t.border-blue-100').filter({ has: page.getByPlaceholder('*/30 * * * *', { exact: true }) })
+    assert.equal(await form.count(), 1)
+    await form.getByTestId('pelican-mode-select').selectOption(mode)
+    const prompt = 'fixture795 edited account rule: draw a standalone SVG with a violet square.'
+    if (mode === 'custom') await form.locator('textarea').fill(prompt)
+    await form.locator('input[type=number]').last().fill('1')
+    const saved = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/admin/scheduled-test-plans/${plans[0].id}`
+      && response.request().method() === 'PUT')
+    await form.getByRole('button', { name: 'Save', exact: true }).click()
+    const response = await saved
+    assert.equal(response.status(), 200)
+    const body = unwrap(await response.json())
+    assert.equal(String(body.id), plans[0].id)
+    assert.equal(String(body.account_id), accounts[0].id)
+    assert.equal(body.pelican_config.prompt_mode, mode)
+    assert.equal(body.pelican_config.parallel_count, 1)
+    if (mode === 'custom') assert.equal(body.pelican_config.prompt, prompt)
+    assert.ok(!body.pelican_config.pelican_question)
+    const stored = (await readPlans()).find(p => p.id === plans[0].id)
+    assert.deepEqual(stored.pelican_config, body.pelican_config)
+    await form.waitFor({ state: 'hidden' })
+    await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
+    await page.reload()
+    await openAccount(accounts[0])
+    const listRead = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/admin/accounts/${accounts[0].id}/scheduled-test-plans`
+      && response.request().method() === 'GET')
+    await dialog().getByRole('button', { name: 'Scheduled tests', exact: true }).click()
+    const listResponse = await listRead
+    assert.equal(listResponse.status(), 200)
+    const list = unwrap(await listResponse.json())
+    const persisted = list.find(p => String(p.id) === plans[0].id)
+    assert.ok(persisted)
+    assert.deepEqual(persisted.pelican_config, body.pelican_config)
+    await dialog().getByRole('button', { name: 'Edit Plan', exact: true }).click()
+    assert.equal(await form.getByTestId('pelican-mode-select').inputValue(), mode)
+    assert.equal(await form.locator('input[type=number]').last().inputValue(), '1')
+    if (mode === 'custom') assert.equal(await form.locator('textarea').inputValue(), prompt)
+    await page.screenshot({ path: join(evidence, `edited-account-${mode}-persisted.png`), fullPage: true })
+    save(`edited-account-${mode}.json`, { update_request_path: new URL(response.request().url()).pathname,
+      list_request_path: new URL(listResponse.request().url()).pathname,
+      api_config: body.pelican_config, pg_plan: stored, reloaded_editor: { prompt_mode: mode, parallel_count: 1 } })
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
+  }
+
+  async function editGroup(mode) {
+    state.active_gate = `ui-edit-group-${mode}`
+    await page.goto(`${origin}/admin/pelican-tests`)
+    await page.getByTestId(`pelican-plan-edit-${groupPlanId}`).click()
+    const form = page.getByTestId('pelican-test-editor')
+    await form.getByTestId('pelican-mode-select').selectOption(mode)
+    const prompt = 'fixture795 edited group rule: draw a standalone SVG with a violet triangle.'
+    if (mode === 'custom') await form.getByTestId('pelican-test-prompt').fill(prompt)
+    await form.locator('#pelican-test-parallel').fill('1')
+    const saved = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/admin/pelican-group-tests/${groupPlanId}`
+      && response.request().method() === 'PUT')
+    await page.getByTestId('pelican-test-save').click()
+    const response = await saved
+    assert.equal(response.status(), 200)
+    const body = unwrap(await response.json())
+    assert.equal(String(body.id), groupPlanId)
+    assert.equal(String(body.group_id), groupId)
+    assert.equal(body.pelican_config.prompt_mode, mode)
+    assert.equal(body.pelican_config.parallel_count, 1)
+    if (mode === 'custom') assert.equal(body.pelican_config.prompt, prompt)
+    assert.ok(!body.pelican_config.pelican_question)
+    const stored = await readGroupPlan()
+    assert.deepEqual(stored.pelican_config, body.pelican_config)
+    await form.waitFor({ state: 'hidden' })
+    await page.waitForLoadState('networkidle')
+    const listRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-tests'
+      && response.request().method() === 'GET')
+    await page.reload()
+    const listResponse = await listRead
+    assert.equal(listResponse.status(), 200)
+    const list = unwrap(await listResponse.json())
+    const persisted = list.find(p => String(p.id) === groupPlanId)
+    assert.ok(persisted)
+    assert.deepEqual(persisted.pelican_config, body.pelican_config)
+    await page.getByTestId(`pelican-plan-edit-${groupPlanId}`).click()
+    assert.equal(await form.getByTestId('pelican-mode-select').inputValue(), mode)
+    assert.equal(await form.locator('#pelican-test-parallel').inputValue(), '1')
+    if (mode === 'custom') assert.equal(await form.getByTestId('pelican-test-prompt').inputValue(), prompt)
+    await page.screenshot({ path: join(evidence, `edited-group-${mode}-persisted.png`), fullPage: true })
+    save(`edited-group-${mode}.json`, { update_request_path: new URL(response.request().url()).pathname,
+      list_request_path: new URL(listResponse.request().url()).pathname,
+      api_config: body.pelican_config, pg_plan: stored, reloaded_editor: { prompt_mode: mode, parallel_count: 1 } })
+    await page.getByRole('dialog').filter({ has: form }).getByRole('button', { name: 'Cancel', exact: true }).click()
+  }
+
+  const savedBeforeEdit = { account: await readResults(), group: await readGroupResults() }
+  const plansBeforeEdit = { account: await readPlans(), group: await readGroupPlan() }
+  await editAccount('custom')
+  await editGroup('custom')
+  state.active_gate = 'edited-old-snapshots'
+  assert.deepEqual(await readResults(), savedBeforeEdit.account)
+  assert.deepEqual(await readGroupResults(), savedBeforeEdit.group)
+  assert.deepEqual((await readPlans()).find(p => p.id === plans[1].id), plansBeforeEdit.account.find(p => p.id === plans[1].id),
+    'editing A must preserve B plan and ownership')
+  for (const p of await readPlans()) assert.equal(p.last_run_at, plansBeforeEdit.account.find(old => old.id === p.id).last_run_at)
+  assert.equal((await readGroupPlan()).last_run_at, plansBeforeEdit.group.last_run_at)
+  await accountHistory('edited-old-snapshots', savedBeforeEdit.account)
+  await groupHistory('edited-old-snapshots', savedBeforeEdit.group)
+  save('edited-old-pg-snapshots.json', savedBeforeEdit)
+  state.scenarios.push({ name: 'ui-edited-account-group-rules-old-pg-api-dom-snapshots-immutable', status: 'passed' })
+
+  // Restore random mode through the real forms, retaining the changed sample
+  // count. The failed and recovery records must freeze this new rule, while
+  // all earlier results continue to describe the old two-sample rule.
+  await editAccount('random')
+  await editGroup('random')
+  await round('account', 'deterministic-refusal', true)
+  await round('account', 'after-refusal-valid-round')
+  await round('group', 'deterministic-refusal', true)
+  await round('group', 'after-refusal-valid-round')
   assert.deepEqual((await readResults()).filter(row => initial.account.some(old => old.id === row.id)), initial.account)
   assert.deepEqual((await readGroupResults()).filter(row => initial.group.some(old => old.id === row.id)), initial.group)
+  state.active_gate = null
 }

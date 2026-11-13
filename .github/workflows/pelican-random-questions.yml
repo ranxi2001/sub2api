@@ -172,8 +172,9 @@ jobs:
             echo 'same nominal time, real Claim leases, four PG results and provider/history/detail/DOM reconciliation.'
             echo 'Also implemented: UI-enabled group plan, actual RunDue/Claim, two results and PG/provider/list/detail/DOM reconciliation.'
             echo 'Group routing is checked against the actual chosen accounts, without assuming equal distribution.'
-            echo 'Historical snapshots after editing, second nominal round,'
-            echo 'deterministic failed record and failure lease release remain unimplemented.'
+            echo 'Successor gates: same-plan T2 with a different question and coexisting histories;'
+            echo 'UI edits persisted and reloaded while old PG/API/DOM snapshots stay unchanged;'
+            echo 'deterministic provider refusal, failed history, released leases and subsequent valid RunDue.'
             echo 'Read this candidate artifact and checks; earlier SHA results do not validate new scenarios.'
             echo 'A green job does not clear all Issue #795 technical or product acceptance gates.'
           } >> "$GITHUB_STEP_SUMMARY"

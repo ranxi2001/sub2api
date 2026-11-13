@@ -21,7 +21,7 @@ GitHub `pull_request`（base 为 `production`，包含 fixture/script/workflow �
 
 分组定时阶段复用先前真实创建的禁用计划：经真实编辑表单设置年周期 Cron，等计划行显示新 Cron 后点击 Enable。以实际 PUT 响应、启用后的 DOM 和限定 PG 规则投影对账，然后仅对这个 fixture plan/group 更新一次 `next_run_at`。仍等待真实分钟 tick/RunDue/Claim，并复用 provider 最多30秒的回复等待来观察有效运行租约、推进后的到期时间及两份真实请求；释放回复后要求两份真实 PG 结果和成功轮次的 lease 完成。每份结果按实际 `account_id` 与 capture alias 对账，允许两份都选中 A 或 B，不断言路由均匀。
 
-页面保持在真实 `PelicanTestsView`，等待其15秒轮询取得本轮 list，随后点击按 result ID 标记的行，监听实际 detail 响应，核对组名、模型、实际账号、成功状态、展开的 question/actual_prompt 和 iframe marker。按 group plan/result ID 保存截图与受限投影。不写结果、调用 `/run` 或注入 auth/store；这个分组的首次 nominal T 不是同一计划的第二轮 T2。CI 浏览器总等待上限为660秒，job仍为45分钟；本轮新代码未远程验证。
+页面保持在真实 `PelicanTestsView`，等待其15秒轮询取得本轮 list，随后点击按 result ID 标记的行，监听实际 detail 响应，核对组名、模型、实际账号、成功状态、展开的 question/actual_prompt 和 iframe marker。按 group plan/result ID 保存截图与受限投影。不写结果、调用 `/run` 或注入 auth/store；这个分组的首次 nominal T 不是同一计划的第二轮 T2。CI 浏览器总等待上限为1080秒，job仍为45分钟；本轮新代码未远程验证。
 
 ## HTTPS fixture 与原 HTTP 建议的差异
 
@@ -29,17 +29,20 @@ GitHub `pull_request`（base 为 `production`，包含 fixture/script/workflow �
 
 假上游只接受模型发现和 messages SSE，额外的健康、去认证 capture 读取及单次 refusal 控制端点仅供 fixture。可选 pricing 刷新明确返回 503，真实应用使用打包的 fallback 文件；未知路径/输入记录为拒绝并使浏览器验收失败。网页本身仅允许 app origin；provider 只能由应用调用，Node fixture 控制读取不伪装成浏览器请求。主防外呼边界是所有运行容器的 Docker internal 网络，虚构 key 不是防外呼措施。
 
-## 未完成的完整验收范围
+## Successor 的编辑、失败和恢复门禁（待本 head 远程运行）
 
-- [ ] 远程验收上述已实现的 A/B 随机定时 UI 创建、同一 T、真实 Claim 和四份 PG/provider/API/DOM 对账；静态实现不等于通过。
-- [ ] 远程验收已实现的分组 UI 启用、真实 RunDue/Claim、成功轮次 lease 完成、PG/provider/list/detail/真实 DOM 对账；不假设分组均匀路由 A/B。
-- [ ] 经真实浏览器编辑计划后，旧 PG/API/UI 快照保持不变。
-- [ ] 已实现第二 nominal time T2 不同选题及历史共存门禁；仍待本 successor exact-head 远程结果。
-- [ ] arm 单次 refusal 后真正产生 failed 持久化结果、失败历史及 lease 释放；现有 refusal server 能力尚未被此增量测试。
-- [ ] 失败场景的结果/租约/到期字段限定投影及关联。账号与分组成功轮次已编写限定投影，但尚待各自实际候选的远程证据。
-- #809 已合并；本 successor 的远程 Actions、失败记录及当前 head 检查结论由父级发布后补录，以当前候选 artifact 为准。没有运行本地动态检查。
-- [ ] 隔离链路真实截图上传 PR 原生附件并回读；现有组件 job 截图仍只是组件证据，不能混同此 job。无 PNG 提交到源码。
-- [ ] 父协调者独审、完整技术验收与产品/经验难度证据。fixture 的简单 SVG 不代表题目作答合格或难度相当。
+同计划 T2 后，通过实际账号 Scheduled tests 编辑表单与分组编辑表单，将随机规则改为不同的 custom prompt、样本数改为1。核对 PUT、PG，刷新页面后读取真实 list API，再打开编辑器核对保存值。原计划的 last_run_at 不应被 UI 编辑改写，账号 B 的计划应保持不变。再次打开旧历史，逐条按原 PG result/plan、请求 URL、provider marker 校验旧题目、版本、actual_prompt、样本数和 DOM；不使用当前计划覆盖旧结果。随后经同一真实表单恢复 random 模式，保留新样本数。
+
+账号和分组各运行一次确定 refusal，再各运行一个有效 nominal round。refusal 是实际假提供商 SSE 的 stop_reason=refusal/category，附带唯一 partial-output marker；它是真实 service 的模型输出失败，不是编译 RED、网络拦截或预先写入的 failed 行。账号 A/B 并发时只拒绝一个实际到达的请求，不预设到达顺序或拒绝账号；按 marker/alias 精确绑定实际失败样本。分组拒绝应保留失败答案而不 failover。每轮都观察 Claim、原 last_run_at 保持、Finish 释放、last_run_at 前进及 next_run_at 已推进，检查旧结果不变。
+
+账号失败卡片通过真实 history/detail 展开，核对冻结快照与失败文本。分组原 UI 失败行没有 preview 按钮，仅从实际 list 请求核对 snapshot/身份，并核对 DOM failed/error；不伪造该 UI 不提供的 detail 请求或失败快照 DOM。下一有效轮次要求相同计划再次实际执行成功并保留之前失败历史。
+
+## 剩余验收
+
+- [ ] 当前 successor exact-head 的远程原始日志、每个 attempt、真实 PG/provider/API/DOM 产物；静态实现不是通过，#832 六份结果也不替代本轮。
+- [ ] 下载并检查当前真实渲染截图，原生附件上传/字节回读（可用时）；无 PNG 入源码。
+- [ ] 父级独立冻结 diff 复审及全部检查验收。
+- [ ] 原始产品/完整题库判据和专家或经验难度可比性。没有实际模型调用，fixture SVG 只证明工程链路，`full_acceptance_complete:false` 保留。
 
 ## 证据与清理
 
