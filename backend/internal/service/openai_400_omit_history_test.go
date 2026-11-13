@@ -266,7 +266,8 @@ func TestOpenAI400HistoryDiagnosticSnapshot(t *testing.T) {
 	d.Decision = "retry_exhausted"
 	events, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)
-	stored := events.([]*OpsUpstreamErrorEvent)
+	stored, ok := events.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
 	require.Len(t, stored, 1, "diagnostics must not add fake attempts")
 	require.Equal(t, "same_account_retry_scheduled", stored[0].EncryptedHistory400.Decision)
 	entry := &OpsInsertErrorLogInput{UpstreamErrors: stored}
