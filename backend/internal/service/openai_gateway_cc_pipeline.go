@@ -358,6 +358,9 @@ func (s *OpenAIGatewayService) scanCCStream(
 			)
 		}
 		st.Err = err
+		if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, err); handled {
+			st.Err = resetErr
+		}
 	}
 	return st
 }

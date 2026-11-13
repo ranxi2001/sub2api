@@ -467,6 +467,12 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		errors.Is(scanErr, context.Canceled) ||
 		errors.Is(scanErr, context.DeadlineExceeded)
 
+	if !clientAborted && !terminal.Terminated() {
+		if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, scanErr); handled {
+			return resultWithUsage(), resetErr
+		}
+	}
+
 	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
 	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成
 	// `HTTP 200 + usage 0/0`，客户端收到半截回答且 Ops 侧完全无感。

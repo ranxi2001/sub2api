@@ -52,6 +52,17 @@ func TestChatCompletionsBufferedResponsesReadErrorReturnsFailover(t *testing.T) 
 
 			require.Error(t, err)
 			require.Nil(t, result)
+			if readError.name == "http2_reset" {
+				var failoverErr *UpstreamFailoverError
+				require.NotErrorAs(t, err, &failoverErr, "peer reset after submission must never authorize replay")
+				code, message, ok := OpenAIUpstreamStreamReadErrorDetails(err)
+				require.True(t, ok)
+				require.Equal(t, readError.expectedCode, code)
+				require.Contains(t, message, "INTERNAL_ERROR")
+				require.Equal(t, 502, rec.Code)
+				require.Contains(t, rec.Body.String(), "Do not automatically retry")
+				return
+			}
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
 			require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)

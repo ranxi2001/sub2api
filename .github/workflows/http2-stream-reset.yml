@@ -53,6 +53,32 @@ jobs:
           restore_head
           trap - EXIT
           git diff --exit-code
+      - name: GREEN boundary and existing stream regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go test -tags=unit ./internal/handler ./internal/service ./internal/repository -run 'TestHTTP2|TestOpenAIStreaming|TestHandleChatStreaming|TestChatCompletionsBuffered|TestAnthropicBuffered|TestForwardAsAnthropic|TestForwardResponses|TestOpenAIImagesOAuthBodyRead|TestOps.*Stream|TestOpsBridge|TestAutoConfig|Test.*RawStream|Test.*StreamTruncat|Test.*ClientCancel|Test.*ClientDisconnect|Test.*Deadline|TestClassifyOpenAIAPIKeyHealth|TestOpsErrorWhere' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/green.log"
+      - name: Ordinary production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go build ./... 2>&1 | tee "$RUNNER_TEMP/http2-evidence/build.log"
+      - name: Race boundary and stream lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go test -race -tags=unit ./internal/handler ./internal/service -run 'TestHTTP2|TestOpenAIStreamingReadError|TestHandleChatStreamingResponse_ClassifiesHTTP2|TestAutoConfigRealRequestOutcomes|TestForwardAsAnthropic_ForceChatCompletionsStreamReadError' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/race.log"
+      - name: PostgreSQL persistence and monitor regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go test -tags=integration ./internal/repository -run 'TestHTTP2PeerResetPersistence|TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus|TestChannelMonitorV2.*Error' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/persistence.log"
+          ! grep -q -- '--- SKIP: TestHTTP2PeerResetPersistence' "$RUNNER_TEMP/http2-evidence/persistence.log"
+          git diff --exit-code
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -2676,6 +2676,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, err)
 			return resultWithUsage(), err
 		}
+		if !clientDisconnected && ctx.Err() == nil {
+			if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, upstreamRequestID, err); handled {
+				return resultWithUsage(), resetErr
+			}
+		}
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			msg := "OpenAI stream disconnected before completion"
 			if errText := strings.TrimSpace(err.Error()); errText != "" {

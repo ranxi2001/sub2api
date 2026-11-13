@@ -186,6 +186,7 @@ func IsOpsRequestScopedError(c *gin.Context) bool {
 // 由于 HTTP 状态码停留在 2xx，ops_error_logger 中间件在 status<400 分支消费该标记并
 // 补记错误日志；标记方是 handler.handleStreamingAwareError 或各 service 的带内检测。
 type OpsStreamError struct {
+	TransportFailure *OpsTransportFailure
 	// BridgeFailure is set only by the local BPS conversion boundary. It keeps
 	// real upstream HTTP evidence while assigning failure ownership to gateway.
 	BridgeFailure *basispoints.BridgeFailure
