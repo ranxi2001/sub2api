@@ -349,9 +349,13 @@ jobs:
           original=e7f54240d83765c90a98e961ad5e33b0fa35ab56
           target=backend/internal/service/openai_ws_agent_recovery.go
           caller=backend/internal/service/openai_ws_forwarder_ingress.go
+          passthrough=backend/internal/service/openai_ws_v2_passthrough_adapter.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "$target" "$caller"; git diff --exit-code' EXIT
-          git restore --source="$original" -- "$target" "$caller"
+          # Manager fields and readable-payload methods live together. Restore
+          # both transport callers with that manager; retain candidate tests and
+          # standalone admission/principal helpers required by current HTTP.
+          trap 'git restore --source=HEAD -- "$target" "$caller" "$passthrough"; git diff --exit-code' EXIT
+          git restore --source="$original" -- "$target" "$caller" "$passthrough"
           expected=$(git rev-parse "$original:$target")
           actual=$(git hash-object "$target")
           echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
@@ -360,6 +364,11 @@ jobs:
           actual_caller=$(git hash-object "$caller")
           echo "baseline=$original path=$caller expected_blob=$expected_caller tested_blob=$actual_caller"
           test "$expected_caller" = "$actual_caller"
+          expected_passthrough=$(git rev-parse "$original:$passthrough")
+          actual_passthrough=$(git hash-object "$passthrough")
+          echo "baseline=$original path=$passthrough expected_blob=$expected_passthrough tested_blob=$actual_passthrough"
+          test "$expected_passthrough" = "$actual_passthrough"
+          git diff --exit-code HEAD -- backend/internal/service/openai_ws_agent_recovery_test.go
           set +e
           (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715WSBridgeValidatesBuiltPayload$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-ws-wire-red.log" 2>&1
           result=$?

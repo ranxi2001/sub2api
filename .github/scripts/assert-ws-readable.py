@@ -13,6 +13,7 @@ MODES = ("http_bridge", "ctx_pool", "shared", "dedicated", "passthrough")
 SUITES = {
     "ws": ("TestOpenAI409WSReadableContinuation", {mode for mode in MODES}),
     "ws-boundaries": ("TestOpenAI409WSReadableBoundaries", {f"{mode}/{case}" for mode in MODES for case in ("off", "no_intent", "b_disabled", "pending_owner", "failed_owner", "ambiguous_B")}),
+    "ws-review": ("TestOpenAI409WSReviewRepairs", {f"identity/{mode}" for mode in MODES} | {f"smart/{mode}" for mode in ("auto", "ws", "http")} | {"bridge_inherited_model"}),
     "oauth-shadow": ("TestOpenAI409FutureShadowOAuth", {f"stream={stream}/{case}" for stream in ("false", "true") for case in ("recover", "write_failed", "pending_owner", "store_read_failed", "two_known_tasks", "fresh_intent")}),
     "pointer": ("TestOpenAI409HTTPReadablePointerWithoutOpaque", {f"{account}/stream={stream}/{pointer}" for account in ("apikey", "oauth") for stream in ("false", "true") for pointer in ("previous", "conversation")}),
     "pointer-boundaries": ("TestOpenAI409HTTPPointerWithoutOpaqueBoundaries", {f"{account}/stream={stream}/{case}" for account in ("apikey", "oauth") for stream in ("false", "true") for case in ("strict", "pointer_only", "foreign_user", "b_disabled")}),
@@ -23,7 +24,7 @@ SUITES = {
     "audit-async": ("TestRecoveredContextAsyncEnforcement", {"admission", "penalty"}),
     "ws-oracle": ("TestOpenAI409WSAmbiguousOracleMutations", {f"{transport}/{mutation}" for transport in ("http_bridge", "socket") for mutation in ("valid", "wrong_credential", "old_pointer", "missing_result", "unrelated_eof")}),
 }
-RED_SUITES = {"ws", "shadow-races", "audit-provenance", "audit-persistence", "audit-async"}
+RED_SUITES = {"ws", "ws-review", "shadow-races", "audit-provenance", "audit-persistence", "audit-async"}
 # Fixed e593 source in shadow-review-repair.yml. These outcomes were accepted
 # from actual provider-wire evidence; never infer them from the observed log.
 STRICT_POINTER_BASELINE = {
@@ -35,6 +36,12 @@ STRICT_POINTER_BASELINE = {
 
 
 def diagnostic(suite, name):
+    if suite == "ws-review":
+        if "/identity/" in name:
+            return ("WS_REVIEW_CLIENT_IDENTITY_LOST", "evt_cyber_session_identity_rejected")
+        if "/smart/" in name:
+            return ("WS_REVIEW_SMART_SESSION_STALE", "session authorization changed")
+        return ("WS_REVIEW_INHERITED_MODEL_LOST", "gpt-5.1")
     if suite == "ws":
         return ("WS_READABLE_B_DISPATCH_MISSING", "account eligibility changed")
     if suite == "strict-pointer":

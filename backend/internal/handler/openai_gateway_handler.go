@@ -3343,10 +3343,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	} else if changed {
 		ctx, firstMessage, previousResponseID = next, clean, ""
-		request := c.Request.Clone(ctx)
-		request.Header.Del("x-codex-turn-state")
-		request.Header.Del("conversation_id")
-		c.Request = request
+		ctx = service.ResetOpenAIWSReadableProviderSession(ctx, c)
+		c.Request = c.Request.WithContext(ctx)
 	}
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -4103,10 +4101,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				ctx = service.WithAPIKeyQueueRequestPermissions(next, permissions)
 				ctx, _ = h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
 				ctx = service.WithOpenAIForwardModel(ctx, currentForwardModel, false)
-				request := c.Request.Clone(ctx)
-				request.Header.Del("x-codex-turn-state")
-				request.Header.Del("conversation_id")
-				c.Request = request
+				ctx = service.ResetOpenAIWSReadableProviderSession(ctx, c)
+				c.Request = c.Request.WithContext(ctx)
 				if err := h.concurrencyHelper.RevalidateTurnAuth(ctx); err != nil {
 					closeOpenAIWSAdmissionError(wsConn, reqLog, "openai.websocket_rebuild_auth_rejected", err)
 					return

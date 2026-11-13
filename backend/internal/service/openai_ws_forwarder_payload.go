@@ -78,6 +78,9 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 	return parsed.String(), nil
 }
 
+// Set only by an authorized unsent readable transition, never by client headers.
+type openAIWSReadableProviderKey struct{}
+
 func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	ctx context.Context,
 	c *gin.Context,
@@ -212,6 +215,16 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		s.requestTimezoneHeaders(ctx, account, c.Request.Header, headers)
 	}
 	s.restoreBoundCodexTicketHarvestIdentity(ctx, headers, account)
+	if detached, _ := ctx.Value(openAIWSReadableProviderKey{}).(bool); detached {
+		// conversation_id can also be the caller's trusted thread identity.
+		// Suppress old provider state only on outbound headers, preserving the
+		// original upgrade headers for later identity checks on this socket.
+		headers.Del(openAIWSTurnStateHeader)
+		headers.Del("conversation_id")
+		if account.UsesOpenAICodexProtocol() && harvestSession == "" && headers.Get("session_id") != "" {
+			headers.Set("conversation_id", headers.Get("session_id"))
+		}
+	}
 
 	return headers, sessionResolution, nil
 }

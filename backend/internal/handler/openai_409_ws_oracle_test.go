@@ -25,6 +25,7 @@ type readableWSOracle struct {
 	mu                   sync.Mutex
 	frames               [][]byte
 	identities           []string
+	headers              []http.Header
 	httpSends, wsSends   int
 	validatedDisconnects int
 	disconnectsInjected  int
@@ -38,12 +39,24 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 	defer u.mu.Unlock()
 	u.frames = append(u.frames, append([]byte(nil), body...))
 	u.identities = append(u.identities, r.Header.Get("Authorization"))
+	u.headers = append(u.headers, r.Header.Clone())
 	if ws {
 		u.wsSends++
 	} else {
 		u.httpSends++
 	}
 	n := len(u.frames)
+	if u.scenario == "bridge_model" && n == 2 {
+		if r.Header.Get("Authorization") != "Bearer fixture-readable-ws-A" || gjson.GetBytes(body, "model").String() != "gpt-5.4" || !strings.Contains(string(body), "model-switch-warmup") {
+			u.validationFailures++
+			return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_model_warmup_failed"}}}`)
+		}
+		return []byte(`{"type":"response.completed","response":{"id":"resp_model_warmup","status":"completed","model":"gpt-5.4","error":null,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"model-switch-complete"}]}],"usage":{"input_tokens":5,"output_tokens":3}}}`)
+	}
+	logicalTurn := n
+	if u.scenario == "bridge_model" && n > 2 {
+		logicalTurn--
+	}
 	output := []json.RawMessage{json.RawMessage(httpRebuildAgentA), json.RawMessage(httpRebuildCall("apply_patch", "call_ws_patch", map[string]any{"path": "sum.go", "source": httpRebuildSource}))}
 	if n > 1 {
 		if u.unrelatedEOF {
@@ -54,6 +67,9 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 			httpRebuildToolPair(body, "apply_patch", httpRebuildPatch) &&
 			!strings.Contains(string(body), "fixture-opaque-A") &&
 			!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
+		if u.scenario == "bridge_model" {
+			valid = valid && gjson.GetBytes(body, "model").String() == "gpt-5.4"
+		}
 		if !valid {
 			u.validationFailures++
 			return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_wrong_task_or_pointer","message":"wrong WS task, result, owner or pointer"}}}`)
@@ -65,13 +81,13 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 			return nil
 		}
 		output = []json.RawMessage{json.RawMessage(httpRebuildAgentB), json.RawMessage(httpRebuildCall("run_tests", "call_ws_verify", map[string]any{"path": "sum.go"}))}
-		if n == 3 && httpRebuildToolPair(body, "run_tests", httpRebuildCheck) {
+		if logicalTurn == 3 && httpRebuildToolPair(body, "run_tests", httpRebuildCheck) {
 			output = []json.RawMessage{json.RawMessage(httpRebuildJSON(map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "ws-coding-task-complete"}}}))}
-		} else if n > 2 {
+		} else if logicalTurn > 2 {
 			return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_duplicate_or_missing_tool"}}}`)
 		}
 	}
-	return []byte(httpRebuildJSON(map[string]any{"type": "response.completed", "response": map[string]any{"id": fmt.Sprintf("resp_readable_ws_%d", n), "status": "completed", "model": "gpt-5.1", "error": nil, "output": output, "usage": map[string]int{"input_tokens": 5, "output_tokens": 3}}}))
+	return []byte(httpRebuildJSON(map[string]any{"type": "response.completed", "response": map[string]any{"id": fmt.Sprintf("resp_readable_ws_%d", n), "status": "completed", "model": gjson.GetBytes(body, "model").String(), "error": nil, "output": output, "usage": map[string]int{"input_tokens": 5, "output_tokens": 3}}}))
 }
 
 func (u *readableWSOracle) server(t *testing.T) *httptest.Server {

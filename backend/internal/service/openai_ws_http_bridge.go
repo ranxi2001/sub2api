@@ -609,7 +609,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			)
 			if forwardStart.IsZero() {
 				source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
-				admissionErr = openAIWSUnsentTurn(admissionErr, source, gjson.GetBytes(source, "model").String(), turn)
+				admissionErr = openAIWSUnsentTurn(admissionErr, source, originalModel, turn)
 			}
 			return nil, admissionErr
 		}

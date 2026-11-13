@@ -48,6 +48,19 @@ func OpenAIWSUnsentTurnPayload(err error) ([]byte, string, int, bool) {
 	return append([]byte(nil), unsent.body...), unsent.model, unsent.turn, true
 }
 
+// ResetOpenAIWSReadableProviderSession drops only the provider-specific smart
+// session at an authorized unsent rebuild. Client identity and owner records
+// remain untouched. A generation already crossing the write boundary cannot reset it.
+func ResetOpenAIWSReadableProviderSession(ctx context.Context, c *gin.Context) context.Context {
+	r := openAIAgentRecoveryFromContext(ctx)
+	blocked, _ := ctx.Value(openAIWSAgentRecoveryRetryKey{}).(*atomic.Bool)
+	if c == nil || r == nil || !r.omittedHistory || r.delivery != nil || blocked == nil || blocked.Load() {
+		return ctx
+	}
+	c.Set(smartProtocolSessionKey, (*openAISmartProtocolSession)(nil))
+	return context.WithValue(ctx, openAIWSReadableProviderKey{}, true)
+}
+
 type openAIWSRecoveryPrincipal struct{ userID, keyID int64 }
 
 // The authenticated handler supplies this identity. It grants shadow scope,
@@ -149,64 +162,4 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 		next = context.WithValue(next, openAIWSAgentRecoveryRetryKey{}, &atomic.Bool{})
 	}
 	return next, clean, changed, err
-}
-
-// Prepare before compatibility/OAuth projection and freeze the expected native
-// representation. begin validates the original source and actual final bytes;
-// it must not mint a new digest from the builder's possibly changed payload.
-func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte) ([]byte, error) {
-	if r == nil {
-		return source, nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.readable = nil
-	initial := openAIAgentRecoveryFromContext(r.ctx)
-	if initial == nil || !initial.omittedHistory {
-		return source, nil
-	}
-	ctx, clean := r.ctx, source
-	if openAIAgentRecoveryInputDigest(source) != initial.inputDigest || openAI409ControlsDigest(source) != initial.replayControlsDigest {
-		// The next client turn may still carry the old A opaque history.
-		// Rebuild that frame independently, preserving every original fence.
-		var changed bool
-		var err error
-		ctx, clean, changed, err = r.service.RebuildOpenAIWSUnsentTurn(r.ctx, r.c, source, r.session, initial.model)
-		if err != nil {
-			return nil, err
-		}
-		if !changed {
-			return source, nil
-		}
-	}
-	snapshot := *openAIAgentRecoveryFromContext(ctx)
-	snapshot.delivery, snapshot.outputs = nil, nil
-	if snapshot.shadowObservation != nil {
-		r.c.Request = r.c.Request.WithContext(WithRecoveredContextPrivacy(r.c.Request.Context()))
-	}
-	ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, &snapshot)
-	if account.UsesOpenAICodexProtocol() {
-		var decoded map[string]any
-		if err := decodeOpenAIJSONUseNumber(clean, &decoded); err != nil {
-			return nil, err
-		}
-		if err := prepareOpenAI409OAuthReplay(ctx, r.c, decoded); err != nil {
-			return nil, err
-		}
-		var err error
-		clean, err = json.Marshal(decoded)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		var err error
-		clean, err = prepareOpenAI409APIKeyReplay(ctx, clean, isOpenAIResponsesLiteWebSocketPayload(clean))
-		if err != nil {
-			return nil, err
-		}
-	}
-	r.readable = &snapshot
-	r.readableSource = openAIAgentRecoveryInputDigest(source)
-	r.readableControls = openAI409ControlsDigest(source)
-	return clean, nil
 }
