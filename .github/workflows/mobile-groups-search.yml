@@ -1,0 +1,106 @@
+name: Mobile groups search
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/src/views/admin/GroupsView.vue'
+      - 'frontend/src/components/layout/TablePageLayout.vue'
+      - 'frontend/src/components/layout/AppLayout.vue'
+      - 'frontend/src/components/layout/AppHeader.vue'
+      - 'frontend/src/components/common/DataTable.vue'
+      - 'frontend/src/style.css'
+      - '.github/scripts/mobile-groups-search-browser.mjs'
+      - '.github/workflows/mobile-groups-search.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-groups-search-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/groups-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/groups-browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Pinned baseline behavioral RED
+        env:
+          GROUPS_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          GROUPS_EVIDENCE_DIR: ${{ runner.temp }}/groups-evidence/baseline
+          GROUPS_APP_ROOT: ${{ runner.temp }}/groups-baseline
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/groups-browser/node_modules/playwright
+        run: |
+          mkdir -p "$GROUPS_APP_ROOT" "$GROUPS_EVIDENCE_DIR"
+          git archive 338528c48fc480fa998c984d923b049841e20039 | tar -x -C "$GROUPS_APP_ROOT"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$GROUPS_APP_ROOT/frontend/node_modules"
+          set +e
+          node .github/scripts/mobile-groups-search-browser.mjs 2>&1 | tee "$GROUPS_EVIDENCE_DIR/browser.log"
+          result=${PIPESTATUS[0]}
+          set -e
+          test "$result" -ne 0
+          grep -q 'GROUPS_LAYOUT_REGRESSION' "$GROUPS_EVIDENCE_DIR/browser.log"
+      - name: Search RED with header boundary already repaired
+        env:
+          GROUPS_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          GROUPS_EVIDENCE_DIR: ${{ runner.temp }}/groups-evidence/layout-only
+          GROUPS_APP_ROOT: ${{ runner.temp }}/groups-layout-only
+          GROUPS_APP_SHA: d56129a3469ae348dbe9f5f1a87bf85babffba45
+          GROUPS_SCOPE: layout-only
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/groups-browser/node_modules/playwright
+        run: |
+          mkdir -p "$GROUPS_APP_ROOT" "$GROUPS_EVIDENCE_DIR"
+          git archive "$GROUPS_APP_SHA" | tar -x -C "$GROUPS_APP_ROOT"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$GROUPS_APP_ROOT/frontend/node_modules"
+          set +e
+          node .github/scripts/mobile-groups-search-browser.mjs 2>&1 | tee "$GROUPS_EVIDENCE_DIR/browser.log"
+          result=${PIPESTATUS[0]}
+          set -e
+          test "$result" -ne 0
+          grep -q 'GROUPS_SEARCH_OCCLUSION' "$GROUPS_EVIDENCE_DIR/browser.log"
+      - name: Current head browser acceptance
+        env:
+          GROUPS_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          GROUPS_EVIDENCE_DIR: ${{ runner.temp }}/groups-evidence/head
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/groups-browser/node_modules/playwright
+        run: |
+          mkdir -p "$GROUPS_EVIDENCE_DIR"
+          node .github/scripts/mobile-groups-search-browser.mjs 2>&1 | tee "$GROUPS_EVIDENCE_DIR/browser.log"
+      - name: Evidence checksums
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/groups-evidence"
+          cd "$RUNNER_TEMP/groups-evidence"
+          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mobile-groups-search-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/groups-evidence
+      - name: Focused Groups and layout regressions
+        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/GroupsView.columnSettings.spec.ts src/views/admin/__tests__/GroupsView.duplicate.spec.ts src/views/admin/__tests__/GroupsView.streamOnly.spec.ts src/views/admin/__tests__/GroupsView.compositePlatforms.spec.ts src/views/admin/__tests__/GroupsView.codexCLIOnly.spec.ts src/views/admin/__tests__/GroupsView.codexManifest.spec.ts src/components/common/__tests__/DataTable.spec.ts src/components/layout/__tests__/TablePageLayout.spec.ts
+      - name: Check changed component lint
+        run: pnpm --dir frontend exec eslint src/components/layout/TablePageLayout.vue src/views/admin/GroupsView.vue
+      - name: Production frontend build and type check
+        run: pnpm --dir frontend run build
