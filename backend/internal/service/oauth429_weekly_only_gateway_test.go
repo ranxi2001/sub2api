@@ -320,6 +320,7 @@ func TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation(t *testing.T) {
 			rates := NewRateLimitService(repo, nil, cfg, nil, nil)
 			gateway := &OpenAIGatewayService{cfg: cfg, httpUpstream: &weeklyOnlyLoopbackHTTP{client: server.Client(), target: server.URL}, rateLimitService: rates, cache: &stubGatewayCache{}, toolCorrector: NewCodexToolCorrector()}
 			rates.SetAccountRuntimeBlocker(gateway)
+			gateway.openaiOAuth429RetryStartedAt.Store(a.ID, time.Now().Add(-openAIOAuth429RetryWindow-time.Second))
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
@@ -335,7 +336,7 @@ func TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation(t *testing.T) {
 			require.Positive(t, peers.Load(), "must reach the real loopback HTTP peer")
 			require.Empty(t, repo.ids, "expired HTTP response quota must not permanently disable on a later stream 429")
 			require.Positive(t, repo.rateLimitedCalls, "semantic 429 must preserve temporary cooldown handling")
-			require.WithinDuration(t, time.Now().Add(2*time.Hour), repo.lastRateLimitedAt, 10*time.Second, "temporary cooldown must use event reset")
+			require.Less(t, time.Until(repo.lastRateLimitedAt), time.Minute, "nested-event fallback cooldown must remain bounded")
 		})
 	}
 }

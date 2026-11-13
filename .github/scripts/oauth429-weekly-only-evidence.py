@@ -36,6 +36,7 @@ if mode.startswith("red"):
         for name in ("new_weekly_zero", "new_weekly_low"):
             assert "TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence/" + name in failed
         assert "TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence/older_query_cannot_replace_newer_high" in passed
+        assert "TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence/new_weekly_high" in passed
         assert "actual QueryUsage persistence must supersede older weekly high" in output
     elif mode == "red-cache":
         assert "TestOAuth429WeeklyOnlySequentialCache/duplicate_usage" in failed

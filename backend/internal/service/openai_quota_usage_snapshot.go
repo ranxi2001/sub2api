@@ -43,13 +43,49 @@ func openAIQuotaSchedulingUpdates(body []byte, shadow bool, expectedAccountID st
 	if selected == nil {
 		return nil
 	}
+	// Keep permanent-policy evidence independent of unrelated window parsing.
+	// It is still persisted atomically with the normal scheduling snapshot.
+	weekly := make(map[string]any)
+	weeklyCount := 0
+	for _, w := range []*window{selected.Primary, selected.Secondary} {
+		if w == nil || w.Seconds != 7*24*60*60 {
+			continue
+		}
+		weeklyCount++
+		if weeklyCount > 1 || w.Used == nil || !validOpenAI429Percent(*w.Used) ||
+			(w.ResetAfter != nil && (*w.ResetAfter <= 0 || *w.ResetAfter > 7*24*60*60)) ||
+			(w.ResetAt != nil && !time.Unix(*w.ResetAt, 0).After(now)) {
+			weekly = map[string]any{openAI429WeeklyInvalidAtKey: now.UTC().Format(time.RFC3339Nano)}
+			break
+		}
+		evidence := openAI429WeeklyEvidence(*w.Used, now, nil)
+		if w.ResetAt != nil {
+			evidence["reset_at"] = time.Unix(*w.ResetAt, 0).UTC().Format(time.RFC3339Nano)
+		} else if w.ResetAfter != nil {
+			evidence["reset_at"] = now.Add(time.Duration(*w.ResetAfter) * time.Second).UTC().Format(time.RFC3339Nano)
+		}
+		weekly[openAI429WeeklyEvidenceKey] = evidence
+	}
+	finish := func(updates map[string]any) map[string]any {
+		if updates == nil {
+			updates = make(map[string]any)
+		}
+		for key, value := range weekly {
+			updates[key] = value
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		updates["codex_usage_updated_at"] = now.UTC().Format(time.RFC3339Nano)
+		return updates
+	}
 	updates := make(map[string]any)
 	for _, w := range []*window{selected.Primary, selected.Secondary} {
 		if w == nil || w.Used == nil {
 			continue
 		}
 		if math.IsNaN(*w.Used) || math.IsInf(*w.Used, 0) || *w.Used < 0 {
-			return nil
+			return finish(nil)
 		}
 		var name string
 		switch w.Seconds {
@@ -58,11 +94,11 @@ func openAIQuotaSchedulingUpdates(body []byte, shadow bool, expectedAccountID st
 		case 7 * 24 * 60 * 60:
 			name = "7d"
 		default:
-			return nil
+			return finish(nil)
 		}
 		prefix := "codex_" + name
 		if _, exists := updates[prefix+"_used_percent"]; exists {
-			return nil
+			return finish(nil)
 		}
 		updates[prefix+"_used_percent"] = *w.Used
 		updates[prefix+"_window_minutes"] = int(w.Seconds / 60)
@@ -75,16 +111,5 @@ func openAIQuotaSchedulingUpdates(body []byte, shadow bool, expectedAccountID st
 			updates[prefix+"_reset_after_seconds"] = int(*w.ResetAfter)
 		}
 	}
-	if len(updates) == 0 {
-		return nil
-	}
-	updates["codex_usage_updated_at"] = now.UTC().Format(time.RFC3339Nano)
-	if used, ok := resolveAccountExtraNumber(updates, "codex_7d_used_percent"); ok && validOpenAI429Percent(used) {
-		evidence := openAI429WeeklyEvidence(used, now, nil)
-		if reset, exists := updates["codex_7d_reset_at"]; exists {
-			evidence["reset_at"] = reset
-		}
-		updates[openAI429WeeklyEvidenceKey] = evidence
-	}
-	return updates
+	return finish(updates)
 }

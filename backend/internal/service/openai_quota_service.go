@@ -259,6 +259,9 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 				// Absolute resets above still use response receipt time.
 				evidence["observed_at"] = updates["codex_usage_updated_at"]
 			}
+			if _, invalid := updates[openAI429WeeklyInvalidAtKey]; invalid {
+				updates[openAI429WeeklyInvalidAtKey] = updates["codex_usage_updated_at"]
+			}
 			payload.schedulingUpdates = updates
 			written, writeErr := persistCodexUsageUpdates(callCtx, s.accountRepo, accountID, updates)
 			payload.UsageCachePersisted = written && writeErr == nil
