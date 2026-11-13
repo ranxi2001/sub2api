@@ -183,6 +183,41 @@ describe('admin usage platform behavior with real filters', () => {
     expect(chart.findComponent(UserBreakdownSubTable).exists()).toBe(false)
   })
 
+  it('disables upstream model breakdown when requested A and B share upstream U but only A is selected', async () => {
+    const records = [{ model: 'A', user: 'a@example.invalid' }, { model: 'B', user: 'b@example.invalid' }]
+    const totals = { requests: 1, total_tokens: 30, input_tokens: 10, output_tokens: 20, cache_creation_tokens: 0, cache_read_tokens: 0, cost: 2, actual_cost: 1 }
+    api.models.mockImplementation(async params => {
+      const selected = records.filter(row => !params.model || row.model === params.model)
+      return { models: params.model_source === 'upstream'
+        ? [{ ...totals, model: 'U', requests: selected.length, total_tokens: selected.length * 30 }]
+        : selected.map(row => ({ ...totals, model: row.model })) }
+    })
+    api.breakdown.mockResolvedValue({ users: records.map((row, i) => ({ ...totals, user_id: i + 1, email: row.user })) })
+    render('en', false, true)
+    await vi.advanceTimersByTimeAsync(120)
+    await flushPromises()
+    const chart = wrapper.getComponent(ModelDistributionChart)
+    ;(wrapper.vm as any).filters.model = 'A'
+    wrapper.findComponent(UsageFilters).vm.$emit('change')
+    await flushPromises()
+    chart.vm.$emit('update:source', 'upstream')
+    await flushPromises()
+    expect(api.models.mock.lastCall?.[0]).toMatchObject({ model: 'A', model_source: 'upstream' })
+    expect(chart.props('upstreamModelStats')[0]).toMatchObject({ model: 'U', requests: 1 })
+    await chart.get('tbody tr').trigger('click')
+    await flushPromises()
+    expect(api.breakdown).not.toHaveBeenCalled()
+    expect(chart.findComponent(UserBreakdownSubTable).exists()).toBe(false)
+    ;(wrapper.vm as any).filters.model = undefined
+    wrapper.findComponent(UsageFilters).vm.$emit('change')
+    await flushPromises()
+    expect(chart.props('upstreamModelStats')[0]).toMatchObject({ model: 'U', requests: 2 })
+    await chart.get('tbody tr').trigger('click')
+    await flushPromises()
+    expect(chart.text()).toContain('a@example.invalid')
+    expect(chart.text()).toContain('b@example.invalid')
+  })
+
   it('clears the detail-only platform when switching tabs and disables unsupported cleanup', async () => {
     render()
     await flushPromises()

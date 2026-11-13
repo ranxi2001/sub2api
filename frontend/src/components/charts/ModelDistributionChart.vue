@@ -299,6 +299,9 @@ const props = withDefaults(defineProps<{
   rankingError: false
 })
 
+// The breakdown API has one model predicate. It cannot combine a selected
+// requested model with a different upstream/mapping dimension.
+const enableBreakdown = computed(() => props.enableBreakdown && !props.filters?.model)
 const expandedKey = ref<string | null>(null)
 const breakdownItems = ref<UserBreakdownItem[]>([])
 const breakdownLoading = ref(false)
@@ -309,7 +312,7 @@ const clearBreakdown = () => {
   breakdownItems.value = []
   breakdownLoading.value = false
 }
-watch(() => [props.enableBreakdown, props.startDate, props.endDate, props.filters, props.source], clearBreakdown, { deep: true, flush: 'sync' })
+watch(() => [enableBreakdown.value, props.startDate, props.endDate, props.filters, props.source], clearBreakdown, { deep: true, flush: 'sync' })
 onBeforeUnmount(clearBreakdown)
 
 
@@ -319,7 +322,7 @@ const toggleBreakdown = async (type: string, id: string) => {
     clearBreakdown()
     return
   }
-  if (!props.enableBreakdown) return
+  if (!enableBreakdown.value) return
   const request = ++breakdownRequest
   expandedKey.value = key
   breakdownLoading.value = true

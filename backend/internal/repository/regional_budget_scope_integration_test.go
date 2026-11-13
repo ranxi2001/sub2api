@@ -154,7 +154,7 @@ func TestRegionalLegacyUnknownAllocationKeepsMoneyAndDrainsBeforeNewAdmission(t 
 	require.NoError(t, err)
 	require.NoError(t, holds.Start(ctx, request.RequestID))
 	// Exact state of an old held balance allocation after additive migration 284.
-	_, err = integrationDB.Exec("UPDATE regional_budget_allocations SET group_id=NULL WHERE allocation_id=$1", "request:"+request.RequestID)
+	_, err = integrationDB.Exec("UPDATE regional_budget_allocations SET group_id=NULL,platform='' WHERE allocation_id=$1", "request:"+request.RequestID)
 	require.NoError(t, err)
 	next := request
 	next.RequestID = "new-" + uuid.NewString()
@@ -168,10 +168,12 @@ func TestRegionalLegacyUnknownAllocationKeepsMoneyAndDrainsBeforeNewAdmission(t 
 	event := regionalLedgerEvent(request, charge)
 	require.NoError(t, holds.Complete(ctx, event))
 	require.NoError(t, holds.Complete(ctx, event))
+	var actualPlatform sql.NullString
 	var actualGroup sql.NullInt64
 	var billingType int
-	require.NoError(t, integrationDB.QueryRow("SELECT group_id,billing_type FROM usage_logs WHERE request_id=$1", request.RequestID).Scan(&actualGroup, &billingType))
+	require.NoError(t, integrationDB.QueryRow("SELECT platform,group_id,billing_type FROM usage_logs WHERE request_id=$1", request.RequestID).Scan(&actualPlatform, &actualGroup, &billingType))
 	require.False(t, actualGroup.Valid)
+	require.False(t, actualPlatform.Valid, "an allocation without platform evidence must remain unknown")
 	require.Zero(t, billingType)
 	fresh, err := holds.Reserve(ctx, next)
 	require.NoError(t, err)
