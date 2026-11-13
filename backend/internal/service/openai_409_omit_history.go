@@ -511,6 +511,7 @@ func prepareOpenAI409APIKeyReplay(ctx context.Context, body []byte, responsesLit
 		return nil, err
 	}
 	r.apiControlsDigest = openAI409ControlsDigest(prepared)
+	r.apiInputDigest = openAIAgentRecoveryInputDigest(prepared)
 	r.apiReplayPrepared = true
 	return prepared, nil
 }

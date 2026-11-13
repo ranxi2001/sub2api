@@ -17,6 +17,8 @@ on:
       - 'backend/internal/service/openai_agent_message*'
       - '.github/scripts/assert-ws-readable.py'
       - '.github/scripts/test_assert_ws_readable.py'
+      - '.github/scripts/exclude-later-http2-red-fixtures.sh'
+      - 'backend/internal/service/openai_gateway_passthrough.go'
       - '.github/workflows/ws-readable-continuation.yml'
 permissions:
   contents: read
@@ -94,6 +96,7 @@ jobs:
           git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           if [ "$PHASE" = RED ]; then
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
           fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/handler/openai_gateway_handler.go; do
             git hash-object "$target" >> "$RUNNER_TEMP/ws-evidence/blobs.txt"
@@ -156,6 +159,9 @@ jobs:
             git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
           fi
           git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
+          fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_forwarder_payload.go; do
             git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/review-blobs.txt"
           done
@@ -165,6 +171,49 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/ws-evidence/review.jsonl"
           python3 .github/scripts/assert-ws-readable.py "$PHASE" "$result" "$RUNNER_TEMP/ws-evidence/review.jsonl" ws-review
+      - name: Residual headers tools and ticket actual transport counterexamples
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          baseline=94bb4a53e9e5057990cd851ab0620d99b116ad41
+          git rev-parse "$baseline" > "$RUNNER_TEMP/ws-evidence/residual-baseline.txt"
+          if [ "$PHASE" = RED ]; then
+            git worktree add --detach "$RUNNER_TEMP/ws-residual-red" "$CANDIDATE_SHA"
+            tested_tree="$RUNNER_TEMP/ws-residual-red"
+            while IFS= read -r target; do
+              case "$target" in *_test.go) continue ;; esac
+              if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                git show "$baseline:$target" > "$tested_tree/$target"
+                test "$(git hash-object "$tested_tree/$target")" = "$(git rev-parse "$baseline:$target")"
+              else
+                rm -- "$tested_tree/$target"
+              fi
+            done < <(git diff --no-renames --name-only "$baseline" "$CANDIDATE_SHA" -- 'backend/**/*.go')
+            git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          fi
+          git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
+          fi
+          for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_409_ws_ticket_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_payload.go backend/internal/service/openai_gateway_passthrough.go; do
+            git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/residual-blobs.txt"
+          done
+          # Run both independently even when one oracle fails. Neither a
+          # compilation failure nor a missing diagnostic is accepted as RED.
+          failed=0
+          for suite in ws-residual ws-ticket; do
+            package=handler
+            test_name=TestOpenAI409WSResidualRepairs
+            if [ "$suite" = ws-ticket ]; then package=service; test_name=TestOpenAI409WSTicketBoundEgress; fi
+            set +e
+            (cd "$tested_tree/backend" && go test -race -json -tags=unit "./internal/$package" -run "^$test_name$" -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/$suite.jsonl" 2>&1
+            result=$?
+            set -e
+            cat "$RUNNER_TEMP/ws-evidence/$suite.jsonl"
+            python3 .github/scripts/assert-ws-readable.py "$PHASE" "$result" "$RUNNER_TEMP/ws-evidence/$suite.jsonl" "$suite" || failed=1
+          done
+          test "$failed" = 0
       - uses: actions/upload-artifact@v7
         if: always()
         with:

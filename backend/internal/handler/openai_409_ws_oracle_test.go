@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type readableWSOracle struct {
@@ -58,12 +60,20 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		logicalTurn--
 	}
 	output := []json.RawMessage{json.RawMessage(httpRebuildAgentA), json.RawMessage(httpRebuildCall("apply_patch", "call_ws_patch", map[string]any{"path": "sum.go", "source": httpRebuildSource}))}
+	customTools := strings.HasPrefix(u.scenario, "tools_")
+	if customTools && n == 1 {
+		output = append(output, json.RawMessage(httpRebuildCall("exec", "call_ws_exec", map[string]any{"input": "read sum.go"})))
+	}
 	if n > 1 {
 		if u.unrelatedEOF {
 			return nil
 		}
+		validTools := httpRebuildToolsAvailable(body)
+		if customTools {
+			validTools = readableWSCustomToolsAvailable(body)
+		}
 		valid := r.Header.Get("Authorization") == "Bearer fixture-readable-ws-B" &&
-			strings.Contains(string(body), httpRebuildTask) && httpRebuildToolsAvailable(body) &&
+			strings.Contains(string(body), httpRebuildTask) && validTools &&
 			httpRebuildToolPair(body, "apply_patch", httpRebuildPatch) &&
 			!strings.Contains(string(body), "fixture-opaque-A") &&
 			!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
@@ -88,6 +98,34 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		}
 	}
 	return []byte(httpRebuildJSON(map[string]any{"type": "response.completed", "response": map[string]any{"id": fmt.Sprintf("resp_readable_ws_%d", n), "status": "completed", "model": gjson.GetBytes(body, "model").String(), "error": nil, "output": output, "usage": map[string]int{"input_tokens": 5, "output_tokens": 3}}}))
+}
+
+func readableWSCustomToolsAvailable(body []byte) bool {
+	tools := gjson.GetBytes(body, "tools").Array()
+	if len(tools) != 3 || tools[2].Get("type").String() != "function" || tools[2].Get("name").String() != "exec" {
+		return false
+	}
+	expected := gjson.Parse(`{"type":"object","properties":{"input":{"type":"string","description":"The raw input for this tool, passed through verbatim."}},"required":["input"]}`)
+	if !reflect.DeepEqual(expected.Value(), tools[2].Get("parameters").Value()) {
+		return false
+	}
+	functions, err := sjson.DeleteBytes(body, "tools.2")
+	if err != nil || !httpRebuildToolsAvailable(functions) {
+		return false
+	}
+	calls, outputs := 0, 0
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if item.Get("call_id").String() != "call_ws_exec" {
+			continue
+		}
+		if item.Get("type").String() == "function_call" && item.Get("name").String() == "exec" && gjson.Get(item.Get("arguments").String(), "input").String() == "read sum.go" {
+			calls++
+		}
+		if item.Get("type").String() == "function_call_output" && item.Get("output").String() == "custom-exec-once" {
+			outputs++
+		}
+	}
+	return calls == 1 && outputs == 1
 }
 
 func (u *readableWSOracle) server(t *testing.T) *httptest.Server {

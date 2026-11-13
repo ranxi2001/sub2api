@@ -51,6 +51,7 @@ type openAIWSAgentRecovery struct {
 	known                            map[[32]byte]bool
 	readable                         *openAIAgentRecoveryRequest
 	readableSource, readableControls [32]byte
+	bridgeInput, bridgeControls      [32]byte
 }
 
 func newOpenAIWSAgentRecovery(s *OpenAIGatewayService, ctx context.Context, c *gin.Context) *openAIWSAgentRecovery {
@@ -151,6 +152,14 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 		if err != nil {
 			return nil, err
 		}
+		// Derive the bridge's permitted custom/namespace tool projection from
+		// the already verified source, before any builder sees it. Native WS
+		// keeps the unprojected expectation. No final payload can redefine it.
+		projected, _, err := adaptResponsesClientToolsForFunctionUpstream(clean, "OpenAI WS HTTP bridge")
+		if err != nil {
+			return nil, err
+		}
+		r.bridgeInput, r.bridgeControls = openAIAgentRecoveryInputDigest(projected), openAI409ControlsDigest(projected)
 	}
 	r.readable = &snapshot
 	r.readableSource = openAIAgentRecoveryInputDigest(source)
@@ -228,6 +237,11 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			return openAIAgentRecoveryError("wire_changed")
 		}
 		ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, r.readable)
+		if mode == "http_bridge" && account.IsOpenAIApiKey() {
+			snapshot := *r.readable
+			snapshot.apiInputDigest, snapshot.apiControlsDigest = r.bridgeInput, r.bridgeControls
+			ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, &snapshot)
+		}
 	}
 	r.request = openAIAgentRecoveryFromContext(ctx)
 	if r.request.disableOwnerBinding && (openAIAgentRecoveryBound(ctx) || len(r.request.items) > 0) {

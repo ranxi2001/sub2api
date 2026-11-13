@@ -125,6 +125,18 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 	}
 	ctx = context.WithValue(ctx, openAIReadableShadowContextKey{}, (*openAIReadableShadowObservation)(nil))
 	ctx, body = s.RestoreOpenAIReadableShadow(ctx, c, body, session)
+	// A missing declaration field inherits the callable tools on this client
+	// socket. Resolve it BEFORE freezing controls, never from the final wire.
+	// Explicit empty/null declarations retain their replacement semantics.
+	if _, present := openAIWSHTTPBridgeRawField(body, "tools"); !present {
+		if state, ok := openAIWSHTTPBridgeToolStateFromContext(c); ok && len(state.ClientTools) > 0 {
+			var err error
+			body, err = sjson.SetRawBytes(body, "tools", state.ClientTools)
+			if err != nil {
+				return ctx, body, false, openAIAgentRecoveryError("readable_history_unsupported")
+			}
+		}
+	}
 	next := s.WithOpenAIWSAgentRecovery(ctx, c, body, session, model)
 	if !openAIWSCompletedToolInputs(body) {
 		return ctx, body, false, openAIAgentRecoveryError("owner_conflict")

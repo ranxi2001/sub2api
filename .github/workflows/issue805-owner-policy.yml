@@ -70,6 +70,8 @@ jobs:
             fi
           done < <(git diff --no-renames --name-only "$baseline" "$EXPECTED_HEAD_SHA" -- 'backend/**/*.go')
           git diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          git diff --exit-code "$EXPECTED_HEAD_SHA" -- 'backend/**/*_test.go'
+          bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/http2-exclusions.txt"
           # These unrelated context-policy tests require newer production symbols.
           # Use their baseline versions only in this disposable RED checkout so
           # compilation can reach the unchanged Issue805 business assertions.
@@ -90,17 +92,6 @@ jobs:
             test ! -e "$omission_test"
             echo "$omission_test test=candidate-only actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
           done
-          # HTTP2 handler regressions depend on candidate-only unit helpers
-          # removed by the exact production overlay above. They are unrelated
-          # to Issue805 and are omitted only in this disposable old-source RED.
-          omission_test=backend/internal/handler/http2_peer_reset_test.go
-          if git cat-file -e "$EXPECTED_HEAD_SHA:$omission_test" 2>/dev/null; then
-            if git cat-file -e "$baseline:$omission_test" 2>/dev/null; then exit 1; fi
-            candidate=$(git rev-parse "$EXPECTED_HEAD_SHA:$omission_test")
-            rm -- "$omission_test"
-            test ! -e "$omission_test"
-            echo "$omission_test test=candidate-only candidate=$candidate actual=absent reason=unavailable-unit-helpers" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
-          fi
           # The selected regression and its shared harness must remain exact
           # candidate blobs. The clean GREEN checkout retains all new tests.
           for target in backend/internal/handler/openai_issue805_delivery_test.go backend/internal/handler/openai_issue805_owner_policy_test.go backend/internal/handler/openai_issue805_ws_test.go backend/internal/handler/openai_issue715_recovery_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do

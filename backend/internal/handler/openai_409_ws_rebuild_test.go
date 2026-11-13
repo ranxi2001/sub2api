@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/testutil"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -105,6 +107,14 @@ func TestOpenAI409WSReviewRepairs(t *testing.T) {
 	})
 }
 
+func TestOpenAI409WSResidualRepairs(t *testing.T) {
+	for _, scenario := range []string{"header_apikey", "header_oauth", "tools_omitted", "tools_explicit"} {
+		t.Run(scenario, func(t *testing.T) {
+			runReadableWSContinuation(t, service.OpenAIWSIngressModeHTTPBridge, scenario)
+		})
+	}
+}
+
 func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	t.Helper()
 	clients := issue805Redis(t)
@@ -114,10 +124,14 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	defer provider.Close()
 	headers := http.Header{"Session_id": {"fixture-readable-ws-session"}, "Thread-Id": {"fixture-readable-ws-thread"}}
 	settings := map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: fmt.Sprint(scenario != "off")}
-	identityCase, modelCase := scenario == "identity", scenario == "bridge_model"
+	identityCase, modelCase := scenario == "identity" || strings.HasPrefix(scenario, "header_"), scenario == "bridge_model"
+	customTools := strings.HasPrefix(scenario, "tools_")
 	smartMode := ""
 	if strings.HasPrefix(scenario, "smart_") {
 		smartMode = strings.TrimPrefix(scenario, "smart_")
+	}
+	if customTools {
+		smartMode = "http"
 	}
 	if identityCase {
 		headers.Del("thread-id")
@@ -130,7 +144,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, provider.URL, headers,
 		settings,
 		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true },
-		func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, repo *service.AccountRepository) {
+		func(a *service.Account, cfg *config.Config, upstream *service.HTTPUpstream, repo *service.AccountRepository) {
 			a.ID, a.Priority = 1, 0
 			a.Credentials["api_key"] = "fixture-readable-ws-A"
 			a.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
@@ -147,6 +161,19 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 			other := *a
 			other.ID, other.Priority = 2, 1
 			other.Credentials = map[string]any{"api_key": "fixture-readable-ws-B", "base_url": provider.URL}
+			if scenario == "header_oauth" {
+				cfg.Gateway.OpenAIWS.OAuthEnabled = true
+				for i, account := range []*service.Account{a, &other} {
+					account.Type = service.AccountTypeOAuth
+					account.Credentials["access_token"] = []string{"fixture-readable-ws-A", "fixture-readable-ws-B"}[i]
+					account.Credentials["chatgpt_account_id"] = fmt.Sprintf("fixture-ws-account-%d", i)
+					account.Extra["openai_oauth_responses_websockets_v2_enabled"] = true
+					account.Extra["openai_oauth_responses_websockets_v2_mode"] = mode
+				}
+				target, err := url.Parse(provider.URL)
+				require.NoError(t, err)
+				*upstream = &httpRebuildTransport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
+			}
 			accounts = &readableWSAccounts{issue600SwitchRepo: &issue600SwitchRepo{&openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{*a, other}}}}
 			*repo = accounts
 		})
@@ -157,10 +184,18 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		}
 	}()
 	requestModel := "gpt-5.1"
+	declarations := httpRebuildToolDefinitions()
+	if customTools {
+		declarations = append(declarations, map[string]any{"type": "custom", "name": "exec", "description": "Read the completed patch exactly once"})
+	}
+	omitTools := false
 	create := func(input []string, previous string) string {
 		body := map[string]any{"type": "response.create", "store": smartMode != "",
-			"tools": httpRebuildToolDefinitions(),
+			"tools": declarations,
 			"input": json.RawMessage("[" + strings.Join(input, ",") + "]")}
+		if omitTools {
+			delete(body, "tools")
+		}
 		if requestModel != "" {
 			body["model"] = requestModel
 		}
@@ -184,6 +219,19 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		history = append(history, item.Raw)
 	}
 	history = append(history, tools.execute(t, first)...)
+	if customTools {
+		customCalls := 0
+		for _, item := range first.Get("output").Array() {
+			if item.Get("type").String() == "custom_tool_call" {
+				customCalls++
+				require.Equal(t, "exec", item.Get("name").String())
+				require.Equal(t, "read sum.go", item.Get("input").String())
+				history = append(history, `{"type":"custom_tool_call_output","call_id":"call_ws_exec","output":"custom-exec-once"}`)
+			}
+		}
+		require.Equal(t, 1, customCalls, "A must actually deliver the completed custom tool")
+		omitTools = scenario == "tools_omitted"
+	}
 	require.Eventually(t, func() bool {
 		owners := issue805Owners(t, probe)
 		if len(owners) != 1 {
@@ -253,15 +301,26 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	oracle.mu.Unlock()
 	if scenario != "completed" && !identityCase && !modelCase && smartMode == "" {
 		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
+		closeCtx, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelClose()
+		if readErr == nil {
+			// A structured refusal precedes synchronous coderws.Close. Keep
+			// reading so the peer close is acknowledged before awaiting return.
+			for readErr == nil {
+				var extra []byte
+				_, extra, readErr = h.clientConn.Read(closeCtx)
+				require.NotContains(t, string(extra), "response.completed")
+			}
+			require.NotErrorIs(t, readErr, context.DeadlineExceeded)
+		}
 		// Observe natural handler termination before counting B sends. Closing
 		// the test client here could hide an automatic retry still in flight.
 		select {
 		case <-h.handlerDone:
-		case <-time.After(5 * time.Second):
+		case <-closeCtx.Done():
 			t.Fatal("WS boundary handler did not terminate")
 		}
 		finished = true
-		_ = h.clientConn.CloseNow()
 		select {
 		case final := <-h.finalHeaders:
 			require.Equal(t, headers.Get("session_id"), final.Get("session_id"))
@@ -286,7 +345,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		require.Zero(t, tools.verifications)
 		return
 	}
-	if smartMode != "" {
+	if customTools {
+		require.Equal(t, 2, sends, "WS_RESIDUAL_TOOL_PROJECTION_REFUSED: close=%v terminal=%s", readErr, secondRaw)
+	} else if smartMode != "" {
 		require.Equal(t, 2, sends, "WS_REVIEW_SMART_SESSION_STALE: close=%v terminal=%s", readErr, secondRaw)
 	}
 	require.Equal(t, 2+extraSends, sends, "WS_READABLE_B_DISPATCH_MISSING: same client must automatically replace disabled A before any next generation; close=%v terminal=%s", readErr, secondRaw)
@@ -303,6 +364,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	require.NoError(t, readErr)
 	second := gjson.GetBytes(secondRaw, "response")
 	require.Equal(t, "completed", second.Get("status").String(), string(secondRaw))
+	if customTools {
+		require.NotContains(t, second.Raw, "custom_tool_call", "completed custom effect must never execute again")
+	}
 	for _, item := range second.Get("output").Array() {
 		history = append(history, item.Raw)
 	}
@@ -318,6 +382,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(final, "type").String(), string(final))
 	require.Contains(t, string(final), "ws-coding-task-complete")
+	if customTools {
+		require.NotContains(t, string(final), "custom_tool_call")
+	}
 	require.Empty(t, tools.execute(t, gjson.GetBytes(final, "response")))
 	require.Equal(t, 1, tools.patches)
 	require.Equal(t, 1, tools.verifications)
@@ -335,8 +402,14 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	require.Equal(t, expectedIdentities, oracle.identities)
 	if identityCase {
 		for _, header := range oracle.headers[1:] {
-			require.NotEqual(t, headers.Get("conversation_id"), header.Get("conversation_id"), "only outbound provider state is detached")
-			require.Empty(t, header.Get("x-codex-turn-state"))
+			require.NotEqual(t, headers.Get("conversation_id"), header.Get("conversation_id"), "WS_RESIDUAL_A_HEADER_LEAK: only outbound provider state is detached")
+			require.Empty(t, header.Get("x-codex-turn-state"), "WS_RESIDUAL_A_HEADER_LEAK: retained A state must not reach B")
+			if scenario == "header_oauth" {
+				require.NotEmpty(t, header.Get("session_id"))
+				require.NotEqual(t, headers.Get("session_id"), header.Get("session_id"))
+				require.Equal(t, header.Get("session_id"), header.Get("conversation_id"), "WS_RESIDUAL_A_HEADER_LEAK: B conversation must use B's isolated session")
+				require.NotEqual(t, oracle.headers[0].Get("session_id"), header.Get("session_id"))
+			}
 		}
 	}
 	if mode == service.OpenAIWSIngressModeHTTPBridge || smartMode == "http" {

@@ -836,6 +836,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if c != nil && c.Request != nil {
 		s.requestTimezoneHeaders(ctx, account, c.Request.Header, req.Header)
 	}
+	s.detachOpenAIWSReadableProviderHeaders(ctx, req.Header, account)
 	s.pinBoundCodexTicketHarvestIdentity(req, account)
 
 	if account.IsCopilotSDKEnabled() {

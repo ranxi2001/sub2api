@@ -90,6 +90,7 @@ jobs:
           git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           if [ "$PHASE" = RED ]; then
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
           fi
           for target in backend/internal/handler/openai_409_shadow_race_test.go backend/internal/handler/openai_409_shadow_http_test.go backend/internal/securityaudit/prompt_recovered_context_test.go backend/internal/service/openai_409_readable_shadow.go; do
             git hash-object "$target" >> "$RUNNER_TEMP/shadow-repair-evidence/blobs.txt"
@@ -158,6 +159,9 @@ jobs:
             git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
           fi
           git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
+          fi
           for target in backend/internal/securityaudit/prompt_service.go backend/internal/securityaudit/prompt_repository.go backend/internal/securityaudit/prompt_recovered_context_test.go; do
             git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/shadow-repair-evidence/async-blobs.txt"
           done

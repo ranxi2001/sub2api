@@ -53,6 +53,7 @@ type openAIAgentRecoveryRequest struct {
 	inputDigest          [32]byte
 	replayControlsDigest [32]byte
 	apiControlsDigest    [32]byte
+	apiInputDigest       [32]byte
 	apiReplayPrepared    bool
 	oauthInputDigest     [32]byte
 	oauthControlsDigest  [32]byte
@@ -416,7 +417,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	}
 	expectedInput, expectedControls := request.inputDigest, request.replayControlsDigest
 	if request.omittedHistory && account.IsOpenAIApiKey() && request.apiReplayPrepared {
-		expectedControls = request.apiControlsDigest
+		expectedInput, expectedControls = request.apiInputDigest, request.apiControlsDigest
 	}
 	if request.omittedHistory && account.UsesOpenAICodexProtocol() {
 		if !request.oauthReplayPrepared {

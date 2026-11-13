@@ -23,6 +23,8 @@ def evidence(phase, suite):
     events.extend([{"Action": terminal, "Test": root}, {"Action": terminal}])
     for event in events:
         event["Package"] = GATE.COMMON.PACKAGE.replace("/handler", "/securityaudit") if suite in {"audit-persistence", "audit-async"} else GATE.COMMON.PACKAGE
+        if suite == "ws-ticket":
+            event["Package"] = GATE.COMMON.PACKAGE.replace("/handler", "/service")
     return events
 
 

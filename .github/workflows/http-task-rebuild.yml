@@ -115,6 +115,7 @@ jobs:
           git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           if [ "$PHASE" = RED ]; then
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
           fi
           for target in backend/internal/handler/openai_409_http_rebuild_test.go backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do
             expected=$(git rev-parse "$CANDIDATE_SHA:$target")
@@ -214,6 +215,7 @@ jobs:
           git diff --exit-code "$REVIEW_BASELINE" -- 'backend/**/*.go' ':!backend/**/*_test.go'
           git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$REVIEW_BASELINE"
+          bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$REVIEW_BASELINE"
           for suite in pointer-waiver normalization; do
             test_name=TestOpenAI409HTTPUnownedPointerMustDetach
             if [ "$suite" = normalization ]; then test_name=TestOpenAI409HTTPControlNormalization; fi
