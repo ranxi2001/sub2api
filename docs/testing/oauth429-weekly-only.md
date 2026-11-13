@@ -17,7 +17,8 @@ The percentage is not inferred from a body `usage_limit_reached` or
 When there are no current quota observation headers, cache fallback requires
 `codex_7d_window_minutes=10080` and retains account identity, percentage,
 observation, per-field provenance, staleness and reset checks. If field versions
-exist, both usage and window identity must have valid fresh versions. Legacy
+exist, both usage and window identity must have valid fresh versions from the same
+source observation. A partial packet cannot borrow another packet's weekly identity. Legacy
 snapshots without an explicit window no longer authorize a permanent disable.
 Current unclassified/short-only quota headers continue to block cache fallback.
 
@@ -28,6 +29,7 @@ Current unclassified/short-only quota headers continue to block cache fallback.
 | `TestOAuth429WeeklyOnlyService` | Public RateLimitService → actual policy → spy durable write + existing quota header parser/persistence |
 | `TestOAuth429WeeklyOnlyHeaderBoundaries` | Both weekly positions; zero/invalid/absent/5h neighbors; 5h-only 100; missing/low/invalid weekly; duplicates and conflicts; no reuse of high cache |
 | `TestOAuth429WeeklyOnlyCachedIdentity` | Explicit identity; global/field freshness; identity mismatch; future/stale/missing versions; absolute/relative resets |
+| `TestOAuth429WeeklyOnlyCacheDoesNotRelabelUnidentifiedUsage` | Actual parser/normalizer/merge; partial usage-only and window-only packets cannot combine into weekly evidence |
 | `TestOAuth429WeeklyOnlyPolicyGates` | Own threshold, strict equality, invalid threshold, opt-out, non429, body-only weekly classification |
 | `TestOAuth429WeeklyOnlyHTTPForward` | Actual `Forward` entry, native and OAuth passthrough HTTP paths, mocked transport response, primary/secondary weekly zero-neighbor and negative cases |
 | `TestOAuth429WeeklyOnlyWSForward` | Actual `Forward` entry, real loopback WS upstream handshake 429 and error frames, handshake quota and explicit-cache/body-only controls |

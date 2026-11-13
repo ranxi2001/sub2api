@@ -255,3 +255,31 @@ func TestOAuth429WeeklyOnlyCombinedRotation(t *testing.T) {
 		})
 	}
 }
+
+func TestOAuth429WeeklyOnlyCacheDoesNotRelabelUnidentifiedUsage(t *testing.T) {
+	for _, order := range []string{"usage_without_window", "window_without_usage"} {
+		t.Run(order, func(t *testing.T) {
+			now := time.Now()
+			first := weekly429Headers("20", "0", false)
+			second := http.Header{"X-Codex-Primary-Used-Percent": {"100"}}
+			if order == "window_without_usage" {
+				first = http.Header{"X-Codex-Primary-Used-Percent": {"100"}}
+				second = http.Header{"X-Codex-Primary-Window-Minutes": {"10080"}}
+			}
+			// Use the real parser, normalizer and field-version merge: a partial
+			// packet must not borrow another packet's weekly identity.
+			oldSnapshot, newSnapshot := ParseCodexRateLimitHeaders(first), ParseCodexRateLimitHeaders(second)
+			oldSnapshot.UpdatedAt = now.Add(-2 * time.Minute).Format(time.RFC3339Nano)
+			newSnapshot.UpdatedAt = now.Add(-time.Minute).Format(time.RFC3339Nano)
+			older := buildCodexUsageExtraUpdates(oldSnapshot, now)
+			newer := buildCodexUsageExtraUpdates(newSnapshot, now)
+			a := scheduling429Account()
+			a.Extra = mergeCodexUsageUpdates(older, newer)
+			a.Extra[OpenAIDisableSchedulingOn429ExtraKey] = true
+			repo := &weeklyOnly429Repo{}
+			rates := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			rates.HandleUpstreamError(t.Context(), a, 429, nil, nil)
+			require.Empty(t, repo.ids, "cached usage must share the explicit weekly identity's source observation")
+		})
+	}
+}

@@ -24,7 +24,7 @@ if mode == "red":
 else:
     assert int(status) == 0 and not failed, "candidate failed"
     required = ["RotationPreservesScheduling"] if mode == "repository" else [
-        "Service", "HeaderBoundaries", "CachedIdentity", "PolicyGates",
+        "Service", "HeaderBoundaries", "CachedIdentity", "CacheDoesNotRelabelUnidentifiedUsage", "PolicyGates",
         "HTTPForward", "WSForward", "WSClientIngress", "CombinedRotation",
     ]
     for name in required:

@@ -132,6 +132,11 @@ func openAI429WeeklyUsage(account *Account, headers http.Header, now time.Time) 
 			return 0, false
 		}
 		windowObserved = time.Unix(0, stamp)
+		// Partial normalized packets can otherwise pair an unidentified
+		// primary percentage with another observation's explicit weekly window.
+		if !windowObserved.Equal(observed) {
+			return 0, false
+		}
 	}
 	// Permanent pauses require a known, recent observation, unlike temporary
 	// scheduling guards that may retain legacy snapshots without timestamps.
