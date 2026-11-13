@@ -39,6 +39,7 @@ return {config,status:200,statusText:'OK',headers:{},data:{code:0,data}};
 document.querySelector('#app').innerHTML='<p class="mb-4 text-gray-500">账号编辑 → 授权连接 · 实际 Vue 组件 / 虚构数据</p><div id="preview"></div>';
 window.preview=mount(View,{attachTo:'#preview',props:{accountId:42,accountType:'oauth',active:true},global:{plugins:[createPinia(),i18n]}});
 `)
+  process.chdir(root)
   server = await createServer({ root, configFile: false, cacheDir,
     resolve: { alias: { '@': join(root, 'src') } },
     plugins: [{ name: 'bps-auth-fixture', enforce: 'pre', load(id) {
