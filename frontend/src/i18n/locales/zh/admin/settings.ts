@@ -568,7 +568,9 @@ export default {
       },
       gatewayForwarding: {
         omitEncryptedHistory409: '409 省略加密内容',
-        omitEncryptedHistory409Hint: '默认关闭。HTTP Responses 在发送前因原加密历史账号不可用或路线变化返回 409 时，省略旧密文并重新选择合格账号，最多处理一次。保留可读文本和工具调用关系，但被省略的上下文将丢失，不能保证会话完整或上游接受。当前加密任务、服务端会话指针、WebSocket、交付未确认和存储故障不适用；不会重放已发送的请求。',
+        omitEncryptedHistory409Hint: '默认关闭。HTTP Responses 在发送前因原加密历史账号不可用或路线变化返回 409 时，省略旧密文并重新选择合格账号，最多处理一次。保留可读文本和工具调用关系，但被省略的上下文将丢失，不能保证会话完整或上游接受。当前加密任务、服务端会话指针、WebSocket、交付未确认和存储故障不适用；本开关不重放已发送的请求；400 恢复由独立 Beta 控制。',
+        omitEncryptedHistory400: '400 加密历史有损恢复',
+        omitEncryptedHistory400Hint: '默认关闭。原生 HTTP Responses 明确返回加密内容无效的 400、常规恢复未成功时，最多增加一次同账号恢复，且本次恢复不得超过第 3 次上游发送。省略当前可读任务之前的旧密文，保留可读文本和工具关系；被省略的上下文将丢失，不保证续接成功。支持 409 省略后的合格请求。当前加密任务、压缩状态、服务端会话指针、WebSocket、200 流内错误、已有输出和交付不确定不适用。',
         title: '请求转发行为',
         description: '控制请求转发到上游 OAuth 账号时的行为',
         grokDefaultTextModel: '默认 Grok 文本模型',
