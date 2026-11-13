@@ -29,7 +29,7 @@ const sources = Object.fromEntries(sourceFiles.map(file => [file, { before: hash
 const cacheDir = mkdtempSync(join(tmpdir(), 'account-ops-preview-'))
 const entryName = `.account-ops-preview-${process.pid}.js`, entry = join(root, entryName)
 const origin = 'http://127.0.0.1:4299'
-const captures = [], assertions = [], errors = [], browserWarnings = []
+const captures = [], assertions = [], reachability = [], errors = [], browserWarnings = []
 let before = true, server, browser, context, page
 mkdirSync(output, { recursive: true })
 try {
@@ -47,7 +47,7 @@ await loadLocaleMessages(locale); i18n.global.locale.value=locale;document.docum
 if(params.has('dark'))document.documentElement.classList.add('dark');
 const groups=[
 {id:'manual-alpha',name:locale==='zh'?'Alpha 示例站点':'Alpha demo site',default_name:'Alpha',provider:'sub2api',site:'https://alpha.example',mode:'manual',account_ids:[121,999]},
-{id:'manual-beta',name:locale==='zh'?'Beta 示例站点':'Beta demo site',default_name:'Beta',provider:'newapi',site:'https://beta.example',mode:'manual',account_ids:[2]}
+{id:'manual-beta',name:locale==='zh'?'Beta 示例站点':'Beta demo site',default_name:'Beta',provider:'newapi',site:'https://beta.example',mode:'manual',account_ids:[2,60,998]}
 ];
 const accounts=Array.from({length:125},(_,i)=>({account_id:i+1,account_name:'Demo account '+(i+1),platform:'openai',type:i%2?'oauth':'apikey',balance:null,unit:'USD',balance_status:'unknown',received_at:null,usage_windows:[]}));
 window.__writes=[];window.__savedEvents=[];window.__closed=0;
@@ -115,6 +115,26 @@ app.use(createPinia());app.use(i18n);app.mount('#app');window.__selected=()=>sel
     assert.equal(css.display, 'flex')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no horizontal viewport overflow')
   }
+  // Scroll the real modal body with wheel input; require full bounds and a clear
+  // center hit before interacting with controls near the fixed footer.
+  const reach = async (locator, name) => {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const bounds = await locator.evaluate(el => {
+        const rect = el.getBoundingClientRect(), body = el.closest('.modal-body').getBoundingClientRect()
+        const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2
+        const hit = document.elementFromPoint(x, y)
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: body.top, bottom: body.bottom,
+          inside: rect.top >= body.top && rect.bottom <= body.bottom && rect.left >= 0 && rect.right <= innerWidth,
+          centerHit: hit === el || el.contains(hit) }
+      })
+      if (bounds.inside && bounds.centerHit) { reachability.push({ name, ...bounds }); return }
+      const body = await page.locator('.modal-body').boundingBox()
+      await page.mouse.move(body.x + body.width / 2, body.y + body.height / 2)
+      await page.mouse.wheel(0, bounds.y < bounds.top ? -260 : 260)
+      await page.waitForTimeout(80)
+    }
+    throw Error('Control unreachable by natural modal scrolling: ' + name)
+  }
   await load('?locale=zh')
   assert.equal(await page.locator('[data-testid^="account-group-member-manual-alpha-"]').count(), 125)
   await capture('before-desktop-zh')
@@ -140,6 +160,7 @@ app.use(createPinia());app.use(i18n);app.mount('#app');window.__selected=()=>sel
   await picker.getByTestId('quality-select-page').click()
   await picker.locator('button[aria-label]').last().click()
   await picker.locator('[data-account-id="51"]').waitFor()
+  assert.equal(await picker.locator('[data-account-id="60"] input').isChecked(), false)
   await search.fill('#125')
   await picker.getByTestId('quality-select-all').click()
   await search.fill('#121')
@@ -152,18 +173,18 @@ app.use(createPinia());app.use(i18n);app.mount('#app');window.__selected=()=>sel
   assert.equal(await picker.locator('[data-account-id="121"] input').isDisabled(), true)
   const writes = await page.evaluate(() => window.__writes)
   assert.deepEqual([...writes[0].groups[0].account_ids].sort((a,b)=>a-b), [...Array.from({length:50},(_,i)=>i+1),121,125,999])
-  assert.deepEqual(writes[0].groups[1].account_ids, [])
+  assert.deepEqual(writes[0].groups[1].account_ids, [60, 998], 'source group keeps an unselected listed account and a hidden ID')
   assert.equal(writes[0].groups[0].site, 'https://alpha.example')
   assert.equal(writes[0].groups[1].site, 'https://beta.example')
   writeFileSync(join(output, 'synthetic-save-payload.json'), JSON.stringify(writes, null, 2) + '\n')
   await page.evaluate(() => window.__releaseSave())
   await page.waitForFunction(() => window.__savedEvents.length === 1)
-  assertions.push('Name/ID search and Enter; pagination keeps hidden selections; page/all-match selection unions IDs; cross-site move removes only selected IDs; complete save payload retains ID 999; busy controls disabled')
+  assertions.push('Name/ID search and Enter; pagination keeps hidden selections; page/all-match selection unions IDs; moving ID 2 keeps unselected listed ID 60 and hidden ID 998 in Beta; complete target payload retains ID 999; busy controls disabled')
 
   await load('?locale=en')
   await picker.getByTestId('quality-account-group').selectOption('manual-beta')
   await picker.locator('[data-account-id="2"]').waitFor()
-  assert.equal(await picker.locator('[data-account-id]').count(), 1)
+  assert.equal(await picker.locator('[data-account-id]').count(), 2)
   await picker.getByTestId('quality-account-type').selectOption('apikey')
   await picker.locator('[data-account-id="2"]').waitFor({ state: 'detached' })
   await picker.getByTestId('quality-account-group').selectOption('')
@@ -179,6 +200,20 @@ app.use(createPinia());app.use(i18n);app.mount('#app');window.__selected=()=>sel
   await page.setViewportSize({ width: 390, height: 844 })
   await load('?locale=en')
   assert.equal(await picker.locator('[aria-busy]').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 1, 'actual mobile Tailwind grid')
+  await capture('after-mobile-en-overview')
+  await reach(search, 'mobile search input')
+  const nextPage = picker.locator('button[aria-label]').last()
+  await reach(nextPage, 'mobile next page')
+  await nextPage.click()
+  await picker.locator('[data-account-id="51"]').waitFor()
+  await reach(picker.locator('button[aria-label]').first(), 'mobile previous page')
+  await picker.locator('button[aria-label]').first().click()
+  await reach(page.getByTestId('add-account-group'), 'mobile add group')
+  await page.getByTestId('add-account-group').click()
+  assert.equal(await page.locator('[data-testid^="account-group-name-"]').count(), 3)
+  await capture('after-mobile-add-group')
+  await load('?locale=en')
+  await reach(search, 'mobile search input after reopening')
   await search.fill('#125')
   await search.press('Tab')
   assert.equal(await page.evaluate(() => document.activeElement?.tagName), 'BUTTON')
@@ -192,7 +227,7 @@ app.use(createPinia());app.use(i18n);app.mount('#app');window.__selected=()=>sel
   assert.equal(await page.evaluate(() => window.__writes.length), 0)
   await load('?locale=zh&dark=1')
   await capture('after-mobile-zh-dark')
-  assertions.push('390px phone layout; keyboard Tab/Enter/Space/Escape; Chinese/English; dark mode; no viewport overflow')
+  assertions.push('390px phone layout and top overview; natural wheel scrolling makes search, both page buttons and Add group fully visible with clear center hit-tests; Add group click works; keyboard Tab/Enter/Space/Escape; Chinese/English; dark mode; no viewport overflow')
 
   await page.goto(origin + '/?locale=en&quality=1', { waitUntil: 'networkidle' })
   const used = page.locator('[data-account-id="2"] input')
@@ -208,7 +243,7 @@ app.use(createPinia());app.use(i18n);app.mount('#app');window.__selected=()=>sel
   errors.push(error.stack)
   throw error
 } finally {
-  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, base, sources, captures, assertions, errors, browserWarnings, boundary: 'Actual GroupDialog, QualityAccountSelector, BaseDialog, project Tailwind/PostCSS, real locales. Synthetic DTOs and offline axios adapter only. Before uses pinned base source overrides; after uses final checkout. No production or upstream requests.' }, null, 2) + '\n')
+  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ head, base, sources, sourceHashNormalization: 'trimEnd', captures, assertions, reachability, errors, browserWarnings, boundary: 'Actual GroupDialog, QualityAccountSelector, BaseDialog, project Tailwind/PostCSS, real locales. Synthetic DTOs and offline axios adapter only. Before uses pinned base source overrides; after uses final checkout. No production or upstream requests.' }, null, 2) + '\n')
   await context?.close()
   await browser?.close()
   await server?.close()

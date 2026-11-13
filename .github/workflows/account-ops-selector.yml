@@ -8,6 +8,7 @@ on:
       - 'frontend/src/components/admin/operations/__tests__/AccountOpsGroup*.spec.ts'
       - 'frontend/src/components/admin/operations/__tests__/QualityAccountSelector.spec.ts'
       - 'frontend/src/views/admin/__tests__/AccountOpsView.spec.ts'
+      - 'frontend/src/views/admin/AccountOpsView.vue'
       - 'frontend/src/i18n/locales/*/accountOps.ts'
       - '.github/scripts/account-ops-selector*'
       - '.github/workflows/account-ops-selector.yml'
@@ -59,6 +60,29 @@ jobs:
             assert.match(test.failureMessages.join('\n'),/expected false to be true/);
           }
           console.log('Confirmed two behavioral RED assertions; no import/setup failure.');
+          JS
+      - name: Confirm save-reopen RED against reviewed parent
+        run: |
+          original=frontend/src/views/admin/AccountOpsView.vue
+          trap 'git show "HEAD:$original" > "$original"' EXIT
+          git show "ce272e17930d1a14d9f063f10b505630800ba8d3:$original" > "$original"
+          set +e
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/AccountOpsView.spec.ts -t 'reopens from saved memberships|fences old post-save group reads' --reporter=json --outputFile="$RUNNER_TEMP/account-ops-selector/reopen-red.json" > "$RUNNER_TEMP/account-ops-selector/reopen-red.log" 2>&1
+          result=$?
+          set -e
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          const report=JSON.parse(readFileSync(process.env.RUNNER_TEMP+'/account-ops-selector/reopen-red.json','utf8'));
+          const failures=report.testResults.flatMap(suite=>suite.assertionResults).filter(test=>test.status==='failed');
+          assert.equal(report.numFailedTests,2);
+          assert.equal(failures.length,2);
+          for(const test of failures){
+            assert.match(test.fullName,/reopens from saved memberships|fences old post-save group reads/);
+            assert.match(test.failureMessages.join('\n'),/expected false to be true|Latest saved/);
+          }
+          console.log('Confirmed save-reopen and stale-read behavioral RED; no setup failure.');
           JS
       - name: GREEN and existing quality regression tests
         run: |

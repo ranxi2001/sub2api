@@ -10,7 +10,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 const groups: AccountOpsGroup[] = [
   { id: 'manual-alpha', name: 'Alpha site', default_name: 'Alpha site', provider: 'sub2api', site: 'https://alpha.example', mode: 'manual', account_ids: [121, 999] },
-  { id: 'manual-beta', name: 'Beta site', default_name: 'Beta site', provider: 'newapi', site: 'https://beta.example', mode: 'manual', account_ids: [2] },
+  { id: 'manual-beta', name: 'Beta site', default_name: 'Beta site', provider: 'newapi', site: 'https://beta.example', mode: 'manual', account_ids: [2, 60, 998] },
 ]
 const accounts: AccountOpsThresholdAccount[] = Array.from({ length: 125 }, (_, i) => ({
   account_id: i + 1, account_name: `Demo account ${i + 1}`, platform: 'openai', type: i % 2 ? 'oauth' : 'apikey',
@@ -43,6 +43,7 @@ describe('account ops shared selector', () => {
     const picker = wrapper.getComponent(QualityAccountSelector)
     await picker.get('[data-testid="quality-select-page"]').trigger('click')
     await picker.get('button[aria-label="qualityOps.nextAccountPage"]').trigger('click')
+    expect((picker.get('[data-account-id="60"] input').element as HTMLInputElement).checked).toBe(false)
     await picker.get('input:not([type])').setValue('#125')
     await picker.get('[data-testid="quality-select-all"]').trigger('click')
     await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
@@ -50,9 +51,11 @@ describe('account ops shared selector', () => {
     const saved = vi.mocked(saveAccountOpsGroups).mock.calls[0]![0]
     expect(saved[0]!.account_ids).toEqual(expect.arrayContaining([1, 2, 121, 125, 999]))
     expect(saved[0]!.account_ids).not.toContain(100)
-    expect(saved[1]!.account_ids).toEqual([])
+    expect(saved[1]!.account_ids).toEqual([60, 998])
+    expect(saved[0]!.account_ids).not.toContain(60)
+    expect(saved[0]!.account_ids).not.toContain(998)
     expect(groups[0]!.account_ids).toEqual([121, 999])
-    expect(groups[1]!.account_ids).toEqual([2])
+    expect(groups[1]!.account_ids).toEqual([2, 60, 998])
     wrapper.unmount()
   })
 })
@@ -64,12 +67,12 @@ describe('account ops selection boundaries', () => {
     expect(picker.find('[data-testid="quality-account-status-active"]').exists()).toBe(false)
     expect(picker.get('[data-testid="quality-account-type"]').findAll('option').map(option => option.attributes('value'))).toEqual(['', 'oauth', 'apikey'])
     await picker.get('[data-testid="quality-account-group"]').setValue('manual-beta')
-    expect(picker.findAll('[data-account-id]').map(row => row.attributes('data-account-id'))).toEqual(['2'])
+    expect(picker.findAll('[data-account-id]').map(row => row.attributes('data-account-id'))).toEqual(['2', '60'])
     await picker.get('[data-testid="quality-account-type"]').setValue('apikey')
     expect(picker.findAll('[data-account-id]')).toHaveLength(0)
     await picker.get('[data-testid="quality-account-type"]').setValue('')
     await picker.get('[data-account-id="2"] input').setValue(true)
-    expect(picker.findAll('[data-account-id]')).toHaveLength(0)
+    expect(picker.findAll('[data-account-id]').map(row => row.attributes('data-account-id'))).toEqual(['60'])
     await picker.get('[data-testid="quality-account-group"]').setValue('ungrouped')
     expect(picker.find('[data-account-id="1"]').exists()).toBe(true)
     expect(picker.find('[data-account-id="2"]').exists()).toBe(false)
@@ -86,11 +89,11 @@ describe('account ops selection boundaries', () => {
     const selected = vi.mocked(saveAccountOpsGroups).mock.calls[0]![0]
     expect(selected[0]!.account_ids).toHaveLength(64) // 63 API keys + pre-existing hidden ID 999.
     expect(selected[0]!.account_ids).toContain(125)
-    expect(selected[1]!.account_ids).toEqual([2])
+    expect(selected[1]!.account_ids).toEqual([2, 60, 998])
     await picker.get('[data-testid="quality-clear-selection"]').trigger('click')
     await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
     await flushPromises()
-    expect(vi.mocked(saveAccountOpsGroups).mock.calls[1]![0].map(group => group.account_ids)).toEqual([[], [2]])
+    expect(vi.mocked(saveAccountOpsGroups).mock.calls[1]![0].map(group => group.account_ids)).toEqual([[], [2, 60, 998]])
     wrapper.unmount()
   })
 
