@@ -86,11 +86,24 @@ jobs:
           git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
           git diff --exit-code
           set +e
-          (cd backend && go test -race -json -tags=unit ./internal/service -run '^Test(OAuth429WeeklyOnly|DisableScheduling429|RateLimitDisableSchedulingOn429|OpenAIGatewayDisableSchedulingOn429|Managed429WeeklyPolicy|TOTPRotationOn429)' -count=1 -timeout=10m) > evidence/green.jsonl 2> evidence/green.stderr
+          (cd backend && go test -race -json -tags=unit ./internal/service -run '^Test(OAuth429WeeklyOnly|DisableScheduling429|RateLimitDisableSchedulingOn429|OpenAIGatewayDisableSchedulingOn429|Managed429WeeklyPolicy|Weekly429Threshold|TOTPRotationOn429)' -count=1 -timeout=10m) > evidence/green.jsonl 2> evidence/green.stderr
           result=$?
           set -e
           printf '%s\n' "$result" > evidence/green-exit.txt
           python3 .github/scripts/oauth429-weekly-only-evidence.py green evidence/green.jsonl "$result"
+      - name: Durable scheduling and rotation lifecycle on isolated PostgreSQL
+        if: success() || failure()
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -json -tags=integration ./internal/repository -run '^TestOAuth429WeeklyOnlyRotationPreservesScheduling$' -count=1 -timeout=10m) > evidence/green-repository.jsonl 2> evidence/green-repository.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/green-repository-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py repository evidence/green-repository.jsonl "$result"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

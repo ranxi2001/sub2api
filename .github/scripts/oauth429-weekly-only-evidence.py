@@ -23,5 +23,10 @@ if mode == "red":
     assert "TestOAuth429WeeklyOnlyService/primary_weekly_five_hour_neighbor" in passed
 else:
     assert int(status) == 0 and not failed, "candidate failed"
-    assert "TestOAuth429WeeklyOnlyService" in passed, "missing candidate regression"
+    required = ["RotationPreservesScheduling"] if mode == "repository" else [
+        "Service", "HeaderBoundaries", "CachedIdentity", "PolicyGates",
+        "HTTPForward", "WSForward", "CombinedRotation",
+    ]
+    for name in required:
+        assert "TestOAuth429WeeklyOnly" + name in passed, "missing regression: " + name
 print(f"Validated {mode.upper()}: {len(passed)} passed events, {len(failed)} failed events")
