@@ -73,6 +73,14 @@ async function shot(name) {
   screenshots.push({ name, viewport: page.viewportSize() })
 }
 async function geometry(label) {
+  // AppLayout animates its desktop sidebar margin for 300ms after crossing lg.
+  // Measure the settled layout, including after Vue handles the resize event.
+  await page.evaluate(async () => {
+    await new Promise(requestAnimationFrame)
+    await Promise.allSettled(document.getAnimations()
+      .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+      .map(animation => animation.finished))
+  })
   const value = await page.evaluate(() => {
     const rect = el => {
       if (!el) return null
