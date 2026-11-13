@@ -19,12 +19,15 @@ if mode == "red":
     assert int(status) != 0, "baseline unexpectedly passed"
     for name in ("primary_weekly_zero_neighbor", "secondary_weekly_invalid_neighbor"):
         assert "TestOAuth429WeeklyOnlyService/" + name in failed, name
+    for name in ("five_hour_100_zero_neighbor", "five_hour_100_invalid_neighbor"):
+        assert "TestOAuth429WeeklyOnlyNonweeklyHeadersAllowExplicitCache/" + name in failed, name
+    assert "nonweekly headers must not veto fresh explicit weekly cache" in output
     assert "explicit weekly 99 must disable despite an unrelated neighbor" in output
     assert "TestOAuth429WeeklyOnlyService/primary_weekly_five_hour_neighbor" in passed
 else:
     assert int(status) == 0 and not failed, "candidate failed"
     required = ["RotationPreservesScheduling"] if mode == "repository" else [
-        "Service", "HeaderBoundaries", "CachedIdentity", "CacheDoesNotRelabelUnidentifiedUsage", "PolicyGates",
+        "Service", "HeaderBoundaries", "CachedIdentity", "NonweeklyHeadersAllowExplicitCache", "CacheDoesNotRelabelUnidentifiedUsage", "PolicyGates",
         "HTTPForward", "WSForward", "WSClientIngress", "CombinedRotation",
     ]
     for name in required:

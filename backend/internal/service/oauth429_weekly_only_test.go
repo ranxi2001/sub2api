@@ -283,3 +283,39 @@ func TestOAuth429WeeklyOnlyCacheDoesNotRelabelUnidentifiedUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestOAuth429WeeklyOnlyNonweeklyHeadersAllowExplicitCache(t *testing.T) {
+	for _, tc := range []struct {
+		name, neighbor string
+		mutate         func(*Account)
+		want           bool
+	}{
+		{"five_hour_100_zero_neighbor", "0", nil, true},
+		{"five_hour_100_invalid_neighbor", "invalid", nil, true},
+		{"missing_cached_usage", "0", func(a *Account) { delete(a.Extra, "codex_7d_used_percent") }, false},
+		{"unidentified_cached_usage", "0", func(a *Account) { delete(a.Extra, "codex_7d_window_minutes") }, false},
+		{"cached_usage_equal_own_threshold", "0", func(a *Account) { a.Extra[OpenAIDisableSchedulingOn4297dThresholdExtraKey] = 99.0 }, false},
+		{"cached_usage_below_threshold", "0", func(a *Account) { a.Extra["codex_7d_used_percent"] = 20.0 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := scheduling429Account()
+			a.Extra[CodexUsageFieldVersionsKey] = weeklyOnlyVersions(time.Now().Add(-time.Minute))
+			if tc.mutate != nil {
+				tc.mutate(a)
+			}
+			h := http.Header{}
+			h.Set("x-codex-primary-window-minutes", "300")
+			h.Set("x-codex-primary-used-percent", "100")
+			h.Set("x-codex-secondary-window-minutes", tc.neighbor)
+			h.Set("x-codex-secondary-used-percent", "0")
+			repo := &weeklyOnly429Repo{}
+			rates := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			rates.HandleUpstreamError(t.Context(), a, 429, h, nil)
+			require.Equal(t, tc.want, len(repo.ids) > 0, "nonweekly headers must not veto fresh explicit weekly cache")
+			if tc.want {
+				require.Equal(t, []bool{false}, repo.values)
+			}
+			require.NotEmpty(t, repo.extra, "real quota parser/persistence path must run")
+		})
+	}
+}
