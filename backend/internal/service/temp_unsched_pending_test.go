@@ -41,7 +41,7 @@ func TestCompatErrorPipelineCountsEachResponseOnce(t *testing.T) {
 			require.NotNil(t, failover)
 			require.Len(t, repo.modelReasons, 1)
 		}
-		require.Equal(t, attempt, counter.hits)
+		require.Equal(t, attempt, counter.hits, "same upstream response must be counted once across compatibility handlers")
 	}
 }
 
