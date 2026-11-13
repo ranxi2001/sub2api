@@ -109,7 +109,11 @@ func TestSecurityPenaltyAsyncFindingCommitsWithLeaseFencedEvent(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 	job.Snapshot.FullPrompt = "SYNTHETIC_ASYNC_PROMPT"
-	result := &NormalizedResult{Action: ActionBlock, Decision: EventCritical, RiskLevel: RiskCritical, MatchedScanners: []string{"jailbreak"}, ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{}}
+	result := &NormalizedResult{
+		Action: ActionBlock, Decision: EventCritical, RiskLevel: RiskCritical, Safety: "Unsafe",
+		Categories: []string{"jailbreak"}, MatchedScanners: []string{"jailbreak"},
+		ScannerScores: map[string]float64{"jailbreak": 1}, ScannerEvidence: map[string]string{"jailbreak": "Jailbreak"},
+	}
 	_, err = repo.Complete(context.Background(), job, result, false)
 	require.NoError(t, err)
 	_, err = repo.Complete(context.Background(), job, result, false)
