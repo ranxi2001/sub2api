@@ -45,6 +45,8 @@ type openAIAgentRecoveryState struct {
 }
 
 type openAIAgentRecoveryRequest struct {
+	omitted400History   bool // one authorized, same-route HTTP 400 history replacement
+	retry400Route       *openAIAgentRecoveryBinding
 	omittedHistory      bool // explicit Beta sanitization; preserve the resulting input and prohibit replay
 	disableOwnerBinding bool
 	previousResponseID  string
@@ -147,7 +149,7 @@ func (r *openAIAgentRecoveryRequest) ownerBindingRequired() bool {
 }
 
 func (r *openAIAgentRecoveryRequest) preservesHistory() bool {
-	return r != nil && (r.omittedHistory || (r.disableOwnerBinding && len(r.items) > 0))
+	return r != nil && (r.omitted400History || r.omittedHistory || (r.disableOwnerBinding && len(r.items) > 0))
 }
 
 func openAIAgentRecoveryPreservesHistory(ctx context.Context) bool {
@@ -247,6 +249,10 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryAccount(ctx context.Conte
 	request := openAIAgentRecoveryFromContext(ctx)
 	if request == nil {
 		return nil
+	}
+	if request.omitted400History && (request.retry400Route == nil || account == nil ||
+		account.ID != request.retry400Route.accountID || openAIAgentRecoveryConfig(account, request.model) != request.retry400Route.config) {
+		return openAIAgentRecoveryError("route_changed")
 	}
 	if request.lookupErr != nil {
 		return request.lookupErr
@@ -389,6 +395,9 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	}
 	wire := openAIAgentRecoveryWireDigest(req.URL.String(), req.Header, gjson.GetBytes(body, "model").String())
 	binding := openAIAgentRecoveryBinding{accountID: account.ID, config: openAIAgentRecoveryConfig(account, request.model), wire: wire, expiresAt: time.Now().Add(s.openAIWSSessionStickyTTL())}
+	if request.omitted400History && (request.retry400Route == nil || !sameOpenAIAgentRecoveryRoute(*request.retry400Route, binding)) {
+		return noop, openAIAgentRecoveryError("wire_changed")
+	}
 	if request.ownerBindingRequired() && !sameOpenAIAgentRecoveryRoute(*request.owner, binding) {
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
@@ -399,7 +408,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	request.delivery = delivery
 	return func(completed bool) {
 		delivery.finish(completed && ctx.Err() == nil)
-		if !completed || ctx.Err() != nil || request.disableOwnerBinding {
+		if !completed || ctx.Err() != nil || request.disableOwnerBinding || request.omitted400History {
 			// Consumption is not production. In opt-out mode inputs retain their
 			// original records (including concurrent fences); only actual new
 			// outputs receive the admitted producer's transactional grant above.

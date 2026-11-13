@@ -420,6 +420,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		GrokDefaultBaseURLMode:               settings.GrokDefaultBaseURLMode,
 		GrokVideoSourceURLEnabled:            settings.GrokVideoSourceURLEnabled,
 		OpenAI409OmitEncryptedHistoryEnabled: settings.OpenAI409OmitEncryptedHistoryEnabled,
+		OpenAI400OmitEncryptedHistoryEnabled: settings.OpenAI400OmitEncryptedHistoryEnabled,
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
 		PelicanShowcaseEnabled:   settings.PelicanShowcaseEnabled,

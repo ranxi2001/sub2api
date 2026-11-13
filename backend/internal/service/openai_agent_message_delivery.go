@@ -90,7 +90,7 @@ func (d *openAIAgentRecoveryDelivery) reserve(items [][32]byte) error {
 	defer cancel()
 	for _, item := range items {
 		key := d.request.itemKey(item)
-		if d.request.disableOwnerBinding && d.request.known[key] {
+		if (d.request.disableOwnerBinding || d.request.omitted400History) && d.request.known[key] {
 			// An echoed completed input is still its original producer's item.
 			// Never reserve/publish it as the account consuming this history.
 			continue

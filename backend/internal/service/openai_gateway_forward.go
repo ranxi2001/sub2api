@@ -1325,6 +1325,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	httpInvalidEncryptedContentRetryTried := false
+	nativeHTTPAttempts := 0
 	compactModelFallbackRetried := false
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
@@ -1419,6 +1420,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		resp, err := func() (*http.Response, error) {
 			stop := s.startOpenAIHeaderWaitKeepalive(c, reqStream)
 			defer stop()
+			nativeHTTPAttempts++
 			return s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		}()
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
@@ -1472,7 +1474,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
-			if !isControlledExperiment(ctx) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+			if !isControlledExperiment(ctx) && !openAI400HistoryRecoveryApplied(ctx) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
 				if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -1482,11 +1484,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			if openAIAgentRecoveryPreservesHistory(ctx) {
-				// The administrator allowed one intact cross-account attempt. An
-				// actual rejection is not permission to rewrite or resubmit it.
-				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
-			}
 			if resp.StatusCode == http.StatusBadRequest && isOpenAIInvalidEncryptedContentError(upstreamCode, extractUpstreamErrorMessage(respBody)) {
 				markInvalidEncryptedContentLineage("http", body, respBody)
 				if retry, retryErr := recoverInvalidEncryptedContentHTTP(resp, respBody); retryErr != nil {
@@ -1494,8 +1491,26 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				} else if retry {
 					continue
 				}
+				if next, clean, changed := s.prepareOpenAI400HistoryRecovery(ctx, c, account, body, nativeHTTPAttempts); changed {
+					ctx, body = next, clean
+					c.Request = c.Request.WithContext(next)
+					requestView, reqBody = newOpenAIRequestView(body), nil
+					rejectedFieldRetryState.remember(body)
+					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+						ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+						Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+						UpstreamStatusCode: resp.StatusCode, UpstreamRequestID: resp.Header.Get("x-request-id"),
+						Kind: "retry", Reason: "encrypted_history_400_omitted",
+						Message: "Eligible historical ciphertext omitted; one same-account recovery scheduled with context loss",
+					})
+					beginUpstreamResponseModelObservation(c)
+					continue
+				}
 				// The explicit error code takes precedence over arbitrary message
 				// text. Do not borrow field/compact/failover retry budgets here.
+				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
+			}
+			if openAIAgentRecoveryPreservesHistory(ctx) {
 				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
