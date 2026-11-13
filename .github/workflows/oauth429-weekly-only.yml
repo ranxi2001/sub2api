@@ -85,10 +85,10 @@ jobs:
           # stream-phase helper. Exclude it only from this disposable old-source
           # checkout; GREEN explicitly runs all six tests with candidate sources.
           excluded=backend/internal/service/temp_unsched_pending_test.go
-          ! git cat-file -e "$BASELINE:$excluded" 2>/dev/null
+          if git cat-file -e "$BASELINE:$excluded" 2>/dev/null; then exit 1; fi
           candidate_blob=$(git rev-parse "$CANDIDATE:$excluded")
           test "$(git hash-object "$RUNNER_TEMP/oauth429-red/$excluded")" = "$candidate_blob"
-          ! grep -q '^func TestOAuth429WeeklyOnly' "$excluded"
+          if grep -q '^func TestOAuth429WeeklyOnly' "$excluded"; then exit 1; fi
           rm -- "$RUNNER_TEMP/oauth429-red/$excluded"
           test ! -e "$RUNNER_TEMP/oauth429-red/$excluded"
           printf '%s baseline=absent candidate=%s red=absent reason=candidate-only-WS-stream-phase-helper\n' "$excluded" "$candidate_blob" > evidence/excluded-tests.txt
