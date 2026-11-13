@@ -1,0 +1,26 @@
+name: Admin usage platform filter
+on:
+  push:
+    branches: [feat/admin-usage-platform-filter]
+permissions:
+  contents: read
+concurrency:
+  group: admin-usage-platform-filter-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Platform behavioral regression
+        run: pnpm --dir frontend exec vitest run src/components/admin/usage/__tests__/UsageFilters.spec.ts

@@ -440,3 +440,13 @@ describe('UsageFilters — identity-only traffic filters', () => {
     expect(wrapper.props('modelValue').api_key_id).toBeUndefined()
   })
 })
+
+describe('admin usage platform filter', () => {
+  it('offers a server-side platform filter alongside the group filter', async () => {
+    const wrapper = mountFilters()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-platform-filter"]').exists(),
+      'admin usage details must offer a platform selector').toBe(true)
+    wrapper.unmount()
+  })
+})
