@@ -997,7 +997,7 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 		modelForCooldown = requestedModel[0]
 	}
 	shouldDisable := s.handleOpenAIAccountUpstreamError(
-		c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
+		openAICompatTempUnschedContext(c, resp, account), account, resp.StatusCode, resp.Header, body, modelForCooldown,
 	)
 	kind := "http_error"
 	if shouldDisable {

@@ -4,13 +4,46 @@ package service
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCompatErrorPipelineCountsEachResponseOnce(t *testing.T) {
+	repo := &tempUnschedPendingRepo{}
+	limits, counter := newCountedTempUnschedService(repo)
+	gateway := &OpenAIGatewayService{rateLimitService: limits}
+	account := tempUnschedTimingAccount(map[string]any{
+		"error_code": float64(400), "keywords": []any{"temporary fixture"},
+		"duration_minutes": float64(10), "scope": "model", "trigger_count": float64(3),
+	})
+	body := []byte(`{"error":{"message":"temporary fixture","type":"invalid_request_error"}}`)
+	for attempt := 1; attempt <= 3; attempt++ {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		resp := &http.Response{StatusCode: 400, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(string(body)))}
+		failover := gateway.failoverOpenAIUpstreamHTTPError(c.Request.Context(), c, account, resp, body, "temporary fixture", "gpt-5.4")
+		if attempt < 3 {
+			require.Nil(t, failover)
+			_, err := gateway.handleChatCompletionsErrorResponse(resp, c, account, "gpt-5.4")
+			require.Error(t, err)
+			var unexpected *UpstreamFailoverError
+			require.NotErrorAs(t, err, &unexpected)
+			require.Empty(t, repo.modelReasons, "one response cannot satisfy the multi-error threshold")
+		} else {
+			require.NotNil(t, failover)
+			require.Len(t, repo.modelReasons, 1)
+		}
+		require.Equal(t, attempt, counter.hits)
+	}
+}
 
 type tempUnschedPendingRepo struct {
 	recordingTempUnschedRepo
