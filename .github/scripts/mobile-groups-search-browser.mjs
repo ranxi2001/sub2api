@@ -15,7 +15,8 @@ assert(process.env.CI && out, 'Application execution is allowed only on remote C
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 assert.equal(head, process.env.GROUPS_EXPECTED_HEAD)
 const baseline = '338528c48fc480fa998c984d923b049841e20039'
-const scope = appRoot === root ? 'head' : 'baseline'
+const scope = process.env.GROUPS_SCOPE || (appRoot === root ? 'head' : 'baseline')
+const productionSHA = process.env.GROUPS_APP_SHA || (appRoot === root ? head : baseline)
 await fs.mkdir(out, { recursive: true })
 const fixture = path.join(frontend, '.mobile-groups-fixture')
 await fs.mkdir(fixture, { recursive: true })
@@ -61,7 +62,7 @@ const groups = Array.from({ length: 20 }, (_, i) => ({
   rate_multiplier: 1, is_exclusive: false, account_count: 3, active_account_count: 3,
   sort_order: i, supported_model_scopes: [], created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z',
 }))
-const measurements = [], requests = [], errors = [], external = [], violations = [], screenshots = []
+const measurements = [], requests = [], errors = [], external = [], violations = [], searchViolations = [], screenshots = []
 let browser, page, css, outcome = 'setup-or-interaction-failure'
 const sourceHashes = {}
 for (const file of ['src/views/admin/GroupsView.vue','src/components/layout/AppLayout.vue','src/components/layout/AppHeader.vue','src/components/layout/TablePageLayout.vue','src/components/common/DataTable.vue','src/style.css','tailwind.config.js']) {
@@ -87,7 +88,7 @@ async function geometry(label) {
       const r = el.getBoundingClientRect(), s = getComputedStyle(el)
       return { top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:r.height,width:r.width,
         scrollTop:el.scrollTop,scrollHeight:el.scrollHeight,clientHeight:el.clientHeight,scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,
-        position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,flexShrink:s.flexShrink,display:s.display }
+        position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,flexShrink:s.flexShrink,display:s.display,scrollMarginTop:s.scrollMarginTop }
     }
     const search = document.querySelector('.layout-section-fixed input'), r = search.getBoundingClientRect()
     const hit = document.elementFromPoint(r.left+r.width/2, r.top+r.height/2)
@@ -107,9 +108,25 @@ async function top() {
 }
 async function searchUsable(label) {
   const g = await geometry(label)
-  check(g.search.top>=g.header.bottom && g.search.bottom<=g.viewport.height && g.search.left>=0 && g.search.right<=g.viewport.width && g.searchHit, `${label}: search must be fully visible and hit-testable; ${JSON.stringify({search:g.search,header:g.header,hit:g.hitTag})}`)
+  const usable=g.search.top>=g.header.bottom && g.search.bottom<=g.viewport.height && g.search.left>=0 && g.search.right<=g.viewport.width && g.searchHit
+  const failure=`${label}: search must be fully visible and hit-testable; ${JSON.stringify({scrollY:g.scrollY,search:g.search,header:g.header,hit:g.hitTag})}`
+  check(usable,failure)
+  if(!usable)searchViolations.push(failure)
   check(g.document.scrollWidth<=g.viewport.width && g.scrollX===0, `${label}: document must not overflow horizontally`)
   return g
+}
+async function middle() {
+  await page.locator('.layout-section-fixed input').evaluate(el=>el.blur())
+  await page.evaluate(()=>window.scrollTo({top:Math.round((document.documentElement.scrollHeight-innerHeight)/2),behavior:'instant'}))
+}
+async function returnToSearch(label, block) {
+  await page.locator('.layout-section-fixed input').evaluate((el,block)=>{
+    if(block)el.scrollIntoView({block,behavior:'instant'})
+    el.focus()
+  },block)
+  assert(await page.locator('.layout-section-fixed input').evaluate(el=>el===document.activeElement),'Search return must actually focus the input')
+  await searchUsable(label)
+  await shot(label)
 }
 try {
   await server.listen();browser=await chromium.launch({headless:true})
@@ -140,7 +157,7 @@ try {
   // Guard against an unstyled fixture before treating any assertion as a behavioral RED.
   css=await page.evaluate(()=>({header:getComputedStyle(document.querySelector('header')).position,headerHeight:document.querySelector('header>div').getBoundingClientRect().height,padding:getComputedStyle(document.querySelector('main')).paddingTop,toolbarShrink:getComputedStyle(document.querySelector('.layout-section-fixed')).flexShrink,display:getComputedStyle(document.querySelector('.table-page-layout')).display}))
   assert.deepEqual(css,{header:'sticky',headerHeight:64,padding:'16px',toolbarShrink:'0',display:'flex'},'CSS_SETUP: actual Tailwind utilities must be compiled')
-  for(const viewport of [{width:375,height:667},{width:390,height:844},{width:320,height:667},{width:667,height:375},{width:844,height:390},{width:1023,height:768},{width:375,height:400},{width:1280,height:900}]){
+  for(const viewport of [{width:375,height:667},{width:390,height:844},{width:320,height:667},{width:667,height:375},{width:844,height:390},{width:1023,height:768},{width:375,height:400},{width:375,height:320},{width:1280,height:900}]){
     await page.setViewportSize(viewport);await top()
     const label=`${viewport.width}x${viewport.height}`
     const g=await searchUsable(`${label}-top`)
@@ -151,6 +168,21 @@ try {
       const mid=await geometry(`${label}-middle`)
       check(Math.abs(mid.header.top)<1,`${label}: header must remain at document top while scrolling cards; header.top=${mid.header.top}, scrollY=${mid.scrollY}`)
       await shot(`${label}-middle`)
+      // Native DOM scrolling does not account for a sticky header by default.
+      await returnToSearch(`${label}-search-start-from-middle`,'start')
+      await middle();await returnToSearch(`${label}-search-focus-from-middle`,null)
+      await top()
+      // Recreate the supplied screenshot's scroll state: exclusive filter just
+      // below the header, with search/platform/status above it. This is a saved
+      // scroll offset simulation, not a claim about native browser history.
+      const savedY=await page.evaluate(()=>{
+        const filter=document.querySelectorAll('.layout-section-fixed .select-trigger')[2]
+        return Math.max(0,filter.getBoundingClientRect().top+scrollY-document.querySelector('header').getBoundingClientRect().height)
+      })
+      await middle()
+      await page.evaluate(y=>window.scrollTo({top:y,behavior:'instant'}),savedY)
+      await geometry(`${label}-restored-filter-offset`);await shot(`${label}-restored-filter-offset`)
+      await returnToSearch(`${label}-search-nearest-after-restore`,'nearest')
     } else {
       assert.equal(await page.locator('table').count(),1,'Desktop list must render')
       await page.locator('.table-wrapper').evaluate(el=>{el.scrollTop=el.scrollHeight/2})
@@ -190,14 +222,14 @@ try {
   await top();await searchUsable('toolbar-actions-returned-top')
   assert.deepEqual(errors,[],'No setup/runtime errors accepted as behavioral RED');assert.deepEqual(external,[])
   outcome=violations.length?'behavioral-red':'green'
-  if(violations.length)throw new Error('GROUPS_LAYOUT_REGRESSION\n'+violations.join('\n'))
+  if(violations.length)throw new Error('GROUPS_LAYOUT_REGRESSION\n'+(searchViolations.length?'GROUPS_SEARCH_OCCLUSION\n':'')+violations.join('\n'))
   console.log('GROUPS_BROWSER_GREEN: real components, compiled CSS, scroll/resize and search assertions passed')
 } catch(error) {
   if(page)await shot('failure').catch(()=>{})
   await fs.writeFile(path.join(out,'failure.txt'),String(error.stack||error))
   throw error
 } finally {
-  await fs.writeFile(path.join(out,'manifest.json'),JSON.stringify({head,baseline,scope,productionSHA:scope==='baseline'?baseline:head,outcome,sourceHashes,css,synthetic:true,browser:`Playwright Chromium ${browser?.version()}; viewport emulation, not physical mobile/keyboard`,actualComponents:['GroupsView','AppLayout','AppHeader','TablePageLayout','DataTable','Select','Pagination','BaseDialog'],screenshots,measurements,requests,errors,external,violations},null,2))
+  await fs.writeFile(path.join(out,'manifest.json'),JSON.stringify({head,baseline,scope,productionSHA,outcome,sourceHashes,css,synthetic:true,browser:`Playwright Chromium ${browser?.version()}; viewport emulation, not physical mobile/keyboard or native history restoration`,actualComponents:['GroupsView','AppLayout','AppHeader','TablePageLayout','DataTable','Select','Pagination','BaseDialog'],screenshots,measurements,requests,errors,external,violations,searchViolations},null,2))
   if(browser)await browser.close();await server.close()
   await fs.rm(fixture,{recursive:true,force:true})
 }

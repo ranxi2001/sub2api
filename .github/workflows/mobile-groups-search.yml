@@ -61,6 +61,24 @@ jobs:
           set -e
           test "$result" -ne 0
           grep -q 'GROUPS_LAYOUT_REGRESSION' "$GROUPS_EVIDENCE_DIR/browser.log"
+      - name: Search RED with header boundary already repaired
+        env:
+          GROUPS_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          GROUPS_EVIDENCE_DIR: ${{ runner.temp }}/groups-evidence/layout-only
+          GROUPS_APP_ROOT: ${{ runner.temp }}/groups-layout-only
+          GROUPS_APP_SHA: d56129a3469ae348dbe9f5f1a87bf85babffba45
+          GROUPS_SCOPE: layout-only
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/groups-browser/node_modules/playwright
+        run: |
+          mkdir -p "$GROUPS_APP_ROOT" "$GROUPS_EVIDENCE_DIR"
+          git archive "$GROUPS_APP_SHA" | tar -x -C "$GROUPS_APP_ROOT"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$GROUPS_APP_ROOT/frontend/node_modules"
+          set +e
+          node .github/scripts/mobile-groups-search-browser.mjs 2>&1 | tee "$GROUPS_EVIDENCE_DIR/browser.log"
+          result=${PIPESTATUS[0]}
+          set -e
+          test "$result" -ne 0
+          grep -q 'GROUPS_SEARCH_OCCLUSION' "$GROUPS_EVIDENCE_DIR/browser.log"
       - name: Current head browser acceptance
         env:
           GROUPS_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
