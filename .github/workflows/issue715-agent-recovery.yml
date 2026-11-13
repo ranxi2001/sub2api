@@ -441,6 +441,10 @@ jobs:
             echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
             test "$expected" = "$actual"
           done
+          # Current HTTP retains the readable helper; the pinned pre-WS bridge
+          # never populates this field or calls that recovery path. Keep all
+          # behavior blobs above exact except this audited zero-value storage.
+          bash .github/scripts/oauth429-weekly-only-bridge-compat.sh . "$original" | tee "$RUNNER_TEMP/issue715-ws-bridge-compat.log"
           set +e
           (cd backend && go test -race -tags=unit ./internal/handler -run '^TestIssue715WSGeneratedTaskContinuation$/.*/cross-node=true$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-ws-red.log" 2>&1
           result=$?

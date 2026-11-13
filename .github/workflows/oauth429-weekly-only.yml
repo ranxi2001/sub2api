@@ -80,6 +80,10 @@ jobs:
             printf '%s %s\n' "$candidate_blob" "$test_file" >> evidence/retained-test-blobs.txt
           done < evidence/retained-tests.txt
           git -C "$RUNNER_TEMP/oauth429-red" diff --exit-code -- '*_test.go'
+          # The retained helper references the new storage field. Add only that
+          # zero-value field after proving every original production blob above.
+          bash .github/scripts/oauth429-weekly-only-bridge-compat.sh "$RUNNER_TEMP/oauth429-red" "$BASELINE" | tee evidence/bridge-compat.txt
+          git -C "$RUNNER_TEMP/oauth429-red" diff --stat > evidence/red-diff.txt
       - name: Require behavioral RED from unchanged service regressions
         shell: bash
         run: |
@@ -128,6 +132,7 @@ jobs:
           ed1708f3c2ee470d80ab97b377ff610050e383fc backend/internal/service/openai_ws_http_bridge.go
           BLOBS
           git -C "$RUNNER_TEMP/oauth429-expiry-red" diff --exit-code -- '*_test.go'
+          bash .github/scripts/oauth429-weekly-only-bridge-compat.sh "$RUNNER_TEMP/oauth429-expiry-red" "$before" | tee evidence/expiry-bridge-compat.txt
           git -C "$RUNNER_TEMP/oauth429-expiry-red" diff --stat > evidence/expiry-red-diff.txt
           set +e
           (cd "$RUNNER_TEMP/oauth429-expiry-red/backend" && go test -json -tags=unit ./internal/service -run '^TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation$' -count=1 -timeout=10m) > evidence/red-http-expiry.jsonl 2> evidence/red-http-expiry.stderr
