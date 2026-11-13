@@ -53,6 +53,18 @@ jobs:
         with:
           go-version-file: ${{ matrix.behavior }}/backend/go.mod
           cache-dependency-path: ${{ matrix.behavior }}/backend/go.sum
+      - name: Prepare existing sanitized startup crash diagnostics
+        working-directory: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v gdb >/dev/null; then
+            bash .github/scripts/ci-ubuntu-mirrors.sh
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdb
+          fi
+          uname -a > evidence/kernel.txt
+          go version > evidence/toolchain.txt
       - name: Real PostgreSQL plan and existing Redis trigger worker
         working-directory: ${{ matrix.behavior }}
         env:
@@ -62,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestIssue817QuotaSkipPreservesPending5xxExecution$' -count=1 -v -timeout=10m) > evidence/pending-5xx.log 2>&1
+          bash .github/scripts/oauth-degradation-integration-race.sh "issue817-$BEHAVIOR" "$PWD" '^TestIssue817QuotaSkipPreservesPending5xxExecution$' 10m > evidence/pending-5xx.log 2>&1
           result=$?
           set -e
           cat evidence/pending-5xx.log
@@ -91,5 +103,7 @@ jobs:
         if: always()
         with:
           name: issue817-skip-${{ matrix.behavior }}-${{ github.event_name }}-${{ github.run_id }}
-          path: ${{ matrix.behavior }}/evidence/
+          path: |
+            ${{ matrix.behavior }}/evidence/
+            evidence/
           if-no-files-found: error
