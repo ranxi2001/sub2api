@@ -24,3 +24,24 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - name: Platform behavioral regression
         run: pnpm --dir frontend exec vitest run src/components/admin/usage/__tests__/UsageFilters.spec.ts
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Historical platform SQL regression (disposable PostgreSQL)
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=integration ./internal/repository -run '^TestUsagePlatformHistoricalQuery$' -count=1 -v -timeout=15m | tee "$RUNNER_TEMP/platform-sql.log"
+          ! grep -E -- '--- SKIP:|no tests to run' "$RUNNER_TEMP/platform-sql.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: platform-sql-${{ github.sha }}
+          path: ${{ runner.temp }}/platform-sql.log
