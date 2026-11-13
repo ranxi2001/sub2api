@@ -41,15 +41,11 @@ const { default: theme } = await import(pathToFileURL(path.join(frontend, 'tailw
 const { chromium } = createRequire(path.join(process.env.PLAYWRIGHT_ROOT, 'package.json'))('playwright')
 const alias = (find, name) => ({ find, replacement: path.join(fixture, `${name}.js`) })
 const server = await createServer({ root: frontend, configFile: false, envFile: false,
-  plugins: [vueModule.default ? vueModule.default() : vueModule(), {
-    name: 'synthetic-unrelated-sidebar', enforce: 'pre',
-    resolveId(source, importer) {
-      if (source === './AppSidebar.vue' && importer?.endsWith('/AppLayout.vue')) return path.join(fixture, 'empty.js')
-    },
-  }],
+  plugins: [vueModule.default ? vueModule.default() : vueModule()],
   resolve: { alias: [
     alias(/^@\/stores$/, 'stores'), ...['app','auth','adminSettings','onboarding'].map(name => alias(`@/stores/${name}`, 'stores')),
     alias('@/composables/useOnboardingTour', 'tour'), alias('@/components/common/AnnouncementBell.vue', 'empty'),
+    alias(/(?:.*\/)?AppSidebar\.vue$/, 'empty'), alias('@/components/common/SubscriptionProgressMini.vue', 'empty'),
     { find: '@', replacement: path.join(frontend, 'src') },
     { find: 'vue-i18n', replacement: 'vue-i18n/dist/vue-i18n.runtime.esm-bundler.js' },
   ] },
@@ -159,7 +155,26 @@ try {
   await page.waitForFunction(()=>document.querySelectorAll('[data-field="name"]').length===1)
   assert(requests.some(r=>r.path==='/api/v1/admin/groups'&&r.query.search==='搜索目标'),'Typed search must reach the real API client')
   await searchUsable('filtered-search')
+  await page.setViewportSize({width:375,height:320})
+  await searchUsable('focused-search-simulated-keyboard')
+  assert(await search.evaluate(el=>el===document.activeElement),'Viewport resize must retain search focus')
+  await page.setViewportSize({width:375,height:667})
   await search.fill('');await page.waitForFunction(()=>document.querySelectorAll('[data-field="name"]').length===20)
+  await page.locator('.layout-section-fixed .select-trigger').first().click()
+  await page.getByRole('option',{name:'OpenAI',exact:true}).click()
+  await page.waitForFunction(()=>document.querySelectorAll('[data-field="name"]').length===10)
+  assert(requests.some(r=>r.query.platform==='openai'),'Platform filter must reach the API')
+  const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/admin/groups')
+  await page.getByTitle('刷新',{exact:true}).click();await response
+  const sortResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/admin/groups'&&new URL(r.url()).searchParams.get('sort_by')==='name')
+  await page.locator('[data-test="mobile-sort-controls"] select').selectOption('name');await sortResponse
+  await page.getByTitle('排序',{exact:true}).click()
+  const sortDialog=page.getByRole('dialog',{name:'排序',exact:true})
+  await sortDialog.waitFor();await sortDialog.getByLabel('Close modal').click();await sortDialog.waitFor({state:'hidden'})
+  await page.locator('[data-tour="groups-create-btn"]').click()
+  const createDialog=page.getByRole('dialog',{name:'创建分组',exact:true})
+  await createDialog.waitFor();await createDialog.getByLabel('Close modal').click();await createDialog.waitFor({state:'hidden'})
+  await top();await searchUsable('toolbar-actions-returned-top')
   assert.deepEqual(errors,[],'No setup/runtime errors accepted as behavioral RED');assert.deepEqual(external,[])
   if(violations.length)throw new Error('GROUPS_LAYOUT_REGRESSION\n'+violations.join('\n'))
   console.log('GROUPS_BROWSER_GREEN: real components, compiled CSS, scroll/resize and search assertions passed')
