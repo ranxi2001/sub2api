@@ -10,15 +10,38 @@ on:
       - 'backend/internal/service/openai_gateway_request_body.go'
       - 'backend/internal/handler/openai_409_*'
       - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/handler/openai_responses_failover_cancel_test.go'
       - '.github/scripts/assert-readable-continuation.py'
+      - '.github/scripts/test_assert_readable_continuation.py'
       - '.github/workflows/readable-continuation-409.yml'
 
 permissions:
   contents: read
 
 jobs:
+  evidence-validator:
+    name: Evidence validator self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Accept valid evidence and reject injected contamination
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s .github/scripts -p 'test_assert_readable_continuation.py' -v 2>&1 | tee "$RUNNER_TEMP/readable-validator-self-tests.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: readable-validator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/readable-validator-self-tests.log
+          if-no-files-found: error
   http:
     name: HTTP ${{ matrix.phase }}
+    needs: evidence-validator
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -52,9 +75,10 @@ jobs:
           git diff --exit-code
           test -z "$(git status --porcelain)"
           git rev-parse HEAD > "$RUNNER_TEMP/readable-$PHASE-provenance.txt"
-          target=backend/internal/handler/openai_409_readable_continuation_test.go
-          test "$(git hash-object "$target")" = "$(git rev-parse "HEAD:$target")"
-          git rev-parse "HEAD:$target" >> "$RUNNER_TEMP/readable-$PHASE-provenance.txt"
+          for target in backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do
+            test "$(git hash-object "$target")" = "$(git rev-parse "HEAD:$target")"
+            git rev-parse "HEAD:$target" >> "$RUNNER_TEMP/readable-$PHASE-provenance.txt"
+          done
       - name: Restore fixed production blob in RED checkout only
         if: matrix.phase == 'RED'
         run: |
@@ -83,6 +107,7 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OmitOpenAIHistorical|OpenAI409(OmitHistory|Replay|Omission|ReadableReasoning)|UpdateSettingsOpenAI409|Issue715(OutputPending|PendingLookup|ObservedPending|HTTPFailedDelivery|HTTPRecoveryKeepsHardRestrictions|HTTPRecoveryCannotBypassLongContext|HTTPPartialOutput))' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/readable-GREEN-safeguards.log"
+          python3 ../.github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/readable-GREEN-safeguards.log"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

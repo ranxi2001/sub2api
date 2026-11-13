@@ -42,9 +42,31 @@ func (w *readable409DeliveryWriter) WriteString(body string) (int, error) {
 	return w.Write([]byte(body))
 }
 
+// Keep the real pricing/RecordUsage path observable. A recovered usage panic
+// must not pass merely because the response already reached the client.
+type readable409UsageRepo struct {
+	service.UsageLogRepository
+	mu   sync.Mutex
+	rows []service.UsageLog
+}
+
+func (r *readable409UsageRepo) Create(_ context.Context, row *service.UsageLog) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rows = append(r.rows, *row)
+	return true, nil
+}
+
+func (r *readable409UsageRepo) snapshot() []service.UsageLog {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]service.UsageLog(nil), r.rows...)
+}
+
 // Both sides use real localhost HTTP, plus the production Redis ownership Lua.
-// Authentication/billing use the existing isolated handler fixtures; no real
-// credentials, provider, customer history or tool side effects are involved.
+// Authentication and persistence use isolated fixtures; pricing and usage run
+// through production services. No real credentials, provider, customer history
+// or tool side effects are involved.
 func TestOpenAI409ReadableContinuationHTTP(t *testing.T) {
 	for _, fixture := range []struct {
 		name, reasoning string
@@ -116,7 +138,8 @@ func TestOpenAI409ReadableContinuationHTTP(t *testing.T) {
 					cfg := &config.Config{RunMode: config.RunModeSimple}
 					cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 					settings := service.NewSettingService(&omit409SettingsRepo{enabled: true}, cfg)
-					h := newOpenAIResponsesFailoverTestHandlerWithSettings(t, testutil.NewRealHTTPUpstream(cfg), repository.NewGatewayCache(clients()), settings, accounts...)
+					usage := &readable409UsageRepo{}
+					h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, testutil.NewRealHTTPUpstream(cfg), repository.NewGatewayCache(clients()), settings, usage, accounts...)
 					h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 					template, _ := newIssue715Context(t, "{}")
 					done := make(chan struct{}, 1)
@@ -168,6 +191,12 @@ func TestOpenAI409ReadableContinuationHTTP(t *testing.T) {
 					}
 					status, first := request(system + "," + originalTask)
 					require.Equal(t, http.StatusOK, status, first)
+					firstUsage := usage.snapshot()
+					require.Len(t, firstUsage, 1, "A usage must reach persistence through real pricing")
+					require.Equal(t, int64(1), firstUsage[0].AccountID)
+					require.Equal(t, 5, firstUsage[0].InputTokens)
+					require.Equal(t, 3, firstUsage[0].OutputTokens)
+					require.Greater(t, firstUsage[0].TotalCost, 0.0)
 					response := issue758CompletedResponse(t, first, stream)
 					toolExecutions, balance := 0, 11
 					for _, item := range response.Get("output").Array() {
@@ -193,6 +222,16 @@ func TestOpenAI409ReadableContinuationHTTP(t *testing.T) {
 					defer mu.Unlock()
 					require.Len(t, sent, 2, "readable continuation must reach B exactly once; response=%s", answer)
 					require.Equal(t, []string{"Bearer fixture-key-1", "Bearer fixture-key-2"}, identities)
+					rows := usage.snapshot()
+					if outcome == "rejected" {
+						require.Len(t, rows, 1, "upstream rejection must not invent completed usage")
+					} else {
+						require.Len(t, rows, 2, "B completed usage survives even a downstream write failure")
+						require.Equal(t, int64(2), rows[1].AccountID)
+						require.Equal(t, 5, rows[1].InputTokens)
+						require.Equal(t, 3, rows[1].OutputTokens)
+						require.Greater(t, rows[1].TotalCost, 0.0)
+					}
 					for index, expected := range map[int]string{0: system, 1: originalTask, 4: assistant, 5: call, 6: result, 7: current} {
 						require.JSONEq(t, expected, gjson.GetBytes(sent[1], fmt.Sprintf("input.%d", index)).Raw)
 					}
