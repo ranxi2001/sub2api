@@ -50,10 +50,10 @@ type openAIAgentRecoveryRequest struct {
 	previousResponseID   string
 	inputDigest          [32]byte
 	replayControlsDigest [32]byte
-	replayInstructions   bool
+	apiControlsDigest    [32]byte
+	apiReplayPrepared    bool
 	oauthInputDigest     [32]byte
 	oauthControlsDigest  [32]byte
-	oauthInstructions    bool
 	oauthReplayPrepared  bool
 	omittedSource        *openAIAgentRecoveryRequest
 	keyID                int64
@@ -385,12 +385,15 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		}
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
-	expectedInput, expectedControls, includeInstructions := request.inputDigest, request.replayControlsDigest, request.replayInstructions
+	expectedInput, expectedControls := request.inputDigest, request.replayControlsDigest
+	if request.omittedHistory && account.IsOpenAIApiKey() && request.apiReplayPrepared {
+		expectedControls = request.apiControlsDigest
+	}
 	if request.omittedHistory && account.UsesOpenAICodexProtocol() {
 		if !request.oauthReplayPrepared {
 			return noop, openAIAgentRecoveryError("wire_changed")
 		}
-		expectedInput, expectedControls, includeInstructions = request.oauthInputDigest, request.oauthControlsDigest, request.oauthInstructions
+		expectedInput, expectedControls = request.oauthInputDigest, request.oauthControlsDigest
 	}
 	if request.preservesHistory() && openAIAgentRecoveryInputDigest(body) != expectedInput {
 		if request.omittedHistory {
@@ -399,7 +402,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	if request.omittedHistory && (gjson.GetBytes(body, "previous_response_id").Exists() || gjson.GetBytes(body, "conversation").Exists() ||
-		openAI409ControlsDigest(body, includeInstructions) != expectedControls) {
+		openAI409ControlsDigest(body) != expectedControls) {
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	if request.previousResponseID != "" && gjson.GetBytes(body, "previous_response_id").String() != request.previousResponseID {

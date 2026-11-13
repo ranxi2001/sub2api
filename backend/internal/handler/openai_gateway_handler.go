@@ -816,6 +816,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	defer stopHeaderWait()
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())
+	mustDiscardUnownedPointer := false
 	if previousResponseID != "" {
 		previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 		reqLog = reqLog.With(
@@ -845,9 +846,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			reqLog.Warn("openai.previous_response_owner_lookup_failed", zap.Error(ownershipErr))
 		}
 		if !owned && ownershipErr == nil && openAICompatibleRequestPlatform(c.Request.Context(), apiKey) == service.PlatformOpenAI {
-			owned = h.gatewayService.CanDiscardOpenAI409ResponsePointer(c.Request.Context(), body, groupID, previousResponseID)
+			mustDiscardUnownedPointer = h.gatewayService.CanDiscardOpenAI409ResponsePointer(c.Request.Context(), body, groupID, previousResponseID)
 		}
-		if !owned {
+		if !owned && !mustDiscardUnownedPointer {
 			reqLog.Warn("openai.request_validation_failed", zap.String("reason", "previous_response_owner_mismatch"))
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "previous_response_id is not available for this user")
 			return
@@ -1028,6 +1029,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 		}
+	}
+	if mustDiscardUnownedPointer && (!omittedEncryptedHistory || previousResponseID != "" ||
+		gjson.GetBytes(body, "previous_response_id").Exists() || gjson.GetBytes(forwardBody, "previous_response_id").Exists()) {
+		// Permission to discard never grants permission to consume provider
+		// state. A changed/failed setting or unsupported rebuild must deny.
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "previous_response_id could not be safely detached for this user")
+		return
 	}
 
 	for {

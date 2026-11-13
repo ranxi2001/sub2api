@@ -96,6 +96,29 @@ class HTTPTaskRebuildEvidenceTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 GATE.validate("GREEN", 0, transcript(values[1:]), suite=suite)
 
+    def test_review_red_requires_specific_failure(self):
+        for suite in ("normalization", "pointer-waiver"):
+            root, leaves = GATE.SUITES[suite]
+            events = [{"Action": "run", "Test": root, "Package": GATE.PACKAGE}]
+            for name in leaves:
+                if suite == "pointer-waiver":
+                    output = "UNOWNED_POINTER_WAIVER_LEAK: response=completed"
+                elif name.endswith("/blank_parts"):
+                    output = "HTTP_REBUILD_B_DISPATCH_MISSING encrypted_agent_recovery_readable_intent_missing"
+                elif name.endswith("/no_tools_parallel"):
+                    output = "automatic next tool turn must finish encrypted_agent_recovery_wire_changed"
+                else:
+                    output = "HTTP_REBUILD_B_DISPATCH_MISSING encrypted_agent_recovery_wire_changed"
+                events.extend([{"Action": "run", "Test": name, "Package": GATE.PACKAGE},
+                               {"Action": "output", "Test": name, "Package": GATE.PACKAGE, "Output": output},
+                               {"Action": "fail", "Test": name, "Package": GATE.PACKAGE}])
+            events.extend([{"Action": "fail", "Test": root, "Package": GATE.PACKAGE},
+                           {"Action": "fail", "Package": GATE.PACKAGE}])
+            GATE.validate("RED", 1, transcript(events), suite=suite)
+            events[2]["Output"] = "arbitrary failure"
+            with self.assertRaises(ValueError):
+                GATE.validate("RED", 1, transcript(events), suite=suite)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -82,8 +82,7 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 	// native HTTP delivery fence and no-replay gates. Old owner records stay put.
 	request.omittedHistory = true
 	request.inputDigest = openAIAgentRecoveryInputDigest(clean)
-	request.replayInstructions = strings.TrimSpace(gjson.GetBytes(clean, "instructions").String()) != ""
-	request.replayControlsDigest = openAI409ControlsDigest(clean, request.replayInstructions)
+	request.replayControlsDigest = openAI409ControlsDigest(clean)
 	request.omittedSource = r
 	return next, clean, true, nil
 }
@@ -157,7 +156,7 @@ func openAI409HasReadableIntent(body []byte) bool {
 		kind, role := item.Get("type").String(), item.Get("role").String()
 		if (kind == "message" || kind == "") && role == "user" {
 			content := item.Get("content")
-			empty := !content.Exists() || content.Type == gjson.Null || (content.Type == gjson.String && strings.TrimSpace(content.String()) == "") || (content.IsArray() && len(content.Array()) == 0)
+			empty := openAI409EmptyTextPlaceholder(content)
 			if !empty || openAI409ReadableText(item.Get("summary")) {
 				latestUser = item
 				summaryIntent = false
@@ -173,6 +172,26 @@ func openAI409HasReadableIntent(body []byte) bool {
 		return openAI409ReadableText(latestUser.Get("content")) || openAI409ReadableText(latestUser.Get("summary")) || summaryIntent
 	}
 	return summaryIntent || openAI409ReadableText(gjson.GetBytes(body, "instructions"))
+}
+
+func openAI409EmptyTextPlaceholder(content gjson.Result) bool {
+	if !content.Exists() || content.Type == gjson.Null {
+		return true
+	}
+	if content.Type == gjson.String {
+		return strings.TrimSpace(content.String()) == ""
+	}
+	if !content.IsArray() {
+		return false
+	}
+	for _, part := range content.Array() {
+		kind := part.Get("type").String()
+		text := part.Get("text")
+		if (kind != "input_text" && kind != "text" && kind != "output_text") || text.Type != gjson.String || strings.TrimSpace(text.String()) != "" {
+			return false // Opaque/media/unknown parts may be a new task.
+		}
+	}
+	return true
 }
 
 // The latest available readable task, not the last opaque item's position,
@@ -455,11 +474,8 @@ func prepareOpenAI409KnownReadableReplay(raw []byte) ([]byte, error) {
 
 // Protect the caller's available tools/schema and task instructions as well as
 // input. Model mappings and transport flags are independently account-specific.
-func openAI409ControlsDigest(raw []byte, instructions bool) [32]byte {
-	fields := []string{"tools", "tool_choice", "parallel_tool_calls"}
-	if instructions {
-		fields = append(fields, "instructions")
-	}
+func openAI409ControlsDigest(raw []byte) [32]byte {
+	fields := []string{"tools", "tool_choice", "parallel_tool_calls", "instructions"}
 	selected := make(map[string]any, len(fields))
 	for _, field := range fields {
 		value := gjson.GetBytes(raw, field)
@@ -473,13 +489,30 @@ func openAI409ControlsDigest(raw []byte, instructions bool) [32]byte {
 		if decoder.Decode(&decoded) != nil {
 			return [32]byte{}
 		}
-		selected[field] = decoded
+		selected[field] = []any{true, decoded} // Presence is distinct from null.
 	}
 	canonical, err := json.Marshal(selected)
 	if err != nil {
 		return [32]byte{}
 	}
 	return sha256.Sum256(canonical)
+}
+
+func prepareOpenAI409APIKeyReplay(ctx context.Context, body []byte, responsesLite bool) ([]byte, error) {
+	r := openAIAgentRecoveryFromContext(ctx)
+	if r == nil || !r.omittedHistory {
+		return body, nil
+	}
+	if openAIAgentRecoveryInputDigest(body) != r.inputDigest || openAI409ControlsDigest(body) != r.replayControlsDigest {
+		return nil, openAIAgentRecoveryError("wire_changed")
+	}
+	prepared, _, err := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite)
+	if err != nil {
+		return nil, err
+	}
+	r.apiControlsDigest = openAI409ControlsDigest(prepared)
+	r.apiReplayPrepared = true
+	return prepared, nil
 }
 
 // The one permitted OAuth adaptation starts by verifying the frozen readable
@@ -496,8 +529,11 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 	if err != nil {
 		return err
 	}
-	if openAIAgentRecoveryInputDigest(before) != r.inputDigest || openAI409ControlsDigest(before, r.replayInstructions) != r.replayControlsDigest {
+	if openAIAgentRecoveryInputDigest(before) != r.inputDigest || openAI409ControlsDigest(before) != r.replayControlsDigest {
 		return openAIAgentRecoveryError("wire_changed")
+	}
+	if isInstructionsEmpty(body) {
+		body["instructions"] = defaultCodexSynthInstructions(firstNonEmptyString(body["model"]))
 	}
 	extractSystemMessagesFromInput(body, false)
 	normalizeCodexTools(body)
@@ -506,6 +542,7 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 		return err
 	}
 	setCodexToolNameReverse(c, reverse)
+	normalizeCodexToolChoice(body)
 	prepared, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -513,8 +550,7 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 	// Retain the original snapshot for any allowed pre-send admission retry.
 	// Only this narrowly derived OAuth expectation is used at its final send.
 	r.oauthInputDigest = openAIAgentRecoveryInputDigest(prepared)
-	r.oauthInstructions = strings.TrimSpace(firstNonEmptyString(body["instructions"])) != ""
-	r.oauthControlsDigest = openAI409ControlsDigest(prepared, r.oauthInstructions)
+	r.oauthControlsDigest = openAI409ControlsDigest(prepared)
 	r.oauthReplayPrepared = true
 	return nil
 }

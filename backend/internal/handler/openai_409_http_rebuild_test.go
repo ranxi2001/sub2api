@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -257,6 +258,115 @@ func TestOpenAI409HTTPTaskRebuild(t *testing.T) {
 	}
 }
 
+func TestOpenAI409HTTPControlNormalization(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+			t.Run(fmt.Sprintf("%s/stream=%t/blank_parts", accountType, stream), func(t *testing.T) {
+				runHTTPRebuildFixture(t, accountType, stream, "blank_parts", "completed", "", "")
+			})
+		}
+		t.Run(fmt.Sprintf("oauth/stream=%t/nested_choice", stream), func(t *testing.T) {
+			runHTTPRebuildFixture(t, service.AccountTypeOAuth, stream, "nested_choice", "completed", "", "")
+		})
+		t.Run(fmt.Sprintf("apikey/stream=%t/no_tools_parallel", stream), func(t *testing.T) {
+			runHTTPRebuildFixture(t, service.AccountTypeAPIKey, stream, "no_tools_parallel", "completed", "", "")
+		})
+	}
+}
+
+type httpRebuildFlippingSettings struct {
+	omit409SettingsRepo
+	mu    sync.Mutex
+	reads int
+	fail  bool
+}
+
+func (s *httpRebuildFlippingSettings) GetValue(ctx context.Context, key string) (string, error) {
+	if key != service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled {
+		return s.omit409SettingsRepo.GetValue(ctx, key)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reads++
+	if s.reads <= 2 {
+		return "true", nil // Waiver and recovery setup, before rebuilding.
+	}
+	if s.fail {
+		return "", errors.New("fixture persisted setting unavailable")
+	}
+	return "false", nil
+}
+
+func TestOpenAI409HTTPUnownedPointerMustDetach(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("setting_error=%t", fail), func(t *testing.T) {
+			clients := issue805Redis(t)
+			var mu sync.Mutex
+			sends := 0
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				sends++
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"resp_waiver_leak","model":"gpt-5.1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)
+			}))
+			defer provider.Close()
+			accounts := issue715AccountsOfType(service.AccountTypeAPIKey)
+			for i := range accounts {
+				accounts[i].Credentials["base_url"] = provider.URL
+			}
+			cfg := &config.Config{RunMode: config.RunModeSimple}
+			cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+			settingsRepo := &httpRebuildFlippingSettings{omit409SettingsRepo: omit409SettingsRepo{enabled: true}, fail: fail}
+			cache := repository.NewGatewayCache(clients())
+			store := service.NewOpenAIWSStateStore(cache)
+			require.NoError(t, store.BindResponseAccount(context.Background(), 3132, "resp_orphan", 1, time.Minute))
+			_, _, found, err := store.GetHTTPResponseOwner(context.Background(), 3132, "resp_orphan")
+			require.NoError(t, err)
+			require.False(t, found, "live provider-account mapping must have no downstream user grant")
+			h := newOpenAIResponsesFailoverTestHandlerWithSettings(t, testutil.NewRealHTTPUpstream(cfg), cache, service.NewSettingService(settingsRepo, cfg), accounts...)
+			h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+			template, _ := newIssue715Context(t, "{}")
+			done := make(chan struct{}, 1)
+			router := gin.New()
+			router.POST("/v1/responses", func(c *gin.Context) {
+				defer func() { done <- struct{}{} }()
+				for key, value := range template.Keys {
+					c.Set(key, value)
+				}
+				h.Responses(c)
+			})
+			gateway := httptest.NewServer(router)
+			defer gateway.Close()
+			req, err := http.NewRequest(http.MethodPost, gateway.URL+"/v1/responses", strings.NewReader(`{"model":"gpt-5.1","stream":false,"previous_response_id":"resp_orphan","input":"Continue only my supplied readable task"}`))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("session_id", "fixture-unowned-pointer")
+			client := gateway.Client()
+			client.Timeout = 10 * time.Second
+			response, err := client.Do(req)
+			require.NoError(t, err)
+			answer, err := io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			require.NoError(t, err)
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("waiver fixture did not finish")
+			}
+			settingsRepo.mu.Lock()
+			reads := settingsRepo.reads
+			settingsRepo.mu.Unlock()
+			require.GreaterOrEqual(t, reads, 3, "exercise the policy change after the initial waiver")
+			mu.Lock()
+			defer mu.Unlock()
+			require.Zero(t, sends, "UNOWNED_POINTER_WAIVER_LEAK: failed detachment must never use provider state; response=%s", answer)
+			require.Equal(t, http.StatusBadRequest, response.StatusCode, string(answer))
+			require.Contains(t, string(answer), "safely detached")
+		})
+	}
+}
+
 func TestOpenAI409HTTPRebuildBoundaries(t *testing.T) {
 	for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
 		for _, stream := range []bool{false, true} {
@@ -335,7 +445,8 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		providerHeaders = append(providerHeaders, r.Header.Clone())
 		n := len(providerBodies)
 		mu.Unlock()
-		if !httpRebuildToolsAvailable(body) {
+		noToolsFinal := pointer == "no_tools_parallel" && n == 3
+		if (!noToolsFinal && !httpRebuildToolsAvailable(body)) || (noToolsFinal && (gjson.GetBytes(body, "tools").Exists() || gjson.GetBytes(body, "parallel_tool_calls").Exists())) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = io.WriteString(w, `{"error":{"type":"invalid_request_error","message":"fixture rejected missing or changed tool declarations"}}`)
@@ -355,6 +466,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 				httpRebuildToolPair(body, "apply_patch", httpRebuildPatch)
 			if n == 2 {
 				valid = valid && !gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
+				if pointer == "nested_choice" {
+					valid = valid && gjson.GetBytes(body, "tool_choice.name").String() == "run_tests" && !gjson.GetBytes(body, "tool_choice.function").Exists()
+				}
 			}
 			if accountType == service.AccountTypeOAuth {
 				valid = valid && r.URL.Path == "/backend-api/codex/responses" && r.Host == "chatgpt.com" &&
@@ -439,6 +553,16 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	client.Timeout = 10 * time.Second
 	request := func(history []string, previous gjson.Result) (int, string) {
 		body := map[string]any{"model": "gpt-5.1", "stream": stream, "store": false, "prompt_cache_key": httpRebuildSession, "tools": httpRebuildToolDefinitions()}
+		if previous.Exists() && pointer == "blank_parts" {
+			history = append(append([]string(nil), history...), `{"role":"user","content":[{"type":"input_text","text":"  \n\t "}]}`)
+		}
+		if pointer == "nested_choice" && previous.Get("id").String() == "resp_rebuild_A" {
+			body["tool_choice"] = map[string]any{"type": "function", "function": map[string]any{"name": "run_tests"}}
+		}
+		if pointer == "no_tools_parallel" && previous.Get("id").String() == "resp_rebuild_B" {
+			delete(body, "tools")
+			body["parallel_tool_calls"] = true
+		}
 		body["input"] = json.RawMessage("[" + strings.Join(history, ",") + "]")
 		if previous.Exists() && (pointer == "previous" || boundary == "pointer_only") {
 			body["previous_response_id"] = previous.Get("id").String()

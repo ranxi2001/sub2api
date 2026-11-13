@@ -356,6 +356,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	if account.IsOpenAIApiKey() {
+		if recovery := openAIAgentRecoveryFromContext(ctx); recovery != nil && recovery.omittedHistory {
+			prepared, prepareErr := prepareOpenAI409APIKeyReplay(ctx, body, responsesLite)
+			if prepareErr != nil {
+				return nil, prepareErr
+			}
+			body, originalBody = prepared, prepared
+		}
 		if normalized, changed, normalizeErr := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite); normalizeErr != nil {
 			return nil, normalizeErr
 		} else if changed {
@@ -580,7 +587,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	instructions := gjson.GetBytes(body, "instructions")
 	instructionsEmpty := !instructions.Exists() || instructions.Type != gjson.String || strings.TrimSpace(instructions.String()) == ""
-	if instructionsEmpty && account.UsesOpenAICodexProtocol() && !compatMessagesBridge && !nativeCNResponses {
+	recovery := openAIAgentRecoveryFromContext(ctx)
+	if instructionsEmpty && account.UsesOpenAICodexProtocol() && !compatMessagesBridge && !nativeCNResponses && (recovery == nil || !recovery.omittedHistory) {
 		markPatchSet("instructions", defaultCodexSynthInstructions(upstreamModel))
 	}
 	if billingModel != requestedModel {

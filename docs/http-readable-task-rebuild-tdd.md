@@ -48,3 +48,9 @@ RED 必须是 36 个命名场景均在 `HTTP_REBUILD_B_DISPATCH_MISSING` 断言�
 future shadow/安全摘要是后续独立增量。可实现方案是把已观测的明确任务意图与任务关联标识按 tenant/user、API key、group、model、session 和版本隔离，使用有界 TTL 和容量；记录来源与交付状态，内容不进日志。只有可证明与当前 opaque 任务关联的已提交意图才能用于重建，不能把“同 session 上一条任务”无条件套给未知新任务。摘要/意图记录不能覆盖 generation/tool 的 pending 或 unknown 屏障，也不能授权重做副作用。历史从未留下线索时仍准确报告缺失。本 HTTP 检查点不实现该存储。
 
 WS HTTP bridge、native/shared/pooled/dedicated、future shadow、真实自有 A/B 上游验证和最终独立 review 都保留为同 PR 必需 gate。HTTP mock 不能替代 WS、真实认证/财务系统或真实供应商验收。
+
+## 84e47 独审后的修复候选
+
+独审提出一个 P1 和三个 P2，修复候选保留这些执行 gate：未归属 pointer 的 discard waiver 与真实 ownership 分开，任何设置翻转/读取故障导致未完成重建时必须零 upstream send；缺省 instructions 的存在状态也受摘要保护，OAuth 默认指令只能在原快照校验后由受控规则产生；合法嵌套 tool choice 和无工具 parallel 控制使用明确的派生快照；全空白 text-part 数组视为占位，opaque/media/未知 part 仍不能借用旧任务。
+
+新增实际 HTTP `TestOpenAI409HTTPUnownedPointerMustDetach` 两场景和 `TestOpenAI409HTTPControlNormalization` 八场景。工作流 `HTTP review counterexamples on 84e47` 在独立旧源码 checkout 对相同测试验证具体错误发送/规范化失败；候选 GREEN 同样执行全套。service integrity 测试另覆盖在 OAuth preparation **之前**插入/替换 instructions 的反例以及确切默认指令正例。新增执行结果仍待当前 head 的 Actions 和独审，不能视为上述 findings 已动态关闭。

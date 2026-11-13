@@ -147,9 +147,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for suite in mixed-fences tool-oracle; do
+          for suite in mixed-fences tool-oracle normalization pointer-waiver; do
             test_name=TestOpenAI409HTTPMixedDeliveryFences
             if [ "$suite" = tool-oracle ]; then test_name=TestOpenAI409HTTPToolDefinitionOracle; fi
+            if [ "$suite" = normalization ]; then test_name=TestOpenAI409HTTPControlNormalization; fi
+            if [ "$suite" = pointer-waiver ]; then test_name=TestOpenAI409HTTPUnownedPointerMustDetach; fi
             set +e
             (cd backend && go test -race -json -tags=unit ./internal/handler -run "^$test_name$" -count=1 -timeout=5m) > "$RUNNER_TEMP/http-task-evidence/$suite.jsonl" 2>&1
             result=$?
@@ -162,6 +164,67 @@ jobs:
         with:
           name: http-task-rebuild-${{ matrix.phase }}-${{ env.CANDIDATE_SHA }}
           path: ${{ runner.temp }}/http-task-evidence/
+          if-no-files-found: error
+  review-counterexamples:
+    name: HTTP review counterexamples on 84e47
+    needs: validator
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      REVIEW_BASELINE: 84e47f1b57acba77f1cfae08a63e8dd9d32a7991
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Reproduce concrete HTTP review failures in disposable baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/http-review-red-evidence"
+          git rev-parse HEAD "$REVIEW_BASELINE" > "$RUNNER_TEMP/http-review-red-evidence/provenance.txt"
+          git worktree add --detach "$RUNNER_TEMP/http-review-red" "$CANDIDATE_SHA"
+          cd "$RUNNER_TEMP/http-review-red"
+          while IFS= read -r target; do
+            case "$target" in *_test.go) continue ;; esac
+            if git cat-file -e "$REVIEW_BASELINE:$target" 2>/dev/null; then
+              git show "$REVIEW_BASELINE:$target" > "$target"
+            else
+              rm -- "$target"
+            fi
+          done < <(git diff --no-renames --name-only "$REVIEW_BASELINE" "$CANDIDATE_SHA" -- 'backend/**/*.go')
+          git diff --exit-code "$REVIEW_BASELINE" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          for suite in pointer-waiver normalization; do
+            test_name=TestOpenAI409HTTPUnownedPointerMustDetach
+            if [ "$suite" = normalization ]; then test_name=TestOpenAI409HTTPControlNormalization; fi
+            set +e
+            (cd backend && go test -race -json -tags=unit ./internal/handler -run "^$test_name$" -count=1 -timeout=5m) > "$RUNNER_TEMP/http-review-red-evidence/$suite.jsonl" 2>&1
+            result=$?
+            set -e
+            cat "$RUNNER_TEMP/http-review-red-evidence/$suite.jsonl"
+            python3 "$GITHUB_WORKSPACE/.github/scripts/assert-http-task-rebuild.py" RED "$result" "$RUNNER_TEMP/http-review-red-evidence/$suite.jsonl" "--$suite"
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http-review-counterexamples-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/http-review-red-evidence/
           if-no-files-found: error
   owner-scan-mutations:
     name: Reject ${{ matrix.mutant }} owner scanner

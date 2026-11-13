@@ -16,6 +16,8 @@ ROOT = "TestOpenAI409HTTPTaskRebuild"
 BOUNDARIES = "TestOpenAI409HTTPRebuildBoundaries"
 TOOLS = "TestOpenAI409HTTPToolDefinitionOracle"
 MIXED = "TestOpenAI409HTTPMixedDeliveryFences"
+NORMALIZATION = "TestOpenAI409HTTPControlNormalization"
+POINTER_WAIVER = "TestOpenAI409HTTPUnownedPointerMustDetach"
 PACKAGE = COMMON.PACKAGE
 LEAVES = {
     f"{ROOT}/{account}/stream={stream}/{pointer}/{outcome}"
@@ -41,7 +43,14 @@ MIXED_LEAVES = {
     for owner in ("A", "B") for state in ("pending", "failed", "conflict")
     for order in ("forward", "reverse")
 }
-SUITES = {"boundaries": (BOUNDARIES, BOUNDARY_LEAVES), "tool-oracle": (TOOLS, TOOL_LEAVES), "mixed-fences": (MIXED, MIXED_LEAVES)}
+NORMALIZATION_LEAVES = {
+    f"{NORMALIZATION}/{account}/stream={stream}/{case}"
+    for account, case in (("apikey", "blank_parts"), ("oauth", "blank_parts"), ("oauth", "nested_choice"), ("apikey", "no_tools_parallel"))
+    for stream in ("false", "true")
+}
+POINTER_WAIVER_LEAVES = {f"{POINTER_WAIVER}/setting_error={value}" for value in ("false", "true")}
+SUITES = {"boundaries": (BOUNDARIES, BOUNDARY_LEAVES), "tool-oracle": (TOOLS, TOOL_LEAVES), "mixed-fences": (MIXED, MIXED_LEAVES),
+          "normalization": (NORMALIZATION, NORMALIZATION_LEAVES), "pointer-waiver": (POINTER_WAIVER, POINTER_WAIVER_LEAVES)}
 MUTANTS = {
     "newest-only": f"{MIXED}/apikey/stream=false/A/failed/forward",
     "break-on-owner-mismatch": f"{MIXED}/apikey/stream=false/A/failed/reverse",
@@ -57,7 +66,7 @@ OLD_REFUSALS = (
 def validate(phase, exit_code, transcript, boundaries=False, suite=None, mutant=None):
     if boundaries:
         suite = "boundaries"
-    if phase not in {"RED", "GREEN", "MUTANT"} or (suite is not None and (phase != "GREEN" or suite not in SUITES)):
+    if phase not in {"RED", "GREEN", "MUTANT"} or (suite is not None and (suite not in SUITES or (phase != "GREEN" and not (phase == "RED" and suite in {"normalization", "pointer-waiver"})))):
         raise ValueError("invalid task-rebuild phase")
     if (phase == "MUTANT") != (mutant in MUTANTS) or (mutant is not None and mutant not in MUTANTS):
         raise ValueError("invalid source mutant")
@@ -102,6 +111,14 @@ def validate(phase, exit_code, transcript, boundaries=False, suite=None, mutant=
             if phase == "MUTANT":
                 if "HTTP_REBUILD_FENCE_BYPASSED" not in output or "coding-task-complete" not in output:
                     raise ValueError(f"missing actual extra-generation counterexample: {name}")
+            elif suite == "pointer-waiver":
+                if "UNOWNED_POINTER_WAIVER_LEAK" not in output:
+                    raise ValueError(f"missing actual unowned-pointer dispatch: {name}")
+            elif suite == "normalization":
+                marker = "automatic next tool turn must finish" if name.endswith("/no_tools_parallel") else DIAGNOSTIC
+                code = "encrypted_agent_recovery_readable_intent_missing" if name.endswith("/blank_parts") else "encrypted_agent_recovery_wire_changed"
+                if marker not in output or code not in output:
+                    raise ValueError(f"missing normalization business refusal: {name}")
             elif DIAGNOSTIC not in output or not any(code in output for code in OLD_REFUSALS):
                 raise ValueError(f"missing named B-dispatch refusal assertion: {name}")
 
