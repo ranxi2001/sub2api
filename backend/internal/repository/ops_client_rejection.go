@@ -83,7 +83,7 @@ func opsEffectiveTypeSQL(alias string) string {
 // separately for upstream diagnostics. Missing IDs remain separate events.
 func opsMetricErrorRowsSQL(where string) string {
 	key := `COALESCE(api_key_id, 0), COALESCE(group_id, 0),
- COALESCE(NULLIF(request_id, ''), 'error:' || id::text), (COALESCE(status_code, 0) >= 400)`
+ COALESCE(NULLIF(request_id, ''), 'error:' || id::text), (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error')`
 	return `(SELECT DISTINCT ON (` + key + `) current_error.*,
  ` + opsBusinessLimitedSQL("current_error") + ` AS effective_business_limited
  FROM ops_error_logs current_error

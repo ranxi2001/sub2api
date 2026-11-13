@@ -1,0 +1,264 @@
+name: HTTP2 stream reset validation
+
+on:
+  pull_request:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: F1 behavioral RED through the real AIOps evidence query
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/http2-evidence"
+          target=backend/internal/repository/ai_ops.go
+          baseline=3137257829f0cc48466911aa4a249dd03f3c088f
+          restore_ai_ops() { git show "HEAD:$target" > "$target"; }
+          trap restore_ai_ops EXIT
+          git show "$baseline:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          git rev-parse HEAD "$baseline:$target" > "$RUNNER_TEMP/http2-evidence/f1-red-identity.txt"
+          set +e
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/http2-evidence/f1-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/f1-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/f1-red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure' "$RUNNER_TEMP/http2-evidence/f1-red.log"
+          grep -q 'AIOps must count one success plus the committed HTTP200 transport failure' "$RUNNER_TEMP/http2-evidence/f1-red.log"
+          restore_ai_ops
+          trap - EXIT
+          git diff --exit-code
+      - name: RED real HTTP2 boundary against production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/http2-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http2-evidence/head.txt"
+          baseline=ccf997c73868083d96c0bec56e71c1a34d26c98a
+          # Keep the historical source/test dependencies on the last fully
+          # validated pre-integration checkpoint. Copy the exact current HTTP2
+          # regressions into this disposable tree; GREEN below runs full HEAD.
+          reviewed=f177caec5510f502270ff3ceb36fe43295f405f1
+          candidate=$(git rev-parse HEAD)
+          red_tree="$RUNNER_TEMP/http2-historical-red"
+          git worktree add --detach "$red_tree" "$reviewed"
+          while IFS= read -r test_source; do
+            git show "$candidate:$test_source" > "$red_tree/$test_source"
+            expected=$(git rev-parse "$candidate:$test_source")
+            actual=$(git hash-object "$red_tree/$test_source")
+            test "$expected" = "$actual"
+            echo "candidate_test=$test_source expected=$expected actual=$actual" >> "$RUNNER_TEMP/http2-evidence/red-tests.txt"
+          done < <(git ls-files 'backend/internal/handler/http2*_test.go' 'backend/internal/service/http2*_test.go' 'backend/internal/repository/http2*_test.go')
+          cd "$red_tree"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http2-evidence/red-source-checkpoint.txt"
+          mapfile -t targets < <(git diff --name-only "$baseline" "$reviewed" -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go')
+          restore_head() {
+            for target in "${targets[@]}"; do git show "HEAD:$target" > "$target"; done
+          }
+          trap restore_head EXIT
+          for target in "${targets[@]}"; do
+            if git cat-file -e "$baseline:$target" 2>/dev/null; then
+              git show "$baseline:$target" > "$target"
+              test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+            fi
+          done
+          git diff --stat > "$RUNNER_TEMP/http2-evidence/overlay.txt"
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestHTTP2PeerResetBoundary$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/red.log"; then exit 1; fi
+          grep -q 'peer reset must persist as transport_error, not synthetic HTTP 502' "$RUNNER_TEMP/http2-evidence/red.log"
+          grep -q -- '--- FAIL: TestHTTP2PeerResetBoundary' "$RUNNER_TEMP/http2-evidence/red.log"
+          # New review findings must fail behaviorally against original production too.
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler ./internal/service -run '^TestHTTP2PeerReset(BeforeHeaders|BufferedBoundaries|PartialImages|NativeConversionBoundary|NativeUsage|ImagesBeforeHeaders)$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/review-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/review-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/review-red.log"; then exit 1; fi
+          for test_name in TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders; do
+            grep -q -- "--- FAIL: $test_name" "$RUNNER_TEMP/http2-evidence/review-red.log"
+          done
+          for diagnostic in 'peer reset before headers must not replay a consumed POST' 'buffered reset must establish transport evidence' 'partial-image reset must persist a failed request' 'native reset must return failure instead of synthetic success' 'image reset before headers must persist transport_error'; do
+            grep -q -- "$diagnostic" "$RUNNER_TEMP/http2-evidence/review-red.log"
+          done
+          # Semantic spoofing was introduced by the first patch; reproduce it
+          # against the compiling pre-review candidate, retaining these tests.
+          vulnerable=c351ebea9bf144c710780da5e4db0e264e6ebb9c
+          for target in "${targets[@]}"; do git show "$vulnerable:$target" > "$target"; done
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestHTTP2SemanticImageErrorCannotSpoofReset$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/spoof-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/spoof-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/spoof-red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestHTTP2SemanticImageErrorCannotSpoofReset' "$RUNNER_TEMP/http2-evidence/spoof-red.log"
+          grep -q 'semantic image text must not create trusted reset evidence' "$RUNNER_TEMP/http2-evidence/spoof-red.log"
+          for target in "${targets[@]}"; do git show "a5bc18f34c68a4c870660b4449bbb73592c73d84:$target" > "$target"; done
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestHTTP2PeerResetWebSocketTurnPersistence$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/ws-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/ws-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/ws-red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestHTTP2PeerResetWebSocketTurnPersistence' "$RUNNER_TEMP/http2-evidence/ws-red.log"
+          grep -q 'final transport marker must preserve both WebSocket turn failures' "$RUNNER_TEMP/http2-evidence/ws-red.log"
+          for target in "${targets[@]}"; do git show "fe4aadbd9ecd0fdfa689282490fa2bf6736335a7:$target" > "$target"; done
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestHTTP2(NativeSemanticErrorBeforeReset|RawIncompleteErrorEventStillResets)$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/terminal-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/terminal-red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestHTTP2NativeSemanticErrorBeforeReset' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          grep -q -- '--- FAIL: TestHTTP2RawIncompleteErrorEventStillResets' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          grep -q 'native semantic failure must not become successful completion' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          grep -q 'incomplete raw error event must not suppress reset classification' "$RUNNER_TEMP/http2-evidence/terminal-red.log"
+          restore_head
+          trap - EXIT
+          git diff --exit-code -- "${targets[@]}"
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove --force "$red_tree"
+          git diff --exit-code
+      - name: GREEN boundary and existing stream regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go test -tags=unit ./internal/handler ./internal/service ./internal/repository -run 'TestHTTP2|Test(CC|Responses)(Buffered|Streaming)FromNativeAnthropic|TestNativeAnthropic|TestProxyOpenAIWSHTTPBridge|TestPluginSSE|TestOpenAIStreaming|TestHandleChatStreaming|TestChatCompletionsBuffered|TestAnthropicBuffered|TestForwardAsAnthropic|TestForwardResponses|TestOpenAIImagesOAuthBodyRead|TestOps.*Stream|TestOpsBridge|TestAutoConfig|Test.*RawStream|Test.*StreamTruncat|Test.*ClientCancel|Test.*ClientDisconnect|Test.*Deadline|TestClassifyOpenAIAPIKeyHealth|TestOpsErrorWhere' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/green.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/green.log"; then exit 1; fi
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence TestHTTP2NativeSemanticErrorBeforeReset TestHTTP2RawIncompleteErrorEventStillResets; do
+            grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/green.log"
+          done
+      - name: Ordinary production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go build ./... 2>&1 | tee "$RUNNER_TEMP/http2-evidence/build.log"
+      - name: Race boundary and stream lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go test -race -tags=unit ./internal/handler ./internal/service -run 'TestHTTP2|TestOpenAIStreamingReadError|TestHandleChatStreamingResponse_ClassifiesHTTP2|TestAutoConfigRealRequestOutcomes|TestForwardAsAnthropic_ForceChatCompletionsStreamReadError' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/race.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/race.log"; then exit 1; fi
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence TestHTTP2NativeSemanticErrorBeforeReset TestHTTP2RawIncompleteErrorEventStillResets; do
+            grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/race.log"
+          done
+      - name: PostgreSQL persistence and monitor regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go test -tags=integration ./internal/repository -run 'TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure|TestHTTP2PeerResetPersistence|TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus|TestChannelMonitorV2.*Error' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/persistence.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/persistence.log"; then exit 1; fi
+          grep -q -- '--- PASS: TestHTTP2PeerResetPersistence' "$RUNNER_TEMP/http2-evidence/persistence.log"
+          grep -q -- '--- PASS: TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure' "$RUNNER_TEMP/http2-evidence/persistence.log"
+          go test -race -tags=integration ./internal/repository -run '^TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure$' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/f1-race.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/f1-race.log"; then exit 1; fi
+          grep -q -- '--- PASS: TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure' "$RUNNER_TEMP/http2-evidence/f1-race.log"
+          git diff --exit-code
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http2-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/http2-evidence/
+
+  user-surface:
+    if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: F2 behavioral RED through the actual UsageView status control
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/http2-ui"
+          target=frontend/src/views/user/UsageView.vue
+          baseline=3137257829f0cc48466911aa4a249dd03f3c088f
+          restore_usage_view() { git show "HEAD:$target" > "$target"; }
+          trap restore_usage_view EXIT
+          git show "$baseline:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          git rev-parse HEAD "$baseline:$target" > "$RUNNER_TEMP/http2-ui/f2-red-identity.txt"
+          set +e
+          pnpm --dir frontend exec vitest run src/views/user/__tests__/UsageView.spec.ts > "$RUNNER_TEMP/http2-ui/f2-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-ui/f2-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'No test files found|no tests|[0-9]+ skipped|Failed to resolve|Unhandled Errors|Unhandled Rejection|SyntaxError|ReferenceError|TypeError|Transform failed|panic|DATA RACE' "$RUNNER_TEMP/http2-ui/f2-red.log"; then exit 1; fi
+          grep -q 'HTTP200 must be selectable from the real error status control' "$RUNNER_TEMP/http2-ui/f2-red.log"
+          grep -q '1 failed' "$RUNNER_TEMP/http2-ui/f2-red.log"
+          restore_usage_view
+          trap - EXIT
+          git diff --exit-code
+      - name: Real component regressions and production frontend build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/http2-ui"
+          git rev-parse HEAD > "$RUNNER_TEMP/http2-ui/head.txt"
+          pnpm --dir frontend exec vitest run src/views/user/__tests__/UsageView.spec.ts src/components/user/__tests__/UserErrorTransport.spec.ts src/components/user/__tests__/UserErrorDetailModal.spec.ts 2>&1 | tee "$RUNNER_TEMP/http2-ui/component.log"
+          if grep -Eiq 'No test files found|Unhandled Errors|Unhandled Rejection|Transform failed|panic|DATA RACE' "$RUNNER_TEMP/http2-ui/component.log"; then exit 1; fi
+          pnpm --dir frontend run build 2>&1 | tee "$RUNNER_TEMP/http2-ui/build.log"
+      - name: Isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/http2-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/http2-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Actual component before and after in English and Chinese
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/http2-browser/node_modules/playwright/index.mjs
+        run: node .github/http2-stream-reset-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/http2-ui"
+      - name: Actual error-tab category and HTTP200 filter before and after
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/http2-browser/node_modules/playwright/index.mjs
+        run: node .github/http2-user-filter-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/http2-ui/filters"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http2-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/http2-ui/

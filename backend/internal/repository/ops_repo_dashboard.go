@@ -925,9 +925,9 @@ func (r *opsRepository) queryErrorCounts(ctx context.Context, filter *service.Op
 
 	q := `
 SELECT
-  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400), 0) AS error_total,
-  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND effective_business_limited), 0) AS business_limited,
-  COALESCE(COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND NOT effective_business_limited AND error_type <> 'client_canceled'), 0) AS error_sla,
+  COALESCE(COUNT(*) FILTER (WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error')), 0) AS error_total,
+  COALESCE(COUNT(*) FILTER (WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error') AND effective_business_limited), 0) AS business_limited,
+  COALESCE(COUNT(*) FILTER (WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error') AND NOT effective_business_limited AND error_type <> 'client_canceled'), 0) AS error_sla,
   COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)), 0) AS upstream_excl,
   COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 429), 0) AS upstream_429,
   COALESCE(COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 529), 0) AS upstream_529
@@ -986,7 +986,7 @@ WITH usage_buckets AS (
 error_buckets AS (
   SELECT date_trunc('minute', created_at) AS bucket, COUNT(*) AS err_cnt
   FROM ` + errorSource + `
-    AND COALESCE(status_code, 0) >= 400
+    AND (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error')
   GROUP BY 1
 ),
 combined AS (

@@ -54,6 +54,10 @@ const messages: Record<string, string> = {
   'admin.usage.allModels': 'All models',
   'usage.allApiKeys': 'All API Keys',
   'usage.errors.allKeys': 'All API Keys',
+  'usage.errors.allStatuses': 'All status codes',
+  'usage.errors.allCategories': 'All categories',
+  'usage.errors.categories.transport_error': 'Transport error',
+  'usage.errors.http200StreamFailure': '200 — Stream failed after headers',
   'usage.tabs.usage': 'Usage records',
   'usage.tabs.errors': 'Error records',
   'usage.apiKeyFilter': 'API Key',
@@ -150,13 +154,14 @@ const usageLog = {
   native_compaction_v2: false,
 }
 
-function mountUsageView() {
+function mountUsageView(realSelect = false) {
   return mount(UsageView, {
+    attachTo: realSelect ? document.body : undefined,
     global: {
       stubs: {
         AppLayout: simpleStub,
         Pagination: true,
-        Select: true,
+        Select: !realSelect,
         DateRangePicker: true,
         Icon: true,
         UsageStatsCards: chartStub,
@@ -217,6 +222,41 @@ describe('user UsageView', () => {
     listMyErrorRequests.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
     list.mockResolvedValue({ items: [{ id: 1, name: 'demo-key' }], total: 1, page: 1, page_size: 100, pages: 1 })
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
+  })
+
+  it('selects HTTP200 transport errors through the actual error-tab controls and submits both API filters', async () => {
+    const wrapper = mountUsageView(true)
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text() === 'Error records')!.trigger('click')
+      await flushPromises()
+      const selects = wrapper.findAllComponents(Select)
+      const category = selects.find(select => (select.props('options') as SelectOption[]).some(option => option.value === 'transport_error'))!
+      await category.get('button').trigger('click')
+      await flushPromises()
+      const transport = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(option => option.textContent?.trim() === 'Transport error')!
+      transport.click()
+      await flushPromises()
+
+      const status = selects.find(select => (select.props('options') as SelectOption[]).some(option => option.value === 502))!
+      expect(status.props('options'), 'HTTP200 must be selectable from the real error status control').toContainEqual({ value: 200, label: '200 — Stream failed after headers' })
+      await status.get('button').trigger('click')
+      await flushPromises()
+      const http200 = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(option => option.textContent?.trim() === '200 — Stream failed after headers')!
+      http200.click()
+      await flushPromises()
+      expect(listMyErrorRequests).toHaveBeenLastCalledWith(expect.objectContaining({ category: 'transport_error', status_code: 200, page: 1 }))
+
+      await status.get('button').trigger('click')
+      await flushPromises()
+      Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).find(option => option.textContent?.trim() === '502')!.click()
+      await flushPromises()
+      expect(listMyErrorRequests).toHaveBeenLastCalledWith(expect.objectContaining({ category: 'transport_error', status_code: 502 }))
+      await wrapper.findAll('button').find(button => button.text() === 'Usage records')!.trigger('click')
+      expect(query.mock.calls.every(([params]) => params.status_code === undefined && params.category === undefined)).toBe(true)
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('passes the same own API key choices to traffic and usage details', async () => {

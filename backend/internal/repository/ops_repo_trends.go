@@ -52,7 +52,7 @@ error_buckets AS (
   SELECT ` + errorBucketExpr + ` AS bucket,
          COUNT(*) AS error_count
   FROM ` + opsMetricErrorRowsSQL(errorWhere) + `
-  WHERE COALESCE(status_code, 0) >= 400
+  WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error')
   GROUP BY 1
 ),
 switch_buckets AS (
@@ -200,7 +200,7 @@ error_totals AS (
          COUNT(*) AS error_count
   FROM ops_error_logs
   WHERE created_at >= $1 AND created_at < $2
-    AND COALESCE(status_code, 0) >= 400
+    AND (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error')
     AND is_count_tokens = FALSE  -- 排除 count_tokens 请求的错误
   GROUP BY 1
 ),
@@ -274,7 +274,7 @@ error_totals AS (
   WHERE created_at >= $1 AND created_at < $2
     AND platform = $3
     AND group_id IS NOT NULL
-    AND COALESCE(status_code, 0) >= 400
+    AND (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error')
     AND is_count_tokens = FALSE  -- 排除 count_tokens 请求的错误
   GROUP BY 1
 ),
@@ -450,9 +450,9 @@ func (r *opsRepository) GetErrorTrend(ctx context.Context, filter *service.OpsDa
 	q := `
 SELECT
   ` + bucketExpr + ` AS bucket,
-  COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400) AS error_total,
-  COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND effective_business_limited) AS business_limited,
-  COUNT(*) FILTER (WHERE COALESCE(status_code, 0) >= 400 AND NOT effective_business_limited AND error_type <> 'client_canceled') AS error_sla,
+  COUNT(*) FILTER (WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error')) AS error_total,
+  COUNT(*) FILTER (WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error') AND effective_business_limited) AS business_limited,
+  COUNT(*) FILTER (WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error') AND NOT effective_business_limited AND error_type <> 'client_canceled') AS error_sla,
   COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) NOT IN (429, 529)) AS upstream_excl,
   COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 429) AS upstream_429,
   COUNT(*) FILTER (WHERE error_owner = 'provider' AND NOT effective_business_limited AND COALESCE(upstream_status_code, status_code, 0) = 529) AS upstream_529
@@ -565,7 +565,7 @@ SELECT
   COUNT(*) FILTER (WHERE NOT effective_business_limited AND error_type <> 'client_canceled') AS sla,
   COUNT(*) FILTER (WHERE effective_business_limited) AS business_limited
 FROM ` + opsMetricErrorRowsSQL(where) + `
-WHERE COALESCE(status_code, 0) >= 400
+WHERE (COALESCE(status_code, 0) >= 400 OR error_type = 'transport_error')
 GROUP BY 1
 ORDER BY total DESC
 LIMIT 20`
