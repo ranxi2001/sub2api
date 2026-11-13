@@ -168,6 +168,59 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	require.Equal(t, httpRequest.Header.Get("session_id"), first.Get("session_id"), "HTTP and WS must derive the same identity from the raw client key")
 }
 
+func TestBuildUpstreamRequestOAuthHeaderOnlySession(t *testing.T) {
+	for _, tc := range []struct {
+		name, underscore, hyphen, cache, seed string
+		rebuild                               bool
+	}{
+		{name: "underscore", underscore: "client-session", seed: "client-session", rebuild: true},
+		{name: "hyphen", hyphen: "client-session", seed: "client-session", rebuild: true},
+		{name: "hyphen_priority", underscore: "other-session", hyphen: "client-session", seed: "client-session", rebuild: true},
+		{name: "cache_priority", underscore: "client-session", cache: "explicit-cache", seed: "explicit-cache", rebuild: true},
+		{name: "no_client_identity", rebuild: true},
+		{name: "ordinary_wire_unchanged", underscore: "client-session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			body := []byte(`{"model":"gpt-5.1","input":[],"stream":true}`)
+			build := func(keyID int64, upstream string) http.Header {
+				t.Helper()
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+				c.Set("api_key", &APIKey{ID: keyID})
+				c.Request.Header.Set("session_id", tc.underscore)
+				c.Request.Header.Set("session-id", tc.hyphen)
+				c.Request.Header.Set("conversation_id", "old-provider-state-is-not-a-client-session")
+				c.Request.Header.Set("thread-id", "unchanged-client-thread")
+				original := c.Request.Header.Clone()
+				account := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+					Credentials: map[string]any{"chatgpt_account_id": upstream},
+					Extra:       map[string]any{"codex_fingerprint_mode": "off"}}
+				ctx := context.WithValue(context.Background(), openAIAgentRecoveryContextKey{}, &openAIAgentRecoveryRequest{omittedHistory: tc.rebuild})
+				req, err := svc.buildUpstreamRequest(ctx, c, account, body, "fixture-token", true, tc.cache, false)
+				require.NoError(t, err)
+				require.Equal(t, original, c.Request.Header, "upstream projection must not mutate the client identity")
+				if tc.seed == "" {
+					require.Empty(t, req.Header.Get("session_id"))
+					require.Empty(t, req.Header.Get("conversation_id"), "do not reuse a provider pointer as client intent or identity")
+				} else {
+					require.Equal(t, isolateOpenAIUpstreamSessionID(keyID, account, tc.seed), req.Header.Get("session_id"))
+					require.Equal(t, req.Header.Get("session_id"), req.Header.Get("conversation_id"))
+					require.NotEqual(t, tc.seed, req.Header.Get("session_id"))
+				}
+				return req.Header
+			}
+			first := build(77, "fixture-account-A")
+			require.Equal(t, first, build(77, "fixture-account-A"), "same client/account identity stays stable")
+			otherAccount, otherKey := build(77, "fixture-account-B"), build(88, "fixture-account-A")
+			if tc.seed != "" {
+				require.NotEqual(t, first.Get("session_id"), otherAccount.Get("session_id"))
+				require.NotEqual(t, first.Get("session_id"), otherKey.Get("session_id"))
+			}
+		})
+	}
+}
+
 func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := &OpenAIGatewayService{}

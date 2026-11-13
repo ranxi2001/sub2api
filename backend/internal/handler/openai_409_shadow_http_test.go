@@ -155,6 +155,7 @@ func runFutureShadowTransport(t *testing.T, accountType string, stream bool, sce
 	var mu sync.Mutex
 	var bodies [][]byte
 	var identities []string
+	var providerHeaders []http.Header
 	reusedOutput := scenario == "conflicting_output" || scenario == "echoed_task"
 	twoTasks := scenario == "two_known_tasks" || reusedOutput
 	patch := httpRebuildCall("apply_patch", "call_shadow_patch", map[string]any{"path": "sum.go", "source": httpRebuildSource})
@@ -168,6 +169,7 @@ func runFutureShadowTransport(t *testing.T, accountType string, stream bool, sce
 		mu.Lock()
 		bodies = append(bodies, body)
 		identities = append(identities, r.Header.Get("Authorization"))
+		providerHeaders = append(providerHeaders, r.Header.Clone())
 		n := len(bodies)
 		mu.Unlock()
 		output := []json.RawMessage{json.RawMessage(patch)}
@@ -278,6 +280,12 @@ func runFutureShadowTransport(t *testing.T, accountType string, stream bool, sce
 	router := gin.New()
 	router.POST("/v1/responses", func(c *gin.Context) {
 		defer func() { done <- struct{}{} }()
+		clientIdentity := c.Request.Header.Clone()
+		defer func() {
+			for _, name := range []string{"session_id", "session-id", "thread-id"} {
+				require.Equal(t, clientIdentity.Values(name), c.Request.Header.Values(name), "client identity must survive upstream rebuilding: %s", name)
+			}
+		}()
 		keyID, userID, groupID := int64(99), int64(100), int64(3132)
 		if c.GetHeader("X-Fixture-Node") == "consumer" {
 			switch scenario {
@@ -495,6 +503,13 @@ func runFutureShadowTransport(t *testing.T, accountType string, stream bool, sce
 		require.Len(t, wires, len(bodies))
 		for i, wire := range wires {
 			require.JSONEq(t, string(wire.body), string(bodies[i]), "native final-send payload must reach the network unchanged")
+			if accountType == service.AccountTypeOAuth {
+				if wire.account == 2 {
+					require.NotEmpty(t, wire.header.Get("session_id"), "rebuilt B send must carry its isolated session")
+				}
+				require.Equal(t, wire.header.Get("session_id"), providerHeaders[i].Get("session_id"), "isolated session must reach the actual provider")
+				require.NotEqual(t, "fixture-shadow-thread", wire.header.Get("session_id"), "raw client session must not be forwarded")
+			}
 		}
 		if accountType == service.AccountTypeOAuth {
 			last := wires[len(wires)-1]

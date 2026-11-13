@@ -2099,6 +2099,14 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 		apiKeyID := getAPIKeyIDFromContext(c)
 		harvestSession := s.harvestPinnedSessionForModel(ctx, account, extractOpenAICodexTicketModel(body))
+		sessionSeed := promptCacheKey
+		if recovery := openAIAgentRecoveryFromContext(ctx); recovery != nil && recovery.omittedHistory && sessionSeed == "" && !isOpenAIResponsesCompactPath(c) {
+			// An authorized readable rebuild needs a new upstream namespace even
+			// for header-only clients. Use the ORIGINAL client identity, never an
+			// old provider pointer. Ordinary requests retain their established
+			// provider-session behavior.
+			sessionSeed = extractClientSessionID(c.Request.Header)
+		}
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			if req.Header.Get("version") == "" {
@@ -2113,8 +2121,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 		if harvestSession != "" {
 			req.Header.Set("session_id", harvestSession)
-		} else if promptCacheKey != "" {
-			isolated := isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), promptCacheKey)
+		} else if sessionSeed != "" {
+			isolated := isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), sessionSeed)
 			req.Header.Set("session_id", isolated)
 			if !compatMessagesBridge || clientConversationID != "" {
 				req.Header.Set("conversation_id", isolated)

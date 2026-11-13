@@ -8,6 +8,8 @@ on:
       - 'backend/internal/handler/security_audit_helper.go'
       - 'backend/internal/service/openai_409_*'
       - 'backend/internal/service/openai_agent_message*'
+      - 'backend/internal/service/openai_gateway_forward.go'
+      - 'backend/internal/service/openai_codex_account_identity*'
       - 'backend/internal/service/recovered_context_privacy.go'
       - 'backend/internal/service/content_moderation.go'
       - 'backend/internal/repository/gateway_cache_agent_shadow_epoch.go'
@@ -112,8 +114,13 @@ jobs:
             cat "$RUNNER_TEMP/shadow-repair-evidence/$suite.jsonl"
             python3 .github/scripts/assert-ws-readable.py "$PHASE" "$result" "$RUNNER_TEMP/shadow-repair-evidence/$suite.jsonl" "$suite"
           done
+      - name: GREEN native OAuth session identity boundaries
+        if: ${{ !cancelled() && matrix.phase == 'GREEN' }}
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json ./internal/service -run '^TestBuildUpstreamRequestOAuthHeaderOnlySession$' -count=1 -timeout=5m) 2>&1 | tee "$RUNNER_TEMP/shadow-repair-evidence/oauth-session-identity.jsonl"
       - name: GREEN OAuth final-wire shadow and pointers without opaque owners
-        if: matrix.phase == 'GREEN'
+        if: ${{ !cancelled() && matrix.phase == 'GREEN' }}
         run: |
           set -euo pipefail
           for suite in oauth-shadow pointer pointer-boundaries; do
