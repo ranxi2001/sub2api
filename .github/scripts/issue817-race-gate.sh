@@ -12,6 +12,7 @@ go env GOOS GOARCH CGO_ENABLED GOEXPERIMENT >> "$evidence/toolchain.txt"
 uname -a > "$evidence/kernel.txt"
 ldd --version > "$evidence/libc.txt" 2>&1
 printf 'go test -c -race -tags=integration ./internal/repository -o %q\n' "$binary" > "$evidence/command.txt"
+printf 'cd %q && %q -test.run %q -test.count=1 -test.v=true -test.timeout=10m\n' "$checkout/backend/internal/repository" "$binary" "$regression" >> "$evidence/command.txt"
 if ! (cd "$checkout/backend" && go test -c -race -tags=integration ./internal/repository -o "$binary") > "$evidence/build.log" 2>&1; then
   cat "$evidence/build.log"
   exit 1
@@ -92,5 +93,6 @@ GO
   sha256sum "$binary" > "$evidence/binary-after-diagnostics.sha256"
   cmp "$evidence/binary-before.sha256" "$evidence/binary-after-diagnostics.sha256"
 fi
+printf 'passed\n' > "$evidence/binary-identity-ok.txt"
 # Even a successful debugger/startup comparison cannot turn a crash into GREEN.
 exit "$result"

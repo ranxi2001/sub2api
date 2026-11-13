@@ -79,6 +79,7 @@ jobs:
           result=$?
           set -e
           cat evidence/pending-5xx.log
+          test "$(cat evidence/binary-identity-ok.txt)" = passed
           ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:|WARNING: DATA RACE|race detected during execution|Segmentation fault|core dumped' evidence/pending-5xx.log
           if [ "$BEHAVIOR" = red ]; then
             test "$result" -ne 0
