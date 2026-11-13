@@ -2,8 +2,9 @@
 
 Refs #795。本目录只提供 CI fixture，不修改应用业务代码，不表示完整验收、真实模型兼容性或经验难度校准完成。逐场景状态由 `acceptance.json` 声明；脚本即使成功，也固定输出 `full_acceptance_complete: false`。
 
-PR #832 独审 P2 仍为 **BLOCKED**，直到修正后候选的远程证据取得。`pelican-detail-identity.mjs` 按请求 URL 选 PG 行，逐条校验 URL result/plan、响应体 id/plan、PG id/plan 和 marker；账号窗口在所有详情响应通过后才以该请求绑定选卡与命名截图，产物保留 `request_binding`。分组 URL 只有 result ID，因此明确校验 URL result＝body id＝PG id，以及 body plan＝PG plan，不虚构 URL plan。远程工作流先运行无网络/API替换的 `node:test` 合成门禁，要求同计划 R1/R2 整包交换两个方向均被拒绝，另验正常乱序和错误 plan/样本内容；保存 `detail-identity-synthetic.tap`。合成门禁不替代真实应用 E2E，未在本机执行。
+PR #832 的六个真实成功结果和请求身份门禁已由父级接受，仅代表该增量。当前 successor 从 `dfc0219a9e66a19642eb73875e4914e540b49575` 开始，保留原有场景，再增加同账号/分组计划的第二 nominal round；待当前 head 的远程运行证据，不能用旧 SHA 的成功代替。`pelican-detail-identity.mjs` 按真实请求 URL 将响应绑定到 PG result/plan，拒绝整包交换。独立合成门禁与真实应用结果分开记录。
 
+第二轮只根据源码 `pelican_questions.go` 的 bank version、SHA256 前八字节 big-endian 与 modulo 公式选择已到期且题目不同的微秒时间，写入 fixture 计划的 `next_run_at`。不注入题目、不修改抽题算法，不保证普通随机轮次必不重复。远程 oracle 回归另以 #832 两份真实 PG 问题身份校验公式。真实 RunDue/Claim 的持有租约、Finish 释放、last_run_at 和已推进 next_run_at 均读取限定投影；旧/新结果按各自冻结快照关联 provider marker、API 请求 URL 和真实 DOM。
 ## 本增量的运行链
 
 GitHub `pull_request`（base 为 `production`，包含 fixture/script/workflow 变动）即可触发本分支新工作流，Draft 不跳过。`workflow_dispatch` 只是工作流进入默认分支后的备用入口，不能假定新分支已经可 dispatch。父协调者负责 publication 和精确 head/check 回读。
@@ -33,7 +34,7 @@ GitHub `pull_request`（base 为 `production`，包含 fixture/script/workflow �
 - [ ] 远程验收上述已实现的 A/B 随机定时 UI 创建、同一 T、真实 Claim 和四份 PG/provider/API/DOM 对账；静态实现不等于通过。
 - [ ] 远程验收已实现的分组 UI 启用、真实 RunDue/Claim、成功轮次 lease 完成、PG/provider/list/detail/真实 DOM 对账；不假设分组均匀路由 A/B。
 - [ ] 经真实浏览器编辑计划后，旧 PG/API/UI 快照保持不变。
-- [ ] 第二 nominal time T2 按现有哈希公式选到另一题，等待真实 tick，新旧记录共存；不能修改生产抽题算法。
+- [ ] 已实现第二 nominal time T2 不同选题及历史共存门禁；仍待本 successor exact-head 远程结果。
 - [ ] arm 单次 refusal 后真正产生 failed 持久化结果、失败历史及 lease 释放；现有 refusal server 能力尚未被此增量测试。
 - [ ] 失败场景的结果/租约/到期字段限定投影及关联。账号与分组成功轮次已编写限定投影，但尚待各自实际候选的远程证据。
 - #809 已合并；本 successor 的远程 Actions、失败记录及当前 head 检查结论由父级发布后补录，以当前候选 artifact 为准。没有运行本地动态检查。

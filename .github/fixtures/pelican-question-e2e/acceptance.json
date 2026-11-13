@@ -1,10 +1,9 @@
 {
-  "scope": "manual-account-and-group-scheduled-increment",
+  "scope": "issue795-successor-complete-engineering-rounds",
   "full_acceptance_complete": false,
-  "review_P2_identity_gate": "BLOCKED pending remote synthetic whole-response swap rejection evidence and real account/group E2E at the corrected head; static diff is not acceptance",
+  "review_P2_identity_gate": "Prior PR832 exact cb54990 accepted by parent; successor requires its own exact-head remote artifacts. Pure identity tests are not business proof.",
   "unimplemented": [
     "plan UI edit followed by proof old stored/API/DOM snapshot is unchanged",
-    "second nominal time mapped to a different question, new and old scheduled records coexist",
     "deterministic upstream refusal yields failed persisted history and released lease",
     "failed-result/lease SQL projections linked to captures and API IDs"
   ],
@@ -29,7 +28,9 @@
     "restricted account plan/result/due/active-lease projections; no result writes and no manual /run substitutes",
     "existing disabled group plan configured and enabled through actual PelicanTestsView UI; only its fixture next_run_at aligned via SQL",
     "actual group RunDue/Claim observed with two held provider replies, two persisted results and successful-run lease completion",
-    "group plan/result IDs and actual selected accounts correlated across restricted PG projection, provider captures, real page list/detail API responses, DOM rows, expanded snapshots and iframe markers; no equal account routing assumption"
+    "group plan/result IDs and actual selected accounts correlated across restricted PG projection, provider captures, real page list/detail API responses, DOM rows, expanded snapshots and iframe markers; no equal account routing assumption",
+    "same account A/B plans second nominal RunDue with a deterministically different question; original and second PG/provider/API/request-bound DOM histories coexist",
+    "same group plan second nominal RunDue with a deterministically different question; original and second PG/provider/API/request-bound DOM histories coexist"
   ],
   "verification_evidence": "Read scenario-results.json and the current PR head checks; this declaration does not assert runtime success."
 }
