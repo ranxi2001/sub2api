@@ -1,6 +1,8 @@
-# Issue #795 隔离应用 E2E：手动链路与禁用分组计划
+# Issue #795 隔离应用 E2E：手动、账号定时与分组定时
 
 Refs #795。本目录只提供 CI fixture，不修改应用业务代码，不表示完整验收、真实模型兼容性或经验难度校准完成。逐场景状态由 `acceptance.json` 声明；脚本即使成功，也固定输出 `full_acceptance_complete: false`。
+
+PR #832 独审 P2 仍为 **BLOCKED**，直到修正后候选的远程证据取得。`pelican-detail-identity.mjs` 按请求 URL 选 PG 行，逐条校验 URL result/plan、响应体 id/plan、PG id/plan 和 marker；账号窗口在所有详情响应通过后才以该请求绑定选卡与命名截图，产物保留 `request_binding`。分组 URL 只有 result ID，因此明确校验 URL result＝body id＝PG id，以及 body plan＝PG plan，不虚构 URL plan。远程工作流先运行无网络/API替换的 `node:test` 合成门禁，要求同计划 R1/R2 整包交换两个方向均被拒绝，另验正常乱序和错误 plan/样本内容；保存 `detail-identity-synthetic.tap`。合成门禁不替代真实应用 E2E，未在本机执行。
 
 ## 本增量的运行链
 
@@ -8,7 +10,17 @@ GitHub `pull_request`（base 为 `production`，包含 fixture/script/workflow �
 
 `APP_SHA` 与 `HARNESS_SHA` 均显式取 PR head（dispatch 时取该事件 SHA），分别 checkout，记录 SHA/tree。`PARENT_BASE_SHA` 记录本轮父协调者提供的整合基线，绝不作为永久固定的被测旧应用 SHA。正常根 Dockerfile 构建嵌入前端的真实应用；浏览器/pg 依赖、镜像和 fixture CA 也全部在运行隔离前准备。运行期间 Compose 一次性内部网络上的应用、PostgreSQL、Redis、假上游和浏览器均无第二网络、host networking、宿主 Docker socket 或发布端口。宿主 CI 的 Docker inspect 只投影网络/端口/挂载/特权配置，不输出容器环境变量。
 
-真实 AUTO_SETUP、迁移及虚构管理员正常登录后，SQL 只初始化两个 `anthropic/apikey` 账号和测试分组/关联，不插入题目、计划或结果。手动测试通过真实页面按钮、prepare API、handler/service 和上游 HTTP 请求执行，A/B 各两样本；输出唯一标记与上游去认证后的题面记录关联，再核真实 DOM 和 localStorage 刷新恢复。分组页面通过真实创建表单保存**禁用**计划并核对 API/PG，尚不执行调度。没有调用任何 `/run` 来代替 RunDue。
+真实 AUTO_SETUP、迁移及虚构管理员正常登录后，SQL 只初始化两个 `anthropic/apikey` 账号和测试分组/关联，不插入题目、计划或结果。手动测试通过真实页面按钮、prepare API、handler/service 和上游 HTTP 请求执行，A/B 各两样本；输出唯一标记与上游去认证后的题面记录关联，再核真实 DOM 和 localStorage 刷新恢复。分组页面通过真实创建表单保存**禁用**计划并核对 API/PG，这一步不执行调度，后续分组定时场景再经真实 UI 启用。没有调用任何 `/run` 来代替 RunDue。
+
+账号定时增量从真实账号页的 Scheduled tests → Add Plan 创建 A/B 随机计划，各两个样本。年周期 Cron 避免创建期间自动到期；该阶段唯一 SQL 写入是绑定两份计划 ID、账号 ID/fixture 名称和未执行条件，原子地将两者 `next_run_at` 对齐到同一个已到期 UTC 微秒 T，其他计划字段与结果不写入。
+
+脚本等待真实每分钟 runner。唯一外部替身 fake-upstream 暂停这四份回复（每份最多 30 秒），使脚本可以读到两份有效 `running_until`、已推进的到期时间及四份真实 provider capture，同时确认 PG 尚无结果。90 秒内必须观察到两份 Claim，否则失败；释放 provider 回复后最多等 30 秒，要求真正落库四份成功结果、唯一 marker、同一 `scheduled:T` / question / actual_prompt。此能力只延迟外部提供商回复，不调用或替换应用执行器。
+
+真实历史窗口发起账号过滤的 history 和 result detail API；脚本只监听这些响应，对照限定 PG 字段与 provider marker，逐一点击对应卡片、展开题目快照并核对 iframe，截图文件名包含 account/result ID。不读取登录 token 或直接发起待验 API 请求。新场景的代码已实现，仍须在 successor PR 的实际候选 SHA 上远程执行；#809 的历史结果不能证明本增量通过。
+
+分组定时阶段复用先前真实创建的禁用计划：经真实编辑表单设置年周期 Cron，等计划行显示新 Cron 后点击 Enable。以实际 PUT 响应、启用后的 DOM 和限定 PG 规则投影对账，然后仅对这个 fixture plan/group 更新一次 `next_run_at`。仍等待真实分钟 tick/RunDue/Claim，并复用 provider 最多30秒的回复等待来观察有效运行租约、推进后的到期时间及两份真实请求；释放回复后要求两份真实 PG 结果和成功轮次的 lease 完成。每份结果按实际 `account_id` 与 capture alias 对账，允许两份都选中 A 或 B，不断言路由均匀。
+
+页面保持在真实 `PelicanTestsView`，等待其15秒轮询取得本轮 list，随后点击按 result ID 标记的行，监听实际 detail 响应，核对组名、模型、实际账号、成功状态、展开的 question/actual_prompt 和 iframe marker。按 group plan/result ID 保存截图与受限投影。不写结果、调用 `/run` 或注入 auth/store；这个分组的首次 nominal T 不是同一计划的第二轮 T2。CI 浏览器总等待上限为660秒，job仍为45分钟；本轮新代码未远程验证。
 
 ## HTTPS fixture 与原 HTTP 建议的差异
 
@@ -18,20 +30,21 @@ GitHub `pull_request`（base 为 `production`，包含 fixture/script/workflow �
 
 ## 未完成的完整验收范围
 
-- [ ] A/B 账号随机定时计划由真实 UI 创建，各两个样本；只用限定 SQL 对齐同一 UTC 微秒 nominal time T，等待真正 runner/Claim。
-- [ ] 四个账号结果的 PG 投影、去认证 payload、history list/detail API 和真实展开 DOM/iframe 按同一 plan/result ID 对账。
-- [ ] 分组计划真实 RunDue/Claim、结果 PG → list/detail API → `PelicanTestsView` 同 ID 对账；不假设分组均匀路由 A/B。
+- [ ] 远程验收上述已实现的 A/B 随机定时 UI 创建、同一 T、真实 Claim 和四份 PG/provider/API/DOM 对账；静态实现不等于通过。
+- [ ] 远程验收已实现的分组 UI 启用、真实 RunDue/Claim、成功轮次 lease 完成、PG/provider/list/detail/真实 DOM 对账；不假设分组均匀路由 A/B。
 - [ ] 经真实浏览器编辑计划后，旧 PG/API/UI 快照保持不变。
 - [ ] 第二 nominal time T2 按现有哈希公式选到另一题，等待真实 tick，新旧记录共存；不能修改生产抽题算法。
 - [ ] arm 单次 refusal 后真正产生 failed 持久化结果、失败历史及 lease 释放；现有 refusal server 能力尚未被此增量测试。
-- [ ] 对结果/租约/到期字段进行限定 SQL 投影，与 API、capture 和场景 ID 关联。目前只有初始化实体与禁用分组计划投影，没有定时结果 SQL 证据。
-- 远程 Actions、失败记录及当前 head 检查结论见 PR #809；场景结果以当次 artifact 为准。没有运行本地动态检查。
+- [ ] 失败场景的结果/租约/到期字段限定投影及关联。账号与分组成功轮次已编写限定投影，但尚待各自实际候选的远程证据。
+- #809 已合并；本 successor 的远程 Actions、失败记录及当前 head 检查结论由父级发布后补录，以当前候选 artifact 为准。没有运行本地动态检查。
 - [ ] 隔离链路真实截图上传 PR 原生附件并回读；现有组件 job 截图仍只是组件证据，不能混同此 job。无 PNG 提交到源码。
 - [ ] 父协调者独审、完整技术验收与产品/经验难度证据。fixture 的简单 SVG 不代表题目作答合格或难度相当。
 
 ## 证据与清理
 
-CI artifact 预期包含应用/harness SHA/tree、显式未完成清单、命名场景结果、网络结构投影、仅限 fixture 题面的 provider captures（无认证头/全量 body）、真实手动请求/题面投影、本轮 localStorage 结果投影、必要的实体/计划 PG 投影、浏览器错误/拒绝清单和截图。比较 `actual_prompt` 的边界是本 fixture 的 UTF-8 文本经过真实 service TrimSpace 后的发送值，不能外推任意输入。
+CI artifact 预期包含应用/harness SHA/tree、显式未完成清单、命名场景结果、网络结构投影、仅限 fixture 题面的 provider captures（无认证头/全量 body）、真实手动请求/题面投影、本轮 localStorage 结果投影、必要的实体/计划 PG 投影、浏览器错误/拒绝清单和截图。账号定时新增 `account-scheduled-created/due/wait/claimed/results.json`、按账号的 history/detail/DOM 投影与按结果命名的截图；SQL 不导出响应全文，只取 fixture marker、ID、status、pelican_config、到期与租约字段。比较 `actual_prompt` 的边界是本 fixture 的 UTF-8 文本经过真实 service TrimSpace 后的发送值，不能外推任意输入。
+
+分组定时新增 `group-scheduled-enabled/due/wait/claimed/results/api-dom.json` 与 `group-scheduled-<planID>-<resultID>.png`；实际选中账号按 fixture ID/name 和 provider alias 关联，SQL 只读 attempts 数量，不导出完整尝试错误。尚未执行编辑后旧快照、第二轮、确定失败历史或失败 lease 验收，成功轮次 lease 完成不能代替它们。
 
 不导出 auth token、Cookie、完整 HAR、数据库全表、凭据列、原始应用日志或真实用户数据。不把整个运行目录当附件。fixture 密码/key/CA 都是本轮自建假值，不能用到任何其他环境。失败时也留存上述受限产物，`always()` 销毁容器、网络和一次性卷，artifact 保留七天。父协调者首次远程运行前需审查此增量，发布后仍须按原 brief 继续同一 PR 的未完成范围。
 

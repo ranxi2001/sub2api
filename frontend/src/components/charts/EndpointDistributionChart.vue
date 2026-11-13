@@ -113,7 +113,7 @@
                   ${{ formatCost(item.cost) }}
                 </td>
               </tr>
-              <tr v-if="expandedKey === item.endpoint">
+              <tr v-if="enableBreakdown && expandedKey === item.endpoint">
                 <td colspan="5" class="p-0">
                   <UserBreakdownSubTable
                     :items="breakdownItems"
@@ -133,7 +133,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
@@ -186,12 +186,24 @@ const emit = defineEmits<{
 const expandedKey = ref<string | null>(null)
 const breakdownItems = ref<UserBreakdownItem[]>([])
 const breakdownLoading = ref(false)
+let breakdownRequest = 0
+const clearBreakdown = () => {
+  breakdownRequest++
+  expandedKey.value = null
+  breakdownItems.value = []
+  breakdownLoading.value = false
+}
+watch(() => [props.enableBreakdown, props.startDate, props.endDate, props.filters, props.source], clearBreakdown, { deep: true, flush: 'sync' })
+onBeforeUnmount(clearBreakdown)
+
 
 const toggleBreakdown = async (endpoint: string) => {
   if (expandedKey.value === endpoint) {
-    expandedKey.value = null
+    clearBreakdown()
     return
   }
+  if (!props.enableBreakdown) return
+  const request = ++breakdownRequest
   expandedKey.value = endpoint
   breakdownLoading.value = true
   breakdownItems.value = []
@@ -203,11 +215,11 @@ const toggleBreakdown = async (endpoint: string) => {
       endpoint,
       endpoint_type: props.source,
     })
-    breakdownItems.value = res.users || []
+    if (request === breakdownRequest) breakdownItems.value = res.users || []
   } catch {
-    breakdownItems.value = []
+    if (request === breakdownRequest) breakdownItems.value = []
   } finally {
-    breakdownLoading.value = false
+    if (request === breakdownRequest) breakdownLoading.value = false
   }
 }
 

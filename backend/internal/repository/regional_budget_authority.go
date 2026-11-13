@@ -69,7 +69,7 @@ func regionalBalanceFunding(ctx context.Context, tx *sql.Tx, user, key int64) (b
 	return kind != "subscription", nil
 }
 
-// Billing metadata comes from the durable allocation, never from a key's group
+// Platform and billing metadata come from the durable allocation, never from a key's group
 // after an administrator moved it or a subscription expired during the request.
 func regionalScopedPricingVerifier(prefix string, scope ledger.VerifyEvent) ledger.VerifyEvent {
 	verify := ledger.PricingVerifier(scope)
@@ -81,7 +81,7 @@ func regionalScopedPricingVerifier(prefix string, scope ledger.VerifyEvent) ledg
 		if prefix == "grant:" {
 			id = prefix + event.Usage.LeaseID
 		}
-		result, err := tx.ExecContext(ctx, "UPDATE usage_logs u SET group_id=a.group_id,subscription_id=NULLIF(a.subscription_id,0),billing_type=CASE WHEN a.subscription_id=0 THEN 0 ELSE 1 END,billing_mode='token',rate_multiplier=1,account_rate_multiplier=1 FROM regional_budget_allocations a WHERE a.allocation_id=$1 AND u.request_id=$2 AND u.api_key_id=a.api_key_id", id, event.Usage.EventID)
+		result, err := tx.ExecContext(ctx, "UPDATE usage_logs u SET platform=NULLIF(a.platform,''),group_id=a.group_id,subscription_id=NULLIF(a.subscription_id,0),billing_type=CASE WHEN a.subscription_id=0 THEN 0 ELSE 1 END,billing_mode='token',rate_multiplier=1,account_rate_multiplier=1 FROM regional_budget_allocations a WHERE a.allocation_id=$1 AND u.request_id=$2 AND u.api_key_id=a.api_key_id", id, event.Usage.EventID)
 		if err != nil {
 			return err
 		}

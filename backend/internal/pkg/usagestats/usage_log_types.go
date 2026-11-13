@@ -269,6 +269,7 @@ type PlatformDashboardStats struct {
 
 // UsageLogFilters represents filters for usage log queries
 type UsageLogFilters struct {
+	Platform  string // Empty: all; unknown: no historical snapshot; otherwise concrete provider.
 	UserID    int64
 	APIKeyID  int64
 	AccountID int64
