@@ -17,7 +17,7 @@
                 v-model="searchQuery"
                 type="text"
                 :placeholder="t('admin.groups.searchGroups')"
-                class="input pl-10"
+                class="input scroll-mt-20 pl-10"
                 @input="handleSearch"
               />
             </div>

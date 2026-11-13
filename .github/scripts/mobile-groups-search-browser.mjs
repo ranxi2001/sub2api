@@ -81,6 +81,15 @@ async function geometry(label) {
     await Promise.allSettled(document.getAnimations()
       .filter(animation => animation.effect?.getTiming().iterations !== Infinity)
       .map(animation => animation.finished))
+    // Native focus can start smooth document scrolling (html.scroll-smooth).
+    // That scroll is not returned by getAnimations(); do not measure mid-flight.
+    let previous=scrollY,stable=0
+    for(let frame=0;frame<180 && stable<8;frame++){
+      await new Promise(requestAnimationFrame)
+      stable=Math.abs(scrollY-previous)<0.1?stable+1:0
+      previous=scrollY
+    }
+    if(stable<8)throw Error('SCROLL_SETUP: document scrolling did not settle')
   })
   const value = await page.evaluate(() => {
     const rect = el => {
@@ -193,6 +202,7 @@ try {
   }
   await page.setViewportSize({width:375,height:667});await top()
   const search=page.locator('.layout-section-fixed input')
+  await middle();await returnToSearch('375x667-interactive-search-after-scroll','nearest')
   // Keyboard traversal, actual debounced API request and rendered filtering.
   await page.getByRole('button',{name:'Select option'}).first().focus();await page.keyboard.press('Shift+Tab')
   assert(await search.evaluate(el=>el===document.activeElement),'Search must be reachable by keyboard')
