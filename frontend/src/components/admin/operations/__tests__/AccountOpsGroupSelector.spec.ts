@@ -106,6 +106,24 @@ describe('account ops selection boundaries', () => {
     wrapper.unmount()
   })
 
+  it('keeps draft selection and in-flight save fenced during the parent 30-second refresh', async () => {
+    let resolveSave!: (value: Awaited<ReturnType<typeof saveAccountOpsGroups>>) => void
+    vi.mocked(saveAccountOpsGroups).mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve }))
+    const wrapper = create()
+    await wrapper.getComponent(QualityAccountSelector).get('[data-testid="quality-select-page"]').trigger('click')
+    await wrapper.get('[data-testid="account-group-name-manual-alpha"]').setValue('Draft name')
+    await wrapper.setProps({ groups: structuredClone(groups) })
+    expect((wrapper.get('[data-testid="account-group-name-manual-alpha"]').element as HTMLInputElement).value).toBe('Draft name')
+    expect(wrapper.getComponent(QualityAccountSelector).props('modelValue')).toContain(1)
+    await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+    await wrapper.setProps({ groups: structuredClone(groups) })
+    expect(wrapper.get('[data-testid="save-account-groups"]').attributes('disabled')).toBeDefined()
+    resolveSave({ enabled: false, recipient: '', balance_low: true, weekly_quota: true, cooldown_minutes: 60 })
+    await flushPromises()
+    expect(wrapper.emitted('saved')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('ignores an old save response after reopening and keeps the new save busy', async () => {
     let resolveOld!: (value: Awaited<ReturnType<typeof saveAccountOpsGroups>>) => void
     let resolveNew!: (value: Awaited<ReturnType<typeof saveAccountOpsGroups>>) => void
