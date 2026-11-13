@@ -385,3 +385,44 @@ func newHTTP2PeerResetHandler(t *testing.T, upstream service.HTTPUpstream, accou
 	h.maxAccountSwitches = 2
 	return h
 }
+
+func TestHTTP2PeerResetHTTP502Control(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 8)
+	var submissions atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		submissions.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(502)
+		_, _ = io.WriteString(w, `{"error":{"type":"server_error","message":"synthetic HTTP refusal"}}`)
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	defer server.Close()
+	base, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	h := newHTTP2PeerResetHandler(t, &peerResetHTTPUpstream{client: server.Client(), base: base})
+	repo := &ingressRejectOpsRepo{}
+	ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		seed, _ := newOpenAIResponsesFailoverTestContext(t, c.Request.Context())
+		for k, v := range seed.Keys {
+			c.Set(k, v)
+		}
+		h.Responses(c)
+	})
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.1","stream":true,"input":"synthetic"}`)))
+	for len(opsErrorLogQueue) > 0 {
+		flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
+	}
+	require.Equal(t, int32(2), submissions.Load(), "actual HTTP refusal retains existing account failover")
+	require.Equal(t, 502, rec.Code)
+	require.Len(t, repo.entries, 1)
+	require.NotNil(t, repo.entries[0].UpstreamStatusCode)
+	require.Equal(t, 502, *repo.entries[0].UpstreamStatusCode)
+	require.NotEqual(t, "transport_error", repo.entries[0].ErrorType)
+	require.NotContains(t, rec.Body.String(), "upstream_http2_stream_error")
+}

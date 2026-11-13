@@ -227,12 +227,20 @@ func TestHTTP2SemanticImageErrorCannotSpoofReset(t *testing.T) {
 				_, _ = c.Writer.WriteString(": established\n\n")
 				c.Writer.Flush()
 			}
-			semantic := &OpenAIImagesUpstreamError{StatusCode: 400, ErrorType: "invalid_request_error", Code: "invalid_image", Message: message}
+			payload, marshalErr := json.Marshal(map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "code": "invalid_image", "message": message}})
+			require.NoError(t, marshalErr)
+			var semantic *OpenAIImagesUpstreamError
+			if stream {
+				semantic = extractOpenAIImagesUpstreamError(append(append([]byte("event: error\ndata: "), payload...), []byte("\n\n")...))
+			} else {
+				semantic = openAIImagesUpstreamErrorFromHTTP(400, http.Header{}, payload)
+			}
+			require.NotNil(t, semantic)
 			err := (&OpenAIGatewayService{}).handleOpenAIImagesOAuthResponseError(context.Background(), c, &Account{ID: 1, Platform: PlatformOpenAI}, "gpt-image-2", "", &http.Response{StatusCode: 200, Header: http.Header{}}, -1, semantic)
 			require.Error(t, err)
 			marker, exists := GetOpsStreamError(c)
 			data, _ := json.Marshal(marker)
-			require.False(t, exists && strings.Contains(string(data), `"ResetReason":"INTERNAL_ERROR"`), "semantic image text must not create trusted reset evidence")
+			require.False(t, exists && gjson.GetBytes(data, "TransportFailure.reset_reason").Exists(), "semantic image text must not create trusted reset evidence")
 			var original *OpenAIImagesUpstreamError
 			require.ErrorAs(t, err, &original)
 			require.Equal(t, 400, original.StatusCode)
