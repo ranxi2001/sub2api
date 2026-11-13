@@ -20,8 +20,10 @@ SUITES = {
     "shadow-races": ("TestOpenAI409FutureShadowPublicationFences", {f"stream={stream}/{case}" for stream in ("false", "true") for case in ("first_publication", "invalidate_after_restore", "reused_exposure", "store_failure_existing", "delayed_publisher")}),
     "audit-provenance": ("TestOpenAI409FutureShadowAuditProvenance", {f"stream={stream}" for stream in ("false", "true")}),
     "audit-persistence": ("TestRecoveredContextAuditPersistence", {"blocking_allow", "blocking_risk", "async"}),
+    "audit-async": ("TestRecoveredContextAsyncEnforcement", {"admission", "penalty"}),
+    "ws-oracle": ("TestOpenAI409WSAmbiguousOracleMutations", {f"{transport}/{mutation}" for transport in ("http_bridge", "socket") for mutation in ("valid", "wrong_credential", "old_pointer", "missing_result", "unrelated_eof")}),
 }
-RED_SUITES = {"ws", "strict-pointer", "shadow-races", "audit-provenance", "audit-persistence"}
+RED_SUITES = {"ws", "strict-pointer", "shadow-races", "audit-provenance", "audit-persistence", "audit-async"}
 
 
 def diagnostic(suite, name):
@@ -33,6 +35,8 @@ def diagnostic(suite, name):
         return ("SHADOW_AUDIT_PROVENANCE_MISSING",)
     if suite == "audit-persistence":
         return ("SHADOW_AUDIT_BODY_RETAINED",)
+    if suite == "audit-async":
+        return ("RECOVERED_ASYNC_ADMISSION_BLOCKED",) if name.endswith("/admission") else ("RECOVERED_ASYNC_PENALTY_MISSING",)
     if name.endswith("/first_publication"):
         return ("SHADOW_PUBLICATION_RACE_REFUSED",)
     if name.endswith("/reused_exposure"):
@@ -47,7 +51,7 @@ def validate(phase, code, raw, suite):
         raise ValueError("invalid WS evidence phase/suite")
     COMMON.check_clean(raw)
     root, names = SUITES[suite]
-    package = COMMON.PACKAGE.replace("/handler", "/securityaudit") if suite == "audit-persistence" else COMMON.PACKAGE
+    package = COMMON.PACKAGE.replace("/handler", "/securityaudit") if suite in {"audit-persistence", "audit-async"} else COMMON.PACKAGE
     leaves = {f"{root}/{name}" for name in names}
     events = []
     for line in raw.splitlines():

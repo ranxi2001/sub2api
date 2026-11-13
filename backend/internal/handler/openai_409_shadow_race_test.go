@@ -37,6 +37,7 @@ type shadowRaceRedis struct {
 type shadowRaceRead struct {
 	seen chan string
 	once sync.Once
+	hold <-chan struct{}
 }
 
 func (h *shadowRaceRead) DialHook(next redis.DialHook) redis.DialHook { return next }
@@ -53,7 +54,15 @@ func (h *shadowRaceRead) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 				if value, ok := cmd.(*redis.StringCmd); ok && strings.HasPrefix(value.Val(), "pending:") {
 					state = "pending"
 				}
-				h.once.Do(func() { h.seen <- state })
+				first := false
+				h.once.Do(func() { first = true; h.seen <- state })
+				if first && h.hold != nil {
+					select {
+					case <-h.hold:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
 			}
 		}
 		return err
@@ -155,6 +164,13 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 	defer provider.Close()
 	hook := &shadowRaceRedis{mode: scenario, entered: make(chan struct{}), release: make(chan struct{})}
 	readHook := &shadowRaceRead{seen: make(chan string, 1)}
+	consumerRelease := make(chan struct{})
+	var consumerOnce sync.Once
+	releaseConsumer := func() { consumerOnce.Do(func() { close(consumerRelease) }) }
+	defer releaseConsumer()
+	if scenario == "reused_exposure" {
+		readHook.hold = consumerRelease
+	}
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(hook.release) }) }
 	defer release()
@@ -222,7 +238,7 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 		producer.Responses(c)
 	})
 	gateway := httptest.NewServer(router)
-	defer func() { release(); resume(); releaseY(); gateway.Close() }()
+	defer func() { release(); resume(); releaseY(); releaseConsumer(); gateway.Close() }()
 	client := gateway.Client()
 	client.Timeout = 10 * time.Second
 	type result struct {
@@ -362,14 +378,31 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 		go func() { produced <- request(y, false, nil) }()
 		await(yEntered)
 		done = consume()
+		var state string
 		select {
-		case early := <-done:
-			require.NotContains(t, early.body, "race-task-complete", "SHADOW_REUSED_EXPOSURE_LEAK")
-			done = nil
-		case <-time.After(50 * time.Millisecond):
+		case state = <-readHook.seen:
+		case <-time.After(2 * time.Second):
+			t.Fatal("SHADOW_RACE_BARRIER_MISSING: consumer never read the held association")
+		}
+		mu.Lock()
+		heldSends := len(identities)
+		mu.Unlock()
+		require.Equal(t, 2, heldSends, "SHADOW_REUSED_EXPOSURE_LEAK: B was sent while the consumer read and Y exposure were held")
+		if state != "pending" {
+			// e593 reads old X here. Keep Y held until that exact consumer
+			// finishes, so its unsafe B send cannot be hidden by invalidation.
+			releaseConsumer()
+			early := <-done
+			require.NoError(t, early.err)
+			mu.Lock()
+			earlySends := len(identities)
+			mu.Unlock()
+			require.Equal(t, 2, earlySends, "SHADOW_REUSED_EXPOSURE_LEAK: consumer used stale X before Y's actual downstream write; response=%s", early.body)
+			t.Fatal("SHADOW_REUSED_EXPOSURE_LEAK: reused association was not pending at its observed read")
 		}
 		releaseY()
 		require.NoError(t, (<-produced).err)
+		releaseConsumer()
 	} else {
 		second := request(y, false, nil)
 		require.NoError(t, second.err)
@@ -387,7 +420,11 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 	mu.Lock()
 	sends := len(identities)
 	mu.Unlock()
-	require.Equal(t, 2, sends, "SHADOW_INVALIDATED_ASSOCIATION_DISPATCH: stale X must not reach B after Y invalidates the same opaque identity; response=%s", got.body)
+	diagnostic := "SHADOW_INVALIDATED_ASSOCIATION_DISPATCH"
+	if scenario == "reused_exposure" {
+		diagnostic = "SHADOW_REUSED_EXPOSURE_LEAK"
+	}
+	require.Equal(t, 2, sends, "%s: stale X must not reach B after Y invalidates the same opaque identity; response=%s", diagnostic, got.body)
 	require.GreaterOrEqual(t, got.status, 400, got.body)
 	require.Equal(t, original, issue805Owners(t, probe), "association changes must not rewrite original owner routes")
 }

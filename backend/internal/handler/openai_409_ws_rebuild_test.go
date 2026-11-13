@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -85,82 +83,8 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	t.Helper()
 	clients := issue805Redis(t)
 	probe := clients()
-	var mu sync.Mutex
-	var frames [][]byte
-	var identities []string
-	var httpSends, wsSends int
-	response := func(r *http.Request, body []byte, ws bool) []byte {
-		mu.Lock()
-		defer mu.Unlock()
-		frames = append(frames, append([]byte(nil), body...))
-		identities = append(identities, r.Header.Get("Authorization"))
-		if ws {
-			wsSends++
-		} else {
-			httpSends++
-		}
-		n := len(frames)
-		output := []json.RawMessage{json.RawMessage(httpRebuildAgentA), json.RawMessage(httpRebuildCall("apply_patch", "call_ws_patch", map[string]any{"path": "sum.go", "source": httpRebuildSource}))}
-		if n > 1 {
-			valid := r.Header.Get("Authorization") == "Bearer fixture-readable-ws-B" &&
-				strings.Contains(string(body), httpRebuildTask) && httpRebuildToolsAvailable(body) &&
-				httpRebuildToolPair(body, "apply_patch", httpRebuildPatch) &&
-				!strings.Contains(string(body), "fixture-opaque-A") &&
-				!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
-			if !valid {
-				return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_wrong_task_or_pointer","message":"wrong WS task, result, owner or pointer"}}}`)
-			}
-			if scenario == "ambiguous_B" {
-				return nil // Actual B accepted the frame; delivery/execution unknown.
-			}
-			output = []json.RawMessage{json.RawMessage(httpRebuildAgentB), json.RawMessage(httpRebuildCall("run_tests", "call_ws_verify", map[string]any{"path": "sum.go"}))}
-			if n == 3 && httpRebuildToolPair(body, "run_tests", httpRebuildCheck) {
-				output = []json.RawMessage{json.RawMessage(httpRebuildJSON(map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "ws-coding-task-complete"}}}))}
-			} else if n > 2 {
-				return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_duplicate_or_missing_tool"}}}`)
-			}
-		}
-		return []byte(httpRebuildJSON(map[string]any{"type": "response.completed", "response": map[string]any{
-			"id": fmt.Sprintf("resp_readable_ws_%d", n), "status": "completed", "model": "gpt-5.1", "error": nil,
-			"output": output, "usage": map[string]int{"input_tokens": 5, "output_tokens": 3},
-		}}))
-	}
-	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			answer := response(r, body, false)
-			if answer == nil {
-				conn, _, err := w.(http.Hijacker).Hijack()
-				if err == nil {
-					_ = conn.Close()
-				}
-				return
-			}
-			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", answer)
-			return
-		}
-		conn, err := coderws.Accept(w, r, nil)
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		defer conn.CloseNow() //nolint:errcheck // Fixture teardown.
-		for {
-			_, body, err := conn.Read(r.Context())
-			if err != nil {
-				return
-			}
-			answer := response(r, body, true)
-			if answer == nil || conn.Write(r.Context(), coderws.MessageText, answer) != nil {
-				return
-			}
-		}
-	}))
+	oracle := &readableWSOracle{scenario: scenario}
+	provider := oracle.server(t)
 	defer provider.Close()
 	headers := http.Header{"Session_id": {"fixture-readable-ws-session"}, "Thread-Id": {"fixture-readable-ws-thread"}}
 	var accounts *readableWSAccounts
@@ -181,7 +105,12 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 			accounts = &readableWSAccounts{issue600SwitchRepo: &issue600SwitchRepo{&openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{*a, other}}}}
 			*repo = accounts
 		})
-	defer issue600Finish(t, h, headers)
+	finished := false
+	defer func() {
+		if !finished {
+			issue600Finish(t, h, headers)
+		}
+	}()
 	create := func(input []string, previous string) string {
 		body := map[string]any{"type": "response.create", "model": "gpt-5.1", "store": false,
 			"tools": httpRebuildToolDefinitions(), "client_metadata": map[string]string{"thread_id": "fixture-readable-ws-thread"},
@@ -249,15 +178,35 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	}
 	issue715WSSend(t, h.clientConn, create(history, first.Get("id").String()))
 	secondRaw, readErr := readTerminal()
-	mu.Lock()
-	sends := len(frames)
-	mu.Unlock()
+	oracle.mu.Lock()
+	sends := len(oracle.frames)
+	oracle.mu.Unlock()
 	if scenario != "completed" {
 		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
+		// Observe natural handler termination before counting B sends. Closing
+		// the test client here could hide an automatic retry still in flight.
+		select {
+		case <-h.handlerDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("WS boundary handler did not terminate")
+		}
+		finished = true
+		_ = h.clientConn.CloseNow()
+		select {
+		case final := <-h.finalHeaders:
+			require.Equal(t, headers.Get("session_id"), final.Get("session_id"))
+			require.Equal(t, headers.Get("thread-id"), final.Get("thread-id"))
+		default:
+			t.Fatal("missing final client identity")
+		}
 		if scenario == "ambiguous_B" {
-			require.Equal(t, 2, sends, "B must receive the actual uncertain generation exactly once")
+			require.NoError(t, oracle.ambiguousEvidence(mode, secondRaw), "B must accept one valid frame before the intentional disconnect")
 		} else {
-			require.Equal(t, 1, sends, "unsafe task or current eligibility must refuse before B")
+			require.NoError(t, readableWSRefusalEvidence(scenario, secondRaw, readErr))
+			oracle.mu.Lock()
+			finalSends := len(oracle.frames)
+			oracle.mu.Unlock()
+			require.Equal(t, 1, finalSends, "unsafe task or current eligibility must refuse before B")
 		}
 		require.NotContains(t, string(secondRaw), "response.completed")
 		for key, raw := range owners {
@@ -286,15 +235,15 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	a, err := accounts.GetByID(context.Background(), 1)
 	require.NoError(t, err)
 	require.False(t, a.Schedulable)
-	mu.Lock()
-	defer mu.Unlock()
-	require.Equal(t, []string{"Bearer fixture-readable-ws-A", "Bearer fixture-readable-ws-B", "Bearer fixture-readable-ws-B"}, identities)
+	oracle.mu.Lock()
+	defer oracle.mu.Unlock()
+	require.Equal(t, []string{"Bearer fixture-readable-ws-A", "Bearer fixture-readable-ws-B", "Bearer fixture-readable-ws-B"}, oracle.identities)
 	if mode == service.OpenAIWSIngressModeHTTPBridge {
-		require.Equal(t, 3, httpSends)
-		require.Zero(t, wsSends)
+		require.Equal(t, 3, oracle.httpSends)
+		require.Zero(t, oracle.wsSends)
 	} else {
-		require.Equal(t, 3, wsSends)
-		require.Zero(t, httpSends)
+		require.Equal(t, 3, oracle.wsSends)
+		require.Zero(t, oracle.httpSends)
 	}
 	for key, raw := range owners {
 		require.Equal(t, raw, issue805Owners(t, probe)[key], "A owner is never overwritten")
