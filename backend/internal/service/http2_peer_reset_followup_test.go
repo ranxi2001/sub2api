@@ -40,13 +40,15 @@ func http2FollowupCCConvert(t *testing.T, mode, payload string) (*httptest.Respo
 
 func TestHTTP2CCSemanticFailureBeforeReset(t *testing.T) {
 	for _, mode := range []string{"responses", "messages"} {
-		for _, envelope := range []string{"event_error", "data_error", "multiline_error"} {
+		for _, envelope := range []string{"event_error", "data_error", "multiline_error", "code_only_error"} {
 			t.Run(mode+"/"+envelope, func(t *testing.T) {
 				errorEvent := "data: " + http2FollowupSemanticData + "\n\n"
 				if envelope == "event_error" {
 					errorEvent = "event: error\n" + errorEvent
 				} else if envelope == "multiline_error" {
 					errorEvent = "event: error\ndata: {\ndata: \"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"synthetic semantic failure\"}}\n\n"
+				} else if envelope == "code_only_error" {
+					errorEvent = strings.ReplaceAll(errorEvent, `"type":"invalid_request_error",`, "")
 				}
 				rec, c, result, err := http2FollowupCCConvert(t, mode, http2FollowupCCPartial+errorEvent)
 				require.Error(t, err)
@@ -60,6 +62,7 @@ func TestHTTP2CCSemanticFailureBeforeReset(t *testing.T) {
 				marker, ok := GetOpsStreamError(c)
 				require.True(t, ok)
 				require.Nil(t, marker.TransportFailure)
+				require.Equal(t, "invalid_request_error", marker.ErrType)
 				require.Equal(t, "context_length_exceeded", marker.Code)
 				require.Equal(t, http.StatusBadRequest, marker.IntendedStatus)
 				_, _, reset := OpenAIUpstreamStreamReadErrorDetails(err)

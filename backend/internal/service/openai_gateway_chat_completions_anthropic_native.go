@@ -569,6 +569,11 @@ func writeNativeAnthropicSemanticFailure(c *gin.Context, payload []byte, model s
 	if errType == "" {
 		errType = "upstream_error"
 	}
+	if isOpenAIContextWindowError(message, payload) {
+		// Some CC providers supply only the canonical code. Retain request
+		// ownership/SLA exclusion even when error.type is absent or generic.
+		errType = "invalid_request_error"
+	}
 	code := strings.TrimSpace(gjson.GetBytes(payload, "error.code").String())
 	if code == "" {
 		code = errType
