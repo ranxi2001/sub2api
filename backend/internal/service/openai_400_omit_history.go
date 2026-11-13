@@ -8,11 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func openAI400HistoryRecoveryApplied(ctx context.Context) bool {
-	r := openAIAgentRecoveryFromContext(ctx)
-	return r != nil && r.omitted400History
-}
-
 func (s *SettingService) IsOpenAI400OmitEncryptedHistoryEnabled(ctx context.Context) bool {
 	if s == nil || s.settingRepo == nil || ctx.Err() != nil {
 		return false

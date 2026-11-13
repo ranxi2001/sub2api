@@ -23,7 +23,15 @@ SUITES = {
     "audit-async": ("TestRecoveredContextAsyncEnforcement", {"admission", "penalty"}),
     "ws-oracle": ("TestOpenAI409WSAmbiguousOracleMutations", {f"{transport}/{mutation}" for transport in ("http_bridge", "socket") for mutation in ("valid", "wrong_credential", "old_pointer", "missing_result", "unrelated_eof")}),
 }
-RED_SUITES = {"ws", "strict-pointer", "shadow-races", "audit-provenance", "audit-persistence", "audit-async"}
+RED_SUITES = {"ws", "shadow-races", "audit-provenance", "audit-persistence", "audit-async"}
+# Fixed e593 source in shadow-review-repair.yml. These outcomes were accepted
+# from actual provider-wire evidence; never infer them from the observed log.
+STRICT_POINTER_BASELINE = {
+    "apikey/stream=false/strict": "fail",
+    "apikey/stream=true/strict": "fail",
+    "oauth/stream=false/strict": "pass",
+    "oauth/stream=true/strict": "pass",
+}
 
 
 def diagnostic(suite, name):
@@ -64,7 +72,12 @@ def validate(phase, code, raw, suite):
             raise ValueError("invalid event")
         events.append(event)
     counts = Counter((e.get("Action"), e.get("Test")) for e in events if e.get("Package") == package)
-    failed = leaves if phase == "RED" else {name for name in leaves if counts["fail", name]} if baseline else set()
+    if baseline:
+        if set(STRICT_POINTER_BASELINE) != names:
+            raise ValueError("strict baseline inventory changed")
+        failed = {f"{root}/{name}" for name, outcome in STRICT_POINTER_BASELINE.items() if outcome == "fail"}
+    else:
+        failed = leaves if phase == "RED" else set()
     terminal = "fail" if failed else "pass"
     if code != (1 if failed else 0):
         raise ValueError("unexpected exit")
@@ -80,6 +93,8 @@ def validate(phase, code, raw, suite):
             raise ValueError("unrelated failure")
         if baseline and event.get("Action") == "run" and (event.get("Package") != package or event.get("Test") not in leaves | {root}):
             raise ValueError("unrelated baseline run")
+        if baseline and event.get("Action") in {"pass", "fail"} and (event.get("Package") != package or event.get("Test") not in leaves | {root, None}):
+            raise ValueError("unrelated baseline terminal")
     if phase == "RED" or baseline:
         for name in failed:
             output = "".join(e.get("Output", "") for e in events if e.get("Package") == package and e.get("Test") == name)

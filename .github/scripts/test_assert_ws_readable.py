@@ -42,29 +42,43 @@ class WSReadableEvidenceTest(unittest.TestCase):
             events.append({"Package": GATE.COMMON.PACKAGE, "Action": "output", "Test": name, "Output": "HTTP_POINTER_STRICT_A_STATE_LEAK"})
         return events
 
-    def test_strict_baseline_accepts_only_consistent_named_outcomes(self):
+    def test_strict_baseline_pins_each_expected_leaf(self):
         names = GATE.SUITES["strict-pointer"][1]
-        for failures in (set(), names, {name for name in names if name.startswith("apikey/")}):
-            events = self.strict_baseline(failures)
-            GATE.validate("BASELINE", int(bool(failures)), raw(events), "strict-pointer")
-            if failures:
-                with self.assertRaises(ValueError):
-                    GATE.validate("GREEN", 1, raw(events), "strict-pointer")
-            for index, original in enumerate(events):
-                if original["Action"] in {"run", "pass", "fail", "output"}:
-                    with self.assertRaises(ValueError):
-                        GATE.validate("BASELINE", int(bool(failures)), raw(events[:index] + events[index + 1:]), "strict-pointer")
-            for event in events:
-                if event["Action"] in {"pass", "fail"}:
-                    with self.assertRaises(ValueError):
-                        GATE.validate("BASELINE", int(bool(failures)), raw(events + [event]), "strict-pointer")
+        failures = {"apikey/stream=false/strict", "apikey/stream=true/strict"}
+        events = self.strict_baseline(failures)
+        GATE.validate("BASELINE", 1, raw(events), "strict-pointer")
+        GATE.validate("GREEN", 0, raw(evidence("GREEN", "strict-pointer")), "strict-pointer")
+        for incorrect in (set(), names, names - failures, {"apikey/stream=false/strict", "oauth/stream=true/strict"}):
             with self.assertRaises(ValueError):
-                GATE.validate("BASELINE", int(not failures), raw(events), "strict-pointer")
-            for poison in ("panic: fixture", "WARNING: DATA RACE", "fatal error: crash", "signal: killed", "undefined: fixture", "--- SKIP: fixture"):
-                with self.assertRaises(ValueError):
-                    GATE.validate("BASELINE", int(bool(failures)), raw(events) + poison, "strict-pointer")
+                GATE.validate("BASELINE", int(bool(incorrect)), raw(self.strict_baseline(incorrect)), "strict-pointer")
+        for code in (0, 1):
             with self.assertRaises(ValueError):
-                GATE.validate("BASELINE", int(bool(failures)), raw(events + [{"Package": GATE.COMMON.PACKAGE, "Action": "fail", "Test": "Unrelated"}]), "strict-pointer")
+                GATE.validate("GREEN", code, raw(events), "strict-pointer")
+        with self.assertRaises(ValueError):
+            GATE.validate("RED", 1, raw(self.strict_baseline(names)), "strict-pointer")
+        for index, original in enumerate(events):
+            if original["Action"] in {"run", "pass", "fail", "output"}:
+                with self.assertRaises(ValueError):
+                    GATE.validate("BASELINE", 1, raw(events[:index] + events[index + 1:]), "strict-pointer")
+            if original["Action"] in {"run", "pass", "fail"}:
+                with self.assertRaises(ValueError):
+                    GATE.validate("BASELINE", 1, raw(events + [original]), "strict-pointer")
+            if original["Action"] in {"pass", "fail"}:
+                wrong = dict(original, Action="pass" if original["Action"] == "fail" else "fail")
+                with self.assertRaises(ValueError):
+                    GATE.validate("BASELINE", 1, raw(events[:index] + [wrong] + events[index + 1:]), "strict-pointer")
+        for wrong_exit in (0, 2, 137):
+            with self.assertRaises(ValueError):
+                GATE.validate("BASELINE", wrong_exit, raw(events), "strict-pointer")
+        for poison in ("panic: fixture", "WARNING: DATA RACE", "openai.usage_record_task_panic_recovered", "fatal error: crash", "signal: killed", "undefined: fixture", "[no tests to run]", "--- SKIP: fixture"):
+            for contamination in (poison, raw([{"Action": "output", "Output": poison}])):
+                with self.assertRaises(ValueError):
+                    GATE.validate("BASELINE", 1, raw(events) + contamination, "strict-pointer")
+        for action in ("run", "pass", "fail", "skip"):
+            with self.assertRaises(ValueError):
+                GATE.validate("BASELINE", 1, raw(events + [{"Package": GATE.COMMON.PACKAGE, "Action": action, "Test": "Unrelated"}]), "strict-pointer")
+        with self.assertRaises(ValueError):
+            GATE.validate("BASELINE", 1, raw(events + [{"Package": "unrelated/package", "Action": "pass"}]), "strict-pointer")
 
     def test_valid(self):
         GATE.validate("RED", 1, raw(evidence("RED", "ws")), "ws")
