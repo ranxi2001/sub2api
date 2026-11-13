@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,11 +47,22 @@ func (r *readableTicketRepo) GetByID(context.Context, int64) (*Account, error) {
 func (r *readableTicketRepo) UpdateExtra(context.Context, int64, map[string]any) error { return nil }
 
 func TestOpenAI409WSTicketBoundEgress(t *testing.T) {
+	testOpenAI409WSTicketBoundEgress(t, 1)
+}
+
+func TestOpenAI409WSTicketRejectsInvalidConcurrency(t *testing.T) {
+	testOpenAI409WSTicketBoundEgress(t, 0)
+}
+
+func testOpenAI409WSTicketBoundEgress(t *testing.T, concurrency int) {
+	t.Helper()
 	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated} {
 		t.Run(mode, func(t *testing.T) {
 			observed := make(chan readableTicketObservation, 4)
+			var proxyRequests atomic.Int64
 			proxyServer := func(label string) *httptest.Server {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					proxyRequests.Add(1)
 					conn, err := coderws.Accept(w, r, nil)
 					if err != nil {
 						t.Error(err)
@@ -81,8 +93,16 @@ func TestOpenAI409WSTicketBoundEgress(t *testing.T) {
 			}
 			cfg.Gateway.OpenAICodexTicket = config.OpenAICodexTicketConfig{Enabled: true, TargetLength: 292, Models: []string{"gpt-6-astra"}, FailClosed: true}
 			account := ticketTestAccount(2)
+			account.Concurrency = concurrency
 			account.GroupIDs = []int64{9}
 			account.Extra = map[string]any{"openai_oauth_responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_mode": mode, "codex_fingerprint_mode": "off"}
+			decision := NewOpenAIWSProtocolResolver(cfg).Resolve(account)
+			if concurrency > 0 {
+				require.Equal(t, OpenAIUpstreamTransportResponsesWebsocketV2, decision.Transport)
+			} else {
+				require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)
+				require.Equal(t, "account_concurrency_invalid", decision.Reason)
+			}
 			qURL, err := url.Parse(q.URL)
 			require.NoError(t, err)
 			port, err := strconv.Atoi(qURL.Port())
@@ -136,6 +156,19 @@ func TestOpenAI409WSTicketBoundEgress(t *testing.T) {
 			defer client.CloseNow() //nolint:errcheck // Fixture teardown.
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6-astra","input":[{"role":"user","content":"Continue the readable coding task without repeating completed work."}]}`)))
 			_, terminal, err := client.Read(ctx)
+			if concurrency <= 0 {
+				require.Error(t, err, "invalid concurrency must close before generation")
+				require.Empty(t, terminal)
+				select {
+				case gatewayErr := <-done:
+					require.EqualError(t, gatewayErr, "websocket ingress requires ws_v2 transport, got=http_sse")
+				case <-ctx.Done():
+					t.Fatal("rejected ticket fixture gateway did not terminate")
+				}
+				require.Zero(t, proxyRequests.Load(), "invalid concurrency must not dial either proxy")
+				require.Empty(t, observed, "invalid concurrency must not send a B generation")
+				return
+			}
 			if err != nil {
 				select {
 				case gatewayErr := <-done:

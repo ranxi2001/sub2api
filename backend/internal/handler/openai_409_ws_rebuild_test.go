@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -404,7 +405,13 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		oracle.mu.Lock()
 		finalSends := len(oracle.frames)
 		oracle.mu.Unlock()
-		require.Equal(t, 3, finalSends, "WS_REVIEW_CLIENT_IDENTITY_LOST: close=%v terminal=%s", err, final)
+		if !assert.Equal(t, 3, finalSends, "WS_REVIEW_CLIENT_IDENTITY_LOST: close=%v terminal=%s", err, final) {
+			// The historical identity defect also mutates upgrade headers. Check
+			// teardown on the normal stack, before FailNow unwinds deferred calls.
+			finished = true
+			issue600Finish(t, h, headers)
+			return
+		}
 	}
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(final, "type").String(), string(final))
