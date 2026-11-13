@@ -9,6 +9,7 @@ on:
       - 'backend/internal/repository/quality_quota_5xx_integration_test.go'
       - 'backend/internal/service/quality_quota_integration_helper.go'
       - '.github/scripts/issue817-race-gate.sh'
+      - '.github/scripts/issue817-validate-evidence.sh'
       - '.github/workflows/issue817-quota-skip-followup.yml'
 
 permissions:
@@ -50,6 +51,46 @@ jobs:
             # Only the isolated RED checkout receives the old production blob.
             git show "$original:$source" > "$source"
           fi
+      - name: Reject contaminated RED evidence before running product regressions
+        working-directory: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > evidence/gate-valid-red.log <<'LOG'
+          === RUN   TestIssue817QuotaSkipPreservesPending5xxExecution/never_run
+          expected: 1
+          actual  : 0
+          Messages: pending 5xx signal must execute after quota-skipped cron before acknowledgement
+          === RUN   TestIssue817QuotaSkipPreservesPending5xxExecution/previous_completed_run
+          expected: 1
+          actual  : 0
+          Messages: pending 5xx signal must execute after quota-skipped cron before acknowledgement
+          --- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution
+              --- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/never_run
+              --- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/previous_completed_run
+          LOG
+          validator=.github/scripts/issue817-validate-evidence.sh
+          bash "$validator" red 1 evidence/gate-valid-red.log
+          for forbidden in 'WARNING: DATA RACE' 'panic: injected' 'Segmentation fault' '--- SKIP: injected' '[build failed]' 'no tests to run'; do
+            cp evidence/gate-valid-red.log evidence/gate-contaminated-red.log
+            printf '%s\n' "$forbidden" >> evidence/gate-contaminated-red.log
+            if bash "$validator" red 1 evidence/gate-contaminated-red.log; then
+              echo "Gate wrongly accepted forbidden evidence: $forbidden" >&2
+              exit 1
+            fi
+          done
+          # Both FAIL labels still exist; only the second child's diagnosis is
+          # missing. A first-child-only global grep would wrongly accept this.
+          awk '/=== RUN.*previous_completed_run/ { second=1 } second && /Messages:/ { next } { print }' evidence/gate-valid-red.log > evidence/gate-missing-second-diagnostic.log
+          if bash "$validator" red 1 evidence/gate-missing-second-diagnostic.log; then
+            echo 'Gate wrongly accepted a missing second-child diagnostic' >&2
+            exit 1
+          fi
+          if bash "$validator" red 0 evidence/gate-valid-red.log; then
+            echo 'Gate wrongly accepted a zero first RED exit' >&2
+            exit 1
+          fi
+          echo 'Evidence gate synthetic rejection regressions passed'
       - uses: actions/setup-go@v6
         with:
           go-version-file: ${{ matrix.behavior }}/backend/go.mod
@@ -80,17 +121,7 @@ jobs:
           set -e
           cat evidence/pending-5xx.log
           test "$(cat evidence/binary-identity-ok.txt)" = passed
-          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:|WARNING: DATA RACE|race detected during execution|Segmentation fault|core dumped' evidence/pending-5xx.log
-          if [ "$BEHAVIOR" = red ]; then
-            test "$result" -ne 0
-            grep -F -- '--- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/never_run' evidence/pending-5xx.log
-            grep -F -- '--- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/previous_completed_run' evidence/pending-5xx.log
-            grep -F -- 'pending 5xx signal must execute after quota-skipped cron before acknowledgement' evidence/pending-5xx.log
-          else
-            test "$result" -eq 0
-            grep -F -- '--- PASS: TestIssue817QuotaSkipPreservesPending5xxExecution/never_run' evidence/pending-5xx.log
-            grep -F -- '--- PASS: TestIssue817QuotaSkipPreservesPending5xxExecution/previous_completed_run' evidence/pending-5xx.log
-          fi
+          bash .github/scripts/issue817-validate-evidence.sh "$BEHAVIOR" "$result" evidence/pending-5xx.log
       - name: Retained exact lease, 401, ownership, manual and trigger contracts
         if: matrix.behavior == 'green'
         working-directory: green/backend
@@ -99,8 +130,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go test -race -tags=integration ./internal/repository -run '^(TestIssue817QuotaSkipPreserves401AndOwnership|TestIssue817QuotaSkipRetainsActualIsolationOwnership|TestIssue817ManualTriggerIsOneShotAndLeaseFenced|TestQuality5xxClaimKeepsCronAndCoalescesScheduledRun|TestQualityRetestRestBlocksEveryClaimUntilDeadline)$' -count=1 -v -timeout=10m 2>&1 | tee ../evidence/retained-contracts.log
-          ! grep -Eq 'no tests to run|--- SKIP:' ../evidence/retained-contracts.log
+          go test -race -tags=integration ./internal/repository -run '^(TestIssue817QuotaSkipPreserves401AndOwnership|TestIssue817QuotaSkipRetainsActualIsolationOwnership|TestIssue817ManualTriggerIsOneShotAndLeaseFenced|TestQuality5xxClaimKeepsCronAndCoalescesScheduledRun|TestQuality5xxFinishConsumesCrossedCronWithoutOverwritingEdits|TestQualityRetestRestBlocksEveryClaimUntilDeadline)$' -count=1 -v -timeout=10m 2>&1 | tee ../evidence/retained-contracts.log
+          if grep -Eq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution' ../evidence/retained-contracts.log; then
+            exit 1
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:
