@@ -64,7 +64,7 @@ describe('account operations tabs and independent saves', () => {
     await wrapper.get('[data-testid="add-account-group"]').trigger('click')
     const manual = wrapper.findAll('[data-testid^="account-group-name-manual-"]').at(-1)!
     await manual.setValue('手动组')
-    const member = wrapper.findAll('[data-testid^="account-group-member-manual-"]').at(-1)!
+    const member = wrapper.get('[data-testid="account-ops-member-picker"] [data-account-id="1"] input')
     await member.setValue(true)
     await wrapper.get('[data-testid="save-account-groups"]').trigger('click'); await flushPromises()
     expect(saveAccountOpsGroups).toHaveBeenCalledWith(expect.arrayContaining([
@@ -80,7 +80,7 @@ describe('account operations tabs and independent saves', () => {
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
     await wrapper.get('[data-testid="edit-account-groups"]').trigger('click'); await flushPromises()
     expect(wrapper.get('[data-testid="account-group-name-manual-empty"]').exists()).toBe(true)
-    expect((wrapper.get('[data-testid="account-group-member-manual-empty-1"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-testid="account-ops-member-picker"] [data-account-id="1"] input').element as HTMLInputElement).checked).toBe(false)
     wrapper.unmount()
   })
   it('adds and removes an email channel without posting the global switch or failure rules', async () => {

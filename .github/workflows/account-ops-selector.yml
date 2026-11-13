@@ -7,6 +7,7 @@ on:
       - 'frontend/src/components/admin/operations/QualityAccountSelector.vue'
       - 'frontend/src/components/admin/operations/__tests__/AccountOpsGroup*.spec.ts'
       - 'frontend/src/components/admin/operations/__tests__/QualityAccountSelector.spec.ts'
+      - 'frontend/src/views/admin/__tests__/AccountOpsView.spec.ts'
       - 'frontend/src/i18n/locales/*/accountOps.ts'
       - '.github/scripts/account-ops-selector*'
       - '.github/workflows/account-ops-selector.yml'

@@ -128,6 +128,7 @@ app.use(createPinia());app.use(i18n);app.mount('#app');window.__selected=()=>sel
   const picker = page.getByTestId('account-ops-member-picker')
   const search = picker.locator('input:not([type])')
   assert.equal(await picker.locator('[data-account-id]').count(), 50)
+  assert.equal(await picker.locator('[aria-busy]').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 2, 'actual desktop Tailwind grid')
   await capture('after-desktop-zh')
   await search.fill('DEMO account 125')
   assert.deepEqual(await picker.locator('[data-account-id]').evaluateAll(rows => rows.map(row => row.dataset.accountId)), ['125'])
@@ -177,6 +178,7 @@ app.use(createPinia());app.use(i18n);app.mount('#app');window.__selected=()=>sel
 
   await page.setViewportSize({ width: 390, height: 844 })
   await load('?locale=en')
+  assert.equal(await picker.locator('[aria-busy]').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 1, 'actual mobile Tailwind grid')
   await search.fill('#125')
   await search.press('Tab')
   assert.equal(await page.evaluate(() => document.activeElement?.tagName), 'BUTTON')

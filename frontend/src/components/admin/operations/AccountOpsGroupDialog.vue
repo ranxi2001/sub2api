@@ -30,7 +30,7 @@
           :label="t('accountOps.searchGroupMembers')" :selection-hint="t('accountOps.groupSelectionHint')"
           @search="goToPage" @select-page="selectAccounts(pageAccounts)" @select-all="selectAccounts(filteredAccounts)" @clear="selectedAccounts = []">
           <template #account-details="{ account }">
-            <span class="ml-1 text-xs text-gray-500">· {{ membership.get(account.id)?.name || t('qualityOps.ungroupedAccounts') }}</span>
+            <span class="ml-1 text-xs text-gray-500">· {{ membership.get(account.id)?.name || membership.get(account.id)?.default_name || t('qualityOps.ungroupedAccounts') }}</span>
           </template>
         </QualityAccountSelector>
       </div>
@@ -116,13 +116,16 @@ const selectedAccounts = computed({
 })
 let sequence = 0
 
-watch(() => [props.show, props.groups] as const, () => {
+// The parent polls groups every 30 seconds. Snapshot on opening only, so a
+// background refresh cannot discard edits or invalidate an in-flight save.
+watch(() => props.show, show => {
   sequence++
   busy.value = false
   error.value = ''
+  if (!show) return
   draftGroups.value = props.groups.map(group => ({ ...group, account_ids: Array.isArray(group.account_ids) ? [...group.account_ids] : [] }))
   editMembers(draftGroups.value[0]?.id ?? '')
-}, { immediate: true, deep: true })
+}, { immediate: true })
 
 watch([search, accountGroup, accountType], () => { page.value = 1 }, { flush: 'sync' })
 watch(pages, count => { page.value = Math.min(page.value, count) }, { flush: 'sync' })
