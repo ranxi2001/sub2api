@@ -1,0 +1,60 @@
+name: PR830 frozen component acceptance
+on:
+  push:
+    branches: [evidence/pr830-frozen-20261113]
+permissions:
+  contents: read
+jobs:
+  component-red-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 8024494b34c085c4e74d9b3e5fb653288280ee84
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Exact candidate component GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pr830"
+          test "$(git rev-parse HEAD)" = 8024494b34c085c4e74d9b3e5fb653288280ee84
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/pr830/candidate.txt"
+          pnpm --dir frontend exec vitest run src/features/ip-audit/__tests__ src/components/common/__tests__/BaseDialog.spec.ts src/components/common/__tests__/BaseDialog.escape.spec.ts src/components/common/__tests__/BaseDialog.scrollLock.spec.ts src/components/common/__tests__/BaseDialog.ids.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts 2>&1 | tee "$RUNNER_TEMP/pr830/green.log"
+          grep -Eq 'KeyRiskPanel.spec.ts.*14 tests' "$RUNNER_TEMP/pr830/green.log"
+      - name: Original component behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          source=frontend/src/features/ip-audit/KeyRiskPanel.vue
+          original=ff23a988f4c5825ec06a7efb4e0f16f2b1e65ced
+          git rev-parse "$original:$source" > "$RUNNER_TEMP/pr830/baseline-blob.txt"
+          git show "$original:$source" > "$source"
+          test "$(git hash-object "$source")" = "$(cat "$RUNNER_TEMP/pr830/baseline-blob.txt")"
+          set +e
+          pnpm --dir frontend exec vitest run src/features/ip-audit/__tests__/KeyRiskPanel.spec.ts -t 'opens a modal above long lists' --reporter=verbose > "$RUNNER_TEMP/pr830/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/pr830/red.log"
+          printf '%s\n' "$result" > "$RUNNER_TEMP/pr830/red-exit.txt"
+          test "$result" -ne 0
+          if grep -Eq 'Failed to load|SyntaxError|ReferenceError|No test files found|Unhandled Error' "$RUNNER_TEMP/pr830/red.log"; then exit 1; fi
+          grep -F 'opens a modal above long lists and only queues after confirmation in en' "$RUNNER_TEMP/pr830/red.log"
+          grep -F 'opens a modal above long lists and only queues after confirmation in zh' "$RUNNER_TEMP/pr830/red.log"
+          grep -F 'expected null not to be null' "$RUNNER_TEMP/pr830/red.log"
+          grep -Eq '2 failed.*12 skipped' "$RUNNER_TEMP/pr830/red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr830-frozen-8024494
+          path: ${{ runner.temp }}/pr830/
+          if-no-files-found: error
