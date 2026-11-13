@@ -255,7 +255,7 @@ func TestAccountOpsValidationErrorPreservesPersistedConfiguration(t *testing.T) 
 func TestAccountOpsBalanceCollectionStateAndHistoricalValue(t *testing.T) {
 	now := time.Now()
 	received, expired := now.Add(-2*time.Hour), now.Add(-time.Hour)
-	a := &Account{ID: 1, Type: AccountTypeAPIKey, Extra: map[string]any{UpstreamBillingProbeExtraKey: &UpstreamBillingProbeSnapshot{Balance: &UpstreamBalanceSnapshot{Status: "ok", ReceivedAt: &received, FreshUntil: &expired, Data: map[string]any{"remaining": 42.0, "unit": "USD"}}}}}
+	a := &Account{ID: 1, Type: AccountTypeAPIKey, Extra: map[string]any{UpstreamBillingProbeExtraKey: &UpstreamBillingProbeSnapshot{Status: "ok", Balance: &UpstreamBalanceSnapshot{Status: "ok", ReceivedAt: &received, FreshUntil: &expired, Data: map[string]any{"remaining": 42.0, "unit": "USD"}}}}}
 	item := opsBalanceAccount(a, now)
 	require.False(t, item.ProbeEnabled)
 	require.Equal(t, "stale", item.BalanceStatus)
