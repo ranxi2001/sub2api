@@ -1,0 +1,207 @@
+name: Anthropic HTTP 413
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/handler/anthropic_413*'
+      - 'backend/internal/handler/account_auto_config_outcome.go'
+      - 'backend/internal/handler/gateway_handler.go'
+      - 'backend/internal/handler/ops_error_logger.go'
+      - 'backend/internal/service/gateway_forward.go'
+      - 'backend/internal/service/gateway_anthropic_passthrough.go'
+      - 'backend/internal/service/gateway_upstream_response.go'
+      - 'backend/internal/service/anthropic_413*'
+      - '.github/workflows/anthropic-413.yml'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  RED_BASE_SHA: ff23a988f4c5825ec06a7efb4e0f16f2b1e65ced
+  REVIEW_RED_BASE_SHA: 4bb46c4c83de1f0cd08b7f3f4ba25ec01e3a3371
+
+jobs:
+  red:
+    name: RED - pinned production source
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # All production files and existing fixtures are the exact pre-fix tree.
+      # Only the new regression is copied from the candidate below.
+      - uses: actions/checkout@v6
+        with:
+          ref: ff23a988f4c5825ec06a7efb4e0f16f2b1e65ced
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Run real handler regression against pre-fix source
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/anthropic-413-red"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = "$RED_BASE_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags --depth=1 origin "$EXPECTED_HEAD_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_HEAD_SHA"
+          regression=backend/internal/handler/anthropic_413_test.go
+          test ! -e "$regression"
+          restore() {
+            rm -f -- "$regression"
+            git diff --exit-code
+            test -z "$(git status --porcelain)"
+          }
+          trap restore EXIT
+          git show "$EXPECTED_HEAD_SHA:$regression" > "$regression"
+          {
+            printf 'candidate=%s\nbase=%s\n' "$EXPECTED_HEAD_SHA" "$RED_BASE_SHA"
+            git rev-parse HEAD^{tree}
+            sha256sum "$regression"
+            go version
+            printf '%s\n' 'go test -json -tags=unit ./internal/handler -run ^TestAnthropic413MessagesHTTP$/^apikey$/^stream$ -count=1 -timeout=5m'
+          } > "$evidence/metadata.txt"
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/handler -run '^TestAnthropic413MessagesHTTP$/^apikey$/^stream$' -count=1 -timeout=5m) > "$evidence/red.jsonl" 2> "$evidence/red.stderr"
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$evidence/exit-code.txt"
+          cat "$evidence/red.jsonl" "$evidence/red.stderr"
+          test "$result" -eq 1
+          python3 - "$evidence/red.jsonl" <<'PY'
+          import json, pathlib, sys
+          events = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+          test = "TestAnthropic413MessagesHTTP/apikey/stream"
+          assert any(e.get("Test") == test and e.get("Action") == "run" for e in events), "regression did not run"
+          assert any(e.get("Test") == test and e.get("Action") == "fail" for e in events), "intended regression did not fail"
+          assert not any(e.get("Action") == "skip" for e in events), "skips are not RED evidence"
+          output = "".join(e.get("Output", "") for e in events)
+          assert "anthropic_413_wire_status" in output, "missing intended status assertion"
+          assert "expected: 413" in output and "actual  : 502" in output, "wrong failure reason"
+          assert not any(s in output for s in ("[build failed]", "panic:", "no tests to run")), "invalid RED evidence"
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: anthropic-413-red-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/anthropic-413-red/
+          if-no-files-found: error
+
+  review-red:
+    name: RED - L1 and L2 on reviewed implementation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 4bb46c4c83de1f0cd08b7f3f4ba25ec01e3a3371
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Require both independent-review failures in JSON and SSE
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/anthropic-413-review-red"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = "$REVIEW_RED_BASE_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags --depth=1 origin "$EXPECTED_HEAD_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_HEAD_SHA"
+          regression=backend/internal/handler/anthropic_413_review_test.go
+          test ! -e "$regression"
+          restore() {
+            rm -f -- "$regression"
+            git diff --exit-code
+            test -z "$(git status --porcelain)"
+          }
+          trap restore EXIT
+          git show "$EXPECTED_HEAD_SHA:$regression" > "$regression"
+          {
+            printf 'candidate=%s\nreview_base=%s\n' "$EXPECTED_HEAD_SHA" "$REVIEW_RED_BASE_SHA"
+            git rev-parse HEAD^{tree}
+            sha256sum "$regression"
+            go version
+            printf '%s\n' 'go test -json -tags=unit ./internal/handler -run ^TestAnthropic413Review(AutoConfigNoCooldown|BudgetRepairMonitoring)$ -count=1 -timeout=5m'
+          } > "$evidence/metadata.txt"
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/handler -run '^TestAnthropic413Review(AutoConfigNoCooldown|BudgetRepairMonitoring)$' -count=1 -timeout=5m) > "$evidence/red.jsonl" 2> "$evidence/red.stderr"
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$evidence/exit-code.txt"
+          cat "$evidence/red.jsonl" "$evidence/red.stderr"
+          test "$result" -eq 1
+          python3 - "$evidence/red.jsonl" <<'PY'
+          import json, pathlib, sys
+          events = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+          markers = {
+              "TestAnthropic413ReviewAutoConfigNoCooldown": "anthropic_413_L1_final_observation",
+              "TestAnthropic413ReviewBudgetRepairMonitoring": "anthropic_413_L2_final_visible",
+          }
+          for parent, marker in markers.items():
+              for boundary in ("json", "sse"):
+                  test = parent + "/" + boundary
+                  assert any(e.get("Test") == test and e.get("Action") == "run" for e in events), f"missing test: {test}"
+                  assert any(e.get("Test") == test and e.get("Action") == "fail" for e in events), f"missing intended failure: {test}"
+                  output = "".join(e.get("Output", "") for e in events if e.get("Test") == test)
+                  assert marker in output, f"wrong failure reason: {test}"
+          assert not any(e.get("Action") == "skip" for e in events), "skips are not RED evidence"
+          output = "".join(e.get("Output", "") for e in events)
+          assert not any(s in output for s in ("[build failed]", "panic:", "no tests to run")), "invalid RED evidence"
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: anthropic-413-review-red-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/anthropic-413-review-red/
+          if-no-files-found: error
+
+  candidate:
+    name: Candidate - mock regressions, race and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Candidate handler, wire and ops regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/anthropic-413-candidate"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+          { git rev-parse HEAD HEAD^{tree}; go version; } > "$evidence/metadata.txt"
+          cd backend
+          go test -tags=unit ./internal/handler -run '^TestAnthropic413(MessagesHTTP|Review.*)$' -count=1 -v -timeout=5m 2>&1 | tee "$evidence/regression.log"
+      - name: Focused boundary regressions and race
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go test -race -tags=unit ./internal/handler -run '^Test(Anthropic413|AutoConfig|GatewayEnsureForwardErrorResponse|GatewayForwardErrorAlreadyCommunicated|StreamWrittenGuard|HandleFailoverError|HandleSelectionExhausted|FailoverClientGone|OpsErrorLoggerMiddleware_(Google|RequestScoped|IntermediateSkipMonitoring|RecoveredTelemetry)|ShouldSkipFinalOpsFailureUsesOnlyFinalAttemptRule|SetOpsLocalErrorTypeClearsRequestScopedMark)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/anthropic-413-candidate/race.log"
+          go test -tags=unit ./internal/service -run '^Test(GatewayService_Forward_|GatewayService_AnthropicAPIKeyPassthrough_|GatewayCompatPoolMode429AllowsSameAccountRetry|CalculateAnthropic429ResetTime|RateLimitService_HandleUpstreamError_(OAuth401|NonOAuth401|NonOAuthModel401)|HandleUpstreamTransportError|ClaudeClientCancelForwardStopsActualHTTPAndDoesNotRetry)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/anthropic-413-candidate/service.log"
+      - name: Build affected production packages without test tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go build ./internal/handler ./internal/service) 2>&1 | tee "$RUNNER_TEMP/anthropic-413-candidate/build.log"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: anthropic-413-candidate-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/anthropic-413-candidate/
+          if-no-files-found: error

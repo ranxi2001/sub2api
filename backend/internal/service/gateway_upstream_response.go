@@ -361,7 +361,58 @@ func (s *GatewayService) readUpstreamErrorBody(resp *http.Response) ([]byte, err
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
+const anthropicRequestTooLargeMessage = "Request body is too large. Anthropic Messages requests are limited to 32 MiB. Reduce the request size and try again."
+
+var errAnthropicRequestTooLarge = errors.New("anthropic request body too large")
+
+func isAnthropicRequestTooLarge(account *Account, resp *http.Response) bool {
+	if account == nil || account.Platform != PlatformAnthropic || resp == nil || resp.StatusCode != http.StatusRequestEntityTooLarge {
+		return false
+	}
+	// Bedrock and Vertex have separate limits and protocol handling.
+	return account.Type == AccountTypeAPIKey || account.IsAnthropicOAuthOrSetupToken()
+}
+
+// handleAnthropicRequestTooLarge owns the rejected response body and returns a
+// terminal error, never a failover error. Neither account policies nor error
+// passthrough rules may turn this request rejection into retries or an outage.
+func handleAnthropicRequestTooLarge(c *gin.Context, resp *http.Response) (*ForwardResult, error) {
+	if resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if c.Request != nil && c.Request.Context().Err() != nil {
+		return nil, c.Request.Context().Err()
+	}
+	setOpsUpstreamError(c, http.StatusRequestEntityTooLarge, anthropicRequestTooLargeMessage, "")
+	MarkOpsRequestScopedError(c, "request_too_large")
+	MarkResponseCommitted(c)
+	payload := `{"type":"error","error":{"type":"request_too_large","message":` + strconv.Quote(anthropicRequestTooLargeMessage) + `}}`
+	if !c.Writer.Written() {
+		c.Data(http.StatusRequestEntityTooLarge, "application/json", []byte(payload))
+		return nil, errAnthropicRequestTooLarge
+	}
+
+	// Flushed headers alone commit HTTP status. Record the logical 413 and
+	// append one terminal event only when the existing response is an SSE stream.
+	MarkOpsStreamErrorValue(c, OpsStreamError{
+		ErrType:        "request_too_large",
+		Message:        anthropicRequestTooLargeMessage,
+		IntendedStatus: http.StatusRequestEntityTooLarge,
+		RequestScoped:  true,
+	})
+	if strings.HasPrefix(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream") {
+		if _, err := fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload); err != nil {
+			_ = c.Error(err)
+		}
+		c.Writer.Flush()
+	}
+	return nil, errAnthropicRequestTooLarge
+}
+
 func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, requestedModel ...string) (*ForwardResult, error) {
+	if isAnthropicRequestTooLarge(account, resp) {
+		return handleAnthropicRequestTooLarge(c, resp)
+	}
 	// Upstream returned a non-success HTTP status; count Ollama Cloud / OpenCode Go activity.
 	scheduleOllamaCloudUsageActivity(s.deferredService, account)
 	scheduleOpenCodeGoUsageActivity(s.deferredService, account)
