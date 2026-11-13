@@ -261,7 +261,13 @@ func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *B
 	inboundEndpoint := "/v1/images/batches"
 	upstreamEndpoint := "vertex:batchPredictionJobs"
 	imageSize := "1K"
+	platform := ""
+	switch job.Provider {
+	case BatchImageProviderGeminiAPI, BatchImageProviderVertex:
+		platform = PlatformGemini
+	}
 	usageLog := &UsageLog{
+		Platform:              platform,
 		UserID:                job.UserID,
 		APIKeyID:              *job.APIKeyID,
 		AccountID:             *job.AccountID,

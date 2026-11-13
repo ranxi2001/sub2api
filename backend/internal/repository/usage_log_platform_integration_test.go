@@ -56,7 +56,9 @@ func TestUsagePlatformHistoricalQuery(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(raw, &filters))
 			want := int64(1)
-			if platform == "" { want = int64(len(platforms) + 1) }
+			if platform == "" {
+				want = int64(len(platforms) + 1)
+			}
 			rows, page, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 1}, filters)
 			require.NoError(t, err)
 			require.Equal(t, want, page.Total, "platform predicate must filter historical rows in SQL")
@@ -71,6 +73,18 @@ func TestUsagePlatformHistoricalQuery(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, page.Total, exportPage.Total)
 			require.Len(t, exported, int(want))
+			trend, err := repo.GetUsageTrendWithUsageFilters(ctx, start, end, "day", filters)
+			require.NoError(t, err)
+			require.Len(t, trend, 1)
+			require.Equal(t, want, trend[0].Requests)
+			models, err := repo.GetModelStatsWithUsageFiltersBySource(ctx, start, end, filters, usagestats.ModelSourceRequested)
+			require.NoError(t, err)
+			require.Len(t, models, 1)
+			require.Equal(t, want, models[0].Requests)
+			groups, err := repo.GetGroupStatsWithUsageFilters(ctx, start, end, filters)
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Equal(t, want, groups[0].Requests)
 			filters.GroupID = 0
 			_, allGroups, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 100}, filters)
 			require.NoError(t, err)

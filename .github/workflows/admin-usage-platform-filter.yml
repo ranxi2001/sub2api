@@ -33,18 +33,36 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Generate Ent snapshot field remotely
+        working-directory: backend
+        run: |
+          go generate ./ent
+          git diff -- ent > "$RUNNER_TEMP/platform-ent.patch"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: platform-ent-${{ github.sha }}
+          path: ${{ runner.temp }}/platform-ent.patch
+      - name: Affected backend unit tests
+        working-directory: backend
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -tags=unit ./internal/repository ./internal/service ./internal/handler/admin -run 'Test(Usage|AdminUsage|PrepareUsage|GatewayServiceRecordUsage|OpenAIGatewayServiceRecordUsage|Dashboard|FinalizeLive|BatchImage)' -count=1 -v -timeout=15m | tee "$RUNNER_TEMP/platform-unit.log"
+          ! grep -E -- '--- SKIP:|no tests to run' "$RUNNER_TEMP/platform-unit.log"
       - name: Historical platform SQL regression (disposable PostgreSQL)
         working-directory: backend
         shell: bash
         run: |
           set -o pipefail
-          go test -tags=integration ./internal/repository -run '^TestUsagePlatformHistoricalQuery$' -count=1 -v -timeout=15m | tee "$RUNNER_TEMP/platform-sql.log"
+          go test -tags=integration ./internal/repository -run 'TestUsage(Log|Platform)' -count=1 -v -timeout=15m | tee "$RUNNER_TEMP/platform-sql.log"
           ! grep -E -- '--- SKIP:|no tests to run' "$RUNNER_TEMP/platform-sql.log"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: platform-sql-${{ github.sha }}
-          path: ${{ runner.temp }}/platform-sql.log
+          path: |
+            ${{ runner.temp }}/platform-sql.log
+            ${{ runner.temp }}/platform-unit.log
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 20

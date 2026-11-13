@@ -24,7 +24,9 @@ func TestAdminUsagePlatformFilter(t *testing.T) {
 				}
 				require.Equal(t, http.StatusOK, rec.Code)
 				filters := repo.listFilters
-				if path == "/admin/usage/stats" { filters = repo.statsFilters }
+				if path == "/admin/usage/stats" {
+					filters = repo.statsFilters
+				}
 				require.Equal(t, int64(7), filters.GroupID)
 				raw, err := json.Marshal(filters)
 				require.NoError(t, err)
