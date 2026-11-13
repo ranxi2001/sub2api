@@ -18,7 +18,8 @@ func waitForRestrictionLock(t *testing.T, ctx context.Context, db *sql.DB, block
 		var waiting bool
 		err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
  WHERE $1=ANY(pg_blocking_pids(pid)) AND wait_event_type='Lock'
- AND query LIKE 'SELECT k.id,k.user_id FROM key_risk_events%')`, blocker).Scan(&waiting)
+ AND (query LIKE 'SELECT k.id,k.user_id FROM key_risk_events%'
+ OR query LIKE 'UPDATE api_keys SET ip_whitelist=%'))`, blocker).Scan(&waiting)
 		require.NoError(t, err)
 		return waiting
 	}, 3*time.Second, 10*time.Millisecond, "restriction must reach the controlled database lock")
@@ -87,7 +88,7 @@ func TestRestrictionRejectsConcurrentEpisodeOrKeyChanges(t *testing.T) {
 					require.NoError(t, got.err)
 					require.Equal(t, "sk-keyrisk-fixture", got.key)
 				} else {
-					require.ErrorIs(t, got.err, sql.ErrNoRows)
+					require.ErrorIs(t, got.err, sql.ErrNoRows, "stale restriction must reject changed episode or key")
 					require.Empty(t, got.key)
 				}
 			case <-ctx.Done():

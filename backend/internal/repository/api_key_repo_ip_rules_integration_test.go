@@ -115,12 +115,12 @@ func TestAPIKeyUpdatePreservesConcurrentOppositeACL(t *testing.T) {
 				if clear && column == "whitelist" {
 					require.Empty(t, got.IPWhitelist)
 				} else {
-					require.Equal(t, allow, got.IPWhitelist)
+					require.Equal(t, allow, got.IPWhitelist, "concurrent whitelist must survive stale opposite ACL edit")
 				}
 				if clear && column == "blacklist" {
 					require.Empty(t, got.IPBlacklist)
 				} else {
-					require.Equal(t, deny, got.IPBlacklist)
+					require.Equal(t, deny, got.IPBlacklist, "concurrent blacklist must survive stale opposite ACL edit")
 					allowed, _ := ip.CheckIPRestrictionWithCompiledRules("203.0.113.8", ip.CompileIPRules(got.IPWhitelist), ip.CompileIPRules(got.IPBlacklist))
 					require.False(t, allowed, "concurrent deny must retain precedence")
 				}
