@@ -89,6 +89,7 @@ func (h *OpenAIOAuthReauthHandler) CompleteConnectionAuthorization(c *gin.Contex
 // Use a body rather than URL parameters so session identifiers are not copied
 // to ordinary access logs, browser history or referrers.
 func (h *OpenAIOAuthReauthHandler) ConnectionAuthorizationStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	id, ok := parseReauthAccountID(c)
 	if !ok {
 		return
@@ -105,7 +106,6 @@ func (h *OpenAIOAuthReauthHandler) ConnectionAuthorizationStatus(c *gin.Context)
 		response.ErrorFrom(c, err)
 		return
 	}
-	c.Header("Cache-Control", "no-store")
 	response.Success(c, result)
 }
 func (h *OpenAIOAuthReauthHandler) RevokeAuthConnection(c *gin.Context) {

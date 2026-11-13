@@ -3,13 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const [repoArg, outputArg] = process.argv.slice(2)
 const repo = resolve(repoArg), output = resolve(outputArg), root = join(repo, 'frontend')
 const require = createRequire(join(root, 'package.json'))
-const { createServer } = await import(pathToFileURL(require.resolve('vite')).href)
+const { createServer } = await import(pathToFileURL(join(dirname(require.resolve('vite/package.json')), 'dist/node/index.js')).href)
 const vue = (await import(pathToFileURL(require.resolve('@vitejs/plugin-vue')).href)).default
 const { chromium } = await import(pathToFileURL(process.env.SUB2API_PLAYWRIGHT_MODULE).href)
 const entry = '.bps-auth-preview.js', cacheDir = mkdtempSync(join(tmpdir(), 'bps-auth-preview-'))
