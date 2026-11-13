@@ -1,0 +1,72 @@
+name: Encrypted history 400 Beta
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai*'
+      - 'backend/internal/service/ops*'
+      - 'backend/internal/service/setting*'
+      - 'backend/internal/service/domain_constants.go'
+      - 'backend/internal/handler/openai_400_omit_history_test.go'
+      - 'backend/internal/handler/admin/setting*'
+      - 'backend/internal/handler/dto/settings.go'
+      - 'frontend/src/components/settings/EncryptedHistory400Settings.vue'
+      - 'frontend/src/components/common/__tests__/NewFeatureBadge.spec.ts'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - 'frontend/src/views/admin/SettingsView.vue'
+      - 'frontend/src/views/admin/__tests__/SettingsView.spec.ts'
+      - 'frontend/src/api/admin/settings.ts'
+      - 'frontend/src/i18n/locales/**/admin/settings.ts'
+      - '.github/scripts/encrypted-history-400-preview.mjs'
+      - '.github/workflows/encrypted-history-400.yml'
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends redis-server
+      - name: Native recovery and unchanged 409 regressions
+        working-directory: backend
+        run: go test -race -p 2 -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OpenAI400|OpenAI409|OmitOpenAIHistorical|ForwardEncryptedContentSSERetry|UpdateSettingsOpenAI400|UpdateSettingsOpenAI409)' -count=1 -timeout=5m
+  settings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - working-directory: frontend
+        run: |
+          pnpm exec vue-tsc --noEmit
+          pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
+      - name: Install screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/history400-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/history400-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Capture independent actual settings
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/history400-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/encrypted-history-400-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/history400-ui"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: encrypted-history-400-ui
+          path: ${{ runner.temp }}/history400-ui
+          if-no-files-found: error

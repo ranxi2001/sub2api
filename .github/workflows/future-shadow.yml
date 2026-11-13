@@ -97,6 +97,9 @@ jobs:
             git diff --exit-code "$BASELINE_SHA" -- 'backend/**/*.go' ':!backend/**/*_test.go'
           fi
           git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA"
+          fi
           for target in backend/internal/handler/openai_409_shadow_http_test.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_409_omit_history.go; do
             git hash-object "$target" >> "$RUNNER_TEMP/shadow-evidence/blobs.txt"
           done

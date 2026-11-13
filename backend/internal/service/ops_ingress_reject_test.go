@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +41,12 @@ func (r *ingressRejectRepoStub) ListIngressRejects(context.Context, *OpsIngressR
 func TestOpsIngressRejectAggregatorUsesGlobalBucketCapacity(t *testing.T) {
 	repo := &ingressRejectRepoStub{}
 	a := NewOpsIngressRejectAggregator(repo)
+	// This assertion measures one minute's capacity; a wall-clock rollover
+	// during insertion legitimately starts a new bucket with fewer entries.
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	a.now = func() time.Time { return now }
 	a.Start()
+	t.Cleanup(a.Stop)
 
 	// Concentrating all dimensions in one shard must not waste capacity in the others.
 	inserted := 0
