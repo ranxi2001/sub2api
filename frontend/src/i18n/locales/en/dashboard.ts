@@ -529,6 +529,7 @@ export default {
     tabs: { usage: 'Usage', errors: 'Error Requests', ranking: 'User Ranking' },
     errors: {
       peerReset: 'Upstream connection reset by peer ({protocol}). Content may be incomplete. Do not automatically retry the same request.',
+      http200StreamFailure: '200 — Stream failed after headers',
       time: 'Time', model: 'Model', endpoint: 'Endpoint', status: 'Status',
       category: 'Category', platform: 'Platform', message: 'Message',
       keyName: 'Key Name', keyDeleted: 'Deleted', allKeys: 'All keys',

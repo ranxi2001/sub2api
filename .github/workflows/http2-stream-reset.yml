@@ -24,6 +24,31 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: F1 behavioral RED through the real AIOps evidence query
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/http2-evidence"
+          target=backend/internal/repository/ai_ops.go
+          baseline=3137257829f0cc48466911aa4a249dd03f3c088f
+          restore_ai_ops() { git show "HEAD:$target" > "$target"; }
+          trap restore_ai_ops EXIT
+          git show "$baseline:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          git rev-parse HEAD "$baseline:$target" > "$RUNNER_TEMP/http2-evidence/f1-red-identity.txt"
+          set +e
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/http2-evidence/f1-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/f1-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/f1-red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure' "$RUNNER_TEMP/http2-evidence/f1-red.log"
+          grep -q 'AIOps must count one success plus the committed HTTP200 transport failure' "$RUNNER_TEMP/http2-evidence/f1-red.log"
+          restore_ai_ops
+          trap - EXIT
+          git diff --exit-code
       - name: RED real HTTP2 boundary against production
         shell: bash
         run: |
@@ -133,9 +158,13 @@ jobs:
         run: |
           set -euo pipefail
           cd backend
-          go test -tags=integration ./internal/repository -run 'TestHTTP2PeerResetPersistence|TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus|TestChannelMonitorV2.*Error' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/persistence.log"
+          go test -tags=integration ./internal/repository -run 'TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure|TestHTTP2PeerResetPersistence|TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus|TestChannelMonitorV2.*Error' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/persistence.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/persistence.log"; then exit 1; fi
           grep -q -- '--- PASS: TestHTTP2PeerResetPersistence' "$RUNNER_TEMP/http2-evidence/persistence.log"
+          grep -q -- '--- PASS: TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure' "$RUNNER_TEMP/http2-evidence/persistence.log"
+          go test -race -tags=integration ./internal/repository -run '^TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure$' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/f1-race.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/f1-race.log"; then exit 1; fi
+          grep -q -- '--- PASS: TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure' "$RUNNER_TEMP/http2-evidence/f1-race.log"
           git diff --exit-code
       - uses: actions/upload-artifact@v7
         if: always()
@@ -161,13 +190,38 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
+      - name: F2 behavioral RED through the actual UsageView status control
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/http2-ui"
+          target=frontend/src/views/user/UsageView.vue
+          baseline=3137257829f0cc48466911aa4a249dd03f3c088f
+          restore_usage_view() { git show "HEAD:$target" > "$target"; }
+          trap restore_usage_view EXIT
+          git show "$baseline:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          git rev-parse HEAD "$baseline:$target" > "$RUNNER_TEMP/http2-ui/f2-red-identity.txt"
+          set +e
+          pnpm --dir frontend exec vitest run src/views/user/__tests__/UsageView.spec.ts > "$RUNNER_TEMP/http2-ui/f2-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-ui/f2-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'No test files found|no tests|[0-9]+ skipped|Failed to resolve|Unhandled Errors|Unhandled Rejection|SyntaxError|ReferenceError|TypeError|Transform failed|panic|DATA RACE' "$RUNNER_TEMP/http2-ui/f2-red.log"; then exit 1; fi
+          grep -q 'HTTP200 must be selectable from the real error status control' "$RUNNER_TEMP/http2-ui/f2-red.log"
+          grep -q '1 failed' "$RUNNER_TEMP/http2-ui/f2-red.log"
+          restore_usage_view
+          trap - EXIT
+          git diff --exit-code
       - name: Real component regressions and production frontend build
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/http2-ui"
           git rev-parse HEAD > "$RUNNER_TEMP/http2-ui/head.txt"
-          pnpm --dir frontend exec vitest run src/components/user/__tests__/UserErrorTransport.spec.ts src/components/user/__tests__/UserErrorDetailModal.spec.ts 2>&1 | tee "$RUNNER_TEMP/http2-ui/component.log"
+          pnpm --dir frontend exec vitest run src/views/user/__tests__/UsageView.spec.ts src/components/user/__tests__/UserErrorTransport.spec.ts src/components/user/__tests__/UserErrorDetailModal.spec.ts 2>&1 | tee "$RUNNER_TEMP/http2-ui/component.log"
+          if grep -Eiq 'No test files found|Unhandled Errors|Unhandled Rejection|Transform failed|panic|DATA RACE' "$RUNNER_TEMP/http2-ui/component.log"; then exit 1; fi
           pnpm --dir frontend run build 2>&1 | tee "$RUNNER_TEMP/http2-ui/build.log"
       - name: Isolated screenshot browser
         run: |
@@ -177,6 +231,10 @@ jobs:
         env:
           SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/http2-browser/node_modules/playwright/index.mjs
         run: node .github/http2-stream-reset-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/http2-ui"
+      - name: Actual error-tab category and HTTP200 filter before and after
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/http2-browser/node_modules/playwright/index.mjs
+        run: node .github/http2-user-filter-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/http2-ui/filters"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

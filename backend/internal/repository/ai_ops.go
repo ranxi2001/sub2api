@@ -200,7 +200,9 @@ func readAIOpsAccounts(ctx context.Context, tx *sql.Tx, ids []int64) (map[int64]
 // dedup key prevents retries/log duplication becoming fictitious sample size;
 // recovered failover rows, business rejections, 429/529 and client cancels are
 // deliberately excluded from automatic fault evidence.
-var aiOpsEvidenceSQL = `WITH successes AS (
+// A final failure wins over a conflicting completed usage trace for the same
+// request: partial billable output must not add a second, successful sample.
+var aiOpsEvidenceSQL = `WITH success_candidates AS (
  SELECT u.request_id,u.model,COALESCE(u.reasoning_effort,'') AS effort,
  t.detail->'protocol_decision'->>'upstream' AS protocol,
  CASE WHEN u.input_tokens+u.cache_read_tokens<4000 THEN 'small' WHEN u.input_tokens+u.cache_read_tokens<32000 THEN 'medium' ELSE 'large' END AS input_bucket,
@@ -222,10 +224,13 @@ var aiOpsEvidenceSQL = `WITH successes AS (
  request_id,model FROM ops_error_logs o WHERE account_id=$1 AND created_at>=$2 AND created_at<$3
  AND NOT is_count_tokens AND NOT ` + opsBusinessLimitedSQL("o") + ` AND ` + opsEffectiveOwnerSQL("o") + `='provider'
  AND NOT ` + opsExplicitRequestRejectionSQL("o", "400, 404, 413, 422, 500, 502, 503", append(append([]string{}, service.OpsContextLimitRejectionNeedles...), service.OpsModelCapabilityRejectionNeedles...)) + `
- AND status_code>=400 AND error_type<>'client_canceled'
+ AND (status_code>=400 OR error_type='transport_error') AND error_type<>'client_canceled'
  AND COALESCE(NULLIF(upstream_status_code,0),status_code) NOT IN (429,529)
- AND (COALESCE(NULLIF(upstream_status_code,0),status_code)>=500 OR error_phase IN ('connect','transport'))
+ AND (COALESCE(NULLIF(upstream_status_code,0),status_code)>=500 OR error_phase IN ('connect','transport') OR error_type='transport_error')
  ORDER BY COALESCE(NULLIF(request_id,''),'error:'||id::text),created_at DESC,id DESC
+), successes AS (
+ SELECT s.* FROM success_candidates s
+ WHERE NOT EXISTS (SELECT 1 FROM failures f WHERE f.request_id<>'' AND f.request_id=s.request_id)
 )
  SELECT (SELECT COUNT(*) FROM successes),(SELECT COUNT(*) FROM failures),
  (SELECT COUNT(*) FROM successes WHERE model<>'' AND effort<>'' AND protocol IN ('http','ws')),
