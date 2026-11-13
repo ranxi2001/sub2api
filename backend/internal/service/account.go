@@ -163,6 +163,16 @@ const (
 	TempUnschedScopeModel   = "model"
 )
 
+// 临时不可调度规则在 accounts.credentials.temp_unschedulable_rules 中的流触发时机。
+// 缺省（空字符串）保持历史行为，见 TempUnschedulableRule.StreamTiming。
+const (
+	// TempUnschedStreamBefore 只匹配流开始前的 HTTP 错误，不处理流已经开始后的失败。
+	TempUnschedStreamBefore = "before_stream"
+	// TempUnschedStreamAfter 同时匹配流开始前的 HTTP 错误和流开始后的失败
+	// （包括 OpenAI 中途 502 / 通用 upstream_error，且规则 error_code 为 502 时）。
+	TempUnschedStreamAfter = "after_stream"
+)
+
 type TempUnschedulableRule struct {
 	ErrorCode       int      `json:"error_code"`
 	Keywords        []string `json:"keywords"`
@@ -171,6 +181,34 @@ type TempUnschedulableRule struct {
 	// Scope 决定命中后的隔离粒度：account 暂停整个账号，model 只冷却本次请求的模型。
 	// 为空时模型已知且非 401 走模型级，否则账号级。
 	Scope string `json:"scope,omitempty"`
+	// StreamTiming 是 credentials JSON 键 stream_timing。
+	//   "" / 省略：兼容旧规则。流开始前的 HTTP 错误可匹配；流中途仅 401、凭据类 403、
+	//     429、容量降载 503、529 可匹配。中途 502 / 通用 upstream_error 不匹配。
+	//   "before_stream"：仅流开始前的 HTTP 错误。
+	//   "after_stream"：流开始前和流开始后都可以，包括中途 502。
+	StreamTiming string `json:"stream_timing,omitempty"`
+	// TriggerCount 是 credentials JSON 键 trigger_count：错误计数窗口内需要多少次匹配才冷却。
+	// 省略或小于 1 按 1 处理（第一次匹配即触发，与旧行为一致）。
+	TriggerCount int `json:"trigger_count,omitempty"`
+	// TriggerWindow 是 credentials JSON 键 trigger_window_minutes：从第一次匹配起累计次数的时间窗口。
+	// 与 duration_minutes（冷却触发后暂停调度多久）相互独立。省略或小于 1 按 1 分钟处理，不借用 duration_minutes。
+	TriggerWindow int `json:"trigger_window_minutes,omitempty"`
+}
+
+// NormalizedTriggerCount 返回至少为 1 的触发次数。
+func (r TempUnschedulableRule) NormalizedTriggerCount() int {
+	if r.TriggerCount < 1 {
+		return 1
+	}
+	return r.TriggerCount
+}
+
+// TriggerWindowMinutes 返回错误计数窗口（分钟），至少 1 分钟。
+func (r TempUnschedulableRule) TriggerWindowMinutes() int {
+	if r.TriggerWindow < 1 {
+		return 1
+	}
+	return r.TriggerWindow
 }
 
 func (a *Account) IsActive() bool {
@@ -538,6 +576,9 @@ func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {
 			DurationMinutes: parseTempUnschedInt(entry["duration_minutes"]),
 			Description:     parseTempUnschedString(entry["description"]),
 			Scope:           normalizeTempUnschedScope(entry["scope"]),
+			StreamTiming:    normalizeTempUnschedStreamTiming(entry["stream_timing"]),
+			TriggerCount:    parseTempUnschedInt(entry["trigger_count"]),
+			TriggerWindow:   parseTempUnschedInt(entry["trigger_window_minutes"]),
 		}
 
 		if rule.ErrorCode <= 0 || rule.DurationMinutes <= 0 || len(rule.Keywords) == 0 {
@@ -557,6 +598,19 @@ func normalizeTempUnschedScope(raw any) string {
 		return TempUnschedScopeAccount
 	case TempUnschedScopeModel:
 		return TempUnschedScopeModel
+	default:
+		return ""
+	}
+}
+
+// normalizeTempUnschedStreamTiming 只认 before_stream / after_stream。
+// 缺省和无法识别的值都视为旧规则（空字符串），以保留历史中途匹配行为。
+func normalizeTempUnschedStreamTiming(raw any) string {
+	switch strings.ToLower(strings.TrimSpace(parseTempUnschedString(raw))) {
+	case TempUnschedStreamBefore:
+		return TempUnschedStreamBefore
+	case TempUnschedStreamAfter:
+		return TempUnschedStreamAfter
 	default:
 		return ""
 	}

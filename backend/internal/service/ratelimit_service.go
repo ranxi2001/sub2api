@@ -20,21 +20,24 @@ import (
 
 // RateLimitService 处理限流和过载状态管理
 type RateLimitService struct {
-	accountOps            *AccountOpsService
-	openAITOTP429Rotator  openAITOTP429Rotator
-	qualityTrigger        *quality5xxTrigger
-	accountRepo           AccountRepository
-	usageRepo             UsageLogRepository
-	cfg                   *config.Config
-	geminiQuotaService    *GeminiQuotaService
-	tempUnschedCache      TempUnschedCache
-	openAIAPIKeyHealth    OpenAIAPIKeyHealthCache
-	timeoutCounterCache   TimeoutCounterCache
-	openAI403CounterCache OpenAI403CounterCache
-	settingService        *SettingService
-	tokenCacheInvalidator TokenCacheInvalidator
-	runtimeBlocker        AccountRuntimeBlocker
-	openAIIPUnauthorized  openAIIPUnauthorizedStreak
+	accountOps                *AccountOpsService
+	openAITOTP429Rotator      openAITOTP429Rotator
+	qualityTrigger            *quality5xxTrigger
+	accountRepo               AccountRepository
+	usageRepo                 UsageLogRepository
+	cfg                       *config.Config
+	geminiQuotaService        *GeminiQuotaService
+	tempUnschedCache          TempUnschedCache
+	tempUnschedTriggerCounter TempUnschedTriggerCounter
+	memoryTriggerOnce         sync.Once
+	memoryTrigger             TempUnschedTriggerCounter
+	openAIAPIKeyHealth        OpenAIAPIKeyHealthCache
+	timeoutCounterCache       TimeoutCounterCache
+	openAI403CounterCache     OpenAI403CounterCache
+	settingService            *SettingService
+	tokenCacheInvalidator     TokenCacheInvalidator
+	runtimeBlocker            AccountRuntimeBlocker
+	openAIIPUnauthorized      openAIIPUnauthorizedStreak
 	// ollamaCloudUsageProbe is the optional Ollama Cloud usage probe scheduler
 	// injected via SetOllamaCloudUsageProbeScheduler. See
 	// ratelimit_service_ollama_429.go for how real-Ollama 429s schedule an async
@@ -116,6 +119,28 @@ func NewRateLimitService(accountRepo AccountRepository, usageRepo UsageLogReposi
 // SetTimeoutCounterCache 设置超时计数器缓存（可选依赖）
 func (s *RateLimitService) SetTimeoutCounterCache(cache TimeoutCounterCache) {
 	s.timeoutCounterCache = cache
+}
+
+// SetTempUnschedTriggerCounter 设置临时不可调度触发计数器。
+// 未设置时使用进程内固定窗口计数，测试可注入可控时钟实现。
+func (s *RateLimitService) SetTempUnschedTriggerCounter(counter TempUnschedTriggerCounter) {
+	if s == nil {
+		return
+	}
+	s.tempUnschedTriggerCounter = counter
+}
+
+func (s *RateLimitService) activeTempUnschedTriggerCounter() TempUnschedTriggerCounter {
+	if s != nil && s.tempUnschedTriggerCounter != nil {
+		return s.tempUnschedTriggerCounter
+	}
+	if s == nil {
+		return newMemoryTempUnschedTriggerCounter(time.Now)
+	}
+	s.memoryTriggerOnce.Do(func() {
+		s.memoryTrigger = newMemoryTempUnschedTriggerCounter(time.Now)
+	})
+	return s.memoryTrigger
 }
 
 func (s *RateLimitService) SetOpenAIAPIKeyHealthCache(cache OpenAIAPIKeyHealthCache) {
@@ -2875,6 +2900,70 @@ func tempUnschedulableModel(ctx context.Context, requestedModel []string) string
 	return strings.TrimSpace(model)
 }
 
+// tempUnschedStreamPhase 区分流开始前的 HTTP 错误和流已经开始后的失败。
+type tempUnschedStreamPhase int
+
+const (
+	// tempUnschedPhasePreStream 是缺省阶段：所有规则都可匹配。
+	tempUnschedPhasePreStream tempUnschedStreamPhase = iota
+	// tempUnschedPhaseMidStreamLegacy 是原本就会产生账号副作用的流中途状态
+	// （401、凭据类 403、429、容量降载 503、529）。省略 stream_timing 的旧规则
+	// 和 after_stream 可以匹配；before_stream 不可以。
+	tempUnschedPhaseMidStreamLegacy
+	// tempUnschedPhaseMidStreamOptIn 只允许显式 after_stream 的规则。
+	// 用于中途 502 / 通用 upstream_error，以及原本直接跳过副作用的中途失败。
+	tempUnschedPhaseMidStreamOptIn
+)
+
+type tempUnschedStreamPhaseContextKey struct{}
+
+func withTempUnschedStreamPhase(ctx context.Context, phase tempUnschedStreamPhase) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, tempUnschedStreamPhaseContextKey{}, phase)
+}
+
+func tempUnschedStreamPhaseFrom(ctx context.Context) tempUnschedStreamPhase {
+	if ctx == nil {
+		return tempUnschedPhasePreStream
+	}
+	phase, _ := ctx.Value(tempUnschedStreamPhaseContextKey{}).(tempUnschedStreamPhase)
+	return phase
+}
+
+func ruleAllowsTempUnschedPhase(rule TempUnschedulableRule, phase tempUnschedStreamPhase) bool {
+	switch phase {
+	case tempUnschedPhaseMidStreamLegacy:
+		return rule.StreamTiming != TempUnschedStreamBefore
+	case tempUnschedPhaseMidStreamOptIn:
+		return rule.StreamTiming == TempUnschedStreamAfter
+	default:
+		return true
+	}
+}
+
+func filterTempUnschedMatchesForPhase(matches []tempUnschedulableRuleMatch, phase tempUnschedStreamPhase) []tempUnschedulableRuleMatch {
+	if phase == tempUnschedPhasePreStream || len(matches) == 0 {
+		return matches
+	}
+	filtered := make([]tempUnschedulableRuleMatch, 0, len(matches))
+	for _, match := range matches {
+		if ruleAllowsTempUnschedPhase(match.rule, phase) {
+			filtered = append(filtered, match)
+		}
+	}
+	return filtered
+}
+
+type tempUnschedAttempt int
+
+const (
+	tempUnschedNoMatch tempUnschedAttempt = iota
+	tempUnschedPending
+	tempUnschedTriggered
+)
+
 type tempUnschedulableRuleMatch struct {
 	rule           TempUnschedulableRule
 	ruleIndex      int
@@ -2909,43 +2998,91 @@ func matchTempUnschedulableRules(account *Account, statusCode int, responseBody 
 }
 
 func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) bool {
-	if account == nil {
-		return false
+	return s.attemptTempUnschedulable(ctx, account, statusCode, responseBody, requestedModel...) == tempUnschedTriggered
+}
+
+func (s *RateLimitService) attemptTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) tempUnschedAttempt {
+	if account == nil || s == nil {
+		return tempUnschedNoMatch
 	}
 	if !account.IsTempUnschedulableEnabled() {
-		return false
+		return tempUnschedNoMatch
 	}
-	matches := matchTempUnschedulableRules(account, statusCode, responseBody)
+	matches := filterTempUnschedMatchesForPhase(matchTempUnschedulableRules(account, statusCode, responseBody), tempUnschedStreamPhaseFrom(ctx))
 	if len(matches) == 0 {
-		return false
+		return tempUnschedNoMatch
 	}
 	modelKey := tempUnschedulableModel(ctx, requestedModel)
-	// 401 首次命中可临时不可调度（给 token 刷新窗口）；
-	// 若历史上已因 401 进入过临时不可调度，则本次应升级为 error（返回 false 交由默认错误逻辑处理）。
-	// Antigravity 跳过：其 401 由 applyErrorPolicy 的 temp_unschedulable_rules 自行控制，无需升级逻辑。
+	// 401 首次达到触发次数时可临时不可调度（给 token 刷新窗口）；
+	// 若历史上已因 401 进入过临时不可调度，则本次应升级为 error（返回未匹配，交由默认错误逻辑处理）。
+	// 次数未达到阈值时不升级。Antigravity 跳过：其 401 由规则自行控制。
 	// 模型级命中只冷却模型、不写账号级状态，不参与升级。
+	escalateFirst := false
 	if statusCode == http.StatusUnauthorized && account.Platform != PlatformAntigravity &&
 		!tempUnschedHitUsesModelScope(account, matches[0].rule, modelKey, statusCode, responseBody) {
 		reason := account.TempUnschedulableReason
-		// 缓存可能没有 reason，从 DB 回退读取
-		if reason == "" {
+		if reason == "" && s.accountRepo != nil {
 			if dbAcc, err := s.accountRepo.GetByID(ctx, account.ID); err == nil && dbAcc != nil {
 				reason = dbAcc.TempUnschedulableReason
 			}
 		}
 		if wasTempUnschedByStatusCode(reason, statusCode) {
+			escalateFirst = true
+		}
+	}
+	sawPending := false
+	for i, match := range matches {
+		modelScoped := tempUnschedHitUsesModelScope(account, match.rule, modelKey, statusCode, responseBody)
+		reached, count := s.observeTempUnschedTrigger(ctx, account, match.rule, match.ruleIndex, modelScoped, modelKey)
+		if !reached {
+			sawPending = true
+			continue
+		}
+		if i == 0 && escalateFirst {
 			slog.Info("401_escalated_to_error", "account_id", account.ID,
 				"reason", "previous temp-unschedulable was also 401")
-			return false
+			return tempUnschedNoMatch
+		}
+		if s.triggerTempUnschedulable(ctx, account, match.rule, match.ruleIndex, statusCode, match.matchedKeyword, responseBody, count, modelKey) {
+			return tempUnschedTriggered
 		}
 	}
-	for _, match := range matches {
-		if s.triggerTempUnschedulable(ctx, account, match.rule, match.ruleIndex, statusCode, match.matchedKeyword, responseBody, modelKey) {
-			return true
-		}
+	if sawPending {
+		return tempUnschedPending
 	}
+	return tempUnschedNoMatch
+}
 
-	return false
+func (s *RateLimitService) observeTempUnschedTrigger(ctx context.Context, account *Account, rule TempUnschedulableRule, ruleIndex int, modelScoped bool, modelKey string) (bool, int64) {
+	threshold := rule.NormalizedTriggerCount()
+	if threshold <= 1 {
+		return true, 1
+	}
+	window := rule.TriggerWindowMinutes()
+	key := tempUnschedTriggerCounterKey(account.ID, ruleIndex, modelScoped, modelKey)
+	count, err := s.activeTempUnschedTriggerCounter().Increment(ctx, key, window)
+	if err != nil {
+		slog.Warn("temp_unsched_trigger_count_failed", "account_id", account.ID, "rule_index", ruleIndex, "error", err)
+		return false, 0
+	}
+	if count < int64(threshold) {
+		slog.Info("temp_unsched_trigger_pending",
+			"account_id", account.ID,
+			"rule_index", ruleIndex,
+			"count", count,
+			"threshold", threshold,
+			"window_minutes", window,
+		)
+		return false, count
+	}
+	return true, count
+}
+
+func (s *RateLimitService) resetTempUnschedTriggerCount(ctx context.Context, accountID int64, ruleIndex int, modelScoped bool, modelKey string) {
+	key := tempUnschedTriggerCounterKey(accountID, ruleIndex, modelScoped, modelKey)
+	if err := s.activeTempUnschedTriggerCounter().Reset(ctx, key); err != nil {
+		slog.Warn("temp_unsched_trigger_count_reset_failed", "account_id", accountID, "rule_index", ruleIndex, "error", err)
+	}
 }
 
 func wasTempUnschedByStatusCode(reason string, statusCode int) bool {
@@ -2980,7 +3117,7 @@ func matchTempUnschedKeyword(bodyLower string, keywords []string) string {
 	return ""
 }
 
-func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account *Account, rule TempUnschedulableRule, ruleIndex int, statusCode int, matchedKeyword string, responseBody []byte, requestedModel ...string) bool {
+func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account *Account, rule TempUnschedulableRule, ruleIndex int, statusCode int, matchedKeyword string, responseBody []byte, triggerCount int64, requestedModel ...string) bool {
 	if account == nil {
 		return false
 	}
@@ -2992,6 +3129,7 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 	until := now.Add(time.Duration(rule.DurationMinutes) * time.Minute)
 	modelKey := firstRequestedModel(requestedModel)
 	modelScoped := tempUnschedHitUsesModelScope(account, rule, modelKey, statusCode, responseBody)
+	threshold := rule.NormalizedTriggerCount()
 
 	state := &TempUnschedState{
 		UntilUnix:       until.Unix(),
@@ -3001,6 +3139,11 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 		RuleIndex:       ruleIndex,
 		ErrorMessage:    truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes),
 		Scope:           TempUnschedScopeAccount,
+	}
+	if threshold > 1 {
+		state.TriggerCount = triggerCount
+		state.TriggerThreshold = threshold
+		state.TriggerWindowMinutes = rule.TriggerWindowMinutes()
 	}
 	if modelScoped {
 		state.Scope = TempUnschedScopeModel
@@ -3024,7 +3167,10 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 			// failed; never widen a model-scoped failure into an account-wide block.
 			return true
 		}
-		slog.Info("account_model_temp_unschedulable", "account_id", account.ID, "model", modelKey, "until", until, "rule_index", ruleIndex, "rule_scope", rule.Scope, "status_code", statusCode)
+		if threshold > 1 {
+			s.resetTempUnschedTriggerCount(ctx, account.ID, ruleIndex, true, modelKey)
+		}
+		slog.Info("account_model_temp_unschedulable", "account_id", account.ID, "model", modelKey, "until", until, "rule_index", ruleIndex, "rule_scope", rule.Scope, "status_code", statusCode, "trigger_count", triggerCount, "trigger_threshold", threshold)
 		return true
 	}
 
@@ -3032,6 +3178,9 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
 		slog.Warn("temp_unsched_set_failed", "account_id", account.ID, "error", err)
 		return false
+	}
+	if threshold > 1 {
+		s.resetTempUnschedTriggerCount(ctx, account.ID, ruleIndex, false, modelKey)
 	}
 
 	if s.tempUnschedCache != nil {

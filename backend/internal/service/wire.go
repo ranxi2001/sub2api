@@ -620,10 +620,13 @@ func ProvideRateLimitService(
 	tokenCacheInvalidator TokenCacheInvalidator,
 	ollamaCloudUsage *OllamaCloudUsageService,
 	accountOps *AccountOpsService,
+	tempUnschedTriggerCounter TempUnschedTriggerCounter,
 	rdb *redis.Client,
 ) *RateLimitService {
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
 	svc.accountOps = accountOps
+	// Redis 计数让多实例共享同一条规则的错误累计；rdb 为空时构造器返回 nil，服务回退到进程内窗口。
+	svc.SetTempUnschedTriggerCounter(tempUnschedTriggerCounter)
 	if rdb != nil {
 		svc.qualityTrigger = &quality5xxTrigger{queue: qualityqueue.NewRedis(rdb)}
 	}
