@@ -3,6 +3,10 @@ on:
   pull_request:
     paths:
       - 'backend/internal/service/openai_409_omit_history*'
+      - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_gateway_forward.go'
+      - 'backend/internal/service/openai_gateway_request_body.go'
+      - 'backend/internal/service/openai_responses_item_id.go'
       - 'backend/internal/handler/openai_409_omit_history*'
       - 'frontend/src/components/settings/EncryptedHistory409Settings.vue'
       - '.github/scripts/encrypted-history-409-preview.mjs'
@@ -34,11 +38,32 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OmitOpenAIHistorical|OpenAI409|UpdateSettingsOpenAI409)' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/omit-history-protocol.log"
+      - name: Same HTTP regression against pinned pre-fix omission code must fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=11f250894eab310cbd4508946c44c9e2a3a2eb48
+          target=backend/internal/service/openai_409_omit_history.go
+          cp "$target" "$RUNNER_TEMP/omit-history-candidate.go"
+          trap 'cp "$RUNNER_TEMP/omit-history-candidate.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git show "$baseline:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          set +e
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestOpenAI409ReplayMetadataHTTP$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/omit-history-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/omit-history-red.log"
+          test "$result" -ne 0
+          grep -q -- '--- FAIL: TestOpenAI409ReplayMetadataHTTP' "$RUNNER_TEMP/omit-history-red.log"
+          grep -q 'encrypted_agent_recovery_wire_changed' "$RUNNER_TEMP/omit-history-red.log"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: encrypted-history-409-protocol-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/omit-history-protocol.log
+          path: |
+            ${{ runner.temp }}/omit-history-protocol.log
+            ${{ runner.temp }}/omit-history-red.log
   screenshots:
     runs-on: ubuntu-latest
     timeout-minutes: 15

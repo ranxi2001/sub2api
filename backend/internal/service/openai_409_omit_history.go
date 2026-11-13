@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const openAIHistoricalCiphertextOmitted = "[Historical encrypted content omitted by the gateway. Its contents are unavailable; do not infer missing instructions or results.]"
@@ -42,6 +43,14 @@ func (s *OpenAIGatewayService) TryOmitOpenAI409History(ctx context.Context, c *g
 	}
 	clean, changed := omitOpenAIHistoricalCiphertext(body)
 	if !changed || ctx.Err() != nil {
+		return ctx, body, false
+	}
+	// Freeze the same narrowly normalized replay metadata that native Responses
+	// will send. Do this before recording the digest, never after arbitrary
+	// forwarder transformations. Readable content and call relationships stay
+	// covered by the original exact-input gate.
+	clean, err := normalizeOpenAI409ReplayMetadata(clean)
+	if err != nil {
 		return ctx, body, false
 	}
 	next := s.WithOpenAIAgentMessageRecovery(ctx, c, clean, session, model)
@@ -160,4 +169,60 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 	}
 	clean, err := json.Marshal(source)
 	return clean, err == nil
+}
+
+// normalizeOpenAI409ReplayMetadata only removes output-only replay metadata.
+// It must not use the general reasoning normalizers: those may delete entire
+// reasoning items or visible content. Such changes still fail the send gate.
+func normalizeOpenAI409ReplayMetadata(raw []byte) ([]byte, error) {
+	clean, _, err := sanitizeOpenAIResponsesInputItemIDs(raw)
+	if err != nil {
+		return nil, err
+	}
+	var source map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(clean))
+	decoder.UseNumber()
+	if err := decoder.Decode(&source); err != nil {
+		return nil, err
+	}
+	input, _ := source["input"].([]any)
+	storeFalse := gjson.GetBytes(clean, "store").Type == gjson.False
+	changed := false
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "reasoning" {
+			continue
+		}
+		if _, exists := item["status"]; exists {
+			delete(item, "status")
+			changed = true
+		}
+		if !storeFalse {
+			continue
+		}
+		encrypted, _ := item["encrypted_content"].(string)
+		if strings.TrimSpace(encrypted) == "" {
+			// Preserve readable reasoning even if the general store=false replay
+			// path cannot transport it. Never bless its removal as normalization.
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(firstNonEmptyString(item["id"])), "rs_") {
+			delete(item, "id")
+			changed = true
+		}
+		if summary, exists := item["summary"]; !exists || summary == nil {
+			item["summary"] = []any{}
+			changed = true
+		}
+	}
+	if !changed {
+		return clean, nil
+	}
+	// Replace only input: top-level model mappings, flags and number spellings
+	// remain the handler's original values. UseNumber keeps nested integers exact.
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	return sjson.SetRawBytes(clean, "input", encoded)
 }
