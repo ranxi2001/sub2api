@@ -658,6 +658,7 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters UsageLogFilters) (*UsageStats, error) {
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
+	conditions, args = appendUsageLogPlatformCondition(conditions, args, filters.Platform, "")
 
 	if filters.UserID > 0 {
 		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
