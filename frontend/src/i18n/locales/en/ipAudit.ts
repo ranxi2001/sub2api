@@ -40,7 +40,7 @@ export default {
     "ignore": "Ignore",
     "resolve": "Resolve",
     "reopen": "Reopen",
-    "confirm": "Queue notices subject to the event limit, customer acknowledgement, and per-user 24-hour deduplication. Each recipient sees only their own valid keys.",
+    "confirm": "Confirm to queue risk reminder emails to the affected users’ account email addresses, subject to the event limit, customer acknowledgement, and per-user 24-hour deduplication. Each recipient sees only their own valid keys.",
     "queued": "Notice queued or coalesced. Check delivery status.",
     "saved": "Saved",
     "error": "Operation failed. Refresh and retry.",
