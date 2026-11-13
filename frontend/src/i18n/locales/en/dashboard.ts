@@ -541,6 +541,9 @@ export default {
         upstream: 'Upstream error', internal: 'Platform error', other: 'Other', cyber: 'Cyber policy',
       },
       detail: {
+        clientHttpStatus: 'Actual client HTTP status',
+        streamFailedAfterHeaders: 'The HTTP headers were already sent. The stream then failed; HTTP 200 does not mean generation completed.',
+        gatewayErrorBody: 'Gateway-generated error details',
         title: 'Error Request Detail',
         responseBody: 'Response Body',
         upstreamStatus: 'Upstream Status',

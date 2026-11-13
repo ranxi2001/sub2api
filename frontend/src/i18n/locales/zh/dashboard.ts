@@ -546,6 +546,9 @@ export default {
         upstream: '上游错误', internal: '平台错误', other: '其他', cyber: '安全策略',
       },
       detail: {
+        clientHttpStatus: '客户端实际 HTTP 状态码',
+        streamFailedAfterHeaders: 'HTTP 响应头已发送，随后流式响应失败；HTTP 200 不表示生成已完成。',
+        gatewayErrorBody: '网关生成的错误详情',
         title: '错误请求详情',
         responseBody: '上游响应内容',
         upstreamStatus: '上游状态码',

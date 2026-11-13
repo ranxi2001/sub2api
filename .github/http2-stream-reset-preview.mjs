@@ -65,8 +65,8 @@ await window.preview.setProps({show:true});
       await page.getByText('example-model', { exact: true }).waitFor()
       const dialog = page.getByRole('dialog'), text = await dialog.innerText()
       if (!before) {
-        for (const expected of [locale === 'en' ? 'Do not automatically retry' : '请勿自动重试', 'HTTP/2 INTERNAL_ERROR', '200']) if (!text.includes(expected)) throw Error('Missing ' + expected)
-        for (const forbidden of ['502', 'stream ID', 'usage.errors.']) if (text.includes(forbidden)) throw Error('Unexpected ' + forbidden)
+        for (const expected of [locale === 'en' ? 'Do not automatically retry' : '请勿自动重试', locale === 'en' ? 'Actual client HTTP status' : '客户端实际 HTTP 状态码', locale === 'en' ? 'HTTP 200 does not mean generation completed' : 'HTTP 200 不表示生成已完成', locale === 'en' ? 'Gateway-generated error details' : '网关生成的错误详情', 'HTTP/2 INTERNAL_ERROR', '200']) if (!text.includes(expected)) throw Error('Missing ' + expected)
+        for (const forbidden of ['502', 'stream ID', 'usage.errors.', '上游响应内容']) if (text.includes(forbidden)) throw Error('Unexpected ' + forbidden)
       }
       const name = `${state}-${locale}.png`
       await dialog.screenshot({ path: join(output, name) })

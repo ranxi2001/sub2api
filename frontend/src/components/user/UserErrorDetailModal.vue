@@ -33,9 +33,12 @@
         </div>
         <!-- Status Code -->
         <div>
-          <span class="font-medium text-gray-500 dark:text-dark-400">{{ t('usage.errors.status') }}</span>
+          <span class="font-medium text-gray-500 dark:text-dark-400">{{ t(detail.category === 'transport_error' ? 'usage.errors.detail.clientHttpStatus' : 'usage.errors.status') }}</span>
           <p class="mt-0.5">
             <span class="badge" :class="statusClass(detail.status_code)">{{ detail.status_code || '-' }}</span>
+          </p>
+          <p v-if="detail.category === 'transport_error' && detail.status_code >= 200 && detail.status_code < 300" class="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            {{ t('usage.errors.detail.streamFailedAfterHeaders') }}
           </p>
         </div>
         <!-- Category -->
@@ -63,7 +66,7 @@
 
       <!-- Error Body -->
       <div v-if="detail.error_body">
-        <span class="font-medium text-gray-500 dark:text-dark-400">{{ t('usage.errors.detail.responseBody') }}</span>
+        <span class="font-medium text-gray-500 dark:text-dark-400">{{ t(detail.category === 'transport_error' ? 'usage.errors.detail.gatewayErrorBody' : 'usage.errors.detail.responseBody') }}</span>
         <pre class="mt-1 overflow-auto max-h-[40vh] whitespace-pre-wrap break-all rounded-lg bg-gray-50 dark:bg-dark-900 border border-gray-200 dark:border-dark-700 p-3 text-xs text-gray-800 dark:text-dark-200">{{ detail.error_body }}</pre>
       </div>
     </div>
