@@ -3,6 +3,7 @@ package keyrisk
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -37,7 +38,11 @@ func TestRestrictionRejectsConcurrentEpisodeOrKeyChanges(t *testing.T) {
 			ev := events[0]
 			blocker, err := s.DB.BeginTx(ctx, nil)
 			require.NoError(t, err)
-			defer blocker.Rollback()
+			defer func() {
+				if err := blocker.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+					t.Errorf("rollback competing writer: %v", err)
+				}
+			}()
 			var pid int
 			require.NoError(t, blocker.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid))
 			// Hold both rows first, avoiding dependence on the join's lock order.

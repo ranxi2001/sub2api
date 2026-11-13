@@ -105,7 +105,10 @@ func TestKeyRiskRestrictionFailureDoesNotInvalidateCache(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			t.Cleanup(func() {
+				mock.ExpectClose()
+				require.NoError(t, db.Close())
+			})
 			updater := &keyRiskKeyUpdater{}
 			h := &SettingHandler{keyRisk: &keyrisk.Service{DB: db}, keyRiskKeys: updater}
 			mock.ExpectBegin()
