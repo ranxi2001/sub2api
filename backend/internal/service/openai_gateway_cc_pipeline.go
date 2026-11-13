@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -278,7 +279,9 @@ type ccStreamScanState struct {
 	FirstTokenMs *int
 	// SawDone 表示上游发出了 [DONE] 哨兵。
 	SawDone bool
-	// Err 为 scanner 读错误（客户端 context 取消不属于此类，会原样带出）。
+	// SemanticFailure is authoritative only after valid JSON and an SSE delimiter.
+	SemanticFailure []byte
+	// Err 为上游语义失败或 scanner 读错误（客户端 context 取消会原样带出）。
 	// 非 nil 时调用方必须跳过 finalize 并返回 usage-incomplete 错误，避免
 	// 把上游截断伪装成正常收尾。
 	Err error
@@ -298,10 +301,41 @@ func (s *OpenAIGatewayService) scanCCStream(
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
 	var st ccStreamScanState
+	var errorData []string
+	stagingError := false
+	errorBytes := 0
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
+		if eventType, ok := extractOpenAISSEEventLine(line); ok && eventType == "error" {
+			stagingError = true
+		}
+		if payload, ok := extractOpenAISSEDataLine(line); ok && (gjson.Get(payload, "error").IsObject() || gjson.Get(payload, "type").String() == "error") {
+			stagingError = true
+		}
+		if stagingError {
+			errorBytes += len(line)
+			if errorBytes > openAIFirstOutputStageMaxBytes {
+				st.Err = errors.New("upstream error event exceeds size limit")
+				return st
+			}
+			if payload, ok := extractOpenAISSEDataLine(line); ok {
+				errorData = append(errorData, payload)
+			}
+			if line != "" {
+				continue
+			}
+			payload := strings.Join(errorData, "\n")
+			if gjson.Valid(payload) && gjson.Get(payload, "error").IsObject() {
+				st.SemanticFailure = []byte(payload)
+				st.Err = errors.New("upstream semantic stream failure")
+				return st
+			}
+			// An incomplete or invalid error cannot hide a subsequent reset.
+			errorData, stagingError, errorBytes = nil, false, 0
+			continue
+		}
 		payload, ok := extractOpenAISSEDataLine(line)
 		if !ok {
 			continue

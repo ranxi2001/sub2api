@@ -558,7 +558,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	return resultWithUsage(), nil
 }
 
-// Anthropic error events are terminal semantic failures. The conversion state
+// Complete upstream error events are terminal semantic failures. The conversion state
 // machines do not consume them, so stop before their successful finalizers.
 func writeNativeAnthropicSemanticFailure(c *gin.Context, payload []byte, model string) error {
 	message := sanitizeUpstreamErrorMessage(extractOpenAISSEErrorMessage(payload))
@@ -573,8 +573,12 @@ func writeNativeAnthropicSemanticFailure(c *gin.Context, payload []byte, model s
 	if code == "" {
 		code = errType
 	}
-	status := openAIStreamFailureStatus(payload, message)
-	safeBody, _ := json.Marshal(gin.H{"error": gin.H{"type": errType, "code": code, "message": message}})
+	status := openAIStreamFailedEventSemanticStatus(payload, message)
+	body := gin.H{"error": gin.H{"type": errType, "code": code, "message": message}}
+	if strings.HasSuffix(strings.TrimRight(c.Request.URL.Path, "/"), "/messages") {
+		body["type"] = "error"
+	}
+	safeBody, _ := json.Marshal(body)
 	if c.Writer.Written() {
 		MarkOpsStreamFailure(c, errType, code, message, status)
 		if strings.Contains(c.Request.URL.Path, "/responses") {

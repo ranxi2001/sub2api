@@ -52,6 +52,48 @@ jobs:
             grep -q -- "$diagnostic" "$RUNNER_TEMP/http2-evidence/f3-red.log"
           done
           test -z "$(git status --porcelain)"
+      - name: F4 and F5 behavioral RED on the same pinned production tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          defect=ea1f3a28d8d1839e92ac5e48c6e9d7aeb90b0fff
+          red_tree="$RUNNER_TEMP/http2-successor-red"
+          test "$(git -C "$red_tree" rev-parse HEAD)" = "$defect"
+          for test_source in backend/internal/service/http2_peer_reset_followup_test.go backend/internal/handler/http2_cc_semantic_followup_test.go; do
+            git show "HEAD:$test_source" > "$red_tree/$test_source"
+            expected=$(git rev-parse "HEAD:$test_source")
+            actual=$(git hash-object "$red_tree/$test_source")
+            test "$actual" = "$expected"
+            echo "candidate=$EXPECTED_HEAD_SHA defect=$defect test=$test_source expected=$expected actual=$actual" >> "$RUNNER_TEMP/http2-evidence/f45-red-identity.txt"
+          done
+          set +e
+          (cd "$red_tree/backend" && go test -tags=unit ./internal/service ./internal/handler -run '^TestHTTP2CC(SemanticFailureBeforeReset|IncompleteSemanticEventStillResets|SemanticFailureOwnershipAndSLA)$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/http2-evidence/f4-red.log" 2>&1
+          f4_result=$?
+          (cd "$red_tree/backend" && go test -tags=unit ./internal/service -run '^TestHTTP2NativeRelay(RequiresCompleteTerminal|CompleteTerminalControls)$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/http2-evidence/f5-red.log" 2>&1
+          f5_result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/f4-red.log" "$RUNNER_TEMP/http2-evidence/f5-red.log"
+          test "$f4_result" -eq 1
+          test "$f5_result" -eq 1
+          for finding in f4 f5; do
+            if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/$finding-red.log"; then exit 1; fi
+          done
+          for mode in responses messages; do
+            grep -q -- "--- FAIL: TestHTTP2CCSemanticFailureBeforeReset/$mode/event_error" "$RUNNER_TEMP/http2-evidence/f4-red.log"
+            grep -q -- "--- FAIL: TestHTTP2CCSemanticFailureOwnershipAndSLA/$mode" "$RUNNER_TEMP/http2-evidence/f4-red.log"
+            grep -q -- "--- PASS: TestHTTP2CCIncompleteSemanticEventStillResets/$mode" "$RUNNER_TEMP/http2-evidence/f4-red.log"
+          done
+          grep -q 'F4 complete CC semantic error must survive a later HTTP2 reset' "$RUNNER_TEMP/http2-evidence/f4-red.log"
+          grep -q 'F4 complete CC context rejection must retain client ownership after reset' "$RUNNER_TEMP/http2-evidence/f4-red.log"
+          for fragment in event_only event_no_data truncated_data missing_boundary data_only_cut invalid_json wrong_data_type; do
+            grep -q -- "--- FAIL: TestHTTP2NativeRelayRequiresCompleteTerminal/$fragment" "$RUNNER_TEMP/http2-evidence/f5-red.log"
+          done
+          grep -q 'F5 incomplete native message_stop must not swallow a later HTTP2 reset' "$RUNNER_TEMP/http2-evidence/f5-red.log"
+          grep -q -- '--- PASS: TestHTTP2NativeRelayCompleteTerminalControls/success' "$RUNNER_TEMP/http2-evidence/f5-red.log"
+          grep -q -- '--- PASS: TestHTTP2NativeRelayCompleteTerminalControls/data_only_success' "$RUNNER_TEMP/http2-evidence/f5-red.log"
+          test -z "$(git status --porcelain)"
       - name: F1 behavioral RED through the real AIOps evidence query
         shell: bash
         run: |
@@ -181,32 +223,40 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
           cd backend
           go test -tags=unit ./internal/handler ./internal/service ./internal/repository -run 'TestHTTP2|Test(CC|Responses)(Buffered|Streaming)FromNativeAnthropic|TestNativeAnthropic|TestProxyOpenAIWSHTTPBridge|TestPluginSSE|TestOpenAIStreaming|TestHandleChatStreaming|TestChatCompletionsBuffered|TestAnthropicBuffered|TestForwardAsAnthropic|TestForwardResponses|TestOpenAIImagesOAuthBodyRead|TestOps.*Stream|TestOpsBridge|TestAutoConfig|Test.*RawStream|Test.*StreamTruncat|Test.*ClientCancel|Test.*ClientDisconnect|Test.*Deadline|TestClassifyOpenAIAPIKeyHealth|TestOpsErrorWhere' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/green.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/green.log"; then exit 1; fi
-          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence TestHTTP2NativeSemanticErrorBeforeReset TestHTTP2RawIncompleteErrorEventStillResets; do
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence TestHTTP2NativeSemanticErrorBeforeReset TestHTTP2RawIncompleteErrorEventStillResets TestHTTP2CCSemanticFailureBeforeReset TestHTTP2CCIncompleteSemanticEventStillResets TestHTTP2CCSemanticFailureOwnershipAndSLA TestHTTP2NativeRelayRequiresCompleteTerminal TestHTTP2NativeRelayCompleteTerminalControls; do
             grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/green.log"
           done
       - name: Ordinary production build
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
           cd backend
           go build ./... 2>&1 | tee "$RUNNER_TEMP/http2-evidence/build.log"
       - name: Race boundary and stream lifecycle
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
           cd backend
           go test -race -tags=unit ./internal/handler ./internal/service -run 'TestHTTP2|TestOpenAIStreamingReadError|TestHandleChatStreamingResponse_ClassifiesHTTP2|TestAutoConfigRealRequestOutcomes|TestForwardAsAnthropic_ForceChatCompletionsStreamReadError' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/race.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/race.log"; then exit 1; fi
-          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence TestHTTP2NativeSemanticErrorBeforeReset TestHTTP2RawIncompleteErrorEventStillResets; do
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence TestHTTP2NativeSemanticErrorBeforeReset TestHTTP2RawIncompleteErrorEventStillResets TestHTTP2CCSemanticFailureBeforeReset TestHTTP2CCIncompleteSemanticEventStillResets TestHTTP2CCSemanticFailureOwnershipAndSLA TestHTTP2NativeRelayRequiresCompleteTerminal TestHTTP2NativeRelayCompleteTerminalControls; do
             grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/race.log"
           done
       - name: PostgreSQL persistence and monitor regressions
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
           cd backend
           go test -tags=integration ./internal/repository -run 'TestHTTP2AIOpsFailureIdentityScopedToAPIKey|TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure|TestHTTP2PeerResetPersistence|TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus|TestChannelMonitorV2.*Error' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/persistence.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/persistence.log"; then exit 1; fi
