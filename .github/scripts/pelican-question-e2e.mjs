@@ -47,6 +47,8 @@ function upstream() {
   const captures = []
   const rejected = []
   let refuseNext = false
+  let holdScheduled = false
+  const heldReplies = new Set()
   const json = (res, status, value) => {
     res.writeHead(status, { 'content-type': 'application/json' })
     res.end(JSON.stringify(value))
@@ -62,6 +64,19 @@ function upstream() {
     if (req.method === 'POST' && path === '/__fixture/refuse-next') {
       refuseNext = true
       return json(res, 200, { armed: true })
+    }
+    // Hold only provider replies, never the application's handlers or results.
+    // This lets CI observe real Claim leases before the fast fixture completes.
+    if (req.method === 'POST' && path === '/__fixture/hold-scheduled') {
+      if (holdScheduled || heldReplies.size) return json(res, 409, { error: 'already holding' })
+      holdScheduled = true
+      return json(res, 200, { holding: true })
+    }
+    if (req.method === 'POST' && path === '/__fixture/release-scheduled') {
+      holdScheduled = false
+      const released = heldReplies.size
+      for (const release of heldReplies) release()
+      return json(res, 200, { released })
     }
     // Explicitly reject the app's optional pricing refresh; this is not a fake
     // pricing response. The packaged application fallback remains in use.
@@ -108,6 +123,16 @@ function upstream() {
       const capture = { sequence, marker, alias, model: input.model, prompt, refused }
       captures.push(capture)
       appendFileSync(join(evidence, 'provider-captures.jsonl'), JSON.stringify(capture) + '\n')
+      if (holdScheduled) {
+        await new Promise((resolve, reject) => {
+          const release = () => { clearTimeout(timer); heldReplies.delete(release); resolve() }
+          const timer = setTimeout(() => {
+            heldReplies.delete(release)
+            reject(new Error('fixture scheduled reply hold expired'))
+          }, 30_000)
+          heldReplies.add(release)
+        })
+      }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
       const event = data => res.write(`event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`)
       event({ type: 'message_start', message: {
@@ -183,9 +208,11 @@ async function browser() {
     page.on('pageerror', error => state.pageErrors.push({ name: error.name }))
     page.on('console', message => { if (message.type() === 'error') state.consoleErrors.push({ type: 'error' }) })
     const manualRequests = []
+    const forbiddenRuns = []
     let prepareCount = 0
     page.on('request', request => {
       const path = new URL(request.url()).pathname
+      if (request.method() === 'POST' && /\/(?:scheduled-test-plans|pelican-group-tests)\/\d+\/run$/.test(path)) forbiddenRuns.push(path)
       if (path === '/api/v1/admin/accounts/pelican-question' && request.method() === 'GET') prepareCount++
       const match = path.match(/^\/api\/v1\/admin\/accounts\/(\d+)\/pelican-test$/)
       if (match && request.method() === 'POST') {
@@ -391,6 +418,260 @@ async function browser() {
     state.scenarios.push({ name: stage, status: 'passed', plan_id: created.id,
       boundary: 'disabled creation only; no scheduled RunDue, /run or result acceptance claimed' })
 
+    stage = 'account-scheduled-ui-create-a-b'
+    await page.goto(`${origin}/admin/accounts`)
+    const plans = []
+    const planProjection = plan => ({ id: String(plan.id), account_id: String(plan.account_id),
+      model_id: plan.model_id, enabled: plan.enabled, cron_expression: plan.cron_expression,
+      pelican_config: plan.pelican_config })
+    for (const account of accounts) {
+      await openAccount(account)
+      await dialog().getByRole('button', { name: 'Scheduled tests', exact: true }).click()
+      await dialog().getByRole('button', { name: 'Add Plan', exact: true }).click()
+      const form = dialog().locator('div.rounded-xl').filter({ has: page.getByPlaceholder('*/30 * * * *', { exact: true }) })
+      assert.equal(await form.count(), 1)
+      await form.locator('input[type=text]').first().fill(model)
+      // A far future real schedule prevents an accidental tick between the two
+      // UI creations; only next_run_at is aligned below, not enabled or config.
+      await form.getByPlaceholder('*/30 * * * *', { exact: true }).fill('0 0 1 1 *')
+      await form.getByTestId('pelican-mode-select').selectOption('random')
+      await form.locator('input[type=number]').last().fill('2')
+      const creation = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/scheduled-test-plans' && response.request().method() === 'POST')
+      await form.getByRole('button', { name: 'Save', exact: true }).click()
+      const response = await creation
+      assert.equal(response.status(), 200)
+      const plan = planProjection(unwrap(await response.json()))
+      assert.equal(plan.account_id, account.id)
+      assert.equal(plan.enabled, true)
+      assert.equal(plan.model_id, model)
+      assert.equal(plan.cron_expression, '0 0 1 1 *')
+      assert.equal(plan.pelican_config.question_kind, 'pelican')
+      assert.equal(plan.pelican_config.prompt_mode, 'random')
+      assert.equal(plan.pelican_config.parallel_count, 2)
+      assert.ok(!plan.pelican_config.pelican_question, 'plan is a rule, not an injected frozen question')
+      plans.push(plan)
+      await form.waitFor({ state: 'hidden' })
+      await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
+    }
+    const planIds = plans.map(plan => plan.id)
+    assert.equal(new Set(planIds).size, 2)
+    const planSQL = `SELECT id::text, account_id::text, model_id, enabled, cron_expression, pelican_config,
+      to_char(next_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS next_run_at,
+      running_until::text, last_run_at::text, running_until > now() AS lease_active
+      FROM scheduled_test_plans WHERE id = ANY($1::bigint[]) ORDER BY id`
+    const resultSQL = `SELECT r.id::text, r.plan_id::text, p.account_id::text, r.status, r.pelican_config,
+      substring(r.response_text from 'fixture795-[0-9]+') AS marker
+      FROM scheduled_test_results r JOIN scheduled_test_plans p ON p.id = r.plan_id
+      WHERE r.plan_id = ANY($1::bigint[]) ORDER BY r.id`
+    const readPlans = async () => (await db.query(planSQL, [planIds])).rows
+    const readResults = async () => (await db.query(resultSQL, [planIds])).rows
+    const initialPlans = await readPlans()
+    assert.equal(initialPlans.length, 2)
+    for (const plan of initialPlans) {
+      assert.deepEqual(planProjection(plan), plans.find(item => item.id === plan.id))
+      assert.equal(plan.running_until, null)
+      assert.equal(plan.last_run_at, null)
+      assert.ok(Date.parse(plan.next_run_at) > Date.now(), 'fresh plans must not yet be due')
+    }
+    assert.deepEqual(await readResults(), [])
+    save('account-scheduled-created.json', { api: plans, pg: initialPlans })
+    state.scenarios.push({ name: stage, status: 'passed', plans: planIds, samples_per_account: 2 })
+
+    stage = 'account-scheduled-nominal-time-and-real-claim'
+    const fixtureControl = async path => {
+      const response = await fetch(`${upstreamOrigin}/__fixture/${path}`, { method: 'POST', signal: AbortSignal.timeout(5000) })
+      assert.equal(response.status, 200)
+      return response.json()
+    }
+    const capturesNow = async () => {
+      const response = await fetch(`${upstreamOrigin}/__fixture/captures`, { signal: AbortSignal.timeout(5000) })
+      assert.equal(response.status, 200)
+      return response.json()
+    }
+    const beforeScheduled = await capturesNow()
+    assert.equal(beforeScheduled.captures.length, 4, 'only previous manual samples exist')
+    assert.deepEqual(beforeScheduled.rejected, [])
+    const captureStart = beforeScheduled.captures.length
+    await fixtureControl('hold-scheduled')
+    let repliesReleased = false
+    try {
+      // The only SQL mutation after entity seeding. Bind both UI-created plan
+      // IDs to their exact fictional accounts, require untouched rules, and
+      // change only their nominal due time in one atomic statement.
+      const due = await db.query(`WITH nominal AS (
+          SELECT date_trunc('second', now()) - interval '1 second' + interval '0.123456 second' AS t
+        ) UPDATE scheduled_test_plans p SET next_run_at = nominal.t
+        FROM nominal, accounts a
+        WHERE p.account_id = a.id AND a.deleted_at IS NULL
+          AND ((p.id = $1::bigint AND a.id = $2::bigint AND a.name = 'fixture-pelican-a')
+            OR (p.id = $3::bigint AND a.id = $4::bigint AND a.name = 'fixture-pelican-b'))
+          AND p.enabled AND p.model_id = $5 AND p.cron_expression = '0 0 1 1 *'
+          AND p.pelican_config->>'prompt_mode' = 'random'
+          AND p.pelican_config->>'parallel_count' = '2'
+          AND p.running_until IS NULL AND p.last_run_at IS NULL AND p.next_run_at > now()
+          AND NOT EXISTS (SELECT 1 FROM scheduled_test_results r WHERE r.plan_id = p.id)
+        RETURNING p.id::text, to_char(p.next_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS nominal_time`,
+      [plans[0].id, accounts[0].id, plans[1].id, accounts[1].id, model])
+      assert.equal(due.rowCount, 2)
+      assert.equal(due.rows[0].nominal_time, due.rows[1].nominal_time)
+      const nominalTime = due.rows[0].nominal_time
+      save('account-scheduled-due.json', due.rows)
+
+      const deadline = Date.now() + 90_000 // includes one real minute-tick wait
+      let claimed
+      while (Date.now() < deadline) {
+        const currentPlans = await readPlans()
+        const currentCaptures = await capturesNow()
+        assert.deepEqual(currentCaptures.rejected, [])
+        const sent = currentCaptures.captures.slice(captureStart)
+        assert.ok(sent.length <= 4, 'no duplicate scheduled submissions')
+        save('account-scheduled-wait.json', { nominal_time: nominalTime, plans: currentPlans, received_samples: sent.length })
+        if (sent.length === 4 && currentPlans.length === 2 && currentPlans.every(plan => plan.lease_active)) {
+          assert.deepEqual(await readResults(), [], 'held upstream replies cannot yet yield result rows')
+          claimed = currentPlans
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      assert.ok(claimed, 'real runner must claim both plans and send four samples within 90 seconds')
+      for (const plan of claimed) assert.ok(Date.parse(plan.next_run_at) > Date.parse(nominalTime))
+      save('account-scheduled-claimed.json', { nominal_time: nominalTime, plans: claimed })
+      const release = await fixtureControl('release-scheduled')
+      repliesReleased = true
+      assert.equal(release.released, 4)
+
+      stage = 'account-scheduled-pg-provider-reconciliation'
+      let scheduledResults
+      const resultDeadline = Date.now() + 30_000
+      while (Date.now() < resultDeadline) {
+        const rows = await readResults()
+        assert.ok(rows.length <= 4, 'exactly four scheduled results are expected')
+        if (rows.length === 4) { scheduledResults = rows; break }
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      assert.ok(scheduledResults, 'real service must persist all four results')
+      const provider = await capturesNow()
+      assert.deepEqual(provider.rejected, [])
+      const sent = provider.captures.slice(captureStart)
+      assert.equal(sent.length, 4)
+      assert.equal(new Set(scheduledResults.map(row => row.marker)).size, 4)
+      const snapshot = scheduledResults[0].pelican_config
+      assert.equal(snapshot.prompt_mode, 'random')
+      assert.equal(snapshot.parallel_count, 2)
+      assert.equal(snapshot.pelican_question.source, 'builtin:svg-motion')
+      assert.ok(snapshot.pelican_question.id && snapshot.pelican_question.version && snapshot.actual_prompt)
+      assert.equal(snapshot.pelican_question.round_id, `scheduled:${nominalTime}`)
+      for (const [index, plan] of plans.entries()) {
+        const results = scheduledResults.filter(row => row.plan_id === plan.id)
+        assert.equal(results.length, 2)
+        for (const result of results) {
+          assert.equal(result.account_id, plan.account_id)
+          assert.equal(result.status, 'success')
+          assert.match(result.marker, /^fixture795-\d+$/)
+          assert.deepEqual(result.pelican_config, snapshot, 'all four samples freeze the same rule and question')
+          assert.equal(result.pelican_config.trigger_source, 'scheduled')
+          const capture = sent.find(item => item.marker === result.marker)
+          assert.ok(capture, 'PG marker must identify an actual provider request')
+          assert.equal(capture.alias, index === 0 ? 'a' : 'b')
+          assert.equal(capture.model, model)
+          assert.equal(capture.prompt, result.pelican_config.actual_prompt.trim())
+          assert.equal(capture.refused, false)
+        }
+      }
+      save('account-scheduled-results.json', { nominal_time: nominalTime, pg: scheduledResults, provider: sent })
+      state.scenarios.push({ name: 'account-scheduled-nominal-time-and-real-claim', status: 'passed', nominal_time: nominalTime, plans: planIds })
+      state.scenarios.push({ name: stage, status: 'passed', result_ids: scheduledResults.map(row => row.id) })
+
+      stage = 'account-scheduled-history-detail-dom'
+      for (const account of accounts) {
+        await openAccount(account)
+        const expected = scheduledResults.filter(row => row.account_id === account.id)
+        // Read responses caused by the actual page. No independent token reads,
+        // API request substitutes, fabricated store state or fulfilled routes.
+        const details = new Map()
+        const pending = []
+        const observeDetail = response => {
+          const path = new URL(response.url()).pathname
+          const match = path.match(/^\/api\/v1\/admin\/scheduled-test-plans\/(\d+)\/results\/(\d+)$/)
+          if (!match || !expected.some(row => row.plan_id === match[1] && row.id === match[2])) return
+          pending.push((async () => ({ status: response.status(), value: unwrap(await response.json()) }))()
+            .catch(error => ({ read_error: error.name })))
+        }
+        page.on('response', observeDetail)
+        try {
+          const historyResponse = page.waitForResponse(response => {
+            const url = new URL(response.url())
+            return url.pathname === '/api/v1/admin/pelican-test-results' && url.searchParams.get('account_id') === account.id
+          })
+          await dialog().getByTestId('open-records').click()
+          const history = await historyResponse
+          assert.equal(history.status(), 200)
+          const historyBody = unwrap(await history.json())
+          assert.equal(historyBody.next_cursor, 0)
+          assert.equal(historyBody.items.length, 2)
+          for (const row of expected) {
+            const item = historyBody.items.find(item => String(item.id) === row.id)
+            assert.ok(item)
+            assert.equal(String(item.plan_id), row.plan_id)
+            assert.equal(String(item.account_id), account.id)
+            assert.equal(item.status, row.status)
+            assert.deepEqual(item.pelican_config, row.pelican_config)
+          }
+          const panel = page.getByTestId('records-panel')
+          // Scoped history hides result IDs in its text. Link cards to IDs via
+          // their fetched detail HTML's unique provider marker, then assert the
+          // expanded snapshot and iframe from that same selected card.
+          for (const row of expected) {
+            const card = panel.getByTestId('pelican-record-card').filter({ has: page.locator(`iframe[srcdoc*="${row.marker}"]`) })
+            await card.waitFor({ state: 'visible' })
+            assert.equal(await card.count(), 1)
+            await card.getByRole('button').click()
+            const detail = page.getByTestId('record-detail')
+            await checkSnapshot(detail, row.pelican_config)
+            assert.equal(await detail.frameLocator('iframe').locator('p').innerText(), row.marker)
+            await page.screenshot({ path: join(evidence, `account-scheduled-${account.id}-${row.id}.png`), fullPage: true })
+            await detail.getByRole('button', { name: 'Close', exact: true }).click()
+          }
+          await panel.getByRole('button', { name: 'Close', exact: true }).click()
+          for (const response of await Promise.all(pending)) {
+            assert.equal(response.read_error, undefined, 'real detail response must be readable')
+            assert.equal(response.status, 200)
+            details.set(String(response.value.id), response.value)
+          }
+          assert.equal(details.size, 2)
+          for (const row of expected) {
+            const api = details.get(row.id)
+            assert.ok(api)
+            assert.equal(String(api.plan_id), row.plan_id)
+            assert.equal(api.status, row.status)
+            assert.deepEqual(api.pelican_config, row.pelican_config)
+            assert.equal(api.response_text.match(/fixture795-\d+/)?.[0], row.marker)
+          }
+          save(`account-scheduled-history-${account.id}.json`, {
+            history: historyBody.items.map(item => ({ id: item.id, plan_id: item.plan_id, account_id: item.account_id,
+              status: item.status, pelican_config: item.pelican_config })),
+            detail: [...details.values()].map(item => ({ id: item.id, plan_id: item.plan_id,
+              status: item.status, pelican_config: item.pelican_config, marker: item.response_text.match(/fixture795-\d+/)?.[0] })),
+            expanded_dom: expected.map(row => ({ result_id: row.id, marker: row.marker, snapshot: row.pelican_config })),
+          })
+        } finally {
+          page.off('response', observeDetail)
+        }
+        await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
+      }
+      assert.deepEqual(await readResults(), scheduledResults, 'reading history must not change saved results')
+      assert.deepEqual(forbiddenRuns, [], 'no manual /run may stand in for scheduled execution')
+      assert.equal(manualRequests.length, 4, 'no new manual submission may stand in for scheduled execution')
+      state.scenarios.push({ name: stage, status: 'passed', result_ids: scheduledResults.map(row => row.id) })
+    } finally {
+      // On assertion failure unblock the provider, but retain the original error
+      // and leave all database rows to the application / disposable CI cleanup.
+      if (!repliesReleased) {
+        try { await fixtureControl('release-scheduled') }
+        catch (error) { save('account-scheduled-release-error.json', { name: error.name }) }
+      }
+    }
+
     stage = 'post-bootstrap-browser-and-provider-error-lists'
     const finalCaptures = await (await fetch(`${upstreamOrigin}/__fixture/captures`)).json()
     assert.deepEqual(finalCaptures.rejected, [])
@@ -399,7 +680,7 @@ async function browser() {
     assert.equal(state.consoleErrors.length, 0, 'no browser console errors')
     assert.equal(state.requestFailures.length, 0, 'no failed browser requests')
     state.scenarios.push({ name: stage, status: 'passed' })
-    console.log('Implemented initial E2E scenarios passed; full acceptance remains incomplete.')
+    console.log('Implemented manual and account-scheduled E2E scenarios passed; full acceptance remains incomplete.')
   } catch (error) {
     state.scenarios.push({ name: stage, status: 'failed', error: { name: error.name, message: error.message.slice(0, 2000) } })
     if (page) {

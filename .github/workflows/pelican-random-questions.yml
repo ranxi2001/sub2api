@@ -73,13 +73,13 @@ jobs:
           name: pelican-random-question-ui-${{ github.run_id }}
           path: evidence/
   isolated-e2e:
-    name: Isolated application E2E (initial scope; full acceptance pending)
+    name: Isolated application E2E (manual and account schedules; full acceptance pending)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       APP_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       HARNESS_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      PARENT_BASE_SHA: 3e07fa89096cb58b260c032aa6de2cb2a2aa98b7
+      PARENT_BASE_SHA: dbed7697aa56e76c6eb48c4914fa441496b67bdd
       COMPOSE_PROJECT_NAME: pelican-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v6
@@ -146,7 +146,7 @@ jobs:
         run: |
           set -euo pipefail
           container_id="$(docker compose ps --all --quiet browser)"
-          result="$(timeout 300s docker wait "$container_id")"
+          result="$(timeout 480s docker wait "$container_id")"
           # Harness logs contain only scenario names/status, never response bodies or tokens.
           docker compose logs --no-color browser
           test "$result" = 0
@@ -155,11 +155,13 @@ jobs:
         shell: bash
         run: |
           {
-            echo '### Isolated E2E initial increment — full acceptance pending'
-            echo 'This job exercises the implemented manual scenarios and disabled group-plan creation only.'
-            echo 'Account/group scheduled RunDue, PG/API/DOM result reconciliation, immutable old snapshots,'
-            echo 'second nominal round, deterministic failed record and lease release remain unimplemented.'
-            echo 'A green initial job does not clear the Issue #795 technical or product acceptance gates.'
+            echo '### Isolated E2E manual and account schedules — full acceptance pending'
+            echo 'Implemented: manual scenarios, disabled group-plan creation, UI-created A/B account schedules,'
+            echo 'same nominal time, real Claim leases, four PG results and provider/history/detail/DOM reconciliation.'
+            echo 'Group RunDue, historical snapshots after editing, second nominal round,'
+            echo 'deterministic failed record and failure lease release remain unimplemented.'
+            echo 'Read this candidate artifact and checks; earlier SHA results do not validate new scenarios.'
+            echo 'A green job does not clear all Issue #795 technical or product acceptance gates.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Destroy all disposable runtime containers and volumes
         if: always()

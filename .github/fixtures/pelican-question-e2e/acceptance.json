@@ -1,17 +1,15 @@
 {
-  "scope": "initial-reviewable-increment",
+  "scope": "manual-and-account-scheduled-increment",
   "full_acceptance_complete": false,
   "unimplemented": [
-    "account scheduled plans created via UI, two samples per A and B",
-    "same nominal UTC time, actual account runner Claim and four PG results",
-    "account PG result IDs and payloads reconciled with history/detail APIs and expanded real DOM",
     "group due time alignment, real RunDue/Claim and PG/list/detail/DOM reconciliation",
     "plan UI edit followed by proof old stored/API/DOM snapshot is unchanged",
     "second nominal time mapped to a different question, new and old scheduled records coexist",
     "deterministic upstream refusal yields failed persisted history and released lease",
-    "restricted result/lease/due SQL projections linked to captures and API IDs"
+    "group and failed-result/lease SQL projections linked to captures and API IDs"
   ],
   "pending_external_gates": [
+    "remote execution and exact successor PR head checks for the new account-scheduled scenarios; prior SHA results are not their validation",
     "screenshots from successful isolated chain uploaded as PR native attachments and read back",
     "product policy and empirical difficulty calibration; fixture output cannot prove either"
   ],
@@ -23,7 +21,12 @@
     "provider payload compared with API question and real DOM snapshot",
     "manual localStorage recovery, history expansion and fixture iframe after reload",
     "next manual round identity changes; repeated question selection is permitted",
-    "disabled group plan created through real browser form, create API and PG"
+    "disabled group plan created through real browser form, create API and PG",
+    "account A/B random scheduled plans created through actual UI, two samples each",
+    "only fixture next_run_at aligned to one UTC microsecond nominal time; actual minute runner and live Claim leases observed while provider replies wait",
+    "four actual scheduled PG results correlated to unique provider captures, same frozen question and actual_prompt",
+    "account-scoped real history and detail API responses triggered by UI, expanded DOM snapshots and iframe markers matched to PG result IDs",
+    "restricted account plan/result/due/active-lease projections; no result writes and no manual /run substitutes"
   ],
   "verification_evidence": "Read scenario-results.json and the current PR head checks; this declaration does not assert runtime success."
 }
