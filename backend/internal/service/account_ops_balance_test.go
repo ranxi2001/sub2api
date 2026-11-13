@@ -264,7 +264,8 @@ func TestAccountOpsBalanceCollectionStateAndHistoricalValue(t *testing.T) {
 	require.Equal(t, 42.0, *item.LastKnownBalance)
 	a.Extra[UpstreamBillingProbeEnabledExtraKey] = true
 	require.True(t, opsBalanceAccount(a, now).ProbeEnabled)
-	snapshot := a.Extra[UpstreamBillingProbeExtraKey].(*UpstreamBillingProbeSnapshot)
+	snapshot, ok := a.Extra[UpstreamBillingProbeExtraKey].(*UpstreamBillingProbeSnapshot)
+	require.True(t, ok)
 	snapshot.Balance.Status = "failed"
 	require.Nil(t, opsBalanceAccount(a, now).LastKnownBalance)
 	snapshot.Balance.Status = "ok"
