@@ -1726,6 +1726,14 @@ func TestOpenAIStreamingReadErrorAfterOutputUsesResponsesErrorSchema(t *testing.
 			require.NotContains(t, body, "stream ID")
 			require.NotContains(t, body, "response.completed")
 			require.NotContains(t, body, "[DONE]")
+			if tc.code == OpenAIUpstreamHTTP2StreamErrorCode {
+				require.Equal(t, 1, strings.Count(body, "event: response.failed\n"))
+				require.Contains(t, body, "INTERNAL_ERROR")
+				require.Contains(t, body, "Do not automatically retry")
+				require.NotContains(t, body, "event: error\n")
+				require.True(t, IsResponseCommitted(c))
+				return
+			}
 			require.Equal(t, 1, strings.Count(body, "event: error\n"))
 			require.True(t, IsResponseCommitted(c), "the handler must not append another failure")
 			var events []gjson.Result

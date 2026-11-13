@@ -21,11 +21,15 @@ func observeAutoConfigRequest(c *gin.Context, ops *service.OpsService, w *opsCap
 		return
 	}
 	failed := map[int64]bool{}
+	failureCategories := map[int64]string{}
 	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
 		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok {
 			for _, e := range events {
 				if e != nil && e.AccountID > 0 {
 					failed[e.AccountID] = true
+					if e.Kind == "transport_error" {
+						failureCategories[e.AccountID] = e.Kind
+					}
 				}
 			}
 		}
@@ -34,7 +38,7 @@ func observeAutoConfigRequest(c *gin.Context, ops *service.OpsService, w *opsCap
 		if service.IsPrismBrowserAttempt(c, id) {
 			continue
 		}
-		ops.ObserveConcurrencyResult(service.AccountConcurrencyResult{AccountID: id, StartedAt: started})
+		ops.ObserveConcurrencyResult(service.AccountConcurrencyResult{AccountID: id, StartedAt: started, FailureCategory: failureCategories[id]})
 	}
 	// Earlier attempts still report their own failures. The final request-size
 	// rejection says nothing about the selected account's concurrency capacity.

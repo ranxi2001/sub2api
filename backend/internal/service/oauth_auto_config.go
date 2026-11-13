@@ -401,10 +401,12 @@ func (s *AccountOpsService) validateModelBillingGroupSelections(ctx context.Cont
 }
 
 type AccountConcurrencyResult struct {
-	Reset     bool
-	AccountID int64
-	StartedAt time.Time
-	Success   bool
+	// Transport failures interrupt the success streak but do not prove capacity exhaustion.
+	FailureCategory string
+	Reset           bool
+	AccountID       int64
+	StartedAt       time.Time
+	Success         bool
 }
 type AccountConcurrencyRepository interface {
 	RecordConcurrencyResult(context.Context, AccountConcurrencyResult, OAuthAutoConfig) error
@@ -443,7 +445,9 @@ func AdvanceConcurrency(state AutoConfigConcurrencyState, current int, c OAuthAu
 	if !result.Success {
 		state.Successes = 0
 		state.LastFailureAt = &now
-		state.PausedUntil = now.Add(time.Duration(c.CooldownSeconds) * time.Second)
+		if result.FailureCategory != "transport_error" {
+			state.PausedUntil = now.Add(time.Duration(c.CooldownSeconds) * time.Second)
+		}
 		return state, current
 	}
 	if current <= 0 || current >= maximum || result.StartedAt.Before(state.PausedUntil) {

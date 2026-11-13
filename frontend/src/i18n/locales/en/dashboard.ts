@@ -528,17 +528,23 @@ export default {
     },
     tabs: { usage: 'Usage', errors: 'Error Requests', ranking: 'User Ranking' },
     errors: {
+      peerReset: 'Upstream connection reset by peer ({protocol}). Content may be incomplete. Do not automatically retry the same request.',
+      http200StreamFailure: '200 — Stream failed after headers',
       time: 'Time', model: 'Model', endpoint: 'Endpoint', status: 'Status',
       category: 'Category', platform: 'Platform', message: 'Message',
       keyName: 'Key Name', keyDeleted: 'Deleted', allKeys: 'All keys',
       modelPlaceholder: 'Search model', allCategories: 'All categories', allStatuses: 'All status codes',
       empty: 'No error requests', failedToLoad: 'Failed to load error requests',
       categories: {
+        transport_error: 'Transport error',
         auth: 'Auth failed', rate_limit: 'Rate limited', quota: 'Balance/Subscription',
         invalid_request: 'Invalid request', service_unavailable: 'Service unavailable',
         upstream: 'Upstream error', internal: 'Platform error', other: 'Other', cyber: 'Cyber policy',
       },
       detail: {
+        clientHttpStatus: 'Actual client HTTP status',
+        streamFailedAfterHeaders: 'The HTTP headers were already sent. The stream then failed; HTTP 200 does not mean generation completed.',
+        gatewayErrorBody: 'Gateway-generated error details',
         title: 'Error Request Detail',
         responseBody: 'Response Body',
         upstreamStatus: 'Upstream Status',
