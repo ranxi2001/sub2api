@@ -5,12 +5,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,11 +22,13 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
 const shadowHTTPAgent = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-shadow-current-task"}`
+const shadowOtherTask = "Verify the existing sum.go only; do not edit it. This is independent task Y."
 
 // Observe the real downstream write; the shadow must not become recoverable
 // merely because the provider returned a terminal payload.
@@ -54,11 +58,50 @@ func TestOpenAI409FutureShadowHTTP(t *testing.T) {
 	}
 }
 
+func TestOpenAI409FutureShadowTaskAssociation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			runFutureShadowHTTP(t, stream, "two_known_tasks")
+		})
+	}
+}
+
 func TestOpenAI409FutureShadowBoundaries(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		for _, boundary := range []string{"other_user", "other_key", "other_group", "other_model", "other_session", "other_task", "expired", "write_failed", "pending_owner", "failed_owner", "conflicted_owner", "off", "fresh_intent"} {
 			t.Run(fmt.Sprintf("stream=%t/%s", stream, boundary), func(t *testing.T) {
 				runFutureShadowHTTP(t, stream, boundary)
+			})
+		}
+	}
+}
+
+// Faults apply only to the optional shared shadow namespace. Owner, billing,
+// scheduling and actual HTTP delivery still use the real Redis/transport.
+type shadowStoreFailure struct{ calls atomic.Int64 }
+
+func (h *shadowStoreFailure) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *shadowStoreFailure) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+func (h *shadowStoreFailure) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		for _, arg := range cmd.Args() {
+			value, _ := arg.(string)
+			if strings.HasPrefix(value, "openai_readable_shadow:") || strings.HasPrefix(value, "openai_readable_shadow_index:") {
+				h.calls.Add(1)
+				return errors.New("fixture shadow store unavailable")
+			}
+		}
+		return next(ctx, cmd)
+	}
+}
+
+func TestOpenAI409FutureShadowResources(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, scenario := range []string{"capacity_oldest", "capacity_latest", "store_write_failed", "store_read_failed", "oversize", "pending_tool", "pending_output", "conflicting_output", "echoed_task"} {
+			t.Run(fmt.Sprintf("stream=%t/%s", stream, scenario), func(t *testing.T) {
+				runFutureShadowHTTP(t, stream, scenario)
 			})
 		}
 	}
@@ -71,6 +114,8 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	var mu sync.Mutex
 	var bodies [][]byte
 	var identities []string
+	reusedOutput := scenario == "conflicting_output" || scenario == "echoed_task"
+	twoTasks := scenario == "two_known_tasks" || reusedOutput
 	patch := httpRebuildCall("apply_patch", "call_shadow_patch", map[string]any{"path": "sum.go", "source": httpRebuildSource})
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -85,15 +130,32 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		n := len(bodies)
 		mu.Unlock()
 		output := []json.RawMessage{json.RawMessage(patch)}
-		switch n {
-		case 2:
-			if !httpRebuildToolPair(body, "apply_patch", httpRebuildPatch) {
+		switch {
+		case twoTasks && n == 3:
+			if !strings.Contains(string(body), shadowOtherTask) || strings.Contains(string(body), httpRebuildTask) {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			output = []json.RawMessage{json.RawMessage(httpRebuildCall("run_tests", "call_shadow_Y_verify", map[string]any{"path": "sum.go"}))}
+		case r.Header.Get("Authorization") == "Bearer fixture-shadow-A" && n >= 2:
+			validPair := httpRebuildToolPair(body, "apply_patch", httpRebuildPatch)
+			if twoTasks && n == 4 {
+				validPair = httpRebuildToolPair(body, "run_tests", httpRebuildCheck) && strings.Contains(string(body), shadowOtherTask)
+			}
+			if !validPair {
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = io.WriteString(w, `{"error":{"message":"fixture requires the actual completed patch"}}`)
 				return
 			}
-			output = []json.RawMessage{json.RawMessage(shadowHTTPAgent)}
-		case 3:
+			agent := shadowHTTPAgent
+			if n > 2 && !reusedOutput {
+				agent = strings.ReplaceAll(agent, "fixture-shadow-current-task", fmt.Sprintf("fixture-shadow-current-task-%d", n))
+			}
+			output = []json.RawMessage{json.RawMessage(agent)}
+			if scenario == "pending_output" {
+				output = append(output, json.RawMessage(httpRebuildCall("run_tests", "call_unconfirmed_output", map[string]any{"path": "sum.go"})))
+			}
+		case r.Header.Get("Authorization") == "Bearer fixture-shadow-B":
 			valid := r.Header.Get("Authorization") == "Bearer fixture-shadow-B" &&
 				!strings.Contains(string(body), "fixture-shadow-current-task") &&
 				!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists() &&
@@ -102,6 +164,14 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 				valid = valid && strings.Contains(string(body), "Report only the supplied fresh task") && !strings.Contains(string(body), httpRebuildTask)
 			} else {
 				valid = valid && strings.Contains(string(body), httpRebuildTask) && httpRebuildToolPair(body, "apply_patch", httpRebuildPatch)
+			}
+			if scenario == "two_known_tasks" {
+				associationValid := strings.Contains(string(body), httpRebuildTask) && httpRebuildToolPair(body, "apply_patch", httpRebuildPatch) &&
+					!strings.Contains(string(body), shadowOtherTask) && !strings.Contains(string(body), "call_shadow_Y_verify") && !strings.Contains(string(body), httpRebuildCheck)
+				if !associationValid {
+					t.Log("SHADOW_TASK_ASSOCIATION_MISMATCH: real B received the wrong delivered task/result pair")
+				}
+				valid = valid && associationValid
 			}
 			if !valid {
 				w.WriteHeader(http.StatusBadRequest)
@@ -129,15 +199,20 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	for i, label := range []string{"A", "B"} {
 		accounts[i].Credentials = map[string]any{"base_url": provider.URL, "api_key": "fixture-shadow-" + label}
 	}
-	newNode := func() *OpenAIGatewayHandler {
+	storeFailure := &shadowStoreFailure{}
+	newNode := func(failStore bool) *OpenAIGatewayHandler {
 		cfg := &config.Config{RunMode: config.RunModeSimple}
 		cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 		settings := service.NewSettingService(&omit409SettingsRepo{enabled: scenario != "off"}, cfg)
-		h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, testutil.NewRealHTTPUpstream(cfg), repository.NewGatewayCache(clients()), settings, &readable409UsageRepo{}, accounts...)
+		client := clients()
+		if failStore {
+			client.AddHook(storeFailure)
+		}
+		h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, testutil.NewRealHTTPUpstream(cfg), repository.NewGatewayCache(client), settings, &readable409UsageRepo{}, accounts...)
 		h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 		return h
 	}
-	producer, consumer := newNode(), newNode() // independent service state/Redis clients
+	producer, consumer := newNode(scenario == "store_write_failed"), newNode(scenario == "store_read_failed") // independent service state/Redis clients
 	done := make(chan struct{}, 1)
 	var beforeDelivery []string
 	var captureErr error
@@ -173,8 +248,9 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	defer gateway.Close()
 	client := gateway.Client()
 	client.Timeout = 10 * time.Second
+	currentSession := "fixture-shadow-thread"
 	request := func(input []string, consume bool) (int, string) {
-		model, session := "gpt-5.1", "fixture-shadow-thread"
+		model, session := "gpt-5.1", currentSession
 		if consume && scenario == "other_model" {
 			model = "gpt-5.4"
 		}
@@ -201,7 +277,11 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		}
 		return response.StatusCode, string(answer)
 	}
-	history := []string{httpRebuildMessage("user", httpRebuildTask)}
+	task := httpRebuildTask
+	if scenario == "oversize" {
+		task += strings.Repeat(" fixture long task", 5000)
+	}
+	history := []string{httpRebuildMessage("user", task)}
 	status, answer := request(history, false)
 	require.Equal(t, http.StatusOK, status, answer)
 	first := issue758CompletedResponse(t, answer, stream)
@@ -211,6 +291,9 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	}
 	history = append(history, tool.execute(t, first)...)
 	require.Equal(t, 1, tool.patches)
+	if scenario == "pending_tool" {
+		history = append(history, httpRebuildCall("run_tests", "call_unconfirmed_side_effect", map[string]any{"path": "sum.go"}))
+	}
 	status, answer = request(history, false)
 	require.True(t, deliveryObserved, "must reach the actual opaque-output downstream write")
 	require.NoError(t, captureErr)
@@ -220,11 +303,81 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		second := issue758CompletedResponse(t, answer, stream)
 		require.Contains(t, second.Get("output").Raw, "fixture-shadow-current-task")
 	}
+	opaque := shadowHTTPAgent
+	producerRequests := 2
+	if twoTasks {
+		otherHistory := []string{httpRebuildMessage("user", shadowOtherTask)}
+		if scenario == "echoed_task" {
+			otherHistory = append([]string{shadowHTTPAgent}, otherHistory...)
+		}
+		status, answer = request(otherHistory, false)
+		require.Equal(t, http.StatusOK, status, answer)
+		otherCall := issue758CompletedResponse(t, answer, stream)
+		for _, item := range otherCall.Get("output").Array() {
+			otherHistory = append(otherHistory, item.Raw)
+		}
+		otherHistory = append(otherHistory, tool.execute(t, otherCall)...)
+		status, answer = request(otherHistory, false)
+		require.Equal(t, http.StatusOK, status, answer)
+		otherDone := issue758CompletedResponse(t, answer, stream)
+		if reusedOutput {
+			require.JSONEq(t, shadowHTTPAgent, otherDone.Get("output.0").Raw)
+		} else {
+			require.Contains(t, otherDone.Get("output").Raw, "fixture-shadow-current-task-4")
+		}
+		require.Equal(t, 1, tool.verifications)
+		producerRequests = 4
+	}
+	capacity := strings.HasPrefix(scenario, "capacity_")
+	if capacity {
+		for i := 0; i < 12; i++ {
+			currentSession = fmt.Sprintf("fixture-shadow-thread-%d", i)
+			status, answer = request(history, false)
+			require.Equal(t, http.StatusOK, status, answer)
+			second := issue758CompletedResponse(t, answer, stream)
+			opaque = second.Get("output.0").Raw
+			require.Contains(t, opaque, "fixture-shadow-current-task-")
+			producerRequests++
+		}
+		if scenario == "capacity_oldest" {
+			currentSession, opaque = "fixture-shadow-thread", shadowHTTPAgent
+		}
+	}
 	owners := issue805Owners(t, probe)
-	require.Len(t, owners, 1)
+	ownerCount := producerRequests - 1
+	if scenario == "two_known_tasks" {
+		ownerCount = 2
+	} else if reusedOutput {
+		ownerCount = 1
+	}
+	require.Len(t, owners, ownerCount)
+	if scenario != "write_failed" {
+		for _, owner := range owners {
+			require.True(t, json.Valid([]byte(owner)) && gjson.Parse(owner).IsArray(), "every produced task must have an actual committed owner")
+		}
+	}
 	accounts[0].Schedulable = false
 	shadowKeys, err := probe.Keys(context.Background(), "openai_readable_shadow:v1:*").Result()
 	require.NoError(t, err)
+	if reusedOutput {
+		require.Len(t, shadowKeys, 1)
+		value, err := probe.Get(context.Background(), shadowKeys[0]).Result()
+		require.NoError(t, err)
+		require.Equal(t, "conflict", value, "same opaque output must not silently acquire another task")
+	}
+	if capacity {
+		require.Len(t, shadowKeys, 8, "SHADOW_CAPACITY_UNBOUNDED: all sessions/models share the principal's eight-record budget")
+		total := 0
+		for _, key := range shadowKeys {
+			value, err := probe.Get(context.Background(), key).Result()
+			require.NoError(t, err)
+			total += len(value)
+		}
+		require.LessOrEqual(t, total, 512*1024, "shadow payload bytes must be bounded across sessions")
+	}
+	if scenario == "store_read_failed" {
+		require.NotEmpty(t, shadowKeys, "read fault must operate on a real committed record")
+	}
 	if scenario == "expired" {
 		require.NotEmpty(t, shadowKeys, "expiry test must expire an actual committed future shadow")
 		for _, key := range shadowKeys {
@@ -243,7 +396,6 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 			owners[key] = value
 		}
 	}
-	opaque := shadowHTTPAgent
 	if scenario == "other_task" {
 		opaque = strings.ReplaceAll(opaque, "fixture-shadow-current-task", "fixture-shadow-unrelated-task")
 	}
@@ -254,13 +406,16 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	status, answer = request(input, true)
 	mu.Lock()
 	defer mu.Unlock()
-	if scenario == "recover" || scenario == "fresh_intent" {
-		require.Len(t, bodies, 3, "FUTURE_SHADOW_B_DISPATCH_MISSING: committed same-task context must reach B without manual input; response=%s", answer)
+	if scenario == "recover" || scenario == "fresh_intent" || scenario == "capacity_latest" || scenario == "two_known_tasks" {
+		require.Len(t, bodies, producerRequests+1, "FUTURE_SHADOW_B_DISPATCH_MISSING: committed same-task context must reach B without manual input; response=%s", answer)
 		require.Equal(t, http.StatusOK, status, answer)
 		completed := issue758CompletedResponse(t, answer, stream)
 		require.Contains(t, completed.Raw, "shadow-task-complete")
 		require.NotContains(t, completed.Raw, `"type":"function_call"`)
-		require.Equal(t, []string{"Bearer fixture-shadow-A", "Bearer fixture-shadow-A", "Bearer fixture-shadow-B"}, identities)
+		require.Equal(t, "Bearer fixture-shadow-B", identities[len(identities)-1])
+		for _, identity := range identities[:producerRequests] {
+			require.Equal(t, "Bearer fixture-shadow-A", identity)
+		}
 		require.Equal(t, 1, tool.patches, "completed side effect was reused, never executed again")
 		if scenario == "recover" {
 			require.NotEmpty(t, shadowKeys, "cross-node recovery must use the shared store")
@@ -277,11 +432,14 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	} else {
 		require.GreaterOrEqual(t, status, 400, answer)
 		require.NotEmpty(t, gjson.Get(answer, "error.message").String(), answer)
-		require.Len(t, bodies, 2, "scope/expiry/delivery must refuse before any B send")
+		require.Len(t, bodies, producerRequests, "scope/expiry/delivery must refuse before any B send")
 		require.NotContains(t, answer, "shadow-task-complete")
-		if scenario == "write_failed" || scenario == "off" {
+		if scenario == "write_failed" || scenario == "off" || scenario == "store_write_failed" || scenario == "oversize" || scenario == "pending_tool" || scenario == "pending_output" {
 			require.Empty(t, shadowKeys, "unconfirmed/disabled capture must not persist task plaintext")
 		}
+	}
+	if scenario == "store_write_failed" || scenario == "store_read_failed" {
+		require.Positive(t, storeFailure.calls.Load(), "must inject a fault in the actual shared shadow data plane")
 	}
 	require.Equal(t, owners, issue805Owners(t, probe), "shadow lookup must not clear or rewrite producer/delivery records")
 }

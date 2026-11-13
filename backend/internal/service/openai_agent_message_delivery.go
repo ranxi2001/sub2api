@@ -178,6 +178,9 @@ func (d *openAIAgentRecoveryDelivery) finish(completed bool) {
 				state.mu.Unlock()
 			}
 		}
+		if completed {
+			d.publishReadableShadow(ctx)
+		}
 	})
 }
 

@@ -11,14 +11,19 @@ GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
 
 
-def evidence(phase, boundaries=False):
+def evidence(phase, boundaries=False, resources=False, association=False):
     root, leaves = (GATE.BOUNDARIES, GATE.BOUNDARY_LEAVES) if boundaries else (GATE.ROOT, GATE.LEAVES)
+    if resources:
+        root, leaves = GATE.RESOURCES, GATE.RESOURCE_LEAVES
+    if association:
+        root, leaves = GATE.ASSOCIATION, GATE.ASSOCIATION_LEAVES
     terminal = "fail" if phase == "RED" else "pass"
     events = [{"Action": "run", "Test": root}]
     for name in leaves:
         events.append({"Action": "run", "Test": name})
         if phase == "RED":
-            events.append({"Action": "output", "Test": name, "Output": "FUTURE_SHADOW_B_DISPATCH_MISSING: encrypted_agent_recovery_readable_intent_missing"})
+            output = "SHADOW_TASK_ASSOCIATION_MISMATCH" if association else "FUTURE_SHADOW_B_DISPATCH_MISSING: encrypted_agent_recovery_readable_intent_missing"
+            events.append({"Action": "output", "Test": name, "Output": output})
         events.append({"Action": terminal, "Test": name})
     events.extend([{"Action": terminal, "Test": root}, {"Action": terminal}])
     for event in events:
@@ -35,6 +40,24 @@ class FutureShadowEvidenceTest(unittest.TestCase):
         GATE.validate("RED", 1, transcript(evidence("RED")))
         GATE.validate("GREEN", 0, transcript(evidence("GREEN")))
         GATE.validate("GREEN", 0, transcript(evidence("GREEN", True)), True)
+        GATE.validate("GREEN", 0, transcript(evidence("GREEN", resources=True)), resources=True)
+        for phase, code in (("RED", 1), ("GREEN", 0)):
+            GATE.validate(phase, code, transcript(evidence(phase, association=True)), association=True)
+
+    def test_association_mutant_needs_content_failure_for_each_task(self):
+        for name in GATE.ASSOCIATION_LEAVES:
+            events = evidence("RED", association=True)
+            for event in events:
+                if event.get("Test") == name and event["Action"] == "output":
+                    event["Output"] = "FUTURE_SHADOW_B_DISPATCH_MISSING: encrypted_agent_recovery_readable_intent_missing"
+            with self.assertRaises(ValueError):
+                GATE.validate("RED", 1, transcript(events), association=True)
+
+    def test_resources_require_every_named_leaf(self):
+        for name in GATE.RESOURCE_LEAVES:
+            events = [event for event in evidence("GREEN", resources=True) if event.get("Test") != name]
+            with self.assertRaises(ValueError):
+                GATE.validate("GREEN", 0, transcript(events), resources=True)
 
     def test_each_business_failure_needs_its_own_diagnostic(self):
         for name in GATE.LEAVES:

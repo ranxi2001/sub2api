@@ -56,6 +56,12 @@ type openAIAgentRecoveryRequest struct {
 	oauthControlsDigest  [32]byte
 	oauthReplayPrepared  bool
 	omittedSource        *openAIAgentRecoveryRequest
+	shadowModel          string // original requested model, independent of account/channel projection
+	shadowReadableIntent bool
+	shadowCandidate      *openAIReadableShadow
+	shadowOutputSafe     bool
+	shadowUnsafeOutput   bool
+	shadowFences         map[string]string
 	keyID                int64
 	userID               int64
 	delivery             *openAIAgentRecoveryDelivery
@@ -90,6 +96,9 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 	keyID := getAPIKeyIDFromContext(c)
 	request.keyID = keyID
 	request.userID = openAIAgentRecoveryHTTPUser(c, keyID)
+	request.shadowModel = gjson.GetBytes(body, "model").String()
+	request.shadowReadableIntent = openAI409HasReadableIntent(body)
+	request.shadowFences, _ = ctx.Value(openAIReadableShadowContextKey{}).(map[string]string)
 	request.nativeCompaction = isOpenAINativeCompactionV2(c)
 	request.disallowLearning = isOpenAIResponsesCompactPath(c) || request.nativeCompaction
 	if s == nil || keyID <= 0 || sessionHash == "" || model == "" {
@@ -337,8 +346,14 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		request.delivery.finish(false)
 	}
 	request.outputs = nil
+	request.shadowOutputSafe = false
+	request.shadowUnsafeOutput = false
+	request.shadowCandidate = nil
 	request.delivery = nil
 	if err := s.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
+		return noop, err
+	}
+	if err := s.checkOpenAIReadableShadowFences(ctx, request.shadowFences); err != nil {
 		return noop, err
 	}
 	if request.omittedSource != nil {
@@ -431,6 +446,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	if err := s.checkOpenAIAgentRecoveryRecords(ctx, request, binding); err != nil {
 		return noop, err
 	}
+	s.prepareOpenAIReadableShadow(ctx, request, body)
 	delivery := newOpenAIAgentRecoveryDelivery(s, ctx, request, binding)
 	request.delivery = delivery
 	return func(completed bool) {
@@ -542,9 +558,6 @@ func (r *openAIAgentRecoveryRequest) itemKey(item [32]byte) [32]byte {
 // output reconstruction and tool/name restoration. The attempt's completion
 // callback decides whether delivery succeeded; item.done alone grants nothing.
 func observeOpenAIAgentRecoveryOutput(c *gin.Context, body []byte, nested bool) error {
-	if !bytes.Contains(body, []byte("agent_message")) && !bytes.Contains(body, []byte(`\u`)) {
-		return nil
-	}
 	request := openAIAgentRecoveryFromContext(c.Request.Context())
 	if request == nil || request.delivery == nil {
 		return nil
@@ -556,6 +569,16 @@ func observeOpenAIAgentRecoveryOutput(c *gin.Context, body []byte, nested bool) 
 	if nested {
 		path = "response.output"
 	}
+	if request.shadowCandidate != nil {
+		request.shadowUnsafeOutput = request.shadowUnsafeOutput || !openAIReadableShadowOutputSafe(body, path)
+		if nested && gjson.GetBytes(body, "item").IsObject() {
+			kind := gjson.GetBytes(body, "item.type").String()
+			request.shadowUnsafeOutput = request.shadowUnsafeOutput || (kind != "agent_message" && kind != "message" && kind != "reasoning")
+		}
+	}
+	if !bytes.Contains(body, []byte("agent_message")) && !bytes.Contains(body, []byte(`\u`)) {
+		return nil
+	}
 	items := openAIAgentRecoveryDigests(body, path)
 	// Even an early item/response event can already contain the entire opaque
 	// item. Fence it before any bytes are released, without granting success.
@@ -564,6 +587,7 @@ func observeOpenAIAgentRecoveryOutput(c *gin.Context, body []byte, nested bool) 
 	}
 	if openAIAgentCompletedResponse(body, nested) {
 		request.outputs = openAIAgentRecoveryDigests(body, path)
+		request.shadowOutputSafe = !request.shadowUnsafeOutput && openAIReadableShadowOutputSafe(body, path)
 	}
 	return request.delivery.reserve(items)
 }

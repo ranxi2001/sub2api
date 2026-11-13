@@ -575,7 +575,7 @@ export default {
       },
       gatewayForwarding: {
         omitEncryptedHistory409: 'Omit encrypted content on 409',
-        omitEncryptedHistory409Hint: 'Off by default. HTTP Responses can automatically continue on an eligible account from the available readable task and completed tool results, starting a new upstream conversation when needed. Old opaque history may be lost; no confirmation or new client session is required. Requests with no readable intent, uncertain delivery or store failures remain protected. WebSockets are not yet covered. Already-sent generations and completed tools are not automatically replayed; upstream acceptance is not guaranteed.',
+        omitEncryptedHistory409Hint: 'Off by default. HTTP Responses can automatically continue on an eligible account from the available readable task and completed tool results, starting a new upstream conversation when needed. Old opaque history may be lost; no confirmation or new client session is required. When enabled, successfully delivered tasks may retain readable context in the internal shared store for up to 30 minutes, limited to eight records and 512 KiB per user/API key, solely for the same task. Context bodies are not logged. Requests with no readable clues, uncertain delivery or store failures remain protected. WebSockets are not yet covered. Already-sent generations and completed tools are not automatically replayed; upstream acceptance is not guaranteed.',
         title: 'Request Forwarding',
         description: 'Control how requests are forwarded to upstream OAuth accounts',
         grokDefaultTextModel: 'Default Grok text model',

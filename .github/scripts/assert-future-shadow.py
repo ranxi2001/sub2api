@@ -15,10 +15,14 @@ BOUNDARIES = "TestOpenAI409FutureShadowBoundaries"
 LEAVES = {f"{ROOT}/stream={stream}" for stream in ("false", "true")}
 BOUNDARY_NAMES = ("other_user", "other_key", "other_group", "other_model", "other_session", "other_task", "expired", "write_failed", "pending_owner", "failed_owner", "conflicted_owner", "off", "fresh_intent")
 BOUNDARY_LEAVES = {f"{BOUNDARIES}/stream={stream}/{case}" for stream in ("false", "true") for case in BOUNDARY_NAMES}
+RESOURCES = "TestOpenAI409FutureShadowResources"
+RESOURCE_LEAVES = {f"{RESOURCES}/stream={stream}/{case}" for stream in ("false", "true") for case in ("capacity_oldest", "capacity_latest", "store_write_failed", "store_read_failed", "oversize", "pending_tool", "pending_output", "conflicting_output", "echoed_task")}
+ASSOCIATION = "TestOpenAI409FutureShadowTaskAssociation"
+ASSOCIATION_LEAVES = {f"{ASSOCIATION}/stream={stream}" for stream in ("false", "true")}
 
 
-def validate(phase, code, raw, boundaries=False):
-    if phase not in ("RED", "GREEN") or (boundaries and phase != "GREEN"):
+def validate(phase, code, raw, boundaries=False, resources=False, association=False):
+    if phase not in ("RED", "GREEN") or ((boundaries or resources) and phase != "GREEN") or sum((boundaries, resources, association)) > 1:
         raise ValueError("invalid shadow evidence phase")
     COMMON.check_clean(raw)
     events = []
@@ -31,6 +35,10 @@ def validate(phase, code, raw, boundaries=False):
             raise ValueError("invalid event")
         events.append(event)
     root, leaves = (BOUNDARIES, BOUNDARY_LEAVES) if boundaries else (ROOT, LEAVES)
+    if resources:
+        root, leaves = RESOURCES, RESOURCE_LEAVES
+    if association:
+        root, leaves = ASSOCIATION, ASSOCIATION_LEAVES
     terminal = "fail" if phase == "RED" else "pass"
     if code != (1 if phase == "RED" else 0):
         raise ValueError("unexpected exit status")
@@ -47,16 +55,18 @@ def validate(phase, code, raw, boundaries=False):
     if phase == "RED":
         for name in leaves:
             output = "".join(event.get("Output", "") for event in events if event.get("Package") == COMMON.PACKAGE and event.get("Test") == name)
-            if "FUTURE_SHADOW_B_DISPATCH_MISSING" not in output or "encrypted_agent_recovery_readable_intent_missing" not in output:
+            required = ("SHADOW_TASK_ASSOCIATION_MISMATCH",) if association else ("FUTURE_SHADOW_B_DISPATCH_MISSING", "encrypted_agent_recovery_readable_intent_missing")
+            if any(marker not in output for marker in required):
                 raise ValueError(f"missing named shadow business assertion: {name}")
 
 
 def main():
     phase, code, filename, *options = sys.argv[1:]
-    if options not in ([], ["--boundaries"]):
+    if options not in ([], ["--boundaries"], ["--resources"], ["--association"]):
         raise ValueError("invalid option")
-    validate(phase, int(code), Path(filename).read_text(), bool(options))
-    print(f"{phase}: {len(BOUNDARY_LEAVES if options else LEAVES)} named shadow scenarios verified")
+    validate(phase, int(code), Path(filename).read_text(), options == ["--boundaries"], options == ["--resources"], options == ["--association"])
+    leaves = ASSOCIATION_LEAVES if options == ["--association"] else RESOURCE_LEAVES if options == ["--resources"] else BOUNDARY_LEAVES if options else LEAVES
+    print(f"{phase}: {len(leaves)} named shadow scenarios verified")
 
 
 if __name__ == "__main__":

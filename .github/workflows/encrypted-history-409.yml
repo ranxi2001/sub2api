@@ -50,9 +50,13 @@ jobs:
           cd "$RUNNER_TEMP/omit-metadata-red"
           # Keep the pre-rebuild callers coherent with the old omission API.
           # The historical metadata regression itself remains the candidate's.
-          for target in backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_error.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_codex_transform.go backend/internal/handler/openai_gateway_handler.go; do
+          for target in backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_agent_message_recovery_error.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_codex_transform.go backend/internal/handler/openai_gateway_handler.go; do
             git show "$callers:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "$callers:$target")"
+          done
+          for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go; do
+            ! git cat-file -e "$callers:$target" 2>/dev/null
+            rm -- "$target"
           done
           target=backend/internal/service/openai_409_omit_history.go
           git show "$baseline:$target" > "$target"

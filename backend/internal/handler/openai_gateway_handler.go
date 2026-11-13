@@ -855,6 +855,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 	}
 	service.SetOpenAIHTTPResponseOwner(c, subject.UserID, apiKey.ID)
+	if openAICompatibleRequestPlatform(c.Request.Context(), apiKey) == service.PlatformOpenAI {
+		shadowCtx, restored := h.gatewayService.RestoreOpenAIReadableShadow(c.Request.Context(), c, body, h.gatewayService.GenerateSessionHash(c, sessionHashBody))
+		c.Request = c.Request.WithContext(shadowCtx)
+		body = restored
+	}
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	bindOpenAIPriorityObservation(c, apiKey.GroupID, reqModel, body)

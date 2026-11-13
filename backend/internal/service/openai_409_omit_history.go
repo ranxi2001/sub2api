@@ -96,7 +96,7 @@ func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.
 		return ctx, body, false, nil
 	}
 	providerState := openAI409HasProviderState(body)
-	if !r.mixedOwners && !(len(r.items) > 0 && r.owner == nil) && !providerState {
+	if len(r.shadowFences) == 0 && !r.mixedOwners && !(len(r.items) > 0 && r.owner == nil) && !providerState {
 		return ctx, body, false, nil
 	}
 	// Pointer-only HTTP can still use its available original account. If that

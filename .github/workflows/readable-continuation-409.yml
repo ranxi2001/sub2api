@@ -86,10 +86,16 @@ jobs:
           baseline=dbed7697aa56e76c6eb48c4914fa441496b67bdd
           # Restore the matching production callers too: later HTTP rebuild
           # APIs must not turn the original reasoning RED into a compile error.
-          for target in backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_error.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_codex_transform.go backend/internal/handler/openai_gateway_handler.go; do
+          for target in backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_agent_message_recovery_error.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_codex_transform.go backend/internal/handler/openai_gateway_handler.go; do
             git show "$baseline:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
             git rev-parse "$baseline:$target" >> "$RUNNER_TEMP/readable-RED-provenance.txt"
+          done
+          # Future shadow calls/fields do not exist in this original baseline.
+          # Keep the selected HTTP tests intact and remove only new production.
+          for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go; do
+            ! git cat-file -e "$baseline:$target" 2>/dev/null
+            rm -- "$target"
           done
       - name: Same HTTP JSON and SSE behavior in both checkouts
         env:
