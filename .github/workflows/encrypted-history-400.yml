@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -37,7 +39,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends redis-server
       - name: Native recovery and unchanged 409 regressions
         working-directory: backend
-        run: go test -race -p 2 -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OpenAI400|OpenAI409|OmitOpenAIHistorical|ForwardEncryptedContentSSERetry|UpdateSettingsOpenAI400|UpdateSettingsOpenAI409)' -count=1 -timeout=5m
+        run: |
+          git rev-parse HEAD
+          go test -race -json -p 2 -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OpenAI400|OpenAI409|OmitOpenAIHistorical|ForwardEncryptedContentSSERetry|UpdateSettingsOpenAI400|UpdateSettingsOpenAI409)' -count=1 -timeout=5m
   settings:
     runs-on: ubuntu-latest
     timeout-minutes: 15

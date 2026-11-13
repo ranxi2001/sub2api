@@ -17,6 +17,7 @@ on:
       - 'backend/internal/service/openai_agent_message*'
       - '.github/scripts/assert-ws-readable.py'
       - '.github/scripts/test_assert_ws_readable.py'
+      - '.github/scripts/exclude-later-400-red-fixtures.sh'
       - '.github/scripts/exclude-later-http2-red-fixtures.sh'
       - 'backend/internal/service/openai_gateway_passthrough.go'
       - '.github/workflows/ws-readable-continuation.yml'
@@ -95,7 +96,7 @@ jobs:
           fi
           git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           if [ "$PHASE" = RED ]; then
-            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/transport-400-exclusions.txt"
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
           fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/handler/openai_gateway_handler.go; do
@@ -160,6 +161,7 @@ jobs:
           fi
           git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-400-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/review-400-exclusions.txt"
             bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
           fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_forwarder_payload.go; do
@@ -194,6 +196,7 @@ jobs:
           fi
           git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-400-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/residual-400-exclusions.txt"
             bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
           fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_409_ws_ticket_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_payload.go backend/internal/service/openai_gateway_passthrough.go; do
@@ -236,6 +239,9 @@ jobs:
             git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
           fi
           git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-400-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/namespace-400-exclusions.txt"
+          fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_ws_agent_recovery.go; do
             git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/native-namespace-blobs.txt"
           done

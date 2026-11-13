@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
@@ -17,6 +18,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type openAIWSPassthroughHandlerHarness struct {
@@ -29,6 +33,7 @@ type openAIWSPassthroughHandlerHarness struct {
 	apiKey         *service.APIKey
 	finalHeaders   <-chan http.Header
 	usageLogs      <-chan *service.UsageLog
+	requestLogs    *observer.ObservedLogs
 }
 
 func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, settings ...map[string]string) *openAIWSPassthroughHandlerHarness {
@@ -144,8 +149,16 @@ func newOpenAIWSPassthroughHandlerHarnessWithKey(t *testing.T, upstreamURL strin
 	}
 	finalHeaders := make(chan http.Header, 4)
 	handlerDone := make(chan struct{}, 4)
+	requestCore, requestLogs := observer.New(zap.WarnLevel)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
+		// Observe the real handler error boundary without replacing its logger
+		// or changing the client-visible close frame.
+		base := logger.FromContext(c.Request.Context())
+		observed := base.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+			return zapcore.NewTee(core, requestCore)
+		}))
+		c.Request = c.Request.WithContext(logger.IntoContext(c.Request.Context(), observed))
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
 		c.Next()
@@ -175,6 +188,7 @@ func newOpenAIWSPassthroughHandlerHarnessWithKey(t *testing.T, upstreamURL strin
 		apiKey:         apiKey,
 		finalHeaders:   finalHeaders,
 		usageLogs:      usageRepo.created,
+		requestLogs:    requestLogs,
 	}
 }
 

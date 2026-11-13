@@ -5,6 +5,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
+	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -135,6 +137,31 @@ func readableWSNativeNamespaceTools() []any {
 			"required": []string{"name"}, "additionalProperties": false,
 		}},
 	)
+}
+
+// A wire close intentionally omits internal causes. Attribute the observed
+// close to the real B dispatch error, never synthesize a diagnostic from the
+// scenario name: historical RED must still prove its specific underlying cause.
+func logReadableWSDispatchFailure(t *testing.T, h *openAIWSPassthroughHandlerHarness, clientErr error) {
+	t.Helper()
+	var peerClose coderws.CloseError
+	require.ErrorAs(t, clientErr, &peerClose)
+	require.Equal(t, coderws.StatusPolicyViolation, peerClose.Code)
+	entries := h.requestLogs.FilterMessage("openai.websocket_proxy_failed").All()
+	require.Len(t, entries, 1, "expected one actual failed B dispatch")
+	require.Equal(t, int64(2), entries[0].ContextMap()["account_id"])
+	var reported error
+	for _, field := range entries[0].Context {
+		if field.Key == "error" {
+			reported, _ = field.Interface.(error)
+		}
+	}
+	var serverClose *service.OpenAIWSClientCloseError
+	require.ErrorAs(t, reported, &serverClose)
+	require.Equal(t, peerClose.Code, serverClose.StatusCode())
+	require.Equal(t, peerClose.Reason, serverClose.Reason())
+	require.NotNil(t, errors.Unwrap(serverClose), "dispatch refusal must retain its underlying cause")
+	t.Logf("actual B dispatch error: %v; client close: %v", reported, clientErr)
 }
 
 func runReadableWSContinuation(t *testing.T, mode, scenario string) {
@@ -370,6 +397,10 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		require.Equal(t, 1, tools.patches)
 		require.Zero(t, tools.verifications)
 		return
+	}
+	if (nativeNamespace || customTools) && sends != 2 {
+		require.Equal(t, 1, sends, "refused rebuilt B dispatch must not emit a generation")
+		logReadableWSDispatchFailure(t, h, readErr)
 	}
 	if nativeNamespace {
 		require.Equal(t, 2, sends, "WS_NATIVE_NAMESPACE_B_DISPATCH_MISSING: close=%v terminal=%s", readErr, secondRaw)
