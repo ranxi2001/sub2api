@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -132,6 +134,9 @@ func openAI429WeeklyUsage(account *Account, headers http.Header, now time.Time, 
 		}
 		if reset, exists := evidence["reset_after_seconds"]; exists {
 			proofExtra["codex_7d_reset_after_seconds"] = reset
+		}
+		if reset, exists := evidence["reset_at"]; exists {
+			proofExtra["codex_7d_reset_at"] = reset
 		}
 		if invalidAt, exists := extra[openAI429WeeklyInvalidAtKey]; exists {
 			proofExtra[openAI429WeeklyInvalidAtKey] = invalidAt
@@ -271,6 +276,22 @@ type openAIDisableScheduling429ObservedKey struct{}
 // and invalid evidence that must prevent fallback to an older high snapshot.
 type openAI429WeeklyHeadersKey struct{}
 type openAI429WeeklyObservedAtKey struct{}
+
+// Bind the receipt time before any body buffering/streaming. Downstream
+// failover helpers read the same request context as direct stream side effects.
+func bindOpenAI429ResponseObservation(ctx context.Context, resp *http.Response, c *gin.Context) context.Context {
+	observed := time.Now()
+	if resp != nil && resp.Request != nil {
+		if stamp, ok := resp.Request.Context().Value(openAI429WeeklyObservedAtKey{}).(time.Time); ok {
+			observed = stamp
+		}
+	}
+	ctx = context.WithValue(ctx, openAI429WeeklyObservedAtKey{}, observed)
+	if c != nil && c.Request != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAI429WeeklyObservedAtKey{}, observed))
+	}
+	return ctx
+}
 
 func openAI429LeaseObservation(ctx context.Context, lease *openAIWSConnLease) context.Context {
 	var observed time.Time

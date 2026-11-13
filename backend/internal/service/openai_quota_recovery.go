@@ -100,8 +100,5 @@ func openAIQuotaRecoveryUsageUpdates(body []byte, now time.Time) map[string]any 
 	if len(updates) != 3 {
 		return nil
 	}
-	// This body explicitly identifies a recovered weekly window. Supersede any
-	// older retained header evidence alongside the existing zero-usage update.
-	updates[openAI429WeeklyEvidenceKey] = openAI429WeeklyEvidence(0, now.Truncate(time.Second), nil)
 	return updates
 }

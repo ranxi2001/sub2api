@@ -4,15 +4,18 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -264,5 +267,75 @@ func TestOAuth429WeeklyOnlyWSClientIngress(t *testing.T) {
 		require.Equal(t, []bool{false}, repo.writes, "client WebSocket ingress must preserve explicit secondary weekly evidence")
 	case <-ctx.Done():
 		t.Fatal("client ingress did not finish")
+	}
+}
+
+type weeklyOnlyLoopbackHTTP struct {
+	client *http.Client
+	target string
+}
+
+func (u *weeklyOnlyLoopbackHTTP) Do(request *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	local := request.Clone(request.Context())
+	parsed, err := url.Parse(u.target)
+	if err != nil {
+		return nil, err
+	}
+	local.URL.Scheme, local.URL.Host = parsed.Scheme, parsed.Host
+	local.Host = parsed.Host
+	return u.client.Do(local)
+}
+
+func (u *weeklyOnlyLoopbackHTTP) DoWithTLS(request *http.Request, proxy string, id int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(request, proxy, id, concurrency)
+}
+
+func TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, mode := range []string{"native_stream", "passthrough_stream", "native_buffered", "passthrough_buffered", "ws_http_bridge"} {
+		t.Run(mode, func(t *testing.T) {
+			var peers atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				peers.Add(1)
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.Header().Set("x-codex-primary-window-minutes", "10080")
+				w.Header().Set("x-codex-primary-used-percent", "99")
+				w.Header().Set("x-codex-primary-reset-after-seconds", "1")
+				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, ": fictional keepalive\n\n")
+				w.(http.Flusher).Flush()
+				// A real HTTP transport receives headers before this reset elapses.
+				time.Sleep(1500 * time.Millisecond)
+				_, _ = io.WriteString(w, "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"fictional-response\",\"error\":{\"type\":\"usage_limit_reached\",\"code\":\"rate_limit_exceeded\",\"message\":\"fictional quota rejection\",\"resets_in_seconds\":7200}}}\n\n")
+			}))
+			defer server.Close()
+			a := scheduling429Account()
+			a.Status, a.Concurrency = StatusActive, 1
+			a.Credentials = map[string]any{"access_token": "fictional-token", "chatgpt_account_id": "fictional-owner"}
+			a.Extra["codex_7d_used_percent"] = 20.0
+			a.Extra["openai_passthrough"] = strings.HasPrefix(mode, "passthrough")
+			a.Extra["openai_oauth_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
+			repo := &weeklyOnly429Repo{}
+			cfg := &config.Config{}
+			rates := NewRateLimitService(repo, nil, cfg, nil, nil)
+			gateway := &OpenAIGatewayService{cfg: cfg, httpUpstream: &weeklyOnlyLoopbackHTTP{client: server.Client(), target: server.URL}, rateLimitService: rates, cache: &stubGatewayCache{}, toolCorrector: NewCodexToolCorrector()}
+			rates.SetAccountRuntimeBlocker(gateway)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+			var err error
+			if mode == "ws_http_bridge" {
+				payload := []byte(`{"type":"response.create","model":"gpt-5.2","stream":true,"input":"fictional test"}`)
+				_, err = gateway.proxyOpenAIWSHTTPBridgeTurn(t.Context(), c, a, "fictional-token", payload, len(payload), "gpt-5.2", "", "", "", "", 1, func([]byte) error { return nil })
+			} else {
+				stream := !strings.HasSuffix(mode, "buffered")
+				_, err = gateway.Forward(t.Context(), c, a, []byte(fmt.Sprintf(`{"model":"gpt-5.2","stream":%t,"input":"fictional test"}`, stream)))
+			}
+			require.Error(t, err)
+			require.Positive(t, peers.Load(), "must reach the real loopback HTTP peer")
+			require.Empty(t, repo.ids, "expired HTTP response quota must not permanently disable on a later stream 429")
+			require.Positive(t, repo.rateLimitedCalls, "semantic 429 must preserve temporary cooldown handling")
+			require.WithinDuration(t, time.Now().Add(2*time.Hour), repo.lastRateLimitedAt, 10*time.Second, "temporary cooldown must use event reset")
+		})
 	}
 }

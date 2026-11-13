@@ -24,7 +24,7 @@ started = {(event.get("Package"), event["Test"]) for event in events
 finished = {(event.get("Package"), event["Test"]) for event in events
             if event["Action"] in ("pass", "fail") and event.get("Test")}
 assert started and started == finished, "test execution did not finish"
-package = "github.com/Wei-Shaw/sub2api/internal/" + ("repository" if mode == "repository" else "service")
+package = "github.com/Wei-Shaw/sub2api/internal/" + ("repository" if mode in ("repository", "red-query") else "service")
 terminal = [event for event in events if event.get("Package") == package
             and not event.get("Test") and event["Action"] in ("pass", "fail")]
 assert len(terminal) == 1, "missing completed package result"
@@ -32,7 +32,12 @@ failed = {event.get("Test") for event in events if event["Action"] == "fail"}
 passed = {event.get("Test") for event in events if event["Action"] == "pass"}
 if mode.startswith("red"):
     assert int(status) == 1 and terminal[0]["Action"] == "fail", "expected normal go test assertion failure"
-    if mode == "red-cache":
+    if mode == "red-query":
+        for name in ("new_weekly_zero", "new_weekly_low"):
+            assert "TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence/" + name in failed
+        assert "TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence/older_query_cannot_replace_newer_high" in passed
+        assert "actual QueryUsage persistence must supersede older weekly high" in output
+    elif mode == "red-cache":
         assert "TestOAuth429WeeklyOnlySequentialCache/duplicate_usage" in failed
         assert "TestOAuth429WeeklyOnlySequentialCache/nan_weekly_usage" in failed
         assert "TestOAuth429WeeklyOnlyNonweeklyPersistenceRetainsEvidence" in failed
@@ -55,16 +60,21 @@ if mode.startswith("red"):
             "WSForward/frame_elapsed_handshake_reset",
             "NonweeklyPersistenceRetainsEvidence",
             "WSClientIngress",
+            "HTTPStreamExpiredObservation/native_stream",
+            "HTTPStreamExpiredObservation/passthrough_stream",
+            "HTTPStreamExpiredObservation/native_buffered",
+            "HTTPStreamExpiredObservation/passthrough_buffered",
+            "HTTPStreamExpiredObservation/ws_http_bridge",
         ):
             assert "TestOAuth429WeeklyOnly" + name in failed, name
         assert "TestOAuth429WeeklyOnlyWSForward/body_only_no_percentage" in passed
         assert "request admission denied:" not in output
 else:
     assert int(status) == 0 and not failed and terminal[0]["Action"] == "pass", "candidate failed"
-    required = ["RotationPreservesScheduling", "InvalidWeeklyPersistence", "NonweeklyPersistenceRetainsEvidence"] if mode == "repository" else [
+    required = ["RotationPreservesScheduling", "InvalidWeeklyPersistence", "NonweeklyPersistenceRetainsEvidence", "QueryUsageSupersedesEvidence"] if mode == "repository" else [
         "Service", "HeaderBoundaries", "CachedIdentity", "NonweeklyHeadersAllowExplicitCache",
         "CacheDoesNotRelabelUnidentifiedUsage", "SequentialCache", "NonweeklyPersistenceRetainsEvidence", "PolicyGates",
-        "HTTPForward", "WSForward", "WSClientIngress", "CombinedRotation",
+        "HTTPForward", "HTTPStreamExpiredObservation", "WSForward", "WSClientIngress", "CombinedRotation",
     ]
     for name in required:
         assert "TestOAuth429WeeklyOnly" + name in passed, "missing regression: " + name

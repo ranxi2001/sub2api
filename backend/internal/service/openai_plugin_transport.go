@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
@@ -33,6 +34,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	defer func() {
 		if result != nil && result.Request == nil {
 			result.Request = request
+		}
+		if result != nil && result.Request != nil {
+			result.Request = result.Request.WithContext(context.WithValue(result.Request.Context(), openAI429WeeklyObservedAtKey{}, time.Now()))
 		}
 		result, resultErr = phaseGuard.finish(result, resultErr)
 		resultErr = finishHeaderTimeout(result, resultErr)

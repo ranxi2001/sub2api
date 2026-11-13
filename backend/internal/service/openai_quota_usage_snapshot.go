@@ -79,5 +79,12 @@ func openAIQuotaSchedulingUpdates(body []byte, shadow bool, expectedAccountID st
 		return nil
 	}
 	updates["codex_usage_updated_at"] = now.UTC().Format(time.RFC3339Nano)
+	if used, ok := resolveAccountExtraNumber(updates, "codex_7d_used_percent"); ok && validOpenAI429Percent(used) {
+		evidence := openAI429WeeklyEvidence(used, now, nil)
+		if reset, exists := updates["codex_7d_reset_at"]; exists {
+			evidence["reset_at"] = reset
+		}
+		updates[openAI429WeeklyEvidenceKey] = evidence
+	}
 	return updates
 }

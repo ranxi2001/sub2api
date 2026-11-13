@@ -5,11 +5,15 @@ package repository
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -133,4 +137,87 @@ func TestOAuth429WeeklyOnlyNonweeklyPersistenceRetainsEvidence(t *testing.T) {
 	a, err = accounts.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.False(t, a.Schedulable, "nonweekly JSONB updates must retain the valid weekly observation")
+}
+
+func TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		used        int
+		newerHeader bool
+	}{
+		{"new_weekly_zero", 0, false}, {"new_weekly_low", 20, false}, {"older_query_cannot_replace_newer_high", 20, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _, cfg := totpRotationFixture(t)
+			accounts := NewAccountRepository(integrationEntClient, integrationDB, nil)
+			require.NoError(t, accounts.SetSchedulable(ctx, cfg.AccountID, true))
+			require.NoError(t, accounts.UpdateCredentials(ctx, cfg.AccountID, map[string]any{"email": "owner@example.test", "chatgpt_account_id": "fictional-owner", "access_token": "fictional-token", "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339)}))
+			rates := service.NewRateLimitService(accounts, nil, &config.Config{}, nil, nil)
+			h := http.Header{}
+			h.Set("x-codex-primary-window-minutes", "10080")
+			h.Set("x-codex-primary-used-percent", "99")
+			a, err := accounts.GetByID(ctx, cfg.AccountID)
+			require.NoError(t, err)
+			rates.HandleUpstreamError(ctx, a, 429, h, nil)
+			old, err := accounts.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			var peers atomic.Int64
+			peerErrors := make(chan error, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path != "/backend-api/wham/usage" {
+					_, _ = w.Write([]byte(`{}`))
+					return
+				}
+				peers.Add(1)
+				if tc.newerHeader {
+					latest, readErr := accounts.GetByID(ctx, a.ID)
+					if readErr != nil {
+						peerErrors <- readErr
+						w.WriteHeader(500)
+						return
+					}
+					rates.HandleUpstreamError(ctx, latest, 429, h, nil)
+				}
+				_, _ = fmt.Fprintf(w, `{"account_id":"fictional-owner","email":"owner@example.test","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":%d,"limit_window_seconds":604800,"reset_after_seconds":7200},"secondary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_after_seconds":3600}}}`, tc.used)
+			}))
+			defer server.Close()
+			target, err := url.Parse(server.URL)
+			require.NoError(t, err)
+			factory := func(string) (*req.Client, error) {
+				client := req.C().WrapRoundTripFunc(func(rt req.RoundTripper) req.RoundTripFunc {
+					return func(request *req.Request) (*req.Response, error) {
+						request.URL.Scheme = target.Scheme
+						request.URL.Host = target.Host
+						return rt.RoundTrip(request)
+					}
+				})
+				return client, nil
+			}
+			quota := service.NewOpenAIQuotaService(accounts, nil, service.NewOpenAITokenProvider(accounts, nil, nil), factory, nil)
+			_, err = quota.QueryUsage(ctx, a.ID)
+			require.NoError(t, err)
+			select {
+			case peerErr := <-peerErrors:
+				require.NoError(t, peerErr)
+			default:
+			}
+			require.Positive(t, peers.Load())
+			// Simulate a delayed pre-query observation after query persistence.
+			delayed := map[string]any{}
+			for key, value := range old.Extra {
+				if service.IsCodexUsageExtraKey(key) {
+					delayed[key] = value
+				}
+			}
+			require.NoError(t, accounts.UpdateExtra(ctx, a.ID, delayed))
+			require.NoError(t, accounts.UpdateExtra(ctx, a.ID, map[string]any{service.OpenAIDisableSchedulingOn429ExtraKey: true}))
+			a, err = accounts.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			rates.HandleUpstreamError(ctx, a, 429, nil, nil)
+			a, err = accounts.GetByID(ctx, a.ID)
+			require.NoError(t, err)
+			require.Equal(t, !tc.newerHeader, a.Schedulable, "actual QueryUsage persistence must supersede older weekly high without overwriting a newer observation")
+		})
+	}
 }

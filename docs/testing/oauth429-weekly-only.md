@@ -2,7 +2,7 @@
 
 Baseline: `f895ea743f34a4c4ab6c9d01c01e13c931625a6e`.
 Production scope: weekly policy, quota snapshot header provenance, and the three
-stream/WS sites that separate permanent-policy evidence from temporary cooldown headers, retained handshake observation time, and explicit zero-quota recovery evidence.
+stream/WS sites that separate permanent-policy evidence from temporary cooldown headers, retained handshake observation time, and persisted quota-query observations (including low/zero recovery).
 All public fixtures are fictional. Local work is static only; dynamic evidence is
 produced by `.github/workflows/oauth429-weekly-only.yml` on GitHub Actions.
 
@@ -22,7 +22,7 @@ exist, both usage and window identity must have valid fresh versions from the sa
 source observation. A partial packet cannot borrow another packet's weekly identity.
 Rejected weekly headers carry an observation timestamp through parser/persistence;
 a later headerless 429 cannot trust usage from that packet. A newer valid weekly
-observation may supply fresh evidence again. Validated weekly usage is also retained as one versioned observation, independently of legacy normalized windows. Nonweekly updates cannot erase it; explicit weekly zero recovery supersedes it. Temporary quota normalization is unchanged. Legacy
+observation may supply fresh evidence again. Validated weekly usage is also retained as one versioned observation, independently of legacy normalized windows. Nonweekly updates cannot erase it; newer explicit quota-query low/zero usage supersedes it in the same repository write. Temporary quota normalization is unchanged. Legacy
 snapshots without an explicit window no longer authorize a permanent disable.
 Nonweekly or unidentified headers do not veto independently valid weekly cache;
 unidentified percentages themselves never count as weekly evidence.
@@ -39,6 +39,8 @@ unidentified percentages themselves never count as weekly evidence.
 | `TestOAuth429WeeklyOnlySequentialCache` | Public error service → actual parser → per-field persist/merge → reload → headerless 429; duplicate/conflicting/invalid weekly packets cannot poison cache |
 | `TestOAuth429WeeklyOnlyInvalidWeeklyPersistence` | Real PostgreSQL JSONB: NaN/Inf/duplicate weekly headers, prior-high cache, reload, delayed older snapshot, headerless 429 |
 | `TestOAuth429WeeklyOnlyNonweeklyPersistenceRetainsEvidence` | Parser/merge and production PostgreSQL variants preserve weekly 99 across subsequent 5h/zero persistence and reload |
+| `TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence` | Actual QueryUsage via loopback HTTP → PostgreSQL update/reload → headerless 429; low/zero supersedes high, delayed observations cannot overwrite newer evidence |
+| `TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation` | Real loopback HTTP flushes weekly headers, waits beyond reset, then sends semantic 429 through native/passthrough streamed and buffered paths plus WS HTTP bridge; temporary cooldown retained |
 | `TestOAuth429WeeklyOnlyPolicyGates` | Own threshold, strict equality, invalid threshold, opt-out, non429, body-only weekly classification |
 | `TestOAuth429WeeklyOnlyHTTPForward` | Actual `Forward` entry, native and OAuth passthrough HTTP paths, mocked transport response, primary/secondary weekly zero-neighbor and negative cases |
 | `TestOAuth429WeeklyOnlyWSForward` | Actual `Forward` entry, real loopback WS upstream handshake 429 and error frames, handshake quota, elapsed handshake reset (simulated on an actual connection after peer read), fresh low/invalid versus high cache, and explicit-cache/body-only controls; observes upstream peer and retains event-reset temporary cooldown |
@@ -53,6 +55,7 @@ no paid calls or production writes occur. The repository lifecycle uses fictiona
 worker transitions; no real 2FA enrollment runs. The combined service and durable
 repository tests are separate boundaries, not a claimed end-to-end worker test.
 
+HTTP response receipt and WS handshake times accompany retained headers through all stream and buffered-event policy paths.
 The permanent policy receives original stream/WS headers through context before
 temporary cooldown sanitization. Ordinary-model temporary cooldowns still discard
 successful handshake quota headers and use their existing event/body policy.
@@ -65,7 +68,7 @@ The three direct entrances to the permanent policy are the common
 its observation context with the common handler, avoiding duplicate permanent
 writes. Native HTTP/passthrough and WS Forward/client ctx_pool have entry-point
 execution above. Existing image/BPS/managed/SIWC tests call shared handlers; they
-are not full image/BPS transport acceptance. WS passthrough and HTTP bridge,
+are not full image/BPS transport acceptance. WS passthrough,
 images, embeddings, count tokens, model listing, alpha search, chat/messages
 compatibility and BPS repair variants are statically mapped below, not all
 individually executed by this focused suite.
@@ -163,9 +166,9 @@ report. Line numbers refer to this change's source tree.
 | `openai_ws_forwarder_v2.go:958` | `forwardOpenAIWSV2` | `handleOpenAIWSErrorEventTransientFailure` |
 | `openai_ws_forwarder_v2.go:1085` | `forwardOpenAIWSV2` | `handleOpenAIWSTerminalTransientFailure` |
 | `openai_ws_http_bridge.go:696` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIAccountUpstreamError` |
-| `openai_ws_http_bridge.go:816` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIWSFailureAccountSideEffects` |
-| `openai_ws_http_bridge.go:980` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIWSFailureAccountSideEffects` |
-| `openai_ws_http_bridge.go:1088` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIWSTerminalTransientFailure` |
+| `openai_ws_http_bridge.go:817` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIWSFailureAccountSideEffects` |
+| `openai_ws_http_bridge.go:981` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIWSFailureAccountSideEffects` |
+| `openai_ws_http_bridge.go:1089` | `proxyOpenAIWSHTTPBridgeTurn` | `handleOpenAIWSTerminalTransientFailure` |
 | `openai_ws_v2_passthrough_adapter.go:981` | `proxyResponsesWebSocketV2Passthrough` | `handleOpenAIWSDialTransientFailure` |
 | `openai_ws_v2_passthrough_adapter.go:1597` | `proxyResponsesWebSocketV2Passthrough` | `handleOpenAIWSFailureAccountSideEffects` |
 | `ratelimit_service.go:354` | `HandleUpstreamError` | `handleUpstreamErrorAfterStreakReset` |

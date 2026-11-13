@@ -254,6 +254,11 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 			// Order by request observation, so a slow earlier query cannot undo
 			// a later response/header snapshot. Resets use response receipt time.
 			updates["codex_usage_updated_at"] = queryStartedAt.UTC().Format(time.RFC3339Nano)
+			if evidence, ok := updates[openAI429WeeklyEvidenceKey].(map[string]any); ok {
+				// Bind the proof to the same ordering version as its atomic field.
+				// Absolute resets above still use response receipt time.
+				evidence["observed_at"] = updates["codex_usage_updated_at"]
+			}
 			payload.schedulingUpdates = updates
 			written, writeErr := persistCodexUsageUpdates(callCtx, s.accountRepo, accountID, updates)
 			payload.UsageCachePersisted = written && writeErr == nil

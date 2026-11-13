@@ -12,7 +12,11 @@ on:
       - 'backend/internal/service/openai_ws_forwarder_v2.go'
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_ws_v2_passthrough_adapter.go'
-      - 'backend/internal/service/openai_quota_recovery.go'
+      - 'backend/internal/service/openai_plugin_transport.go'
+      - 'backend/internal/service/openai_gateway_response_handling.go'
+      - 'backend/internal/service/openai_ws_http_bridge.go'
+      - 'backend/internal/service/openai_quota_service.go'
+      - 'backend/internal/service/openai_quota_usage_snapshot.go'
       - 'backend/internal/repository/oauth429_weekly_only*'
       - '.github/workflows/oauth429-weekly-only.yml'
       - '.github/scripts/oauth429-weekly-only-*'
@@ -27,7 +31,7 @@ env:
 jobs:
   red:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
         with:
@@ -61,7 +65,11 @@ jobs:
           3af551183471cd0ac3b2a6baa27aa506975dce96 backend/internal/service/openai_ws_forwarder_v2.go
           fcff9837e12c0aa9c3ea3e22724f923890681fe1 backend/internal/service/openai_ws_forwarder_ingress.go
           aee0bb83694c375d5baf431db916ea093a1658f4 backend/internal/service/openai_ws_v2_passthrough_adapter.go
-          696cd27a7aa58e6503e57c0b64bb341388c6ce3e backend/internal/service/openai_quota_recovery.go
+          0f83bd1fcfcf9d585c4fda999cce71bb7154451f backend/internal/service/openai_plugin_transport.go
+          fc1490884a556ef7518786c770fbd73a237155da backend/internal/service/openai_gateway_response_handling.go
+          ed1708f3c2ee470d80ab97b377ff610050e383fc backend/internal/service/openai_ws_http_bridge.go
+          0e4455ea613b07f2775c793346bd0b8fa0257fd5 backend/internal/service/openai_quota_service.go
+          26744ab312ed9552b375487d34052fd8b7f28da1 backend/internal/service/openai_quota_usage_snapshot.go
           BLOBS
           git -C "$RUNNER_TEMP/oauth429-red" diff --stat > evidence/red-diff.txt
           git ls-files 'backend/internal/service/*429*test.go' 'backend/internal/repository/oauth429_weekly_only*test.go' > evidence/retained-tests.txt
@@ -103,6 +111,27 @@ jobs:
           set -e
           printf '%s\n' "$result" > evidence/red-cache-exit.txt
           python3 .github/scripts/oauth429-weekly-only-evidence.py red-cache evidence/red-cache.jsonl "$result"
+      - name: Original quota-query persistence must fail against real PostgreSQL
+        shell: bash
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/oauth429-query-red" "$CANDIDATE"
+          target=backend/internal/service/openai_quota_usage_snapshot.go
+          expected=26744ab312ed9552b375487d34052fd8b7f28da1
+          test "$(git rev-parse "$BASELINE:$target")" = "$expected"
+          git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-query-red/$target"
+          test "$(git hash-object "$RUNNER_TEMP/oauth429-query-red/$target")" = "$expected"
+          printf '%s %s %s\n' "$BASELINE" "$expected" "$target" > evidence/query-restored-blobs.txt
+          git -C "$RUNNER_TEMP/oauth429-query-red" diff --exit-code -- '*_test.go'
+          git -C "$RUNNER_TEMP/oauth429-query-red" diff --stat > evidence/query-red-diff.txt
+          set +e
+          (cd "$RUNNER_TEMP/oauth429-query-red/backend" && go test -json -tags=integration ./internal/repository -run '^TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence$' -count=1 -timeout=10m) > evidence/red-query.jsonl 2> evidence/red-query.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/red-query-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py red-query evidence/red-query.jsonl "$result"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
