@@ -1,8 +1,6 @@
 name: Mobile groups search
 
 on:
-  push:
-    branches: [fix/mobile-groups-search]
   pull_request:
     paths:
       - 'frontend/src/views/admin/GroupsView.vue'
@@ -25,6 +23,9 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v6
         with:
@@ -68,12 +69,6 @@ jobs:
         run: |
           mkdir -p "$GROUPS_EVIDENCE_DIR"
           node .github/scripts/mobile-groups-search-browser.mjs 2>&1 | tee "$GROUPS_EVIDENCE_DIR/browser.log"
-      - name: Focused Groups and layout regressions
-        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/GroupsView.columnSettings.spec.ts src/views/admin/__tests__/GroupsView.duplicate.spec.ts src/views/admin/__tests__/GroupsView.streamOnly.spec.ts src/views/admin/__tests__/GroupsView.compositePlatforms.spec.ts src/views/admin/__tests__/GroupsView.codexCLIOnly.spec.ts src/views/admin/__tests__/GroupsView.codexManifest.spec.ts src/components/common/__tests__/DataTable.spec.ts src/components/layout/__tests__/TablePageLayout.spec.ts
-      - name: Check changed component lint
-        run: pnpm --dir frontend exec eslint src/components/layout/TablePageLayout.vue src/views/admin/GroupsView.vue
-      - name: Production frontend build and type check
-        run: pnpm --dir frontend run build
       - name: Evidence checksums
         if: always()
         run: |
@@ -85,3 +80,9 @@ jobs:
         with:
           name: mobile-groups-search-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/groups-evidence
+      - name: Focused Groups and layout regressions
+        run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/GroupsView.columnSettings.spec.ts src/views/admin/__tests__/GroupsView.duplicate.spec.ts src/views/admin/__tests__/GroupsView.streamOnly.spec.ts src/views/admin/__tests__/GroupsView.compositePlatforms.spec.ts src/views/admin/__tests__/GroupsView.codexCLIOnly.spec.ts src/views/admin/__tests__/GroupsView.codexManifest.spec.ts src/components/common/__tests__/DataTable.spec.ts src/components/layout/__tests__/TablePageLayout.spec.ts
+      - name: Check changed component lint
+        run: pnpm --dir frontend exec eslint src/components/layout/TablePageLayout.vue src/views/admin/GroupsView.vue
+      - name: Production frontend build and type check
+        run: pnpm --dir frontend run build

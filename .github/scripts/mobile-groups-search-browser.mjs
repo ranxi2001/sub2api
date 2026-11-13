@@ -3,6 +3,7 @@
 // Only authentication/settings, unrelated navigation/onboarding and API responses are synthetic.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -61,7 +62,11 @@ const groups = Array.from({ length: 20 }, (_, i) => ({
   sort_order: i, supported_model_scopes: [], created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z',
 }))
 const measurements = [], requests = [], errors = [], external = [], violations = [], screenshots = []
-let browser, page
+let browser, page, css, outcome = 'setup-or-interaction-failure'
+const sourceHashes = {}
+for (const file of ['src/views/admin/GroupsView.vue','src/components/layout/AppLayout.vue','src/components/layout/AppHeader.vue','src/components/layout/TablePageLayout.vue','src/components/common/DataTable.vue','src/style.css','tailwind.config.js']) {
+  sourceHashes[file] = createHash('sha256').update(await fs.readFile(path.join(frontend,file))).digest('hex')
+}
 function check(value, message) { if (!value) violations.push(message) }
 async function shot(name) {
   await page.screenshot({ path: path.join(out, `${name}.png`), fullPage: false, animations: 'disabled' })
@@ -125,9 +130,9 @@ try {
   await page.getByText('搜索目标演示组',{exact:true}).first().waitFor()
   await page.evaluate(()=>document.fonts.ready)
   // Guard against an unstyled fixture before treating any assertion as a behavioral RED.
-  const css=await page.evaluate(()=>({header:getComputedStyle(document.querySelector('header')).position,headerHeight:document.querySelector('header>div').getBoundingClientRect().height,padding:getComputedStyle(document.querySelector('main')).paddingTop,toolbarShrink:getComputedStyle(document.querySelector('.layout-section-fixed')).flexShrink,display:getComputedStyle(document.querySelector('.table-page-layout')).display}))
+  css=await page.evaluate(()=>({header:getComputedStyle(document.querySelector('header')).position,headerHeight:document.querySelector('header>div').getBoundingClientRect().height,padding:getComputedStyle(document.querySelector('main')).paddingTop,toolbarShrink:getComputedStyle(document.querySelector('.layout-section-fixed')).flexShrink,display:getComputedStyle(document.querySelector('.table-page-layout')).display}))
   assert.deepEqual(css,{header:'sticky',headerHeight:64,padding:'16px',toolbarShrink:'0',display:'flex'},'CSS_SETUP: actual Tailwind utilities must be compiled')
-  for(const viewport of [{width:375,height:667},{width:390,height:844},{width:320,height:667},{width:667,height:375},{width:375,height:400},{width:1280,height:900}]){
+  for(const viewport of [{width:375,height:667},{width:390,height:844},{width:320,height:667},{width:667,height:375},{width:844,height:390},{width:1023,height:768},{width:375,height:400},{width:1280,height:900}]){
     await page.setViewportSize(viewport);await top()
     const label=`${viewport.width}x${viewport.height}`
     const g=await searchUsable(`${label}-top`)
@@ -176,6 +181,7 @@ try {
   await createDialog.waitFor();await createDialog.getByLabel('Close modal').click();await createDialog.waitFor({state:'hidden'})
   await top();await searchUsable('toolbar-actions-returned-top')
   assert.deepEqual(errors,[],'No setup/runtime errors accepted as behavioral RED');assert.deepEqual(external,[])
+  outcome=violations.length?'behavioral-red':'green'
   if(violations.length)throw new Error('GROUPS_LAYOUT_REGRESSION\n'+violations.join('\n'))
   console.log('GROUPS_BROWSER_GREEN: real components, compiled CSS, scroll/resize and search assertions passed')
 } catch(error) {
@@ -183,7 +189,7 @@ try {
   await fs.writeFile(path.join(out,'failure.txt'),String(error.stack||error))
   throw error
 } finally {
-  await fs.writeFile(path.join(out,'manifest.json'),JSON.stringify({head,baseline,scope,productionSHA:scope==='baseline'?baseline:head,synthetic:true,browser:'Playwright Chromium; viewport emulation, not physical mobile/keyboard',actualComponents:['GroupsView','AppLayout','AppHeader','TablePageLayout','DataTable','Select','Pagination','BaseDialog'],screenshots,measurements,requests,errors,external,violations},null,2))
+  await fs.writeFile(path.join(out,'manifest.json'),JSON.stringify({head,baseline,scope,productionSHA:scope==='baseline'?baseline:head,outcome,sourceHashes,css,synthetic:true,browser:`Playwright Chromium ${browser?.version()}; viewport emulation, not physical mobile/keyboard`,actualComponents:['GroupsView','AppLayout','AppHeader','TablePageLayout','DataTable','Select','Pagination','BaseDialog'],screenshots,measurements,requests,errors,external,violations},null,2))
   if(browser)await browser.close();await server.close()
   await fs.rm(fixture,{recursive:true,force:true})
 }
