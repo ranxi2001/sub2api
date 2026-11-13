@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       phase:
-        description: RED first; GREEN/BOTH after the production increment
+        description: Paired immutable-baseline RED and production-candidate GREEN
         type: choice
         options: [RED, GREEN, BOTH]
-        default: RED
+        default: BOTH
   pull_request:
     paths:
       - 'backend/internal/handler/openai_409_*'
@@ -21,6 +21,7 @@ on:
       - 'backend/internal/service/openai_codex_transform.go'
       - '.github/scripts/assert-http-task-rebuild.py'
       - '.github/scripts/test_assert_http_task_rebuild.py'
+      - '.github/scripts/mutate-http-rebuild-owner-scan.py'
       - '.github/scripts/assert-readable-continuation.py'
       - '.github/workflows/http-task-rebuild.yml'
 
@@ -55,10 +56,8 @@ jobs:
     timeout-minutes: 25
     strategy:
       fail-fast: false
-      # This test-first checkpoint runs RED automatically. The production
-      # checkpoint must enable automatic BOTH before claiming feature GREEN.
       matrix:
-        phase: ${{ fromJSON(inputs.phase == 'BOTH' && '["RED","GREEN"]' || inputs.phase == 'GREEN' && '["GREEN"]' || '["RED"]') }}
+        phase: ${{ fromJSON(inputs.phase == 'RED' && '["RED"]' || inputs.phase == 'GREEN' && '["GREEN"]' || '["RED","GREEN"]') }}
     env:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       BASELINE_SHA: 96ba36a85edab665ad5a035788fc07a40fd18762
@@ -143,9 +142,80 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/http-task-evidence/boundaries.jsonl"
           python3 .github/scripts/assert-http-task-rebuild.py GREEN "$result" "$RUNNER_TEMP/http-task-evidence/boundaries.jsonl" --boundaries
+      - name: GREEN mixed producer fences and tool-definition wire mutations
+        if: matrix.phase == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in mixed-fences tool-oracle; do
+            test_name=TestOpenAI409HTTPMixedDeliveryFences
+            if [ "$suite" = tool-oracle ]; then test_name=TestOpenAI409HTTPToolDefinitionOracle; fi
+            set +e
+            (cd backend && go test -race -json -tags=unit ./internal/handler -run "^$test_name$" -count=1 -timeout=5m) > "$RUNNER_TEMP/http-task-evidence/$suite.jsonl" 2>&1
+            result=$?
+            set -e
+            cat "$RUNNER_TEMP/http-task-evidence/$suite.jsonl"
+            python3 .github/scripts/assert-http-task-rebuild.py GREEN "$result" "$RUNNER_TEMP/http-task-evidence/$suite.jsonl" "--$suite"
+          done
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: http-task-rebuild-${{ matrix.phase }}-${{ env.CANDIDATE_SHA }}
           path: ${{ runner.temp }}/http-task-evidence/
+          if-no-files-found: error
+  owner-scan-mutations:
+    name: Reject ${{ matrix.mutant }} owner scanner
+    needs: transport
+    if: inputs.phase != 'RED'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mutant: [newest-only, break-on-owner-mismatch]
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      MUTANT: ${{ matrix.mutant }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Execute unsafe source mutant with unchanged composed HTTP oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/http-mutant-evidence"
+          git worktree add --detach "$RUNNER_TEMP/http-owner-mutant" "$CANDIDATE_SHA"
+          python3 .github/scripts/mutate-http-rebuild-owner-scan.py "$RUNNER_TEMP/http-owner-mutant" "$MUTANT" > "$RUNNER_TEMP/http-mutant-evidence/mutation.json"
+          git -C "$RUNNER_TEMP/http-owner-mutant" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          git -C "$RUNNER_TEMP/http-owner-mutant" diff > "$RUNNER_TEMP/http-mutant-evidence/source.diff"
+          git rev-parse HEAD > "$RUNNER_TEMP/http-mutant-evidence/candidate.txt"
+          order=forward
+          if [ "$MUTANT" = break-on-owner-mismatch ]; then order=reverse; fi
+          set +e
+          (cd "$RUNNER_TEMP/http-owner-mutant/backend" && go test -race -json -tags=unit ./internal/handler -run "^TestOpenAI409HTTPMixedDeliveryFences$/^apikey$/^stream=false$/^A$/^failed$/^$order$" -count=1 -timeout=5m) > "$RUNNER_TEMP/http-mutant-evidence/transport.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http-mutant-evidence/transport.jsonl"
+          python3 .github/scripts/assert-http-task-rebuild.py MUTANT "$result" "$RUNNER_TEMP/http-mutant-evidence/transport.jsonl" "--mutant=$MUTANT"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http-owner-mutant-${{ matrix.mutant }}-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/http-mutant-evidence/
           if-no-files-found: error

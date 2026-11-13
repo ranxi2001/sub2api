@@ -3,7 +3,10 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -13,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -26,17 +30,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
-	httpRebuildSession = "fixture-unattended-coding-thread"
-	httpRebuildTask    = "Fix sum.go so Sum(2, 3) returns 5, then run verification. Reuse completed tool results."
-	httpRebuildSystem  = "Use the supplied coding task and recorded results. Never repeat a completed patch or verification."
-	httpRebuildSource  = "package fixture\nfunc Sum(a, b int) int { return a + b }\n"
-	httpRebuildPatch   = "sum.go patched once: return a + b"
-	httpRebuildCheck   = "Sum(2,3)=5; PASS"
-	httpRebuildAgentA  = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-opaque-A"}`
-	httpRebuildAgentB  = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-readable-B"}`
+	httpRebuildSession     = "fixture-unattended-coding-thread"
+	httpRebuildTask        = "Fix sum.go so Sum(2, 3) returns 5, then run verification. Reuse completed tool results."
+	httpRebuildSystem      = "Use the supplied coding task and recorded results. Never repeat a completed patch or verification."
+	httpRebuildSource      = "package fixture\nfunc Sum(a, b int) int { return a + b }\n"
+	httpRebuildPatch       = "sum.go patched once: return a + b"
+	httpRebuildCheck       = "Sum(2,3)=5; PASS"
+	httpRebuildAgentA      = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-opaque-A"}`
+	httpRebuildAgentB      = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-readable-B"}`
+	httpRebuildAgentAExtra = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-opaque-A-extra"}`
 )
 
 type httpRebuildWire struct {
@@ -52,9 +58,10 @@ type httpRebuildWire struct {
 // dialed. The loopback provider independently observes the resulting request.
 type httpRebuildTransport struct {
 	service.HTTPUpstream
-	target *url.URL
-	mu     sync.Mutex
-	wires  []httpRebuildWire
+	target   *url.URL
+	mu       sync.Mutex
+	wires    []httpRebuildWire
+	mutation string // test-only final-wire mutation, never a runtime option
 }
 
 func (u *httpRebuildTransport) Do(req *http.Request, proxy string, account int64, concurrency int) (*http.Response, error) {
@@ -78,7 +85,58 @@ func (u *httpRebuildTransport) Do(req *http.Request, proxy string, account int64
 	address := *req.URL
 	address.Scheme, address.Host = u.target.Scheme, u.target.Host
 	local.URL = &address
+	if account == 2 && u.mutation != "" {
+		mutated := body
+		switch u.mutation {
+		case "drop_tools":
+			mutated, err = sjson.DeleteBytes(body, "tools")
+		case "change_schema":
+			mutated, err = sjson.SetBytes(body, "tools.1.parameters.properties.path.type", "integer")
+		default:
+			return nil, fmt.Errorf("unknown fixture wire mutation")
+		}
+		if err != nil {
+			return nil, err
+		}
+		local.Body = io.NopCloser(bytes.NewReader(mutated))
+		local.ContentLength = int64(len(mutated))
+		local.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(mutated)), nil }
+	}
 	return u.HTTPUpstream.Do(local, "", account, concurrency)
+}
+
+func httpRebuildToolDefinitions() []any {
+	return []any{
+		map[string]any{"type": "function", "name": "apply_patch", "parameters": map[string]any{
+			"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "enum": []string{"sum.go"}}, "source": map[string]any{"type": "string"}},
+			"required": []string{"path", "source"}, "additionalProperties": false,
+		}},
+		map[string]any{"type": "function", "name": "run_tests", "parameters": map[string]any{
+			"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "enum": []string{"sum.go"}}},
+			"required": []string{"path"}, "additionalProperties": false,
+		}},
+	}
+}
+
+func httpRebuildToolsAvailable(body []byte) bool {
+	actual := gjson.GetBytes(body, "tools").Array()
+	expected := gjson.Parse(httpRebuildJSON(httpRebuildToolDefinitions())).Array()
+	if len(actual) != len(expected) {
+		return false
+	}
+	for _, want := range expected {
+		matches := 0
+		for _, got := range actual {
+			if got.Get("type").String() == "function" && got.Get("name").String() == want.Get("name").String() &&
+				reflect.DeepEqual(got.Get("parameters").Value(), want.Get("parameters").Value()) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return false
+		}
+	}
+	return true // Native optional description/strict defaults are not schemas.
 }
 
 func (u *httpRebuildTransport) DoWithTLS(req *http.Request, proxy string, account int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
@@ -191,7 +249,7 @@ func TestOpenAI409HTTPTaskRebuild(t *testing.T) {
 			for _, pointer := range []string{"intent", "previous", "conversation"} {
 				for _, outcome := range []string{"completed", "rejected", "write_failed"} {
 					t.Run(fmt.Sprintf("%s/stream=%t/%s/%s", accountType, stream, pointer, outcome), func(t *testing.T) {
-						runHTTPRebuildFixture(t, accountType, stream, pointer, outcome, "")
+						runHTTPRebuildFixture(t, accountType, stream, pointer, outcome, "", "")
 					})
 				}
 			}
@@ -204,15 +262,60 @@ func TestOpenAI409HTTPRebuildBoundaries(t *testing.T) {
 		for _, stream := range []bool{false, true} {
 			for _, boundary := range []string{"pointer_only", "opaque_only", "delivery_pending", "delivery_failed", "b_disabled"} {
 				t.Run(fmt.Sprintf("%s/stream=%t/%s", accountType, stream, boundary), func(t *testing.T) {
-					runHTTPRebuildFixture(t, accountType, stream, "previous", "completed", boundary)
+					runHTTPRebuildFixture(t, accountType, stream, "previous", "completed", boundary, "")
 				})
 			}
 		}
 	}
 }
 
-func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointer, outcome, boundary string) {
+func TestOpenAI409HTTPToolDefinitionOracle(t *testing.T) {
+	for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, stream := range []bool{false, true} {
+			for _, mutation := range []string{"drop_tools", "change_schema"} {
+				t.Run(fmt.Sprintf("%s/stream=%t/%s", accountType, stream, mutation), func(t *testing.T) {
+					runHTTPRebuildFixture(t, accountType, stream, "previous", "completed", "", mutation)
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAI409HTTPMixedDeliveryFences(t *testing.T) {
+	for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, stream := range []bool{false, true} {
+			for _, owner := range []string{"A", "B"} {
+				for _, state := range []string{"pending", "failed", "conflict"} {
+					for _, order := range []string{"forward", "reverse"} {
+						t.Run(fmt.Sprintf("%s/stream=%t/%s/%s/%s", accountType, stream, owner, state, order), func(t *testing.T) {
+							runHTTPRebuildFixture(t, accountType, stream, "previous", "completed", "mixed/"+owner+"/"+state+"/"+order, "")
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+// Address an existing fixture record, not manufacture ownership. Scope and
+// payload hashes locate the actual Lua-written key, which callers verify exists
+// before changing its delivery fence. No production cache APIs are overridden.
+func httpRebuildOwnerKey(t *testing.T, h *OpenAIGatewayHandler, agent string) string {
 	t.Helper()
+	c, _ := newIssue715Context(t, "{}")
+	c.Request.Header.Set("session_id", httpRebuildSession)
+	session := h.gatewayService.GenerateSessionHash(c, []byte(`{"model":"gpt-5.1"}`))
+	var item any
+	require.NoError(t, json.Unmarshal([]byte(agent), &item))
+	itemHash := sha256.Sum256([]byte(httpRebuildJSON(item)))
+	scope := httpRebuildJSON([]string{"99", "3132", session, "gpt-5.1", hex.EncodeToString(itemHash[:])})
+	key := sha256.Sum256([]byte(scope))
+	return "openai_agent_owner:v1:" + hex.EncodeToString(key[:])
+}
+
+func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointer, outcome, boundary, mutation string) {
+	t.Helper()
+	mixed := strings.HasPrefix(boundary, "mixed/")
 	clients := issue805Redis(t)
 	observer := clients()
 	patchCall := httpRebuildCall("apply_patch", "call_patch_once", map[string]any{"path": "sum.go", "source": httpRebuildSource})
@@ -232,8 +335,17 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		providerHeaders = append(providerHeaders, r.Header.Clone())
 		n := len(providerBodies)
 		mu.Unlock()
+		if !httpRebuildToolsAvailable(body) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"type":"invalid_request_error","message":"fixture rejected missing or changed tool declarations"}}`)
+			return
+		}
 		id, conversation := "resp_rebuild_A", "conv_rebuild_A"
 		output := []json.RawMessage{json.RawMessage(patchCall), json.RawMessage(httpRebuildAgentA)}
+		if mixed {
+			output = append(output, json.RawMessage(httpRebuildAgentAExtra))
+		}
 		if n > 1 {
 			readable := gjson.GetBytes(body, "input").Raw + " " + gjson.GetBytes(body, "instructions").String()
 			valid := r.Header.Get("Authorization") == "Bearer fixture-rebuild-B" &&
@@ -284,7 +396,7 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	target, err := url.Parse(provider.URL)
 	require.NoError(t, err)
-	transport := &httpRebuildTransport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
+	transport := &httpRebuildTransport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target, mutation: mutation}
 	accounts := issue715AccountsOfType(accountType)
 	for i, label := range []string{"A", "B"} {
 		accounts[i].Credentials = map[string]any{"base_url": provider.URL, "api_key": "fixture-rebuild-" + label, "access_token": "fixture-rebuild-" + label, "chatgpt_account_id": "fixture-chatgpt-" + label}
@@ -326,8 +438,7 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	client := gateway.Client()
 	client.Timeout = 10 * time.Second
 	request := func(history []string, previous gjson.Result) (int, string) {
-		body := map[string]any{"model": "gpt-5.1", "stream": stream, "store": false, "prompt_cache_key": httpRebuildSession,
-			"tools": []any{map[string]any{"type": "function", "name": "apply_patch", "parameters": map[string]any{"type": "object"}}, map[string]any{"type": "function", "name": "run_tests", "parameters": map[string]any{"type": "object"}}}}
+		body := map[string]any{"model": "gpt-5.1", "stream": stream, "store": false, "prompt_cache_key": httpRebuildSession, "tools": httpRebuildToolDefinitions()}
 		body["input"] = json.RawMessage("[" + strings.Join(history, ",") + "]")
 		if previous.Exists() && (pointer == "previous" || boundary == "pointer_only") {
 			body["previous_response_id"] = previous.Get("id").String()
@@ -374,7 +485,11 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	require.Zero(t, tools.verifications)
 	require.Len(t, usage.snapshot(), 1, "A must finish the real usage path")
 	ownersA := issue805Owners(t, observer)
-	require.Len(t, ownersA, 1)
+	if mixed {
+		require.Len(t, ownersA, 2)
+	} else {
+		require.Len(t, ownersA, 1)
+	}
 	accounts[0].Schedulable = false
 	disabled, err := (openAIImagesFailoverAccountRepo{accounts: accounts}).GetByID(context.Background(), 1)
 	require.NoError(t, err)
@@ -397,7 +512,7 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		accounts[1].Schedulable = false
 	}
 	status, answer = request(history, first)
-	if boundary != "" {
+	if boundary != "" && !mixed {
 		require.GreaterOrEqual(t, status, 400, "unrecoverable input/delivery must not pretend completion: %s", answer)
 		require.NotEmpty(t, gjson.Get(answer, "error.message").String(), answer)
 		require.NotContains(t, answer, "response.completed")
@@ -425,6 +540,21 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	for key, owner := range ownersA {
 		require.Equal(t, owner, owners[key], "old A owner remains intact")
 		delete(owners, key)
+	}
+	if mutation != "" {
+		require.Equal(t, http.StatusBadRequest, status, "wire mutant must not get a false GREEN: %s", answer)
+		require.Contains(t, answer, "missing or changed tool declarations")
+		require.Empty(t, owners, "provider must reject before generating a new tool or opaque item")
+		require.Len(t, usage.snapshot(), 1)
+		require.Zero(t, tools.verifications)
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, providerBodies, 2)
+		require.True(t, httpRebuildToolsAvailable(wires[1].body), "unmutated builder output must be valid")
+		require.False(t, httpRebuildToolsAvailable(providerBodies[1]), "mutation must actually reach the network provider")
+		require.JSONEq(t, gjson.GetBytes(wires[1].body, "input").Raw, gjson.GetBytes(providerBodies[1], "input").Raw)
+		t.Log("tool-definition wire mutation reached provider and was rejected before tool emission")
+		return
 	}
 	if outcome == "rejected" {
 		require.Equal(t, http.StatusBadRequest, status, answer)
@@ -456,6 +586,46 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		history = append(history, item.Raw)
 	}
 	history = append(history, tools.execute(t, second)...)
+	if mixed {
+		parts := strings.Split(boundary, "/")
+		fenced := httpRebuildAgentA
+		if parts[1] == "B" {
+			fenced = httpRebuildAgentB
+		}
+		key := httpRebuildOwnerKey(t, h, fenced)
+		expected := issue805Owners(t, observer)
+		require.Len(t, expected, 3, "two delivered A items and a delivered B item")
+		require.Contains(t, expected, key, "fence an actually delivered item")
+		value := parts[2]
+		if value == "pending" {
+			value = "pending:fixture-mixed-unconfirmed:" + expected[key]
+		}
+		require.NoError(t, observer.Set(context.Background(), key, value, time.Minute).Err())
+		expected[key] = value
+		if parts[3] == "reverse" {
+			var indices []int
+			for i, item := range history {
+				if gjson.Get(item, "type").String() == "agent_message" {
+					indices = append(indices, i)
+				}
+			}
+			for left, right := 0, len(indices)-1; left < right; left, right = left+1, right-1 {
+				history[indices[left]], history[indices[right]] = history[indices[right]], history[indices[left]]
+			}
+		}
+		// In reverse A-fenced order: completed B, completed A-extra, fenced A.
+		// A reader that stops at the first owner mismatch misses the last fence.
+		status, answer = request(history, second)
+		require.Len(t, transport.snapshot(), 2, "HTTP_REBUILD_FENCE_BYPASSED: every mixed-history fence must stop the next generation; response=%s", answer)
+		require.GreaterOrEqual(t, status, 400, answer)
+		require.NotEmpty(t, gjson.Get(answer, "error.message").String(), answer)
+		require.NotContains(t, answer, "response.completed")
+		require.Equal(t, expected, issue805Owners(t, observer), "all Redis records must remain byte-identical on refusal")
+		require.Equal(t, 1, tools.patches)
+		require.Equal(t, 1, tools.verifications)
+		require.Len(t, usage.snapshot(), 2)
+		return
+	}
 	// No new user text, no retry and no client/session reset. This next tool turn
 	// includes delivered A and B opaque history; both producer records survive.
 	status, answer = request(history, second)

@@ -66,6 +66,36 @@ class HTTPTaskRebuildEvidenceTest(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         GATE.validate(phase, code, transcript(altered))
 
+    def test_mutant_requires_actual_extra_generation_assertion(self):
+        for mutant, name in GATE.MUTANTS.items():
+            values = [
+                {"Action": "run", "Test": GATE.MIXED, "Package": GATE.PACKAGE},
+                {"Action": "run", "Test": name, "Package": GATE.PACKAGE},
+                {"Action": "output", "Test": name, "Package": GATE.PACKAGE,
+                 "Output": "HTTP_REBUILD_FENCE_BYPASSED: response=coding-task-complete"},
+                {"Action": "fail", "Test": name, "Package": GATE.PACKAGE},
+                {"Action": "fail", "Test": GATE.MIXED, "Package": GATE.PACKAGE},
+                {"Action": "fail", "Package": GATE.PACKAGE},
+            ]
+            GATE.validate("MUTANT", 1, transcript(values), mutant=mutant)
+            for bad in ("unrelated assertion", "HTTP_REBUILD_FENCE_BYPASSED", "panic: coding-task-complete"):
+                with self.subTest(mutant=mutant, bad=bad):
+                    values[2]["Output"] = bad
+                    with self.assertRaises(ValueError):
+                        GATE.validate("MUTANT", 1, transcript(values), mutant=mutant)
+
+    def test_all_new_green_inventory_is_required(self):
+        for suite, (root, leaves) in GATE.SUITES.items():
+            values = [{"Action": "run", "Test": root, "Package": GATE.PACKAGE}]
+            for name in leaves:
+                values.extend([{"Action": "run", "Test": name, "Package": GATE.PACKAGE},
+                               {"Action": "pass", "Test": name, "Package": GATE.PACKAGE}])
+            values.extend([{"Action": "pass", "Test": root, "Package": GATE.PACKAGE},
+                           {"Action": "pass", "Package": GATE.PACKAGE}])
+            GATE.validate("GREEN", 0, transcript(values), suite=suite)
+            with self.assertRaises(ValueError):
+                GATE.validate("GREEN", 0, transcript(values[1:]), suite=suite)
+
 
 if __name__ == "__main__":
     unittest.main()

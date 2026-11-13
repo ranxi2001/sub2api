@@ -50,7 +50,7 @@ jobs:
         phase: [RED, GREEN]
     steps:
       # Each job has a disposable independent checkout of the identical head.
-      # RED changes one pinned production blob and retains the new HTTP tests.
+      # RED restores pinned production callers and retains the candidate tests.
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -84,10 +84,13 @@ jobs:
         run: |
           set -euo pipefail
           baseline=dbed7697aa56e76c6eb48c4914fa441496b67bdd
-          target=backend/internal/service/openai_409_omit_history.go
-          git show "$baseline:$target" > "$target"
-          test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
-          git rev-parse "$baseline:$target" >> "$RUNNER_TEMP/readable-RED-provenance.txt"
+          # Restore the matching production callers too: later HTTP rebuild
+          # APIs must not turn the original reasoning RED into a compile error.
+          for target in backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_error.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_codex_transform.go backend/internal/handler/openai_gateway_handler.go; do
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+            git rev-parse "$baseline:$target" >> "$RUNNER_TEMP/readable-RED-provenance.txt"
+          done
       - name: Same HTTP JSON and SSE behavior in both checkouts
         env:
           PHASE: ${{ matrix.phase }}
@@ -106,7 +109,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OmitOpenAIHistorical|OpenAI409(OmitHistory|Replay|Omission|ReadableReasoning)|UpdateSettingsOpenAI409|Issue715(OutputPending|PendingLookup|ObservedPending|HTTPFailedDelivery|HTTPRecoveryKeepsHardRestrictions|HTTPRecoveryCannotBypassLongContext|HTTPPartialOutput))' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/readable-GREEN-safeguards.log"
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OmitOpenAIHistorical|OpenAI409(OmitHistory|Replay|Omission|ReadableReasoning|Rebuild|OAuth)|UpdateSettingsOpenAI409|Issue715(OutputPending|PendingLookup|ObservedPending|HTTPFailedDelivery|HTTPRecoveryKeepsHardRestrictions|HTTPRecoveryCannotBypassLongContext|HTTPPartialOutput))' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/readable-GREEN-safeguards.log"
           python3 ../.github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/readable-GREEN-safeguards.log"
       - uses: actions/upload-artifact@v7
         if: always()

@@ -694,9 +694,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
+		readableReplay := false
+		if recovery := openAIAgentRecoveryFromContext(ctx); recovery != nil && recovery.omittedHistory {
+			if err := prepareOpenAI409OAuthReplay(ctx, c, decoded); err != nil {
+				return nil, err
+			}
+			readableReplay = true
+			markDecodedModified()
+		}
 		// Responses OAuth 与 Chat 兼容入口保持一致：纯文本 system 可以无损提升后删除，
 		// JSON object 模式仍需在 input 中保留 JSON 指令供上游兼容校验。
-		omitPromotedSystemMessages := !strings.EqualFold(
+		omitPromotedSystemMessages := !readableReplay && !strings.EqualFold(
 			strings.TrimSpace(gjson.GetBytes(body, "text.format.type").String()),
 			"json_object",
 		)
@@ -707,6 +715,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				IsCompact:                           isCompactRequest,
 				SkipDefaultInstructions:             true,
 				PreserveToolCallIDs:                 true,
+				PreserveReadableReplay:              readableReplay,
 				OmitPromotedSystemMessagesFromInput: omitPromotedSystemMessages,
 				ResponsesLite:                       responsesLite,
 			})
@@ -716,6 +725,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			codexResult = applyCodexOAuthTransformWithOptions(decoded, codexOAuthTransformOptions{
 				IsCodexCLI:                          isCodexCLI,
 				IsCompact:                           isCompactRequest,
+				SkipDefaultInstructions:             readableReplay,
+				PreserveReadableReplay:              readableReplay,
 				OmitPromotedSystemMessagesFromInput: omitPromotedSystemMessages,
 				ResponsesLite:                       responsesLite,
 			})
@@ -724,7 +735,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": codexResult.Error.Error()}})
 			return nil, codexResult.Error
 		}
-		setCodexToolNameReverse(c, codexResult.ToolNameReverse)
+		if readableReplay {
+			mergeCodexToolNameReverse(c, codexResult.ToolNameReverse)
+		} else {
+			setCodexToolNameReverse(c, codexResult.ToolNameReverse)
+		}
 		if codexResult.Modified {
 			markDecodedModified()
 		}
@@ -1472,7 +1487,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
-			if !isControlledExperiment(ctx) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+			if !isControlledExperiment(ctx) && !openAIAgentRecoveryPreservesHistory(ctx) && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
 				if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -2038,6 +2053,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 客户端回带的 x-codex-turn-state 若已知由其他账号铸造（failover 换号），
 	// 剥离后再出站——异账号 blob 与本账号的（指纹收敛后）出站身份自相矛盾。
 	s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
+	if recovery := openAIAgentRecoveryFromContext(ctx); recovery != nil && recovery.omittedHistory {
+		req.Header.Del("x-codex-turn-state")
+		req.Header.Del("conversation_id")
+	}
 	if err := s.applyOpenAICodexTicket(ctx, account, extractOpenAICodexTicketModel(body), req.Header); err != nil {
 		return nil, err
 	}

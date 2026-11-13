@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -28,22 +29,43 @@ func (s *SettingService) IsOpenAI409OmitEncryptedHistoryEnabled(ctx context.Cont
 	return err == nil && strings.TrimSpace(value) == "true"
 }
 
-// TryOmitOpenAI409History is called only after initial account selection fails,
-// before any upstream attempt. It never handles provider responses or retries.
+// TryOmitOpenAI409History retains the original pre-send compatibility API.
+// HTTP callers use the explicit refusal returned by TryRebuild below.
 func (s *OpenAIGatewayService) TryOmitOpenAI409History(ctx context.Context, c *gin.Context, body []byte, session, model string, cause error) (context.Context, []byte, bool) {
+	next, clean, changed, _ := s.TryRebuildOpenAI409History(ctx, c, body, session, model, cause)
+	return next, clean, changed
+}
+
+func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c *gin.Context, body []byte, session, model string, cause error) (context.Context, []byte, bool, error) {
 	var refusal *OpenAIAgentRecoveryError
-	if !errors.As(cause, &refusal) || (refusal.Reason != "owner_unavailable" && refusal.Reason != "route_changed" && refusal.Reason != "wire_changed") {
-		return ctx, body, false
+	if !errors.As(cause, &refusal) {
+		return ctx, body, false, nil
 	}
 	r := openAIAgentRecoveryFromContext(ctx)
-	if s == nil || r == nil || r.owner == nil || r.conflict || r.lookupErr != nil || r.disallowLearning || r.omittedHistory ||
-		r.owner.pending != "" || r.owner.failed || r.owner.conflicted ||
+	allowed := refusal.Reason == "owner_unavailable" || refusal.Reason == "route_changed" || refusal.Reason == "wire_changed" ||
+		refusal.Reason == "http_previous_response_unsupported" || (refusal.Reason == "owner_conflict" && r != nil && r.mixedOwners)
+	if !allowed || s == nil || r == nil || r.disallowLearning || r.omittedHistory || r.delivery != nil || s.settingService == nil ||
 		!s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
-		return ctx, body, false
+		return ctx, body, false, nil
+	}
+	if r.lookupErr != nil {
+		return ctx, body, false, r.lookupErr
+	}
+	if r.conflict || (r.owner != nil && (r.owner.pending != "" || r.owner.failed || r.owner.conflicted)) {
+		return ctx, body, false, openAIAgentRecoveryError("owner_conflict")
+	}
+	if len(r.items) == 0 && !openAI409HasProviderState(body) {
+		return ctx, body, false, nil
+	}
+	if !openAI409HasReadableIntent(body) {
+		return ctx, body, false, openAIAgentRecoveryError("readable_intent_missing")
 	}
 	clean, changed := omitOpenAIHistoricalCiphertext(body)
-	if !changed || ctx.Err() != nil {
-		return ctx, body, false
+	if ctx.Err() != nil {
+		return ctx, body, false, openAIAgentRecoveryError("store_unavailable")
+	}
+	if !changed {
+		return ctx, body, false, openAIAgentRecoveryError("readable_history_unsupported")
 	}
 	// Build portable readable history before freezing it. Native Responses
 	// normalization otherwise drops reasoning.content and (with store=false)
@@ -51,29 +73,114 @@ func (s *OpenAIGatewayService) TryOmitOpenAI409History(ctx context.Context, c *g
 	// Never rebase the digest on the forwarder's potentially lossy result.
 	clean, err := prepareOpenAI409ReadableReplay(clean)
 	if err != nil {
-		return ctx, body, false
+		return ctx, body, false, openAIAgentRecoveryError("readable_history_unsupported")
 	}
-	next := s.WithOpenAIAgentMessageRecovery(ctx, c, clean, session, model)
+	fresh := context.WithValue(ctx, openAIGuardianParentAffinityContextKey{}, openAIGuardianParentAffinity{})
+	next := s.WithOpenAIAgentMessageRecovery(WithOpenAIEncryptedReasoningAffinity(fresh, clean), c, clean, session, model)
 	request := openAIAgentRecoveryFromContext(next)
 	// Preserve the sanitized input at the actual send and reuse the existing
 	// native HTTP delivery fence and no-replay gates. Old owner records stay put.
 	request.omittedHistory = true
 	request.inputDigest = openAIAgentRecoveryInputDigest(clean)
-	return next, clean, true
+	request.replayInstructions = strings.TrimSpace(gjson.GetBytes(clean, "instructions").String()) != ""
+	request.replayControlsDigest = openAI409ControlsDigest(clean, request.replayInstructions)
+	request.omittedSource = r
+	return next, clean, true, nil
 }
 
-// Omission is limited to history before the latest user/agent task. Tool
-// arguments, readable results, media, reasoning and numeric precision survive.
-// A ciphertext in the current task causes the entire operation to be refused.
-func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
-	if !utf8.Valid(raw) || !openAIEncryptedJSONUnambiguous(raw) {
-		return raw, false
+// Provider state and mixed completed producers cannot be forwarded as one new
+// account's conversation. Rebuild before selection, after all item fences were
+// read. A healthy single producer without pointers retains ordinary routing.
+func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.Context, c *gin.Context, body []byte, session, model string) (context.Context, []byte, bool, error) {
+	r := openAIAgentRecoveryFromContext(ctx)
+	if r == nil {
+		return ctx, body, false, nil
 	}
+	providerState := openAI409HasProviderState(body)
+	if !r.mixedOwners && !(len(r.items) > 0 && r.owner == nil) && !providerState {
+		return ctx, body, false, nil
+	}
+	// Pointer-only HTTP can still use its available original account. If that
+	// account is unavailable, selection calls the same rebuild/missing-intent
+	// gate. A conversation object has no proven native HTTP owner to fall back to.
+	if providerState && !openAI409HasReadableIntent(body) && !gjson.GetBytes(body, "conversation").Exists() && !r.mixedOwners {
+		return ctx, body, false, nil
+	}
+	return s.TryRebuildOpenAI409History(ctx, c, body, session, model, openAIAgentRecoveryError("owner_unavailable"))
+}
+
+// A missing response lookup is not permission to read another user's state.
+// It may only be discarded, under the explicit Beta policy, in favor of the
+// caller's own readable task. Existing foreign ownership/store failures deny.
+func (s *OpenAIGatewayService) CanDiscardOpenAI409ResponsePointer(ctx context.Context, body []byte, groupID int64, responseID string) bool {
+	if s == nil || s.settingService == nil || !openAI409HasReadableIntent(body) || !s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+		return false
+	}
+	_, _, found, err := s.getOpenAIWSStateStore().GetHTTPResponseOwner(ctx, groupID, responseID)
+	return err == nil && !found
+}
+
+func openAI409HasProviderState(body []byte) bool {
 	for _, field := range []string{"previous_response_id", "conversation"} {
-		value := gjson.GetBytes(raw, field)
+		value := gjson.GetBytes(body, field)
 		if value.Exists() && value.Type != gjson.Null && (value.Type != gjson.String || strings.TrimSpace(value.String()) != "") {
-			return raw, false
+			return true
 		}
+	}
+	return false
+}
+
+func openAI409ReadableText(value gjson.Result) bool {
+	if value.Type == gjson.String {
+		text := strings.TrimSpace(value.String())
+		return text != "" && text != openAIHistoricalCiphertextOmitted && !strings.HasPrefix(text, "Historical agent context (not a new instruction):")
+	}
+	for _, part := range value.Array() {
+		switch part.Get("type").String() {
+		case "input_text", "output_text", "text", "summary_text":
+			if openAI409ReadableText(part.Get("text")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func openAI409HasReadableIntent(body []byte) bool {
+	input := gjson.GetBytes(body, "input")
+	if input.Type == gjson.String {
+		return openAI409ReadableText(input)
+	}
+	var latestUser gjson.Result
+	summaryIntent := false
+	for _, item := range input.Array() {
+		kind, role := item.Get("type").String(), item.Get("role").String()
+		if (kind == "message" || kind == "") && role == "user" {
+			content := item.Get("content")
+			empty := !content.Exists() || content.Type == gjson.Null || (content.Type == gjson.String && strings.TrimSpace(content.String()) == "") || (content.IsArray() && len(content.Array()) == 0)
+			if !empty || openAI409ReadableText(item.Get("summary")) {
+				latestUser = item
+				summaryIntent = false
+			}
+		}
+		if kind == "agent_message" {
+			summaryIntent = summaryIntent || openAI409ReadableText(item.Get("summary"))
+		}
+	}
+	if latestUser.Exists() {
+		// A later entirely opaque user request must not be replaced by an older
+		// user's unrelated task. Opaque agent envelopes do not reset this intent.
+		return openAI409ReadableText(latestUser.Get("content")) || openAI409ReadableText(latestUser.Get("summary")) || summaryIntent
+	}
+	return summaryIntent || openAI409ReadableText(gjson.GetBytes(body, "instructions"))
+}
+
+// The latest available readable task, not the last opaque item's position,
+// determines whether loss is possible. Tool calls/results and readable input
+// remain; provider pointers are detached only as part of this same rebuild.
+func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
+	if !utf8.Valid(raw) || !openAIEncryptedJSONUnambiguous(raw) || !openAI409HasReadableIntent(raw) {
+		return raw, false
 	}
 	var source map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -82,30 +189,40 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 		return raw, false
 	}
 	input, ok := source["input"].([]any)
+	if text, textInput := source["input"].(string); textInput {
+		input, ok = []any{map[string]any{"type": "message", "role": "user", "content": text}}, true
+		source["input"] = input
+	}
+	if (source["input"] == nil || (ok && len(input) == 0)) && openAI409ReadableText(gjson.GetBytes(raw, "instructions")) {
+		// Instructions-only callers also supplied a real task. Carry it in the
+		// protected input when rebuilding instead of sending an empty task.
+		input, ok = []any{map[string]any{"type": "message", "role": "user", "content": source["instructions"]}}, true
+		source["input"] = input
+	}
 	if !ok {
 		return raw, false
 	}
-	current := -1
-	for i, value := range input {
-		item, _ := value.(map[string]any)
-		kind, _ := item["type"].(string)
-		role, _ := item["role"].(string)
-		if kind == "item_reference" || kind == "compaction" || kind == "compaction_summary" {
-			return raw, false
-		}
-		if kind == "agent_message" || ((kind == "" || kind == "message") && role == "user") {
-			current = i
-		}
-	}
-	if current < 0 {
-		return raw, false
-	}
 	changed := false
+	for _, field := range []string{"previous_response_id", "conversation"} {
+		if _, exists := source[field]; exists {
+			delete(source, field)
+			changed = true
+		}
+	}
 	for i, value := range input {
 		item, _ := value.(map[string]any)
 		kind, _ := item["type"].(string)
 		field, textKind := "content", "input_text"
 		switch kind {
+		case "item_reference":
+			input[i] = map[string]any{"type": "message", "role": "assistant", "content": openAIHistoricalCiphertextOmitted}
+			changed = true
+			continue
+		case "compaction", "compaction_summary":
+			readable, _ := json.Marshal(openAI409ReadableMetadata(map[string]any{"content": item["content"], "summary": item["summary"]}))
+			input[i] = map[string]any{"type": "message", "role": "assistant", "content": "Historical compaction context (JSON): " + string(readable) + "\n" + openAIHistoricalCiphertextOmitted}
+			changed = true
+			continue
 		case "", "message", "agent_message":
 			if item["role"] == "assistant" {
 				textKind = "output_text"
@@ -118,9 +235,6 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 		itemChanged := false
 		if kind == "agent_message" {
 			if encrypted, exists := item["encrypted_content"]; exists && encrypted != nil && encrypted != "" {
-				if i >= current {
-					return raw, false
-				}
 				marker := map[string]any{"type": "input_text", "text": openAIHistoricalCiphertextOmitted}
 				switch content := item["content"].(type) {
 				case []any:
@@ -130,7 +244,8 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 				case nil:
 					item["content"] = []any{marker}
 				default:
-					return raw, false
+					readable, _ := json.Marshal(openAI409ReadableMetadata(content))
+					item["content"] = []any{map[string]any{"type": "input_text", "text": string(readable)}, marker}
 				}
 				delete(item, "encrypted_content")
 				itemChanged = true
@@ -140,19 +255,42 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 			for j, rawPart := range parts {
 				part, _ := rawPart.(map[string]any)
 				if part["type"] == "encrypted_content" {
-					if i >= current {
-						return raw, false
-					}
 					parts[j] = map[string]any{"type": textKind, "text": openAIHistoricalCiphertextOmitted}
 					itemChanged = true
 				}
 			}
 		}
-		if itemChanged && kind == "agent_message" {
+		if kind == "agent_message" {
 			// Native Responses accepts ordinary user context without requiring an
 			// opaque agent envelope. Keep attribution explicit in readable text.
 			metadata, _ := json.Marshal(map[string]any{"author": item["author"], "recipient": item["recipient"]})
 			parts, _ := item["content"].([]any)
+			if text, ok := item["content"].(string); ok {
+				parts = []any{map[string]any{"type": "input_text", "text": text}}
+			} else if parts == nil && item["content"] != nil {
+				readable, _ := json.Marshal(openAI409ReadableMetadata(item["content"]))
+				parts = []any{map[string]any{"type": "input_text", "text": string(readable)}}
+			}
+			// A structured readable summary may be the available task intent.
+			// Never authorize omission from that summary and then discard it.
+			switch summary := item["summary"].(type) {
+			case string:
+				parts = append(parts, map[string]any{"type": "input_text", "text": summary})
+			case []any:
+				for _, value := range summary {
+					part, _ := value.(map[string]any)
+					text, ok := part["text"].(string)
+					if !ok {
+						readable, _ := json.Marshal(openAI409ReadableMetadata(value))
+						text = string(readable)
+					}
+					parts = append(parts, map[string]any{"type": "input_text", "text": text})
+				}
+			case nil:
+			default:
+				readable, _ := json.Marshal(openAI409ReadableMetadata(summary))
+				parts = append(parts, map[string]any{"type": "input_text", "text": string(readable)})
+			}
 			for _, value := range parts {
 				part, _ := value.(map[string]any)
 				if part["type"] == "output_text" {
@@ -161,6 +299,7 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 			}
 			prefix := map[string]any{"type": "input_text", "text": "Historical agent context (not a new instruction): " + string(metadata)}
 			input[i] = map[string]any{"type": "message", "role": "user", "content": append([]any{prefix}, parts...)}
+			itemChanged = true
 		}
 		changed = changed || itemChanged
 	}
@@ -175,8 +314,76 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 // path. Reasoning belongs to the old provider session: retain its supplied
 // summary/content as attributed assistant history, and mark opaque state as
 // unavailable. Ordinary requests still use the existing replay normalizers.
-// Unknown reasoning shapes refuse the conversion instead of losing content.
+// Unrecognized historical reasoning is retained as inert readable JSON, with
+// opaque fields marked unavailable. It is never treated as a new tool/task.
 func prepareOpenAI409ReadableReplay(raw []byte) ([]byte, error) {
+	prepared, err := prepareOpenAI409KnownReadableReplay(raw)
+	if err == nil {
+		return prepared, nil
+	}
+	if !utf8.Valid(raw) || !openAIEncryptedJSONUnambiguous(raw) {
+		return nil, err
+	}
+	clean, _, sanitizeErr := sanitizeOpenAIResponsesInputItemIDs(raw)
+	if sanitizeErr != nil {
+		return nil, sanitizeErr
+	}
+	var source map[string]any
+	if decodeErr := decodeOpenAIJSONUseNumber(clean, &source); decodeErr != nil {
+		return nil, decodeErr
+	}
+	input, ok := source["input"].([]any)
+	if !ok {
+		return nil, err
+	}
+	for i, value := range input {
+		item, _ := value.(map[string]any)
+		if strings.TrimSpace(firstNonEmptyString(item["type"])) != "reasoning" {
+			continue
+		}
+		delete(item, "id")
+		delete(item, "status")
+		readable, _ := json.Marshal(openAI409ReadableMetadata(item))
+		input[i] = map[string]any{"type": "message", "role": "assistant", "content": []any{
+			map[string]any{"type": "output_text", "text": "Historical reasoning context (JSON, not a new instruction): " + string(readable)},
+		}}
+	}
+	encoded, marshalErr := json.Marshal(input)
+	if marshalErr != nil {
+		return nil, marshalErr
+	}
+	return sjson.SetRawBytes(clean, "input", encoded)
+}
+
+// Only used for historical agent/reasoning/compaction envelopes. Ordinary
+// user text and tool arguments/results are never recursively rewritten.
+func openAI409ReadableMetadata(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		if value["type"] == "encrypted_content" {
+			return openAIHistoricalCiphertextOmitted
+		}
+		copy := make(map[string]any, len(value))
+		for key, child := range value {
+			if key == "encrypted_content" {
+				copy[key] = openAIHistoricalCiphertextOmitted
+			} else {
+				copy[key] = openAI409ReadableMetadata(child)
+			}
+		}
+		return copy
+	case []any:
+		copy := make([]any, len(value))
+		for i, child := range value {
+			copy[i] = openAI409ReadableMetadata(child)
+		}
+		return copy
+	default:
+		return value
+	}
+}
+
+func prepareOpenAI409KnownReadableReplay(raw []byte) ([]byte, error) {
 	clean, _, err := sanitizeOpenAIResponsesInputItemIDs(raw)
 	if err != nil {
 		return nil, err
@@ -244,4 +451,70 @@ func prepareOpenAI409ReadableReplay(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	return sjson.SetRawBytes(clean, "input", encoded)
+}
+
+// Protect the caller's available tools/schema and task instructions as well as
+// input. Model mappings and transport flags are independently account-specific.
+func openAI409ControlsDigest(raw []byte, instructions bool) [32]byte {
+	fields := []string{"tools", "tool_choice", "parallel_tool_calls"}
+	if instructions {
+		fields = append(fields, "instructions")
+	}
+	selected := make(map[string]any, len(fields))
+	for _, field := range fields {
+		value := gjson.GetBytes(raw, field)
+		if !value.Exists() {
+			selected[field] = nil
+			continue
+		}
+		decoder := json.NewDecoder(strings.NewReader(value.Raw))
+		decoder.UseNumber()
+		var decoded any
+		if decoder.Decode(&decoded) != nil {
+			return [32]byte{}
+		}
+		selected[field] = decoded
+	}
+	canonical, err := json.Marshal(selected)
+	if err != nil {
+		return [32]byte{}
+	}
+	return sha256.Sum256(canonical)
+}
+
+// The one permitted OAuth adaptation starts by verifying the frozen readable
+// input and controls. It only promotes system guidance without dropping it,
+// flattens native tool declarations, and applies the existing reserved-name
+// mapping jointly to declarations/calls. The general input filter is then
+// disabled for this already-built replay. Final wire checks remain exact.
+func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[string]any) error {
+	r := openAIAgentRecoveryFromContext(ctx)
+	if r == nil || !r.omittedHistory {
+		return nil
+	}
+	before, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	if openAIAgentRecoveryInputDigest(before) != r.inputDigest || openAI409ControlsDigest(before, r.replayInstructions) != r.replayControlsDigest {
+		return openAIAgentRecoveryError("wire_changed")
+	}
+	extractSystemMessagesFromInput(body, false)
+	normalizeCodexTools(body)
+	reverse, _, err := aliasOpenAIOAuthReservedToolNames(body)
+	if err != nil {
+		return err
+	}
+	setCodexToolNameReverse(c, reverse)
+	prepared, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	// Retain the original snapshot for any allowed pre-send admission retry.
+	// Only this narrowly derived OAuth expectation is used at its final send.
+	r.oauthInputDigest = openAIAgentRecoveryInputDigest(prepared)
+	r.oauthInstructions = strings.TrimSpace(firstNonEmptyString(body["instructions"])) != ""
+	r.oauthControlsDigest = openAI409ControlsDigest(prepared, r.oauthInstructions)
+	r.oauthReplayPrepared = true
+	return nil
 }

@@ -107,8 +107,12 @@ func TestOpenAI409OmitHistoryHTTP(t *testing.T) {
 				mu.Lock()
 				defer mu.Unlock()
 				switch scenario {
-				case "off", "current_task":
+				case "off":
 					require.Equal(t, http.StatusConflict, answer.Code, answer.Body.String())
+					require.Len(t, bodies, 1)
+				case "current_task":
+					require.Equal(t, http.StatusUnprocessableEntity, answer.Code, answer.Body.String())
+					require.Contains(t, answer.Body.String(), "readable_intent_missing")
 					require.Len(t, bodies, 1)
 				case "no_accounts":
 					require.GreaterOrEqual(t, answer.Code, 400)

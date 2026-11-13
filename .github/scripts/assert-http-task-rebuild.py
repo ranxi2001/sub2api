@@ -14,6 +14,8 @@ COMMON = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COMMON)
 ROOT = "TestOpenAI409HTTPTaskRebuild"
 BOUNDARIES = "TestOpenAI409HTTPRebuildBoundaries"
+TOOLS = "TestOpenAI409HTTPToolDefinitionOracle"
+MIXED = "TestOpenAI409HTTPMixedDeliveryFences"
 PACKAGE = COMMON.PACKAGE
 LEAVES = {
     f"{ROOT}/{account}/stream={stream}/{pointer}/{outcome}"
@@ -28,6 +30,22 @@ BOUNDARY_LEAVES = {
     for stream in ("false", "true")
     for boundary in ("pointer_only", "opaque_only", "delivery_pending", "delivery_failed", "b_disabled")
 }
+TOOL_LEAVES = {
+    f"{TOOLS}/{account}/stream={stream}/{mutation}"
+    for account in ("apikey", "oauth") for stream in ("false", "true")
+    for mutation in ("drop_tools", "change_schema")
+}
+MIXED_LEAVES = {
+    f"{MIXED}/{account}/stream={stream}/{owner}/{state}/{order}"
+    for account in ("apikey", "oauth") for stream in ("false", "true")
+    for owner in ("A", "B") for state in ("pending", "failed", "conflict")
+    for order in ("forward", "reverse")
+}
+SUITES = {"boundaries": (BOUNDARIES, BOUNDARY_LEAVES), "tool-oracle": (TOOLS, TOOL_LEAVES), "mixed-fences": (MIXED, MIXED_LEAVES)}
+MUTANTS = {
+    "newest-only": f"{MIXED}/apikey/stream=false/A/failed/forward",
+    "break-on-owner-mismatch": f"{MIXED}/apikey/stream=false/A/failed/reverse",
+}
 DIAGNOSTIC = "HTTP_REBUILD_B_DISPATCH_MISSING"
 OLD_REFUSALS = (
     "encrypted_agent_recovery_owner_unavailable",
@@ -36,9 +54,13 @@ OLD_REFUSALS = (
 )
 
 
-def validate(phase, exit_code, transcript, boundaries=False):
-    if phase not in {"RED", "GREEN"} or (boundaries and phase != "GREEN"):
+def validate(phase, exit_code, transcript, boundaries=False, suite=None, mutant=None):
+    if boundaries:
+        suite = "boundaries"
+    if phase not in {"RED", "GREEN", "MUTANT"} or (suite is not None and (phase != "GREEN" or suite not in SUITES)):
         raise ValueError("invalid task-rebuild phase")
+    if (phase == "MUTANT") != (mutant in MUTANTS) or (mutant is not None and mutant not in MUTANTS):
+        raise ValueError("invalid source mutant")
     COMMON.check_clean(transcript)
     events = []
     for line in transcript.splitlines():
@@ -49,9 +71,11 @@ def validate(phase, exit_code, transcript, boundaries=False):
         if not isinstance(event, dict):
             raise ValueError("invalid go-test event")
         events.append(event)
-    root, leaves = (BOUNDARIES, BOUNDARY_LEAVES) if boundaries else (ROOT, LEAVES)
-    terminal = "fail" if phase == "RED" else "pass"
-    expected_exit = 1 if phase == "RED" else 0
+    root, leaves = SUITES[suite] if suite else (ROOT, LEAVES)
+    if mutant:
+        root, leaves = MIXED, {MUTANTS[mutant]}
+    terminal = "pass" if phase == "GREEN" else "fail"
+    expected_exit = 0 if phase == "GREEN" else 1
     if exit_code != expected_exit:
         raise ValueError("unexpected go-test exit status")
     actions = Counter(
@@ -69,23 +93,34 @@ def validate(phase, exit_code, transcript, boundaries=False):
             phase == "GREEN" or event.get("Package") != PACKAGE or event.get("Test") not in leaves | {root, None}
         ):
             raise ValueError("unexpected failure outside named task-rebuild RED")
-    if phase == "RED":
+    if phase != "GREEN":
         for name in leaves:
             output = "".join(
                 event.get("Output", "") for event in events
                 if event.get("Package") == PACKAGE and event.get("Test") == name
             )
-            if DIAGNOSTIC not in output or not any(code in output for code in OLD_REFUSALS):
+            if phase == "MUTANT":
+                if "HTTP_REBUILD_FENCE_BYPASSED" not in output or "coding-task-complete" not in output:
+                    raise ValueError(f"missing actual extra-generation counterexample: {name}")
+            elif DIAGNOSTIC not in output or not any(code in output for code in OLD_REFUSALS):
                 raise ValueError(f"missing named B-dispatch refusal assertion: {name}")
 
 
 def main():
     phase, code, filename, *options = sys.argv[1:]
-    if options not in ([], ["--boundaries"]):
+    if len(options) > 1:
         raise ValueError("unknown option")
-    boundaries = bool(options)
-    validate(phase, int(code), Path(filename).read_text(), boundaries)
-    print(f"{phase}: {len(BOUNDARY_LEAVES if boundaries else LEAVES)} named task-rebuild scenarios verified")
+    suite, mutant = None, None
+    if options:
+        if options[0].startswith("--mutant="):
+            mutant = options[0].split("=", 1)[1]
+        else:
+            suite = options[0].removeprefix("--")
+            if suite not in SUITES:
+                raise ValueError("unknown suite")
+    validate(phase, int(code), Path(filename).read_text(), suite=suite, mutant=mutant)
+    count = 1 if mutant else len(SUITES[suite][1] if suite else LEAVES)
+    print(f"{phase}: {count} named task-rebuild scenarios verified")
 
 
 if __name__ == "__main__":

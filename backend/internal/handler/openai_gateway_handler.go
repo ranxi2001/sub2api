@@ -844,6 +844,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if ownershipErr != nil {
 			reqLog.Warn("openai.previous_response_owner_lookup_failed", zap.Error(ownershipErr))
 		}
+		if !owned && ownershipErr == nil && openAICompatibleRequestPlatform(c.Request.Context(), apiKey) == service.PlatformOpenAI {
+			owned = h.gatewayService.CanDiscardOpenAI409ResponsePointer(c.Request.Context(), body, groupID, previousResponseID)
+		}
 		if !owned {
 			reqLog.Warn("openai.request_validation_failed", zap.String("reason", "previous_response_owner_mismatch"))
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "previous_response_id is not available for this user")
@@ -993,6 +996,39 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(service.WithOpenAIEncryptedReasoningAffinity(pricingCtx, body))
 	c.Request = c.Request.WithContext(h.gatewayService.WithOpenAIAgentMessageRecovery(c.Request.Context(), c, body, sessionHash, forwardModel))
+	applyReadableRebuild := func(next context.Context, clean []byte) error {
+		// Keep the channel model mapping, but detach provider state atomically
+		// from both body copies, the selection argument and recovery context.
+		mapped, err := sjson.SetRawBytes(forwardBody, "input", []byte(gjson.GetBytes(clean, "input").Raw))
+		if err != nil {
+			return err
+		}
+		for _, field := range []string{"previous_response_id", "conversation"} {
+			mapped, err = sjson.DeleteBytes(mapped, field)
+			if err != nil {
+				return err
+			}
+		}
+		body, forwardBody = clean, mapped
+		previousResponseID = ""
+		omittedEncryptedHistory = true
+		c.Request = c.Request.WithContext(next)
+		reqLog.Info("openai.encrypted_history_409_omitted", zap.Bool("context_loss", true))
+		return nil
+	}
+	if requestPlatform == service.PlatformOpenAI {
+		next, clean, changed, rebuildErr := h.gatewayService.PrepareOpenAI409ReadableContinuation(c.Request.Context(), c, body, sessionHash, forwardModel)
+		if rebuildErr != nil {
+			h.handleOpenAIAgentRecoveryError(c, rebuildErr, streamStarted)
+			return
+		}
+		if changed {
+			if err := applyReadableRebuild(next, clean); err != nil {
+				h.handleStreamingAwareError(c, http.StatusInternalServerError, "api_error", "Unable to prepare readable continuation", streamStarted)
+				return
+			}
+		}
+	}
 
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
@@ -1022,14 +1058,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		)
 		if err != nil {
 			if !omittedEncryptedHistory && !upstreamAttempted && !streamStarted && !c.Writer.Written() && requestPlatform == service.PlatformOpenAI {
-				if next, clean, changed := h.gatewayService.TryOmitOpenAI409History(c.Request.Context(), c, body, sessionHash, forwardModel, err); changed {
-					// Preserve the channel's model mapping while replacing only input.
-					mapped, mapErr := sjson.SetRawBytes(forwardBody, "input", []byte(gjson.GetBytes(clean, "input").Raw))
-					if mapErr == nil {
-						body, forwardBody = clean, mapped
-						omittedEncryptedHistory = true
-						c.Request = c.Request.WithContext(next)
-						reqLog.Info("openai.encrypted_history_409_omitted", zap.Bool("context_loss", true))
+				if next, clean, changed, rebuildErr := h.gatewayService.TryRebuildOpenAI409History(c.Request.Context(), c, body, sessionHash, forwardModel, err); rebuildErr != nil {
+					err = rebuildErr
+				} else if changed {
+					if mapErr := applyReadableRebuild(next, clean); mapErr == nil {
 						continue
 					}
 				}
