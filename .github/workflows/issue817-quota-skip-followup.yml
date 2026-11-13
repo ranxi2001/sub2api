@@ -8,6 +8,7 @@ on:
       - 'backend/internal/repository/quality_template_quota.go'
       - 'backend/internal/repository/quality_quota_5xx_integration_test.go'
       - 'backend/internal/service/quality_quota_integration_helper.go'
+      - '.github/scripts/issue817-race-gate.sh'
       - '.github/workflows/issue817-quota-skip-followup.yml'
 
 permissions:
@@ -53,7 +54,7 @@ jobs:
         with:
           go-version-file: ${{ matrix.behavior }}/backend/go.mod
           cache-dependency-path: ${{ matrix.behavior }}/backend/go.sum
-      - name: Prepare existing sanitized startup crash diagnostics
+      - name: Prepare live first-signal startup diagnostics
         working-directory: ${{ matrix.behavior }}
         shell: bash
         run: |
@@ -74,11 +75,11 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          bash .github/scripts/oauth-degradation-integration-race.sh "issue817-$BEHAVIOR" "$PWD" '^TestIssue817QuotaSkipPreservesPending5xxExecution$' 10m > evidence/pending-5xx.log 2>&1
+          bash .github/scripts/issue817-race-gate.sh "$BEHAVIOR" "$PWD" '^TestIssue817QuotaSkipPreservesPending5xxExecution$' > evidence/pending-5xx.log 2>&1
           result=$?
           set -e
           cat evidence/pending-5xx.log
-          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' evidence/pending-5xx.log
+          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:|WARNING: DATA RACE|race detected during execution|Segmentation fault|core dumped' evidence/pending-5xx.log
           if [ "$BEHAVIOR" = red ]; then
             test "$result" -ne 0
             grep -F -- '--- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/never_run' evidence/pending-5xx.log
