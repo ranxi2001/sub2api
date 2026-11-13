@@ -43,6 +43,7 @@ jobs:
           result=$?
           set -e
           cat "$RUNNER_TEMP/http2-evidence/f3-red.log"
+          printf '%s\n' "$result" > "$RUNNER_TEMP/http2-evidence/f3-red-exit.txt"
           test "$result" -eq 1
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/f3-red.log"; then exit 1; fi
           for scenario in shared_request unknown_model conflicting_completed_usage; do
@@ -75,6 +76,8 @@ jobs:
           f5_result=$?
           set -e
           cat "$RUNNER_TEMP/http2-evidence/f4-red.log" "$RUNNER_TEMP/http2-evidence/f5-red.log"
+          printf '%s\n' "$f4_result" > "$RUNNER_TEMP/http2-evidence/f4-red-exit.txt"
+          printf '%s\n' "$f5_result" > "$RUNNER_TEMP/http2-evidence/f5-red-exit.txt"
           test "$f4_result" -eq 1
           test "$f5_result" -eq 1
           for finding in f4 f5; do
@@ -84,11 +87,12 @@ jobs:
             grep -q -- "--- FAIL: TestHTTP2CCSemanticFailureBeforeReset/$mode/event_error" "$RUNNER_TEMP/http2-evidence/f4-red.log"
             grep -q -- "--- FAIL: TestHTTP2CCSemanticFailureOwnershipAndSLA/$mode" "$RUNNER_TEMP/http2-evidence/f4-red.log"
             grep -q -- "--- PASS: TestHTTP2CCIncompleteSemanticEventStillResets/$mode" "$RUNNER_TEMP/http2-evidence/f4-red.log"
+            grep -q "F4 complete CC semantic error must survive a later HTTP2 reset: $mode/event_error" "$RUNNER_TEMP/http2-evidence/f4-red.log"
+            grep -q "F4 complete CC context rejection must retain client ownership after reset: $mode" "$RUNNER_TEMP/http2-evidence/f4-red.log"
           done
-          grep -q 'F4 complete CC semantic error must survive a later HTTP2 reset' "$RUNNER_TEMP/http2-evidence/f4-red.log"
-          grep -q 'F4 complete CC context rejection must retain client ownership after reset' "$RUNNER_TEMP/http2-evidence/f4-red.log"
           for fragment in event_only event_no_data truncated_data missing_boundary data_only_cut invalid_json wrong_data_type; do
             grep -q -- "--- FAIL: TestHTTP2NativeRelayRequiresCompleteTerminal/$fragment" "$RUNNER_TEMP/http2-evidence/f5-red.log"
+            grep -q "F5 incomplete native message_stop must not swallow a later HTTP2 reset: $fragment" "$RUNNER_TEMP/http2-evidence/f5-red.log"
           done
           grep -q 'F5 incomplete native message_stop must not swallow a later HTTP2 reset' "$RUNNER_TEMP/http2-evidence/f5-red.log"
           grep -q -- '--- PASS: TestHTTP2NativeRelayCompleteTerminalControls/success' "$RUNNER_TEMP/http2-evidence/f5-red.log"

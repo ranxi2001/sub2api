@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -58,6 +59,8 @@ func TestHTTP2CCSemanticFailureOwnershipAndSLA(t *testing.T) {
 				for key, value := range seed.Keys {
 					c.Set(key, value)
 				}
+				key, _ := middleware2.GetAPIKeyFromContext(c)
+				key.Group.AllowMessagesDispatch = true
 				handler(c)
 			})
 			rec := httptest.NewRecorder()
@@ -65,11 +68,11 @@ func TestHTTP2CCSemanticFailureOwnershipAndSLA(t *testing.T) {
 			for len(opsErrorLogQueue) > 0 {
 				flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
 			}
-			require.Equal(t, int32(1), submissions.Load(), "a semantic failure after submission must never replay generation")
+			require.Equal(t, int32(1), submissions.Load(), "a semantic failure after submission must never replay generation: %s", rec.Body.String())
 			require.Equal(t, http.StatusOK, rec.Code)
 			require.Len(t, repo.entries, 1)
 			entry := repo.entries[0]
-			require.Equal(t, "client", entry.ErrorOwner, "F4 complete CC context rejection must retain client ownership after reset")
+			require.Equal(t, "client", entry.ErrorOwner, "F4 complete CC context rejection must retain client ownership after reset: %s", mode)
 			require.True(t, entry.IsBusinessLimited, "F4 context rejection must retain its SLA exclusion after reset")
 			require.NotEqual(t, "transport_error", entry.ErrorType)
 			require.Contains(t, entry.ErrorBody, "context_length_exceeded")

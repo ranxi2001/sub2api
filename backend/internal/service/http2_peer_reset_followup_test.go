@@ -19,7 +19,7 @@ import (
 
 const http2FollowupCCPartial = "data: {\"id\":\"synthetic\",\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"partial\"}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\n"
 const http2FollowupSemanticData = `{"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"synthetic semantic failure"}}`
-const http2FollowupNativePartial = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"model\",\"content\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n"
+const http2FollowupNativePartial = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"model\",\"content\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":1}}\n\n"
 
 func http2FollowupCCConvert(t *testing.T, mode, payload string) (*httptest.ResponseRecorder, *gin.Context, *OpenAIForwardResult, error) {
 	t.Helper()
@@ -53,7 +53,7 @@ func TestHTTP2CCSemanticFailureBeforeReset(t *testing.T) {
 				rec, c, result, err := http2FollowupCCConvert(t, mode, http2FollowupCCPartial+errorEvent)
 				require.Error(t, err)
 				require.NotNil(t, result)
-				require.Contains(t, rec.Body.String(), "context_length_exceeded", "F4 complete CC semantic error must survive a later HTTP2 reset")
+				require.Contains(t, rec.Body.String(), "context_length_exceeded", "F4 complete CC semantic error must survive a later HTTP2 reset: %s/%s", mode, envelope)
 				require.Contains(t, rec.Body.String(), "synthetic semantic failure")
 				require.Contains(t, rec.Body.String(), "partial")
 				require.Equal(t, 3, result.Usage.InputTokens)
@@ -119,7 +119,7 @@ func TestHTTP2NativeRelayRequiresCompleteTerminal(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 			result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).handleNativeAnthropicStreamingResponse(context.Background(), resp, c, nativeAnthropicTestAccount(), "model", "model", "model", nil, time.Now())
-			require.Error(t, err, "F5 incomplete native message_stop must not swallow a later HTTP2 reset")
+			require.Error(t, err, "F5 incomplete native message_stop must not swallow a later HTTP2 reset: %s", name)
 			code, _, reset := OpenAIUpstreamStreamReadErrorDetails(err)
 			require.True(t, reset)
 			require.Equal(t, OpenAIUpstreamHTTP2StreamErrorCode, code)
