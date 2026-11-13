@@ -47,7 +47,8 @@ def diagnostic(suite, name):
 
 
 def validate(phase, code, raw, suite):
-    if phase not in ("RED", "GREEN") or suite not in SUITES or (phase == "RED" and suite not in RED_SUITES):
+    baseline = phase == "BASELINE" and suite == "strict-pointer"
+    if (phase not in ("RED", "GREEN") and not baseline) or suite not in SUITES or (phase == "RED" and suite not in RED_SUITES):
         raise ValueError("invalid WS evidence phase/suite")
     COMMON.check_clean(raw)
     root, names = SUITES[suite]
@@ -62,21 +63,25 @@ def validate(phase, code, raw, suite):
         if not isinstance(event, dict):
             raise ValueError("invalid event")
         events.append(event)
-    terminal = "fail" if phase == "RED" else "pass"
-    if code != (1 if phase == "RED" else 0):
-        raise ValueError("unexpected exit")
     counts = Counter((e.get("Action"), e.get("Test")) for e in events if e.get("Package") == package)
+    failed = leaves if phase == "RED" else {name for name in leaves if counts["fail", name]} if baseline else set()
+    terminal = "fail" if failed else "pass"
+    if code != (1 if failed else 0):
+        raise ValueError("unexpected exit")
     for name in leaves | {root}:
         if counts["run", name] != 1:
             raise ValueError(f"missing named run {name}")
     for name in leaves | {root, None}:
-        if counts[terminal, name] != 1 or counts["pass", name] + counts["fail", name] != 1:
+        expected = ("fail" if name in failed else "pass") if name in leaves else terminal
+        if counts[expected, name] != 1 or counts["pass", name] + counts["fail", name] != 1:
             raise ValueError(f"incorrect terminal {name}")
     for event in events:
         if event.get("Action") == "fail" and (phase == "GREEN" or event.get("Package") != package or event.get("Test") not in leaves | {root, None}):
             raise ValueError("unrelated failure")
-    if phase == "RED":
-        for name in leaves:
+        if baseline and event.get("Action") == "run" and (event.get("Package") != package or event.get("Test") not in leaves | {root}):
+            raise ValueError("unrelated baseline run")
+    if phase == "RED" or baseline:
+        for name in failed:
             output = "".join(e.get("Output", "") for e in events if e.get("Package") == package and e.get("Test") == name)
             if any(marker not in output for marker in diagnostic(suite, name)):
                 raise ValueError(f"missing own unsent-turn refusal diagnostic {name}")

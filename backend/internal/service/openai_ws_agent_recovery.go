@@ -35,18 +35,21 @@ func OpenAIWSAgentRecoveryBound(ctx context.Context) bool { return openAIAgentRe
 
 // One manager per forwarding attempt serializes an immediate next create with
 // the previous terminal write/commit. Passthrough's AfterTurn runs BEFORE that
-// write and must never grant ownership. No plaintext or frame is retained here.
+// write and must never grant ownership. The current request's integrity/shadow
+// snapshot is bounded by the ingress frame limit; it is not a generation replay buffer.
 type openAIWSAgentRecovery struct {
-	mu       sync.Mutex
-	service  *OpenAIGatewayService
-	c        *gin.Context
-	ctx      context.Context
-	session  string
-	request  *openAIAgentRecoveryRequest
-	finish   func(bool)
-	blocked  *atomic.Bool
-	itemDone [][32]byte
-	known    map[[32]byte]bool
+	mu                               sync.Mutex
+	service                          *OpenAIGatewayService
+	c                                *gin.Context
+	ctx                              context.Context
+	session                          string
+	request                          *openAIAgentRecoveryRequest
+	finish                           func(bool)
+	blocked                          *atomic.Bool
+	itemDone                         [][32]byte
+	known                            map[[32]byte]bool
+	readable                         *openAIAgentRecoveryRequest
+	readableSource, readableControls [32]byte
 }
 
 func newOpenAIWSAgentRecovery(s *OpenAIGatewayService, ctx context.Context, c *gin.Context) *openAIWSAgentRecovery {
@@ -83,6 +86,15 @@ func (r *openAIWSAgentRecovery) preventReplay() {
 	if r.blocked != nil {
 		r.blocked.Store(true)
 	}
+}
+
+func (r *openAIWSAgentRecovery) readablePrepared() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.readable != nil
 }
 
 // Stored native Responses already has a verified response anchor and the
@@ -150,6 +162,12 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		model = initial.model
 	}
 	ctx := r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, source, r.session, model)
+	if r.readable != nil {
+		if openAIAgentRecoveryInputDigest(source) != r.readableSource || openAI409ControlsDigest(source) != r.readableControls {
+			return openAIAgentRecoveryError("wire_changed")
+		}
+		ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, r.readable)
+	}
 	r.request = openAIAgentRecoveryFromContext(ctx)
 	if r.request.disableOwnerBinding && (openAIAgentRecoveryBound(ctx) || len(r.request.items) > 0) {
 		// Record current-turn replay safety even when a later delivery/pointer
@@ -174,7 +192,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		return err
 	}
 	previous := gjson.GetBytes(source, "previous_response_id").String()
-	if (r.request.owner != nil || r.request.disableOwnerBinding) && previous != "" {
+	if !r.request.omittedHistory && (r.request.owner != nil || r.request.disableOwnerBinding) && previous != "" {
 		owner, err := r.service.getOpenAIWSStateStore().GetResponseAccount(ctx, r.request.groupID, previous)
 		if err != nil || owner != account.ID || gjson.GetBytes(payload, "previous_response_id").String() != previous {
 			return openAIAgentRecoveryError("owner_unavailable")
@@ -194,7 +212,11 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		return err
 	}
 	r.finish = finish
-	if r.request.owner != nil || len(r.request.items) > 0 {
+	if r.request.owner != nil || len(r.request.items) > 0 || r.request.omittedHistory ||
+		(r.service.settingService != nil && r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx)) {
+		// In automatic continuation mode, even a plaintext initial generation
+		// becomes non-replayable as it crosses the physical write boundary.
+		// Only a separately proven unsent NEXT frame can change accounts.
 		r.preventReplay()
 	}
 	return nil

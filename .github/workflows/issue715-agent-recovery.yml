@@ -100,6 +100,7 @@ jobs:
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go backend/internal/service/openai_ws_search_activation.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go)
           # The exact original gateway struct predates analysis admission state.
+          added+=(backend/internal/service/openai_ws_readable_continuation.go)
           # Pin this unrelated leaf to its pre-admission version, preserving all
           # Issue715 business-chain blobs and the retained handler regressions.
           analysis_compat=e395038e98fbc5a0c44944f0edcfbfe714570f71
@@ -237,6 +238,7 @@ jobs:
           ws_targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           # Neither helper exists on the restored historical socket structure.
           ws_added=(backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_search_activation.go)
+          ws_added+=(backend/internal/service/openai_ws_readable_continuation.go)
           # The historical recovery request predates Issue758 cooldown state.
           # Keep the exact delivery-defect blobs above, and pin only this
           # scheduling compatibility leaf to the pre-Issue758 production base.
@@ -403,8 +405,10 @@ jobs:
           git rev-parse HEAD
           original=a575df898ccd0876c4c0eb1559da38cedfdfe99d
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
-          # Search activation was introduced with fields absent in this pool.
-          added=(backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_search_activation.go)
+          # Search activation references fields absent in this pool. Retain the
+          # standalone recovery helpers needed by current HTTP code; the pinned
+          # pre-WS handler/transports never call them or publish WS ownership.
+          added=(backend/internal/service/openai_ws_search_activation.go)
           git fetch --no-tags --depth=1 origin "$original"
           trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"

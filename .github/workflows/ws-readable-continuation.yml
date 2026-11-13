@@ -6,8 +6,8 @@ on:
       phase:
         type: choice
         options: [RED, GREEN, BOTH]
-        default: RED
-        description: Five real WS adapters; enable BOTH with the production repair
+        default: BOTH
+        description: Five real WS adapters against accepted baseline and production candidate
   pull_request:
     paths:
       - 'backend/internal/handler/openai_409_*'
@@ -47,10 +47,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        phase: ${{ fromJSON(inputs.phase == 'BOTH' && '["RED","GREEN"]' || inputs.phase == 'GREEN' && '["GREEN"]' || '["RED"]') }}
+        phase: ${{ fromJSON(inputs.phase == 'RED' && '["RED"]' || inputs.phase == 'GREEN' && '["GREEN"]' || '["RED","GREEN"]') }}
     env:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      BASELINE_SHA: e59321cbf7e919f980ca90690ec70159180761f2
+      BASELINE_SHA: 5e83d0b73611a447b425ad5692f883de120da9ed
       PHASE: ${{ matrix.phase }}
     steps:
       - uses: actions/checkout@v6
@@ -119,6 +119,11 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/ws-evidence/boundaries.jsonl"
           python3 .github/scripts/assert-ws-readable.py GREEN "$result" "$RUNNER_TEMP/ws-evidence/boundaries.jsonl" ws-boundaries
+      - name: GREEN typed current-frame admission guards
+        if: ${{ !cancelled() && matrix.phase == 'GREEN' }}
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json ./internal/service -run '^TestOpenAI409WSUnsentTurnBoundary$' -count=1 -timeout=5m) 2>&1 | tee "$RUNNER_TEMP/ws-evidence/unsent-guards.jsonl"
       - name: Reject actual-wire ambiguous oracle mutations
         if: ${{ !cancelled() }}
         run: |

@@ -31,6 +31,41 @@ def raw(events):
 
 
 class WSReadableEvidenceTest(unittest.TestCase):
+    def strict_baseline(self, failures):
+        events = evidence("GREEN", "strict-pointer")
+        root, _ = GATE.SUITES["strict-pointer"]
+        names = {f"{root}/{suffix}" for suffix in failures}
+        for event in events:
+            if event["Action"] == "pass" and (event.get("Test") in names or (failures and event.get("Test") in {root, None})):
+                event["Action"] = "fail"
+        for name in names:
+            events.append({"Package": GATE.COMMON.PACKAGE, "Action": "output", "Test": name, "Output": "HTTP_POINTER_STRICT_A_STATE_LEAK"})
+        return events
+
+    def test_strict_baseline_accepts_only_consistent_named_outcomes(self):
+        names = GATE.SUITES["strict-pointer"][1]
+        for failures in (set(), names, {name for name in names if name.startswith("apikey/")}):
+            events = self.strict_baseline(failures)
+            GATE.validate("BASELINE", int(bool(failures)), raw(events), "strict-pointer")
+            if failures:
+                with self.assertRaises(ValueError):
+                    GATE.validate("GREEN", 1, raw(events), "strict-pointer")
+            for index, original in enumerate(events):
+                if original["Action"] in {"run", "pass", "fail", "output"}:
+                    with self.assertRaises(ValueError):
+                        GATE.validate("BASELINE", int(bool(failures)), raw(events[:index] + events[index + 1:]), "strict-pointer")
+            for event in events:
+                if event["Action"] in {"pass", "fail"}:
+                    with self.assertRaises(ValueError):
+                        GATE.validate("BASELINE", int(bool(failures)), raw(events + [event]), "strict-pointer")
+            with self.assertRaises(ValueError):
+                GATE.validate("BASELINE", int(not failures), raw(events), "strict-pointer")
+            for poison in ("panic: fixture", "WARNING: DATA RACE", "fatal error: crash", "signal: killed", "undefined: fixture", "--- SKIP: fixture"):
+                with self.assertRaises(ValueError):
+                    GATE.validate("BASELINE", int(bool(failures)), raw(events) + poison, "strict-pointer")
+            with self.assertRaises(ValueError):
+                GATE.validate("BASELINE", int(bool(failures)), raw(events + [{"Package": GATE.COMMON.PACKAGE, "Action": "fail", "Test": "Unrelated"}]), "strict-pointer")
+
     def test_valid(self):
         GATE.validate("RED", 1, raw(evidence("RED", "ws")), "ws")
         for suite in GATE.SUITES:

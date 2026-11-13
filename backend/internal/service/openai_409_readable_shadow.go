@@ -87,7 +87,7 @@ func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, 
 		}
 	}
 	keyID := getAPIKeyIDFromContext(c)
-	r := &openAIAgentRecoveryRequest{keyID: keyID, userID: openAIAgentRecoveryHTTPUser(c, keyID),
+	r := &openAIAgentRecoveryRequest{keyID: keyID, userID: openAIReadableRecoveryUser(c, keyID),
 		groupID: getOpenAIGroupIDFromContext(c), session: session, shadowModel: gjson.GetBytes(body, "model").String()}
 	store, ok := s.cache.(OpenAIReadableShadowCache)
 	if !ok || r.userID <= 0 || r.keyID <= 0 || r.session == "" || r.shadowModel == "" ||

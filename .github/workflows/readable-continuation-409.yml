@@ -92,6 +92,12 @@ jobs:
             git rev-parse "$baseline:$target" >> "$RUNNER_TEMP/readable-RED-provenance.txt"
           done
           # Future shadow calls/fields do not exist in this original baseline.
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go; do
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          done
+          ! git cat-file -e "$baseline:backend/internal/service/openai_ws_readable_continuation.go" 2>/dev/null
+          rm -- backend/internal/service/openai_ws_readable_continuation.go
           # Keep the selected HTTP tests intact and remove only new production.
           for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go; do
             ! git cat-file -e "$baseline:$target" 2>/dev/null

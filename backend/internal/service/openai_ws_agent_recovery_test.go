@@ -15,6 +15,40 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestOpenAI409WSUnsentTurnBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		turn int
+		want bool
+	}{
+		{"disabled_account", denyOpenAITurn("account_ineligible"), 2, true},
+		{"route_changed", denyOpenAITurn("account_binding_changed"), 3, true},
+		{"initial_warmup", denyOpenAITurn("account_ineligible"), 1, false},
+		{"quota", denyOpenAITurn("account_runtime_blocked"), 2, false},
+		{"model_policy", denyOpenAITurn("model_not_allowed_in_group"), 2, false},
+		{"store_failure", denyOpenAITurn("latest_state_unavailable"), 2, false},
+		{"unknown_write", errors.New("upstream write outcome unknown"), 2, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"type":"response.create","input":"private-current-task"}`)
+			err := openAIWSUnsentTurn(tc.err, body, "gpt-5.1", tc.turn)
+			body[0] = '!'
+			current, model, turn, ok := OpenAIWSUnsentTurnPayload(err)
+			require.Equal(t, tc.want, ok)
+			require.NotContains(t, err.Error(), "private-current-task")
+			if ok {
+				require.True(t, gjson.ValidBytes(current), "the rejected current frame must be an independent snapshot")
+				require.Equal(t, "gpt-5.1", model)
+				require.Equal(t, tc.turn, turn)
+				current[0] = '!'
+				again, _, _, _ := OpenAIWSUnsentTurnPayload(err)
+				require.True(t, gjson.ValidBytes(again))
+			}
+		})
+	}
+}
+
 func issue715WSManager(t *testing.T, svc *OpenAIGatewayService, parent context.Context) (*openAIWSAgentRecovery, *gin.Context, *Account) {
 	t.Helper()
 	c, _ := newTurnStateTestContext(t, 715, "fixture-session")

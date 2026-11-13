@@ -55,6 +55,12 @@ jobs:
             git show "$callers:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "$callers:$target")"
           done
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go; do
+            git show "$callers:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$callers:$target")"
+          done
+          ! git cat-file -e "$callers:backend/internal/service/openai_ws_readable_continuation.go" 2>/dev/null
+          rm -- backend/internal/service/openai_ws_readable_continuation.go
           for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go; do
             ! git cat-file -e "$callers:$target" 2>/dev/null
             rm -- "$target"

@@ -607,6 +607,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				account.ID,
 				admissionErr,
 			)
+			if forwardStart.IsZero() {
+				source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
+				admissionErr = openAIWSUnsentTurn(admissionErr, source, gjson.GetBytes(source, "model").String(), turn)
+			}
 			return nil, admissionErr
 		}
 		// Freeze the first-send boundary. Rejected-field network attempts remain

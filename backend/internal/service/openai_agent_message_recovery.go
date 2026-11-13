@@ -67,6 +67,7 @@ type openAIAgentRecoveryRequest struct {
 	shadowObservation    *openAIReadableShadowObservation
 	keyID                int64
 	userID               int64
+	httpResponsePointer  bool
 	delivery             *openAIAgentRecoveryDelivery
 	outputs              [][32]byte
 	disallowLearning     bool
@@ -100,7 +101,8 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 	}
 	keyID := getAPIKeyIDFromContext(c)
 	request.keyID = keyID
-	request.userID = openAIAgentRecoveryHTTPUser(c, keyID)
+	request.userID = openAIReadableRecoveryUser(c, keyID)
+	request.httpResponsePointer = openAIAgentRecoveryHTTPUser(c, keyID) > 0
 	request.shadowModel = gjson.GetBytes(body, "model").String()
 	request.shadowReadableIntent = openAI409HasReadableIntent(body)
 	request.shadowObservation, _ = ctx.Value(openAIReadableShadowContextKey{}).(*openAIReadableShadowObservation)
@@ -295,7 +297,7 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryAccount(ctx context.Conte
 		if err != nil || owner <= 0 || account == nil || owner != account.ID {
 			return openAIAgentRecoveryError("owner_unavailable")
 		}
-		if request.userID > 0 && !account.IsOpenAIApiKey() {
+		if request.httpResponsePointer && !account.IsOpenAIApiKey() {
 			return openAIAgentRecoveryError("http_previous_response_unsupported")
 		}
 	}

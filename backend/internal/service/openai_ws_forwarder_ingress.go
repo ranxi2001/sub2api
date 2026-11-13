@@ -708,6 +708,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// Neither output absence nor transport failure authorizes account failover.
 		defer func() {
 			if smartStrict && returnErr != nil {
+				if _, _, _, unsent := OpenAIWSUnsentTurnPayload(returnErr); unsent {
+					return
+				}
 				var closeErr *OpenAIWSClientCloseError
 				if !errors.As(returnErr, &closeErr) {
 					returnErr = NewOpenAIWSClientCloseError(coderws.StatusInternalError, "upstream session ended; request was not replayed", nil)
@@ -876,6 +879,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	parseClientPayload := func(turn int, raw []byte) (openAIWSClientPayload, error) {
 		clientPayloadRaw := append([]byte(nil), raw...)
+		prepared, prepareErr := agentRecovery.prepareReadable(account, raw)
+		if prepareErr != nil {
+			return openAIWSClientPayload{}, openAIWSAgentRecoveryClose(prepareErr)
+		}
+		raw = prepared
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "empty websocket request payload", nil)
@@ -935,7 +943,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if aliasErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, aliasErr.Error(), aliasErr)
 			}
-			updateCodexToolNameReverseForWSFrame(c, normalized, reverse)
+			if agentRecovery.readablePrepared() {
+				mergeCodexToolNameReverse(c, reverse)
+			} else {
+				updateCodexToolNameReverseForWSFrame(c, normalized, reverse)
+			}
 			if aliased {
 				normalized = aliasedBody
 			}
@@ -1266,6 +1278,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		preferredConnID = ""
 		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(payload.payloadRaw, account)
+		if recovery := openAIAgentRecoveryFromContext(ctx); recovery != nil && recovery.omittedHistory {
+			// A readable rebuild starts a new provider conversation. Keep the
+			// original client scope, but never revive A's cached socket/state.
+			turnState = ""
+			return
+		}
 		if useHTTPBridge {
 			// Sticky account affinity may be shared, but an HTTP bridge must not
 			// inherit another connection's native WS turn state or socket binding.
@@ -1358,7 +1376,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						account.ID,
 						err,
 					)
-					return err
+					return openAIWSUnsentTurn(err, currentBridgePayload.clientPayloadRaw, currentBridgePayload.originalModel, turn)
 				}
 			}
 			if turnState != "" && c != nil && c.Request != nil {
@@ -1843,6 +1861,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				admissionErr,
 			)
 			lease.MarkBroken()
+			if latencyGenerationStartedTurn != turn {
+				admissionErr = openAIWSUnsentTurn(admissionErr, clientPayload, originalModel, turn)
+			}
 			return nil, admissionErr
 		}
 		turnStart := requesttiming.Now(ctx)
@@ -2455,6 +2476,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				account.ID,
 				err,
 			)
+			if latencyGenerationStartedTurn != turn {
+				return openAIWSUnsentTurn(err, currentClientPayload, currentOriginalModel, turn)
+			}
 			return err
 		}
 		if turn > 1 && !skipBeforeTurn && hooks != nil {
@@ -2478,7 +2502,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					account.ID,
 					err,
 				)
-				return err
+				return openAIWSUnsentTurn(err, currentClientPayload, currentOriginalModel, turn)
 			}
 		}
 		if !skipBeforeTurn {
@@ -2530,6 +2554,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		currentPreviousResponseID := openAIWSPayloadStringFromRaw(currentPayload, "previous_response_id")
 		expectedPrev := strings.TrimSpace(lastTurnResponseID)
+		if agentRecovery.readablePrepared() {
+			// Paired completed tools are explicit in the rebuilt input. Never
+			// reattach a provider pointer that the authorized rebuild removed.
+			expectedPrev = ""
+		}
 		if contextWindowBoundary.Changed {
 			// A context-window rollover is a new Responses root. Do not infer a
 			// continuation anchor from the response produced in the old window.
@@ -2886,6 +2915,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		if relayErr != nil {
 			lastTurnClean = false
+			if _, _, _, unsent := OpenAIWSUnsentTurnPayload(relayErr); unsent {
+				sessionLease.MarkBroken()
+				if hooks != nil && hooks.AfterTurn != nil {
+					hooks.AfterTurn(turn, nil, relayErr)
+				}
+				return relayErr
+			}
 			if isOpenAIWSSessionPreempted(ctx) {
 				sessionLease.MarkBroken()
 				return errOpenAIWSSessionPreempted
