@@ -1,0 +1,60 @@
+name: HTTP2 stream reset validation
+
+on:
+  pull_request:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: RED real HTTP2 boundary against production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/http2-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http2-evidence/head.txt"
+          baseline=ccf997c73868083d96c0bec56e71c1a34d26c98a
+          mapfile -t targets < <(git diff --name-only "$baseline" HEAD -- 'backend/**/*.go' ':!backend/**/*_test.go')
+          restore_head() {
+            for target in "${targets[@]}"; do git show "HEAD:$target" > "$target"; done
+          }
+          trap restore_head EXIT
+          for target in "${targets[@]}"; do
+            if git cat-file -e "$baseline:$target" 2>/dev/null; then git show "$baseline:$target" > "$target"; fi
+          done
+          git diff --stat > "$RUNNER_TEMP/http2-evidence/overlay.txt"
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestHTTP2PeerResetBoundary$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/http2-evidence/red.log"
+          grep -q 'peer reset must persist as transport_error, not synthetic HTTP 502' "$RUNNER_TEMP/http2-evidence/red.log"
+          grep -q -- '--- FAIL: TestHTTP2PeerResetBoundary' "$RUNNER_TEMP/http2-evidence/red.log"
+          restore_head
+          trap - EXIT
+          git diff --exit-code
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http2-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/http2-evidence/
