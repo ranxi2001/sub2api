@@ -163,7 +163,7 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 		return nil, false
 	}
 	classified := newOpenAIUpstreamStreamReadError(cause)
-	if marked, exists := GetOpsStreamError(c); exists && marked.TransportFailure != nil {
+	if marked, exists := GetOpsStreamError(c); exists && marked.TransportFailure != nil && marked.Turn == c.GetInt(OpsStreamTurnKey) {
 		return classified, true
 	}
 	StopOpenAICompactSSEKeepaliveCommitted(c)

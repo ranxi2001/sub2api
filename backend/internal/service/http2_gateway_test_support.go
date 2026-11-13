@@ -4,8 +4,9 @@ package service
 
 import (
 	"context"
-	"github.com/gin-gonic/gin"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 // ObserveHTTP2SchedulerForTest wraps the real scheduler at its ReportResult
