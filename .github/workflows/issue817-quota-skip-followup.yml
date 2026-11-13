@@ -1,0 +1,182 @@
+name: Issue817 quota skip pending 5xx
+
+on:
+  push:
+    branches: [fix/issue817-quota-skip-followup-20261113]
+  pull_request:
+    paths:
+      - 'backend/internal/repository/quality_template_quota.go'
+      - 'backend/internal/repository/quality_quota_5xx_integration_test.go'
+      - 'backend/internal/repository/integration_harness_test.go'
+      - 'backend/internal/service/quality_quota_integration_helper.go'
+      - '.github/scripts/issue817-race-gate.sh'
+      - '.github/scripts/issue817-validate-evidence.sh'
+      - '.github/workflows/issue817-quota-skip-followup.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue817-skip-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pending-5xx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        behavior: [red, green]
+    # Provision services outside the race binary: the captured startup SIGSEGV
+    # occurred in TestMain's Docker subprocess path, before any product test.
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sub2api_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sub2api_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      SUB2API_TEST_POSTGRES_DSN: 'host=127.0.0.1 port=5432 dbname=sub2api_test user=postgres password=postgres sslmode=disable TimeZone=UTC'
+      SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:6379/0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ matrix.behavior }}
+      - name: Record exact candidate and baseline blob
+        working-directory: ${{ matrix.behavior }}
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          BEHAVIOR: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/head.txt
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          if [ "$BEHAVIOR" = red ]; then
+            original=c424f8217da12cd4fb8d10aeaf1c4f2592c3f286
+            source=backend/internal/repository/quality_template_quota.go
+            git fetch --no-tags --depth=1 origin "$original"
+            git rev-parse "$original:$source" | tee evidence/original-blob.txt
+            # Only the isolated RED checkout receives the old production blob.
+            git show "$original:$source" > "$source"
+          fi
+      - name: Reject contaminated RED evidence before running product regressions
+        working-directory: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > evidence/gate-valid-red.log <<'LOG'
+          === RUN   TestIssue817QuotaSkipPreservesPending5xxExecution/never_run
+          expected: 1
+          actual  : 0
+          Messages: pending 5xx signal must execute after quota-skipped cron before acknowledgement
+          === RUN   TestIssue817QuotaSkipPreservesPending5xxExecution/previous_completed_run
+          expected: 1
+          actual  : 0
+          Messages: pending 5xx signal must execute after quota-skipped cron before acknowledgement
+          --- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution
+              --- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/never_run
+              --- FAIL: TestIssue817QuotaSkipPreservesPending5xxExecution/previous_completed_run
+          LOG
+          validator=.github/scripts/issue817-validate-evidence.sh
+          bash "$validator" red 1 evidence/gate-valid-red.log
+          for forbidden in 'WARNING: DATA RACE' 'panic: injected' 'Segmentation fault' '--- SKIP: injected' '[build failed]' 'no tests to run'; do
+            cp evidence/gate-valid-red.log evidence/gate-contaminated-red.log
+            printf '%s\n' "$forbidden" >> evidence/gate-contaminated-red.log
+            if bash "$validator" red 1 evidence/gate-contaminated-red.log; then
+              echo "Gate wrongly accepted forbidden evidence: $forbidden" >&2
+              exit 1
+            fi
+          done
+          # Both FAIL labels still exist; only the second child's diagnosis is
+          # missing. A first-child-only global grep would wrongly accept this.
+          awk '/=== RUN.*previous_completed_run/ { second=1 } second && /Messages:/ { next } { print }' evidence/gate-valid-red.log > evidence/gate-missing-second-diagnostic.log
+          if bash "$validator" red 1 evidence/gate-missing-second-diagnostic.log; then
+            echo 'Gate wrongly accepted a missing second-child diagnostic' >&2
+            exit 1
+          fi
+          if bash "$validator" red 0 evidence/gate-valid-red.log; then
+            echo 'Gate wrongly accepted a zero first RED exit' >&2
+            exit 1
+          fi
+          echo 'Evidence gate synthetic rejection regressions passed'
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ matrix.behavior }}/backend/go.mod
+          cache-dependency-path: ${{ matrix.behavior }}/backend/go.sum
+      - name: Prepare live first-signal startup diagnostics
+        working-directory: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v gdb >/dev/null; then
+            bash .github/scripts/ci-ubuntu-mirrors.sh
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gdb
+          fi
+          uname -a > evidence/kernel.txt
+          go version > evidence/toolchain.txt
+      - name: Real PostgreSQL plan and existing Redis trigger worker
+        working-directory: ${{ matrix.behavior }}
+        env:
+          CI: 'true'
+          BEHAVIOR: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          bash .github/scripts/issue817-race-gate.sh "$BEHAVIOR" "$PWD" '^TestIssue817QuotaSkipPreservesPending5xxExecution$' > evidence/pending-5xx.log 2>&1
+          result=$?
+          set -e
+          cat evidence/pending-5xx.log
+          test "$(cat evidence/binary-identity-ok.txt)" = passed
+          bash .github/scripts/issue817-validate-evidence.sh "$BEHAVIOR" "$result" evidence/pending-5xx.log
+      - name: Retained exact lease, 401, ownership, manual and trigger contracts
+        if: matrix.behavior == 'green'
+        working-directory: green/backend
+        env:
+          CI: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=integration ./internal/repository -run '^(TestIssue817QuotaSkipPreserves401AndOwnership|TestIssue817QuotaSkipRetainsActualIsolationOwnership|TestIssue817ManualTriggerIsOneShotAndLeaseFenced|TestQuality5xxClaimKeepsCronAndCoalescesScheduledRun|TestQuality5xxFinishConsumesCrossedCronWithoutOverwritingEdits|TestQualityRetestRestBlocksEveryClaimUntilDeadline)$' -count=1 -v -timeout=10m 2>&1 | tee ../evidence/retained-contracts.log
+          if grep -Eq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution' ../evidence/retained-contracts.log; then
+            exit 1
+          fi
+          for required in \
+            TestIssue817QuotaSkipPreserves401AndOwnership \
+            TestIssue817QuotaSkipRetainsActualIsolationOwnership \
+            TestIssue817ManualTriggerIsOneShotAndLeaseFenced \
+            TestQuality5xxClaimKeepsCronAndCoalescesScheduledRun \
+            TestQuality5xxFinishConsumesCrossedCronWithoutOverwritingEdits \
+            TestQualityRetestRestBlocksEveryClaimUntilDeadline; do
+            grep -F -- "--- PASS: $required (" ../evidence/retained-contracts.log
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue817-skip-${{ matrix.behavior }}-${{ github.event_name }}-${{ github.run_id }}
+          path: |
+            ${{ matrix.behavior }}/evidence/
+            evidence/
+          if-no-files-found: error

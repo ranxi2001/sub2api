@@ -49,8 +49,10 @@ func (r *scheduledTestPlanRepository) FinishQuotaSkippedPelican(ctx context.Cont
  SET claimed_until=COALESCE(last_round_until,claimed_until) WHERE plan_id=$1 AND claimed_until=$2`, plan.ID, until); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE scheduled_test_plans SET running_until=NULL,last_run_at=$3
- WHERE id=$1 AND running_until=$2`, plan.ID, until, finished); err != nil {
+	// No probe ran: last_run_at must still describe the last executed round.
+	// Advancing it here would discard an earlier queued upstream 5xx signal.
+	if _, err = tx.ExecContext(ctx, `UPDATE scheduled_test_plans SET running_until=NULL
+ WHERE id=$1 AND running_until=$2`, plan.ID, until); err != nil {
 		return err
 	}
 	return tx.Commit()
