@@ -100,6 +100,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/utils/__tests__/usageTps.spec.ts \
 	src/utils/__tests__/usageCacheRate.spec.ts \
 	src/utils/__tests__/usageRate.spec.ts \
+	src/components/charts/__tests__/TokenUsageTrend.spec.ts \
 	src/views/admin/ops/components/__tests__/OpsErrorDetailModal.spec.ts \
 	src/router/__tests__/feature-access.spec.ts \
 	src/api/admin/__tests__/requestCaptures.spec.ts \
