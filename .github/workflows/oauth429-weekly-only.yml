@@ -1,0 +1,99 @@
+name: OAuth 429 weekly-only RED GREEN
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/*429*'
+      - 'backend/internal/repository/oauth429_weekly_only*'
+      - '.github/workflows/oauth429-weekly-only.yml'
+      - '.github/scripts/oauth429-weekly-only-*'
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE: ${{ github.event.pull_request.head.sha }}
+  BASELINE: f895ea743f34a4c4ab6c9d01c01e13c931625a6e
+
+jobs:
+  red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Restore only affected production source in disposable checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
+          git diff --exit-code
+          git worktree add --detach "$RUNNER_TEMP/oauth429-red" "$CANDIDATE"
+          target=backend/internal/service/openai_disable_scheduling_429.go
+          expected=ab9d5251a4acec7c17b0adb0f21ae59a71f89067
+          test "$(git rev-parse "$BASELINE:$target")" = "$expected"
+          git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-red/$target"
+          actual=$(git hash-object "$RUNNER_TEMP/oauth429-red/$target")
+          test "$actual" = "$expected"
+          printf '%s %s %s\n' "$BASELINE" "$actual" "$target" > evidence/restored-blobs.txt
+          git -C "$RUNNER_TEMP/oauth429-red" diff --stat > evidence/red-diff.txt
+          git hash-object backend/internal/service/oauth429_weekly_only_test.go > evidence/candidate-test-blob.txt
+          git hash-object "$RUNNER_TEMP/oauth429-red/backend/internal/service/oauth429_weekly_only_test.go" > evidence/red-test-blob.txt
+          diff evidence/candidate-test-blob.txt evidence/red-test-blob.txt
+      - name: Require behavioral RED from unchanged service regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RUNNER_TEMP/oauth429-red/backend" && go test -json -tags=unit ./internal/service -run '^TestOAuth429WeeklyOnly' -count=1 -timeout=10m) > evidence/red.jsonl 2> evidence/red.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/red-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py red evidence/red.jsonl "$result"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth429-red-${{ github.event.pull_request.head.sha }}
+          path: evidence/
+          if-no-files-found: error
+  green:
+    needs: red
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Clean candidate GREEN with race detector
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
+          git diff --exit-code
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/service -run '^Test(OAuth429WeeklyOnly|DisableScheduling429|RateLimitDisableSchedulingOn429|OpenAIGatewayDisableSchedulingOn429|Managed429WeeklyPolicy|TOTPRotationOn429)' -count=1 -timeout=10m) > evidence/green.jsonl 2> evidence/green.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/green-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py green evidence/green.jsonl "$result"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth429-green-${{ github.event.pull_request.head.sha }}
+          path: evidence/
+          if-no-files-found: error
