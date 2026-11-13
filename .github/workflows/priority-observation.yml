@@ -145,6 +145,14 @@ jobs:
           cat "$RUNNER_TEMP/priority-logs/review-red.log"
           test "$result" -ne 0
           python3 .github/scripts/priority-penalty-review-red.py "$RUNNER_TEMP/priority-logs/review-red.log"
+      - name: Install Redis for retained HTTP replay regressions
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          redis-server --version
       - name: New transport scheduler history and handler seams
         id: green
         if: ${{ !cancelled() }}
