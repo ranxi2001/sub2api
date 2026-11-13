@@ -48,7 +48,7 @@ func ParseBridgeFailure(raw []byte) *BridgeFailure {
 		reason := text(d["reason"])
 		if reason == "schema_validation" || reason == "resource_limit" {
 			failure.ToolArguments = &ToolArgumentsDiagnostic{Tool: safeSchemaName(text(d["tool"])), Reason: reason,
-				Path: safeSchemaName(text(d["path"])), Rule: safeToolArgumentRule(text(d["rule"]))}
+				Path: safeToolArgumentPath(text(d["path"])), Rule: safeToolArgumentRule(text(d["rule"]))}
 		}
 	}
 	return failure

@@ -3,6 +3,7 @@ package basispoints
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -77,4 +78,23 @@ func declaredArgumentPath(parts []string, schema object) string {
 		}
 	}
 	return schemaPointer(path, true)
+}
+
+func safeToolArgumentPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if len(path) > 1024 || !strings.HasPrefix(path, "/") {
+		return "/[redacted]"
+	}
+	parts := strings.Split(path[1:], "/")
+	if len(parts) > 33 {
+		return "/[redacted]"
+	}
+	for i, part := range parts {
+		if part != "[redacted]" && part != "[truncated]" {
+			parts[i] = safeSchemaName(part)
+		}
+	}
+	return "/" + strings.Join(parts, "/")
 }

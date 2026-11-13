@@ -31,7 +31,7 @@ jobs:
       - working-directory: backend
         run: go test -race ./internal/service/basispoints -count=1 -v
       - working-directory: backend
-        run: go test -race -tags=unit ./internal/service ./internal/handler/admin ./internal/server/middleware -run 'Test(ConnectionAuthorizationStatus|OpenAIConnectionManagement|OpenAIAuthConnection|Audit)' -count=1 -v -timeout=10m
+        run: go test -race -tags=unit ./internal/service ./internal/handler/admin ./internal/server/middleware -run 'Test(ExcelBPSToolArgumentsDiagnostic|ConnectionAuthorizationStatus|OpenAIConnectionManagement|OpenAIAuthConnection|Audit)' -count=1 -v -timeout=10m
   authorization-ui:
     runs-on: ubuntu-latest
     timeout-minutes: 20
