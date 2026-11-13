@@ -62,6 +62,7 @@ describe('admin usage platform behavior with real filters', () => {
     const filter = wrapper.get('[data-testid="usage-platform-filter"]')
     expect(filter.get('.select-trigger').text()).toBe(locale === 'en' ? 'All platforms' : '全部平台')
     expect(api.list.mock.lastCall?.[0].platform).toBeFalsy()
+    expect(api.list.mock.lastCall?.[0].exact_total).toBe(false)
     await filter.get('.select-trigger').trigger('click')
     const options = filter.findAll('[role="option"]').map(el => el.text())
     for (const platform of CONCRETE_PLATFORM_OPTIONS) expect(options).toContain(platform.label)
@@ -90,11 +91,13 @@ describe('admin usage platform behavior with real filters', () => {
     }
     await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'All platforms')
     expect(api.list.mock.lastCall?.[0].platform).toBeFalsy()
+    expect(api.list.mock.lastCall?.[0].exact_total).toBe(false)
     expect(api.list.mock.lastCall?.[0].group_id).toBe(7)
     await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'OpenAI')
     filters.vm.$emit('reset')
     await flushPromises()
     expect(api.list.mock.lastCall?.[0].platform).toBeFalsy()
+    expect(api.list.mock.lastCall?.[0].exact_total).toBe(false)
     expect(api.list.mock.lastCall?.[0].group_id).toBeUndefined()
   })
 

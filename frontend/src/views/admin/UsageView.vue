@@ -463,7 +463,7 @@ const loadLogs = async () => {
   abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
   try {
     const res = await (props.observerMode ? observerUsageAPI.list : adminAPI.usage.list)(
-      buildUsageListParams(pagination.page, pagination.page_size, !props.observerMode),
+      buildUsageListParams(pagination.page, pagination.page_size, !props.observerMode && !!filters.value.platform),
       { signal: c.signal }
     )
     if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }

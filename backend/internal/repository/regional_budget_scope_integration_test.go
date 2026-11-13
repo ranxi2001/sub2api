@@ -99,7 +99,11 @@ func TestRegionalSubscriptionCanonicalUsesDurableFundingMetadata(t *testing.T) {
 	_, err = holds.Reserve(ctx, request)
 	require.NoError(t, err)
 	require.NoError(t, holds.Start(ctx, request.RequestID))
-	// Mid-flight changes must not rewrite the original billing group/subscription.
+	// Mid-flight entity changes must not rewrite request-time provider or billing metadata.
+	_, err = integrationDB.Exec("UPDATE accounts SET platform='anthropic' WHERE id=$1", account.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.Exec("UPDATE groups SET platform='gemini' WHERE id=$1", group.ID)
+	require.NoError(t, err)
 	_, err = integrationDB.Exec("UPDATE api_keys SET group_id=NULL WHERE id=$1", key.ID)
 	require.NoError(t, err)
 	charge, err := price.Charge(10, 5, 0, 0)
@@ -107,9 +111,11 @@ func TestRegionalSubscriptionCanonicalUsesDurableFundingMetadata(t *testing.T) {
 	event := regionalLedgerEvent(request, charge)
 	require.NoError(t, holds.Complete(ctx, event))
 	require.NoError(t, holds.Complete(ctx, event))
+	var platform string
 	var actualGroup, actualSubscription int64
 	var billingType, count int
-	require.NoError(t, integrationDB.QueryRow("SELECT group_id,subscription_id,billing_type FROM usage_logs WHERE request_id=$1", request.RequestID).Scan(&actualGroup, &actualSubscription, &billingType))
+	require.NoError(t, integrationDB.QueryRow("SELECT platform,group_id,subscription_id,billing_type FROM usage_logs WHERE request_id=$1", request.RequestID).Scan(&platform, &actualGroup, &actualSubscription, &billingType))
+	require.Equal(t, service.PlatformOpenAI, platform, "settlement must preserve the admission platform")
 	require.Equal(t, group.ID, actualGroup)
 	require.Equal(t, subscription, actualSubscription)
 	require.Equal(t, 1, billingType)
