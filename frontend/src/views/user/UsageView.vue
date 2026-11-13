@@ -313,17 +313,19 @@ const errorModelOptions = computed<SelectOption[]>(() => {
   return opts
 })
 
-const errorCategoryCodes = ['auth', 'rate_limit', 'quota', 'invalid_request', 'service_unavailable', 'upstream', 'internal', 'cyber']
+const errorCategoryCodes = ['auth', 'rate_limit', 'quota', 'invalid_request', 'service_unavailable', 'upstream', 'transport_error', 'internal', 'cyber']
 
 const errorCategoryOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('usage.errors.allCategories') },
   ...errorCategoryCodes.map((c) => ({ value: c, label: t('usage.errors.categories.' + c) })),
 ])
 
-// 状态码候选用固定常用列表(与管理端 UsageFilters 共用常量),不受当前页数据限制:
+// Status is the actual client HTTP boundary, including a failed stream whose
+// headers were already committed as 200. Options must not depend on this page.
 // 后端 status_code 过滤对全量生效,若只列当前页出现过的码,用户就选不到仅在后续页的码。
 const errorStatusOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('usage.errors.allStatuses') },
+  { value: 200, label: t('usage.errors.http200StreamFailure') },
   ...COMMON_ERROR_STATUS_CODES.map((c) => ({ value: c, label: String(c) })),
 ])
 

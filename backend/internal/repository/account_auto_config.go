@@ -76,7 +76,7 @@ func (r *accountRepository) RecordConcurrencyResult(ctx context.Context, event s
 	}
 	now := time.Now().UTC()
 	// Repeated failures within one cooldown do not flood history.
-	logFailure := !event.Success && (state.Revision != actual.Revision || state.LastFailureAt == nil || !now.Before(state.PausedUntil) || state.Successes > 0)
+	logFailure := !event.Success && event.FailureCategory != "transport_error" && (state.Revision != actual.Revision || state.LastFailureAt == nil || !now.Before(state.PausedUntil) || state.Successes > 0)
 	state, next := service.AdvanceConcurrency(state, current, actual, event, now)
 	encoded, err := json.Marshal(state)
 	if err != nil {
