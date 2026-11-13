@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -50,18 +51,29 @@ func openAI429WeeklyHeaderUsage(headers http.Header) (used float64, present, val
 	// assumption. Require exactly one explicitly identified weekly window.
 	prefix := ""
 	for _, window := range []string{"primary", "secondary"} {
-		if key := "x-codex-" + window + "-window-minutes"; len(headers.Values(key)) > 0 {
-			minutes, err := strconv.Atoi(headers.Get(key))
-			if err != nil || minutes <= 0 {
-				return 0, true, false
-			}
-			if minutes == 7*24*60 {
-				if prefix != "" {
-					return 0, true, false
+		values := headers.Values("x-codex-" + window + "-window-minutes")
+		claimsWeekly := false
+		// Inspect every value so a conflicting duplicate cannot hide a weekly
+		// claim behind Header.Get's first value (including comma-joined fields).
+		for _, value := range values {
+			for _, part := range strings.Split(value, ",") {
+				if minutes, err := strconv.Atoi(strings.TrimSpace(part)); err == nil && minutes == 7*24*60 {
+					claimsWeekly = true
 				}
-				prefix = "x-codex-" + window + "-"
 			}
 		}
+		if !claimsWeekly {
+			// An unused, malformed or shorter neighbor says nothing about an
+			// independently identified weekly window.
+			continue
+		}
+		if prefix != "" || len(values) != 1 {
+			return 0, true, false
+		}
+		if minutes, err := strconv.Atoi(values[0]); err != nil || minutes != 7*24*60 {
+			return 0, true, false
+		}
+		prefix = "x-codex-" + window + "-"
 	}
 	if prefix == "" {
 		return 0, true, false
@@ -70,11 +82,14 @@ func openAI429WeeklyHeaderUsage(headers http.Header) (used float64, present, val
 	if prefix == "x-codex-secondary-" {
 		weekly = snapshot.SecondaryUsedPercent
 	}
-	if weekly == nil || !validOpenAI429Percent(*weekly) {
+	if len(headers.Values(prefix+"used-percent")) != 1 || weekly == nil || !validOpenAI429Percent(*weekly) {
 		return 0, true, false
 	}
-	if key := prefix + "reset-after-seconds"; len(headers.Values(key)) > 0 {
-		seconds, err := strconv.ParseInt(headers.Get(key), 10, 64)
+	if values, exists := headers[http.CanonicalHeaderKey(prefix+"reset-after-seconds")]; exists {
+		if len(values) != 1 {
+			return 0, true, false
+		}
+		seconds, err := strconv.ParseInt(values[0], 10, 64)
 		if err != nil || seconds <= 0 || seconds > int64((7*24*time.Hour)/time.Second) {
 			return 0, true, false
 		}
@@ -90,17 +105,18 @@ func openAI429WeeklyUsage(account *Account, headers http.Header, now time.Time) 
 		return 0, false
 	}
 	extra := account.Extra
-	if _, exists := extra["codex_7d_window_minutes"]; exists {
-		minutes, ok := resolveAccountExtraNumber(extra, "codex_7d_window_minutes")
-		if !ok || minutes != 7*24*60 {
-			return 0, false
-		}
+	// A normalized legacy primary snapshot may have no window identity. Its
+	// "7d" field name alone is not evidence for a permanent scheduling change.
+	minutes, ok := resolveAccountExtraNumber(extra, "codex_7d_window_minutes")
+	if !ok || minutes != 7*24*60 {
+		return 0, false
 	}
 	used, ok := resolveAccountExtraNumber(extra, "codex_7d_used_percent")
 	if !ok || !validOpenAI429Percent(used) {
 		return 0, false
 	}
 	observed := codexUpdatesTime(extra)
+	windowObserved := observed
 	if versions, exists := extra[CodexUsageFieldVersionsKey]; exists {
 		fields, ok := versions.(map[string]any)
 		if !ok {
@@ -111,11 +127,18 @@ func openAI429WeeklyUsage(account *Account, headers http.Header, now time.Time) 
 			return 0, false
 		}
 		observed = time.Unix(0, stamp)
+		stamp, err = strconv.ParseInt(fmt.Sprint(fields["codex_7d_window_minutes"]), 10, 64)
+		if err != nil || stamp <= 0 {
+			return 0, false
+		}
+		windowObserved = time.Unix(0, stamp)
 	}
 	// Permanent pauses require a known, recent observation, unlike temporary
 	// scheduling guards that may retain legacy snapshots without timestamps.
-	if observed.IsZero() || observed.After(now) || now.Sub(observed) >= openAICodexAutoPauseStaleAfter {
-		return 0, false
+	for _, observation := range []time.Time{observed, windowObserved} {
+		if observation.IsZero() || observation.After(now) || now.Sub(observation) >= openAICodexAutoPauseStaleAfter {
+			return 0, false
+		}
 	}
 	if raw, exists := extra["codex_7d_reset_at"]; exists {
 		reset, err := parseTime(fmt.Sprint(raw))

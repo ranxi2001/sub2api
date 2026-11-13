@@ -40,7 +40,7 @@ func (r *scheduling429Repo) SetSchedulable(ctx context.Context, id int64, enable
 
 func scheduling429Account() *Account {
 	return &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Schedulable: true,
-		Extra: map[string]any{OpenAIDisableSchedulingOn429ExtraKey: true, "codex_7d_used_percent": 99.0, "codex_usage_updated_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)}}
+		Extra: map[string]any{OpenAIDisableSchedulingOn429ExtraKey: true, "codex_7d_used_percent": 99.0, "codex_7d_window_minutes": 10080, "codex_usage_updated_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)}}
 }
 
 func TestRateLimitDisableSchedulingOn429ScopeAndObservation(t *testing.T) {
