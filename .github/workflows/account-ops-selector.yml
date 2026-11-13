@@ -34,12 +34,51 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
-      - name: Behavior tests (initial RED expected)
+      - name: Confirm behavioral RED against pinned original dialog
         run: |
           mkdir -p "$RUNNER_TEMP/account-ops-selector"
           git rev-parse HEAD > "$RUNNER_TEMP/account-ops-selector/head.txt"
+          original=frontend/src/components/admin/operations/AccountOpsGroupDialog.vue
+          trap 'git show "HEAD:$original" > "$original"' EXIT
+          git show "f895ea743f34a4c4ab6c9d01c01e13c931625a6e:$original" > "$original"
+          set +e
+          pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOpsGroupSelector.spec.ts -t 'account ops shared selector' --reporter=json --outputFile="$RUNNER_TEMP/account-ops-selector/red.json" > "$RUNNER_TEMP/account-ops-selector/red.log" 2>&1
+          result=$?
+          set -e
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          const report=JSON.parse(readFileSync(process.env.RUNNER_TEMP+'/account-ops-selector/red.json','utf8'));
+          const failures=report.testResults.flatMap(suite=>suite.assertionResults).filter(test=>test.status==='failed');
+          assert.equal(report.numFailedTests,2);
+          assert.equal(failures.length,2);
+          for(const test of failures){
+            assert.match(test.fullName,/account ops shared selector/);
+            assert.match(test.failureMessages.join('\n'),/expected false to be true/);
+          }
+          console.log('Confirmed two behavioral RED assertions; no import/setup failure.');
+          JS
+      - name: GREEN and existing quality regression tests
+        run: |
           set -o pipefail
-          pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOpsGroupSelector.spec.ts --reporter=verbose 2>&1 | tee "$RUNNER_TEMP/account-ops-selector/behavior.log"
+          pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOpsGroupDialog.spec.ts src/components/admin/operations/__tests__/AccountOpsGroupSelector.spec.ts src/components/admin/operations/__tests__/QualityAccountSelector.spec.ts src/views/admin/__tests__/AccountOpsView.spec.ts src/views/admin/__tests__/AccountQualityView.spec.ts --reporter=verbose 2>&1 | tee "$RUNNER_TEMP/account-ops-selector/green.log"
+      - name: Required frontend checks
+        run: |
+          set -o pipefail
+          make test-frontend 2>&1 | tee "$RUNNER_TEMP/account-ops-selector/checks.log"
+          pnpm --dir frontend run build 2>&1 | tee "$RUNNER_TEMP/account-ops-selector/build.log"
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/account-ops-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/account-ops-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Actual component screenshots and interactions
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/account-ops-selector
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/account-ops-browser/node_modules/playwright/index.mjs
+        run: |
+          set -o pipefail
+          node .github/scripts/account-ops-selector-preview.mjs 2>&1 | tee "$EVIDENCE_DIR/browser.log"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
