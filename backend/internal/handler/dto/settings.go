@@ -347,6 +347,7 @@ type SystemSettings struct {
 	GrokDefaultBaseURLMode               string `json:"grok_default_base_url_mode"`
 	GrokVideoSourceURLEnabled            bool   `json:"grok_video_source_url_enabled"`
 	OpenAI409OmitEncryptedHistoryEnabled bool   `json:"openai_409_omit_encrypted_history_enabled"`
+	OpenAI400OmitEncryptedHistoryEnabled bool   `json:"openai_400_omit_encrypted_history_enabled"`
 
 	// Available Channels feature switch (user-facing aggregate view)
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`

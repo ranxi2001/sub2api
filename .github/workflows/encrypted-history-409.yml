@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'backend/internal/service/openai_409_omit_history*'
+      - 'backend/internal/service/openai_history_omission.go'
       - 'backend/internal/service/openai_agent_message_recovery.go'
       - 'backend/internal/service/openai_gateway_forward.go'
       - 'backend/internal/service/openai_gateway_request_body.go'
