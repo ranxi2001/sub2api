@@ -1,0 +1,151 @@
+name: HTTP readable task rebuild TDD
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: RED first; GREEN/BOTH after the production increment
+        type: choice
+        options: [RED, GREEN, BOTH]
+        default: RED
+  pull_request:
+    paths:
+      - 'backend/internal/handler/openai_409_*'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/handler/openai_responses_failover_cancel_test.go'
+      - 'backend/internal/service/openai_409_*'
+      - 'backend/internal/service/openai_agent_message_*'
+      - 'backend/internal/service/openai_gateway_forward.go'
+      - 'backend/internal/service/openai_gateway_response_handling.go'
+      - 'backend/internal/service/openai_account_scheduler.go'
+      - 'backend/internal/service/openai_codex_transform.go'
+      - '.github/scripts/assert-http-task-rebuild.py'
+      - '.github/scripts/test_assert_http_task_rebuild.py'
+      - '.github/scripts/assert-readable-continuation.py'
+      - '.github/workflows/http-task-rebuild.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validator:
+    name: Task rebuild evidence self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Evidence manifest and contamination self-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s .github/scripts -p 'test_assert_http_task_rebuild.py' -v 2>&1 | tee "$RUNNER_TEMP/http-task-validator.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http-task-validator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/http-task-validator.log
+          if-no-files-found: error
+  transport:
+    name: Native HTTP ${{ matrix.phase }}
+    needs: validator
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      # This test-first checkpoint runs RED automatically. The production
+      # checkpoint must enable automatic BOTH before claiming feature GREEN.
+      matrix:
+        phase: ${{ fromJSON(inputs.phase == 'BOTH' && '["RED","GREEN"]' || inputs.phase == 'GREEN' && '["GREEN"]' || '["RED"]') }}
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASELINE_SHA: 96ba36a85edab665ad5a035788fc07a40fd18762
+      PHASE: ${{ matrix.phase }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Keep clean candidate and prepare disposable RED source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/http-task-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http-task-evidence/candidate.txt"
+          git rev-parse "$BASELINE_SHA" > "$RUNNER_TEMP/http-task-evidence/baseline.txt"
+          if [ "$PHASE" = RED ]; then
+            git worktree add --detach "$RUNNER_TEMP/http-task-red" "$CANDIDATE_SHA"
+            cd "$RUNNER_TEMP/http-task-red"
+            while IFS= read -r target; do
+              case "$target" in *_test.go) continue ;; esac
+              if git cat-file -e "$BASELINE_SHA:$target" 2>/dev/null; then
+                git show "$BASELINE_SHA:$target" > "$target"
+                expected=$(git rev-parse "$BASELINE_SHA:$target")
+                test "$(git hash-object "$target")" = "$expected"
+                echo "$target baseline=$expected" >> "$RUNNER_TEMP/http-task-evidence/red-blobs.txt"
+              else
+                rm -- "$target"
+                echo "$target baseline=absent" >> "$RUNNER_TEMP/http-task-evidence/red-blobs.txt"
+              fi
+            done < <(git diff --no-renames --name-only "$BASELINE_SHA" "$CANDIDATE_SHA" -- 'backend/**/*.go')
+            git diff --exit-code "$BASELINE_SHA" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+            # Record the real refusal/normalization callsites even on the
+            # initial test-only head, where no production blob needs changing.
+            for target in backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_codex_transform.go; do
+              expected=$(git rev-parse "$BASELINE_SHA:$target")
+              test "$(git hash-object "$target")" = "$expected"
+              echo "$target baseline=$expected" >> "$RUNNER_TEMP/http-task-evidence/red-blobs.txt"
+            done
+          fi
+          git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          for target in backend/internal/handler/openai_409_http_rebuild_test.go backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do
+            expected=$(git rev-parse "$CANDIDATE_SHA:$target")
+            test "$(git hash-object "$target")" = "$expected"
+            echo "$target candidate=$expected" >> "$RUNNER_TEMP/http-task-evidence/test-blobs.txt"
+          done
+      - name: Same composed network regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          if [ "$PHASE" = RED ]; then tested_tree="$RUNNER_TEMP/http-task-red"; fi
+          set +e
+          (cd "$tested_tree/backend" && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409HTTPTaskRebuild$' -count=1 -timeout=5m) > "$RUNNER_TEMP/http-task-evidence/transport.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http-task-evidence/transport.jsonl"
+          python3 .github/scripts/assert-http-task-rebuild.py "$PHASE" "$result" "$RUNNER_TEMP/http-task-evidence/transport.jsonl"
+      - name: GREEN intent and delivery boundaries
+        if: matrix.phase == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409HTTPRebuildBoundaries$' -count=1 -timeout=5m) > "$RUNNER_TEMP/http-task-evidence/boundaries.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http-task-evidence/boundaries.jsonl"
+          python3 .github/scripts/assert-http-task-rebuild.py GREEN "$result" "$RUNNER_TEMP/http-task-evidence/boundaries.jsonl" --boundaries
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http-task-rebuild-${{ matrix.phase }}-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/http-task-evidence/
+          if-no-files-found: error

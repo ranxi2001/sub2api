@@ -81,10 +81,10 @@ jobs:
             test "$expected" = "$actual"
           done
           # The later omission fixtures require a Beta setting absent from this
-          # baseline. The readable fixture also imports omit409SettingsRepo from
-          # the omission fixture. Exclude this exact dependency pair only in the
-          # old Issue805 RED; both remain in GREEN and their own RED/GREEN job.
-          for omission_test in backend/internal/handler/openai_409_omit_history_test.go backend/internal/handler/openai_409_readable_continuation_test.go; do
+          # baseline. The readable/task-rebuild fixtures import its settings and
+          # usage helpers. Exclude this exact dependency set only in the old
+          # Issue805 RED; GREEN and each feature's own TDD job retain them.
+          for omission_test in backend/internal/handler/openai_409_omit_history_test.go backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_409_http_rebuild_test.go; do
             git cat-file -e "$EXPECTED_HEAD_SHA:$omission_test"
             rm -- "$omission_test"
             test ! -e "$omission_test"

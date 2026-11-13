@@ -1,0 +1,489 @@
+//go:build unit
+
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/testutil"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+)
+
+const (
+	httpRebuildSession = "fixture-unattended-coding-thread"
+	httpRebuildTask    = "Fix sum.go so Sum(2, 3) returns 5, then run verification. Reuse completed tool results."
+	httpRebuildSystem  = "Use the supplied coding task and recorded results. Never repeat a completed patch or verification."
+	httpRebuildSource  = "package fixture\nfunc Sum(a, b int) int { return a + b }\n"
+	httpRebuildPatch   = "sum.go patched once: return a + b"
+	httpRebuildCheck   = "Sum(2,3)=5; PASS"
+	httpRebuildAgentA  = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-opaque-A"}`
+	httpRebuildAgentB  = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-readable-B"}`
+)
+
+type httpRebuildWire struct {
+	account int64
+	url     string
+	header  http.Header
+	body    []byte
+}
+
+// OAuth must use the real native builder and final send gate. Only at the
+// HTTPUpstream boundary do we redirect its fixed production URL to localhost;
+// the body and identity headers are unchanged. No external destination is ever
+// dialed. The loopback provider independently observes the resulting request.
+type httpRebuildTransport struct {
+	service.HTTPUpstream
+	target *url.URL
+	mu     sync.Mutex
+	wires  []httpRebuildWire
+}
+
+func (u *httpRebuildTransport) Do(req *http.Request, proxy string, account int64, concurrency int) (*http.Response, error) {
+	if proxy != "" || (req.URL.String() != "https://chatgpt.com/backend-api/codex/responses" &&
+		req.URL.String() != u.target.String()+"/v1/responses") {
+		return nil, fmt.Errorf("fixture refuses unexpected transport destination")
+	}
+	reader, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		return nil, err
+	}
+	u.mu.Lock()
+	u.wires = append(u.wires, httpRebuildWire{account: account, url: req.URL.String(), header: req.Header.Clone(), body: body})
+	u.mu.Unlock()
+	local := req.Clone(req.Context())
+	address := *req.URL
+	address.Scheme, address.Host = u.target.Scheme, u.target.Host
+	local.URL = &address
+	return u.HTTPUpstream.Do(local, "", account, concurrency)
+}
+
+func (u *httpRebuildTransport) DoWithTLS(req *http.Request, proxy string, account int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxy, account, concurrency)
+}
+
+func (u *httpRebuildTransport) snapshot() []httpRebuildWire {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]httpRebuildWire(nil), u.wires...)
+}
+
+func httpRebuildJSON(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		panic(err) // Only fixed JSON fixture values are passed here.
+	}
+	return string(encoded)
+}
+
+func httpRebuildMessage(role, text string) string {
+	return httpRebuildJSON(map[string]any{"type": "message", "role": role, "content": text})
+}
+
+func httpRebuildCall(name, id string, arguments map[string]any) string {
+	return httpRebuildJSON(map[string]any{"type": "function_call", "name": name, "call_id": id, "arguments": httpRebuildJSON(arguments)})
+}
+
+func httpRebuildToolPair(body []byte, name, output string) bool {
+	items := gjson.GetBytes(body, "input").Array()
+	calls, results := 0, 0
+	for _, call := range items {
+		if call.Get("type").String() != "function_call" || call.Get("name").String() != name || call.Get("call_id").String() == "" {
+			continue
+		}
+		calls++
+		arguments := gjson.Parse(call.Get("arguments").String())
+		if arguments.Get("path").String() != "sum.go" || (name == "apply_patch" && arguments.Get("source").String() != httpRebuildSource) {
+			return false
+		}
+		for _, result := range items {
+			if result.Get("type").String() == "function_call_output" && result.Get("call_id").String() == call.Get("call_id").String() && result.Get("output").String() == output {
+				results++
+			}
+		}
+	}
+	return calls == 1 && results == 1
+}
+
+// A bounded client-side coding tool loop: one in-memory source edit and one
+// AST-based verification. No external command, repository edit or real effect.
+type httpRebuildTools struct {
+	source        string
+	patches       int
+	verifications int
+}
+
+func (tools *httpRebuildTools) execute(t *testing.T, response gjson.Result) []string {
+	t.Helper()
+	var results []string
+	for _, call := range response.Get("output").Array() {
+		if call.Get("type").String() != "function_call" {
+			continue
+		}
+		arguments := gjson.Parse(call.Get("arguments").String())
+		require.Equal(t, "sum.go", arguments.Get("path").String())
+		var output string
+		switch call.Get("name").String() {
+		case "apply_patch":
+			require.Zero(t, tools.patches, "completed patch must never execute again")
+			tools.source = arguments.Get("source").String()
+			require.Equal(t, httpRebuildSource, tools.source)
+			tools.patches++
+			output = httpRebuildPatch
+		case "run_tests":
+			require.Equal(t, 1, tools.patches)
+			require.Zero(t, tools.verifications, "completed verification must never execute again")
+			parsed, err := parser.ParseFile(token.NewFileSet(), "sum.go", tools.source, 0)
+			require.NoError(t, err)
+			require.Len(t, parsed.Decls, 1)
+			fn, ok := parsed.Decls[0].(*ast.FuncDecl)
+			require.True(t, ok)
+			require.Equal(t, "Sum", fn.Name.Name)
+			require.Len(t, fn.Body.List, 1)
+			statement, ok := fn.Body.List[0].(*ast.ReturnStmt)
+			require.True(t, ok)
+			require.Len(t, statement.Results, 1)
+			expression, ok := statement.Results[0].(*ast.BinaryExpr)
+			require.True(t, ok)
+			require.Equal(t, token.ADD, expression.Op)
+			left, leftOK := expression.X.(*ast.Ident)
+			right, rightOK := expression.Y.(*ast.Ident)
+			require.True(t, leftOK && rightOK)
+			require.Equal(t, "a", left.Name)
+			require.Equal(t, "b", right.Name)
+			values := map[string]int{"a": 2, "b": 3}
+			output = fmt.Sprintf("Sum(2,3)=%d; PASS", values[left.Name]+values[right.Name])
+			tools.verifications++
+		default:
+			t.Fatalf("unexpected fixture tool: %s", call.Get("name").String())
+		}
+		results = append(results, httpRebuildJSON(map[string]any{"type": "function_call_output", "call_id": call.Get("call_id").String(), "output": output}))
+	}
+	return results
+}
+
+func TestOpenAI409HTTPTaskRebuild(t *testing.T) {
+	for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, stream := range []bool{false, true} {
+			for _, pointer := range []string{"intent", "previous", "conversation"} {
+				for _, outcome := range []string{"completed", "rejected", "write_failed"} {
+					t.Run(fmt.Sprintf("%s/stream=%t/%s/%s", accountType, stream, pointer, outcome), func(t *testing.T) {
+						runHTTPRebuildFixture(t, accountType, stream, pointer, outcome, "")
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestOpenAI409HTTPRebuildBoundaries(t *testing.T) {
+	for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, stream := range []bool{false, true} {
+			for _, boundary := range []string{"pointer_only", "opaque_only", "delivery_pending", "delivery_failed", "b_disabled"} {
+				t.Run(fmt.Sprintf("%s/stream=%t/%s", accountType, stream, boundary), func(t *testing.T) {
+					runHTTPRebuildFixture(t, accountType, stream, "previous", "completed", boundary)
+				})
+			}
+		}
+	}
+}
+
+func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointer, outcome, boundary string) {
+	t.Helper()
+	clients := issue805Redis(t)
+	observer := clients()
+	patchCall := httpRebuildCall("apply_patch", "call_patch_once", map[string]any{"path": "sum.go", "source": httpRebuildSource})
+	checkCall := httpRebuildCall("run_tests", "call_verify_once", map[string]any{"path": "sum.go"})
+	var mu sync.Mutex
+	var providerBodies [][]byte
+	var providerHeaders []http.Header
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		providerBodies = append(providerBodies, body)
+		providerHeaders = append(providerHeaders, r.Header.Clone())
+		n := len(providerBodies)
+		mu.Unlock()
+		id, conversation := "resp_rebuild_A", "conv_rebuild_A"
+		output := []json.RawMessage{json.RawMessage(patchCall), json.RawMessage(httpRebuildAgentA)}
+		if n > 1 {
+			readable := gjson.GetBytes(body, "input").Raw + " " + gjson.GetBytes(body, "instructions").String()
+			valid := r.Header.Get("Authorization") == "Bearer fixture-rebuild-B" &&
+				strings.Contains(readable, httpRebuildTask) && strings.Contains(readable, httpRebuildSystem) &&
+				!strings.Contains(string(body), "fixture-opaque-A") &&
+				!strings.Contains(string(body), "resp_rebuild_A") && !strings.Contains(string(body), "conv_rebuild_A") &&
+				httpRebuildToolPair(body, "apply_patch", httpRebuildPatch)
+			if n == 2 {
+				valid = valid && !gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
+			}
+			if accountType == service.AccountTypeOAuth {
+				valid = valid && r.URL.Path == "/backend-api/codex/responses" && r.Host == "chatgpt.com" &&
+					r.Header.Get("ChatGPT-Account-ID") == "fixture-chatgpt-B" &&
+					gjson.GetBytes(body, "stream").Bool() && gjson.GetBytes(body, "store").Type == gjson.False &&
+					gjson.GetBytes(body, `input.#(role==system)`).Type == gjson.Null
+			}
+			if n == 3 {
+				valid = valid && httpRebuildToolPair(body, "run_tests", httpRebuildCheck)
+			}
+			if !valid || outcome == "rejected" || n > 3 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"error":{"type":"invalid_request_error","message":"fixture rejected final task, identity or provider pointer"}}`)
+				return
+			}
+			id, conversation = "resp_rebuild_B", "conv_rebuild_B"
+			output = []json.RawMessage{json.RawMessage(checkCall), json.RawMessage(httpRebuildAgentB)}
+			if n == 3 {
+				id = "resp_rebuild_done"
+				output = []json.RawMessage{json.RawMessage(httpRebuildJSON(map[string]any{
+					"type": "message", "role": "assistant", "content": []any{map[string]any{
+						"type": "output_text", "text": "coding-task-complete: Sum(2,3)=5; patch and verification each executed once",
+					}},
+				}))}
+			}
+		}
+		payload := httpRebuildJSON(map[string]any{"id": id, "conversation": map[string]any{"id": conversation}, "status": "completed", "error": nil, "model": "gpt-5.1", "output": output, "usage": map[string]int{"input_tokens": 5, "output_tokens": 3}})
+		if gjson.GetBytes(body, "stream").Bool() {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\ndata: [DONE]\n\n", payload)
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, payload)
+		}
+	}))
+	defer provider.Close()
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	target, err := url.Parse(provider.URL)
+	require.NoError(t, err)
+	transport := &httpRebuildTransport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
+	accounts := issue715AccountsOfType(accountType)
+	for i, label := range []string{"A", "B"} {
+		accounts[i].Credentials = map[string]any{"base_url": provider.URL, "api_key": "fixture-rebuild-" + label, "access_token": "fixture-rebuild-" + label, "chatgpt_account_id": "fixture-chatgpt-" + label}
+	}
+	settings := service.NewSettingService(&omit409SettingsRepo{enabled: true}, cfg)
+	usage := &readable409UsageRepo{}
+	h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, transport, repository.NewGatewayCache(clients()), settings, usage, accounts...)
+	h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	template, _ := newIssue715Context(t, "{}")
+	done := make(chan struct{}, 1)
+	var sessions []string
+	pendingBeforeWrite := false
+	var observeErr error
+	router := gin.New()
+	router.POST("/v1/responses", func(c *gin.Context) {
+		defer func() { done <- struct{}{} }()
+		sessions = append(sessions, c.GetHeader("session_id"))
+		for key, value := range template.Keys {
+			c.Set(key, value)
+		}
+		c.Writer = &readable409DeliveryWriter{ResponseWriter: c.Writer, fail: outcome == "write_failed", observe: func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			var keys []string
+			keys, observeErr = observer.Keys(ctx, "openai_agent_owner:*").Result()
+			for _, key := range keys {
+				var value string
+				value, observeErr = observer.Get(ctx, key).Result()
+				if observeErr != nil {
+					return
+				}
+				pendingBeforeWrite = pendingBeforeWrite || (strings.HasPrefix(value, "pending:") && strings.Contains(value, ":[1,2,"))
+			}
+		}}
+		h.Responses(c)
+	})
+	gateway := httptest.NewServer(router)
+	defer gateway.Close()
+	client := gateway.Client()
+	client.Timeout = 10 * time.Second
+	request := func(history []string, previous gjson.Result) (int, string) {
+		body := map[string]any{"model": "gpt-5.1", "stream": stream, "store": false, "prompt_cache_key": httpRebuildSession,
+			"tools": []any{map[string]any{"type": "function", "name": "apply_patch", "parameters": map[string]any{"type": "object"}}, map[string]any{"type": "function", "name": "run_tests", "parameters": map[string]any{"type": "object"}}}}
+		body["input"] = json.RawMessage("[" + strings.Join(history, ",") + "]")
+		if previous.Exists() && (pointer == "previous" || boundary == "pointer_only") {
+			body["previous_response_id"] = previous.Get("id").String()
+		}
+		if previous.Exists() && pointer == "conversation" {
+			body["conversation"] = map[string]any{"id": previous.Get("conversation.id").String()}
+		}
+		req, err := http.NewRequest(http.MethodPost, gateway.URL+"/v1/responses", strings.NewReader(httpRebuildJSON(body)))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("session_id", httpRebuildSession)
+		response, err := client.Do(req)
+		require.NoError(t, err)
+		answer, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		require.NoError(t, err)
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("fixture handler did not finish")
+		}
+		return response.StatusCode, string(answer)
+	}
+	history := []string{httpRebuildMessage("system", httpRebuildSystem), httpRebuildMessage("user", httpRebuildTask)}
+	status, answer := request(history, gjson.Result{})
+	require.Equal(t, http.StatusOK, status, answer)
+	first := issue758CompletedResponse(t, answer, stream)
+	require.Equal(t, "resp_rebuild_A", first.Get("id").String())
+	require.Equal(t, "conv_rebuild_A", first.Get("conversation.id").String())
+	initialWire := transport.snapshot()
+	require.Len(t, initialWire, 1)
+	require.Equal(t, int64(1), initialWire[0].account)
+	require.Equal(t, "Bearer fixture-rebuild-A", initialWire[0].header.Get("Authorization"))
+	if accountType == service.AccountTypeOAuth {
+		require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", initialWire[0].url)
+		require.Equal(t, "fixture-chatgpt-A", initialWire[0].header.Get("ChatGPT-Account-ID"))
+	}
+	tools := &httpRebuildTools{}
+	for _, item := range first.Get("output").Array() {
+		history = append(history, item.Raw)
+	}
+	history = append(history, tools.execute(t, first)...)
+	require.Equal(t, 1, tools.patches)
+	require.Zero(t, tools.verifications)
+	require.Len(t, usage.snapshot(), 1, "A must finish the real usage path")
+	ownersA := issue805Owners(t, observer)
+	require.Len(t, ownersA, 1)
+	accounts[0].Schedulable = false
+	disabled, err := (openAIImagesFailoverAccountRepo{accounts: accounts}).GetByID(context.Background(), 1)
+	require.NoError(t, err)
+	require.False(t, disabled.Schedulable)
+	switch boundary {
+	case "pointer_only":
+		history = nil
+	case "opaque_only":
+		history = []string{httpRebuildAgentA}
+	case "delivery_pending", "delivery_failed":
+		for key, owner := range ownersA {
+			value := "failed"
+			if boundary == "delivery_pending" {
+				value = "pending:fixture-unconfirmed:" + owner
+			}
+			require.NoError(t, observer.Set(context.Background(), key, value, time.Minute).Err())
+			ownersA[key] = value
+		}
+	case "b_disabled":
+		accounts[1].Schedulable = false
+	}
+	status, answer = request(history, first)
+	if boundary != "" {
+		require.GreaterOrEqual(t, status, 400, "unrecoverable input/delivery must not pretend completion: %s", answer)
+		require.NotEmpty(t, gjson.Get(answer, "error.message").String(), answer)
+		require.NotContains(t, answer, "response.completed")
+		require.Len(t, transport.snapshot(), 1, "boundary must refuse before any B generation")
+		require.Equal(t, ownersA, issue805Owners(t, observer), "refusal must not clear pending/failed/old owner")
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		return
+	}
+	wires := transport.snapshot()
+	require.Len(t, wires, 2, "HTTP_REBUILD_B_DISPATCH_MISSING: automatic continuation with readable intent must reach B exactly once; response=%s", answer)
+	require.Equal(t, int64(1), wires[0].account)
+	require.Equal(t, int64(2), wires[1].account)
+	require.Equal(t, "Bearer fixture-rebuild-B", wires[1].header.Get("Authorization"))
+	require.NotContains(t, string(wires[1].body), "fixture-opaque-A")
+	require.False(t, gjson.GetBytes(wires[1].body, "previous_response_id").Exists())
+	require.False(t, gjson.GetBytes(wires[1].body, "conversation").Exists())
+	require.True(t, httpRebuildToolPair(wires[1].body, "apply_patch", httpRebuildPatch), "completed call/result relation must survive")
+	if accountType == service.AccountTypeOAuth {
+		require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", wires[1].url)
+		require.NotEmpty(t, wires[1].header.Get("session_id"))
+		require.NotEqual(t, wires[0].header.Get("session_id"), wires[1].header.Get("session_id"), "upstream account namespace changes while the client session stays fixed")
+	}
+	owners := issue805Owners(t, observer)
+	for key, owner := range ownersA {
+		require.Equal(t, owner, owners[key], "old A owner remains intact")
+		delete(owners, key)
+	}
+	if outcome == "rejected" {
+		require.Equal(t, http.StatusBadRequest, status, answer)
+		require.Contains(t, answer, "fixture rejected")
+		require.Empty(t, owners)
+		require.Len(t, usage.snapshot(), 1)
+		return
+	}
+	require.NoError(t, observeErr)
+	require.True(t, pendingBeforeWrite, "B output must be reserved before exposure")
+	require.Len(t, owners, 1)
+	require.Len(t, usage.snapshot(), 2, "completed B usage survives downstream failure")
+	for _, owner := range owners {
+		if outcome == "write_failed" {
+			require.Equal(t, "failed", owner, "failed downstream write must not commit B")
+		} else {
+			require.True(t, strings.HasPrefix(owner, "[1,2,"), owner)
+		}
+	}
+	if outcome == "write_failed" {
+		require.NotContains(t, answer, "coding-task-complete")
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		return
+	}
+	require.Equal(t, http.StatusOK, status, answer)
+	second := issue758CompletedResponse(t, answer, stream)
+	for _, item := range second.Get("output").Array() {
+		history = append(history, item.Raw)
+	}
+	history = append(history, tools.execute(t, second)...)
+	// No new user text, no retry and no client/session reset. This next tool turn
+	// includes delivered A and B opaque history; both producer records survive.
+	status, answer = request(history, second)
+	require.Equal(t, http.StatusOK, status, "automatic next tool turn must finish: %s", answer)
+	final := issue758CompletedResponse(t, answer, stream)
+	require.Contains(t, final.Raw, "coding-task-complete")
+	require.Empty(t, tools.execute(t, final), "final output must not request completed tools again")
+	require.Equal(t, 1, tools.patches)
+	require.Equal(t, 1, tools.verifications)
+	require.Equal(t, []string{httpRebuildSession, httpRebuildSession, httpRebuildSession}, sessions)
+	require.False(t, accounts[0].Schedulable)
+	wires = transport.snapshot()
+	require.Len(t, wires, 3, "one A generation and exactly two B generations")
+	require.Equal(t, int64(2), wires[2].account)
+	require.True(t, httpRebuildToolPair(wires[2].body, "run_tests", httpRebuildCheck))
+	require.Len(t, usage.snapshot(), 3)
+	finalOwners := issue805Owners(t, observer)
+	for key, owner := range ownersA {
+		require.Equal(t, owner, finalOwners[key])
+	}
+	for key, owner := range owners {
+		require.Equal(t, owner, finalOwners[key], "completed B owner cannot be overwritten by subsequent consumption")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, providerBodies, 3)
+	for i, wire := range wires {
+		require.JSONEq(t, string(wire.body), string(providerBodies[i]), "provider must receive the final builder payload unchanged")
+		require.Equal(t, wire.header.Get("Authorization"), providerHeaders[i].Get("Authorization"))
+	}
+}
