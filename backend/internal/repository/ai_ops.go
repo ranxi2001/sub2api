@@ -203,7 +203,7 @@ func readAIOpsAccounts(ctx context.Context, tx *sql.Tx, ids []int64) (map[int64]
 // A final failure wins over a conflicting completed usage trace for the same
 // request: partial billable output must not add a second, successful sample.
 var aiOpsEvidenceSQL = `WITH success_candidates AS (
- SELECT u.request_id,u.model,COALESCE(u.reasoning_effort,'') AS effort,
+ SELECT u.request_id,u.api_key_id,u.model,COALESCE(u.reasoning_effort,'') AS effort,
  t.detail->'protocol_decision'->>'upstream' AS protocol,
  CASE WHEN u.input_tokens+u.cache_read_tokens<4000 THEN 'small' WHEN u.input_tokens+u.cache_read_tokens<32000 THEN 'medium' ELSE 'large' END AS input_bucket,
  CASE WHEN u.cache_read_tokens>0 THEN 'cached' ELSE 'uncached' END AS cache_bucket,
@@ -221,7 +221,7 @@ var aiOpsEvidenceSQL = `WITH success_candidates AS (
  AND COALESCE(u.image_count,0)=0 AND COALESCE(u.image_output_tokens,0)=0 AND COALESCE(u.billing_mode,'token') NOT IN ('image','video')
 ), failures AS (
  SELECT DISTINCT ON (COALESCE(NULLIF(request_id,''),'error:'||id::text))
- request_id,model FROM ops_error_logs o WHERE account_id=$1 AND created_at>=$2 AND created_at<$3
+ request_id,client_request_id,api_key_id,model FROM ops_error_logs o WHERE account_id=$1 AND created_at>=$2 AND created_at<$3
  AND NOT is_count_tokens AND NOT ` + opsBusinessLimitedSQL("o") + ` AND ` + opsEffectiveOwnerSQL("o") + `='provider'
  AND NOT ` + opsExplicitRequestRejectionSQL("o", "400, 404, 413, 422, 500, 502, 503", append(append([]string{}, service.OpsContextLimitRejectionNeedles...), service.OpsModelCapabilityRejectionNeedles...)) + `
  AND (status_code>=400 OR error_type='transport_error') AND error_type<>'client_canceled'
@@ -230,7 +230,9 @@ var aiOpsEvidenceSQL = `WITH success_candidates AS (
  ORDER BY COALESCE(NULLIF(request_id,''),'error:'||id::text),created_at DESC,id DESC
 ), successes AS (
  SELECT s.* FROM success_candidates s
- WHERE NOT EXISTS (SELECT 1 FROM failures f WHERE f.request_id<>'' AND f.request_id=s.request_id)
+ WHERE NOT EXISTS (SELECT 1 FROM failures f WHERE f.api_key_id=s.api_key_id AND (
+   (f.request_id<>'' AND (f.request_id=s.request_id OR 'local:'||f.request_id=s.request_id))
+   OR (f.client_request_id<>'' AND 'client:'||f.client_request_id=s.request_id)))
 )
  SELECT (SELECT COUNT(*) FROM successes),(SELECT COUNT(*) FROM failures),
  (SELECT COUNT(*) FROM successes WHERE model<>'' AND effort<>'' AND protocol IN ('http','ws')),
