@@ -19,6 +19,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
 	"github.com/gin-gonic/gin"
@@ -38,6 +39,28 @@ type shadowRaceRead struct {
 	seen chan string
 	once sync.Once
 	hold <-chan struct{}
+}
+
+// Observe the actual handler body after RestoreOpenAIReadableShadow returns,
+// before its ordinary admission/send path. Do not synthesize readable input or
+// depend on a user-slot callback: this fixture's concurrency=0 skips that cache.
+type shadowRestoredRequestBarrier struct {
+	observed chan []byte
+	release  <-chan struct{}
+}
+
+func (b *shadowRestoredRequestBarrier) Check(ctx context.Context, req securityaudit.Request) (*securityaudit.LegacyDecision, error) {
+	select {
+	case b.observed <- append([]byte(nil), req.Body...):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-b.release:
+		return nil, nil // Preserve this fixture's existing allow decision.
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (h *shadowRaceRead) DialHook(next redis.DialHook) redis.DialHook { return next }
@@ -195,24 +218,14 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 		return h
 	}
 	producer, consumer := node(false), node(true)
-	restored, continueSend := make(chan struct{}), make(chan struct{})
+	restored, continueSend := make(chan []byte, 1), make(chan struct{})
 	var resumeOnce sync.Once
 	resume := func() { resumeOnce.Do(func() { close(continueSend) }) }
 	defer resume()
 	if scenario == "invalidate_after_restore" {
-		var once sync.Once
-		consumer.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(&concurrencyCacheMock{
-			acquireUserSlotFn: func(ctx context.Context, _ int64, _ int, _ string) (bool, error) {
-				once.Do(func() { close(restored) })
-				select {
-				case <-continueSend:
-					return true, nil
-				case <-ctx.Done():
-					return false, ctx.Err()
-				}
-			},
-			acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
-		}), SSEPingFormatNone, time.Second)
+		consumer.securityAuditCoordinator = securityaudit.NewCoordinator(&shadowRestoredRequestBarrier{
+			observed: restored, release: continueSend,
+		}, nil)
 	}
 	var exposeY atomic.Bool
 	yEntered, yRelease := make(chan struct{}), make(chan struct{})
@@ -220,6 +233,7 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 	releaseY := func() { yReleaseOnce.Do(func() { close(yRelease) }) }
 	defer releaseY()
 	template, _ := newIssue715Context(t, "{}")
+	producerCompleted := make(chan struct{}, 2)
 	router := gin.New()
 	router.POST("/v1/responses", func(c *gin.Context) {
 		for key, value := range template.Keys {
@@ -236,6 +250,9 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 			}
 		}}
 		producer.Responses(c)
+		if scenario == "invalidate_after_restore" {
+			producerCompleted <- struct{}{} // publication has finished, not just the client write
+		}
 	})
 	gateway := httptest.NewServer(router)
 	defer func() { release(); resume(); releaseY(); releaseConsumer(); gateway.Close() }()
@@ -359,6 +376,9 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 	first := request(x, false, nil)
 	require.NoError(t, first.err)
 	require.Equal(t, http.StatusOK, first.status, first.body)
+	if scenario == "invalidate_after_restore" {
+		await(producerCompleted)
+	}
 	keys, err := probe.Keys(context.Background(), "openai_readable_shadow:v1:*").Result()
 	require.NoError(t, err)
 	require.Len(t, keys, 1)
@@ -367,7 +387,22 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 	var done <-chan result
 	if scenario == "invalidate_after_restore" {
 		done = consume()
-		await(restored)
+		select {
+		case body := <-restored:
+			// The HTTP client sent only the opaque item. Seeing X here proves
+			// real cross-node recovery, not just a cache read or a slot attempt.
+			require.JSONEq(t, "["+x+","+shadowHTTPAgent+"]", gjson.GetBytes(body, "input").Raw,
+				"SHADOW_RESTORE_OBSERVATION_MISSING: actual audit input must contain the recovered X task and original opaque item")
+		case early := <-done:
+			t.Fatalf("SHADOW_RACE_BARRIER_MISSING: consumer ended before post-restore observation: %+v", early)
+		case <-time.After(2 * time.Second):
+			t.Fatal("SHADOW_RACE_BARRIER_MISSING: post-restore audit stage was not reached")
+		}
+		mu.Lock()
+		heldIdentities := append([]string(nil), identities...)
+		mu.Unlock()
+		require.Equal(t, []string{"Bearer fixture-race-A"}, heldIdentities,
+			"consumer must be held after restoration and before any B send")
 	}
 	if scenario == "store_failure_existing" {
 		hook.armed.Store(true)
@@ -410,6 +445,18 @@ func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
 	}
 	if scenario == "store_failure_existing" {
 		await(hook.entered)
+	}
+	if scenario == "invalidate_after_restore" {
+		await(producerCompleted)
+		invalidated, err := probe.Get(context.Background(), keys[0]).Result()
+		require.NoError(t, err)
+		require.Equal(t, "conflict", invalidated, "Y must invalidate the actual shared association before consumer release")
+		require.Equal(t, original, issue805Owners(t, probe), "Y invalidation must preserve original owner bytes")
+		mu.Lock()
+		heldIdentities := append([]string(nil), identities...)
+		mu.Unlock()
+		require.Equal(t, []string{"Bearer fixture-race-A", "Bearer fixture-race-A"}, heldIdentities,
+			"only X and Y may reach the provider while the consumer is held")
 	}
 	resume()
 	if done == nil {
