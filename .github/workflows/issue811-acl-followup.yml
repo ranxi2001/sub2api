@@ -1,0 +1,183 @@
+name: Issue811 ACL concurrency acceptance
+
+on:
+  push:
+    branches: [fix/issue811-acl-followup-20261113]
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/keyrisk/**'
+      - 'backend/internal/handler/admin/key_risk_handler*'
+      - 'backend/internal/service/api_key_service*'
+      - 'backend/internal/repository/api_key_repo*'
+      - '.github/workflows/issue811-acl-followup.yml'
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  acl-concurrency:
+    if: github.event_name == 'push' || github.head_ref == 'fix/issue811-acl-followup-20261113'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18.1
+        env:
+          POSTGRES_USER: keyrisk
+          POSTGRES_PASSWORD: keyrisk-ci-only
+          POSTGRES_DB: keyrisk_task
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keyrisk -d keyrisk_task"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CI: 'true'
+      KEYRISK_TEST_REQUIRED: 'true'
+      KEYRISK_TEST_POSTGRES_DSN: postgres://keyrisk:keyrisk-ci-only@127.0.0.1:5432/keyrisk_task?sslmode=disable
+      GOFLAGS: '-p=1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate and prepare evidence assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          mkdir -p "$RUNNER_TEMP/issue811"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue811/candidate.txt"
+          git diff --exit-code
+          cat > "$RUNNER_TEMP/issue811/assert-tests.py" <<'PY'
+          import json, pathlib, sys
+          path, action, *required = sys.argv[1:]
+          rows = [json.loads(line) for line in pathlib.Path(path).read_text().splitlines() if line.startswith('{')]
+          seen = {row.get('Test') for row in rows if row.get('Action') == action}
+          skipped = [row.get('Test') for row in rows if row.get('Action') == 'skip']
+          output = ''.join(row.get('Output', '') for row in rows)
+          forbidden = ('[build failed]', 'build failed', 'undefined:', 'no tests to run', 'DATA RACE')
+          missing = set(required) - seen
+          if skipped or missing or any(value in output for value in forbidden):
+              raise SystemExit(f'incomplete {action} evidence: skipped={skipped}, missing={sorted(missing)}')
+          if action == 'pass' and any(row.get('Action') == 'fail' for row in rows):
+              raise SystemExit('GREEN contains a failure')
+          print(f'{action}: all {len(required)} required tests observed; no skips/build failures/data races')
+          PY
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: GREEN real PostgreSQL risk generation and ownership with race detection
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -json ./internal/keyrisk -count=1 -timeout=10m 2>&1 | tee "$RUNNER_TEMP/issue811/green-keyrisk.jsonl"
+          python3 "$RUNNER_TEMP/issue811/assert-tests.py" "$RUNNER_TEMP/issue811/green-keyrisk.jsonl" pass \
+            TestRestrictionRejectsConcurrentEpisodeOrKeyChanges \
+            TestRestrictionRejectsConcurrentEpisodeOrKeyChanges/{reopened,resolved,ignored,owner,disabled,deleted,expired,blacklist} \
+            TestRestrictionRequiresCurrentLiveOwnedKey TestRetiredRulesCannotNotifyOrRestrictBeforeMigration \
+            TestPerKeyIPMigrationPreservesAuditAndValidMixedQueue TestExplicitlyAllowedMultiExitKeysDoNotAlert
+      - name: GREEN actual repository opposite ACL interleavings with race detection
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -json -tags=integration ./internal/repository -run '^TestAPIKeyUpdatePreservesConcurrentOppositeACL$' -count=1 -timeout=10m 2>&1 | tee "$RUNNER_TEMP/issue811/green-repository.jsonl"
+          python3 "$RUNNER_TEMP/issue811/assert-tests.py" "$RUNNER_TEMP/issue811/green-repository.jsonl" pass \
+            TestAPIKeyUpdatePreservesConcurrentOppositeACL \
+            TestAPIKeyUpdatePreservesConcurrentOppositeACL/{whitelist,blacklist}/clear={false,true}
+      - name: GREEN handler cache masks SQL and deny precedence
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -json -tags=unit ./internal/handler/admin ./internal/service ./internal/repository ./internal/pkg/ip ./internal/server/middleware \
+            -run '^(TestKeyRisk|TestUserKeyRisk|TestAPIKeyUpdate_|TestAPIKeyRepositoryIPRulesPostgresSQL|TestAPIKeyService_InvalidateAuthCacheByKey|TestCheckIPRestrictionWithCompiledRules|TestAPIKeyAuthIPRestriction)' \
+            -count=1 -timeout=10m 2>&1 | tee "$RUNNER_TEMP/issue811/green-unit.jsonl"
+          python3 "$RUNNER_TEMP/issue811/assert-tests.py" "$RUNNER_TEMP/issue811/green-unit.jsonl" pass \
+            TestKeyRiskRestrictionOnlyUpdatesCurrentKeysWhitelist TestKeyRiskRejectsUnsafeAndStaleRestrictionActions \
+            TestKeyRiskRestrictionFailureDoesNotInvalidateCache/{write,commit} \
+            TestAPIKeyUpdate_OnlyDeclaresRequestedColumns TestAPIKeyRepositoryIPRulesPostgresSQL \
+            TestAPIKeyService_InvalidateAuthCacheByKey TestCheckIPRestrictionWithCompiledRules \
+            TestAPIKeyAuthIPRestrictionIncludesClientIPForBlacklistDenial
+      - name: Compile ordinary production server package
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/issue811/sub2api" ./cmd/server 2>&1 | tee "$RUNNER_TEMP/issue811/build.log"
+          sha256sum "$RUNNER_TEMP/issue811/sub2api" > "$RUNNER_TEMP/issue811/build-sha256.txt"
+      - name: Prepare isolated compilable defect variants for behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/issue811-red-lock" "$EXPECTED_HEAD"
+          git worktree add --detach "$RUNNER_TEMP/issue811-red-columns" "$EXPECTED_HEAD"
+          python3 - "$RUNNER_TEMP/issue811-red-lock" "$RUNNER_TEMP/issue811-red-columns" <<'PY'
+          import pathlib, sys
+          lock = pathlib.Path(sys.argv[1]) / 'backend/internal/keyrisk/service.go'
+          source = lock.read_text()
+          start = source.index('func (s *Service) RestrictIPWhitelist(')
+          prefix, method = source[:start], source[start:]
+          assert method.count(' FOR UPDATE OF e,k') == 1
+          lock.write_text(prefix + method.replace(' FOR UPDATE OF e,k', '', 1))
+          columns = pathlib.Path(sys.argv[2]) / 'backend/internal/service/api_key_service.go'
+          source = columns.read_text()
+          for name in ('IPWhitelist', 'IPBlacklist'):
+              old = f'fields.{name} = true'
+              assert source.count(old) == 1
+              source = source.replace(old, 'fields.IPRules = true', 1)
+          columns.write_text(source)
+          PY
+          git -C "$RUNNER_TEMP/issue811-red-lock" diff > "$RUNNER_TEMP/issue811/red-lock.patch"
+          git -C "$RUNNER_TEMP/issue811-red-columns" diff > "$RUNNER_TEMP/issue811/red-columns.patch"
+          cat > "$RUNNER_TEMP/issue811/red-method.txt" <<'TEXT'
+          Same-signature defect variants based on the exact candidate, not unchanged old production blobs:
+          1. Remove only event+key row locks from RestrictIPWhitelist; retain all predicates and whitelist UPDATE.
+          2. Restore the service's combined IPRules masks; retain new mask definitions to keep tests compilable.
+          Regressions, APIs, schema and fixtures remain from the candidate. Never publish these variants.
+          TEXT
+      - name: RED stale episode must fail for business behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/issue811-red-lock/backend"
+          set +e
+          go test -race -json ./internal/keyrisk -run '^TestRestrictionRejectsConcurrentEpisodeOrKeyChanges/reopened$' -count=1 -timeout=3m > "$RUNNER_TEMP/issue811/red-lock.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue811/red-lock.jsonl"
+          test "$result" -ne 0
+          python3 "$RUNNER_TEMP/issue811/assert-tests.py" "$RUNNER_TEMP/issue811/red-lock.jsonl" fail TestRestrictionRejectsConcurrentEpisodeOrKeyChanges/reopened
+          grep -q 'stale restriction must reject changed episode or key' "$RUNNER_TEMP/issue811/red-lock.jsonl"
+      - name: RED combined masks must fail for persisted ACL loss
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/issue811-red-columns/backend"
+          set +e
+          go test -race -json -tags=integration ./internal/repository -run '^TestAPIKeyUpdatePreservesConcurrentOppositeACL/whitelist/clear=false$' -count=1 -timeout=5m > "$RUNNER_TEMP/issue811/red-columns.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue811/red-columns.jsonl"
+          test "$result" -ne 0
+          python3 "$RUNNER_TEMP/issue811/assert-tests.py" "$RUNNER_TEMP/issue811/red-columns.jsonl" fail TestAPIKeyUpdatePreservesConcurrentOppositeACL/whitelist/clear=false
+          grep -q 'concurrent blacklist must survive stale opposite ACL edit' "$RUNNER_TEMP/issue811/red-columns.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue811-acl-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/issue811/*.txt
+            ${{ runner.temp }}/issue811/*.jsonl
+            ${{ runner.temp }}/issue811/*.patch
+            ${{ runner.temp }}/issue811/*.log
+            ${{ runner.temp }}/issue811/*.py
+          if-no-files-found: error

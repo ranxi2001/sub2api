@@ -52,7 +52,7 @@ func TestExplicitlyAllowedMultiExitKeysDoNotAlert(t *testing.T) {
 	}
 }
 
-func TestRestrictionTargetRequiresCurrentLiveOwnedKey(t *testing.T) {
+func TestRestrictionRequiresCurrentLiveOwnedKey(t *testing.T) {
 	s, _ := fixture(t)
 	ctx := context.Background()
 	run(t, s)
@@ -61,11 +61,11 @@ func TestRestrictionTargetRequiresCurrentLiveOwnedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	ev := events[0]
-	key, owner, err := s.RestrictionTarget(ctx, ev.ID, ev.Generation)
-	if err != nil || key != 11 || owner != 1 {
-		t.Fatalf("bad target %d %d %v", key, owner, err)
+	key, err := s.RestrictIPWhitelist(ctx, ev.ID, ev.Generation, []string{"192.0.2.0/24"})
+	if err != nil || key != "sk-keyrisk-fixture" {
+		t.Fatalf("bad restriction %q %v", key, err)
 	}
-	if _, _, err = s.RestrictionTarget(ctx, ev.ID, ev.Generation+1); !errors.Is(err, sql.ErrNoRows) {
+	if _, err = s.RestrictIPWhitelist(ctx, ev.ID, ev.Generation+1, []string{"198.51.100.0/24"}); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("stale generation accepted", err)
 	}
 	for _, update := range []string{
@@ -75,7 +75,7 @@ func TestRestrictionTargetRequiresCurrentLiveOwnedKey(t *testing.T) {
 		"UPDATE api_keys SET deleted_at=NULL,user_id=2 WHERE id=11",
 	} {
 		exec(t, s, update)
-		if _, _, err = s.RestrictionTarget(ctx, ev.ID, ev.Generation); !errors.Is(err, sql.ErrNoRows) {
+		if _, err = s.RestrictIPWhitelist(ctx, ev.ID, ev.Generation, []string{"198.51.100.0/24"}); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatal("invalid target accepted", update, err)
 		}
 	}
@@ -83,7 +83,7 @@ func TestRestrictionTargetRequiresCurrentLiveOwnedKey(t *testing.T) {
 	if err = s.SetState(ctx, ev.ID, 99, "resolved"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.RestrictionTarget(ctx, ev.ID, ev.Generation); !errors.Is(err, sql.ErrNoRows) {
+	if _, err = s.RestrictIPWhitelist(ctx, ev.ID, ev.Generation, []string{"198.51.100.0/24"}); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("resolved episode accepted", err)
 	}
 }
@@ -108,7 +108,7 @@ func TestRetiredRulesCannotNotifyOrRestrictBeforeMigration(t *testing.T) {
 		if err = s.SetState(ctx, ev.ID, 99, "pending"); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatal("retired rule reopened", err)
 		}
-		if _, _, err = s.RestrictionTarget(ctx, ev.ID, ev.Generation); !errors.Is(err, sql.ErrNoRows) {
+		if _, err = s.RestrictIPWhitelist(ctx, ev.ID, ev.Generation, []string{"198.51.100.0/24"}); !errors.Is(err, sql.ErrNoRows) {
 			t.Fatal("retired target accepted", err)
 		}
 	}

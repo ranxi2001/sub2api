@@ -362,12 +362,14 @@ func (r *apiKeyRepository) update(ctx context.Context, key *service.APIKey, fiel
 	}
 
 	// IP 限制字段
-	if fields.IPRules {
+	if fields.IPRules || fields.IPWhitelist {
 		if len(key.IPWhitelist) > 0 {
 			builder.SetIPWhitelist(key.IPWhitelist)
 		} else {
 			builder.ClearIPWhitelist()
 		}
+	}
+	if fields.IPRules || fields.IPBlacklist {
 		if len(key.IPBlacklist) > 0 {
 			builder.SetIPBlacklist(key.IPBlacklist)
 		} else {
