@@ -146,6 +146,7 @@ func TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence(t *testing.T) {
 		newerHeader bool
 	}{
 		{"new_weekly_zero", 0, false}, {"new_weekly_low", 20, false}, {"new_weekly_high", 99, false},
+		{"invalid_weekly_reset", 99, false}, {"expired_weekly_reset", 99, false},
 		{"invalid_weekly_usage", 101, false}, {"negative_weekly_usage", -1, false}, {"unrelated_zero_window", 20, false},
 		{"older_query_cannot_replace_newer_high", 20, true},
 	} {
@@ -185,7 +186,14 @@ func TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence(t *testing.T) {
 				if tc.name == "unrelated_zero_window" {
 					shortSeconds = 0
 				}
-				_, _ = fmt.Fprintf(w, `{"account_id":"fictional-owner","email":"owner@example.test","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":%d,"limit_window_seconds":604800,"reset_after_seconds":7200},"secondary_window":{"used_percent":0,"limit_window_seconds":%d,"reset_after_seconds":3600}}}`, tc.used, shortSeconds)
+				resetSeconds, resetAt := 7200, ""
+				if tc.name == "invalid_weekly_reset" {
+					resetSeconds = -1
+				}
+				if tc.name == "expired_weekly_reset" {
+					resetAt = fmt.Sprintf(",\"reset_at\":%d", time.Now().Add(-time.Minute).Unix())
+				}
+				_, _ = fmt.Fprintf(w, `{"account_id":"fictional-owner","email":"owner@example.test","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":%d,"limit_window_seconds":604800,"reset_after_seconds":%d%s},"secondary_window":{"used_percent":0,"limit_window_seconds":%d,"reset_after_seconds":3600}}}`, tc.used, resetSeconds, resetAt, shortSeconds)
 			}))
 			defer server.Close()
 			target, err := url.Parse(server.URL)
@@ -223,7 +231,7 @@ func TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence(t *testing.T) {
 			rates.HandleUpstreamError(ctx, a, 429, nil, nil)
 			a, err = accounts.GetByID(ctx, a.ID)
 			require.NoError(t, err)
-			require.Equal(t, !(tc.newerHeader || (tc.used > 98 && tc.used <= 100)), a.Schedulable, "actual QueryUsage persistence must supersede older weekly high without overwriting a newer observation")
+			require.Equal(t, !(tc.newerHeader || (tc.used > 98 && tc.used <= 100 && tc.name != "invalid_weekly_reset" && tc.name != "expired_weekly_reset")), a.Schedulable, "actual QueryUsage persistence must supersede older weekly high without overwriting a newer observation")
 		})
 	}
 }

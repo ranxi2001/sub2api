@@ -111,6 +111,30 @@ jobs:
           set -e
           printf '%s\n' "$result" > evidence/red-cache-exit.txt
           python3 .github/scripts/oauth429-weekly-only-evidence.py red-cache evidence/red-cache.jsonl "$result"
+      - name: Retained HTTP evidence without receipt-time binding must fail expiry regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          before=d93943307125aa239fae94a6cc719e03c1c1b3ff
+          git worktree add --detach "$RUNNER_TEMP/oauth429-expiry-red" "$CANDIDATE"
+          while read -r expected target; do
+            test "$(git rev-parse "$before:$target")" = "$expected"
+            git show "$before:$target" > "$RUNNER_TEMP/oauth429-expiry-red/$target"
+            test "$(git hash-object "$RUNNER_TEMP/oauth429-expiry-red/$target")" = "$expected"
+            printf '%s %s %s\n' "$before" "$expected" "$target" >> evidence/expiry-restored-blobs.txt
+          done <<'BLOBS'
+          fc1490884a556ef7518786c770fbd73a237155da backend/internal/service/openai_gateway_response_handling.go
+          c1833fc0e65a9e4951418de52658e343f14593f0 backend/internal/service/openai_gateway_passthrough.go
+          ed1708f3c2ee470d80ab97b377ff610050e383fc backend/internal/service/openai_ws_http_bridge.go
+          BLOBS
+          git -C "$RUNNER_TEMP/oauth429-expiry-red" diff --exit-code -- '*_test.go'
+          git -C "$RUNNER_TEMP/oauth429-expiry-red" diff --stat > evidence/expiry-red-diff.txt
+          set +e
+          (cd "$RUNNER_TEMP/oauth429-expiry-red/backend" && go test -json -tags=unit ./internal/service -run '^TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation$' -count=1 -timeout=10m) > evidence/red-http-expiry.jsonl 2> evidence/red-http-expiry.stderr
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/red-http-expiry-exit.txt
+          python3 .github/scripts/oauth429-weekly-only-evidence.py red-http-expiry evidence/red-http-expiry.jsonl "$result"
       - name: Original quota-query persistence must fail against real PostgreSQL
         shell: bash
         env:

@@ -38,6 +38,11 @@ if mode.startswith("red"):
         assert "TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence/older_query_cannot_replace_newer_high" in passed
         assert "TestOAuth429WeeklyOnlyQueryUsageSupersedesEvidence/new_weekly_high" in passed
         assert "actual QueryUsage persistence must supersede older weekly high" in output
+    elif mode == "red-http-expiry":
+        for name in ("native_stream", "passthrough_stream", "native_buffered", "passthrough_buffered", "ws_http_bridge"):
+            test = "TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation/" + name
+            assert test in failed, name
+            assert any(event.get("Test") == test and "expired HTTP response quota must not permanently disable" in event.get("Output", "") for event in events), "wrong expiry failure: " + name
     elif mode == "red-cache":
         assert "TestOAuth429WeeklyOnlySequentialCache/duplicate_usage" in failed
         assert "TestOAuth429WeeklyOnlySequentialCache/nan_weekly_usage" in failed
@@ -61,14 +66,10 @@ if mode.startswith("red"):
             "WSForward/frame_elapsed_handshake_reset",
             "NonweeklyPersistenceRetainsEvidence",
             "WSClientIngress",
-            "HTTPStreamExpiredObservation/native_stream",
-            "HTTPStreamExpiredObservation/passthrough_stream",
-            "HTTPStreamExpiredObservation/native_buffered",
-            "HTTPStreamExpiredObservation/passthrough_buffered",
-            "HTTPStreamExpiredObservation/ws_http_bridge",
         ):
             assert "TestOAuth429WeeklyOnly" + name in failed, name
         assert "TestOAuth429WeeklyOnlyWSForward/body_only_no_percentage" in passed
+        assert "TestOAuth429WeeklyOnlyHTTPStreamExpiredObservation" in passed
         assert "request admission denied:" not in output
 else:
     assert int(status) == 0 and not failed and terminal[0]["Action"] == "pass", "candidate failed"
