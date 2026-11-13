@@ -1703,8 +1703,20 @@ func applyOpsStreamErrorSnapshot(entry *service.OpsInsertErrorLogInput, streamEr
 	}
 }
 
+// Only the trusted local marker identifies this final request outcome; an
+// arbitrary upstream error body cannot opt out of account observations.
+func isOpsRequestSizeRejection(c *gin.Context) bool {
+	errType, _ := service.OpsLocalErrorType(c)
+	return service.IsOpsRequestScopedError(c) && errType == "request_too_large"
+}
+
 func shouldSkipFinalOpsFailure(c *gin.Context) bool {
 	if c == nil {
+		return false
+	}
+	// A preceding repair attempt's rule belongs to that attempt, not the final
+	// request-size rejection. Retain its event and SkipMonitoring snapshot.
+	if isOpsRequestSizeRejection(c) {
 		return false
 	}
 	if v, ok := c.Get(service.OpsSkipPassthroughKey); ok {
@@ -2161,6 +2173,8 @@ func inferStreamFailureStatus(_ *gin.Context, parsed parsedOpsError) int {
 		return http.StatusUnauthorized
 	case "invalid_request_error":
 		return http.StatusBadRequest
+	case "request_too_large":
+		return http.StatusRequestEntityTooLarge
 	case "overloaded_error", "service_unavailable_error":
 		return http.StatusServiceUnavailable
 	}
@@ -2213,6 +2227,7 @@ func guessPlatformFromPath(path string) string {
 func isKnownOpsErrorType(t string) bool {
 	switch t {
 	case "invalid_request_error",
+		"request_too_large",
 		"authentication_error",
 		"permission_error",
 		"model_not_found",
@@ -2275,7 +2290,7 @@ func classifyOpsPhase(errType, message, code string) string {
 			return "request"
 		}
 		return "upstream"
-	case service.OpsClientCanceledCode, "invalid_request_error", "permission_error", "forbidden_error", "not_found_error", "model_not_found":
+	case service.OpsClientCanceledCode, "invalid_request_error", "request_too_large", "permission_error", "forbidden_error", "not_found_error", "model_not_found":
 		return "request"
 	case "upstream_error", "overloaded_error":
 		return "upstream"
@@ -2291,7 +2306,7 @@ func classifyOpsPhase(errType, message, code string) string {
 
 func classifyOpsSeverity(errType string, status int) string {
 	switch errType {
-	case service.OpsClientCanceledCode, "invalid_request_error", "authentication_error", "permission_error", "forbidden_error", "not_found_error", "model_not_found", "billing_error", "subscription_error":
+	case service.OpsClientCanceledCode, "invalid_request_error", "request_too_large", "authentication_error", "permission_error", "forbidden_error", "not_found_error", "model_not_found", "billing_error", "subscription_error":
 		return "P3"
 	}
 	if status >= 500 {
@@ -2347,6 +2362,9 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 }
 
 func classifyOpsIsBusinessLimited(errType, phase, code string, status int, message string, localClientAuthError ...bool) bool {
+	if errType == "request_too_large" && phase == "request" && status == http.StatusRequestEntityTooLarge {
+		return true
+	}
 	if len(localClientAuthError) > 0 && localClientAuthError[0] {
 		return true
 	}

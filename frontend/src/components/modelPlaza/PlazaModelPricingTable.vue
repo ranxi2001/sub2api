@@ -402,9 +402,10 @@ function billingMode(m: PlazaModel): BillingMode {
 }
 
 function billingModeLabel(m: PlazaModel): string {
-  return billingMode(m) === BILLING_MODE_IMAGE
-    ? t('modelPlaza.table.perImage')
-    : t('modelPlaza.table.perRequest')
+  const mode = billingMode(m)
+  if (mode === BILLING_MODE_IMAGE) return t('modelPlaza.table.perImage')
+  if (mode === BILLING_MODE_VIDEO) return t('modelPlaza.table.perSecond')
+  return t('modelPlaza.table.perRequest')
 }
 
 /** 价格统一保底 2 位小数,更长的有效小数原样保留。 */
@@ -469,11 +470,12 @@ function official(value: number | null | undefined): string {
   return formatScaled(value, PER_MILLION, MIN_DECIMALS)
 }
 
-/** 非 token 计费的单位后缀:按图片 → “/ 张”,按次 → “/ 次”。 */
+/** 非 token 计费的单位后缀:按图片 → “/ 张”,按视频 → “/ 秒”,按次 → “/ 次”。 */
 function perUnitSuffix(m: PlazaModel): string {
-  return billingMode(m) === BILLING_MODE_IMAGE
-    ? t('modelPlaza.table.perUnitImage')
-    : t('modelPlaza.table.perUnitRequest')
+  const mode = billingMode(m)
+  if (mode === BILLING_MODE_IMAGE) return t('modelPlaza.table.perUnitImage')
+  if (mode === BILLING_MODE_VIDEO) return t('modelPlaza.table.perUnitSecond')
+  return t('modelPlaza.table.perUnitRequest')
 }
 
 function hasCachePricing(m: PlazaModel): boolean {

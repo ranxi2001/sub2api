@@ -823,7 +823,9 @@ export default {
       unitPerMillion: '$ / 1M tokens',
       perUnitRequest: '/ request',
       perUnitImage: '/ image',
+      perUnitSecond: '/ second',
       perRequest: 'Per request',
+      perSecond: 'Per second',
       perImage: 'Per image'
     },
     nav: {

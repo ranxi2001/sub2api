@@ -410,6 +410,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				UpstreamURL: safeUpstreamURL(upstreamReq.URL.String()),
 			})
 		}
+		if isAnthropicRequestTooLarge(account, resp) {
+			return handleAnthropicRequestTooLarge(c, resp)
+		}
 
 		// 优先检测thinking block签名错误（400）并重试一次
 		if resp.StatusCode == 400 {
@@ -465,6 +468,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 						s.rateLimitService.observeQualityResponse(retryReq.Context(), account, retryResp, retryErr)
 						if retryErr == nil {
+							if isAnthropicRequestTooLarge(account, retryResp) {
+								return handleAnthropicRequestTooLarge(c, retryResp)
+							}
 							if retryResp.StatusCode < 400 {
 								// 重试请求被上游接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。
 								lastWireBody = retryWireBody
@@ -671,6 +677,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			}
 		}
 		break
+	}
+	// A signature/budget repair above can also receive 413. Stop before the
+	// retry-exhausted and account-policy paths, regardless of custom error codes.
+	if isAnthropicRequestTooLarge(account, resp) {
+		return handleAnthropicRequestTooLarge(c, resp)
 	}
 	if resp == nil || resp.Body == nil {
 		return nil, errors.New("upstream request failed: empty response")
