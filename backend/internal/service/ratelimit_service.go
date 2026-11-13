@@ -353,9 +353,11 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 	if account.IsPoolMode() {
 		// 池模式只跳过默认账号状态处理；管理员显式配置的临时不可调度规则仍应生效。
 		// 401 只在非凭据级且命中显式模型级规则时由规则处理，其余保留现有认证错误语义。
-		if tempUnschedRulesApply(account, statusCode, responseBody, tempUnschedulableModel(ctx, nil)) &&
-			s.tryTempUnschedulable(ctx, account, statusCode, responseBody) {
-			return ErrorPolicyTempUnscheduled
+		if stop, triggered := s.consumeTempUnschedAttempt(ctx, account, statusCode, responseBody); stop {
+			if triggered {
+				return ErrorPolicyTempUnscheduled
+			}
+			return ErrorPolicySkipped
 		}
 		return ErrorPolicySkipped
 	}
@@ -364,10 +366,14 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 	if statusCode == 529 {
 		return ErrorPolicyMatched
 	}
-	if s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
+	// CheckErrorPolicy 不套用 handleUpstreamError 的 401 凭据门闩。
+	// OAuth / token_revoked 仍按规则冷却；次数未到则继续默认策略，且不把结果写成“已跳过”。
+	switch s.attemptTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
+	case tempUnschedTriggered:
 		return ErrorPolicyTempUnscheduled
+	default:
+		return ErrorPolicyNone
 	}
-	return ErrorPolicyNone
 }
 
 // HandleUpstreamError 处理上游错误响应，标记账号状态
@@ -426,9 +432,12 @@ func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Conte
 	// 池模式默认不标记本地账号状态；但管理员显式配置的临时不可调度规则优先。
 	// 401 只在非凭据级且命中显式模型级规则时由规则处理，其余保留池模式现有的认证处理。
 	if account.IsPoolMode() && !customErrorCodesEnabled {
-		if tempUnschedRulesApply(account, statusCode, responseBody, tempUnschedulableModel(ctx, nil)) &&
-			s.tryTempUnschedulable(ctx, account, statusCode, responseBody) {
-			return true
+		if stop, triggered := s.consumeTempUnschedAttempt(ctx, account, statusCode, responseBody); stop {
+			if triggered {
+				return true
+			}
+			slog.Info("pool_mode_temp_unsched_pending", "account_id", account.ID, "status_code", statusCode)
+			return false
 		}
 		slog.Info("pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
@@ -475,12 +484,11 @@ func (s *RateLimitService) handleUpstreamErrorAfterStreakReset(ctx context.Conte
 		}
 	}
 
-	// 先尝试临时不可调度规则（401 仅限非凭据级且命中显式模型级规则）
-	// 如果匹配成功，直接返回，不执行后续禁用逻辑
-	if tempUnschedRulesApply(account, statusCode, responseBody, tempUnschedulableModel(ctx, requestedModel)) {
-		if s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
-			return true
-		}
+	// 先尝试临时不可调度规则（401 仅限非凭据级且命中显式模型级规则）。
+	// 达到阈值就冷却并返回；次数未到也到此为止，不能再落到后面的整账号停用。
+	// 同一次上游错误若已在 fastpath 计过数，consume 会复用那次结果，不会再加一。
+	if stop, triggered := s.consumeTempUnschedAttempt(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)); stop {
+		return triggered
 	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody))
@@ -3001,7 +3009,62 @@ func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Ac
 	return s.attemptTempUnschedulable(ctx, account, statusCode, responseBody, requestedModel...) == tempUnschedTriggered
 }
 
+// consumeTempUnschedAttempt 对一次上游错误最多计数一次。
+// stop 表示规则已经接住这次错误：triggered 为冷却已写入，否则是次数未到，两种都不能再走默认停用。
+func (s *RateLimitService) consumeTempUnschedAttempt(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) (stop bool, triggered bool) {
+	if !tempUnschedRulesApply(account, statusCode, responseBody, tempUnschedulableModel(ctx, requestedModel)) {
+		return false, false
+	}
+	switch s.attemptTempUnschedulable(ctx, account, statusCode, responseBody, requestedModel...) {
+	case tempUnschedTriggered:
+		return true, true
+	case tempUnschedPending:
+		return true, false
+	default:
+		return false, false
+	}
+}
+
+type tempUnschedAttemptMemo struct {
+	done   bool
+	result tempUnschedAttempt
+}
+
+type tempUnschedAttemptMemoKey struct{}
+
+// bindTempUnschedAttempt 让同一次上游错误上的多次规则判断共用一个结果。
+// 已绑定过的 context 保持原样，避免外层结果被内层空记录盖掉。
+func bindTempUnschedAttempt(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Value(tempUnschedAttemptMemoKey{}).(*tempUnschedAttemptMemo); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, tempUnschedAttemptMemoKey{}, &tempUnschedAttemptMemo{})
+}
+
+func tempUnschedAttemptMemoFrom(ctx context.Context) *tempUnschedAttemptMemo {
+	if ctx == nil {
+		return nil
+	}
+	memo, _ := ctx.Value(tempUnschedAttemptMemoKey{}).(*tempUnschedAttemptMemo)
+	return memo
+}
+
 func (s *RateLimitService) attemptTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) tempUnschedAttempt {
+	if memo := tempUnschedAttemptMemoFrom(ctx); memo != nil && memo.done {
+		return memo.result
+	}
+	result := s.evaluateTempUnschedulable(ctx, account, statusCode, responseBody, requestedModel...)
+	if memo := tempUnschedAttemptMemoFrom(ctx); memo != nil && !memo.done {
+		memo.done = true
+		memo.result = result
+	}
+	return result
+}
+
+func (s *RateLimitService) evaluateTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) tempUnschedAttempt {
 	if account == nil || s == nil {
 		return tempUnschedNoMatch
 	}
@@ -3033,7 +3096,7 @@ func (s *RateLimitService) attemptTempUnschedulable(ctx context.Context, account
 	sawPending := false
 	for i, match := range matches {
 		modelScoped := tempUnschedHitUsesModelScope(account, match.rule, modelKey, statusCode, responseBody)
-		reached, count := s.observeTempUnschedTrigger(ctx, account, match.rule, match.ruleIndex, modelScoped, modelKey)
+		reached, count, epoch := s.observeTempUnschedTrigger(ctx, account, match.rule, match.ruleIndex, modelScoped, modelKey)
 		if !reached {
 			sawPending = true
 			continue
@@ -3043,7 +3106,7 @@ func (s *RateLimitService) attemptTempUnschedulable(ctx context.Context, account
 				"reason", "previous temp-unschedulable was also 401")
 			return tempUnschedNoMatch
 		}
-		if s.triggerTempUnschedulable(ctx, account, match.rule, match.ruleIndex, statusCode, match.matchedKeyword, responseBody, count, modelKey) {
+		if s.triggerTempUnschedulable(ctx, account, match.rule, match.ruleIndex, statusCode, match.matchedKeyword, responseBody, count, epoch, modelKey) {
 			return tempUnschedTriggered
 		}
 	}
@@ -3053,17 +3116,17 @@ func (s *RateLimitService) attemptTempUnschedulable(ctx context.Context, account
 	return tempUnschedNoMatch
 }
 
-func (s *RateLimitService) observeTempUnschedTrigger(ctx context.Context, account *Account, rule TempUnschedulableRule, ruleIndex int, modelScoped bool, modelKey string) (bool, int64) {
+func (s *RateLimitService) observeTempUnschedTrigger(ctx context.Context, account *Account, rule TempUnschedulableRule, ruleIndex int, modelScoped bool, modelKey string) (bool, int64, string) {
 	threshold := rule.NormalizedTriggerCount()
 	if threshold <= 1 {
-		return true, 1
+		return true, 1, ""
 	}
 	window := rule.TriggerWindowMinutes()
 	key := tempUnschedTriggerCounterKey(account.ID, ruleIndex, modelScoped, modelKey)
-	count, err := s.activeTempUnschedTriggerCounter().Increment(ctx, key, window)
+	count, epoch, err := s.activeTempUnschedTriggerCounter().Increment(ctx, key, window)
 	if err != nil {
 		slog.Warn("temp_unsched_trigger_count_failed", "account_id", account.ID, "rule_index", ruleIndex, "error", err)
-		return false, 0
+		return false, 0, ""
 	}
 	if count < int64(threshold) {
 		slog.Info("temp_unsched_trigger_pending",
@@ -3073,14 +3136,17 @@ func (s *RateLimitService) observeTempUnschedTrigger(ctx context.Context, accoun
 			"threshold", threshold,
 			"window_minutes", window,
 		)
-		return false, count
+		return false, count, ""
 	}
-	return true, count
+	return true, count, epoch
 }
 
-func (s *RateLimitService) resetTempUnschedTriggerCount(ctx context.Context, accountID int64, ruleIndex int, modelScoped bool, modelKey string) {
+func (s *RateLimitService) resetTempUnschedTriggerCount(ctx context.Context, accountID int64, ruleIndex int, modelScoped bool, modelKey, epoch string) {
+	if epoch == "" {
+		return
+	}
 	key := tempUnschedTriggerCounterKey(accountID, ruleIndex, modelScoped, modelKey)
-	if err := s.activeTempUnschedTriggerCounter().Reset(ctx, key); err != nil {
+	if err := s.activeTempUnschedTriggerCounter().Reset(ctx, key, epoch); err != nil {
 		slog.Warn("temp_unsched_trigger_count_reset_failed", "account_id", accountID, "rule_index", ruleIndex, "error", err)
 	}
 }
@@ -3117,7 +3183,7 @@ func matchTempUnschedKeyword(bodyLower string, keywords []string) string {
 	return ""
 }
 
-func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account *Account, rule TempUnschedulableRule, ruleIndex int, statusCode int, matchedKeyword string, responseBody []byte, triggerCount int64, requestedModel ...string) bool {
+func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account *Account, rule TempUnschedulableRule, ruleIndex int, statusCode int, matchedKeyword string, responseBody []byte, triggerCount int64, triggerEpoch string, requestedModel ...string) bool {
 	if account == nil {
 		return false
 	}
@@ -3168,7 +3234,7 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 			return true
 		}
 		if threshold > 1 {
-			s.resetTempUnschedTriggerCount(ctx, account.ID, ruleIndex, true, modelKey)
+			s.resetTempUnschedTriggerCount(ctx, account.ID, ruleIndex, true, modelKey, triggerEpoch)
 		}
 		slog.Info("account_model_temp_unschedulable", "account_id", account.ID, "model", modelKey, "until", until, "rule_index", ruleIndex, "rule_scope", rule.Scope, "status_code", statusCode, "trigger_count", triggerCount, "trigger_threshold", threshold)
 		return true
@@ -3180,7 +3246,7 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 		return false
 	}
 	if threshold > 1 {
-		s.resetTempUnschedTriggerCount(ctx, account.ID, ruleIndex, false, modelKey)
+		s.resetTempUnschedTriggerCount(ctx, account.ID, ruleIndex, false, modelKey, triggerEpoch)
 	}
 
 	if s.tempUnschedCache != nil {

@@ -21,22 +21,53 @@ func TestTempUnschedTriggerCounterWindowAndReset(t *testing.T) {
 	require.NotNil(t, counter)
 	ctx := context.Background()
 
-	first, err := counter.Increment(ctx, "temp_unsched_trigger:7:0:account", 2)
+	key := "temp_unsched_trigger:7:0:account"
+	first, epoch, err := counter.Increment(ctx, key, 2)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), first)
-	second, err := counter.Increment(ctx, "temp_unsched_trigger:7:0:account", 2)
+	require.NotEmpty(t, epoch)
+	second, sameEpoch, err := counter.Increment(ctx, key, 2)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), second)
+	require.Equal(t, epoch, sameEpoch)
 
-	require.NoError(t, counter.Reset(ctx, "temp_unsched_trigger:7:0:account"))
-	restarted, err := counter.Increment(ctx, "temp_unsched_trigger:7:0:account", 2)
+	require.NoError(t, counter.Reset(ctx, key, epoch))
+	restarted, restartedEpoch, err := counter.Increment(ctx, key, 2)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), restarted)
+	require.NotEqual(t, epoch, restartedEpoch)
 
 	server.FastForward(3 * time.Minute)
-	expired, err := counter.Increment(ctx, "temp_unsched_trigger:7:0:account", 2)
+	expired, _, err := counter.Increment(ctx, key, 2)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), expired, "the fixed window expires and the next match starts a new count")
+}
+
+func TestTempUnschedTriggerCounterDelayedResetKeepsNewRound(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	counter := NewTempUnschedTriggerCounter(client)
+	ctx := context.Background()
+	key := "temp_unsched_trigger:9:1:model:gpt-5.4"
+
+	_, oldEpoch, err := counter.Increment(ctx, key, 5)
+	require.NoError(t, err)
+	count, sameEpoch, err := counter.Increment(ctx, key, 5)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), count)
+	require.Equal(t, oldEpoch, sameEpoch)
+
+	require.NoError(t, counter.Reset(ctx, key, oldEpoch))
+	next, newEpoch, err := counter.Increment(ctx, key, 5)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), next)
+	require.NotEqual(t, oldEpoch, newEpoch)
+
+	require.NoError(t, counter.Reset(ctx, key, oldEpoch))
+	afterStaleReset, _, err := counter.Increment(ctx, key, 5)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), afterStaleReset, "a delayed reset from the previous round must not delete the new count")
 }
 
 func TestNewTempUnschedTriggerCounterNilRedis(t *testing.T) {

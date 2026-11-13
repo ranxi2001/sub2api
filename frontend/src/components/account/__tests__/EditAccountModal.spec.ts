@@ -3234,9 +3234,60 @@ describe('EditAccountModal temp-unschedulable rule scope', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(savedRules()).toMatchObject([
-      { error_code: 429, stream_timing: 'after_stream', trigger_count: 1, trigger_window_minutes: 1 },
-      { error_code: 502, stream_timing: 'before_stream', trigger_count: 3, trigger_window_minutes: 8 }
+      { error_code: 429, trigger_count: 1, trigger_window_minutes: 1 },
+      { error_code: 502, trigger_count: 3, trigger_window_minutes: 8 }
     ])
+    expect(savedRules()[0]).not.toHaveProperty('stream_timing')
+    expect(savedRules()[1]).not.toHaveProperty('stream_timing')
+    wrapper.unmount()
+  })
+
+  it('keeps an omitted legacy 529 timing when only another account field is saved', async () => {
+    const account = buildAccountWithTempUnschedRules([
+      {
+        error_code: 529,
+        keywords: ['Overloaded'],
+        duration_minutes: 15,
+        description: 'legacy overload',
+        scope: 'model'
+      }
+    ])
+    account.platform = 'anthropic'
+    account.name = 'Claude relay'
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+
+    expect(checkedStreamTimings(wrapper)).toEqual(['temp-unsched-stream-after_stream'])
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('Claude relay renamed')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledWith(
+      account.id,
+      expect.objectContaining({ name: 'Claude relay renamed' })
+    )
+    expect(savedRules()).toHaveLength(1)
+    expect(savedRules()[0]).toMatchObject({
+      error_code: 529,
+      keywords: ['Overloaded'],
+      duration_minutes: 15,
+      description: 'legacy overload',
+      scope: 'model'
+    })
+    expect(savedRules()[0]).not.toHaveProperty('stream_timing')
+    wrapper.unmount()
+  })
+
+  it('writes stream_timing only after the operator changes that control', async () => {
+    const account = buildAccountWithTempUnschedRules([
+      { error_code: 529, keywords: ['Overloaded'], duration_minutes: 15, scope: 'model' }
+    ])
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+
+    await wrapper.get('[data-testid="temp-unsched-stream-before_stream"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(savedRules()[0]).toMatchObject({ error_code: 529, stream_timing: 'before_stream' })
     wrapper.unmount()
   })
 

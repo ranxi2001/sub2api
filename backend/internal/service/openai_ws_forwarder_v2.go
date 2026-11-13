@@ -944,6 +944,9 @@ readLoop:
 		}
 		imageCounter.AddSSEData(message)
 
+		// Snapshot before this event is flushed or emitted. A failure frame itself
+		// is not client output, so a before_stream rule must not see it as mid-stream.
+		wsOutputStarted := wroteDownstream
 		if eventType == "error" || eventType == "response.failed" {
 			markOpenAICyberPolicyEvent(c, message, http.StatusOK, usage)
 		}
@@ -955,7 +958,7 @@ readLoop:
 				// account failover for a request the provider already received.
 				flushBufferedStreamEvents("error_event")
 			}
-			s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
+			s.handleOpenAIWSErrorEventTransientFailure(openAIWSForwardStreamPhaseContext(ctx, wsOutputStarted, message), account, mappedModel, lease.HandshakeHeaders(), message)
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
 			s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
 			errMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(errMsgRaw))
@@ -1082,7 +1085,7 @@ readLoop:
 			if !clientDisconnected {
 				markOpenAIWSClientVisibleFailure(c, eventType, message)
 			}
-			upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
+			upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(openAIWSForwardStreamPhaseContext(ctx, wsOutputStarted, message), account, mappedModel, lease.HandshakeHeaders(), message)
 			// A terminal event must be the final JSON document in its WS message.
 			// Ignore any tail for the completed client turn, but never reuse the
 			// ambiguous upstream connection for another request.

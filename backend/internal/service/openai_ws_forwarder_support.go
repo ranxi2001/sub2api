@@ -316,6 +316,38 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	}
 }
 
+// openAIWSForwardStreamPhaseContext stamps the temp-unsched phase for a websocket
+// event. Before any client output, the default pre-stream phase still lets every
+// rule match. After output has started, legacy mid-stream statuses keep their
+// historical behavior and generic 500/502 failures require an explicit after_stream rule.
+func openAIWSForwardStreamPhaseContext(ctx context.Context, outputStarted bool, payload []byte) context.Context {
+	if !outputStarted {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return withTempUnschedStreamPhase(ctx, openAIWSOutputStartedStreamPhase(payload))
+}
+
+func openAIWSOutputStartedStreamPhase(payload []byte) tempUnschedStreamPhase {
+	message := extractOpenAISSEErrorMessage(payload)
+	switch openAIStreamFailureStatus(payload, message) {
+	case http.StatusUnauthorized, http.StatusTooManyRequests, http.StatusServiceUnavailable, 529:
+		return tempUnschedPhaseMidStreamLegacy
+	case http.StatusForbidden:
+		if openAIStream403AccountFailure(payload, message) {
+			return tempUnschedPhaseMidStreamLegacy
+		}
+	}
+	switch openAIWSPayloadTransientStatus(payload) {
+	case http.StatusUnauthorized, http.StatusTooManyRequests, http.StatusServiceUnavailable, 529:
+		return tempUnschedPhaseMidStreamLegacy
+	default:
+		return tempUnschedPhaseMidStreamOptIn
+	}
+}
+
 func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) string {
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 	terminalEvent := normalizeOpenAIWSTerminalEvent(eventType)

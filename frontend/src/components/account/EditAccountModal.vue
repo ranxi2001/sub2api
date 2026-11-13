@@ -1892,7 +1892,7 @@
                       role="radio"
                       :aria-checked="rule.stream_timing === option.value"
                       :data-testid="`temp-unsched-stream-${option.value}`"
-                      @click="rule.stream_timing = option.value"
+                      @click="chooseTempUnschedStreamTiming(rule, option.value)"
                       :class="[
                         'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
                         rule.stream_timing === option.value
@@ -4104,6 +4104,9 @@ interface TempUnschedRuleForm {
   // 作用范围：account 暂停整个账号，model 只冷却本次请求的模型。
   scope: TempUnschedulableScope
   stream_timing: TempUnschedulableStreamTiming
+  // 旧规则没有 stream_timing。表单可以按历史行为回显，但只有操作者改过这个选项，
+  // 或规则本来就写了明确值，保存时才把 stream_timing 写回去。
+  stream_timing_explicit: boolean
   trigger_count: number
   trigger_window_minutes: number
 }
@@ -5850,9 +5853,9 @@ const removeErrorCode = (code: number) => {
   }
 }
 
-const addTempUnschedRule = (preset?: TempUnschedRuleForm) => {
+const addTempUnschedRule = (preset?: Omit<TempUnschedRuleForm, 'stream_timing_explicit'>) => {
   if (preset) {
-    tempUnschedRules.value.push({ ...preset })
+    tempUnschedRules.value.push({ ...preset, stream_timing_explicit: true })
     return
   }
   tempUnschedRules.value.push({
@@ -5862,9 +5865,15 @@ const addTempUnschedRule = (preset?: TempUnschedRuleForm) => {
     description: '',
     scope: 'model',
     stream_timing: 'before_stream',
+    stream_timing_explicit: true,
     trigger_count: 1,
     trigger_window_minutes: 5
   })
+}
+
+function chooseTempUnschedStreamTiming(rule: TempUnschedRuleForm, timing: TempUnschedulableStreamTiming) {
+  rule.stream_timing = timing
+  rule.stream_timing_explicit = true
 }
 
 const removeTempUnschedRule = (index: number) => {
@@ -5887,7 +5896,7 @@ const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
     duration_minutes: number
     description: string
     scope: TempUnschedulableScope
-    stream_timing: TempUnschedulableStreamTiming
+    stream_timing?: TempUnschedulableStreamTiming
     trigger_count: number
     trigger_window_minutes: number
   }> = []
@@ -5905,16 +5914,19 @@ const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
     if (keywords.length === 0) {
       continue
     }
-    out.push({
+    const next: (typeof out)[number] = {
       error_code: Math.trunc(errorCode),
       keywords,
       duration_minutes: Math.trunc(duration),
       description: rule.description.trim(),
       scope: rule.scope,
-      stream_timing: rule.stream_timing === 'after_stream' ? 'after_stream' : 'before_stream',
       trigger_count: resolveTempUnschedTriggerCount(rule.trigger_count),
       trigger_window_minutes: resolveTempUnschedTriggerWindow(rule.trigger_window_minutes)
-    })
+    }
+    if (rule.stream_timing_explicit) {
+      next.stream_timing = rule.stream_timing === 'after_stream' ? 'after_stream' : 'before_stream'
+    }
+    out.push(next)
   }
 
   return out
@@ -6018,7 +6030,8 @@ function loadTempUnschedRules(credentials?: Record<string, unknown>) {
       duration_minutes: toPositiveNumber(entry.duration_minutes),
       description: typeof entry.description === 'string' ? entry.description : '',
       scope: resolveTempUnschedScope(entry.scope, errorCode),
-      stream_timing: resolveTempUnschedStreamTiming(entry.stream_timing, errorCode),
+      stream_timing: explicitTempUnschedStreamTiming(entry.stream_timing) ?? resolveTempUnschedStreamTiming(entry.stream_timing, errorCode),
+      stream_timing_explicit: explicitTempUnschedStreamTiming(entry.stream_timing) !== null,
       trigger_count: resolveTempUnschedTriggerCount(entry.trigger_count),
       trigger_window_minutes: resolveTempUnschedTriggerWindow(entry.trigger_window_minutes)
     }
@@ -6138,12 +6151,23 @@ function resolveTempUnschedScope(value: unknown, errorCode: number | null): Temp
   return errorCode === 401 ? 'account' : 'model'
 }
 
-// 旧规则没有 stream_timing。表单必须展示一个明确选项，并按当前后端行为回显：
-// 401/403/429/503/529 今天可以在流中途触发，其余错误码（含 502）不可以。
-function resolveTempUnschedStreamTiming(value: unknown, errorCode: number | null): TempUnschedulableStreamTiming {
+function explicitTempUnschedStreamTiming(value: unknown): TempUnschedulableStreamTiming | null {
   const timing = typeof value === 'string' ? value.trim().toLowerCase() : ''
   if (timing === 'before_stream' || timing === 'after_stream') {
     return timing
+  }
+  return null
+}
+
+// 旧规则没有 stream_timing。表单仍按当前后端行为回显一个选项：
+// 401/403/429/503/529 今天可以在部分流中途触发，其余错误码（含 502）不可以。
+// 回显不等于迁移。未改这个选项时保存必须继续省略 stream_timing，
+// 否则一次只改账号名的保存会把 Anthropic 529 旧规则写成 after_stream，
+// 让原本不处理的流输出后 overloaded_error 开始冷却。
+function resolveTempUnschedStreamTiming(value: unknown, errorCode: number | null): TempUnschedulableStreamTiming {
+  const explicit = explicitTempUnschedStreamTiming(value)
+  if (explicit) {
+    return explicit
   }
   if (errorCode != null && [401, 403, 429, 503, 529].includes(errorCode)) {
     return 'after_stream'
