@@ -54,7 +54,7 @@ jobs:
             git show "$callers:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "$callers:$target")"
           done
-          for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go; do
+          for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go; do
             ! git cat-file -e "$callers:$target" 2>/dev/null
             rm -- "$target"
           done

@@ -29,6 +29,9 @@ func NewCoordinator(legacy LegacyEngine, prompt PromptEngine) *Coordinator {
 }
 
 func (c *Coordinator) Check(ctx context.Context, req Request) (decision Decision) {
+	if req.NoBodyRetention {
+		ctx = service.WithRecoveredContextPrivacy(ctx)
+	}
 	if c == nil {
 		return allowDecision(nil, nil)
 	}

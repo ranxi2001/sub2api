@@ -42,6 +42,6 @@ shadow 恢复在 HTTP 内容审查、image intent、token 预留和选号之前�
 
 独审新增 P2 对应 `TestOpenAI409FutureShadowTaskAssociation`：同一个作用域先真实执行 X 的 patch，再执行独立 Y 的 verification，两个不同 opaque output 均已交付并有 committed owner；另一个节点恢复旧 X，B 必须接收 X 的指令与 patch 结果且不能含 Y 指令/verification。原 unknown-item 负例保留。远端 session-last-task 变异必须因任务内容不匹配而失败，不能用缺 owner/缺 store 失败代替。
 
-`TestOpenAI409FutureShadowResources` 另覆盖 JSON/SSE × 九项：跨 session 超出八条后旧记录淘汰/最新仍能恢复、仅 shadow 写故障/读故障、超大正文不入库、请求或响应含未完成工具不入库、同一 opaque output 对应两条已交付任务时失效，以及回带旧 opaque 后生成同 identity 时失效。故障通过真实 Redis client 的命令 hook 注入，owner、billing 与真实 HTTP 保留；读故障要求先存在真实 committed record，且必须证明 hook 实际执行。
+`TestOpenAI409FutureShadowResources` 另覆盖 JSON/SSE × 九项：跨141个任务/session 超出八条正文和128条 epoch预算后旧记录淘汰/最新仍能恢复、仅 shadow 写故障/读故障、超大正文不入库、请求或响应含未完成工具不入库、同一 opaque output 对应两条已交付任务时失效，以及回带旧 opaque 后生成同 identity 时失效。故障通过真实 Redis client 的命令 hook 注入，owner、billing 与真实 HTTP 保留；读故障要求先存在真实 committed record，且必须证明 hook 实际执行。
 
-本生产片的 shadow 恢复范围是单个精确 opaque agent item；多条未知 opaque、新 opaque user/media 意图或新未配对工具结果不能借旧快照猜测当前任务。可读请求仍走现有 HTTP 有损重建，不受这个 future-only 范围限制。普通 native HTTP 的共同发送/交付路径可记录上下文，首个 shadow transport gate 使用 API-key JSON/SSE；OAuth shadow 的专用线级回归与所有 WS 入口仍需后续独立补齐。
+本生产片的 shadow 恢复范围是单个精确 opaque agent item；多条未知 opaque、新 opaque user/media 意图或新未配对工具结果不能借旧快照猜测当前任务。可读请求仍走现有 HTTP 有损重建，不受这个 future-only 范围限制。普通 native HTTP 的共同发送/交付路径可记录上下文。后续独审发现的发布窗口、失效竞态与审计保留已在 [生命周期修复记录](shadow-review-repair-and-ws-tdd.md) 中处理：记录格式升级为2并依赖独立 pending/ready epoch，新增 OAuth shadow 线级回归。新候选全部动态验证、所有 WS 生产入口仍未完成。

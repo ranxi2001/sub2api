@@ -93,7 +93,7 @@ jobs:
           done
           # Future shadow calls/fields do not exist in this original baseline.
           # Keep the selected HTTP tests intact and remove only new production.
-          for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go; do
+          for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go; do
             ! git cat-file -e "$baseline:$target" 2>/dev/null
             rm -- "$target"
           done

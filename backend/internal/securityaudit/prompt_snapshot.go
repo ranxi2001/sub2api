@@ -67,7 +67,7 @@ func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, er
 		PromptHash: hex.EncodeToString(digest[:]), RedactedPreview: BuildPromptPreview(metadataText, DefaultPromptPreviewMaxRunes),
 		FullPrompt:   BuildFullPrompt(metadataText, DefaultFullPromptMaxRunes),
 		PromptLength: utf8.RuneCountInString(metadataText), MessageCount: len(segments), Stage: stage,
-		ScanText: scanText, PenaltyContext: req.PenaltyContext,
+		ScanText: scanText, PenaltyContext: req.PenaltyContext, NoBodyRetention: req.NoBodyRetention,
 	}, nil
 }
 

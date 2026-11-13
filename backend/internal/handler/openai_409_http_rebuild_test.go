@@ -26,6 +26,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
 	"github.com/gin-gonic/gin"
@@ -379,6 +380,33 @@ func TestOpenAI409HTTPRebuildBoundaries(t *testing.T) {
 	}
 }
 
+// The original composed fixture also had an encrypted-agent owner. These
+// actual-wire cases deliberately produce no opaque item on A, so only HTTP
+// response authorization and the provider pointer can constrain selection.
+func TestOpenAI409HTTPReadablePointerWithoutOpaque(t *testing.T) {
+	for _, account := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, stream := range []bool{false, true} {
+			for _, pointer := range []string{"previous", "conversation"} {
+				t.Run(fmt.Sprintf("%s/stream=%t/%s", account, stream, pointer), func(t *testing.T) {
+					runHTTPRebuildFixture(t, account, stream, pointer+"_no_opaque", "completed", "", "")
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAI409HTTPPointerWithoutOpaqueBoundaries(t *testing.T) {
+	for _, account := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, stream := range []bool{false, true} {
+			for _, boundary := range []string{"strict", "pointer_only", "foreign_user", "b_disabled"} {
+				t.Run(fmt.Sprintf("%s/stream=%t/%s", account, stream, boundary), func(t *testing.T) {
+					runHTTPRebuildFixture(t, account, stream, "previous_no_opaque", "completed", boundary, "")
+				})
+			}
+		}
+	}
+}
+
 func TestOpenAI409HTTPToolDefinitionOracle(t *testing.T) {
 	for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
 		for _, stream := range []bool{false, true} {
@@ -425,6 +453,8 @@ func httpRebuildOwnerKey(t *testing.T, h *OpenAIGatewayHandler, agent string) st
 
 func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointer, outcome, boundary, mutation string) {
 	t.Helper()
+	noOpaque := strings.HasSuffix(pointer, "_no_opaque")
+	pointer = strings.TrimSuffix(pointer, "_no_opaque")
 	mixed := strings.HasPrefix(boundary, "mixed/")
 	clients := issue805Redis(t)
 	observer := clients()
@@ -454,6 +484,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		}
 		id, conversation := "resp_rebuild_A", "conv_rebuild_A"
 		output := []json.RawMessage{json.RawMessage(patchCall), json.RawMessage(httpRebuildAgentA)}
+		if noOpaque {
+			output = []json.RawMessage{json.RawMessage(patchCall)}
+		}
 		if mixed {
 			output = append(output, json.RawMessage(httpRebuildAgentAExtra))
 		}
@@ -515,7 +548,7 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	for i, label := range []string{"A", "B"} {
 		accounts[i].Credentials = map[string]any{"base_url": provider.URL, "api_key": "fixture-rebuild-" + label, "access_token": "fixture-rebuild-" + label, "chatgpt_account_id": "fixture-chatgpt-" + label}
 	}
-	settings := service.NewSettingService(&omit409SettingsRepo{enabled: true}, cfg)
+	settings := service.NewSettingService(&omit409SettingsRepo{enabled: boundary != "strict"}, cfg)
 	usage := &readable409UsageRepo{}
 	h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, transport, repository.NewGatewayCache(clients()), settings, usage, accounts...)
 	h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -530,6 +563,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		sessions = append(sessions, c.GetHeader("session_id"))
 		for key, value := range template.Keys {
 			c.Set(key, value)
+		}
+		if c.GetHeader("X-Fixture-Foreign-User") == "true" {
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
 		}
 		c.Writer = &readable409DeliveryWriter{ResponseWriter: c.Writer, fail: outcome == "write_failed", observe: func() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -574,6 +610,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("session_id", httpRebuildSession)
+		if boundary == "foreign_user" && previous.Exists() {
+			req.Header.Set("X-Fixture-Foreign-User", "true")
+		}
 		response, err := client.Do(req)
 		require.NoError(t, err)
 		answer, err := io.ReadAll(response.Body)
@@ -609,7 +648,13 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	require.Zero(t, tools.verifications)
 	require.Len(t, usage.snapshot(), 1, "A must finish the real usage path")
 	ownersA := issue805Owners(t, observer)
-	if mixed {
+	if noOpaque {
+		require.Empty(t, ownersA, "pointer-only ownership path must have no encrypted-agent owner to hide behind")
+		require.NotContains(t, strings.Join(history, ","), "agent_message")
+		owned, err := h.gatewayService.ValidateOpenAIHTTPResponseOwner(context.Background(), 3132, first.Get("id").String(), 100, 99)
+		require.NoError(t, err)
+		require.True(t, owned, "the actual A response must have downstream HTTP authorization")
+	} else if mixed {
 		require.Len(t, ownersA, 2)
 	} else {
 		require.Len(t, ownersA, 1)
@@ -637,6 +682,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	}
 	status, answer = request(history, first)
 	if boundary != "" && !mixed {
+		if boundary == "strict" {
+			require.Len(t, transport.snapshot(), 1, "HTTP_POINTER_STRICT_A_STATE_LEAK: disabled A pointer must never reach B under default strict policy; response=%s", answer)
+		}
 		require.GreaterOrEqual(t, status, 400, "unrecoverable input/delivery must not pretend completion: %s", answer)
 		require.NotEmpty(t, gjson.Get(answer, "error.message").String(), answer)
 		require.NotContains(t, answer, "response.completed")

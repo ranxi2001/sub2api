@@ -151,7 +151,14 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 		"status": "completed",
 	}))
 	if g.repo != nil {
-		if _, recordErr := g.repo.RecordBlocking(ctx, snapshot.Redacted(), cfg.ConfigVersion, aggregated, cfg.StorePassEvents); recordErr != nil {
+		storedResult := aggregated
+		if snapshot.NoBodyRetention {
+			copy := *aggregated
+			copy.ScannerEvidence = nil // Scanner quotes can contain recovered text.
+			copy.UnknownCategories = nil
+			storedResult = &copy
+		}
+		if _, recordErr := g.repo.RecordBlocking(ctx, snapshot.Redacted(), cfg.ConfigVersion, storedResult, cfg.StorePassEvents); recordErr != nil {
 			if g.metrics != nil {
 				g.metrics.IncRecordFailed()
 			}

@@ -1,0 +1,393 @@
+//go:build unit
+
+package handler
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/testutil"
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+)
+
+type shadowRaceRedis struct {
+	mode             string
+	armed            atomic.Bool
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+type shadowRaceRead struct {
+	seen chan string
+	once sync.Once
+}
+
+func (h *shadowRaceRead) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *shadowRaceRead) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+func (h *shadowRaceRead) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		if cmd.Name() == "get" && len(cmd.Args()) > 1 {
+			key, _ := cmd.Args()[1].(string)
+			if strings.HasPrefix(key, "openai_agent_shadow_epoch:") || strings.HasPrefix(key, "openai_readable_shadow:") {
+				state := "miss-or-record"
+				if value, ok := cmd.(*redis.StringCmd); ok && strings.HasPrefix(value.Val(), "pending:") {
+					state = "pending"
+				}
+				h.once.Do(func() { h.seen <- state })
+			}
+		}
+		return err
+	}
+}
+func (h *shadowRaceRedis) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *shadowRaceRedis) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+func (h *shadowRaceRedis) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if h.armed.Load() && (cmd.Name() == "eval" || cmd.Name() == "evalsha") {
+			shadow, publication := false, false
+			for _, arg := range cmd.Args() {
+				text, _ := arg.(string)
+				shadow = shadow || strings.HasPrefix(text, "openai_readable_shadow:v1:")
+				publication = publication || (strings.HasPrefix(text, "{") && strings.Contains(text, `"version":`))
+			}
+			if shadow {
+				if h.mode == "store_failure_existing" {
+					h.once.Do(func() { close(h.entered) })
+					return errors.New("fixture optional shadow unavailable")
+				}
+				if publication && (h.mode == "first_publication" || h.mode == "delayed_publisher") {
+					block := false
+					h.once.Do(func() { block = true; close(h.entered) })
+					if block {
+						select {
+						case <-h.release:
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+					}
+				}
+			}
+		}
+		return next(ctx, cmd)
+	}
+}
+
+type shadowRaceWriter struct {
+	gin.ResponseWriter
+	before func()
+}
+
+func (w *shadowRaceWriter) Write(body []byte) (int, error) {
+	if strings.Contains(string(body), "fixture-shadow-current-task") && w.before != nil {
+		w.before()
+	}
+	n, err := w.ResponseWriter.Write(body)
+	w.ResponseWriter.Flush() // client can see a terminal while publication waits
+	return n, err
+}
+func (w *shadowRaceWriter) WriteString(body string) (int, error) { return w.Write([]byte(body)) }
+
+func TestOpenAI409FutureShadowPublicationFences(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, scenario := range []string{"first_publication", "invalidate_after_restore", "reused_exposure", "store_failure_existing", "delayed_publisher"} {
+			t.Run(fmt.Sprintf("stream=%t/%s", stream, scenario), func(t *testing.T) { runShadowPublicationRace(t, stream, scenario) })
+		}
+	}
+}
+
+func runShadowPublicationRace(t *testing.T, stream bool, scenario string) {
+	clients := issue805Redis(t)
+	probe := clients()
+	var mu sync.Mutex
+	var identities []string
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		identities = append(identities, r.Header.Get("Authorization"))
+		mu.Unlock()
+		output := json.RawMessage(shadowHTTPAgent)
+		if r.Header.Get("Authorization") == "Bearer fixture-race-B" {
+			if !strings.Contains(string(body), "fixture task X") || strings.Contains(string(body), "fixture task Y") || strings.Contains(string(body), "fixture-shadow-current-task") {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			output = json.RawMessage(httpRebuildJSON(map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "race-task-complete"}}}))
+		}
+		outputs := []json.RawMessage{output}
+		if scenario == "delayed_publisher" && strings.Contains(string(body), "fixture task Y") {
+			outputs = append(outputs, json.RawMessage(httpRebuildCall("run_tests", "call_unknown_side_effect", map[string]any{"path": "sum.go"})))
+		}
+		answer := httpRebuildJSON(map[string]any{"id": "resp_race", "status": "completed", "model": "gpt-5.1", "error": nil, "output": outputs, "usage": map[string]int{"input_tokens": 2, "output_tokens": 1}})
+		if gjson.GetBytes(body, "stream").Bool() {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":%s}\n\ndata: [DONE]\n\n", answer)
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, answer)
+		}
+	}))
+	defer provider.Close()
+	hook := &shadowRaceRedis{mode: scenario, entered: make(chan struct{}), release: make(chan struct{})}
+	readHook := &shadowRaceRead{seen: make(chan string, 1)}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(hook.release) }) }
+	defer release()
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	node := func(consumer bool) *OpenAIGatewayHandler {
+		accounts := issue715AccountsOfType(service.AccountTypeAPIKey)
+		for i, label := range []string{"A", "B"} {
+			accounts[i].Credentials = map[string]any{"base_url": provider.URL, "api_key": "fixture-race-" + label}
+		}
+		// The second node observes A's administrative disablement; the producer
+		// is already completing an admitted generation when barriers are held.
+		accounts[0].Schedulable = !consumer
+		client := clients()
+		if !consumer {
+			client.AddHook(hook)
+		} else {
+			client.AddHook(readHook)
+		}
+		h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, testutil.NewRealHTTPUpstream(cfg), repository.NewGatewayCache(client), service.NewSettingService(&omit409SettingsRepo{enabled: true}, cfg), &readable409UsageRepo{}, accounts...)
+		h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+		return h
+	}
+	producer, consumer := node(false), node(true)
+	restored, continueSend := make(chan struct{}), make(chan struct{})
+	var resumeOnce sync.Once
+	resume := func() { resumeOnce.Do(func() { close(continueSend) }) }
+	defer resume()
+	if scenario == "invalidate_after_restore" {
+		var once sync.Once
+		consumer.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(&concurrencyCacheMock{
+			acquireUserSlotFn: func(ctx context.Context, _ int64, _ int, _ string) (bool, error) {
+				once.Do(func() { close(restored) })
+				select {
+				case <-continueSend:
+					return true, nil
+				case <-ctx.Done():
+					return false, ctx.Err()
+				}
+			},
+			acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		}), SSEPingFormatNone, time.Second)
+	}
+	var exposeY atomic.Bool
+	yEntered, yRelease := make(chan struct{}), make(chan struct{})
+	var yOnce, yReleaseOnce sync.Once
+	releaseY := func() { yReleaseOnce.Do(func() { close(yRelease) }) }
+	defer releaseY()
+	template, _ := newIssue715Context(t, "{}")
+	router := gin.New()
+	router.POST("/v1/responses", func(c *gin.Context) {
+		for key, value := range template.Keys {
+			c.Set(key, value)
+		}
+		if c.GetHeader("X-Fixture-Node") == "consumer" {
+			consumer.Responses(c)
+			return
+		}
+		c.Writer = &shadowRaceWriter{ResponseWriter: c.Writer, before: func() {
+			if exposeY.Load() {
+				yOnce.Do(func() { close(yEntered) })
+				<-yRelease
+			}
+		}}
+		producer.Responses(c)
+	})
+	gateway := httptest.NewServer(router)
+	defer func() { release(); resume(); releaseY(); gateway.Close() }()
+	client := gateway.Client()
+	client.Timeout = 10 * time.Second
+	type result struct {
+		status int
+		body   string
+		err    error
+	}
+	request := func(input string, consume bool, visible chan<- struct{}) result {
+		body := httpRebuildJSON(map[string]any{"model": "gpt-5.1", "stream": stream, "tools": httpRebuildToolDefinitions(), "input": json.RawMessage("[" + input + "]")})
+		req, err := http.NewRequest(http.MethodPost, gateway.URL+"/v1/responses", strings.NewReader(body))
+		if err != nil {
+			return result{err: err}
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("session_id", "fixture-race-session")
+		if consume {
+			req.Header.Set("X-Fixture-Node", "consumer")
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return result{err: err}
+		}
+		defer resp.Body.Close()
+		var answer string
+		if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+			reader := bufio.NewReader(resp.Body)
+			for {
+				line, e := reader.ReadString('\n')
+				answer += line
+				if strings.Contains(line, `"type":"response.completed"`) {
+					if visible != nil {
+						close(visible)
+						visible = nil
+					}
+				}
+				if e != nil {
+					if e != io.EOF {
+						return result{err: e}
+					}
+					break
+				}
+			}
+		} else {
+			var value json.RawMessage
+			if err = json.NewDecoder(resp.Body).Decode(&value); err != nil {
+				return result{err: err}
+			}
+			answer = string(value)
+			if visible != nil && gjson.Get(answer, "status").String() == "completed" {
+				close(visible)
+			}
+			_, err = io.Copy(io.Discard, resp.Body)
+		}
+		return result{status: resp.StatusCode, body: answer, err: err}
+	}
+	x := httpRebuildMessage("user", "fixture task X: report saved work without repeating it")
+	y := httpRebuildMessage("user", "fixture task Y: a distinct task")
+	await := func(ch <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatal("SHADOW_RACE_BARRIER_MISSING")
+		}
+	}
+	consume := func() <-chan result {
+		done := make(chan result, 1)
+		go func() { done <- request(shadowHTTPAgent, true, nil) }()
+		return done
+	}
+	if scenario == "first_publication" || scenario == "delayed_publisher" {
+		hook.armed.Store(true)
+		visible, produced := make(chan struct{}), make(chan result, 1)
+		go func() { produced <- request(x, false, visible) }()
+		await(visible)
+		await(hook.entered)
+		if scenario == "delayed_publisher" {
+			second := request(y, false, nil)
+			require.NoError(t, second.err)
+			require.Equal(t, http.StatusOK, second.status, second.body)
+			require.Contains(t, second.body, "call_unknown_side_effect")
+			release()
+			require.NoError(t, (<-produced).err)
+			got := request(shadowHTTPAgent, true, nil)
+			require.NoError(t, got.err)
+			mu.Lock()
+			sends := len(identities)
+			mu.Unlock()
+			require.Equal(t, 2, sends, "SHADOW_DELAYED_PUBLICATION_REVIVED: an earlier publisher cannot revive context after a newer unknown tool output; response=%s", got.body)
+			require.GreaterOrEqual(t, got.status, 400, got.body)
+			return
+		}
+		done := consume()
+		select {
+		case state := <-readHook.seen:
+			if state != "pending" {
+				early := <-done
+				t.Fatalf("SHADOW_PUBLICATION_RACE_REFUSED: no shared publication wait after visible terminal: %+v", early)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("SHADOW_RACE_BARRIER_MISSING: consumer did not read shared state")
+		}
+		select {
+		case early := <-done:
+			t.Fatalf("SHADOW_PUBLICATION_RACE_REFUSED: consumer ended before successful publication: %+v", early)
+		case <-time.After(50 * time.Millisecond):
+		}
+		release()
+		p := <-produced
+		require.NoError(t, p.err)
+		require.Equal(t, http.StatusOK, p.status, p.body)
+		got := <-done
+		require.NoError(t, got.err)
+		require.Equal(t, http.StatusOK, got.status, got.body)
+		require.Contains(t, got.body, "race-task-complete")
+		return
+	}
+	first := request(x, false, nil)
+	require.NoError(t, first.err)
+	require.Equal(t, http.StatusOK, first.status, first.body)
+	keys, err := probe.Keys(context.Background(), "openai_readable_shadow:v1:*").Result()
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	original := issue805Owners(t, probe)
+	require.Len(t, original, 1)
+	var done <-chan result
+	if scenario == "invalidate_after_restore" {
+		done = consume()
+		await(restored)
+	}
+	if scenario == "store_failure_existing" {
+		hook.armed.Store(true)
+	}
+	if scenario == "reused_exposure" {
+		exposeY.Store(true)
+		produced := make(chan result, 1)
+		go func() { produced <- request(y, false, nil) }()
+		await(yEntered)
+		done = consume()
+		select {
+		case early := <-done:
+			require.NotContains(t, early.body, "race-task-complete", "SHADOW_REUSED_EXPOSURE_LEAK")
+			done = nil
+		case <-time.After(50 * time.Millisecond):
+		}
+		releaseY()
+		require.NoError(t, (<-produced).err)
+	} else {
+		second := request(y, false, nil)
+		require.NoError(t, second.err)
+		require.Equal(t, http.StatusOK, second.status, second.body)
+	}
+	if scenario == "store_failure_existing" {
+		await(hook.entered)
+	}
+	resume()
+	if done == nil {
+		done = consume()
+	}
+	got := <-done
+	require.NoError(t, got.err)
+	mu.Lock()
+	sends := len(identities)
+	mu.Unlock()
+	require.Equal(t, 2, sends, "SHADOW_INVALIDATED_ASSOCIATION_DISPATCH: stale X must not reach B after Y invalidates the same opaque identity; response=%s", got.body)
+	require.GreaterOrEqual(t, got.status, 400, got.body)
+	require.Equal(t, original, issue805Owners(t, probe), "association changes must not rewrite original owner routes")
+}

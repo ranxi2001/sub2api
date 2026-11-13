@@ -41,6 +41,7 @@ func ProvidePenaltyCoordinator(legacy LegacyEngine, prompt PromptEngine, penalti
 }
 
 func penaltyViolation(snapshot PromptSnapshot, source, reason string) service.SecurityPenaltyViolation {
+	snapshot = snapshot.Redacted()
 	groupID := snapshot.GroupID
 	if snapshot.PenaltyContext.OriginalGroupID != nil {
 		groupID = snapshot.PenaltyContext.OriginalGroupID

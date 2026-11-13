@@ -62,6 +62,7 @@ type openAIAgentRecoveryRequest struct {
 	shadowOutputSafe     bool
 	shadowUnsafeOutput   bool
 	shadowFences         map[string]string
+	shadowObservation    *openAIReadableShadowObservation
 	keyID                int64
 	userID               int64
 	delivery             *openAIAgentRecoveryDelivery
@@ -90,7 +91,9 @@ type openAIAgentRecoveryRequest struct {
 func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Context, c *gin.Context, body []byte, sessionHash, model string) context.Context {
 	request := &openAIAgentRecoveryRequest{groupID: getOpenAIGroupIDFromContext(c), model: model, session: sessionHash}
 	request.disableOwnerBinding = s != nil && s.cfg != nil && s.cfg.Gateway.DisableEncryptedAgentOwnerBinding
-	if request.disableOwnerBinding || (openAI409HasProviderState(body) && s != nil && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx)) {
+	if request.disableOwnerBinding || (openAI409HasProviderState(body) && s != nil && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx)) || openAIAgentRecoveryHTTPUser(c, getAPIKeyIDFromContext(c)) > 0 {
+		// An authenticated HTTP response pointer must remain on its actual
+		// producer even with Beta off and without any encrypted-agent owner.
 		request.previousResponseID = strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())
 	}
 	keyID := getAPIKeyIDFromContext(c)
@@ -98,7 +101,10 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 	request.userID = openAIAgentRecoveryHTTPUser(c, keyID)
 	request.shadowModel = gjson.GetBytes(body, "model").String()
 	request.shadowReadableIntent = openAI409HasReadableIntent(body)
-	request.shadowFences, _ = ctx.Value(openAIReadableShadowContextKey{}).(map[string]string)
+	request.shadowObservation, _ = ctx.Value(openAIReadableShadowContextKey{}).(*openAIReadableShadowObservation)
+	if request.shadowObservation != nil {
+		request.shadowFences = request.shadowObservation.fences
+	}
 	request.nativeCompaction = isOpenAINativeCompactionV2(c)
 	request.disallowLearning = isOpenAIResponsesCompactPath(c) || request.nativeCompaction
 	if s == nil || keyID <= 0 || sessionHash == "" || model == "" {
@@ -353,7 +359,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	if err := s.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
 		return noop, err
 	}
-	if err := s.checkOpenAIReadableShadowFences(ctx, request.shadowFences); err != nil {
+	if err := s.checkOpenAIReadableShadowObservation(ctx, request.shadowObservation); err != nil {
 		return noop, err
 	}
 	if request.omittedSource != nil {

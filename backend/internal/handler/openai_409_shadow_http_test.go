@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
@@ -29,6 +32,29 @@ import (
 
 const shadowHTTPAgent = `{"type":"agent_message","author":"/root","recipient":"/root/worker","encrypted_content":"fixture-shadow-current-task"}`
 const shadowOtherTask = "Verify the existing sum.go only; do not edit it. This is independent task Y."
+
+type shadowAuditProbe struct{ evaluated, private atomic.Bool }
+
+func (*shadowAuditProbe) EffectiveMode() securityaudit.Mode { return securityaudit.ModeBlocking }
+func (*shadowAuditProbe) Enqueue(context.Context, securityaudit.Request) error {
+	return errors.New("unexpected asynchronous fixture")
+}
+func (p *shadowAuditProbe) Evaluate(_ context.Context, req securityaudit.Request) (*securityaudit.PromptDecision, error) {
+	if strings.Contains(string(req.Body), httpRebuildTask) {
+		p.evaluated.Store(true)
+	}
+	field := reflect.ValueOf(req).FieldByName("NoBodyRetention")
+	if field.IsValid() && field.Bool() {
+		p.private.Store(true)
+	}
+	return &securityaudit.PromptDecision{Kind: securityaudit.DecisionAllow, AllowNextStage: true}, nil
+}
+
+func TestOpenAI409FutureShadowAuditProvenance(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) { runFutureShadowHTTP(t, stream, "privacy") })
+	}
+}
 
 // Observe the real downstream write; the shadow must not become recoverable
 // merely because the provider returned a terminal payload.
@@ -55,6 +81,16 @@ func TestOpenAI409FutureShadowHTTP(t *testing.T) {
 		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
 			runFutureShadowHTTP(t, stream, "recover")
 		})
+	}
+}
+
+func TestOpenAI409FutureShadowOAuth(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, scenario := range []string{"recover", "write_failed", "pending_owner", "store_read_failed", "two_known_tasks", "fresh_intent"} {
+			t.Run(fmt.Sprintf("stream=%t/%s", stream, scenario), func(t *testing.T) {
+				runFutureShadowTransport(t, service.AccountTypeOAuth, stream, scenario)
+			})
+		}
 	}
 }
 
@@ -109,6 +145,11 @@ func TestOpenAI409FutureShadowResources(t *testing.T) {
 
 func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	t.Helper()
+	runFutureShadowTransport(t, service.AccountTypeAPIKey, stream, scenario)
+}
+
+func runFutureShadowTransport(t *testing.T, accountType string, stream bool, scenario string) {
+	t.Helper()
 	clients := issue805Redis(t)
 	probe := clients()
 	var mu sync.Mutex
@@ -160,6 +201,13 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 				!strings.Contains(string(body), "fixture-shadow-current-task") &&
 				!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists() &&
 				httpRebuildToolsAvailable(body)
+			if accountType == service.AccountTypeOAuth {
+				valid = valid && r.URL.Path == "/backend-api/codex/responses" && r.Host == "chatgpt.com" &&
+					r.Header.Get("ChatGPT-Account-ID") == "fixture-shadow-account-B" &&
+					gjson.GetBytes(body, "stream").Bool() && gjson.GetBytes(body, "store").Type == gjson.False &&
+					gjson.GetBytes(body, `input.#(role==system)`).Type == gjson.Null &&
+					r.Header.Get("x-codex-turn-state") != "fixture-shadow-A-state" && r.Header.Get("conversation_id") != "fixture-shadow-A-conversation"
+			}
 			if scenario == "fresh_intent" {
 				valid = valid && strings.Contains(string(body), "Report only the supplied fresh task") && !strings.Contains(string(body), httpRebuildTask)
 			} else {
@@ -195,9 +243,15 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		}
 	}))
 	defer provider.Close()
-	accounts := issue715AccountsOfType(service.AccountTypeAPIKey)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	target, err := url.Parse(provider.URL)
+	require.NoError(t, err)
+	transport := &httpRebuildTransport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
+	accounts := issue715AccountsOfType(accountType)
 	for i, label := range []string{"A", "B"} {
-		accounts[i].Credentials = map[string]any{"base_url": provider.URL, "api_key": "fixture-shadow-" + label}
+		accounts[i].Credentials = map[string]any{"base_url": provider.URL, "api_key": "fixture-shadow-" + label,
+			"access_token": "fixture-shadow-" + label, "chatgpt_account_id": "fixture-shadow-account-" + label}
 	}
 	storeFailure := &shadowStoreFailure{}
 	newNode := func(failStore bool) *OpenAIGatewayHandler {
@@ -208,11 +262,15 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		if failStore {
 			client.AddHook(storeFailure)
 		}
-		h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, testutil.NewRealHTTPUpstream(cfg), repository.NewGatewayCache(client), settings, &readable409UsageRepo{}, accounts...)
+		h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, transport, repository.NewGatewayCache(client), settings, &readable409UsageRepo{}, accounts...)
 		h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 		return h
 	}
 	producer, consumer := newNode(scenario == "store_write_failed"), newNode(scenario == "store_read_failed") // independent service state/Redis clients
+	auditProbe := &shadowAuditProbe{}
+	if scenario == "privacy" {
+		consumer.securityAuditCoordinator = securityaudit.NewCoordinator(nil, auditProbe)
+	}
 	done := make(chan struct{}, 1)
 	var beforeDelivery []string
 	var captureErr error
@@ -264,6 +322,10 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		req.Header.Set("session_id", session)
 		if consume {
 			req.Header.Set("X-Fixture-Node", "consumer")
+			if accountType == service.AccountTypeOAuth {
+				req.Header.Set("x-codex-turn-state", "fixture-shadow-A-state")
+				req.Header.Set("conversation_id", "fixture-shadow-A-conversation")
+			}
 		}
 		response, err := client.Do(req)
 		require.NoError(t, err)
@@ -330,7 +392,7 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	}
 	capacity := strings.HasPrefix(scenario, "capacity_")
 	if capacity {
-		for i := 0; i < 12; i++ {
+		for i := 0; i < 140; i++ {
 			currentSession = fmt.Sprintf("fixture-shadow-thread-%d", i)
 			status, answer = request(history, false)
 			require.Equal(t, http.StatusOK, status, answer)
@@ -366,6 +428,19 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		require.Equal(t, "conflict", value, "same opaque output must not silently acquire another task")
 	}
 	if capacity {
+		epochKeys, err := probe.Keys(context.Background(), "openai_agent_shadow_epoch:v1:*").Result()
+		require.NoError(t, err)
+		require.Len(t, epochKeys, 128, "association metadata must also be bounded across sessions")
+		indexes, err := probe.Keys(context.Background(), "openai_agent_shadow_index:v1:*").Result()
+		require.NoError(t, err)
+		require.Len(t, indexes, 1)
+		count, err := probe.ZCard(context.Background(), indexes[0]).Result()
+		require.NoError(t, err)
+		require.EqualValues(t, 128, count)
+		ttl, err := probe.PTTL(context.Background(), indexes[0]).Result()
+		require.NoError(t, err)
+		require.Greater(t, ttl, time.Duration(0))
+		require.LessOrEqual(t, ttl, 30*time.Minute)
 		require.Len(t, shadowKeys, 8, "SHADOW_CAPACITY_UNBOUNDED: all sessions/models share the principal's eight-record budget")
 		total := 0
 		for _, key := range shadowKeys {
@@ -406,7 +481,7 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 	status, answer = request(input, true)
 	mu.Lock()
 	defer mu.Unlock()
-	if scenario == "recover" || scenario == "fresh_intent" || scenario == "capacity_latest" || scenario == "two_known_tasks" {
+	if scenario == "recover" || scenario == "fresh_intent" || scenario == "capacity_latest" || scenario == "two_known_tasks" || scenario == "privacy" {
 		require.Len(t, bodies, producerRequests+1, "FUTURE_SHADOW_B_DISPATCH_MISSING: committed same-task context must reach B without manual input; response=%s", answer)
 		require.Equal(t, http.StatusOK, status, answer)
 		completed := issue758CompletedResponse(t, answer, stream)
@@ -415,6 +490,19 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		require.Equal(t, "Bearer fixture-shadow-B", identities[len(identities)-1])
 		for _, identity := range identities[:producerRequests] {
 			require.Equal(t, "Bearer fixture-shadow-A", identity)
+		}
+		wires := transport.snapshot()
+		require.Len(t, wires, len(bodies))
+		for i, wire := range wires {
+			require.JSONEq(t, string(wire.body), string(bodies[i]), "native final-send payload must reach the network unchanged")
+		}
+		if accountType == service.AccountTypeOAuth {
+			last := wires[len(wires)-1]
+			require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", last.url)
+			require.Equal(t, int64(2), last.account)
+			require.Equal(t, "fixture-shadow-account-B", last.header.Get("ChatGPT-Account-ID"))
+			require.NotEmpty(t, last.header.Get("session_id"))
+			require.NotEqual(t, wires[0].header.Get("session_id"), last.header.Get("session_id"), "B must receive a new upstream account namespace")
 		}
 		require.Equal(t, 1, tool.patches, "completed side effect was reused, never executed again")
 		if scenario == "recover" {
@@ -437,6 +525,10 @@ func runFutureShadowHTTP(t *testing.T, stream bool, scenario string) {
 		if scenario == "write_failed" || scenario == "off" || scenario == "store_write_failed" || scenario == "oversize" || scenario == "pending_tool" || scenario == "pending_output" {
 			require.Empty(t, shadowKeys, "unconfirmed/disabled capture must not persist task plaintext")
 		}
+	}
+	if scenario == "privacy" {
+		require.True(t, auditProbe.evaluated.Load(), "restored text must reach the actual HTTP moderation stage")
+		require.True(t, auditProbe.private.Load(), "SHADOW_AUDIT_PROVENANCE_MISSING: restored plaintext must be evaluated without persistent body retention")
 	}
 	if scenario == "store_write_failed" || scenario == "store_read_failed" {
 		require.Positive(t, storeFailure.calls.Load(), "must inject a fault in the actual shared shadow data plane")

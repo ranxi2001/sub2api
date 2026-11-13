@@ -108,9 +108,27 @@ func (s *PromptService) EffectiveMode() Mode {
 	return s.config.EffectiveMode()
 }
 
-func (s *PromptService) Enqueue(_ context.Context, req Request) error {
+func (s *PromptService) Enqueue(ctx context.Context, req Request) error {
 	if s == nil || s.enqueuer == nil || s.EffectiveMode() != ModeAsync {
 		return nil
+	}
+	if req.NoBodyRetention {
+		// Evaluate this exceptional request in memory instead of copying it to
+		// the durable asynchronous payload queue. Policy results are retained
+		// as metadata only; normal async policy semantics remain nonblocking.
+		cfg, ok := s.config.Active()
+		if !ok || !cfg.IncludesGroup(req.GroupID) {
+			return nil
+		}
+		snapshot, err := ExtractPromptSnapshot(req)
+		if errors.Is(err, ErrNoPromptText) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		_, err = s.evaluator.Evaluate(ctx, cfg, snapshot)
+		return err
 	}
 	select {
 	case s.enqueueSlots <- struct{}{}:
