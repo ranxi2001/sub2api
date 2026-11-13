@@ -236,9 +236,6 @@ func openAI429WeeklyEvidence(used float64, observed time.Time, reset *int) map[s
 }
 
 func openAI429SnapshotWeeklyEvidence(snapshot *OpenAICodexUsageSnapshot, observed time.Time) map[string]any {
-	if snapshot.invalidWeekly429 {
-		return nil
-	}
 	var evidence map[string]any
 	for _, window := range []struct {
 		minutes, reset *int

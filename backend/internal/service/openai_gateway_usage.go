@@ -1188,8 +1188,7 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 	updates := make(map[string]any)
 	if snapshot.invalidWeekly429 {
 		updates[openAI429WeeklyInvalidAtKey] = baseTime.Format(time.RFC3339Nano)
-	}
-	if evidence := openAI429SnapshotWeeklyEvidence(snapshot, baseTime); evidence != nil {
+	} else if evidence := openAI429SnapshotWeeklyEvidence(snapshot, baseTime); evidence != nil {
 		updates[openAI429WeeklyEvidenceKey] = evidence
 	}
 
