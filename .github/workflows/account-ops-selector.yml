@@ -1,0 +1,49 @@
+name: Account ops selector offline acceptance
+on:
+  push:
+    branches: [feat/account-ops-quality-selector]
+    paths:
+      - 'frontend/src/components/admin/operations/AccountOpsGroup*.vue'
+      - 'frontend/src/components/admin/operations/QualityAccountSelector.vue'
+      - 'frontend/src/components/admin/operations/__tests__/AccountOpsGroup*.spec.ts'
+      - 'frontend/src/components/admin/operations/__tests__/QualityAccountSelector.spec.ts'
+      - 'frontend/src/i18n/locales/*/accountOps.ts'
+      - '.github/scripts/account-ops-selector*'
+      - '.github/workflows/account-ops-selector.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: account-ops-selector-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Behavior tests (initial RED expected)
+        run: |
+          mkdir -p "$RUNNER_TEMP/account-ops-selector"
+          git rev-parse HEAD > "$RUNNER_TEMP/account-ops-selector/head.txt"
+          set -o pipefail
+          pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOpsGroupSelector.spec.ts --reporter=verbose 2>&1 | tee "$RUNNER_TEMP/account-ops-selector/behavior.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: account-ops-selector-${{ github.sha }}
+          path: ${{ runner.temp }}/account-ops-selector
+          if-no-files-found: error
+          retention-days: 30
