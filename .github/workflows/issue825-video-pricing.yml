@@ -1,0 +1,120 @@
+name: Issue825 video pricing units
+on:
+  push:
+    branches: [fix/issue825-video-pricing-unit]
+  pull_request:
+    branches: [production]
+permissions:
+  contents: read
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  SOURCE_BASE: c424f8217da12cd4fb8d10aeaf1c4f2592c3f286
+jobs:
+  regression:
+    if: github.head_ref == 'fix/issue825-video-pricing-unit' || github.ref_name == 'fix/issue825-video-pricing-unit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact candidate
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Real pricing components and locale completeness (GREEN)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/issue825-tests"
+          pnpm --dir frontend exec vitest run src/components/modelPlaza/__tests__/PlazaModelPricingTable.spec.ts src/components/modelPlaza/__tests__/PlazaModelPricingTable.video.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --reporter=verbose 2>&1 | tee "$RUNNER_TEMP/issue825-tests/green.log"
+      - name: Same localized component regression against fixed defective source (RED)
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/issue825-tests
+        run: |
+          set -euo pipefail
+          for file in frontend/src/components/modelPlaza/PlazaModelPricingTable.vue frontend/src/i18n/locales/zh/dashboard.ts frontend/src/i18n/locales/en/dashboard.ts; do
+            git show "$SOURCE_BASE:$file" > "$file"
+          done
+          set +e
+          pnpm --dir frontend exec vitest run src/components/modelPlaza/__tests__/PlazaModelPricingTable.video.spec.ts --reporter=verbose --reporter=json --outputFile="$EVIDENCE_DIR/red.json" > "$EVIDENCE_DIR/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$EVIDENCE_DIR/red.log"
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+          const report = JSON.parse(readFileSync(`${process.env.EVIDENCE_DIR}/red.json`, 'utf8'))
+          assert.equal(report.numFailedTests, 10)
+          assert.equal(report.numPassedTests, 6)
+          const failures = report.testResults.flatMap(file => file.assertionResults).filter(test => test.status === 'failed')
+          assert.equal(failures.length, 10)
+          for (const test of failures) {
+            assert.ok(test.fullName.includes('shows seconds and preserves'))
+            assert.ok(test.failureMessages.join('\n').includes('to contain'))
+          }
+          console.log('RED confirmed: 10 video label assertions fail; 6 image/request/token controls pass')
+          JS
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue825-tests-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue825-tests
+          if-no-files-found: error
+  rendered:
+    if: github.head_ref == 'fix/issue825-video-pricing-unit' || github.ref_name == 'fix/issue825-video-pricing-unit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact candidate
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Preserve complete baseline archive
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/issue825-baseline"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/issue825-baseline"
+          cmp frontend/package.json "$RUNNER_TEMP/issue825-baseline/frontend/package.json"
+          cmp frontend/pnpm-lock.yaml "$RUNNER_TEMP/issue825-baseline/frontend/pnpm-lock.yaml"
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" "$RUNNER_TEMP/issue825-baseline/frontend/node_modules"
+      - name: Install isolated browser remotely
+        run: |
+          npm install --prefix "$RUNNER_TEMP/issue825-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/issue825-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual baseline and candidate components with real CSS
+        env:
+          BASELINE_ROOT: ${{ runner.temp }}/issue825-baseline/frontend
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/issue825-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/issue825-ui
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCREENSHOT_DIR"
+          node .github/scripts/issue825-video-pricing-screenshot.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue825-ui-${{ github.event_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue825-ui
+          if-no-files-found: error
