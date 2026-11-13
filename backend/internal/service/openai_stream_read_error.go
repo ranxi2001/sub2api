@@ -113,6 +113,13 @@ func openAIHTTP2PeerResetReason(err error) (string, bool) {
 	if !shouldClassifyOpenAIUpstreamStreamReadError(err) {
 		return "", false
 	}
+	// Semantic HTTP/SSE errors may contain arbitrary upstream text, including
+	// an exact transport signature. They cannot create trusted reset evidence.
+	var imageErr *OpenAIImagesUpstreamError
+	var httpErr *UpstreamFailoverError
+	if errors.As(err, &imageErr) || errors.As(err, &httpErr) {
+		return "", false
+	}
 	var streamErr http2.StreamError
 	if errors.As(err, &streamErr) && streamErr.Cause != nil && streamErr.Cause.Error() == "received from peer" {
 		return safeHTTP2ResetReason(streamErr.Code.String()), true
@@ -147,7 +154,7 @@ func (f *OpsTransportFailure) ErrorFields() map[string]any {
 // handleOpenAIHTTP2PeerReset ends this submitted request at the read boundary.
 // The caller must discard any incomplete staged event before invoking it. A
 // typed read error (not UpstreamFailoverError) prevents account or request replay.
-func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID string, cause error) (error, bool) {
+func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID string, cause error, writeWSFrame ...func([]byte) error) (error, bool) {
 	if c == nil || c.Request == nil || !shouldClassifyOpenAIUpstreamStreamReadError(cause, c.Request.Context()) {
 		return nil, false
 	}
@@ -166,7 +173,7 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 	c.Set(OpsUpstreamStatusCodeKey, 0)
 	c.Set(OpsUpstreamErrorMessageKey, message)
 	c.Set(OpsUpstreamErrorDetailKey, "")
-	event := OpsUpstreamErrorEvent{Kind: "transport_error", Stage: "response_body", Reason: reason,
+	event := OpsUpstreamErrorEvent{Kind: "transport_error", Stage: "response_stream", Reason: reason,
 		Message: message, UpstreamRequestID: requestID, ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account)}
 	if account != nil {
 		event.Platform, event.AccountID, event.AccountName = account.Platform, account.ID, account.Name
@@ -174,10 +181,25 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 	appendOpsUpstreamError(c, event)
 	MarkOpsStreamErrorValue(c, OpsStreamError{TransportFailure: failure, ErrType: "upstream_error",
 		Code: OpenAIUpstreamHTTP2StreamErrorCode, Message: message, IntendedStatus: http.StatusBadGateway, CountTowardsSLA: true,
-		NonStream: !c.GetBool("ops_stream") && !strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream")})
+		NonStream: len(writeWSFrame) == 0 && !c.GetBool("ops_stream") && !strings.Contains(c.Writer.Header().Get("Content-Type"), "text/event-stream")})
 	fields := failure.ErrorFields()
-	// HTTP bridge WebSocket callers own their frame writer; don't write HTTP SSE
-	// to an upgraded connection. Their caller consumes the typed safe details.
+	failedResponse := func() map[string]any {
+		// Match buildOpenAIResponseFailedSSE's strict-client field contract.
+		return map[string]any{"type": "response.failed", "sequence_number": 0, "response": map[string]any{
+			"id": "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""), "object": "response",
+			"created_at": time.Now().Unix(), "model": c.GetString("ops_model"), "output": []any{},
+			"status": "failed", "error": fields}}
+	}
+	// HTTP bridge WebSocket callers own their frame writer. A reset still ends
+	// the submitted turn, including before its first visible output.
+	if len(writeWSFrame) > 0 {
+		data, _ := json.Marshal(failedResponse())
+		if err := writeWSFrame[0](data); err != nil {
+			_ = c.Error(err)
+		}
+		MarkResponseCommitted(c)
+		return classified, true
+	}
 	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
 		return classified, true
 	}
@@ -187,12 +209,7 @@ func handleOpenAIHTTP2PeerReset(c *gin.Context, account *Account, requestID stri
 		path := strings.TrimRight(c.Request.URL.Path, "/")
 		if strings.HasSuffix(path, "/responses") || strings.Contains(path, "/responses/") {
 			eventType = "response.failed"
-			// Match the required fields of buildOpenAIResponseFailedSSE. Strict
-			// clients require created_at, output and sequence_number even on errors.
-			payload = map[string]any{"type": eventType, "sequence_number": 0, "response": map[string]any{
-				"id": "resp_" + strings.ReplaceAll(uuid.NewString(), "-", ""), "object": "response",
-				"created_at": time.Now().Unix(), "model": c.GetString("ops_model"), "output": []any{},
-				"status": "failed", "error": fields}}
+			payload = failedResponse()
 		} else if strings.HasSuffix(c.Request.URL.Path, "/messages") {
 			payload["type"] = "error"
 		}

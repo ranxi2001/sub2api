@@ -348,6 +348,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	var terminal openAIRawStreamTerminalState
 	var regionalUsagePayload []byte
 	var normalizationErr error
+	semanticFailure := false
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -398,6 +399,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
 			terminal.ObserveDataLine(trimmedPayload)
+			if gjson.Get(trimmedPayload, "error").IsObject() {
+				semanticFailure = true
+			}
 			if trimmedPayload == "[DONE]" && c.Request != nil {
 				regionalMeterObserveUsage(c.Request.Context(), regionalUsagePayload, "json")
 			}
@@ -467,6 +471,10 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		errors.Is(scanErr, context.Canceled) ||
 		errors.Is(scanErr, context.DeadlineExceeded)
 
+	if semanticFailure && clientOutputStarted {
+		MarkResponseCommitted(c)
+		return resultWithUsage(), errors.New("upstream response failed")
+	}
 	if !clientAborted && !terminal.Terminated() {
 		if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, scanErr); handled {
 			return resultWithUsage(), resetErr
@@ -580,6 +588,9 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
+		if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, resp.Header.Get("x-request-id"), err); handled {
+			return nil, resetErr
+		}
 		if !errors.Is(err, ErrUpstreamResponseBodyTooLarge) {
 			writeChatCompletionsError(c, http.StatusBadGateway, "api_error", "Failed to read upstream response")
 		}

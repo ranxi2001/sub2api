@@ -46,10 +46,37 @@ jobs:
           result=$?
           set -e
           cat "$RUNNER_TEMP/http2-evidence/red.log"
-          test "$result" -ne 0
-          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/http2-evidence/red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/red.log"; then exit 1; fi
           grep -q 'peer reset must persist as transport_error, not synthetic HTTP 502' "$RUNNER_TEMP/http2-evidence/red.log"
           grep -q -- '--- FAIL: TestHTTP2PeerResetBoundary' "$RUNNER_TEMP/http2-evidence/red.log"
+          # New review findings must fail behaviorally against original production too.
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler ./internal/service -run '^TestHTTP2PeerReset(BeforeHeaders|BufferedBoundaries|PartialImages)$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/review-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/review-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/review-red.log"; then exit 1; fi
+          for test_name in TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages; do
+            grep -q -- "--- FAIL: $test_name" "$RUNNER_TEMP/http2-evidence/review-red.log"
+          done
+          for diagnostic in 'peer reset before headers must not replay a consumed POST' 'buffered reset must establish transport evidence' 'partial-image reset must persist a failed request'; do
+            grep -q -- "$diagnostic" "$RUNNER_TEMP/http2-evidence/review-red.log"
+          done
+          # Semantic spoofing was introduced by the first patch; reproduce it
+          # against the compiling pre-review candidate, retaining these tests.
+          vulnerable=c351ebea9bf144c710780da5e4db0e264e6ebb9c
+          for target in "${targets[@]}"; do git show "$vulnerable:$target" > "$target"; done
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestHTTP2SemanticImageErrorCannotSpoofReset$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/spoof-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/spoof-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/spoof-red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestHTTP2SemanticImageErrorCannotSpoofReset' "$RUNNER_TEMP/http2-evidence/spoof-red.log"
+          grep -q 'semantic image text must not create trusted reset evidence' "$RUNNER_TEMP/http2-evidence/spoof-red.log"
           restore_head
           trap - EXIT
           git diff --exit-code
@@ -58,7 +85,11 @@ jobs:
         run: |
           set -euo pipefail
           cd backend
-          go test -tags=unit ./internal/handler ./internal/service ./internal/repository -run 'TestHTTP2|TestOpenAIStreaming|TestHandleChatStreaming|TestChatCompletionsBuffered|TestAnthropicBuffered|TestForwardAsAnthropic|TestForwardResponses|TestOpenAIImagesOAuthBodyRead|TestOps.*Stream|TestOpsBridge|TestAutoConfig|Test.*RawStream|Test.*StreamTruncat|Test.*ClientCancel|Test.*ClientDisconnect|Test.*Deadline|TestClassifyOpenAIAPIKeyHealth|TestOpsErrorWhere' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/green.log"
+          go test -tags=unit ./internal/handler ./internal/service ./internal/repository -run 'TestHTTP2|TestProxyOpenAIWSHTTPBridge|TestPluginSSE|TestOpenAIStreaming|TestHandleChatStreaming|TestChatCompletionsBuffered|TestAnthropicBuffered|TestForwardAsAnthropic|TestForwardResponses|TestOpenAIImagesOAuthBodyRead|TestOps.*Stream|TestOpsBridge|TestAutoConfig|Test.*RawStream|Test.*StreamTruncat|Test.*ClientCancel|Test.*ClientDisconnect|Test.*Deadline|TestClassifyOpenAIAPIKeyHealth|TestOpsErrorWhere' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/green.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/green.log"; then exit 1; fi
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset; do
+            grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/green.log"
+          done
       - name: Ordinary production build
         shell: bash
         run: |
@@ -71,13 +102,18 @@ jobs:
           set -euo pipefail
           cd backend
           go test -race -tags=unit ./internal/handler ./internal/service -run 'TestHTTP2|TestOpenAIStreamingReadError|TestHandleChatStreamingResponse_ClassifiesHTTP2|TestAutoConfigRealRequestOutcomes|TestForwardAsAnthropic_ForceChatCompletionsStreamReadError' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/race.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/race.log"; then exit 1; fi
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset; do
+            grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/race.log"
+          done
       - name: PostgreSQL persistence and monitor regressions
         shell: bash
         run: |
           set -euo pipefail
           cd backend
           go test -tags=integration ./internal/repository -run 'TestHTTP2PeerResetPersistence|TestGetErrorLogByID_APIKeyPrefixAndUpstreamStatus|TestChannelMonitorV2.*Error' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/persistence.log"
-          ! grep -q -- '--- SKIP: TestHTTP2PeerResetPersistence' "$RUNNER_TEMP/http2-evidence/persistence.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/persistence.log"; then exit 1; fi
+          grep -q -- '--- PASS: TestHTTP2PeerResetPersistence' "$RUNNER_TEMP/http2-evidence/persistence.log"
           git diff --exit-code
       - uses: actions/upload-artifact@v7
         if: always()
