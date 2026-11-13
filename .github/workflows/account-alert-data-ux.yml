@@ -1,0 +1,49 @@
+name: Account alert data and UI
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'frontend/src/components/admin/operations/AccountOps*'
+      - 'frontend/src/components/admin/operations/__tests__/AccountOps*'
+      - 'frontend/src/views/admin/AccountOpsView.vue'
+      - 'frontend/src/i18n/locales/*/accountOps.ts'
+      - '.github/scripts/account-alert-data-ux.mjs'
+      - '.github/workflows/account-alert-data-ux.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Account notification regressions
+        run: pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOps src/views/admin/__tests__/AccountOpsView.spec.ts
+      - run: pnpm --dir frontend run build
+      - name: Install screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/alert-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/alert-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Render actual components with fictional data
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/account-alert-ui
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/alert-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/account-alert-data-ux.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: account-alert-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/account-alert-ui
