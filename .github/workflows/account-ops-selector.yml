@@ -1,0 +1,113 @@
+name: Account ops selector offline acceptance
+on:
+  push:
+    branches: [feat/account-ops-quality-selector]
+    paths:
+      - 'frontend/src/components/admin/operations/AccountOpsGroup*.vue'
+      - 'frontend/src/components/admin/operations/QualityAccountSelector.vue'
+      - 'frontend/src/components/admin/operations/__tests__/AccountOpsGroup*.spec.ts'
+      - 'frontend/src/components/admin/operations/__tests__/QualityAccountSelector.spec.ts'
+      - 'frontend/src/views/admin/__tests__/AccountOpsView.spec.ts'
+      - 'frontend/src/views/admin/AccountOpsView.vue'
+      - 'frontend/src/i18n/locales/*/accountOps.ts'
+      - '.github/scripts/account-ops-selector*'
+      - '.github/workflows/account-ops-selector.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: account-ops-selector-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Confirm behavioral RED against pinned original dialog
+        run: |
+          mkdir -p "$RUNNER_TEMP/account-ops-selector"
+          git rev-parse HEAD > "$RUNNER_TEMP/account-ops-selector/head.txt"
+          original=frontend/src/components/admin/operations/AccountOpsGroupDialog.vue
+          trap 'git show "HEAD:$original" > "$original"' EXIT
+          git show "f895ea743f34a4c4ab6c9d01c01e13c931625a6e:$original" > "$original"
+          set +e
+          pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOpsGroupSelector.spec.ts -t 'account ops shared selector' --reporter=json --outputFile="$RUNNER_TEMP/account-ops-selector/red.json" > "$RUNNER_TEMP/account-ops-selector/red.log" 2>&1
+          result=$?
+          set -e
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          const report=JSON.parse(readFileSync(process.env.RUNNER_TEMP+'/account-ops-selector/red.json','utf8'));
+          const failures=report.testResults.flatMap(suite=>suite.assertionResults).filter(test=>test.status==='failed');
+          assert.equal(report.numFailedTests,2);
+          assert.equal(failures.length,2);
+          for(const test of failures){
+            assert.match(test.fullName,/account ops shared selector/);
+            assert.match(test.failureMessages.join('\n'),/expected false to be true/);
+          }
+          console.log('Confirmed two behavioral RED assertions; no import/setup failure.');
+          JS
+      - name: Confirm save-reopen RED against reviewed parent
+        run: |
+          original=frontend/src/views/admin/AccountOpsView.vue
+          trap 'git show "HEAD:$original" > "$original"' EXIT
+          git show "ce272e17930d1a14d9f063f10b505630800ba8d3:$original" > "$original"
+          set +e
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/AccountOpsView.spec.ts -t 'reopens from saved memberships|fences old post-save group reads' --reporter=json --outputFile="$RUNNER_TEMP/account-ops-selector/reopen-red.json" > "$RUNNER_TEMP/account-ops-selector/reopen-red.log" 2>&1
+          result=$?
+          set -e
+          test "$result" -ne 0
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          const report=JSON.parse(readFileSync(process.env.RUNNER_TEMP+'/account-ops-selector/reopen-red.json','utf8'));
+          const failures=report.testResults.flatMap(suite=>suite.assertionResults).filter(test=>test.status==='failed');
+          assert.equal(report.numFailedTests,2);
+          assert.equal(failures.length,2);
+          for(const test of failures){
+            assert.match(test.fullName,/reopens from saved memberships|fences old post-save group reads/);
+            assert.match(test.failureMessages.join('\n'),/expected false to be true|Latest saved/);
+          }
+          console.log('Confirmed save-reopen and stale-read behavioral RED; no setup failure.');
+          JS
+      - name: GREEN and existing quality regression tests
+        run: |
+          set -o pipefail
+          pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOpsGroupDialog.spec.ts src/components/admin/operations/__tests__/AccountOpsGroupSelector.spec.ts src/components/admin/operations/__tests__/QualityAccountSelector.spec.ts src/views/admin/__tests__/AccountOpsView.spec.ts src/views/admin/__tests__/AccountQualityView.spec.ts --reporter=verbose 2>&1 | tee "$RUNNER_TEMP/account-ops-selector/green.log"
+      - name: Required frontend checks
+        run: |
+          set -o pipefail
+          make test-frontend 2>&1 | tee "$RUNNER_TEMP/account-ops-selector/checks.log"
+          pnpm --dir frontend run build 2>&1 | tee "$RUNNER_TEMP/account-ops-selector/build.log"
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/account-ops-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/account-ops-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Actual component screenshots and interactions
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/account-ops-selector
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/account-ops-browser/node_modules/playwright/index.mjs
+        run: |
+          set -o pipefail
+          node .github/scripts/account-ops-selector-preview.mjs 2>&1 | tee "$EVIDENCE_DIR/browser.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: account-ops-selector-${{ github.sha }}
+          path: ${{ runner.temp }}/account-ops-selector
+          if-no-files-found: error
+          retention-days: 30

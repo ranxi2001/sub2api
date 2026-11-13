@@ -3,6 +3,8 @@ import { createPinia } from 'pinia'
 import { reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import AccountOpsView from '../AccountOpsView.vue'
+import AccountOpsGroupDialog from '@/components/admin/operations/AccountOpsGroupDialog.vue'
+import type { AccountOpsGroup, AccountOpsThresholdAccount } from '@/api/admin/accountOps'
 import { useAppStore } from '@/stores/app'
 import { getAccountOpsSettings, getAccountOpsEvents, getAccountOpsThresholdAccounts, getAccountOpsThresholdGroups, saveAccountOpsGroups, saveAccountOpsNotificationSettings, saveAccountOpsRulesBatch, saveAccountOpsRuleGroups, testAccountOpsWebhook } from '@/api/admin/accountOps'
 const state = vi.hoisted(() => ({ auth: null as any }))
@@ -15,8 +17,192 @@ const config = { enabled: false, recipient: '', balance_low: true, weekly_quota:
 const settings = () => ({ config: { ...config }, smtp_configured: true, dropped_signals: 0, storage_failures: 0, encryption_key_configured: true })
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }
 const create = () => mount(AccountOpsView, { global: { plugins: [createPinia()], stubs: { teleport: true } } })
+const pollingGroups = (): AccountOpsGroup[] => [
+  { id: 'manual-alpha', name: 'Alpha', default_name: 'Alpha', provider: 'sub2api', site: 'https://alpha.example', mode: 'manual', account_ids: [1] },
+  { id: 'manual-beta', name: 'Beta', default_name: 'Beta', provider: 'newapi', site: 'https://beta.example', mode: 'manual', account_ids: [2, 60, 998] },
+]
+const pollingAccounts = (): AccountOpsThresholdAccount[] => [1, 2, 60].map(id => ({
+  account_id: id, account_name: `Demo ${id}`, platform: 'openai', type: 'apikey', balance: null, unit: 'USD', balance_status: 'unknown', received_at: null, usage_windows: [],
+}))
 beforeEach(() => { vi.resetAllMocks(); state.auth = reactive({ user: { id: 1, role: 'admin' } }); vi.mocked(getAccountOpsSettings).mockResolvedValue(settings()); vi.mocked(getAccountOpsEvents).mockResolvedValue({ items: [], has_more: false }); vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([]); vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue([]); vi.mocked(saveAccountOpsGroups).mockResolvedValue(config); vi.mocked(saveAccountOpsRulesBatch).mockResolvedValue(config); vi.mocked(saveAccountOpsRuleGroups).mockResolvedValue(config); vi.mocked(testAccountOpsWebhook).mockResolvedValue({ ok: true }); vi.mocked(saveAccountOpsNotificationSettings).mockImplementation(async c => ({ ...config, ...c })) })
 describe('account operations tabs and independent saves', () => {
+  it('reopens from saved memberships before the post-save groups read completes', async () => {
+    vi.mocked(getAccountOpsThresholdGroups).mockImplementation(async () => pollingGroups())
+    vi.mocked(getAccountOpsThresholdAccounts).mockImplementation(async () => pollingAccounts())
+    const savedGroups = pollingGroups()
+    savedGroups[0]!.account_ids = [1, 2]
+    savedGroups[1]!.account_ids = [60, 998]
+    const saved = { ...config, groups: savedGroups }
+    vi.mocked(saveAccountOpsGroups).mockResolvedValue(saved)
+    const wrapper = create()
+    try {
+      await flushPromises()
+      await wrapper.get('[data-testid="edit-account-groups"]').trigger('click')
+      await wrapper.get('[data-account-id="2"] input').setValue(true)
+      const postSaveRead = deferred<AccountOpsGroup[]>()
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(postSaveRead.promise)
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      await flushPromises()
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(2)
+      await wrapper.get('[data-testid="edit-account-groups"]').trigger('click')
+      expect((wrapper.get('[data-account-id="2"] input').element as HTMLInputElement).checked).toBe(true)
+      postSaveRead.resolve(savedGroups)
+      await flushPromises()
+      await wrapper.get('[data-testid="account-group-name-manual-alpha"]').setValue('Rename only')
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      await flushPromises()
+      expect(vi.mocked(saveAccountOpsGroups).mock.calls[1]![0]).toEqual([
+        expect.objectContaining({ id: 'manual-alpha', name: 'Rename only', account_ids: [1, 2] }),
+        expect.objectContaining({ id: 'manual-beta', account_ids: [60, 998] }),
+      ])
+    } finally { wrapper.unmount() }
+  })
+
+  it('fences old post-save group reads and account polls after a newer save succeeds', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    vi.mocked(getAccountOpsThresholdGroups).mockImplementation(async () => pollingGroups())
+    vi.mocked(getAccountOpsThresholdAccounts).mockImplementation(async () => pollingAccounts())
+    const firstGroups = pollingGroups()
+    firstGroups[0]!.account_ids = [1, 2]; firstGroups[1]!.account_ids = [60, 998]
+    const latestGroups = pollingGroups()
+    latestGroups[0]!.name = 'Latest saved'; latestGroups[0]!.account_ids = [1, 2, 60]; latestGroups[1]!.account_ids = [998]
+    vi.mocked(saveAccountOpsGroups).mockResolvedValueOnce({ ...config, groups: firstGroups }).mockResolvedValueOnce({ ...config, groups: latestGroups })
+    const wrapper = create()
+    try {
+      await flushPromises()
+      await wrapper.get('[data-testid="edit-account-groups"]').trigger('click')
+      await wrapper.get('[data-account-id="2"] input').setValue(true)
+      const firstRead = deferred<AccountOpsGroup[]>()
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(firstRead.promise)
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-testid="edit-account-groups"]').trigger('click')
+      await wrapper.get('[data-account-id="60"] input').setValue(true)
+      await wrapper.get('[data-testid="account-group-name-manual-alpha"]').setValue('Latest saved')
+      const oldPoll = deferred<AccountOpsGroup[]>()
+      const oldAccounts = deferred<AccountOpsThresholdAccount[]>()
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(oldPoll.promise)
+      vi.mocked(getAccountOpsThresholdAccounts).mockReturnValueOnce(oldAccounts.promise)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(3)
+      const latestRead = deferred<AccountOpsGroup[]>()
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(latestRead.promise)
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      await flushPromises()
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(4)
+      oldPoll.resolve(pollingGroups()); oldAccounts.resolve(pollingAccounts())
+      await flushPromises()
+      firstRead.resolve(firstGroups)
+      await flushPromises()
+      await wrapper.get('[data-testid="edit-account-groups"]').trigger('click')
+      expect((wrapper.get('[data-testid="account-group-name-manual-alpha"]').element as HTMLInputElement).value).toBe('Latest saved')
+      expect((wrapper.get('[data-account-id="60"] input').element as HTMLInputElement).checked).toBe(true)
+      expect(wrapper.getComponent(AccountOpsGroupDialog).props('groups').map(group => group.account_ids)).toEqual([[1, 2, 60], [998]])
+      latestRead.resolve(latestGroups)
+      await flushPromises()
+    } finally {
+      wrapper.unmount(); visibility.mockRestore(); vi.useRealTimers()
+    }
+  })
+
+  it('preserves group drafts and save lock when real parent polling reads complete', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    vi.mocked(getAccountOpsThresholdGroups).mockImplementation(async () => pollingGroups())
+    vi.mocked(getAccountOpsThresholdAccounts).mockImplementation(async () => pollingAccounts())
+    const wrapper = create()
+    try {
+      await flushPromises()
+      await wrapper.get('[data-testid="edit-account-groups"]').trigger('click')
+      const dialog = wrapper.getComponent(AccountOpsGroupDialog)
+      await wrapper.get('[data-testid="account-group-name-manual-alpha"]').setValue('Draft name')
+      await wrapper.get('[data-testid="account-ops-member-picker"] [data-account-id="2"] input').setValue(true)
+
+      const editingRead = deferred<AccountOpsGroup[]>()
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(editingRead.promise)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(2)
+      expect(getAccountOpsThresholdAccounts).toHaveBeenCalledTimes(2)
+      editingRead.resolve(pollingGroups())
+      await flushPromises()
+      expect((wrapper.get('[data-testid="account-group-name-manual-alpha"]').element as HTMLInputElement).value).toBe('Draft name')
+      expect((wrapper.get('[data-account-id="2"] input').element as HTMLInputElement).checked).toBe(true)
+
+      const saving = deferred<Awaited<ReturnType<typeof saveAccountOpsGroups>>>()
+      vi.mocked(saveAccountOpsGroups).mockReturnValueOnce(saving.promise)
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      const savingRead = deferred<AccountOpsGroup[]>()
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(savingRead.promise)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(3)
+      expect(getAccountOpsThresholdAccounts).toHaveBeenCalledTimes(3)
+      savingRead.resolve(pollingGroups())
+      await flushPromises()
+      expect((wrapper.get('[data-testid="account-group-name-manual-alpha"]').element as HTMLInputElement).value).toBe('Draft name')
+      expect(wrapper.get('[data-testid="save-account-groups"]').attributes('disabled')).toBeDefined()
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      expect(saveAccountOpsGroups).toHaveBeenCalledTimes(1)
+      expect(saveAccountOpsGroups).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'manual-alpha', name: 'Draft name', account_ids: [1, 2] }),
+        expect.objectContaining({ id: 'manual-beta', account_ids: [60, 998] }),
+      ])
+      expect(dialog.emitted('saved')).toBeUndefined()
+      saving.resolve(config)
+      await flushPromises()
+      expect(dialog.emitted('saved')).toHaveLength(1)
+      expect(wrapper.find('[data-testid="save-account-groups"]').exists()).toBe(false)
+      expect(useAppStore().toasts.filter(toast => toast.type === 'success')).toHaveLength(1)
+    } finally {
+      wrapper.unmount(); visibility.mockRestore(); vi.useRealTimers()
+    }
+  })
+
+  it('isolates a late save reply after parent polling and closing then reopening the dialog', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    vi.mocked(getAccountOpsThresholdGroups).mockImplementation(async () => pollingGroups())
+    vi.mocked(getAccountOpsThresholdAccounts).mockImplementation(async () => pollingAccounts())
+    const oldSave = deferred<Awaited<ReturnType<typeof saveAccountOpsGroups>>>()
+    const newSave = deferred<Awaited<ReturnType<typeof saveAccountOpsGroups>>>()
+    vi.mocked(saveAccountOpsGroups).mockReturnValueOnce(oldSave.promise).mockReturnValueOnce(newSave.promise)
+    const wrapper = create()
+    try {
+      await flushPromises()
+      await wrapper.get('[data-testid="edit-account-groups"]').trigger('click')
+      const dialog = wrapper.getComponent(AccountOpsGroupDialog)
+      await wrapper.get('[data-testid="account-group-name-manual-alpha"]').setValue('Closed draft')
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      const lateRead = deferred<AccountOpsGroup[]>()
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(lateRead.promise)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(2)
+      await wrapper.get('[data-testid="cancel-account-groups"]').trigger('click')
+      const refreshed = pollingGroups()
+      refreshed[0]!.name = 'Refreshed name'
+      lateRead.resolve(refreshed)
+      await flushPromises()
+      await wrapper.get('[data-testid="edit-account-groups"]').trigger('click')
+      expect((wrapper.get('[data-testid="account-group-name-manual-alpha"]').element as HTMLInputElement).value).toBe('Refreshed name')
+      await wrapper.get('[data-testid="account-group-name-manual-alpha"]').setValue('New draft')
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      oldSave.resolve(config)
+      await flushPromises()
+      expect(dialog.emitted('saved')).toBeUndefined()
+      expect(wrapper.get('[data-testid="save-account-groups"]').attributes('disabled')).toBeDefined()
+      expect((wrapper.get('[data-testid="account-group-name-manual-alpha"]').element as HTMLInputElement).value).toBe('New draft')
+      await wrapper.get('[data-testid="save-account-groups"]').trigger('click')
+      expect(saveAccountOpsGroups).toHaveBeenCalledTimes(2)
+      newSave.resolve(config)
+      await flushPromises()
+      expect(dialog.emitted('saved')).toHaveLength(1)
+      expect(wrapper.find('[data-testid="save-account-groups"]').exists()).toBe(false)
+      expect(useAppStore().toasts.filter(toast => toast.type === 'success')).toHaveLength(1)
+    } finally {
+      wrapper.unmount(); visibility.mockRestore(); vi.useRealTimers()
+    }
+  })
+
   it('initializes a dynamically opened dialog from saved recovery-only flags', async () => {
     vi.mocked(getAccountOpsSettings).mockResolvedValue({ ...settings(), config: { ...config, balance_thresholds: [{ account_id: 1, enabled: true, threshold: 5, unit: 'USD', notify_alert: false, notify_recovery: true }] } } as any)
     vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([{ account_id: 1, account_name: 'key', type: 'apikey', platform: 'openai', balance: 3, unit: 'USD', balance_status: 'ok', received_at: null, usage_windows: [] }])
@@ -64,7 +250,7 @@ describe('account operations tabs and independent saves', () => {
     await wrapper.get('[data-testid="add-account-group"]').trigger('click')
     const manual = wrapper.findAll('[data-testid^="account-group-name-manual-"]').at(-1)!
     await manual.setValue('手动组')
-    const member = wrapper.findAll('[data-testid^="account-group-member-manual-"]').at(-1)!
+    const member = wrapper.get('[data-testid="account-ops-member-picker"] [data-account-id="1"] input')
     await member.setValue(true)
     await wrapper.get('[data-testid="save-account-groups"]').trigger('click'); await flushPromises()
     expect(saveAccountOpsGroups).toHaveBeenCalledWith(expect.arrayContaining([
@@ -80,7 +266,7 @@ describe('account operations tabs and independent saves', () => {
     expect(wrapper.find('[role="status"]').exists()).toBe(false)
     await wrapper.get('[data-testid="edit-account-groups"]').trigger('click'); await flushPromises()
     expect(wrapper.get('[data-testid="account-group-name-manual-empty"]').exists()).toBe(true)
-    expect((wrapper.get('[data-testid="account-group-member-manual-empty-1"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-testid="account-ops-member-picker"] [data-account-id="1"] input').element as HTMLInputElement).checked).toBe(false)
     wrapper.unmount()
   })
   it('adds and removes an email channel without posting the global switch or failure rules', async () => {
