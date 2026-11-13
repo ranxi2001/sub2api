@@ -1150,7 +1150,8 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		// parser cannot distinguish a bridge failure from an upstream failure and
 		// otherwise overwrites real HTTP 200 evidence with a synthetic 502.
 		if marked, ok := service.GetOpsStreamError(c); ok && (marked.BridgeFailure != nil || marked.TransportFailure != nil) {
-			logOpsStreamErrorValue(c, ops, status, marked)
+			// A trusted final marker must not erase failures from earlier WS turns.
+			logOpsStreamError(c, ops, status)
 			return
 		}
 		body := w.capturedBytes()

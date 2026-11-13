@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -243,8 +244,42 @@ func TestHTTP2SemanticImageErrorCannotSpoofReset(t *testing.T) {
 			require.False(t, exists && gjson.GetBytes(data, "TransportFailure.reset_reason").Exists(), "semantic image text must not create trusted reset evidence")
 			var original *OpenAIImagesUpstreamError
 			require.ErrorAs(t, err, &original)
+			require.Same(t, semantic, err, "semantic failure must not be wrapped as transport")
 			require.Equal(t, 400, original.StatusCode)
 			require.NotContains(t, rec.Body.String(), `"category":"transport_error"`)
+		})
+	}
+}
+
+func TestHTTP2PeerResetNativeUsage(t *testing.T) {
+	for _, mode := range []string{"responses_stream", "responses_buffered", "chat_stream", "chat_buffered"} {
+		t.Run(mode, func(t *testing.T) {
+			payload := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"synthetic\",\"content\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"partial\"}}\n\n"
+			resp := http2PeerResetResponse(t, "text/event-stream", payload)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			var result *OpenAIForwardResult
+			var err error
+			switch mode {
+			case "responses_stream":
+				result, err = svc.handleResponsesStreamingFromNativeAnthropic(resp, c, "model", "model", "model", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+			case "responses_buffered":
+				result, err = svc.handleResponsesBufferedFromNativeAnthropic(resp, c, "model", "model", "model", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+			case "chat_stream":
+				c.Request.URL.Path = "/v1/chat/completions"
+				result, err = svc.handleCCStreamingFromNativeAnthropic(resp, c, "model", "model", "model", nil, time.Now())
+			case "chat_buffered":
+				c.Request.URL.Path = "/v1/chat/completions"
+				result, err = svc.handleCCBufferedFromNativeAnthropic(resp, c, "model", "model", "model", nil, time.Now())
+			}
+			require.Error(t, err, "native reset must return failure instead of synthetic success")
+			require.NotNil(t, result)
+			require.Equal(t, 3, result.Usage.InputTokens)
+			require.Equal(t, 1, result.Usage.OutputTokens)
+			require.NotContains(t, rec.Body.String(), "response.completed")
+			require.NotContains(t, rec.Body.String(), "[DONE]")
 		})
 	}
 }

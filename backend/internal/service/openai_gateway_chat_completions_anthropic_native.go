@@ -143,9 +143,9 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, upstreamModel)
 
 	if clientStream {
-		return s.handleCCStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)
+		return s.handleCCStreamingFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, account)
 	}
-	return s.handleCCBufferedFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime)
+	return s.handleCCBufferedFromNativeAnthropic(resp, c, originalModel, billingModel, upstreamModel, reasoningEffort, startTime, account)
 }
 
 // handleCCBufferedFromNativeAnthropic reads Anthropic SSE events, assembles the
@@ -158,8 +158,14 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	upstreamModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	accounts ...*Account,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	var account *Account
+	if len(accounts) > 0 {
+		account = accounts[0]
+	}
+	terminalSeen := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -170,6 +176,14 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	resultWithUsage := func() *OpenAIForwardResult {
+		result := &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header,
+			Usage: claudeUsageToOpenAIUsage(&usage), Model: originalModel, BillingModel: billingModel,
+			UpstreamModel: upstreamModel, UpstreamEndpoint: "/v1/messages", ReasoningEffort: reasoningEffort,
+			Stream: false, Duration: time.Since(startTime)}
+		applyObservedUpstreamResponseModel(c, result)
+		return result
+	}
 
 	// 读间隔上限：上游挂住 SSE 时中止组装（缓冲路径尚未提交响应头，可回 502）。
 	streamInterval := anthropicNativeStreamInterval(s.cfg)
@@ -201,6 +215,11 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 				return onIdle()
 			}
 			logReadErr(rerr)
+			if !terminalSeen {
+				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
+					return resultWithUsage(), resetErr
+				}
+			}
 			break
 		}
 		// SSE 规范允许 `event:xxx`（冒号后无空格）：Kimi 等 Anthropic 兼容上游
@@ -215,6 +234,11 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 				return onIdle()
 			}
 			logReadErr(rerr)
+			if !terminalSeen {
+				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
+					return resultWithUsage(), resetErr
+				}
+			}
 			break
 		}
 		payload, ok := extractOpenAISSEDataLine(dataLine)
@@ -227,6 +251,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
+		terminalSeen = terminalSeen || event.Type == "message_stop" || event.Type == "error"
 
 		if event.Type == "message_start" && event.Message != nil {
 			finalResp = event.Message
@@ -313,8 +338,14 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	upstreamModel string,
 	reasoningEffort *string,
 	startTime time.Time,
+	accounts ...*Account,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	var account *Account
+	if len(accounts) > 0 {
+		account = accounts[0]
+	}
+	terminalSeen := false
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -451,6 +482,11 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 				return onIdle()
 			}
 			logReadErr(rerr)
+			if !terminalSeen && !clientDisconnected {
+				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
+					return resultWithUsage(), resetErr
+				}
+			}
 			break
 		}
 		if _, ok := extractOpenAISSEEventLine(line); !ok {
@@ -464,6 +500,11 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			}
 			// EOF / 读错误：事件行后流终止，进入 finalize。
 			logReadErr(rerr)
+			if !terminalSeen && !clientDisconnected {
+				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
+					return resultWithUsage(), resetErr
+				}
+			}
 			break
 		}
 		payload, ok := extractOpenAISSEDataLine(dataLine)
@@ -476,6 +517,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			continue
 		}
+		terminalSeen = terminalSeen || event.Type == "message_stop" || event.Type == "error"
 
 		// Forward received usage regardless of the client stream_options.
 		// The intermediate Responses converter synthesizes usage even when absent.

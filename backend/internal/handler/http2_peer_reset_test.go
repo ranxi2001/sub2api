@@ -3,10 +3,12 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	coderws "github.com/coder/websocket"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -315,14 +317,17 @@ func TestHTTP2PeerResetPartialImages(t *testing.T) {
 			accounts := openAIImagesFailoverAccountRepo{accounts: []service.Account{{ID: 1, Name: "synthetic", Platform: service.PlatformOpenAI, Type: kind, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{3131}, Credentials: map[string]any{"api_key": "synthetic", "access_token": "synthetic", "base_url": "https://example.invalid"}}}}
 			usage := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
 			deferred := service.NewDeferredService(accounts, nil, time.Minute)
-			gateway := service.NewOpenAIGatewayService(accounts, nil, usage, nil, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), nil, nil, &peerResetHTTPUpstream{client: server.Client(), base: base}, deferred, nil, nil, nil, nil, nil, nil, nil)
+			gateway := service.NewOpenAIGatewayService(accounts, nil, usage, nil, nil, nil, nil, nil, cfg, nil, service.NewConcurrencyService(&helperConcurrencyCacheStub{}), service.NewBillingService(cfg, nil), nil, nil, &peerResetHTTPUpstream{client: server.Client(), base: base}, deferred, nil, nil, nil, nil, nil, nil, nil)
 			billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 			t.Cleanup(billing.Stop)
 			h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 			repo := &ingressRejectOpsRepo{}
 			ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-			var outcomes []service.AccountConcurrencyResult
-			ops.SetAutoConfigObserver(func(r service.AccountConcurrencyResult) { outcomes = append(outcomes, r) })
+			var schedulerOutcomes []bool
+			t.Cleanup(service.ObserveHTTP2SchedulerForTest(gateway, func(id int64, success bool) {
+				require.EqualValues(t, 1, id)
+				schedulerOutcomes = append(schedulerOutcomes, success)
+			}))
 			router := gin.New()
 			router.Use(OpsErrorLoggerMiddleware(ops))
 			router.POST("/v1/images/generations", func(c *gin.Context) {
@@ -348,8 +353,8 @@ func TestHTTP2PeerResetPartialImages(t *testing.T) {
 			require.Equal(t, "transport_error", repo.entries[0].ErrorType)
 			require.Equal(t, 200, repo.entries[0].StatusCode)
 			require.Nil(t, repo.entries[0].UpstreamStatusCode)
-			require.Len(t, outcomes, 1)
-			require.False(t, outcomes[0].Success, "partial image does not make the interrupted request successful")
+			require.Equal(t, []bool{false}, schedulerOutcomes, "partial image reset must report scheduler failure")
+			require.Greater(t, service.HTTP2SchedulerErrorRateForTest(gateway, 1), 0.0, "real scheduler must record failure")
 			require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error\n"))
 			require.Contains(t, rec.Body.String(), "upstream_http2_stream_error")
 			require.NotContains(t, rec.Body.String(), "[DONE]")
@@ -425,4 +430,234 @@ func TestHTTP2PeerResetHTTP502Control(t *testing.T) {
 	require.Equal(t, 502, *repo.entries[0].UpstreamStatusCode)
 	require.NotEqual(t, "transport_error", repo.entries[0].ErrorType)
 	require.NotContains(t, rec.Body.String(), "upstream_http2_stream_error")
+}
+
+func TestHTTP2PeerResetImagesBeforeHeaders(t *testing.T) {
+	for _, kind := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
+		t.Run(kind, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 8)
+			var submissions atomic.Int32
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				submissions.Add(1)
+				panic(http.ErrAbortHandler)
+			}))
+			server.EnableHTTP2 = true
+			server.StartTLS()
+			defer server.Close()
+			base, err := url.Parse(server.URL)
+			require.NoError(t, err)
+			account := service.Account{ID: 1, Name: "synthetic", Platform: service.PlatformOpenAI, Type: kind, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "synthetic", "access_token": "synthetic", "base_url": "https://example.invalid"}}
+			h := newHTTP2PeerResetHandler(t, &peerResetHTTPUpstream{client: server.Client(), base: base}, account)
+			repo := &ingressRejectOpsRepo{}
+			ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.POST("/v1/images/generations", func(c *gin.Context) {
+				seed, _ := newOpenAIResponsesFailoverTestContext(t, c.Request.Context())
+				for k, v := range seed.Keys {
+					c.Set(k, v)
+				}
+				key, _ := middleware2.GetAPIKeyFromContext(c)
+				key.Group.AllowImageGeneration = true
+				h.Images(c)
+			})
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"synthetic","stream":true}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			for len(opsErrorLogQueue) > 0 {
+				flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
+			}
+			require.Equal(t, int32(1), submissions.Load())
+			require.Len(t, repo.entries, 1)
+			require.Equal(t, "transport_error", repo.entries[0].ErrorType, "image reset before headers must persist transport_error")
+			require.Nil(t, repo.entries[0].UpstreamStatusCode)
+			require.Equal(t, 502, rec.Code)
+			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+			require.Contains(t, rec.Body.String(), "Do not automatically retry")
+			require.NotContains(t, rec.Body.String(), "stream ID")
+		})
+	}
+}
+
+func TestHTTP2PeerResetNativeConversionBoundary(t *testing.T) {
+	for _, endpoint := range []string{"/v1/responses", "/v1/chat/completions"} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%v", endpoint, stream), func(t *testing.T) {
+				setupOpsErrorLogTestQueue(t, 8)
+				var submissions atomic.Int32
+				server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					submissions.Add(1)
+					if !strings.HasSuffix(r.URL.Path, "/messages") {
+						t.Error("native Anthropic path was not exercised")
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n")
+					w.(http.Flusher).Flush()
+					panic(http.ErrAbortHandler)
+				}))
+				server.EnableHTTP2 = true
+				server.StartTLS()
+				defer server.Close()
+				base, err := url.Parse(server.URL)
+				require.NoError(t, err)
+				account := service.Account{ID: 1, Name: "synthetic", Platform: service.PlatformKimi, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "synthetic", "base_url": "https://example.invalid", "api_protocol": service.APIProtocolAnthropic}}
+				h := newHTTP2PeerResetHandler(t, &peerResetHTTPUpstream{client: server.Client(), base: base}, account)
+				repo := &ingressRejectOpsRepo{}
+				ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+				router := gin.New()
+				router.Use(OpsErrorLoggerMiddleware(ops))
+				router.POST(endpoint, func(c *gin.Context) {
+					seed, _ := newOpenAIResponsesFailoverTestContext(t, c.Request.Context())
+					for k, v := range seed.Keys {
+						c.Set(k, v)
+					}
+					key, _ := middleware2.GetAPIKeyFromContext(c)
+					key.Group.Platform = service.PlatformKimi
+					if endpoint == "/v1/responses" {
+						h.Responses(c)
+					} else {
+						h.ChatCompletions(c)
+					}
+				})
+				body := fmt.Sprintf(`{"model":"claude-sonnet-4-5","stream":%v,"input":"synthetic","messages":[{"role":"user","content":"synthetic"}]}`, stream)
+				rec := httptest.NewRecorder()
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(body)))
+				for len(opsErrorLogQueue) > 0 {
+					flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
+				}
+				require.Equal(t, int32(1), submissions.Load())
+				require.NotContains(t, rec.Body.String(), "[DONE]", "native reset must not fabricate successful completion")
+				require.NotContains(t, rec.Body.String(), "response.completed", "native reset must not fabricate successful completion")
+				require.Len(t, repo.entries, 1, "native reset must persist a failed request")
+				require.Equal(t, "transport_error", repo.entries[0].ErrorType)
+				require.Nil(t, repo.entries[0].UpstreamStatusCode)
+				if stream {
+					require.Equal(t, 200, rec.Code)
+					require.Contains(t, rec.Body.String(), "partial")
+				} else {
+					require.Equal(t, 502, rec.Code)
+				}
+				require.Contains(t, rec.Body.String(), "upstream_http2_stream_error")
+			})
+		}
+	}
+}
+
+// The fixture drives two real WebSocket turns through the production HTTP
+// bridge and actual Ops middleware. Only outer turn orchestration is controlled.
+func TestHTTP2PeerResetWebSocketTurnPersistence(t *testing.T) {
+	for _, beforeHeaders := range []bool{false, true} {
+		t.Run(fmt.Sprint(beforeHeaders), func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 8)
+			var submissions atomic.Int32
+			upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				turn := submissions.Add(1)
+				if r.ProtoMajor != 2 {
+					t.Error("expected HTTP/2 bridge transport")
+				}
+				if turn == 2 && beforeHeaders {
+					panic(http.ErrAbortHandler)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n")
+				if turn == 1 {
+					_, _ = io.WriteString(w, "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_semantic\",\"status\":\"failed\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"synthetic context limit\"}}}\n\n")
+					return
+				}
+				w.(http.Flusher).Flush()
+				panic(http.ErrAbortHandler)
+			}))
+			upstream.EnableHTTP2 = true
+			upstream.StartTLS()
+			defer upstream.Close()
+			base, err := url.Parse(upstream.URL)
+			require.NoError(t, err)
+			account := service.Account{ID: 1, Name: "synthetic", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "synthetic", "base_url": "https://example.invalid"}}
+			h := newHTTP2PeerResetHandler(t, &peerResetHTTPUpstream{client: upstream.Client(), base: base}, account)
+			repo := &ingressRejectOpsRepo{}
+			ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			done := make(chan struct{})
+			router := gin.New()
+			router.Use(func(c *gin.Context) { c.Next(); close(done) })
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			router.GET("/v1/responses", func(c *gin.Context) {
+				conn, acceptErr := coderws.Accept(c.Writer, c.Request, nil)
+				if acceptErr != nil {
+					t.Error(acceptErr)
+					return
+				}
+				defer func() { _ = conn.CloseNow() }()
+				service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
+				c.Set(opsAccountIDKey, account.ID)
+				c.Set(opsModelKey, "gpt-5.1")
+				c.Set(opsStreamKey, true)
+				for turn := 1; turn <= 2; turn++ {
+					_, payload, readErr := conn.Read(c.Request.Context())
+					if readErr != nil {
+						t.Error(readErr)
+						return
+					}
+					service.BeginOpsStreamTurn(c, turn)
+					turnErr := service.ForwardHTTP2BridgeTurnForTest(h.gatewayService, c, &account, payload, turn, func(frame []byte) error { return conn.Write(c.Request.Context(), coderws.MessageText, frame) })
+					if turn == 2 {
+						code, _, ok := service.OpenAIUpstreamStreamReadErrorDetails(turnErr)
+						if !ok || code != service.OpenAIUpstreamHTTP2StreamErrorCode {
+							t.Errorf("reset turn must return classified non-replay error: %v", turnErr)
+						}
+					}
+				}
+				_ = conn.Close(coderws.StatusNormalClosure, "fixture complete")
+			})
+			server := httptest.NewServer(router)
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			client, upgrade, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
+			require.NoError(t, err)
+			defer func() { _ = client.CloseNow() }()
+			require.Equal(t, 101, upgrade.StatusCode)
+			for turn := 1; turn <= 2; turn++ {
+				require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"synthetic"}`)))
+				terminals := 0
+				for {
+					_, frame, readErr := client.Read(ctx)
+					require.NoError(t, readErr)
+					require.NotContains(t, string(frame), "response.completed")
+					require.NotContains(t, string(frame), "stream ID")
+					if gjson.GetBytes(frame, "type").String() == "response.failed" {
+						terminals++
+						code := gjson.GetBytes(frame, "response.error.code").String()
+						if turn == 1 {
+							require.Equal(t, "context_length_exceeded", code)
+						} else {
+							require.Equal(t, service.OpenAIUpstreamHTTP2StreamErrorCode, code)
+						}
+						break
+					}
+				}
+				require.Equal(t, 1, terminals)
+			}
+			_, _, err = client.Read(ctx)
+			require.Error(t, err)
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("middleware did not finish")
+			}
+			for len(opsErrorLogQueue) > 0 {
+				flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
+			}
+			require.Equal(t, int32(2), submissions.Load(), "each submitted WS turn must be sent once")
+			require.Len(t, repo.entries, 2, "final transport marker must preserve both WebSocket turn failures")
+			require.NotEqual(t, "transport_error", repo.entries[0].ErrorType)
+			require.Contains(t, repo.entries[0].ErrorBody, "context_length_exceeded")
+			require.Equal(t, "transport_error", repo.entries[1].ErrorType)
+			require.Equal(t, 101, repo.entries[1].StatusCode)
+			require.Nil(t, repo.entries[1].UpstreamStatusCode)
+		})
+	}
 }

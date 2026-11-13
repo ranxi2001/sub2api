@@ -32,7 +32,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/http2-evidence"
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http2-evidence/head.txt"
           baseline=ccf997c73868083d96c0bec56e71c1a34d26c98a
-          mapfile -t targets < <(git diff --name-only "$baseline" HEAD -- 'backend/**/*.go' ':!backend/**/*_test.go')
+          mapfile -t targets < <(git diff --name-only "$baseline" HEAD -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go')
           restore_head() {
             for target in "${targets[@]}"; do git show "HEAD:$target" > "$target"; done
           }
@@ -52,16 +52,16 @@ jobs:
           grep -q -- '--- FAIL: TestHTTP2PeerResetBoundary' "$RUNNER_TEMP/http2-evidence/red.log"
           # New review findings must fail behaviorally against original production too.
           set +e
-          (cd backend && go test -tags=unit ./internal/handler ./internal/service -run '^TestHTTP2PeerReset(BeforeHeaders|BufferedBoundaries|PartialImages)$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/review-red.log" 2>&1
+          (cd backend && go test -tags=unit ./internal/handler ./internal/service -run '^TestHTTP2PeerReset(BeforeHeaders|BufferedBoundaries|PartialImages|NativeConversionBoundary|NativeUsage|ImagesBeforeHeaders)$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/review-red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/http2-evidence/review-red.log"
           test "$result" -eq 1
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/review-red.log"; then exit 1; fi
-          for test_name in TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages; do
+          for test_name in TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders; do
             grep -q -- "--- FAIL: $test_name" "$RUNNER_TEMP/http2-evidence/review-red.log"
           done
-          for diagnostic in 'peer reset before headers must not replay a consumed POST' 'buffered reset must establish transport evidence' 'partial-image reset must persist a failed request'; do
+          for diagnostic in 'peer reset before headers must not replay a consumed POST' 'buffered reset must establish transport evidence' 'partial-image reset must persist a failed request' 'native reset must return failure instead of synthetic success' 'image reset before headers must persist transport_error'; do
             grep -q -- "$diagnostic" "$RUNNER_TEMP/http2-evidence/review-red.log"
           done
           # Semantic spoofing was introduced by the first patch; reproduce it
@@ -77,6 +77,16 @@ jobs:
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/spoof-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestHTTP2SemanticImageErrorCannotSpoofReset' "$RUNNER_TEMP/http2-evidence/spoof-red.log"
           grep -q 'semantic image text must not create trusted reset evidence' "$RUNNER_TEMP/http2-evidence/spoof-red.log"
+          for target in "${targets[@]}"; do git show "a5bc18f34c68a4c870660b4449bbb73592c73d84:$target" > "$target"; done
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestHTTP2PeerResetWebSocketTurnPersistence$' -count=1 -v -timeout=3m) > "$RUNNER_TEMP/http2-evidence/ws-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/http2-evidence/ws-red.log"
+          test "$result" -eq 1
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/ws-red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestHTTP2PeerResetWebSocketTurnPersistence' "$RUNNER_TEMP/http2-evidence/ws-red.log"
+          grep -q 'final transport marker must preserve both WebSocket turn failures' "$RUNNER_TEMP/http2-evidence/ws-red.log"
           restore_head
           trap - EXIT
           git diff --exit-code
@@ -85,9 +95,9 @@ jobs:
         run: |
           set -euo pipefail
           cd backend
-          go test -tags=unit ./internal/handler ./internal/service ./internal/repository -run 'TestHTTP2|TestProxyOpenAIWSHTTPBridge|TestPluginSSE|TestOpenAIStreaming|TestHandleChatStreaming|TestChatCompletionsBuffered|TestAnthropicBuffered|TestForwardAsAnthropic|TestForwardResponses|TestOpenAIImagesOAuthBodyRead|TestOps.*Stream|TestOpsBridge|TestAutoConfig|Test.*RawStream|Test.*StreamTruncat|Test.*ClientCancel|Test.*ClientDisconnect|Test.*Deadline|TestClassifyOpenAIAPIKeyHealth|TestOpsErrorWhere' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/green.log"
+          go test -tags=unit ./internal/handler ./internal/service ./internal/repository -run 'TestHTTP2|Test(CC|Responses)(Buffered|Streaming)FromNativeAnthropic|TestNativeAnthropic|TestProxyOpenAIWSHTTPBridge|TestPluginSSE|TestOpenAIStreaming|TestHandleChatStreaming|TestChatCompletionsBuffered|TestAnthropicBuffered|TestForwardAsAnthropic|TestForwardResponses|TestOpenAIImagesOAuthBodyRead|TestOps.*Stream|TestOpsBridge|TestAutoConfig|Test.*RawStream|Test.*StreamTruncat|Test.*ClientCancel|Test.*ClientDisconnect|Test.*Deadline|TestClassifyOpenAIAPIKeyHealth|TestOpsErrorWhere' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/green.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/green.log"; then exit 1; fi
-          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset; do
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence; do
             grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/green.log"
           done
       - name: Ordinary production build
@@ -103,7 +113,7 @@ jobs:
           cd backend
           go test -race -tags=unit ./internal/handler ./internal/service -run 'TestHTTP2|TestOpenAIStreamingReadError|TestHandleChatStreamingResponse_ClassifiesHTTP2|TestAutoConfigRealRequestOutcomes|TestForwardAsAnthropic_ForceChatCompletionsStreamReadError' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/http2-evidence/race.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|race detected|signal: (killed|segmentation)' "$RUNNER_TEMP/http2-evidence/race.log"; then exit 1; fi
-          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset; do
+          for test_name in TestHTTP2PeerResetBoundary TestHTTP2PeerResetBeforeHeaders TestHTTP2PeerResetBufferedBoundaries TestHTTP2PeerResetPartialImages TestHTTP2PeerResetPluginEarlyMetadata TestHTTP2SemanticImageErrorCannotSpoofReset TestHTTP2PeerResetNativeConversionBoundary TestHTTP2PeerResetNativeUsage TestHTTP2PeerResetImagesBeforeHeaders TestHTTP2PeerResetWebSocketTurnPersistence; do
             grep -q -- "--- PASS: $test_name" "$RUNNER_TEMP/http2-evidence/race.log"
           done
       - name: PostgreSQL persistence and monitor regressions
