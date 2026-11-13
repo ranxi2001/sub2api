@@ -49,6 +49,7 @@ h(Rules,{accounts:accounts.value,groups,config,loading:false,ready:true,error:''
 h(Dialog,{show:selected.value.length>0,accounts:selected.value,config,onClose:()=>selected.value=[]})
 ])}}).use(createPinia()).use(i18n).mount('#app');
 `)
+  process.chdir(root)
   server = await createServer({ root, configFile: false, cacheDir,
     resolve: { alias: { '@': join(root, 'src') } },
     plugins: [{ name: 'account-alert-preview', enforce: 'pre', load(id) {
@@ -63,7 +64,7 @@ h(Dialog,{show:selected.value.length>0,accounts:selected.value,config,onClose:()
   const page = await browser.newPage({ viewport: { width: 1360, height: 1000 }, timezoneId: 'UTC' })
   page.on('pageerror', e => errors.push(e.message))
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
-  const load = async query => { await page.goto(origin+'/'+query, { waitUntil:'networkidle' });await page.getByTestId('account-ops-rules').waitFor() }
+  const load = async query => { await page.goto(origin+'/'+query, { waitUntil:'networkidle' });await page.getByTestId('account-ops-rules').waitFor(); assert.equal(await page.getByTestId('account-ops-rules').evaluate(el=>getComputedStyle(el).borderTopWidth),'1px','project Tailwind styles must be generated') }
   await load('');await page.screenshot({path:join(output,'before.png'),fullPage:true})
   before=false;server.moduleGraph.invalidateAll()
   await load('');await page.screenshot({path:join(output,'after.png'),fullPage:true})
