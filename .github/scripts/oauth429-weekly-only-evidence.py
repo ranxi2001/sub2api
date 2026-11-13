@@ -34,6 +34,8 @@ if mode.startswith("red"):
     assert int(status) == 1 and terminal[0]["Action"] == "fail", "expected normal go test assertion failure"
     if mode == "red-cache":
         assert "TestOAuth429WeeklyOnlySequentialCache/duplicate_usage" in failed
+        assert "TestOAuth429WeeklyOnlySequentialCache/nan_weekly_usage" in failed
+        assert "TestOAuth429WeeklyOnlyNonweeklyPersistenceRetainsEvidence" in failed
         assert "rejected weekly headers must not poison a later headerless 429 cache" in output
     else:
         for name in ("primary_weekly_zero_neighbor", "secondary_weekly_invalid_neighbor"):
@@ -50,6 +52,8 @@ if mode.startswith("red"):
             "WSForward/frame_with_weekly_handshake",
             "WSForward/frame_low_overrides_high_cache",
             "WSForward/frame_invalid_overrides_high_cache",
+            "WSForward/frame_elapsed_handshake_reset",
+            "NonweeklyPersistenceRetainsEvidence",
             "WSClientIngress",
         ):
             assert "TestOAuth429WeeklyOnly" + name in failed, name
@@ -57,9 +61,9 @@ if mode.startswith("red"):
         assert "request admission denied:" not in output
 else:
     assert int(status) == 0 and not failed and terminal[0]["Action"] == "pass", "candidate failed"
-    required = ["RotationPreservesScheduling"] if mode == "repository" else [
+    required = ["RotationPreservesScheduling", "InvalidWeeklyPersistence", "NonweeklyPersistenceRetainsEvidence"] if mode == "repository" else [
         "Service", "HeaderBoundaries", "CachedIdentity", "NonweeklyHeadersAllowExplicitCache",
-        "CacheDoesNotRelabelUnidentifiedUsage", "SequentialCache", "PolicyGates",
+        "CacheDoesNotRelabelUnidentifiedUsage", "SequentialCache", "NonweeklyPersistenceRetainsEvidence", "PolicyGates",
         "HTTPForward", "WSForward", "WSClientIngress", "CombinedRotation",
     ]
     for name in required:

@@ -16,6 +16,7 @@ const (
 	OpenAIDisableSchedulingOn4297dThresholdExtraKey       = "openai_disable_scheduling_on_429_7d_threshold_percent"
 	DefaultOpenAIDisableSchedulingOn4297dThresholdPercent = 98.0
 	openAI429WeeklyInvalidAtKey                           = "codex_7d_permanent_disable_invalid_at"
+	openAI429WeeklyEvidenceKey                            = "codex_7d_permanent_disable_evidence"
 )
 
 func openAI429WeeklyThreshold(account *Account) (float64, bool) {
@@ -93,14 +94,61 @@ func openAI429WeeklyParsedHeaderUsage(headers http.Header, snapshot *OpenAICodex
 	return *weekly, true, true
 }
 
-func openAI429WeeklyUsage(account *Account, headers http.Header, now time.Time) (float64, bool) {
+func openAI429WeeklyUsage(account *Account, headers http.Header, now time.Time, observedAt ...time.Time) (float64, bool) {
 	if used, present, valid := openAI429WeeklyHeaderUsage(headers); present {
+		if valid && len(observedAt) > 0 {
+			observed := observedAt[0]
+			if observed.IsZero() || observed.After(now) || now.Sub(observed) >= openAICodexAutoPauseStaleAfter {
+				return 0, false
+			}
+			for _, window := range []string{"primary", "secondary"} {
+				prefix := "x-codex-" + window + "-"
+				minutes, _ := strconv.Atoi(headers.Get(prefix + "window-minutes"))
+				if minutes == 7*24*60 && len(headers.Values(prefix+"reset-after-seconds")) > 0 {
+					seconds, _ := strconv.ParseInt(headers.Get(prefix+"reset-after-seconds"), 10, 64)
+					if !observed.Add(time.Duration(seconds) * time.Second).After(now) {
+						return 0, false
+					}
+				}
+			}
+		}
 		return used, valid
 	}
 	if !openAICodexSnapshotIdentityTrusted(account) {
 		return 0, false
 	}
 	extra := account.Extra
+	if raw, exists := extra[openAI429WeeklyEvidenceKey]; exists {
+		evidence, ok := raw.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		// The complete validated observation is one versioned value. Legacy
+		// normalization of nonweekly packets cannot overwrite its identity.
+		proofExtra := map[string]any{
+			"codex_7d_used_percent":   evidence["used_percent"],
+			"codex_7d_window_minutes": evidence["window_minutes"],
+			"codex_usage_updated_at":  evidence["observed_at"],
+		}
+		if reset, exists := evidence["reset_after_seconds"]; exists {
+			proofExtra["codex_7d_reset_after_seconds"] = reset
+		}
+		if invalidAt, exists := extra[openAI429WeeklyInvalidAtKey]; exists {
+			proofExtra[openAI429WeeklyInvalidAtKey] = invalidAt
+		}
+		if rawVersions, exists := extra[CodexUsageFieldVersionsKey]; exists {
+			versions, ok := rawVersions.(map[string]any)
+			stamp, err := strconv.ParseInt(fmt.Sprint(versions[openAI429WeeklyEvidenceKey]), 10, 64)
+			if !ok || err != nil || stamp <= 0 || !codexUpdatesTime(proofExtra).Equal(time.Unix(0, stamp)) {
+				return 0, false
+			}
+			proofExtra[CodexUsageFieldVersionsKey] = map[string]any{
+				"codex_7d_used_percent": stamp, "codex_7d_window_minutes": stamp,
+				"codex_7d_reset_after_seconds": stamp,
+			}
+		}
+		extra = proofExtra
+	}
 	// A normalized legacy primary snapshot may have no window identity. Its
 	// "7d" field name alone is not evidence for a permanent scheduling change.
 	minutes, ok := resolveAccountExtraNumber(extra, "codex_7d_window_minutes")
@@ -174,6 +222,38 @@ func openAI429WeeklyUsage(account *Account, headers http.Header, now time.Time) 
 	return used, true
 }
 
+func openAI429WeeklyEvidence(used float64, observed time.Time, reset *int) map[string]any {
+	evidence := map[string]any{"used_percent": used, "window_minutes": 7 * 24 * 60, "observed_at": observed.Format(time.RFC3339Nano)}
+	if reset != nil {
+		evidence["reset_after_seconds"] = *reset
+	}
+	return evidence
+}
+
+func openAI429SnapshotWeeklyEvidence(snapshot *OpenAICodexUsageSnapshot, observed time.Time) map[string]any {
+	if snapshot.invalidWeekly429 {
+		return nil
+	}
+	var evidence map[string]any
+	for _, window := range []struct {
+		minutes, reset *int
+		used           *float64
+	}{
+		{snapshot.PrimaryWindowMinutes, snapshot.PrimaryResetAfterSeconds, snapshot.PrimaryUsedPercent},
+		{snapshot.SecondaryWindowMinutes, snapshot.SecondaryResetAfterSeconds, snapshot.SecondaryUsedPercent},
+	} {
+		if window.minutes == nil || *window.minutes != 7*24*60 {
+			continue
+		}
+		if evidence != nil || window.used == nil || !validOpenAI429Percent(*window.used) ||
+			(window.reset != nil && (*window.reset <= 0 || *window.reset > 7*24*60*60)) {
+			return nil
+		}
+		evidence = openAI429WeeklyEvidence(*window.used, observed, window.reset)
+	}
+	return evidence
+}
+
 func openAIDisableSchedulingOn429Enabled(account *Account) bool {
 	// Evaluate the persisted owner, not a managed connection's projected type.
 	if account == nil || account.ID <= 0 || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth ||
@@ -190,6 +270,15 @@ type openAIDisableScheduling429ObservedKey struct{}
 // opt-in permanent weekly policy still needs that observation, including lows
 // and invalid evidence that must prevent fallback to an older high snapshot.
 type openAI429WeeklyHeadersKey struct{}
+type openAI429WeeklyObservedAtKey struct{}
+
+func openAI429LeaseObservation(ctx context.Context, lease *openAIWSConnLease) context.Context {
+	var observed time.Time
+	if lease != nil && lease.conn != nil {
+		observed = lease.conn.createdAt()
+	}
+	return context.WithValue(ctx, openAI429WeeklyObservedAtKey{}, observed)
+}
 
 type openAIDisableScheduling429Observation struct {
 	accountID int64
@@ -234,7 +323,11 @@ func (s *RateLimitService) maybeDisableOpenAISchedulingOn429(ctx context.Context
 	if evidence, ok := ctx.Value(openAI429WeeklyHeadersKey{}).(http.Header); ok {
 		headers = evidence
 	}
-	used, usageValid := openAI429WeeklyUsage(owner, headers, time.Now())
+	var observedAt []time.Time
+	if observed, ok := ctx.Value(openAI429WeeklyObservedAtKey{}).(time.Time); ok {
+		observedAt = []time.Time{observed}
+	}
+	used, usageValid := openAI429WeeklyUsage(owner, headers, time.Now(), observedAt...)
 	if !thresholdValid || !usageValid || used <= threshold {
 		return ctx, false
 	}

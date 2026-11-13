@@ -103,6 +103,7 @@ func TestOAuth429WeeklyOnlyWSForward(t *testing.T) {
 		{"frame_with_explicit_cache", true, true, true},
 		{"frame_low_overrides_high_cache", true, true, false},
 		{"frame_invalid_overrides_high_cache", true, true, false},
+		{"frame_elapsed_handshake_reset", true, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := weekly429Headers("99", "0", false)
@@ -121,6 +122,10 @@ func TestOAuth429WeeklyOnlyWSForward(t *testing.T) {
 			if tc.name == "body_only_no_percentage" || tc.name == "frame_with_explicit_cache" {
 				h = http.Header{}
 			}
+			if tc.name == "frame_elapsed_handshake_reset" {
+				h.Set("x-codex-primary-reset-after-seconds", "1")
+			}
+			var poolRef atomic.Pointer[openAIWSConnPool]
 			var peers atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				peers.Add(1)
@@ -143,6 +148,16 @@ func TestOAuth429WeeklyOnlyWSForward(t *testing.T) {
 				if err := conn.ReadJSON(&request); err != nil {
 					t.Errorf("read: %v", err)
 					return
+				}
+				if tc.name == "frame_elapsed_handshake_reset" {
+					// Simulate elapsed connection time after the actual peer read,
+					// before the error frame; no sleep or alternate helper path.
+					ap := poolRef.Load().getOrCreateAccountPool(42)
+					ap.mu.Lock()
+					for _, pooled := range ap.conns {
+						pooled.createdAtNano.Store(time.Now().Add(-time.Minute).UnixNano())
+					}
+					ap.mu.Unlock()
 				}
 				_ = conn.WriteJSON(map[string]any{"type": "error", "error": map[string]any{"type": "usage_limit_reached", "code": "rate_limit_exceeded", "message": "fictional quota rejection", "limit_window_minutes": 10080, "resets_in_seconds": 7200}})
 			}))
@@ -168,6 +183,7 @@ func TestOAuth429WeeklyOnlyWSForward(t *testing.T) {
 			defer pool.Close()
 			pool.setClientDialerForTest(&openAIWSQuotaLocalDialer{url: "ws" + strings.TrimPrefix(server.URL, "http")})
 			gateway.openaiWSPool = pool
+			poolRef.Store(pool)
 			rates.SetAccountRuntimeBlocker(gateway)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)

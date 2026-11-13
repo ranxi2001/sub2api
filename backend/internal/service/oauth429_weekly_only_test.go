@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -335,6 +336,9 @@ type weeklyOnlyPersistedRepo struct {
 }
 
 func (r *weeklyOnlyPersistedRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
+	if _, err := json.Marshal(updates); err != nil {
+		return err
+	}
 	r.stored.Extra = mergeCodexUsageUpdates(r.stored.Extra, updates)
 	return nil
 }
@@ -354,10 +358,12 @@ func TestOAuth429WeeklyOnlySequentialCache(t *testing.T) {
 		{"conflicting_window", "x-codex-primary-window-minutes", []string{"10080", "300"}},
 		{"conflicting_weekly_windows", "x-codex-secondary-window-minutes", []string{"10080"}},
 		{"invalid_weekly_usage", "x-codex-primary-used-percent", []string{"invalid"}},
+		{"nan_weekly_usage", "x-codex-primary-used-percent", []string{"NaN"}},
+		{"infinite_weekly_usage", "x-codex-primary-used-percent", []string{"+Inf"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := scheduling429Account()
-			initial := ParseCodexRateLimitHeaders(weekly429Headers("20", "0", false))
+			initial := ParseCodexRateLimitHeaders(weekly429Headers("99", "0", false))
 			initial.UpdatedAt = time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
 			a.Extra = mergeCodexUsageUpdates(a.Extra, buildCodexUsageExtraUpdates(initial, time.Now()))
 			repo := &weeklyOnlyPersistedRepo{stored: a}
@@ -381,4 +387,23 @@ func TestOAuth429WeeklyOnlySequentialCache(t *testing.T) {
 			require.Equal(t, []bool{false}, repo.values)
 		})
 	}
+}
+
+func TestOAuth429WeeklyOnlyNonweeklyPersistenceRetainsEvidence(t *testing.T) {
+	a := scheduling429Account()
+	weekly := ParseCodexRateLimitHeaders(weekly429Headers("99", "0", false))
+	weekly.UpdatedAt = time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+	a.Extra = mergeCodexUsageUpdates(a.Extra, buildCodexUsageExtraUpdates(weekly, time.Now()))
+	repo := &weeklyOnlyPersistedRepo{stored: a}
+	nonweekly := http.Header{}
+	nonweekly.Set("x-codex-primary-window-minutes", "300")
+	nonweekly.Set("x-codex-primary-used-percent", "100")
+	nonweekly.Set("x-codex-secondary-window-minutes", "0")
+	nonweekly.Set("x-codex-secondary-used-percent", "0")
+	require.NoError(t, repo.UpdateExtra(t.Context(), a.ID, buildCodexUsageExtraUpdates(ParseCodexRateLimitHeaders(nonweekly), time.Now())))
+	reloaded, err := repo.GetByID(t.Context(), a.ID)
+	require.NoError(t, err)
+	rates := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rates.HandleUpstreamError(t.Context(), reloaded, 429, nil, nil)
+	require.Equal(t, []bool{false}, repo.values, "nonweekly persistence must retain independently valid weekly evidence")
 }

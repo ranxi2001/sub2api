@@ -2,7 +2,7 @@
 
 Baseline: `f895ea743f34a4c4ab6c9d01c01e13c931625a6e`.
 Production scope: weekly policy, quota snapshot header provenance, and the three
-stream/WS sites that separate permanent-policy evidence from temporary cooldown headers.
+stream/WS sites that separate permanent-policy evidence from temporary cooldown headers, retained handshake observation time, and explicit zero-quota recovery evidence.
 All public fixtures are fictional. Local work is static only; dynamic evidence is
 produced by `.github/workflows/oauth429-weekly-only.yml` on GitHub Actions.
 
@@ -22,7 +22,7 @@ exist, both usage and window identity must have valid fresh versions from the sa
 source observation. A partial packet cannot borrow another packet's weekly identity.
 Rejected weekly headers carry an observation timestamp through parser/persistence;
 a later headerless 429 cannot trust usage from that packet. A newer valid weekly
-observation may supply fresh evidence again. Temporary quota normalization is unchanged. Legacy
+observation may supply fresh evidence again. Validated weekly usage is also retained as one versioned observation, independently of legacy normalized windows. Nonweekly updates cannot erase it; explicit weekly zero recovery supersedes it. Temporary quota normalization is unchanged. Legacy
 snapshots without an explicit window no longer authorize a permanent disable.
 Nonweekly or unidentified headers do not veto independently valid weekly cache;
 unidentified percentages themselves never count as weekly evidence.
@@ -37,9 +37,11 @@ unidentified percentages themselves never count as weekly evidence.
 | `TestOAuth429WeeklyOnlyCacheDoesNotRelabelUnidentifiedUsage` | Actual parser/normalizer/merge; partial usage-only and window-only packets cannot combine into weekly evidence |
 | `TestOAuth429WeeklyOnlyNonweeklyHeadersAllowExplicitCache` | Public RateLimitService: explicit fresh cached 99 with only 300-minute 100 and zero/invalid neighbor; absent/unidentified cache and equality remain closed |
 | `TestOAuth429WeeklyOnlySequentialCache` | Public error service → actual parser → per-field persist/merge → reload → headerless 429; duplicate/conflicting/invalid weekly packets cannot poison cache |
+| `TestOAuth429WeeklyOnlyInvalidWeeklyPersistence` | Real PostgreSQL JSONB: NaN/Inf/duplicate weekly headers, prior-high cache, reload, delayed older snapshot, headerless 429 |
+| `TestOAuth429WeeklyOnlyNonweeklyPersistenceRetainsEvidence` | Parser/merge and production PostgreSQL variants preserve weekly 99 across subsequent 5h/zero persistence and reload |
 | `TestOAuth429WeeklyOnlyPolicyGates` | Own threshold, strict equality, invalid threshold, opt-out, non429, body-only weekly classification |
 | `TestOAuth429WeeklyOnlyHTTPForward` | Actual `Forward` entry, native and OAuth passthrough HTTP paths, mocked transport response, primary/secondary weekly zero-neighbor and negative cases |
-| `TestOAuth429WeeklyOnlyWSForward` | Actual `Forward` entry, real loopback WS upstream handshake 429 and error frames, handshake quota, fresh low/invalid versus high cache, and explicit-cache/body-only controls; observes upstream peer and retains event-reset temporary cooldown |
+| `TestOAuth429WeeklyOnlyWSForward` | Actual `Forward` entry, real loopback WS upstream handshake 429 and error frames, handshake quota, elapsed handshake reset (simulated on an actual connection after peer read), fresh low/invalid versus high cache, and explicit-cache/body-only controls; observes upstream peer and retains event-reset temporary cooldown |
 | `TestOAuth429WeeklyOnlyWSClientIngress` | Real loopback client socket → `ProxyResponsesWebSocketFromClient` ctx_pool path → upstream adapter fixture → secondary weekly error frame |
 | `TestOAuth429WeeklyOnlyCombinedRotation` | Actual RateLimitService and auto2FA service together, real queue method with spy storage, manual snapshot untouched |
 | `TestOAuth429WeeklyOnlyRotationPreservesScheduling` | Isolated PostgreSQL: actual permanent scheduling write, real automatic rotation repository lifecycle success/failure, manual enable/disable after queueing, successful-test recovery |
