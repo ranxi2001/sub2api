@@ -111,6 +111,20 @@ func TestUsagePlatformAllInsertPaths(t *testing.T) {
 	user := mustCreateUser(t, client, &service.User{Email: "platform-paths-" + stamp + "@example.invalid"})
 	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "synthetic-paths-" + stamp, Name: "Fixture"})
 	account := mustCreateAccount(t, client, &service.Account{Name: "Fixture paths", Platform: "openai"})
+	t.Cleanup(func() {
+		for _, cleanup := range []struct {
+			query string
+			id    int64
+		}{
+			{"DELETE FROM usage_logs WHERE user_id=$1", user.ID},
+			{"DELETE FROM api_keys WHERE id=$1", key.ID},
+			{"DELETE FROM accounts WHERE id=$1", account.ID},
+			{"DELETE FROM users WHERE id=$1", user.ID},
+		} {
+			_, err := integrationDB.ExecContext(ctx, cleanup.query, cleanup.id)
+			require.NoError(t, err)
+		}
+	})
 	for _, mode := range []string{"single", "batch", "best-effort-single", "best-effort-batch"} {
 		t.Run(mode, func(t *testing.T) {
 			log := &service.UsageLog{Platform: "qwen", UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID,
