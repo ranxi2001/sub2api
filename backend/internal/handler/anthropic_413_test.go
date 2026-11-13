@@ -84,6 +84,7 @@ func TestAnthropic413MessagesHTTP(t *testing.T) {
 		passthrough bool
 		omit413     bool
 		cooldown    bool
+		override    string
 	}{
 		{name: "apikey", accountType: service.AccountTypeAPIKey},
 		{name: "passthrough", accountType: service.AccountTypeAPIKey, passthrough: true},
@@ -93,6 +94,8 @@ func TestAnthropic413MessagesHTTP(t *testing.T) {
 		{name: "setup_token", accountType: service.AccountTypeSetupToken},
 		{name: "apikey_cooldown_rule", accountType: service.AccountTypeAPIKey, cooldown: true},
 		{name: "oauth_cooldown_rule", accountType: service.AccountTypeOAuth, cooldown: true},
+		{name: "apikey_custom_override", accountType: service.AccountTypeAPIKey, override: "custom"},
+		{name: "passthrough_body_override", accountType: service.AccountTypeAPIKey, passthrough: true, override: "body"},
 	} {
 		t.Run(variant.name, func(t *testing.T) {
 			for _, boundary := range []string{"nonstream", "stream", "headers", "ping", "partial"} {
@@ -156,34 +159,50 @@ func TestAnthropic413MessagesHTTP(t *testing.T) {
 						gatewayService: gw, billingCacheService: billing, cfg: cfg, maxAccountSwitches: 1,
 						concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(&fakeConcurrencyCache{}), SSEPingFormatClaude, 0),
 					}
+					if variant.override != "" {
+						rule := newBodyLimitPassthroughRule(http.StatusOK, "fixture-override-must-not-leak")
+						rule.Platforms = []string{service.PlatformAnthropic}
+						rule.PassthroughBody = variant.override == "body"
+						rule.SkipMonitoring = true
+						rules := &errorPassthroughRepoStub{}
+						rules.rules = append(rules.rules, rule)
+						h.errorPassthroughService = service.NewErrorPassthroughService(rules, nil)
+					}
 					rec := httptest.NewRecorder()
-					c, _ := gin.CreateTestContext(rec)
 					body := fmt.Sprintf(`{"model":"claude-sonnet-4-5","max_tokens":16,"stream":%t,"messages":[{"role":"user","content":"synthetic-413-input"}]}`, stream)
-					c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
-					c.Request.Header.Set("Content-Type", "application/json")
-					c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
+					req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+					req.Header.Set("Content-Type", "application/json")
+					req = req.WithContext(context.WithValue(req.Context(), ctxkey.Group, group))
 					apiKey := &service.APIKey{ID: 4133, UserID: 4134, GroupID: &groupID, Group: group, Status: service.StatusActive,
 						User: &service.User{ID: 4134, Balance: 100, Concurrency: 10}}
-					c.Set(string(middleware.ContextKeyAPIKey), apiKey)
-					c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 10})
 					prefix := ""
-					if committed {
-						c.Header("Content-Type", "text/event-stream")
-						switch boundary {
-						case "ping":
-							prefix = "event: ping\ndata: {\"type\":\"ping\"}\n\n"
-						case "partial":
-							prefix = partialMessageStartSSE
+					setupOpsErrorLogTestQueue(t, 1)
+					ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+					router := gin.New()
+					router.Use(OpsErrorLoggerMiddleware(ops))
+					var c *gin.Context
+					router.POST("/v1/messages", func(handlerContext *gin.Context) {
+						c = handlerContext
+						c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+						c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 10})
+						if committed {
+							c.Header("Content-Type", "text/event-stream")
+							switch boundary {
+							case "ping":
+								prefix = "event: ping\ndata: {\"type\":\"ping\"}\n\n"
+							case "partial":
+								prefix = partialMessageStartSSE
+							}
+							if prefix != "" {
+								_, writeErr := io.WriteString(c.Writer, prefix)
+								require.NoError(t, writeErr)
+							}
+							c.Writer.Flush()
 						}
-						if prefix != "" {
-							_, err = io.WriteString(c.Writer, prefix)
-							require.NoError(t, err)
-						}
-						c.Writer.Flush()
-					}
-
-					// Exercise the real selection, Forward, error and handler paths.
-					h.Messages(c)
+						h.Messages(c)
+					})
+					// Exercise actual ops middleware, selection, Forward and wire output.
+					router.ServeHTTP(rec, req)
 
 					if !committed {
 						require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code, "anthropic_413_wire_status: upstream HTTP 413 must reach the client")
@@ -208,6 +227,19 @@ func TestAnthropic413MessagesHTTP(t *testing.T) {
 					require.NotContains(t, rec.Body.String(), "fixture-must-not-leak")
 					require.Empty(t, rec.Result().Header.Get("X-Request-Id"))
 					require.Empty(t, rec.Result().Header.Get("Retry-After"))
+					require.Equal(t, int64(1), OpsErrorLogQueueLength(), "413 must remain observable even when an override requests skip_monitoring")
+					entry := (<-opsErrorLogQueue).entry
+					require.Equal(t, http.StatusRequestEntityTooLarge, entry.StatusCode, "ops records logical 413 even on an already committed HTTP 200 stream")
+					require.Equal(t, "request_too_large", entry.ErrorType)
+					require.Equal(t, "request", entry.ErrorPhase)
+					require.Equal(t, "client", entry.ErrorOwner)
+					require.Equal(t, "client_request", entry.ErrorSource)
+					require.Equal(t, "P3", entry.Severity)
+					require.True(t, entry.IsBusinessLimited)
+					require.Nil(t, entry.AccountID, "client rejection must not be attributed to account health")
+					require.Nil(t, entry.UpstreamStatusCode)
+					require.Empty(t, entry.UpstreamErrors)
+					require.NotContains(t, entry.ErrorMessage, "must-not-leak")
 					phase, businessLimited, owner, _ := classifyOpsErrorLog(c, "request_too_large", anthropic413ClientMessage, "", http.StatusRequestEntityTooLarge)
 					require.Equal(t, "request", phase, "request size must not be classified as an upstream outage")
 					require.Equal(t, "client", owner, "request rejection must not pollute provider/group health")

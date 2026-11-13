@@ -100,7 +100,7 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Candidate regression (expected to fail in tests-only Draft)
+      - name: Candidate handler, wire and ops regressions
         shell: bash
         run: |
           set -euo pipefail
@@ -117,7 +117,7 @@ jobs:
         run: |
           set -euo pipefail
           cd backend
-          go test -race -tags=unit ./internal/handler -run '^Test(Anthropic413MessagesHTTP|GatewayEnsureForwardErrorResponse|GatewayForwardErrorAlreadyCommunicated|StreamWrittenGuard|HandleFailoverError|HandleSelectionExhausted|FailoverClientGone)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/anthropic-413-candidate/race.log"
+          go test -race -tags=unit ./internal/handler -run '^Test(Anthropic413MessagesHTTP|GatewayEnsureForwardErrorResponse|GatewayForwardErrorAlreadyCommunicated|StreamWrittenGuard|HandleFailoverError|HandleSelectionExhausted|FailoverClientGone|OpsErrorLoggerMiddleware_(Google|RequestScoped)|SetOpsLocalErrorTypeClearsRequestScopedMark)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/anthropic-413-candidate/race.log"
           go test -tags=unit ./internal/service -run '^Test(GatewayService_Forward_|GatewayService_AnthropicAPIKeyPassthrough_|GatewayCompatPoolMode429AllowsSameAccountRetry|CalculateAnthropic429ResetTime|RateLimitService_HandleUpstreamError_(OAuth401|NonOAuth401|NonOAuthModel401)|HandleUpstreamTransportError|ClaudeClientCancelForwardStopsActualHTTPAndDoesNotRetry)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/anthropic-413-candidate/service.log"
       - name: Build affected production packages without test tags
         shell: bash
