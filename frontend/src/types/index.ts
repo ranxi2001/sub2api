@@ -2468,6 +2468,7 @@ export interface UserErrorRequest {
 }
 
 export interface UserErrorRequestDetail extends UserErrorRequest {
+  reset_reason?: string
   error_body: string
   upstream_status_code?: number
 }

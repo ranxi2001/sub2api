@@ -313,7 +313,7 @@ const errorModelOptions = computed<SelectOption[]>(() => {
   return opts
 })
 
-const errorCategoryCodes = ['auth', 'rate_limit', 'quota', 'invalid_request', 'service_unavailable', 'upstream', 'internal', 'cyber']
+const errorCategoryCodes = ['auth', 'rate_limit', 'quota', 'invalid_request', 'service_unavailable', 'upstream', 'transport_error', 'internal', 'cyber']
 
 const errorCategoryOptions = computed<SelectOption[]>(() => [
   { value: '', label: t('usage.errors.allCategories') },

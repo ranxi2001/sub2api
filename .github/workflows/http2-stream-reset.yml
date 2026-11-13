@@ -84,3 +84,43 @@ jobs:
         with:
           name: http2-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/http2-evidence/
+
+  user-surface:
+    if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Real component regressions and production frontend build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/http2-ui"
+          git rev-parse HEAD > "$RUNNER_TEMP/http2-ui/head.txt"
+          pnpm --dir frontend exec vitest run src/components/user/__tests__/UserErrorTransport.spec.ts src/components/user/__tests__/UserErrorDetailModal.spec.ts 2>&1 | tee "$RUNNER_TEMP/http2-ui/component.log"
+          pnpm --dir frontend run build 2>&1 | tee "$RUNNER_TEMP/http2-ui/build.log"
+      - name: Isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/http2-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/http2-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Actual component before and after in English and Chinese
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/http2-browser/node_modules/playwright/index.mjs
+        run: node .github/http2-stream-reset-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/http2-ui"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http2-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/http2-ui/

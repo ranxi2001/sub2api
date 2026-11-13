@@ -58,7 +58,7 @@
       <!-- Message -->
       <div v-if="detail.message">
         <span class="font-medium text-gray-500 dark:text-dark-400">{{ t('usage.errors.message') }}</span>
-        <p class="mt-0.5 text-gray-900 dark:text-dark-100 break-all">{{ detail.message }}</p>
+        <p class="mt-0.5 text-gray-900 dark:text-dark-100 break-all">{{ userErrorMessage(detail, t) }}</p>
       </div>
 
       <!-- Error Body -->
@@ -77,6 +77,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import { getMyErrorDetail } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
 import type { UserErrorRequestDetail } from '@/types'
+import { userErrorMessage } from '@/utils/userErrorMessage'
 
 const props = defineProps<{
   show: boolean
