@@ -239,8 +239,30 @@ async function loadAccounts() {
 function selectTab(tab:'records'|'settings'){activeTab.value=tab;if(tab==='settings'&&!thresholdReady.value&&!thresholdLoading.value)void loadAccounts()}
 function tabKey(event:KeyboardEvent,tab:'records'|'settings'){if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?'settings':event.key==='End'?'records':tab==='records'?'settings':'records';selectTab(next);document.getElementById(`ops-tab-${next}`)?.focus()}
 function acceptConfig(config: AccountOpsConfig){if(!alive||!auth.user||!remote.value)return;version++;loading.value=false;remote.value={...remote.value,config:normalize(config)};app.showSuccess(t('accountOps.settingsSaved'))}
-function acceptGroupConfig(config: AccountOpsConfig){showGroupDialog.value=false;acceptConfig(config);void loadGroups()}
-async function loadGroups(){try{const groups=await getAccountOpsThresholdGroups();if(alive)accountGroups.value=groups}catch(e){if(alive)app.showError(message(e))}}
+function acceptGroupConfig(config: AccountOpsConfig) {
+  if (!alive || !auth.user) return
+  // Publish the committed membership before allowing another editing session.
+  // Invalidate both pending account polls and previous post-save group reads.
+  accountsVersion++
+  thresholdLoading.value = false
+  accountGroups.value = (config.groups ?? []).map(group => ({
+    id: group.id, name: group.name, default_name: group.name,
+    provider: group.provider || 'manual', site: group.site || '', mode: 'manual',
+    account_ids: [...(group.account_ids ?? [])],
+  }))
+  showGroupDialog.value = false
+  acceptConfig(config)
+  void loadGroups()
+}
+async function loadGroups() {
+  const current = ++accountsVersion
+  try {
+    const groups = await getAccountOpsThresholdGroups()
+    if (alive && current === accountsVersion) accountGroups.value = groups
+  } catch (e) {
+    if (alive && current === accountsVersion) app.showError(message(e))
+  }
+}
 function acceptBatchConfig(config: AccountOpsConfig){acceptConfig(config);ruleList.value?.clearSelection()}
 function editWebhook(hook:AccountOpsWebhook|null){editingHook.value=hook;showWebhook.value=true}
 function addChannel(provider: 'email'|'webhook') {
