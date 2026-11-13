@@ -7,6 +7,7 @@ on:
     paths:
       - 'backend/internal/repository/quality_template_quota.go'
       - 'backend/internal/repository/quality_quota_5xx_integration_test.go'
+      - 'backend/internal/repository/integration_harness_test.go'
       - 'backend/internal/service/quality_quota_integration_helper.go'
       - '.github/scripts/issue817-race-gate.sh'
       - '.github/scripts/issue817-validate-evidence.sh'
@@ -27,6 +28,34 @@ jobs:
       fail-fast: false
       matrix:
         behavior: [red, green]
+    # Provision services outside the race binary: the captured startup SIGSEGV
+    # occurred in TestMain's Docker subprocess path, before any product test.
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sub2api_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sub2api_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      SUB2API_TEST_POSTGRES_DSN: 'host=127.0.0.1 port=5432 dbname=sub2api_test user=postgres password=postgres sslmode=disable TimeZone=UTC'
+      SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:6379/0'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -134,6 +163,15 @@ jobs:
           if grep -Eq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution' ../evidence/retained-contracts.log; then
             exit 1
           fi
+          for required in \
+            TestIssue817QuotaSkipPreserves401AndOwnership \
+            TestIssue817QuotaSkipRetainsActualIsolationOwnership \
+            TestIssue817ManualTriggerIsOneShotAndLeaseFenced \
+            TestQuality5xxClaimKeepsCronAndCoalescesScheduledRun \
+            TestQuality5xxFinishConsumesCrossedCronWithoutOverwritingEdits \
+            TestQualityRetestRestBlocksEveryClaimUntilDeadline; do
+            grep -F -- "--- PASS: $required (" ../evidence/retained-contracts.log
+          done
       - uses: actions/upload-artifact@v7
         if: always()
         with:
