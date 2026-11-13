@@ -2095,11 +2095,11 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 	writerSizeBeforeResponse int,
 	err error,
 ) error {
-	requestID := ""
+	resetRequestID := ""
 	if resp != nil {
-		requestID = resp.Header.Get("x-request-id")
+		resetRequestID = resp.Header.Get("x-request-id")
 	}
-	if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, err); handled {
+	if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, resetRequestID, err); handled {
 		return resetErr
 	}
 	responseWritten := c != nil && c.Writer != nil && OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeResponse
