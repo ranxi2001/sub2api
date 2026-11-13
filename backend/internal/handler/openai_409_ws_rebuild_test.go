@@ -115,6 +115,27 @@ func TestOpenAI409WSResidualRepairs(t *testing.T) {
 	}
 }
 
+func TestOpenAI409WSNativeNamespaceRecovery(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModeShared, service.OpenAIWSIngressModeDedicated, service.OpenAIWSIngressModePassthrough} {
+		t.Run(mode, func(t *testing.T) { runReadableWSContinuation(t, mode, "native_namespace") })
+	}
+}
+
+func readableWSNativeNamespaceTools() []any {
+	return append(httpRebuildToolDefinitions(),
+		map[string]any{"type": "namespace", "name": "files", "tools": []any{
+			map[string]any{"type": "function", "name": "read", "parameters": map[string]any{
+				"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "enum": []string{"sum.go"}}},
+				"required": []string{"path"}, "additionalProperties": false,
+			}},
+		}},
+		map[string]any{"type": "function", "name": "files__read", "parameters": map[string]any{
+			"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string", "enum": []string{"README.md"}}},
+			"required": []string{"name"}, "additionalProperties": false,
+		}},
+	)
+}
+
 func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	t.Helper()
 	clients := issue805Redis(t)
@@ -126,6 +147,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	settings := map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: fmt.Sprint(scenario != "off")}
 	identityCase, modelCase := scenario == "identity" || strings.HasPrefix(scenario, "header_"), scenario == "bridge_model"
 	customTools := strings.HasPrefix(scenario, "tools_")
+	nativeNamespace := scenario == "native_namespace"
 	smartMode := ""
 	if strings.HasPrefix(scenario, "smart_") {
 		smartMode = strings.TrimPrefix(scenario, "smart_")
@@ -185,6 +207,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	}()
 	requestModel := "gpt-5.1"
 	declarations := httpRebuildToolDefinitions()
+	if nativeNamespace {
+		declarations = readableWSNativeNamespaceTools()
+	}
 	if customTools {
 		declarations = append(declarations, map[string]any{"type": "custom", "name": "exec", "description": "Read the completed patch exactly once"})
 	}
@@ -299,7 +324,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
-	if scenario != "completed" && !identityCase && !modelCase && smartMode == "" {
+	if scenario != "completed" && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
 		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
 		closeCtx, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelClose()
@@ -345,7 +370,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		require.Zero(t, tools.verifications)
 		return
 	}
-	if customTools {
+	if nativeNamespace {
+		require.Equal(t, 2, sends, "WS_NATIVE_NAMESPACE_B_DISPATCH_MISSING: close=%v terminal=%s", readErr, secondRaw)
+	} else if customTools {
 		require.Equal(t, 2, sends, "WS_RESIDUAL_TOOL_PROJECTION_REFUSED: close=%v terminal=%s", readErr, secondRaw)
 	} else if smartMode != "" {
 		require.Equal(t, 2, sends, "WS_REVIEW_SMART_SESSION_STALE: close=%v terminal=%s", readErr, secondRaw)
@@ -400,6 +427,11 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		require.Equal(t, "gpt-5.4", gjson.GetBytes(oracle.frames[3], "model").String())
 	}
 	require.Equal(t, expectedIdentities, oracle.identities)
+	if nativeNamespace {
+		for _, frame := range oracle.frames {
+			require.JSONEq(t, httpRebuildJSON(declarations), gjson.GetBytes(frame, "tools").Raw, "native declarations and both distinct schemas must survive A/B/B")
+		}
+	}
 	if identityCase {
 		for _, header := range oracle.headers[1:] {
 			require.NotEqual(t, headers.Get("conversation_id"), header.Get("conversation_id"), "WS_RESIDUAL_A_HEADER_LEAK: only outbound provider state is detached")

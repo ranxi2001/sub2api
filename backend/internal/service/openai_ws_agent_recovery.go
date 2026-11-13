@@ -51,7 +51,7 @@ type openAIWSAgentRecovery struct {
 	known                            map[[32]byte]bool
 	readable                         *openAIAgentRecoveryRequest
 	readableSource, readableControls [32]byte
-	bridgeInput, bridgeControls      [32]byte
+	bridgeSource                     []byte // verified pre-builder bytes, bounded by the current frame
 }
 
 func newOpenAIWSAgentRecovery(s *OpenAIGatewayService, ctx context.Context, c *gin.Context) *openAIWSAgentRecovery {
@@ -109,6 +109,7 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.readable = nil
+	r.bridgeSource = nil
 	initial := openAIAgentRecoveryFromContext(r.ctx)
 	if initial == nil || !initial.omittedHistory {
 		return source, nil
@@ -152,14 +153,9 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 		if err != nil {
 			return nil, err
 		}
-		// Derive the bridge's permitted custom/namespace tool projection from
-		// the already verified source, before any builder sees it. Native WS
-		// keeps the unprojected expectation. No final payload can redefine it.
-		projected, _, err := adaptResponsesClientToolsForFunctionUpstream(clean, "OpenAI WS HTTP bridge")
-		if err != nil {
-			return nil, err
-		}
-		r.bridgeInput, r.bridgeControls = openAIAgentRecoveryInputDigest(projected), openAI409ControlsDigest(projected)
+		// Freeze a private copy before any builder sees it. Projection errors
+		// belong only to an actual HTTP bridge; native WS retains namespaces.
+		r.bridgeSource = append([]byte(nil), clean...)
 	}
 	r.readable = &snapshot
 	r.readableSource = openAIAgentRecoveryInputDigest(source)
@@ -238,8 +234,14 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		}
 		ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, r.readable)
 		if mode == "http_bridge" && account.IsOpenAIApiKey() {
+			// Derive the permitted projection exclusively from the verified
+			// pre-builder snapshot, never from source/payload/request final bytes.
+			projected, _, err := adaptResponsesClientToolsForFunctionUpstream(r.bridgeSource, "OpenAI WS HTTP bridge")
+			if err != nil {
+				return err
+			}
 			snapshot := *r.readable
-			snapshot.apiInputDigest, snapshot.apiControlsDigest = r.bridgeInput, r.bridgeControls
+			snapshot.apiInputDigest, snapshot.apiControlsDigest = openAIAgentRecoveryInputDigest(projected), openAI409ControlsDigest(projected)
 			ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, &snapshot)
 		}
 	}

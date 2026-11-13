@@ -99,6 +99,28 @@ class WSReadableEvidenceTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     GATE.validate("RED", 1, raw(events), suite)
 
+    def test_tool_red_requires_actual_transport_message_on_both_leaves(self):
+        # Keep this independent of diagnostic(): the actual baseline emits
+        # ClientMessage(), not its internal wire_changed reason identifier.
+        message = "The proven encrypted agent transport changed."
+        marker = "WS_RESIDUAL_TOOL_PROJECTION_REFUSED"
+        events = evidence("RED", "ws-residual")
+        for event in events:
+            if event.get("Action") == "output" and "/tools_" in event.get("Test", ""):
+                event["Output"] = f"{marker}: {message} Preserve this task and context."
+        GATE.validate("RED", 1, raw(events), "ws-residual")
+        for leaf in ("tools_omitted", "tools_explicit"):
+            for wrong in (marker, message, f"{marker}: wire_changed", f"{marker}: upstream failed"):
+                changed = [dict(event) for event in events]
+                for event in changed:
+                    if event.get("Action") == "output" and event.get("Test", "").endswith("/" + leaf):
+                        event["Output"] = wrong
+                with self.assertRaises(ValueError):
+                    GATE.validate("RED", 1, raw(changed), "ws-residual")
+        for poison in ("undefined: fixture", "panic: fixture", "WARNING: DATA RACE", "--- SKIP: fixture"):
+            with self.assertRaises(ValueError):
+                GATE.validate("RED", 1, raw(events) + poison, "ws-residual")
+
     def test_each_leaf_requires_both_diagnostics(self):
         for suffix in GATE.SUITES["ws"][1]:
             for diagnostic in ("WS_READABLE_B_DISPATCH_MISSING", "account eligibility changed", "other"):

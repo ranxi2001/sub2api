@@ -48,6 +48,10 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		u.httpSends++
 	}
 	n := len(u.frames)
+	if u.scenario == "native_namespace" && (!ws || !reflect.DeepEqual(gjson.GetBytes(body, "tools").Value(), gjson.Parse(httpRebuildJSON(readableWSNativeNamespaceTools())).Value())) {
+		u.validationFailures++
+		return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_native_namespace_changed"}}}`)
+	}
 	if u.scenario == "bridge_model" && n == 2 {
 		if r.Header.Get("Authorization") != "Bearer fixture-readable-ws-A" || gjson.GetBytes(body, "model").String() != "gpt-5.4" || !strings.Contains(string(body), "model-switch-warmup") {
 			u.validationFailures++
@@ -71,6 +75,9 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		validTools := httpRebuildToolsAvailable(body)
 		if customTools {
 			validTools = readableWSCustomToolsAvailable(body)
+		}
+		if u.scenario == "native_namespace" {
+			validTools = true // exact native declarations/schema checked above, including A
 		}
 		valid := r.Header.Get("Authorization") == "Bearer fixture-readable-ws-B" &&
 			strings.Contains(string(body), httpRebuildTask) && validTools &&
