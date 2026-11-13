@@ -17,7 +17,8 @@
                 v-model="searchQuery"
                 type="text"
                 :placeholder="t('admin.groups.searchGroups')"
-                class="input pl-10"
+                class="input scroll-mt-20 pl-10"
+                @focus="handleSearchFocus"
                 @input="handleSearch"
               />
             </div>
@@ -5917,6 +5918,15 @@ const loadCapacitySummary = async () => {
     capacityMap.value = map;
   } catch (error) {
     console.error("Error loading group capacity summary:", error);
+  }
+};
+
+const handleSearchFocus = (event: FocusEvent) => {
+  const input = event.target as HTMLInputElement;
+  const topInset = parseFloat(getComputedStyle(input).scrollMarginTop) || 0;
+  // Nearest scrolling can leave an input inside the viewport but behind AppHeader.
+  if (input.getBoundingClientRect().top < topInset) {
+    input.scrollIntoView({ block: "start", behavior: "auto" });
   }
 };
 

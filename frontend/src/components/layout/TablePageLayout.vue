@@ -92,6 +92,11 @@ onUnmounted(() => {
 }
 
 /* 移动端：恢复正常滚动 */
+.table-page-layout.mobile-mode {
+  /* 卡片随文档滚动时，父布局也必须随内容增高，避免提前结束顶栏的 sticky 范围。 */
+  height: auto;
+}
+
 .table-page-layout.mobile-mode .table-scroll-container {
   @apply h-auto overflow-visible border-none shadow-none bg-transparent;
 }
