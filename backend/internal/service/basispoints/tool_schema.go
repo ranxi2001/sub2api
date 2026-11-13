@@ -86,8 +86,12 @@ func validateToolNumberBudget(value any) error {
 	return visit(value, 0)
 }
 
-type toolArgumentsSchemaError struct{}
+type toolArgumentsSchemaError struct{ Diagnostic *ToolArgumentsDiagnostic }
 
-func (toolArgumentsSchemaError) Error() string {
-	return "basispoints function arguments do not satisfy the declared tool schema or validation resource limits"
+func (e toolArgumentsSchemaError) Error() string {
+	if e.Diagnostic == nil {
+		return "basispoints function arguments do not satisfy the declared tool schema or validation resource limits"
+	}
+	d := e.Diagnostic
+	return fmt.Sprintf("basispoints function arguments rejected: %s (tool=%q; path=%s; rule=%s)", d.Reason, d.Tool, d.Path, d.Rule)
 }

@@ -259,6 +259,8 @@ func (s *OpenAIOAuthReauthService) CompleteConnectionAuthorization(ctx context.C
 		creds["chatgpt_user_id"] = info.ChatGPTUserID
 		creds["email"] = info.Email
 	}
+	creds[connectionAuthorizationReceipt] = connectionAuthorizationHash(sessionID)
+	creds[connectionAuthorizationTime] = strconv.FormatInt(time.Now().Unix(), 10)
 	if err = s.encryptConnectionCredentials(c, creds); err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ type BridgeFailure struct {
 	RejectedTool          string
 	RepairSkippedReason   string
 	UpstreamTerminalEvent string
+	ToolArguments         *ToolArgumentsDiagnostic
 }
 
 func (f *BridgeFailure) Details() map[string]any {
@@ -20,6 +21,9 @@ func (f *BridgeFailure) Details() map[string]any {
 	}
 	if f.UpstreamTerminalEvent != "" {
 		result["upstream_terminal_event"] = f.UpstreamTerminalEvent
+	}
+	if f.ToolArguments != nil {
+		result["tool_arguments"] = f.ToolArguments
 	}
 	return result
 }
@@ -37,7 +41,15 @@ func ParseBridgeFailure(raw []byte) *BridgeFailure {
 	if text(detail["code"]) != "basispoints_protocol_error" || (stage != "bridge_tool_validation" && stage != "bridge_protocol_conversion") {
 		return nil
 	}
-	return &BridgeFailure{Message: text(detail["message"]), FailureStage: stage,
+	failure := &BridgeFailure{Message: text(detail["message"]), FailureStage: stage,
 		RejectedTool: safeSchemaName(text(detail["rejected_tool"])), RepairSkippedReason: text(detail["repair_skipped_reason"]),
 		UpstreamTerminalEvent: text(detail["upstream_terminal_event"])}
+	if d, ok := detail["tool_arguments"].(object); ok {
+		reason := text(d["reason"])
+		if reason == "schema_validation" || reason == "resource_limit" {
+			failure.ToolArguments = &ToolArgumentsDiagnostic{Tool: safeSchemaName(text(d["tool"])), Reason: reason,
+				Path: safeSchemaName(text(d["path"])), Rule: safeToolArgumentRule(text(d["rule"]))}
+		}
+	}
+	return failure
 }

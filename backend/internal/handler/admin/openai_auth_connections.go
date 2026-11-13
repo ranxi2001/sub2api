@@ -85,6 +85,29 @@ func (h *OpenAIOAuthReauthHandler) CompleteConnectionAuthorization(c *gin.Contex
 	}
 	response.Success(c, gin.H{"authorized": true})
 }
+
+// Use a body rather than URL parameters so session identifiers are not copied
+// to ordinary access logs, browser history or referrers.
+func (h *OpenAIOAuthReauthHandler) ConnectionAuthorizationStatus(c *gin.Context) {
+	id, ok := parseReauthAccountID(c)
+	if !ok {
+		return
+	}
+	var input struct {
+		SessionID string `json:"session_id" binding:"required"`
+	}
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "Session is required")
+		return
+	}
+	result, err := h.service.ConnectionAuthorizationStatus(c.Request.Context(), id, c.Param("connection_id"), input.SessionID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, result)
+}
 func (h *OpenAIOAuthReauthHandler) RevokeAuthConnection(c *gin.Context) {
 	id, ok := parseReauthAccountID(c)
 	if !ok {

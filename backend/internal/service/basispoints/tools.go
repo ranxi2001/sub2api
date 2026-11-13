@@ -710,13 +710,15 @@ func (b *Bridge) finishClientToolCall(native object, info tool, envelope object,
 		}
 		if info.Schema != nil {
 			if err := validateToolNumberBudget(args); err != nil {
-				return nil, toolArgumentsSchemaError{}
+				return nil, newToolArgumentsError(info, err)
 			}
 		}
 		// FUNCTION_CMD preserves client-validated metadata verbatim. Ordinary
 		// function envelopes still enforce their complete declared schema.
-		if validateSchema && info.Schema != nil && info.Schema.Validate(args) != nil {
-			return nil, toolArgumentsSchemaError{}
+		if validateSchema && info.Schema != nil {
+			if err := info.Schema.Validate(args); err != nil {
+				return nil, newToolArgumentsError(info, err)
+			}
 		}
 		encoded, _ := json.Marshal(args)
 		result["arguments"] = string(encoded)
