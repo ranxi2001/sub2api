@@ -12,7 +12,7 @@
       <label v-if="!hideTypeFilter" class="space-y-1 text-sm"><span>{{ t('qualityOps.accountType') }}</span>
         <select v-model="accountType" class="input" data-testid="quality-account-type" @change="emit('search', 1)">
           <option value="">{{ t('qualityOps.allAccountTypes') }}</option>
-          <option v-for="option in qualityAccountTypeOptions" :key="option.value" :value="option.value">{{ t(option.label) }}</option>
+          <option v-for="option in typeOptions || qualityAccountTypeOptions" :key="option.value" :value="option.value">{{ t(option.label) }}</option>
         </select>
       </label>
     </div>
@@ -47,10 +47,9 @@
   </div>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends { id: number; name: string }">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AccountListItem, AdminGroup } from '@/types'
 import { qualityAccountStatusOptions, qualityAccountTypeOptions } from '@/utils/qualityAccountFilter'
 
 const { t } = useI18n()
@@ -62,8 +61,8 @@ const accountType = defineModel<string>('type', { required: true })
 const statuses = defineModel<string[]>('statuses', { required: true })
 const scope = defineModel<'all' | 'manual'>('scope', { required: true })
 const props = defineProps<{
-  accounts: AccountListItem[]
-  groups: Pick<AdminGroup, 'id' | 'name'>[]
+  accounts: T[]
+  groups: { id: number | string; name: string }[]
   accountsLoading: boolean
   selectingAccounts: boolean
   accountsError: string
@@ -79,7 +78,8 @@ const props = defineProps<{
   searchId?: string
   hideTypeFilter?: boolean
   hideStatusFilter?: boolean
-  disabledReason: (account: AccountListItem) => string
+  typeOptions?: { value: string; label: string }[]
+  disabledReason: (account: T) => string
 }>()
 // 批量修改改的是已有规则，范围选择只在新建时出现。
 const allScope = computed(() => scope.value === 'all' && !props.bulk)

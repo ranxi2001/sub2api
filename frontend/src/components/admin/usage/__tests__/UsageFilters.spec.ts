@@ -440,3 +440,30 @@ describe('UsageFilters — identity-only traffic filters', () => {
     expect(wrapper.props('modelValue').api_key_id).toBeUndefined()
   })
 })
+
+describe('admin usage platform filter', () => {
+  it.each(['errors', 'ranking', 'connections', 'latency'] as const)('keeps the platform selector out of %s', async mode => {
+    const wrapper = mountFilters(defaultFilters(), mode)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-platform-filter"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not expose the admin platform filter in observer mode', async () => {
+    const wrapper = mount(UsageFilters, {
+      props: { modelValue: defaultFilters(), exporting: false, startDate: '', endDate: '' },
+      global: { provide: { [observerUsageContext as symbol]: true }, stubs: { Select: true } },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-platform-filter"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('offers a server-side platform filter alongside the group filter', async () => {
+    const wrapper = mountFilters()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-platform-filter"]').exists(),
+      'admin usage details must offer a platform selector').toBe(true)
+    wrapper.unmount()
+  })
+})
