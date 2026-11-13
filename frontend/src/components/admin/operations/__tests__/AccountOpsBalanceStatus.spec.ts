@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import Status from '../AccountOpsBalanceStatus.vue'
 import { getUpstreamBillingProbeSettings, probeUpstreamBilling, setUpstreamBillingProbeEnabled } from '@/api/admin/accounts'
 import type { AccountOpsThresholdAccount } from '@/api/admin/accountOps'
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/admin/accounts', () => ({ getUpstreamBillingProbeSettings: vi.fn(), probeUpstreamBilling: vi.fn(), setUpstreamBillingProbeEnabled: vi.fn() }))
 const account: AccountOpsThresholdAccount = { account_id: 1, account_name: 'Demo', platform: 'openai', type: 'apikey', unit: 'USD', balance: null, balance_status: 'stale', received_at: '2026-01-01T00:00:00Z', probe_enabled: false, last_known_balance: 42, usage_windows: [] }
 const create = () => mount(Status, { props: { accounts: [account] } })
