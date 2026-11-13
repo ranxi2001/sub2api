@@ -527,6 +527,12 @@ export default {
 
     // Usage Records
     usage: {
+      platform: 'Platform',
+      allPlatforms: 'All platforms',
+      unknownPlatform: 'Unknown (legacy)',
+      platformHistoryHint: 'Uses the platform recorded for each request. Older records without a platform remain under Unknown (legacy).',
+      platformCleanupUnavailable: 'Reset the platform filter before cleaning up records.',
+
       title: 'Usage Records',
       description: 'View and manage all user usage records',
       userFilter: 'User',
