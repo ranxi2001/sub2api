@@ -3214,6 +3214,12 @@ describe('EditAccountModal temp-unschedulable rule scope', () => {
     )
     expect(announcements).toHaveLength(2)
     expect(announcements.every((badge) => badge.props('userId') === 41)).toBe(true)
+    await announcements[0].get('button').trigger('click')
+    expect(
+      wrapper.findAllComponents(NewFeatureBadge).filter(
+        (badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.tempUnschedStreamCountWindow && badge.find('button').exists()
+      )
+    ).toHaveLength(0)
     const counts = wrapper.findAll('[data-testid="temp-unsched-trigger-count"]')
     expect(counts).toHaveLength(2)
     expect((counts[0].element as HTMLInputElement).value).toBe('1')
