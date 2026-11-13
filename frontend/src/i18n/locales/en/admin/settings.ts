@@ -575,7 +575,9 @@ export default {
       },
       gatewayForwarding: {
         omitEncryptedHistory409: 'Omit encrypted content on 409',
-        omitEncryptedHistory409Hint: 'Off by default. For HTTP Responses rejected before dispatch because the encrypted history owner is unavailable or its route changed, omit historical ciphertext and select an eligible account once. Readable text and tool relationships remain, but omitted context is lost and upstream acceptance is not guaranteed. Excludes current encrypted tasks, server-side conversation pointers, WebSockets, uncertain delivery and store failures. Already-sent requests are not replayed.',
+        omitEncryptedHistory409Hint: 'Off by default. For HTTP Responses rejected before dispatch because the encrypted history owner is unavailable or its route changed, omit historical ciphertext and select an eligible account once. Readable text and tool relationships remain, but omitted context is lost and upstream acceptance is not guaranteed. Excludes current encrypted tasks, server-side conversation pointers, WebSockets, uncertain delivery and store failures. This option does not replay sent requests; a separate 400 Beta controls that recovery.',
+        omitEncryptedHistory400: 'Lossy encrypted history recovery on 400',
+        omitEncryptedHistory400Hint: 'Off by default. After an explicit encrypted-content HTTP 400 on native Responses, if normal recovery cannot succeed, allow one additional same-account attempt, no later than upstream send 3. Omit ciphertext before the current readable task, preserving readable text and tool relationships. Omitted context is lost and continuation is not guaranteed. Eligible requests following 409 omission are supported. Excludes current encrypted tasks, compaction, server-side pointers, WebSockets, HTTP 200 stream errors, existing output and uncertain delivery.',
         title: 'Request Forwarding',
         description: 'Control how requests are forwarded to upstream OAuth accounts',
         grokDefaultTextModel: 'Default Grok text model',

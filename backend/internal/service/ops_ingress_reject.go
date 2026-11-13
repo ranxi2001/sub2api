@@ -86,6 +86,7 @@ type ingressRejectShard struct {
 
 type OpsIngressRejectAggregator struct {
 	repo OpsIngressRejectRepository
+	now  func() time.Time
 
 	shards      [ingressRejectShardCount]ingressRejectShard
 	recordMu    sync.RWMutex
@@ -116,7 +117,7 @@ type OpsIngressRejectAggregator struct {
 func NewOpsIngressRejectAggregator(repo OpsIngressRejectRepository) *OpsIngressRejectAggregator {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &OpsIngressRejectAggregator{
-		repo: repo, ctx: ctx, cancel: cancel, flushCh: make(chan struct{}, 1),
+		repo: repo, now: time.Now, ctx: ctx, cancel: cancel, flushCh: make(chan struct{}, 1),
 	}
 	for i := range a.shards {
 		a.shards[i].items = make(map[ingressRejectKey]*OpsIngressRejectAggregate)
@@ -168,7 +169,7 @@ func (a *OpsIngressRejectAggregator) RecordIngressReject(reason, routeFamily, pr
 	if a == nil || a.repo == nil || !a.accepting.Load() {
 		return
 	}
-	now := time.Now().UTC()
+	now := a.now().UTC()
 	bucket := now.Truncate(ingressRejectBucketSize)
 	key := ingressRejectKey{
 		reason: boundedDimension(reason, "unknown"), routeFamily: boundedDimension(routeFamily, "other"),

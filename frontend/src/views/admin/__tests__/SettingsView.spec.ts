@@ -2455,6 +2455,31 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload.openai_409_omit_encrypted_history_enabled).toBe(false);
   });
 
+  it("loads and saves the 400 encrypted history omission Beta", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_400_omit_encrypted_history_enabled: true,
+      openai_409_omit_encrypted_history_enabled: false,
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const sourceURLToggle = wrapper.get(
+      '[data-testid="openai-400-omit-encrypted-history-toggle"]',
+    );
+    expect((sourceURLToggle.element as HTMLInputElement).checked).toBe(true);
+
+    await sourceURLToggle.setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const payload = updateSettings.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(payload.openai_400_omit_encrypted_history_enabled).toBe(false);
+    expect(payload.openai_409_omit_encrypted_history_enabled).toBe(false);
+  });
+
   it("loads and saves the OpenAI Responses first-token metric mode", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
