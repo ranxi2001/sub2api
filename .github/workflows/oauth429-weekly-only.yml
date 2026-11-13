@@ -46,9 +46,14 @@ jobs:
           test "$actual" = "$expected"
           printf '%s %s %s\n' "$BASELINE" "$actual" "$target" > evidence/restored-blobs.txt
           git -C "$RUNNER_TEMP/oauth429-red" diff --stat > evidence/red-diff.txt
-          git hash-object backend/internal/service/oauth429_weekly_only_test.go > evidence/candidate-test-blob.txt
-          git hash-object "$RUNNER_TEMP/oauth429-red/backend/internal/service/oauth429_weekly_only_test.go" > evidence/red-test-blob.txt
-          diff evidence/candidate-test-blob.txt evidence/red-test-blob.txt
+          git ls-files 'backend/internal/service/*429*test.go' 'backend/internal/repository/oauth429_weekly_only*test.go' > evidence/retained-tests.txt
+          while IFS= read -r test_file; do
+            candidate_blob=$(git hash-object "$test_file")
+            red_blob=$(git hash-object "$RUNNER_TEMP/oauth429-red/$test_file")
+            test "$candidate_blob" = "$red_blob"
+            printf '%s %s\n' "$candidate_blob" "$test_file" >> evidence/retained-test-blobs.txt
+          done < evidence/retained-tests.txt
+          git -C "$RUNNER_TEMP/oauth429-red" diff --exit-code -- '*_test.go'
       - name: Require behavioral RED from unchanged service regressions
         shell: bash
         run: |

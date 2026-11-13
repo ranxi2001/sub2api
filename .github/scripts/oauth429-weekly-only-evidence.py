@@ -25,7 +25,7 @@ else:
     assert int(status) == 0 and not failed, "candidate failed"
     required = ["RotationPreservesScheduling"] if mode == "repository" else [
         "Service", "HeaderBoundaries", "CachedIdentity", "PolicyGates",
-        "HTTPForward", "WSForward", "CombinedRotation",
+        "HTTPForward", "WSForward", "WSClientIngress", "CombinedRotation",
     ]
     for name in required:
         assert "TestOAuth429WeeklyOnly" + name in passed, "missing regression: " + name

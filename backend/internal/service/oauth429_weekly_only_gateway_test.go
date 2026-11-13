@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
@@ -164,5 +166,66 @@ func TestOAuth429WeeklyOnlyWSForward(t *testing.T) {
 				require.Equal(t, []bool{false}, repo.writes)
 			}
 		})
+	}
+}
+
+func TestOAuth429WeeklyOnlyWSClientIngress(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := newOpenAIWSV2TestConfig()
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	h := weekly429Headers("99", "0", true)
+	h.Set("x-codex-primary-window-minutes", "0")
+	capture := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"error","error":{"type":"usage_limit_reached","code":"rate_limit_exceeded","message":"fictional rejection","resets_in_seconds":7200}}`)}}
+	dialer := &openAIWSCaptureDialer{conn: capture, handshake: h}
+	pool := newOpenAIWSConnPool(cfg)
+	defer pool.Close()
+	pool.setClientDialerForTest(dialer)
+	a := scheduling429Account()
+	a.Status = StatusActive
+	a.Concurrency = 1
+	a.Credentials = openAIWSQuotaTestCredentials(AccountTypeOAuth, "")
+	a.Extra["responses_websockets_v2_enabled"] = true
+	delete(a.Extra, "codex_7d_used_percent")
+	repo := &weeklyOnlyWSRepo{}
+	rates := NewRateLimitService(repo, nil, cfg, nil, nil)
+	gateway := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rates, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{}, cfg: cfg, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool}
+	rates.SetAccountRuntimeBlocker(gateway)
+	done := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer conn.CloseNow()
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		_, first, err := conn.Read(ctx)
+		if err != nil {
+			done <- err
+			return
+		}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = r.Clone(ctx)
+		c.Request.Header.Set("User-Agent", "unit-test-agent/1.0")
+		done <- gateway.ProxyResponsesWebSocketFromClient(ctx, c, conn, a, "fictional-token", first, nil)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer client.CloseNow()
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`)))
+	select {
+	case err := <-done:
+		var failover *UpstreamFailoverError
+		require.ErrorAs(t, err, &failover)
+		require.Equal(t, 429, failover.StatusCode)
+		require.Positive(t, dialer.DialCount(), "client ingress must reach the upstream adapter")
+		require.Equal(t, []bool{false}, repo.writes, "client WebSocket ingress must preserve explicit secondary weekly evidence")
+	case <-ctx.Done():
+		t.Fatal("client ingress did not finish")
 	}
 }
