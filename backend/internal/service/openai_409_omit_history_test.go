@@ -116,7 +116,8 @@ func TestOpenAI409ReplayInputTamperingStillFails(t *testing.T) {
 			require.Equal(t, "9007199254740993", gjson.GetBytes(clean, "input.4.sequence").Raw)
 			require.False(t, gjson.GetBytes(clean, "input.1.id").Exists())
 			require.False(t, gjson.GetBytes(clean, "input.1.status").Exists())
-			require.True(t, gjson.GetBytes(clean, "input.1.summary").IsArray())
+			require.Equal(t, "message", gjson.GetBytes(clean, "input.1.type").String())
+			require.NotContains(t, string(clean), "fixture-reasoning")
 			originalDigest := openAIAgentRecoveryFromContext(next).inputDigest
 			var err error
 			switch mode {
@@ -133,7 +134,7 @@ func TestOpenAI409ReplayInputTamperingStillFails(t *testing.T) {
 			case "reasoning_removed":
 				clean, err = sjson.DeleteBytes(clean, "input.1")
 			case "visible_reasoning_removed":
-				clean, _, err = normalizeOpenAIResponsesReasoningContentReplay(clean)
+				clean, err = sjson.DeleteBytes(clean, "input.1.content.1")
 			case "order":
 				items := gjson.GetBytes(clean, "input").Array()
 				clean, err = sjson.SetRawBytes(clean, "input.2", []byte(items[3].Raw))
@@ -169,7 +170,28 @@ func TestOpenAI409ReplayPreservesOrdinaryAndStoredReasoning(t *testing.T) {
 		ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(body), "fixture-session", "gpt-6-astra")
 		_, clean, changed := svc.TryOmitOpenAI409History(ctx, c, []byte(body), "fixture-session", "gpt-6-astra", openAIAgentRecoveryError("owner_unavailable"))
 		require.True(t, changed)
-		require.Equal(t, store == "true", gjson.GetBytes(clean, "input.1.id").Exists(), "stored reasoning IDs are not disposable")
-		require.JSONEq(t, gjson.Get(body, "input.2").Raw, gjson.GetBytes(clean, "input.2").Raw, "readable reasoning without ciphertext must not be discarded")
+		require.False(t, gjson.GetBytes(clean, "input.1.id").Exists(), "old provider reasoning IDs cannot migrate")
+		require.NotContains(t, string(clean), "reasoning-cipher")
+		require.Equal(t, "readable reasoning", gjson.GetBytes(clean, "input.2.content.1.text").String())
+		require.Equal(t, "assistant", gjson.GetBytes(clean, "input.2.role").String())
+		// Both destructive production normalizers must now leave input intact.
+		normalized, _, err := normalizeOpenAIAPIKeyStoreFalseReasoningReplay(clean, false)
+		require.NoError(t, err)
+		normalized, _, err = normalizeOpenAIResponsesReasoningContentReplay(normalized)
+		require.NoError(t, err)
+		require.Equal(t, openAIAgentRecoveryInputDigest(clean), openAIAgentRecoveryInputDigest(normalized))
+	}
+}
+
+func TestOpenAI409ReadableReasoningRefusesUnknownShapes(t *testing.T) {
+	for _, reasoning := range []string{
+		`{"type":"reasoning","content":"unrecognized text shape"}`,
+		`{"type":"reasoning","summary":[{"type":"summary_text","text":"visible","extra":"must not lose"}]}`,
+		`{"type":"reasoning","content":[{"type":"image","url":"fixture"}]}`,
+		`{"type":"reasoning","encrypted_content":{"opaque":"unknown"}}`,
+		`{"type":"reasoning","future_field":"must not lose"}`,
+	} {
+		_, err := prepareOpenAI409ReadableReplay([]byte(`{"input":[` + reasoning + `]}`))
+		require.Error(t, err)
 	}
 }

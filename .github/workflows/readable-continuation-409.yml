@@ -1,0 +1,91 @@
+name: Readable continuation 409 RED GREEN
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_409_*'
+      - 'backend/internal/service/openai_agent_message_*'
+      - 'backend/internal/service/openai_gateway_forward.go'
+      - 'backend/internal/service/openai_gateway_request_body.go'
+      - 'backend/internal/handler/openai_409_*'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - '.github/scripts/assert-readable-continuation.py'
+      - '.github/workflows/readable-continuation-409.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  http:
+    name: HTTP ${{ matrix.phase }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      # Each job has a disposable independent checkout of the identical head.
+      # RED changes one pinned production blob and retains the new HTTP tests.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Pin candidate and unchanged behavioral test
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD > "$RUNNER_TEMP/readable-$PHASE-provenance.txt"
+          target=backend/internal/handler/openai_409_readable_continuation_test.go
+          test "$(git hash-object "$target")" = "$(git rev-parse "HEAD:$target")"
+          git rev-parse "HEAD:$target" >> "$RUNNER_TEMP/readable-$PHASE-provenance.txt"
+      - name: Restore fixed production blob in RED checkout only
+        if: matrix.phase == 'RED'
+        run: |
+          set -euo pipefail
+          baseline=dbed7697aa56e76c6eb48c4914fa441496b67bdd
+          target=backend/internal/service/openai_409_omit_history.go
+          git show "$baseline:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          git rev-parse "$baseline:$target" >> "$RUNNER_TEMP/readable-RED-provenance.txt"
+      - name: Same HTTP JSON and SSE behavior in both checkouts
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409ReadableContinuationHTTP$' -count=1 -timeout=5m) > "$RUNNER_TEMP/readable-$PHASE.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/readable-$PHASE.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py "$PHASE" "$result" "$RUNNER_TEMP/readable-$PHASE.jsonl"
+      - name: GREEN omission and delivery safeguards
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OmitOpenAIHistorical|OpenAI409(OmitHistory|Replay|Omission|ReadableReasoning)|UpdateSettingsOpenAI409|Issue715(OutputPending|PendingLookup|ObservedPending|HTTPFailedDelivery|HTTPRecoveryKeepsHardRestrictions|HTTPRecoveryCannotBypassLongContext|HTTPPartialOutput))' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/readable-GREEN-safeguards.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: readable-continuation-${{ matrix.phase }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/readable-*
+          if-no-files-found: error

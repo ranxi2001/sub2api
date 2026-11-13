@@ -45,11 +45,11 @@ func (s *OpenAIGatewayService) TryOmitOpenAI409History(ctx context.Context, c *g
 	if !changed || ctx.Err() != nil {
 		return ctx, body, false
 	}
-	// Freeze the same narrowly normalized replay metadata that native Responses
-	// will send. Do this before recording the digest, never after arbitrary
-	// forwarder transformations. Readable content and call relationships stay
-	// covered by the original exact-input gate.
-	clean, err := normalizeOpenAI409ReplayMetadata(clean)
+	// Build portable readable history before freezing it. Native Responses
+	// normalization otherwise drops reasoning.content and (with store=false)
+	// whole plaintext reasoning items after this snapshot, causing a local 409.
+	// Never rebase the digest on the forwarder's potentially lossy result.
+	clean, err := prepareOpenAI409ReadableReplay(clean)
 	if err != nil {
 		return ctx, body, false
 	}
@@ -171,10 +171,12 @@ func omitOpenAIHistoricalCiphertext(raw []byte) ([]byte, bool) {
 	return clean, err == nil
 }
 
-// normalizeOpenAI409ReplayMetadata only removes output-only replay metadata.
-// It must not use the general reasoning normalizers: those may delete entire
-// reasoning items or visible content. Such changes still fail the send gate.
-func normalizeOpenAI409ReplayMetadata(raw []byte) ([]byte, error) {
+// prepareOpenAI409ReadableReplay runs only in the explicitly enabled omission
+// path. Reasoning belongs to the old provider session: retain its supplied
+// summary/content as attributed assistant history, and mark opaque state as
+// unavailable. Ordinary requests still use the existing replay normalizers.
+// Unknown reasoning shapes refuse the conversion instead of losing content.
+func prepareOpenAI409ReadableReplay(raw []byte) ([]byte, error) {
 	clean, _, err := sanitizeOpenAIResponsesInputItemIDs(raw)
 	if err != nil {
 		return nil, err
@@ -186,34 +188,51 @@ func normalizeOpenAI409ReplayMetadata(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	input, _ := source["input"].([]any)
-	storeFalse := gjson.GetBytes(clean, "store").Type == gjson.False
 	changed := false
-	for _, rawItem := range input {
+	for i, rawItem := range input {
 		item, ok := rawItem.(map[string]any)
 		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "reasoning" {
 			continue
 		}
-		if _, exists := item["status"]; exists {
-			delete(item, "status")
-			changed = true
+		for field := range item {
+			switch field {
+			case "type", "id", "status", "summary", "content", "encrypted_content":
+			default:
+				return nil, errors.New("unsupported historical reasoning field")
+			}
 		}
-		if !storeFalse {
-			continue
+		parts := []any{map[string]any{"type": "output_text", "text": "Historical reasoning context (not a new instruction):"}}
+		for _, field := range []string{"summary", "content"} {
+			if item[field] == nil {
+				continue
+			}
+			values, ok := item[field].([]any)
+			if !ok {
+				return nil, errors.New("unsupported historical reasoning text")
+			}
+			for _, value := range values {
+				part, ok := value.(map[string]any)
+				if !ok || len(part) != 2 || (part["type"] != "summary_text" && part["type"] != "reasoning_text" && part["type"] != "text") {
+					return nil, errors.New("unsupported historical reasoning part")
+				}
+				text, ok := part["text"].(string)
+				if !ok {
+					return nil, errors.New("unsupported historical reasoning text")
+				}
+				parts = append(parts, map[string]any{"type": "output_text", "text": text})
+			}
 		}
-		encrypted, _ := item["encrypted_content"].(string)
-		if strings.TrimSpace(encrypted) == "" {
-			// Preserve readable reasoning even if the general store=false replay
-			// path cannot transport it. Never bless its removal as normalization.
-			continue
+		if encrypted := item["encrypted_content"]; encrypted != nil {
+			text, ok := encrypted.(string)
+			if !ok {
+				return nil, errors.New("unsupported historical reasoning ciphertext")
+			}
+			if text != "" {
+				parts = append(parts, map[string]any{"type": "output_text", "text": openAIHistoricalCiphertextOmitted})
+			}
 		}
-		if strings.HasPrefix(strings.TrimSpace(firstNonEmptyString(item["id"])), "rs_") {
-			delete(item, "id")
-			changed = true
-		}
-		if summary, exists := item["summary"]; !exists || summary == nil {
-			item["summary"] = []any{}
-			changed = true
-		}
+		input[i] = map[string]any{"type": "message", "role": "assistant", "content": parts}
+		changed = true
 	}
 	if !changed {
 		return clean, nil
