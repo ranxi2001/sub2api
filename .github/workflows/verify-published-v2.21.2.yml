@@ -1,0 +1,27 @@
+name: Verify published v2.21.2 download
+on:
+  push:
+    branches: ['evidence/release-v2.21.2-download-20261113']
+    paths:
+      - '.github/workflows/verify-published-v2.21.2.yml'
+      - '.github/scripts/verify-published-v2.21.2.py'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read back formal release, verify checksum and execute version flag only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/verify-published-v2.21.2.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: published-v2.21.2-download-verification
+          path: |
+            ${{ runner.temp }}/published-download-verification/verification.json
+            ${{ runner.temp }}/published-download-verification/version.txt
+            ${{ runner.temp }}/published-download-verification/checksums.txt
+          if-no-files-found: error
