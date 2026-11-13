@@ -524,6 +524,12 @@ export default {
 
     // Usage Records
     usage: {
+      platform: '平台',
+      allPlatforms: '全部平台',
+      unknownPlatform: '未知（历史记录）',
+      platformHistoryHint: '按请求发生时记录的平台筛选。未记录平台的历史数据保留在“未知（历史记录）”中。',
+      platformCleanupUnavailable: '清理记录前请重置平台筛选。',
+
       title: '使用记录',
       description: '查看和管理所有用户的使用记录',
       userFilter: '用户',

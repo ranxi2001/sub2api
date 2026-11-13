@@ -17,7 +17,7 @@ func TestAdminUsagePlatformFilter(t *testing.T) {
 				repo := &adminUsageRepoCapture{}
 				router := newAdminUsageRequestTypeTestRouter(repo)
 				rec := httptest.NewRecorder()
-				router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path+"?platform="+platform+"&group_id=7", nil))
+				router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path+"?platform="+platform+"&group_id=7&start_date=2026-11-01&end_date=2026-11-07", nil))
 				if platform == "composite" || platform == "invented" {
 					require.Equal(t, http.StatusBadRequest, rec.Code)
 					return

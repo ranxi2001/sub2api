@@ -92,3 +92,38 @@ func TestUsagePlatformHistoricalQuery(t *testing.T) {
 		})
 	}
 }
+
+func TestUsagePlatformAllInsertPaths(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	stamp := fmt.Sprint(time.Now().UnixNano())
+	user := mustCreateUser(t, client, &service.User{Email: "platform-paths-" + stamp + "@example.invalid"})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "synthetic-paths-" + stamp, Name: "Fixture"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "Fixture paths", Platform: "openai"})
+	for _, mode := range []string{"single", "batch", "best-effort-single", "best-effort-batch"} {
+		t.Run(mode, func(t *testing.T) {
+			log := &service.UsageLog{Platform: "qwen", UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID,
+				RequestID: "platform-" + stamp + mode, Model: "fixture-model", CreatedAt: time.Now().UTC()}
+			prepared := prepareUsageLogInsert(log)
+			var err error
+			switch mode {
+			case "single":
+				_, err = repo.createSingle(ctx, integrationDB, log)
+			case "batch":
+				batchKey := usageLogBatchKey(log.RequestID, log.APIKeyID)
+				_, _, _, err = repo.batchInsertUsageLogs(integrationDB, []string{batchKey}, map[string]usageLogInsertPrepared{batchKey: prepared})
+			case "best-effort-single":
+				err = execUsageLogInsertNoResult(ctx, integrationDB, prepared)
+			case "best-effort-batch":
+				query, args := buildUsageLogBestEffortInsertQuery([]usageLogInsertPrepared{prepared})
+				_, err = integrationDB.ExecContext(ctx, query, args...)
+			}
+			require.NoError(t, err)
+			var platform string
+			err = integrationDB.QueryRowContext(ctx, "SELECT platform FROM usage_logs WHERE request_id=$1 AND api_key_id=$2", log.RequestID, key.ID).Scan(&platform)
+			require.NoError(t, err)
+			require.Equal(t, "qwen", platform)
+		})
+	}
+}

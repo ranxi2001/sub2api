@@ -81,6 +81,23 @@
         </div>
 
         <template v-if="!identityOnly">
+          <div v-if="mode === 'usage' && !observerMode" data-testid="usage-platform-filter" class="w-full sm:w-52">
+            <label for="usage-platform" class="input-label flex items-center gap-1.5">
+              {{ t('admin.usage.platform') }}
+              <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.adminUsagePlatform" :user-id="noticeUserId" />
+            </label>
+            <Select
+              id="usage-platform"
+              :model-value="filters.platform ?? null"
+              :options="platformOptions"
+              :aria-label="t('admin.usage.platform')"
+              aria-describedby="usage-platform-hint"
+              searchable
+              @update:model-value="filters.platform = $event || undefined"
+              @change="emitChange"
+            />
+          </div>
+
           <!-- Model Filter -->
           <div class="w-full sm:w-auto sm:min-w-[220px]">
             <label class="input-label">{{ t('usage.model') }}</label>
@@ -190,7 +207,7 @@
         </button>
         <slot name="after-reset" />
         <template v-if="mode === 'usage'">
-          <button v-if="!observerMode" type="button" @click="$emit('cleanup')" class="btn btn-danger">
+          <button v-if="!observerMode" type="button" @click="$emit('cleanup')" :disabled="!!filters.platform" :title="filters.platform ? t('admin.usage.platformCleanupUnavailable') : undefined" class="btn btn-danger">
             {{ t('admin.usage.cleanup.button') }}
           </button>
           <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
@@ -199,6 +216,7 @@
         </template>
       </div>
     </div>
+    <p v-if="!identityOnly && mode === 'usage' && !observerMode" id="usage-platform-hint" class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.usage.platformHistoryHint') }}</p>
   </div>
 </template>
 
@@ -210,12 +228,16 @@ import { observerUsageContext } from './observerUsageContext'
 import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import type { SimpleUser } from '@/api/admin/usage'
 
 type ModelValue = Record<string, any>
 
 interface Props {
   modelValue: ModelValue
+  noticeUserId?: number
   exporting: boolean
   startDate: string
   endDate: string
@@ -282,6 +304,11 @@ let accountSearchTimeout: ReturnType<typeof setTimeout> | null = null
 const modelOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allModels') },
   ...(props.modelOptions ?? []).map((m) => ({ value: m, label: m })),
+])
+const platformOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.usage.allPlatforms') },
+  ...CONCRETE_PLATFORM_OPTIONS,
+  { value: 'unknown', label: t('admin.usage.unknownPlatform') },
 ])
 const groupOptions = ref<SelectOption[]>([{ value: null, label: t('admin.usage.allGroups') }])
 
