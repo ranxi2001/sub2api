@@ -211,8 +211,11 @@ export async function completeScheduledRounds(c) {
       }
       assert.ok(results, 'new persisted results AND released leases required')
       for (const p of completed) {
-        assert.ok(Date.parse(p.last_run_at) > Date.parse(beforePlans.find(old => old.id === p.id).last_run_at))
+        const old = beforePlans.find(old => old.id === p.id)
+        assert.ok(Date.parse(p.last_run_at) > Date.parse(old.last_run_at))
         assert.ok(Date.parse(p.next_run_at) > Date.parse(nominal))
+        const rule = ({ next_run_at, running_until, last_run_at, lease_active, ...fields }) => fields
+        assert.deepEqual(rule(p), rule(old), 'execution preserves the saved plan rule and ownership')
       }
       assert.deepEqual(results.filter(row => before.some(old => old.id === row.id)), before, 'all previously saved JSON values remain unchanged')
       const fresh = results.filter(row => !before.some(old => old.id === row.id))
@@ -228,12 +231,24 @@ export async function completeScheduledRounds(c) {
         assert.equal(cfg.pelican_question.round_id, `scheduled:${nominal}`)
         assert.equal(cfg.pelican_question.id, questionAt(nominal))
         assert.equal(cfg.pelican_question.version, bankVersion)
+        assert.equal(cfg.pelican_question.source, 'builtin:svg-motion')
+        assert.deepEqual(cfg.pelican_question, fresh[0].pelican_config.pelican_question, 'all samples in the same nominal round share the exact question')
+        assert.equal(cfg.actual_prompt, fresh[0].pelican_config.actual_prompt)
         assert.equal(cfg.prompt_mode, 'random')
         assert.equal(cfg.parallel_count, beforePlans.find(p => p.id === row.plan_id).pelican_config.parallel_count)
         assert.notEqual(cfg.pelican_question.id, previous.at(-1).question_id)
         const capture = sent.find(item => item.marker === row.marker)
         assert.ok(capture, 'persisted marker binds one actual provider request')
-        assert.equal(capture.alias, accounts[0].id === row.account_id ? 'a' : 'b')
+        const accountIndex = accounts.findIndex(account => account.id === row.account_id)
+        assert.ok(accountIndex >= 0, 'actual route must identify a fixture account')
+        assert.equal(capture.alias, accountIndex === 0 ? 'a' : 'b')
+        if (kind === 'account') {
+          assert.equal(row.account_id, plans.find(p => p.id === row.plan_id).account_id)
+          assert.equal(cfg.trigger_source, 'scheduled')
+        } else {
+          assert.equal(row.group_id, groupId)
+          assert.equal(row.account_name, accounts[accountIndex].name)
+        }
         assert.equal(capture.model, model)
         assert.equal(capture.prompt, cfg.actual_prompt.trim())
         assert.equal(capture.refused, row.status === 'failed')
