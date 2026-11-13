@@ -17,17 +17,21 @@ await fs.mkdir(out, { recursive: true })
 const fixtureDir = path.join(frontend, '.usage-platform-fixture')
 await fs.mkdir(fixtureDir, { recursive: true })
 const sources = ['views/admin/UsageView.vue', 'components/admin/usage/UsageFilters.vue']
-const pinned = {}
 for (const source of sources) {
   const target = path.join(fixtureDir, `Baseline${path.basename(source)}`)
-  await fs.writeFile(target, execFileSync('git', ['show', `${baseline}:frontend/src/${source}`]))
-  pinned[source] = target
+  const original = execFileSync('git', ['show', `${baseline}:frontend/src/${source}`], { encoding: 'utf8' })
+  // Pin the baseline dependency before Vite's alias resolver runs. Only import
+  // locations change; the rendered component/template remains the fixed source.
+  const pinnedSource = original
+    .replace('@/components/admin/usage/UsageFilters.vue', './BaselineUsageFilters.vue')
+    .replace('./observerUsageContext', '@/components/admin/usage/observerUsageContext')
+  await fs.writeFile(target, pinnedSource)
 }
 const catalog = JSON.parse(await fs.readFile(path.join(frontend, 'src/constants/platformCatalog.builtin.json'), 'utf8'))
 const modules = {
   auth: `export const useAuthStore=()=>({user:{id:41,role:'admin'},isAdmin:true});`,
   app: `export const useAppStore=()=>({cachedPublicSettings:{},showError:msg=>{throw Error(msg)},showWarning:()=>{},showSuccess:()=>{}});`,
-  router: `export const useRoute=()=>({query:{start_date:'2026-11-01',end_date:'2026-11-07'}});export const useRouter=()=>({push:()=>{}});`,
+  router: `export default {push:()=>{},currentRoute:{value:{fullPath:'/admin/usage'}}};export const useRoute=()=>({query:{start_date:'2026-11-01',end_date:'2026-11-07'}});export const useRouter=()=>({push:()=>{}});`,
   blank: `export default {render:()=>null};`,
   layout: `import {h} from 'vue';export default {setup(_,{slots}){return()=>h('main',{class:'min-h-screen bg-gray-50 p-4 dark:bg-dark-950 sm:p-6'},[h('div',{class:'mb-4 text-xs text-gray-500'},'Offline synthetic fixture · Admin usage / 管理用量 · No production data'),slots.default?.()])}};`,
   api: `const platforms=${JSON.stringify(catalog.platforms)};
@@ -51,13 +55,11 @@ const tailwind = requireFrontend('tailwindcss'), autoprefixer = requireFrontend(
 const { default: theme } = await import(pathToFileURL(path.join(frontend, 'tailwind.config.js')))
 const { chromium } = createRequire(path.join(process.env.PLAYWRIGHT_ROOT, 'package.json'))('playwright')
 const alias = (find, name) => ({ find, replacement: path.join(fixtureDir, `${name}.js`) })
-const server = await createServer({ root: frontend, configFile: false, plugins: [{name:'baseline-components',enforce:'pre',resolveId(source,importer){
-  if(importer?.split('?')[0]===pinned[sources[0]]&&source==='@/components/admin/usage/UsageFilters.vue')return pinned[sources[1]]
-  if(importer?.split('?')[0]===pinned[sources[1]]&&source==='./observerUsageContext')return path.join(frontend,'src/components/admin/usage/observerUsageContext.ts')
-}}, (vueModule.default || vueModule)()], resolve: {alias:[
+const server = await createServer({ root: frontend, configFile: false, plugins: [(vueModule.default || vueModule)()], resolve: {alias:[
   alias(/^@\/api\/admin$/, 'api'),alias(/^@\/api\/admin\/usage$/, 'api'),alias('@/stores/auth','auth'),alias('@/stores/app','app'),alias(/^vue-router$/,'router'),alias('@/components/layout/AppLayout.vue','layout'),
   ...['admin/usage/UsageConnections','admin/usage/LatencyObservabilityPanel','usage/TrafficPanel','admin/usage/UserTokenRanking','admin/usage/UsageCleanupDialog','admin/user/UserBalanceHistoryModal'].map(name=>alias(`@/components/${name}.vue`,'blank')),
   alias('@/views/admin/ops/components/OpsErrorLogTable.vue','blank'),alias('@/views/admin/ops/components/OpsErrorDetailModal.vue','blank'),
+  alias(/^@\/router$/, 'router'),
   {find:'@',replacement:path.join(frontend,'src')},
 ]},css:{postcss:{plugins:[tailwind({...theme,content:[path.join(frontend,'src/**/*.{vue,ts,js}'),path.join(fixtureDir,'*.{vue,js,html}')]}),autoprefixer()]}},
   define:{__INTLIFY_JIT_COMPILATION__:true},server:{host:'127.0.0.1',port:4186,strictPort:true},optimizeDeps:{entries:[path.join(fixtureDir,'index.html')],include:['vue','vue-i18n','pinia']}})
