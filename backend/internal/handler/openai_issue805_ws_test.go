@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -149,7 +150,9 @@ func TestIssue805WSCompletedHistoryAcrossNodesAndTurns(t *testing.T) {
 					return false
 				}
 				for _, raw := range owners {
-					if gjson.Get(raw, "1").Int() != 1 {
+					// gjson can find the route array after a pending: prefix.
+					// Require a complete committed JSON record before snapshotting A.
+					if !json.Valid([]byte(raw)) || !gjson.Parse(raw).IsArray() || gjson.Get(raw, "1").Int() != 1 {
 						return false
 					}
 				}
@@ -290,7 +293,7 @@ func TestIssue805WSRejectsUnsafeHistoryBeforeNetworkSend(t *testing.T) {
 						return false
 					}
 					for _, raw := range owners {
-						if gjson.Get(raw, "1").Int() != 1 {
+						if !json.Valid([]byte(raw)) || !gjson.Parse(raw).IsArray() || gjson.Get(raw, "1").Int() != 1 {
 							return false
 						}
 					}
@@ -371,7 +374,7 @@ func TestIssue805WSNewBOutputWaitsForCrossNodeCommit(t *testing.T) {
 					return false
 				}
 				for _, raw := range owners {
-					if gjson.Get(raw, "1").Int() != 1 {
+					if !json.Valid([]byte(raw)) || !gjson.Parse(raw).IsArray() || gjson.Get(raw, "1").Int() != 1 {
 						return false
 					}
 				}
