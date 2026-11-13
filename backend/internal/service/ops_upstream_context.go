@@ -186,6 +186,7 @@ func IsOpsRequestScopedError(c *gin.Context) bool {
 // 由于 HTTP 状态码停留在 2xx，ops_error_logger 中间件在 status<400 分支消费该标记并
 // 补记错误日志；标记方是 handler.handleStreamingAwareError 或各 service 的带内检测。
 type OpsStreamError struct {
+	TransportFailure *OpsTransportFailure
 	// BridgeFailure is set only by the local BPS conversion boundary. It keeps
 	// real upstream HTTP evidence while assigning failure ownership to gateway.
 	BridgeFailure *basispoints.BridgeFailure
@@ -444,11 +445,46 @@ func setOpsUpstreamError(c *gin.Context, upstreamStatusCode int, upstreamMessage
 	}
 }
 
+const openAI400HistoryDiagnosticKey = "openai_400_history_diagnostic"
+
+// Only fixed decisions and booleans reach the existing Ops event JSON.
+// Applied means a replacement was prepared, not that upstream received it.
+type OpenAI400HistoryDiagnostic struct {
+	Applied  bool   `json:"applied"`
+	After409 bool   `json:"after_409"`
+	Decision string `json:"decision"`
+}
+
+func sanitizeOpenAI400HistoryDiagnostic(d *OpenAI400HistoryDiagnostic) *OpenAI400HistoryDiagnostic {
+	if d == nil {
+		return nil
+	}
+	switch d.Decision {
+	case "disabled", "retry_exhausted", "canceled_or_output_started", "unsupported_context",
+		"delivery_unconfirmed", "history_integrity", "ownership_unavailable", "no_eligible_history",
+		"same_account_retry_scheduled":
+		copy := *d
+		return &copy
+	default:
+		return nil
+	}
+}
+
+func openAI400HistoryDiagnostic(c *gin.Context) *OpenAI400HistoryDiagnostic {
+	if c == nil {
+		return nil
+	}
+	v, _ := c.Get(openAI400HistoryDiagnosticKey)
+	d, _ := v.(*OpenAI400HistoryDiagnostic)
+	return sanitizeOpenAI400HistoryDiagnostic(d)
+}
+
 // OpsUpstreamErrorEvent describes one upstream error attempt during a single gateway request.
 // It is stored in ops_error_logs.upstream_errors as a JSON array.
 type OpsUpstreamErrorEvent struct {
-	AuthConnectionID string `json:"auth_connection_id,omitempty"`
-	AtUnixMs         int64  `json:"at_unix_ms,omitempty"`
+	EncryptedHistory400 *OpenAI400HistoryDiagnostic `json:"encrypted_history_400,omitempty"`
+	AuthConnectionID    string                      `json:"auth_connection_id,omitempty"`
+	AtUnixMs            int64                       `json:"at_unix_ms,omitempty"`
 
 	// Passthrough 表示本次请求是否命中“原样透传（仅替换认证）”分支。
 	// 该字段用于排障与灰度评估；存入 JSON，不涉及 DB schema 变更。
@@ -481,7 +517,7 @@ type OpsUpstreamErrorEvent struct {
 	// Best-effort upstream response capture (sanitized+trimmed).
 	UpstreamResponseBody string `json:"upstream_response_body,omitempty"`
 
-	// Kind: http_error | request_error | retry_exhausted | failover | bridge_error
+	// Kind: http_error | request_error | transport_error | retry_exhausted | failover | bridge_error
 	Kind string `json:"kind,omitempty"`
 	// Stage/Scope/Reason distinguish credential acquisition from inference
 	// without overloading upstream_status_code with a synthetic HTTP status.
@@ -510,6 +546,11 @@ const (
 func appendOpsUpstreamError(c *gin.Context, ev OpsUpstreamErrorEvent) {
 	if c == nil {
 		return
+	}
+	if ev.EncryptedHistory400 == nil {
+		ev.EncryptedHistory400 = openAI400HistoryDiagnostic(c)
+	} else {
+		ev.EncryptedHistory400 = sanitizeOpenAI400HistoryDiagnostic(ev.EncryptedHistory400)
 	}
 	if ev.AuthConnectionID == "" {
 		ev.AuthConnectionID = c.GetString("openai_auth_connection_id")

@@ -285,7 +285,7 @@ WITH dedup AS (
       )
     )
     AND NOT current_error.is_count_tokens
-    AND (COALESCE(current_error.status_code, 0) >= 400 OR current_error.error_type = 'cyber_policy')
+    AND (COALESCE(current_error.status_code, 0) >= 400 OR current_error.error_type = 'cyber_policy' OR current_error.error_type = 'transport_error')
   ORDER BY COALESCE(NULLIF(current_error.request_id, ''), 'error:' || current_error.id::text), current_error.created_at DESC, current_error.id DESC
 ), classified AS (
   SELECT *, CASE

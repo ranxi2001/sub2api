@@ -639,6 +639,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if upstreamCtx.Err() != nil {
 				return nil, context.Cause(upstreamCtx)
 			}
+			if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, "", err, writeClientMessage); handled {
+				return nil, resetErr
+			}
 			if turn == 1 && !strictSession {
 				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 			}
@@ -707,6 +710,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
+	ctx = bindOpenAI429ResponseObservation(ctx, resp, c)
 	defer func() { _ = resp.Body.Close() }()
 	// upstreamCtx cancellation interrupts the transport read. Keep Body.Close
 	// on this reader's goroutine: compressed bodies cannot close during Read.
@@ -1123,6 +1127,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		streamErr := fmt.Errorf("read upstream http bridge stream: %w", err)
 		if upstreamCtx.Err() != nil {
 			return resultWithUsage(), context.Cause(upstreamCtx)
+		}
+		if !clientDisconnected {
+			if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, resp.Header.Get("x-request-id"), err, writeClientMessage); handled {
+				upstreamTerminalEvent = "response.failed"
+				return resultWithUsage(), resetErr
+			}
 		}
 		if !strictSession && turn == 1 && !clientDisconnected && !wroteDownstream {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)

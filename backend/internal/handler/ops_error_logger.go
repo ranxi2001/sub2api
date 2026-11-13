@@ -1149,8 +1149,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		// Trust only the forwarding boundary's local marker. The captured SSE
 		// parser cannot distinguish a bridge failure from an upstream failure and
 		// otherwise overwrites real HTTP 200 evidence with a synthetic 502.
-		if marked, ok := service.GetOpsStreamError(c); ok && marked.BridgeFailure != nil {
-			logOpsStreamErrorValue(c, ops, status, marked)
+		if marked, ok := service.GetOpsStreamError(c); ok && (marked.BridgeFailure != nil || marked.TransportFailure != nil) {
+			// A trusted final marker must not erase failures from earlier WS turns.
+			logOpsStreamError(c, ops, status)
 			return
 		}
 		body := w.capturedBytes()
@@ -1538,6 +1539,11 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 			errorBody = string(payload)
 		}
 	}
+	if streamErr.TransportFailure != nil {
+		if payload, err := json.Marshal(gin.H{"error": streamErr.TransportFailure.ErrorFields()}); err == nil {
+			errorBody = string(payload)
+		}
+	}
 
 	apiKey := getOpsAPIKey(c)
 	clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
@@ -1636,6 +1642,13 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 			entry.UpstreamStatusCode = &status
 		}
 		entry.UpstreamErrorMessage, entry.UpstreamErrorDetail = nil, nil
+	}
+	if streamErr.TransportFailure != nil {
+		entry.ErrorPhase, entry.ErrorType = "network", "transport_error"
+		entry.ErrorOwner, entry.ErrorSource, entry.Severity = "provider", "upstream_transport", "error"
+		entry.StatusCode, entry.UpstreamStatusCode = wireStatus, nil
+		entry.IsBusinessLimited = false
+		entry.UpstreamErrorDetail = nil
 	}
 	suppressOpsUpstreamAttributionForClientRejection(entry)
 

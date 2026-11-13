@@ -1093,7 +1093,7 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 	// Helper to parse float64 from header
 	parseFloat := func(key string) *float64 {
 		if v := headers.Get(key); v != "" {
-			if f, err := strconv.ParseFloat(v, 64); err == nil {
+			if f, err := strconv.ParseFloat(v, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 				return &f
 			}
 		}
@@ -1144,7 +1144,9 @@ func ParseCodexRateLimitHeaders(headers http.Header) *OpenAICodexUsageSnapshot {
 		hasData = true
 	}
 
-	if !hasData {
+	_, weeklyPresent, weeklyValid := openAI429WeeklyParsedHeaderUsage(headers, snapshot)
+	snapshot.invalidWeekly429 = weeklyPresent && !weeklyValid
+	if !hasData && !snapshot.invalidWeekly429 {
 		return nil
 	}
 
@@ -1185,6 +1187,11 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 
 	baseTime := codexSnapshotBaseTime(snapshot, fallbackNow)
 	updates := make(map[string]any)
+	if snapshot.invalidWeekly429 {
+		updates[openAI429WeeklyInvalidAtKey] = baseTime.Format(time.RFC3339Nano)
+	} else if evidence := openAI429SnapshotWeeklyEvidence(snapshot, baseTime); evidence != nil {
+		updates[openAI429WeeklyEvidenceKey] = evidence
+	}
 
 	// 保存原始 primary/secondary 字段，便于排查问题
 	if snapshot.PrimaryUsedPercent != nil {

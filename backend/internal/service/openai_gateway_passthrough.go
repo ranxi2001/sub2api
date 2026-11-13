@@ -1844,14 +1844,20 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	headers http.Header,
 	canonicalModel ...string,
 ) (int, bool) {
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	return s.handleOpenAIStreamTerminalAccountSideEffectsWithContext(ctx, account, payload, message, headers, canonicalModel...)
+}
+
+func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffectsWithContext(
+	ctx context.Context, account *Account, payload []byte, message string, headers http.Header, canonicalModel ...string,
+) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
 	if account != nil && account.IsGrok() {
 		if isGrokContentPolicyRejection(http.StatusForbidden, payload) {
 			return http.StatusForbidden, false
-		}
-		ctx := context.Background()
-		if c != nil && c.Request != nil {
-			ctx = c.Request.Context()
 		}
 		ctx = withTempUnschedStreamPhase(ctx, tempUnschedPhaseMidStreamLegacy)
 		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, firstNonEmpty(canonicalModel...)), account, statusCode, nil, payload)
@@ -1867,16 +1873,13 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 		}
 		fallthrough
 	case http.StatusUnauthorized, http.StatusTooManyRequests, http.StatusServiceUnavailable, 529:
-		ctx := context.Background()
-		if c != nil && c.Request != nil {
-			ctx = c.Request.Context()
-		}
 		model := firstNonEmpty(canonicalModel...)
 		if model == "" {
 			model = firstNonEmpty(gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
 		}
 		accountHeaders := headers
 		if statusCode == http.StatusTooManyRequests {
+			ctx = context.WithValue(ctx, openAI429WeeklyHeadersKey{}, headers)
 			// 普通模型的流式 429 不能继承外层 HTTP 200 的全局 quota 快照；
 			// 只有 OAuth/SetupToken 的 Spark 配额 429 才需要保留 headers 读取明确的 5h/7d reset。
 			accountHeaders = openAIWSSemantic429Headers(account, model, headers)
@@ -1888,10 +1891,6 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 		// 只有显式 stream_timing=after_stream 的规则可以在关键词匹配后冷却。
 		if s == nil || s.rateLimitService == nil || account == nil || !account.ShouldHandleErrorCode(statusCode) {
 			return statusCode, false
-		}
-		ctx := context.Background()
-		if c != nil && c.Request != nil {
-			ctx = c.Request.Context()
 		}
 		ctx = withTempUnschedStreamPhase(ctx, tempUnschedPhaseMidStreamOptIn)
 		model := firstNonEmpty(canonicalModel...)
@@ -2137,6 +2136,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 	imageBillingModel string,
 	reasoningEfforts ...string,
 ) (*openaiStreamingResultPassthrough, error) {
+	ctx = bindOpenAI429ResponseObservation(ctx, resp, c)
 	earlyPluginEvents := s.openAIPluginSSEEarlyEvents(resp, account)
 	pluginEarlyCommitted := false
 	earlyMetadataPending := false
@@ -2695,6 +2695,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, err)
 			return resultWithUsage(), err
 		}
+		if !clientDisconnected && ctx.Err() == nil {
+			if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, upstreamRequestID, err); handled {
+				failureDelivered = true
+				return resultWithUsage(), resetErr
+			}
+		}
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 			msg := "OpenAI stream disconnected before completion"
 			if errText := strings.TrimSpace(err.Error()); errText != "" {
@@ -2767,8 +2773,12 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (*openaiNonStreamingResultPassthrough, error) {
+	ctx = bindOpenAI429ResponseObservation(ctx, resp, c)
 	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
+		if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, resp.Header.Get("x-request-id"), err); handled {
+			return nil, resetErr
+		}
 		return nil, err
 	}
 	observer := upstreamResponseModelObserverFromContext(c)
