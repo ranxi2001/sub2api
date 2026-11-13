@@ -60,7 +60,10 @@ jobs:
           # Freeze the transport repair's source set. A later production merge
           # must not roll back unrelated schemas while retaining their new tests.
           reviewed=f177caec5510f502270ff3ceb36fe43295f405f1
-          mapfile -t targets < <(git diff --name-only "$baseline" "$reviewed" -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go')
+          # Keep the additive Ops event DTO at HEAD: later 400 recovery code
+          # needs its diagnostic fields. This file only adds the reset marker
+          # field; old transport producers below still cannot populate it.
+          mapfile -t targets < <(git diff --name-only "$baseline" "$reviewed" -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go' ':!backend/internal/service/ops_upstream_context.go')
           restore_head() {
             for target in "${targets[@]}"; do git show "HEAD:$target" > "$target"; done
           }
