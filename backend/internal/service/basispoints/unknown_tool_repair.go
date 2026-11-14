@@ -20,7 +20,7 @@ type RepairToolCall func(context.Context) (io.ReadCloser, error)
 
 func (b *Bridge) canRepair(response object, err error) bool {
 	var unknown unknownClientToolError
-	if len(b.tools) == 0 || b.hasToolHistory || !errors.As(err, &unknown) || text(response["status"]) != "completed" {
+	if b.selectedTool != nil || len(b.tools) == 0 || b.hasToolHistory || !errors.As(err, &unknown) || text(response["status"]) != "completed" {
 		return false
 	}
 	output, _ := response["output"].([]any)
@@ -43,7 +43,7 @@ func (b *Bridge) canRepair(response object, err error) bool {
 // unexecuted native call can be returned to BPS as an executed:false result.
 func (b *Bridge) canRepairUnknownContinuation(response object, err error) bool {
 	var unknown unknownClientToolError
-	if !b.hasToolHistory || b.structured != nil || len(b.completedToolHistory) == 0 || len(b.tools) == 0 || !errors.As(err, &unknown) || text(response["status"]) != "completed" {
+	if b.selectedTool != nil || !b.hasToolHistory || b.structured != nil || len(b.completedToolHistory) == 0 || len(b.tools) == 0 || !errors.As(err, &unknown) || text(response["status"]) != "completed" {
 		return false
 	}
 	items, ok := repairableTools(response)
