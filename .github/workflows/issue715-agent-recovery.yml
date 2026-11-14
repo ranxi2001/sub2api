@@ -346,7 +346,13 @@ jobs:
           test "$result" -ne 0
           ! grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|--- SKIP:' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
           grep -q -- '--- FAIL: TestIssue715WSGeneratedTaskContinuation/http_bridge/cross-node=false' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
-          grep -q 'generated WS task must continue without rebuilding the session' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          # PR855 returns the safe structured refusal before the close. The
+          # unchanged oracle now reaches its content assertion (instead of the
+          # socket-read assertion). Require that exact business failure after
+          # the first continuation completed; do not accept arbitrary errors.
+          grep -q 'generated opaque WS task and tool result must return to producer' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          grep -q 'encrypted_agent_recovery_wire_changed' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          grep -q 'ingress_ws_http_bridge_turn_completed.*turn=2' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
 
   red-ws-wire:
     runs-on: ubuntu-latest
