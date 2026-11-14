@@ -103,7 +103,7 @@ func TestIssue854PostgresRoundtrip(t *testing.T) {
 			require.Equal(t, 409, row.StatusCode)
 			require.Nil(t, row.UpstreamStatusCode)
 			require.Equal(t, "internal", row.Phase)
-			require.Equal(t, "platform", row.ErrorOwner)
+			require.Equal(t, "platform", row.Owner)
 			fields := gjson.Get(row.ErrorBody, "error")
 			require.Equal(t, "encrypted_agent_recovery_owner_unavailable", fields.Get("code").String())
 			require.Equal(t, tc.protocol, fields.Get("protocol").String())
