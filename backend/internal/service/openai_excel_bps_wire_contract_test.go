@@ -56,16 +56,19 @@ func TestExcelBPSWireIdentityUsesActualBearer(t *testing.T) {
 
 func TestExcelBPSWireTierPolicyAndModelEvidence(t *testing.T) {
 	for _, tc := range []struct {
-		name, tier, action, want string
-		force                    bool
-		status                   int
+		name, tier, action, ruleTier string
+		force                        bool
+		status                       int
 	}{
-		{name: "priority", tier: "priority", want: "priority"},
-		{name: "fast alias", tier: "fast", want: "priority"},
-		{name: "default", tier: "default", want: "default"},
-		{name: "auto", tier: "auto", want: "auto"},
+		{name: "priority", tier: "priority"},
+		{name: "fast alias", tier: "fast"},
+		{name: "default", tier: "default"},
+		{name: "auto", tier: "auto"},
 		{name: "missing stays missing"},
-		{name: "group force", force: true, want: "priority"},
+		{name: "global force priority", tier: "auto", action: OpenAIFastPolicyActionForcePriority, ruleTier: OpenAIFastTierAny},
+		{name: "global force missing tier", action: OpenAIFastPolicyActionForcePriority, ruleTier: OpenAIFastTierMissing},
+		{name: "group force", force: true},
+		{name: "block overrides group force", force: true, action: BetaPolicyActionBlock, status: 403},
 		{name: "filter overrides group", force: true, action: BetaPolicyActionFilter},
 		{name: "block", tier: "priority", action: BetaPolicyActionBlock, status: 403},
 		{name: "unsupported is not silently dropped", tier: "flex", status: 400},
@@ -74,7 +77,11 @@ func TestExcelBPSWireTierPolicyAndModelEvidence(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
 				settings := DefaultOpenAIFastPolicySettings()
 				if tc.action != "" {
-					settings.Rules = []OpenAIFastPolicyRule{{ServiceTier: OpenAIFastTierPriority, Action: tc.action, Scope: BetaPolicyScopeAll, FallbackAction: BetaPolicyActionPass}}
+					ruleTier := tc.ruleTier
+					if ruleTier == "" {
+						ruleTier = OpenAIFastTierPriority
+					}
+					settings.Rules = []OpenAIFastPolicyRule{{ServiceTier: ruleTier, Action: tc.action, Scope: BetaPolicyScopeAll, FallbackAction: BetaPolicyActionPass}}
 				}
 				svc := openAIClientToolsTestService(nil)
 				svc.settingService = newOpenAIGatewayServiceWithSettings(t, settings).settingService
@@ -112,8 +119,8 @@ func TestExcelBPSWireTierPolicyAndModelEvidence(t *testing.T) {
 				require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.lastBody, "model").String())
 				require.Equal(t, "explicit", gjson.GetBytes(upstream.lastBody, "model_selection").String())
 				require.Equal(t, "xhigh", gjson.GetBytes(upstream.lastBody, "reasoning_effort").String())
-				require.Equal(t, tc.want, gjson.GetBytes(upstream.lastBody, "service_tier").String())
-				require.Equal(t, tc.want, optionalStringValue(result.ServiceTier))
+				require.False(t, gjson.GetBytes(upstream.lastBody, "service_tier").Exists(), "BPS rejects this field even after group Fast policy")
+				require.Nil(t, result.ServiceTier, "do not bill omitted priority as executed priority")
 				require.Equal(t, "selected-bps-user", upstream.lastReq.Header.Get("X-Openai-Account-User-Id"))
 				require.Equal(t, "gpt-5.6-luna", result.UpstreamResponseModel, "never relabel provider model as requested Astra")
 				require.Equal(t, "default", result.UpstreamResponseServiceTier, "keep provider declaration distinct from requested priority")
