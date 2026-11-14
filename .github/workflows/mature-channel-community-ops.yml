@@ -459,12 +459,30 @@ jobs:
         with:
           name: mature-qqdb-${{ github.sha }}
           path: ${{ runner.temp }}/mature-qqdb.log
+      - name: RED coupon preservation through signed resume
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/service/payment_resume_service.go
+          cp "$target" "$RUNNER_TEMP/mature-resume-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-resume-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          git show 37dc4620a41a68abaeab329358c15821c41e3f7f:"$target" > "$target"
+          set +e
+          (cd backend && go test ./internal/service -run '^TestMatureCouponSurvivesSignedPaymentResume$' -count=1 -v) > "$RUNNER_TEMP/mature-coupon-resume-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-coupon-resume-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-coupon-resume-red.log"
+          grep -q 'signed payment resumption must preserve the selected coupon' "$RUNNER_TEMP/mature-coupon-resume-red.log"
       - name: Coupon accounting and isolation regressions
         if: always()
         working-directory: backend
         run: |
           set -o pipefail
-          go test -tags=unit ./internal/service -run '^Test(Coupon|QQBot)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/mature-coupon.log"
+          go test -tags=unit ./internal/service -run '^Test(Coupon|QQBot|MatureCoupon)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/mature-coupon.log"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
