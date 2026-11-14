@@ -30,16 +30,20 @@ func TestRepairMatureProductionUpgradeAndRollbackBoundary(t *testing.T) {
 	admin, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
-	baseline := os.DirFS(baselineDir)
-	files, err := fs.Glob(baseline, "*.sql")
+	productionFiles := os.DirFS(baselineDir)
+	baseline := fstest.MapFS{}
+	files, err := fs.Glob(productionFiles, "*.sql")
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
 	for _, name := range files {
-		before, err := fs.ReadFile(baseline, name)
+		before, err := fs.ReadFile(productionFiles, name)
 		require.NoError(t, err)
 		after, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
 		require.Equal(t, before, after, "applied production migration must remain immutable: %s", name)
+		// Execute only embedded migration bytes after exact equality with the
+		// pinned production archive; environment input selects evidence, not SQL.
+		baseline[name] = &fstest.MapFile{Data: after}
 	}
 	for _, fresh := range []bool{false, true} {
 		t.Run(fmt.Sprintf("fresh_%t", fresh), func(t *testing.T) {

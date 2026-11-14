@@ -1016,7 +1016,8 @@ func (s *PaymentService) RetryFulfillment(ctx context.Context, oid int64) error 
 		return infraerrors.BadRequest("INVALID_STATUS", "order already completed")
 	}
 	recoveryReview, _ := o.ProviderSnapshot["coupon_review_required"].(bool)
-	if o.Status != OrderStatusFailed && o.Status != OrderStatusPaid && o.Status != OrderStatusRecharging && !(recoveryReview && (o.Status == OrderStatusCancelled || o.Status == OrderStatusExpired)) {
+	reviewableHold := recoveryReview && (o.Status == OrderStatusCancelled || o.Status == OrderStatusExpired)
+	if o.Status != OrderStatusFailed && o.Status != OrderStatusPaid && o.Status != OrderStatusRecharging && !reviewableHold {
 		return infraerrors.BadRequest("INVALID_STATUS", "only paid, failed, and recoverable recharging orders can retry")
 	}
 	if !isSupportedPaymentOrderType(o.OrderType) {

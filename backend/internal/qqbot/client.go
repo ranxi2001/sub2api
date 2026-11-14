@@ -543,9 +543,6 @@ func (s *Service) token(ctx context.Context, c Config) (string, error) {
 	s.tokenExpires = time.Now().Add(time.Duration(seconds-30) * time.Second)
 	return v.AccessToken, nil
 }
-func (s *Service) qqRequest(ctx context.Context, c Config, path string, body any) ([]byte, error) {
-	return s.qqRequestMethod(ctx, c, http.MethodPost, path, body)
-}
 func (s *Service) qqRequestMethod(ctx context.Context, c Config, method, path string, body any) ([]byte, error) {
 	token, err := s.token(ctx, c)
 	if err != nil {
