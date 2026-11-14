@@ -246,14 +246,16 @@ func runRecoveredWSAudit(t *testing.T, mode, policy string, allowRecovery bool) 
 	}
 	require.Equal(t, "error", gjson.GetBytes(terminal, "type").String(), string(terminal))
 	wantCode := "content_policy_violation"
+	wantClose := coderws.StatusPolicyViolation
 	if policy == "prompt" {
 		wantCode = "prompt_guard_blocked"
+		wantClose = coderws.StatusCode(4403)
 	}
 	require.Equal(t, wantCode, gjson.GetBytes(terminal, "error.code").String())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, _, err := h.clientConn.Read(ctx)
-	require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
+	require.Equal(t, wantClose, coderws.CloseStatus(err))
 	select {
 	case <-h.handlerDone:
 	case <-ctx.Done():

@@ -1021,7 +1021,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 	}
 	if cfg.Mode == ContentModerationModePreBlock {
 		if (moderationState == nil || !moderationState.KeywordExempt) && cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
-			keywordText := extractContentModerationKeywordText(input.Protocol, input.Body)
+			keywordText := extractContentModerationInput(input.Protocol, input.Body, false, input.noBodyRetention).Text
 			if keyword, hit := runtimeSnapshot.matchBlockedKeyword(keywordText); hit {
 				if input.noBodyRetention {
 					keyword = "[Recovered context withheld]"
@@ -1067,7 +1067,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			return allow, nil
 		}
 	}
-	content := ExtractContentModerationInput(input.Protocol, input.Body)
+	content := extractContentModerationInput(input.Protocol, input.Body, true, input.noBodyRetention)
 	if content.IsEmpty() {
 		slog.Info("content_moderation.skip_empty_input",
 			"user_id", input.UserID,
