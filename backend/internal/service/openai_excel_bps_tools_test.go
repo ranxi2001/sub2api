@@ -72,7 +72,7 @@ func TestExcelBPSToolFallbackPolicy(t *testing.T) {
 					if forced {
 						require.Error(t, err)
 						require.Equal(t, http.StatusBadRequest, rec.Code)
-						require.Contains(t, rec.Body.String(), "basispoints supports tool_choice auto or none only")
+						require.Contains(t, rec.Body.String(), "basispoints tool_choice rejected")
 						require.True(t, IsResponseCommitted(c))
 						require.Empty(t, upstream.requests)
 					} else {
