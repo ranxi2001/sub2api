@@ -1,0 +1,56 @@
+name: Mature channel and community operations
+on:
+  push:
+    branches: [feat/mature-channel-community-ops]
+  pull_request:
+    paths:
+      - '**/*mature_provider*'
+      - '**/*provider_operations*'
+      - '**/qqbot/**'
+      - '.github/workflows/mature-channel-community-ops.yml'
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Freeze candidate identity
+        run: |
+          mkdir -p "$RUNNER_TEMP/mature-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/mature-evidence/candidate.txt"
+      - name: RED frozen production with candidate HTTP assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=37dc4620a41a68abaeab329358c15821c41e3f7f
+          git fetch --no-tags --depth=1 origin "$base"
+          git worktree add --detach "$RUNNER_TEMP/mature-red" "$base"
+          cp backend/internal/server/routes/mature_providers_test.go "$RUNNER_TEMP/mature-red/backend/internal/server/routes/"
+          cd "$RUNNER_TEMP/mature-red/backend"
+          set +e
+          go test ./internal/server/routes -run '^TestMatureProvidersHTTPContract$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-evidence/red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/red.log"
+          grep -q -- '--- FAIL: TestMatureProvidersHTTPContract/admin' "$RUNNER_TEMP/mature-evidence/red.log"
+          grep -q 'actual  : 404' "$RUNNER_TEMP/mature-evidence/red.log"
+      - name: Candidate HTTP contract
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test ./internal/server/routes -run '^TestMatureProvidersHTTPContract$' -count=1 -v 2>&1 | tee "$RUNNER_TEMP/mature-evidence/green.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-contract-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/mature-evidence/
