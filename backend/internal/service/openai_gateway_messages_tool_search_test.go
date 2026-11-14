@@ -112,6 +112,82 @@ func TestForwardAsAnthropic_CodexOAuthModelWithoutSearchSupportKeepsFunctionTool
 	require.NotContains(t, string(upstream.lastBody), "tool_search_call")
 }
 
+func codexOAuthToolSearchAccount() *Account {
+	return &Account{
+		ID: 1, Name: "openai-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+	}
+}
+
+const toolSearchNoopSSE = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_noop\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7}}}\n\n"
+
+// A revealed tool is declared in tool_search_output and replayed as a
+// function_call; both must carry the same upstream name.
+func TestForwardAsAnthropic_CodexOAuthRevealedToolNameMatchesReplay(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"python", "python__sub2api"},
+		{"Python", "python__sub2api"},
+		{"Echo", "Echo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.ReplaceAll(messagesToolSearchBody, "WebFetch", tc.name)
+			body = strings.TrimSuffix(body, "]}") + `,
+  {"role":"assistant","content":[{"type":"tool_use","id":"toolu_call","name":"` + tc.name + `","input":{"url":"https://example.com"}}]},
+  {"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_call","content":"ok"}]}]}`
+			upstream, _ := forwardMessagesToolSearch(t, codexOAuthToolSearchAccount(), body, toolSearchNoopSSE, "gpt-6-astra")
+
+			var declared, replayed []string
+			for _, item := range gjson.GetBytes(upstream.lastBody, "input").Array() {
+				switch item.Get("type").String() {
+				case "tool_search_output":
+					for _, tool := range item.Get("tools").Array() {
+						declared = append(declared, tool.Get("name").String())
+					}
+				case "function_call":
+					replayed = append(replayed, item.Get("name").String())
+				}
+			}
+			require.Equal(t, []string{tc.want}, declared)
+			require.Equal(t, []string{tc.want}, replayed)
+		})
+	}
+}
+
+// Selections that name a top-level function or carry no name are forwarded
+// as the bridge produced them.
+func TestForwardAsAnthropic_CodexOAuthToolChoiceControls(t *testing.T) {
+	for choice, want := range map[string]string{
+		`{"type":"tool","name":"Bash"}`: `{"type":"function","name":"Bash"}`,
+		`{"type":"auto"}`:               `"auto"`,
+		`{"type":"any"}`:                `"required"`,
+	} {
+		t.Run(choice, func(t *testing.T) {
+			body := strings.Replace(messagesToolSearchBody, `"stream":true,`, `"stream":true,"tool_choice":`+choice+`,`, 1)
+			upstream, _ := forwardMessagesToolSearch(t, codexOAuthToolSearchAccount(), body, toolSearchNoopSSE, "gpt-6-astra")
+			require.JSONEq(t, want, gjson.GetBytes(upstream.lastBody, "tool_choice").Raw)
+		})
+	}
+}
+
+func TestForwardAsAnthropic_CodexOAuthForcedHiddenToolKeepsFunctionTools(t *testing.T) {
+	for _, name := range []string{"ToolSearch", "WebFetch"} {
+		t.Run(name, func(t *testing.T) {
+			body := strings.Replace(messagesToolSearchBody, `"stream":true,`, `"stream":true,"tool_choice":{"type":"tool","name":"`+name+`"},`, 1)
+			upstream, _ := forwardMessagesToolSearch(t, codexOAuthToolSearchAccount(), body, toolSearchNoopSSE, "gpt-6-astra")
+
+			var names []string
+			for _, tool := range gjson.GetBytes(upstream.lastBody, "tools").Array() {
+				require.Equal(t, "function", tool.Get("type").String())
+				names = append(names, tool.Get("name").String())
+			}
+			require.Equal(t, []string{"Bash", "ToolSearch", "WebFetch"}, names)
+			require.JSONEq(t, `{"type":"function","name":"`+name+`"}`, gjson.GetBytes(upstream.lastBody, "tool_choice").Raw)
+			require.NotContains(t, string(upstream.lastBody), "tool_search_call")
+			require.NotContains(t, string(upstream.lastBody), "tool_search_output")
+		})
+	}
+}
+
 // Claude Code also sends stream:false turns; their upstream stream can end
 // with an empty terminal output, rebuilt from the buffered output items.
 func TestForwardAsAnthropic_CodexOAuthNonStreamingRestoresToolSearchCall(t *testing.T) {

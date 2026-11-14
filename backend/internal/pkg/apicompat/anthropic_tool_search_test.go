@@ -118,6 +118,88 @@ func TestApplyNativeToolSearch_NoToolSearchDeclaredKeepsFunctionTools(t *testing
 	require.NotContains(t, string(body), "tool_search_call")
 }
 
+func TestApplyNativeToolSearch_ForcedHiddenToolLeavesRequestUntouched(t *testing.T) {
+	for _, name := range []string{"ToolSearch", "WebFetch"} {
+		for _, raw := range []string{toolSearchBeforeReveal, toolSearchAfterReveal} {
+			req := toolSearchTestRequest(t, raw)
+			if name == "WebFetch" {
+				req.Tools = append(req.Tools, AnthropicTool{Name: "WebFetch", InputSchema: json.RawMessage(`{"type":"object"}`), DeferLoading: true})
+			}
+			req.ToolChoice = json.RawMessage(`{"type":"tool","name":"` + name + `"}`)
+			want, err := AnthropicToResponses(req)
+			require.NoError(t, err)
+			wantBody, err := json.Marshal(want)
+			require.NoError(t, err)
+
+			require.Equal(t, string(wantBody), string(nativeToolSearchJSON(t, req)), name)
+			require.NotContains(t, string(wantBody), "tool_search", name)
+		}
+	}
+}
+
+func TestApplyNativeToolSearch_OtherToolChoicesKeepNativeMapping(t *testing.T) {
+	for _, choice := range []string{
+		`{"type":"tool","name":"Bash"}`,
+		`{"type":"auto"}`,
+		`{"type":"any"}`,
+	} {
+		req := toolSearchTestRequest(t, toolSearchAfterReveal)
+		req.ToolChoice = json.RawMessage(choice)
+		body := nativeToolSearchJSON(t, req)
+		require.Equal(t, "tool_search", gjson.GetBytes(body, "tools.1.type").String(), choice)
+		require.Contains(t, string(body), "tool_search_output", choice)
+	}
+}
+
+func toolSearchResultRequest(t *testing.T, result string, trailing string) *AnthropicRequest {
+	t.Helper()
+	return toolSearchTestRequest(t, `{"model":"gpt-6-astra","max_tokens":64,
+ "tools":[
+  {"name":"ToolSearch","description":"search deferred tools","input_schema":`+toolSearchTestSchema+`},
+  {"name":"WebFetch","description":"fetch a url","input_schema":{"type":"object"},"defer_loading":true}],
+ "messages":[
+  {"role":"user","content":"fetch the page"},
+  {"role":"assistant","content":[{"type":"tool_use","id":"toolu_search","name":"ToolSearch","input":{"query":"x","max_results":5}}]},
+  {"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_search",`+result+`}`+trailing+`]}]}`)
+}
+
+func TestApplyNativeToolSearch_ResultTextRidesInFollowingUserMessage(t *testing.T) {
+	cases := []struct {
+		name, result, trailing, wantText, wantUser string
+		wantTools                                  int
+	}{
+		{"error", `"is_error":true,"content":"<tool_use_error>InputValidationError</tool_use_error>"`, "", "<tool_use_error>InputValidationError</tool_use_error>", "", 0},
+		{"no match string", `"content":"No matching deferred tools found"`, "", "No matching deferred tools found", "", 0},
+		{"text with reference", `"content":[{"type":"text","text":"found one"},{"type":"tool_reference","tool_name":"WebFetch"}]`, "", "found one", "", 1},
+		{"separate part ahead of following text", `"content":"No matching deferred tools found"`, `,{"type":"text","text":"retry"}`, "No matching deferred tools found", "retry", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := nativeToolSearchJSON(t, toolSearchResultRequest(t, tc.result, tc.trailing))
+			input := gjson.GetBytes(body, "input").Array()
+			require.Len(t, input, 4)
+			require.Equal(t, "tool_search_call", input[1].Get("type").String())
+			require.Equal(t, "tool_search_output", input[2].Get("type").String())
+			require.Len(t, input[2].Get("tools").Array(), tc.wantTools)
+			require.Equal(t, "message", input[3].Get("type").String())
+			require.Equal(t, "user", input[3].Get("role").String())
+			parts := input[3].Get("content").Array()
+			require.Equal(t, tc.wantText, parts[0].Get("text").String())
+			if tc.wantUser == "" {
+				require.Len(t, parts, 1)
+				return
+			}
+			require.Len(t, parts, 2)
+			require.Equal(t, `{"type":"input_text","text":"`+tc.wantUser+`"}`, parts[1].Raw)
+		})
+	}
+
+	t.Run("reference only adds no message", func(t *testing.T) {
+		body := nativeToolSearchJSON(t, toolSearchResultRequest(t, `"content":[{"type":"tool_reference","tool_name":"WebFetch"}]`, ""))
+		require.Len(t, gjson.GetBytes(body, "input").Array(), 3)
+	})
+}
+
 func TestResponsesToAnthropic_RestoresToolSearchCall(t *testing.T) {
 	var resp ResponsesResponse
 	require.NoError(t, json.Unmarshal([]byte(`{"id":"resp_1","status":"completed","output":[
