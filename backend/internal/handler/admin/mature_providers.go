@@ -66,7 +66,7 @@ func (h *ChannelHandler) GetMatureProvider(c *gin.Context) {
 
 func (h *ChannelHandler) MutateMatureProvider(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
 	var in service.MatureProviderInput
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
@@ -91,6 +91,12 @@ func (h *ChannelHandler) MutateMatureProvider(c *gin.Context) {
 	} else if err := service.ValidateMatureProviderInput(&in); err != nil {
 		matureProviderError(c, err)
 		return
+	}
+	if c.Request.Method != "DELETE" {
+		if err := h.encryptMatureProviderInput(&in); err != nil {
+			matureProviderError(c, err)
+			return
+		}
 	}
 	r, err := h.channelService.MatureProviderRepository()
 	if err != nil {

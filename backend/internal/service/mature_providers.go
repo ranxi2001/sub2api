@@ -32,6 +32,11 @@ type ProviderMetrics struct {
 
 // Provider records do not participate in routing, billing, or channel ownership.
 type MatureProvider struct {
+	AuthMode                string          `json:"auth_mode"`
+	Account                 string          `json:"account"`
+	UserID                  string          `json:"user_id"`
+	HasCredential           bool            `json:"has_credential"`
+	LastError               string          `json:"last_error"`
 	ID                      int64           `json:"id"`
 	Revision                int64           `json:"revision"`
 	Name                    string          `json:"name"`
@@ -48,6 +53,14 @@ type MatureProvider struct {
 }
 
 type MatureProviderInput struct {
+	AuthMode                string   `json:"auth_mode"`
+	Account                 string   `json:"account"`
+	UserID                  string   `json:"user_id"`
+	Password                string   `json:"password"`
+	AccessToken             string   `json:"access_token"`
+	RefreshToken            string   `json:"refresh_token"`
+	TokenType               string   `json:"token_type"`
+	CredentialCipher        *string  `json:"-"`
 	Name                    string   `json:"name"`
 	SiteType                string   `json:"site_type"`
 	BaseURL                 string   `json:"base_url"`
@@ -72,6 +85,14 @@ type MatureProviderRepository interface {
 	CreateMatureProvider(context.Context, MatureProviderInput) (*MatureProvider, error)
 	UpdateMatureProvider(context.Context, int64, MatureProviderInput) (*MatureProvider, error)
 	DeleteMatureProvider(context.Context, int64, int64) error
+	WithMatureProviderSession(context.Context, int64, int64, func(*MatureProvider, string) (ProviderSessionUpdate, error)) (*MatureProvider, error)
+}
+
+type ProviderSessionUpdate struct {
+	Cipher    *string
+	Metrics   *ProviderMetrics
+	Status    string
+	LastError string
 }
 
 func (s *ChannelService) MatureProviderRepository() (MatureProviderRepository, error) {
@@ -86,6 +107,16 @@ func (s *ChannelService) MatureProviderRepository() (MatureProviderRepository, e
 // This is lexical validation only: storing a record must not resolve DNS or
 // contact an upstream. Every future network request must validate at dial time.
 func ValidateMatureProviderInput(in *MatureProviderInput) error {
+	if in.AuthMode == "" {
+		in.AuthMode = "token"
+	}
+	if in.AuthMode != "token" && in.AuthMode != "password" {
+		return ErrMatureProviderValidation
+	}
+	in.Account, in.UserID = strings.TrimSpace(in.Account), strings.TrimSpace(in.UserID)
+	if len(in.Account) > 320 || len(in.UserID) > 128 || strings.IndexFunc(in.Account+in.UserID, unicode.IsControl) >= 0 || (in.AuthMode == "password" && in.Account == "") {
+		return ErrMatureProviderValidation
+	}
 	in.Name, in.Notes = strings.TrimSpace(in.Name), strings.TrimSpace(in.Notes)
 	if in.Name == "" || len(in.Name) > 120 || len(in.Notes) > 1000 || strings.IndexFunc(in.Name, unicode.IsControl) >= 0 {
 		return ErrMatureProviderValidation

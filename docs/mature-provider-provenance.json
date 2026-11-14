@@ -1,0 +1,52 @@
+[
+  {
+    "source_repository": "mizaawa/zayuapi",
+    "source_commit": "a71aa9615ccb55a19973908c9f261b5ba25a48c6",
+    "source_path": "backend/internal/handler/admin/provider_remote.go",
+    "source_blob": "b6bf6653497597594e787379c3984f26f87281f6",
+    "target_path": "backend/internal/handler/admin/mature_provider_remote.go",
+    "license": "LGPL-3.0",
+    "notices_preserved": true,
+    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+  },
+  {
+    "source_repository": "mizaawa/zayuapi",
+    "source_commit": "a71aa9615ccb55a19973908c9f261b5ba25a48c6",
+    "source_path": "backend/internal/handler/admin/provider_newapi_auth.go",
+    "source_blob": "17f93f65ee080de940960d61472408ad17249337",
+    "target_path": "backend/internal/handler/admin/mature_provider_newapi_auth.go",
+    "license": "LGPL-3.0",
+    "notices_preserved": true,
+    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+  },
+  {
+    "source_repository": "mizaawa/zayuapi",
+    "source_commit": "a71aa9615ccb55a19973908c9f261b5ba25a48c6",
+    "source_path": "backend/internal/handler/admin/provider_session.go",
+    "source_blob": "fdc5b385440faaeec174c95b93e010ab66c04302",
+    "target_path": "backend/internal/handler/admin/mature_provider_session.go",
+    "license": "LGPL-3.0",
+    "notices_preserved": true,
+    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+  },
+  {
+    "source_repository": "mizaawa/zayuapi",
+    "source_commit": "a71aa9615ccb55a19973908c9f261b5ba25a48c6",
+    "source_path": "backend/internal/handler/admin/provider_key_remote.go",
+    "source_blob": "aa20e643798ab2d81c48ac83f6fe99f32dd23114",
+    "target_path": "backend/internal/handler/admin/mature_provider_key_remote.go",
+    "license": "LGPL-3.0",
+    "notices_preserved": true,
+    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+  },
+  {
+    "source_repository": "mizaawa/zayuapi",
+    "source_commit": "a71aa9615ccb55a19973908c9f261b5ba25a48c6",
+    "source_path": "backend/internal/handler/admin/provider_keys.go",
+    "source_blob": "1e0e78a5ac52b80bce8f157e26d0c9e83e712f82",
+    "target_path": "backend/internal/handler/admin/mature_provider_key_types.go",
+    "license": "LGPL-3.0",
+    "notices_preserved": true,
+    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+  }
+]

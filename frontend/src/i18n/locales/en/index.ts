@@ -1,3 +1,4 @@
+import matureProviders from './matureProviders'
 import autoCredit from './autoCredit'
 import accountPerformance from './accountPerformance'
 import apiKeyModelPolicy from './apiKeyModelPolicy'
@@ -40,6 +41,7 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
+  matureProviders,
   apiKeyModelPolicy,
   autoCredit,
  accountPerformance,

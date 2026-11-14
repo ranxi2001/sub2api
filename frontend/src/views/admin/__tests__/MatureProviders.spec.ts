@@ -4,7 +4,7 @@ import UpstreamChannelOperationsView from '../UpstreamChannelOperationsView.vue'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ default: api }))
-vi.mock('@/components/admin/operations/UpstreamAnalytics.vue', () => ({ default: { template: '<div>existing analytics</div>' } }))
+vi.mock('@/components/admin/operations/UpstreamAnalytics.vue', () => ({ default: { template: '<div>existing analytics<slot /></div>' } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 1 }, isAdmin: true }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 

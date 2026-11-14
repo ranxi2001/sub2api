@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -16,9 +17,11 @@ import (
 
 // ChannelHandler handles admin channel management
 type ChannelHandler struct {
-	channelService *service.ChannelService
-	billingService *service.BillingService
-	pricingService *service.PricingService
+	providerEncryptor service.SecretEncryptor
+	providerClient    *http.Client
+	channelService    *service.ChannelService
+	billingService    *service.BillingService
+	pricingService    *service.PricingService
 }
 
 // NewChannelHandler creates a new admin channel handler
