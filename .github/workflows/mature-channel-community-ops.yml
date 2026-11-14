@@ -256,9 +256,26 @@ jobs:
       - name: QQ frontend business regression
         working-directory: frontend
         run: pnpm exec vitest run src/components/admin/qqbot/__tests__ src/views/admin/__tests__/QQBotView.spec.ts src/views/admin/__tests__/QQBotSetup.spec.ts src/views/admin/__tests__/QQBotActivities.spec.ts src/views/admin/__tests__/QQBotRecords.spec.ts src/components/admin/__tests__/QQBotBindings.spec.ts src/components/user/profile/__tests__/ProfileQQBotCard.spec.ts src/views/auth/__tests__/QQBotBindView.spec.ts src/views/auth/__tests__/QQBotTransferView.spec.ts src/api/__tests__/qqbot.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: RED definite remote refusals must not be presented as unknown writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=frontend/src/components/account/MatureProviderImport.vue
+          cp "$target" "$RUNNER_TEMP/mature-import-current.vue"
+          trap 'cp "$RUNNER_TEMP/mature-import-current.vue" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin a72031bcda0102664f65d3889783d227fe6fa802
+          git show a72031bcda0102664f65d3889783d227fe6fa802:"$target" > "$target"
+          set +e
+          (cd frontend && pnpm exec vitest run src/components/account/__tests__/MatureProviderImport.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism) > "$RUNNER_TEMP/mature-ui-evidence/key-refusal-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-ui-evidence/key-refusal-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found|Unhandled Error' "$RUNNER_TEMP/mature-ui-evidence/key-refusal-red.log"
+          grep -q 'definite refusals must remain distinct from uncertain writes' "$RUNNER_TEMP/mature-ui-evidence/key-refusal-red.log"
       - name: Account import regression
         working-directory: frontend
-        run: pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+        run: pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts src/components/account/__tests__/MatureProviderImport.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - name: Coupon reward payment UI regressions
         working-directory: frontend
         run: pnpm exec vitest run src/components/payment/__tests__/RechargeCouponPicker.spec.ts src/views/admin/orders/__tests__/AdminCouponsView.spec.ts src/views/user/__tests__/UserCouponsView.spec.ts src/views/user/__tests__/PaymentView.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
