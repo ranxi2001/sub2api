@@ -109,7 +109,9 @@ func TestSecurityPenaltyAsyncFindingCommitsWithLeaseFencedEvent(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 	job.Snapshot.FullPrompt = "SYNTHETIC_ASYNC_PROMPT"
-	result := &NormalizedResult{Action: ActionBlock, Decision: EventCritical, RiskLevel: RiskCritical, MatchedScanners: []string{"jailbreak"}, ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{}}
+	// Normalization produces an array, including when no category is reported.
+	// A nil slice encodes JSON null and violates the existing event constraint.
+	result := &NormalizedResult{Action: ActionBlock, Decision: EventCritical, RiskLevel: RiskCritical, Categories: []string{}, MatchedScanners: []string{"jailbreak"}, ScannerScores: map[string]float64{}, ScannerEvidence: map[string]string{}}
 	_, err = repo.Complete(context.Background(), job, result, false)
 	require.NoError(t, err)
 	_, err = repo.Complete(context.Background(), job, result, false)

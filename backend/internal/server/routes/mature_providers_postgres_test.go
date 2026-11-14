@@ -3,10 +3,12 @@
 package routes
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -20,13 +22,28 @@ import (
 	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
 // Only existing production constructors are used, including in the RED run.
 // The PostgreSQL fixture is isolated and never uses application configuration.
 func matureProviderDatabase(t *testing.T) *sql.DB {
 	dsn := os.Getenv("MATURE_TEST_POSTGRES")
-	require.NotEmpty(t, dsn, "explicit isolated PostgreSQL DSN is required")
+	if dsn == "" {
+		// The general integration suite has no feature-specific DSN. Launch
+		// an isolated fixture rather than consulting application settings.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		container, err := tcpostgres.Run(ctx, "postgres:16-alpine", tcpostgres.WithDatabase("mature_test"), tcpostgres.WithUsername("mature_fixture"), tcpostgres.WithPassword("synthetic-fixture-only"), tcpostgres.BasicWaitStrategies())
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
+			defer stop()
+			_ = container.Terminate(cleanup)
+		})
+		dsn, err = container.ConnectionString(ctx, "sslmode=disable")
+		require.NoError(t, err)
+	}
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
@@ -35,7 +52,16 @@ func matureProviderDatabase(t *testing.T) *sql.DB {
 	_, err = db.Exec(`CREATE SCHEMA ` + schema)
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = db.Exec(`DROP SCHEMA ` + schema + ` CASCADE`) })
-	isolated, err := sql.Open("postgres", dsn+" search_path="+schema)
+	isolatedDSN := dsn + " search_path=" + schema
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		parsed, err := url.Parse(dsn)
+		require.NoError(t, err)
+		query := parsed.Query()
+		query.Set("search_path", schema)
+		parsed.RawQuery = query.Encode()
+		isolatedDSN = parsed.String()
+	}
+	isolated, err := sql.Open("postgres", isolatedDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = isolated.Close() })
 	// The frozen baseline has no provider schema; it still reaches the HTTP
