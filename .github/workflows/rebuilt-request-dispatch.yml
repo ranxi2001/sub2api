@@ -8,6 +8,7 @@ on:
       - 'backend/internal/service/openai_account_scheduler.go'
       - 'backend/internal/service/openai_request_timezone_egress*'
       - 'backend/internal/service/openai_ws_client.go'
+      - 'backend/internal/service/openai_responses_namespace.go'
       - 'backend/internal/handler/openai_409_*'
       - 'backend/internal/handler/openai_gateway_handler.go'
       - '.github/workflows/rebuilt-request-dispatch.yml'
@@ -40,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           baseline=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
-          for target in backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; do
+          for target in backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go backend/internal/service/openai_responses_namespace.go; do
             git show "$baseline:$target" > "$target"
           done
       - name: Same network and tool-loop regressions
@@ -49,7 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler -run '^TestOpenAI409(HTTPProjectionAndPassthrough|WSInitialWithoutPointer|PhysicalTimezonePreservesReadableTask)$' -count=1 -timeout=10m) > "$RUNNER_TEMP/dispatch.jsonl" 2>&1
+          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler -run '^TestOpenAI409(HTTPProjectionAndPassthrough|WSInitialWithoutPointer|PhysicalTimezonePreservesReadableTask|NamespaceProjectionPreservesNumbers)$' -count=1 -timeout=10m) > "$RUNNER_TEMP/dispatch.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/dispatch.jsonl"
