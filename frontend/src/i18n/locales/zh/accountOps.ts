@@ -1,4 +1,16 @@
 export default {
+  "directEditHint": "直接编辑每组规则；勾选多组可批量修改",
+  "manageGroups": "管理分组",
+  "failureSettingsSummary": "请求失败提醒与重复间隔",
+  "lastKnownBalance": "上次余额 {value} {unit}（仅供参考）",
+  "collectionDisabled": "自动采集未开启，提醒规则不会自动获取余额。",
+  "enableCollection": "开启采集并刷新",
+  "refreshBalance": "刷新余额",
+  "balanceUnsupportedHint": "上游未提供可用的余额数据，请检查上游是否支持余额查询。",
+  "balancePendingHint": "当前没有可用于阈值判断的新数据，可尝试刷新余额。",
+  "collectionGloballyDisabled": "全局上游采集已关闭，请到账号管理开启后再试。",
+  "balanceRefreshFailed": "未获取到有效余额，请检查上游支持情况和账号配置。",
+
   "workspaceTitle": "账号提醒与阈值",
   "smartTitle": "智能运维",
   "title": "账号运维",

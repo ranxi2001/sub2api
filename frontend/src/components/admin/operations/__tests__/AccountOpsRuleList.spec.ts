@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import RuleList from '../AccountOpsRuleList.vue'
 import type { AccountOpsConfig, AccountOpsGroup, AccountOpsThresholdAccount } from '@/api/admin/accountOps'
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => values ? `${key}:${JSON.stringify(values)}` : key }) }))
+vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => values ? `${key}:${JSON.stringify(values)}` : key }) }))
 
 const config: AccountOpsConfig = {
   enabled: false, recipient: '', balance_low: true, weekly_quota: true, cooldown_minutes: 60,

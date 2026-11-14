@@ -1,4 +1,16 @@
 export default {
+  "directEditHint": "Edit a group directly, or select groups for bulk editing",
+  "manageGroups": "Manage groups",
+  "failureSettingsSummary": "Request failure alerts and repeat interval",
+  "lastKnownBalance": "Last balance {value} {unit} (reference only)",
+  "collectionDisabled": "Automatic collection is off. Alert rules do not fetch balances.",
+  "enableCollection": "Enable collection and refresh",
+  "refreshBalance": "Refresh balance",
+  "balanceUnsupportedHint": "The upstream did not provide usable balance data. Check its balance query support.",
+  "balancePendingHint": "No fresh data is available for threshold checks. Try refreshing the balance.",
+  "collectionGloballyDisabled": "Global upstream collection is off. Enable it in account management first.",
+  "balanceRefreshFailed": "No valid balance was received. Check upstream support and account settings.",
+
   "workspaceTitle": "Account notifications and thresholds",
   "smartTitle": "Smart operations",
   "title": "Account operations",
