@@ -14,20 +14,20 @@ func ExtractContentModerationText(protocol string, body []byte) string {
 }
 
 func ExtractContentModerationInput(protocol string, body []byte) ContentModerationInput {
-	return extractContentModerationInput(protocol, body, true)
+	return extractContentModerationInput(protocol, body, true, false)
 }
 
 // Keyword checks share semantic moderation's current-user boundaries, but must
 // inspect client-supplied reminder blocks as ordinary user text.
 func extractContentModerationKeywordText(protocol string, body []byte) string {
-	return extractContentModerationInput(protocol, body, false).Text
+	return extractContentModerationInput(protocol, body, false, false).Text
 }
 
 type moderationTextCollector struct {
 	filterReminders bool
 }
 
-func extractContentModerationInput(protocol string, body []byte, filterReminders bool) ContentModerationInput {
+func extractContentModerationInput(protocol string, body []byte, filterReminders, recovered bool) ContentModerationInput {
 	collector := moderationTextCollector{filterReminders: filterReminders}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return ContentModerationInput{}
@@ -40,7 +40,14 @@ func extractContentModerationInput(protocol string, body []byte, filterReminders
 	case ContentModerationProtocolOpenAIChat:
 		collector.collectLastRoleMessage(gjson.GetBytes(body, "messages"), "user", &parts, &images)
 	case ContentModerationProtocolOpenAIResponses:
-		collector.collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+		if recovered {
+			// A rebuilt task can end in a gateway-authored historical user
+			// marker. Audit its recovered context, not only that final marker.
+			collector.collectRecoveredResponsesValue(gjson.GetBytes(body, "instructions"), &parts, &images)
+			collector.collectRecoveredResponsesValue(gjson.GetBytes(body, "input"), &parts, &images)
+		} else {
+			collector.collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+		}
 	case ContentModerationProtocolGemini:
 		collector.collectLastGeminiContent(gjson.GetBytes(body, "contents"), &parts, &images)
 	case ContentModerationProtocolOpenAIImages:
@@ -63,6 +70,35 @@ func extractContentModerationInput(protocol string, body []byte, filterReminders
 		out.Normalize()
 	}
 	return out
+}
+
+// Only the server-owned recovered-context provenance enables this traversal.
+// Read supported plaintext and images without interpreting opaque fields or
+// changing the request sent to the provider. Ordinary requests retain their
+// current-user boundary.
+func (collector moderationTextCollector) collectRecoveredResponsesValue(value gjson.Result, parts *[]string, images *[]string) {
+	if value.IsArray() {
+		value.ForEach(func(_, item gjson.Result) bool {
+			collector.collectRecoveredResponsesValue(item, parts, images)
+			return true
+		})
+		return
+	}
+	if value.IsObject() {
+		switch value.Get("type").String() {
+		case "function_call_output", "custom_tool_call_output":
+			collector.collectRecoveredResponsesValue(value.Get("output"), parts, images)
+			return
+		case "output_text", "summary_text":
+			collector.addModerationText(parts, value.Get("text").String())
+			return
+		}
+		if content := value.Get("content"); content.Exists() {
+			collector.collectRecoveredResponsesValue(content, parts, images)
+			return
+		}
+	}
+	collector.collectContentValue(value, parts, images)
 }
 
 // collectSystemOneInput moderates every client-controlled text of a System One

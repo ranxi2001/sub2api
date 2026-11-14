@@ -1,0 +1,5 @@
+diff --git a/backend/internal/service/openai_ws_http_bridge.go b/backend/internal/service/openai_ws_http_bridge.go
+--- a/backend/internal/service/openai_ws_http_bridge.go
++++ b/backend/internal/service/openai_ws_http_bridge.go
+@@ -33,0 +34 @@
++	ClientTools   json.RawMessage

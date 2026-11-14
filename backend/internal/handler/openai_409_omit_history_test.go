@@ -107,8 +107,12 @@ func TestOpenAI409OmitHistoryHTTP(t *testing.T) {
 				mu.Lock()
 				defer mu.Unlock()
 				switch scenario {
-				case "off", "current_task":
+				case "off":
 					require.Equal(t, http.StatusConflict, answer.Code, answer.Body.String())
+					require.Len(t, bodies, 1)
+				case "current_task":
+					require.Equal(t, http.StatusUnprocessableEntity, answer.Code, answer.Body.String())
+					require.Contains(t, answer.Body.String(), "readable_intent_missing")
 					require.Len(t, bodies, 1)
 				case "no_accounts":
 					require.GreaterOrEqual(t, answer.Code, 400)
@@ -178,7 +182,8 @@ func TestOpenAI409ReplayMetadataHTTP(t *testing.T) {
 					mu.Unlock()
 					if n > 1 {
 						rule := gjson.GetBytes(body, "input.5")
-						valid := !rule.Get("id").Exists() && !rule.Get("status").Exists() && rule.Get("summary").IsArray() &&
+						valid := !rule.Get("id").Exists() && !rule.Get("status").Exists() && rule.Get("type").String() == "message" &&
+							!rule.Get("encrypted_content").Exists() &&
 							!gjson.GetBytes(body, "input.1.id").Exists() && !gjson.GetBytes(body, "input.1.call_id").Exists() &&
 							gjson.GetBytes(body, "input.1.sequence").Raw == "9007199254740993" &&
 							strings.Contains(string(body), "Historical encrypted content omitted") &&
@@ -232,7 +237,7 @@ func TestOpenAI409ReplayMetadataHTTP(t *testing.T) {
 					require.Equal(t, http.StatusOK, answer.Code, answer.Body.String())
 					issue758CompletedResponse(t, answer.Body.String(), stream)
 				}
-				for _, path := range []string{"input.1.content", "input.1.sequence", "input.2", "input.3", "input.4", "input.5.encrypted_content"} {
+				for _, path := range []string{"input.1.content", "input.1.sequence", "input.2", "input.3", "input.4"} {
 					require.JSONEq(t, gjson.Get(followup, path).Raw, gjson.GetBytes(bodies[1], path).Raw, path)
 				}
 				require.Equal(t, owners, issue805Owners(t, clients()), "old ownership remains intact")

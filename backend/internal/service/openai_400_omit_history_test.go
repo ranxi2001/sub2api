@@ -152,6 +152,7 @@ func TestOpenAI400HistoryNativeForward(t *testing.T) {
 				if tc.after409 {
 					r := openAIAgentRecoveryFromContext(ctx)
 					r.omittedHistory, r.inputDigest = true, openAIAgentRecoveryInputDigest(body)
+					r.replayControlsDigest = openAI409ControlsDigest(body)
 				}
 				c.Request = c.Request.WithContext(ctx)
 				_, err := svc.Forward(ctx, c, newStreamLineageHTTPAccount(), body)
@@ -185,17 +186,25 @@ func TestOpenAI400HistoryNativeForward(t *testing.T) {
 }
 
 func TestOpenAI400HistorySendGuards(t *testing.T) {
-	for _, mode := range []string{"unchanged", "task", "tool_result", "order", "account", "credential", "url", "budget", "canceled", "output_started", "delivery_pending", "owner_lookup"} {
+	for _, mode := range []string{"unchanged", "task", "tool_result", "order", "controls", "account", "credential", "url", "budget", "canceled", "output_started", "delivery_pending", "owner_lookup"} {
 		t.Run(mode, func(t *testing.T) {
 			svc := newStreamLineageHTTPService(nil)
 			enableHistory400(svc, true)
 			c, rec := newStreamLineageTestContext("history400-guards")
 			c.Set("api_key", &APIKey{ID: 7, AllowLongContext: true})
-			body := history400Body(history400Input, false)
+			body, err := sjson.SetBytes(history400Body(history400Input, false), "parallel_tool_calls", true)
+			require.NoError(t, err)
 			ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, body, "history400-guards", "gpt-5.1")
 			original := openAIAgentRecoveryFromContext(ctx)
 			original.omittedHistory, original.inputDigest = true, openAIAgentRecoveryInputDigest(body)
+			original.replayControlsDigest = openAI409ControlsDigest(body)
 			digest := original.inputDigest
+			// Exercise the same frozen native API-key adaptation as Forward.
+			body, err = prepareOpenAI409APIKeyReplay(ctx, body, false)
+			require.NoError(t, err)
+			require.True(t, original.apiReplayPrepared)
+			require.False(t, gjson.GetBytes(body, "parallel_tool_calls").Exists())
+			apiInput, apiControls := original.apiInputDigest, original.apiControlsDigest
 			account := newStreamLineageHTTPAccount()
 			request := func(body []byte, url string) *http.Request {
 				req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
@@ -230,7 +239,10 @@ func TestOpenAI400HistorySendGuards(t *testing.T) {
 			}
 			require.True(t, changed, "%+v; response=%s", openAI400HistoryDiagnostic(c), rec.Body.String())
 			require.Equal(t, digest, original.inputDigest, "source snapshot is immutable")
+			require.Equal(t, apiInput, original.apiInputDigest, "source adapter snapshot is immutable")
 			frozen := openAIAgentRecoveryFromContext(next).inputDigest
+			require.Equal(t, frozen, openAIAgentRecoveryFromContext(next).apiInputDigest)
+			require.Equal(t, apiControls, openAIAgentRecoveryFromContext(next).apiControlsDigest, "400 omission must not authorize new controls")
 			switch mode {
 			case "task":
 				clean, err = sjson.SetBytes(clean, "input.4.content", "changed task")
@@ -238,6 +250,8 @@ func TestOpenAI400HistorySendGuards(t *testing.T) {
 				clean, err = sjson.SetBytes(clean, "input.3.output", "changed result")
 			case "order":
 				clean, err = sjson.DeleteBytes(clean, "input.2")
+			case "controls":
+				clean, err = sjson.SetBytes(clean, "instructions", "unauthorized replacement instructions")
 			case "account":
 				account.ID++
 			case "credential":

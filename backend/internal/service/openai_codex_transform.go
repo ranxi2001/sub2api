@@ -95,6 +95,7 @@ type codexOAuthTransformOptions struct {
 	SkipDefaultInstructions             bool
 	PreserveToolCallIDs                 bool
 	OmitPromotedSystemMessagesFromInput bool
+	PreserveReadableReplay              bool // explicitly prepared and digest-protected HTTP replay
 	// ResponsesLite selects where an injected hosted tool is declared.
 	ResponsesLite bool
 }
@@ -319,18 +320,20 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 
 	// 续链场景保留 item_reference 与 id，避免 call_id 上下文丢失。
 	if input, ok := reqBody["input"].([]any); ok {
-		if normalizedInput, modified := normalizeCodexToolRoleMessages(input); modified {
-			input = normalizedInput
-			result.Modified = true
+		if !opts.PreserveReadableReplay {
+			if normalizedInput, modified := normalizeCodexToolRoleMessages(input); modified {
+				input = normalizedInput
+				result.Modified = true
+			}
+			if normalizedInput, modified := normalizeCodexMessageContentText(input); modified {
+				input = normalizedInput
+				result.Modified = true
+			}
+			input = filterCodexInputWithOptions(input, codexInputFilterOptions{
+				PreserveReferences: needsToolContinuation,
+				PreserveCallIDs:    opts.PreserveToolCallIDs,
+			})
 		}
-		if normalizedInput, modified := normalizeCodexMessageContentText(input); modified {
-			input = normalizedInput
-			result.Modified = true
-		}
-		input = filterCodexInputWithOptions(input, codexInputFilterOptions{
-			PreserveReferences: needsToolContinuation,
-			PreserveCallIDs:    opts.PreserveToolCallIDs,
-		})
 		reqBody["input"] = input
 		result.Modified = true
 	} else if inputStr, ok := reqBody["input"].(string); ok {

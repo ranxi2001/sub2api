@@ -78,6 +78,9 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 	return parsed.String(), nil
 }
 
+// Set only by an authorized unsent readable transition, never by client headers.
+type openAIWSReadableProviderKey struct{}
+
 func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	ctx context.Context,
 	c *gin.Context,
@@ -211,9 +214,28 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if c != nil && c.Request != nil {
 		s.requestTimezoneHeaders(ctx, account, c.Request.Header, headers)
 	}
+	s.detachOpenAIWSReadableProviderHeaders(ctx, headers, account)
 	s.restoreBoundCodexTicketHarvestIdentity(ctx, headers, account)
 
 	return headers, sessionResolution, nil
+}
+
+// The inbound upgrade identity remains immutable. A valid B-bound ticket is
+// independent of the discarded A conversation and must retain its own state.
+func (s *OpenAIGatewayService) detachOpenAIWSReadableProviderHeaders(ctx context.Context, headers http.Header, account *Account) {
+	if detached, _ := ctx.Value(openAIWSReadableProviderKey{}).(bool); detached {
+		// conversation_id can also be the caller's trusted thread identity.
+		// Suppress old provider state only on outbound headers, preserving the
+		// original upgrade headers for later identity checks on this socket.
+		ticket := s.boundCodexTicketFromHeader(ctx, headers, account)
+		if ticket == nil {
+			headers.Del(openAIWSTurnStateHeader)
+		}
+		headers.Del("conversation_id")
+		if account.UsesOpenAICodexProtocol() && harvestTicketSessionID(ticket) == "" && headers.Get("session_id") != "" {
+			headers.Set("conversation_id", headers.Get("session_id"))
+		}
+	}
 }
 
 func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any, account *Account) map[string]any {

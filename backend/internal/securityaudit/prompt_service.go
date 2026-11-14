@@ -23,13 +23,15 @@ type PromptService struct {
 	metrics   *AtomicMetrics
 	clock     Clock
 
-	lifecycleMu  sync.Mutex
-	cancel       context.CancelFunc
-	background   context.Context
-	enqueueWG    sync.WaitGroup
-	enqueueSlots chan struct{}
-	probeMu      sync.RWMutex
-	probes       map[string]ProbeResult
+	lifecycleMu    sync.Mutex
+	cancel         context.CancelFunc
+	background     context.Context
+	stopping       bool
+	enqueueWG      sync.WaitGroup
+	enqueueSlots   chan struct{}
+	recoveredSlots chan struct{}
+	probeMu        sync.RWMutex
+	probes         map[string]ProbeResult
 }
 
 func NewPromptService(
@@ -46,7 +48,7 @@ func NewPromptService(
 	return &PromptService{
 		config: config, repo: repo, payload: payload, scanner: scanner, metrics: metrics,
 		enqueuer: enqueuer, evaluator: evaluator, runner: runner, clock: realClock{},
-		enqueueSlots: make(chan struct{}, 128), probes: map[string]ProbeResult{},
+		enqueueSlots: make(chan struct{}, 128), recoveredSlots: make(chan struct{}, 8), probes: map[string]ProbeResult{},
 	}
 }
 
@@ -60,6 +62,7 @@ func (s *PromptService) Start(ctx context.Context) error {
 		return nil
 	}
 	background, cancel := context.WithCancel(ctx)
+	s.stopping = false
 	s.background, s.cancel = background, cancel
 	s.lifecycleMu.Unlock()
 	configErr := s.config.Start(background)
@@ -74,6 +77,8 @@ func (s *PromptService) Shutdown(ctx context.Context) error {
 	s.lifecycleMu.Lock()
 	cancel := s.cancel
 	s.cancel = nil
+	s.stopping = true
+	s.background = nil
 	s.lifecycleMu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -108,9 +113,12 @@ func (s *PromptService) EffectiveMode() Mode {
 	return s.config.EffectiveMode()
 }
 
-func (s *PromptService) Enqueue(_ context.Context, req Request) error {
+func (s *PromptService) Enqueue(ctx context.Context, req Request) error {
 	if s == nil || s.enqueuer == nil || s.EffectiveMode() != ModeAsync {
 		return nil
+	}
+	if req.NoBodyRetention {
+		return s.enqueueRecovered(req)
 	}
 	select {
 	case s.enqueueSlots <- struct{}{}:
@@ -123,13 +131,14 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 	}
 	s.lifecycleMu.Lock()
 	background := s.background
-	s.lifecycleMu.Unlock()
-	if background == nil {
+	if background == nil || s.stopping {
+		s.lifecycleMu.Unlock()
 		<-s.enqueueSlots
 		return errors.New("prompt audit service not started")
 	}
-	requestCopy := req.Clone()
 	s.enqueueWG.Add(1)
+	s.lifecycleMu.Unlock()
+	requestCopy := req.Clone()
 	go func() {
 		defer s.enqueueWG.Done()
 		defer func() { <-s.enqueueSlots }()
@@ -138,6 +147,74 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 		_ = s.enqueuer.Enqueue(ctx, requestCopy)
 	}()
 	return nil
+}
+
+func (s *PromptService) enqueueRecovered(req Request) error {
+	// Eight in-flight jobs, <=128KiB each, no waiting queue, <=30s lifetime.
+	// Acquire before cloning so an overload never retains unbounded plaintext.
+	if len(req.Body) > 128*1024 {
+		return errors.New("recovered audit payload too large")
+	}
+	select {
+	case s.recoveredSlots <- struct{}{}:
+	default:
+		if s.metrics != nil {
+			s.metrics.IncDropped()
+		}
+		LogWarn(EventEnqueueDropped, map[string]any{"request_id": req.RequestID, "status": "dropped", "error_code": "recovered_enqueue_busy"})
+		return ErrQueueFull
+	}
+	s.lifecycleMu.Lock()
+	background := s.background
+	if background == nil || s.stopping {
+		s.lifecycleMu.Unlock()
+		<-s.recoveredSlots
+		return errors.New("prompt audit service not started")
+	}
+	s.enqueueWG.Add(1)
+	s.lifecycleMu.Unlock()
+	copy := req.Clone()
+	go func() {
+		defer s.enqueueWG.Done()
+		defer func() { <-s.recoveredSlots }()
+		defer func() {
+			if recover() != nil {
+				LogError(EventProcessFailed, map[string]any{"request_id": copy.RequestID, "status": "failed", "error_code": "recovered_worker_panic"})
+			}
+		}()
+		ctx, cancel := context.WithTimeout(background, 30*time.Second)
+		defer cancel()
+		if err := s.processRecovered(ctx, copy); err != nil {
+			if s.metrics != nil {
+				s.metrics.IncRecordFailed()
+			}
+			LogWarn(EventProcessFailed, map[string]any{"request_id": copy.RequestID, "status": "failed", "error_code": "recovered_audit_failed"})
+		}
+	}()
+	return nil
+}
+
+func (s *PromptService) processRecovered(ctx context.Context, req Request) error {
+	cfg, ok := s.config.Active()
+	if !ok || cfg.EffectiveMode() != ModeAsync || !cfg.IncludesGroup(req.GroupID) {
+		return nil
+	}
+	snapshot, err := ExtractPromptSnapshot(req)
+	if errors.Is(err, ErrNoPromptText) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	decision, err := s.evaluator.evaluate(ctx, cfg, snapshot, false)
+	if err != nil {
+		return err
+	}
+	if decision == nil || decision.Result == nil {
+		return errors.New("recovered audit result unavailable")
+	}
+	_, err = s.repo.RecordRecoveredAsync(ctx, snapshot, cfg.ConfigVersion, decision.Result, cfg.StorePassEvents)
+	return err
 }
 
 func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecision, error) {

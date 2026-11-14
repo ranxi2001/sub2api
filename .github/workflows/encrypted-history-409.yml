@@ -44,10 +44,28 @@ jobs:
         run: |
           set -euo pipefail
           baseline=11f250894eab310cbd4508946c44c9e2a3a2eb48
-          target=backend/internal/service/openai_409_omit_history.go
-          cp "$target" "$RUNNER_TEMP/omit-history-candidate.go"
-          trap 'cp "$RUNNER_TEMP/omit-history-candidate.go" "$target"' EXIT
+          callers=96ba36a85edab665ad5a035788fc07a40fd18762
           git fetch --no-tags --depth=1 origin "$baseline"
+          git fetch --no-tags --depth=1 origin "$callers"
+          git worktree add --detach "$RUNNER_TEMP/omit-metadata-red" HEAD
+          cd "$RUNNER_TEMP/omit-metadata-red"
+          # Keep the pre-rebuild callers coherent with the old omission API.
+          # The historical metadata regression itself remains the candidate's.
+          for target in backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_agent_message_recovery_error.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_codex_transform.go backend/internal/handler/openai_gateway_handler.go; do
+            git show "$callers:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$callers:$target")"
+          done
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go; do
+            git show "$callers:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$callers:$target")"
+          done
+          ! git cat-file -e "$callers:backend/internal/service/openai_ws_readable_continuation.go" 2>/dev/null
+          rm -- backend/internal/service/openai_ws_readable_continuation.go
+          for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go; do
+            ! git cat-file -e "$callers:$target" 2>/dev/null
+            rm -- "$target"
+          done
+          target=backend/internal/service/openai_409_omit_history.go
           git show "$baseline:$target" > "$target"
           test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
           set +e
@@ -56,6 +74,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/omit-history-red.log"
           test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|panic|data race|--- SKIP:' "$RUNNER_TEMP/omit-history-red.log"
           grep -q -- '--- FAIL: TestOpenAI409ReplayMetadataHTTP' "$RUNNER_TEMP/omit-history-red.log"
           grep -q 'encrypted_agent_recovery_wire_changed' "$RUNNER_TEMP/omit-history-red.log"
       - uses: actions/upload-artifact@v7

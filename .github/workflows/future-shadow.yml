@@ -1,0 +1,202 @@
+name: Future readable shadow TDD
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [RED, GREEN, BOTH]
+        default: BOTH
+        description: Fixed baseline RED and exact candidate GREEN
+  pull_request:
+    paths:
+      - 'backend/internal/handler/openai_409_shadow*'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/service/openai_agent_message_*'
+      - 'backend/internal/service/openai_409_*'
+      - 'backend/internal/repository/gateway_cache_agent*'
+      - 'backend/internal/repository/gateway_cache_readable_shadow*'
+      - '.github/scripts/assert-future-shadow.py'
+      - '.github/scripts/test_assert_future_shadow.py'
+      - '.github/scripts/mutate-future-shadow.py'
+      - '.github/scripts/prepare-moderation-red-fixtures.sh'
+      - '.github/workflows/future-shadow.yml'
+permissions:
+  contents: read
+
+jobs:
+  validator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Evidence self-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s .github/scripts -p 'test_assert_future_shadow.py' -v 2>&1 | tee "$RUNNER_TEMP/shadow-validator.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: shadow-validator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/shadow-validator.log
+          if-no-files-found: error
+  http:
+    name: Future shadow HTTP ${{ matrix.phase }}
+    needs: validator
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: ${{ fromJSON(inputs.phase == 'RED' && '["RED"]' || inputs.phase == 'GREEN' && '["GREEN"]' || '["RED","GREEN"]') }}
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASELINE_SHA: 84e47f1b57acba77f1cfae08a63e8dd9d32a7991
+      PHASE: ${{ matrix.phase }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Freeze candidate tests and disposable baseline source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/shadow-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/shadow-evidence/candidate.txt"
+          git rev-parse "$BASELINE_SHA" > "$RUNNER_TEMP/shadow-evidence/baseline.txt"
+          if [ "$PHASE" = RED ]; then
+            git worktree add --detach "$RUNNER_TEMP/shadow-red" "$CANDIDATE_SHA"
+            cd "$RUNNER_TEMP/shadow-red"
+            while IFS= read -r target; do
+              case "$target" in *_test.go) continue ;; esac
+              if git cat-file -e "$BASELINE_SHA:$target" 2>/dev/null; then
+                git show "$BASELINE_SHA:$target" > "$target"
+                test "$(git hash-object "$target")" = "$(git rev-parse "$BASELINE_SHA:$target")"
+              else
+                rm -- "$target"
+              fi
+            done < <(git diff --no-renames --name-only "$BASELINE_SHA" "$CANDIDATE_SHA" -- 'backend/**/*.go')
+            git diff --exit-code "$BASELINE_SHA" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          fi
+          git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/shadow-evidence/moderation-fixtures.txt"
+          fi
+          for target in backend/internal/handler/openai_409_shadow_http_test.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_409_omit_history.go; do
+            git hash-object "$target" >> "$RUNNER_TEMP/shadow-evidence/blobs.txt"
+          done
+      - name: Actual cross-node HTTP continuation
+        shell: bash
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          if [ "$PHASE" = RED ]; then tested_tree="$RUNNER_TEMP/shadow-red"; fi
+          set +e
+          (cd "$tested_tree/backend" && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409FutureShadowHTTP$' -count=1 -timeout=5m) > "$RUNNER_TEMP/shadow-evidence/transport.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/shadow-evidence/transport.jsonl"
+          python3 .github/scripts/assert-future-shadow.py "$PHASE" "$result" "$RUNNER_TEMP/shadow-evidence/transport.jsonl"
+      - name: GREEN scope and delivery boundaries
+        if: matrix.phase == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409FutureShadowBoundaries$' -count=1 -timeout=5m) > "$RUNNER_TEMP/shadow-evidence/boundaries.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/shadow-evidence/boundaries.jsonl"
+          python3 .github/scripts/assert-future-shadow.py GREEN "$result" "$RUNNER_TEMP/shadow-evidence/boundaries.jsonl" --boundaries
+      - name: GREEN bounded storage and exact delivered task association
+        if: matrix.phase == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in resources association; do
+            if [ "$suite" = resources ]; then root=TestOpenAI409FutureShadowResources; else root=TestOpenAI409FutureShadowTaskAssociation; fi
+            set +e
+            (cd backend && go test -race -json -tags=unit ./internal/handler -run "^${root}$" -count=1 -timeout=5m) > "$RUNNER_TEMP/shadow-evidence/$suite.jsonl" 2>&1
+            result=$?
+            set -e
+            cat "$RUNNER_TEMP/shadow-evidence/$suite.jsonl"
+            python3 .github/scripts/assert-future-shadow.py GREEN "$result" "$RUNNER_TEMP/shadow-evidence/$suite.jsonl" "--$suite"
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: future-shadow-${{ matrix.phase }}-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/shadow-evidence/
+          if-no-files-found: error
+  task-association-mutation:
+    name: Reject session-last-task production mutant
+    needs: http
+    if: inputs.phase != 'RED'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Mutate only disposable production and require wrong-task network failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/shadow-mutation-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/shadow-mutation-evidence/candidate.txt"
+          git worktree add --detach "$RUNNER_TEMP/shadow-mutant" "$CANDIDATE_SHA"
+          python3 .github/scripts/mutate-future-shadow.py "$RUNNER_TEMP/shadow-mutant" > "$RUNNER_TEMP/shadow-mutation-evidence/mutation.jsonl"
+          git -C "$RUNNER_TEMP/shadow-mutant" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          git -C "$RUNNER_TEMP/shadow-mutant" diff --stat > "$RUNNER_TEMP/shadow-mutation-evidence/delta.txt"
+          git hash-object backend/internal/handler/openai_409_shadow_http_test.go > "$RUNNER_TEMP/shadow-mutation-evidence/test-blob.txt"
+          set +e
+          (cd "$RUNNER_TEMP/shadow-mutant/backend" && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409FutureShadowTaskAssociation$' -count=1 -timeout=5m) > "$RUNNER_TEMP/shadow-mutation-evidence/association.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/shadow-mutation-evidence/association.jsonl"
+          python3 .github/scripts/assert-future-shadow.py RED "$result" "$RUNNER_TEMP/shadow-mutation-evidence/association.jsonl" --association
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: future-shadow-task-mutation-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/shadow-mutation-evidence/
+          if-no-files-found: error

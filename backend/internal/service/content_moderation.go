@@ -350,6 +350,7 @@ type ContentModerationCheckInput struct {
 	UpstreamConfig     *ContentModerationConfig // Frozen policy for a selected attempt.
 	moderationVersion  *int64
 	riskControlLogOnly bool // Captured at admission and retained by asynchronous tasks.
+	noBodyRetention    bool
 	RequestID          string
 	UserID             int64
 	UserEmail          string
@@ -886,6 +887,7 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 }
 
 func (s *ContentModerationService) Check(ctx context.Context, input ContentModerationCheckInput) (decision *ContentModerationDecision, err error) {
+	input.noBodyRetention = HasRecoveredContextPrivacy(ctx)
 	allow := &ContentModerationDecision{Allowed: true, Action: ContentModerationActionAllow}
 	if s == nil || s.settingRepo == nil || s.repo == nil {
 		slog.Info("content_moderation.skip_unavailable",
@@ -1019,8 +1021,11 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 	}
 	if cfg.Mode == ContentModerationModePreBlock {
 		if (moderationState == nil || !moderationState.KeywordExempt) && cfg.KeywordBlockingMode != ContentModerationKeywordModeAPIOnly && len(cfg.BlockedKeywords) > 0 {
-			keywordText := extractContentModerationKeywordText(input.Protocol, input.Body)
+			keywordText := extractContentModerationInput(input.Protocol, input.Body, false, input.noBodyRetention).Text
 			if keyword, hit := runtimeSnapshot.matchBlockedKeyword(keywordText); hit {
+				if input.noBodyRetention {
+					keyword = "[Recovered context withheld]"
+				}
 				metricAction := ContentModerationActionKeywordBlock
 				if input.riskControlLogOnly {
 					metricAction = ContentModerationActionAllow
@@ -1062,7 +1067,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			return allow, nil
 		}
 	}
-	content := ExtractContentModerationInput(input.Protocol, input.Body)
+	content := extractContentModerationInput(input.Protocol, input.Body, true, input.noBodyRetention)
 	if content.IsEmpty() {
 		slog.Info("content_moderation.skip_empty_input",
 			"user_id", input.UserID,
@@ -1170,6 +1175,9 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 }
 
 func (s *ContentModerationService) checkSync(ctx context.Context, input ContentModerationCheckInput, cfg *ContentModerationConfig, content ContentModerationInput, hashText string, queueDelay *int, allowBlock bool) *ContentModerationDecision {
+	if input.noBodyRetention {
+		ctx = WithRecoveredContextPrivacy(ctx)
+	}
 	allow := &ContentModerationDecision{Allowed: true, Action: ContentModerationActionAllow}
 	// Observe tasks may wait in the queue while an administrator grants an
 	// exemption. Recheck immediately before sending; never introduce keywords here.
@@ -1892,6 +1900,9 @@ func (s *ContentModerationService) callModeration(ctx context.Context, cfg *Cont
 		if trackLoad {
 			s.finishModerationAPIKeyCall(key, latency, false, cfg.Engine)
 		}
+		if HasRecoveredContextPrivacy(ctx) {
+			err = errors.New("moderation request failed")
+		}
 		s.markAPIKeyError(key, err.Error(), latency, httpStatus, cfg.Engine)
 		lastErr = err
 		if httpStatus == http.StatusBadRequest {
@@ -2035,6 +2046,12 @@ func (s *ContentModerationService) resolveModerationProxyURL(ctx context.Context
 }
 
 func (s *ContentModerationService) buildLog(input ContentModerationCheckInput, cfg *ContentModerationConfig, action string, flagged bool, highestCategory string, highestScore float64, scores map[string]float64, text string, latency *int, queueDelay *int, errText string) *ContentModerationLog {
+	if input.noBodyRetention {
+		text = "[Recovered context withheld]"
+		if errText != "" {
+			errText = "moderation request failed"
+		}
+	}
 	var userID *int64
 	if input.UserID > 0 {
 		userID = &input.UserID

@@ -10,8 +10,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// Shared pure transformation. HTTP 400 and pre-send 409 have separate admission,
-// retry, ownership and opt-in policies; this helper grants no retry permission.
+// HTTP 400's stricter history transformation. Pre-send 409 builds portable
+// readable context separately; this helper grants no retry permission.
 func omitOpenAIHistoricalCiphertextForRecovery(raw []byte, omitReasoning bool) ([]byte, bool) {
 	if !utf8.Valid(raw) || !openAIEncryptedJSONUnambiguous(raw) {
 		return raw, false
