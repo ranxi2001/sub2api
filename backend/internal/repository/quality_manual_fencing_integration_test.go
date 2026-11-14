@@ -205,7 +205,9 @@ func TestIssue817ManualGenerationAndLeaseFencing(t *testing.T) {
 	require.Equal(t, pending.NextRunAt, current.NextRunAt)
 	require.Nil(t, current.RunningUntil, "the old expired lease really finished; this is not a mismatched-lease no-op")
 	require.NotNil(t, current.LastRunAt)
-	require.Equal(t, finished, *current.LastRunAt)
+	// PostgreSQL preserves the instant, but its driver may reconstruct a
+	// different Location object. Compare exact instants without a tolerance.
+	require.True(t, finished.Equal(*current.LastRunAt), "finish must persist the exact completion instant")
 
 	// Legacy bool-only requests remain claimable, with no public config field.
 	_, err = integrationDB.Exec(`UPDATE scheduled_test_plans SET pelican_config=pelican_config-'_manual_quality_run_id' WHERE id=$1`, newer.ID)
