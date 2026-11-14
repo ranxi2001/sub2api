@@ -23,12 +23,12 @@ import (
 func TestModerationUpstreamImagesJSONKeepaliveAndAsync(t *testing.T) {
 	for _, scenario := range []string{"fast", "slow", "async"} {
 		t.Run(scenario, func(t *testing.T) {
-			var audits atomic.Int32
+			var audits, workerStatus atomic.Int32
 			release := make(chan struct{})
 
 			audit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				audits.Add(1)
-				if scenario == "slow" {
+				if scenario == "slow" || scenario == "async" {
 					time.Sleep(1200 * time.Millisecond)
 				}
 				if scenario == "async" {
@@ -53,6 +53,7 @@ func TestModerationUpstreamImagesJSONKeepaliveAndAsync(t *testing.T) {
 				h.contentModerationService = service.NewContentModerationService(settings, &contentModerationHandlerTestRepo{}, nil, nil, nil, nil, nil, nil, accounts)
 				tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
 				async := NewAsyncImageHandler(tasks, h)
+				async.execute = func(_ string, c *gin.Context) { h.Images(c); workerStatus.Store(int32(c.Writer.Status())) }
 				router.POST("/v1/images/generations/async", async.Submit)
 				router.GET("/fixture-health", func(c *gin.Context) { c.JSON(200, gin.H{"fixture": "ok"}) })
 			})
@@ -90,6 +91,9 @@ func TestModerationUpstreamImagesJSONKeepaliveAndAsync(t *testing.T) {
 				require.Equal(t, expected, response.StatusCode)
 				require.Contains(t, string(body), "content_policy_violation")
 				require.Equal(t, 1, strings.Count(string(body), `"error":`))
+			}
+			if scenario == "async" {
+				require.Equal(t, int32(200), workerStatus.Load(), "async denial must actually follow a committed worker keepalive")
 			}
 			require.Equal(t, int32(1), audits.Load())
 			require.Zero(t, calls.Load())

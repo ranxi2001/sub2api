@@ -397,8 +397,8 @@
         </div>
       </template>
 
-      <BaseDialog :show="settingsOpen" :title="t('admin.riskControl.settingsTitle')" width="extra-wide" @close="settingsOpen = false">
-        <div class="space-y-6">
+      <BaseDialog :show="settingsOpen" :title="t('admin.riskControl.settingsTitle')" width="extra-wide" :show-close-button="!saving" :close-on-escape="!saving" @close="closeSettings">
+        <fieldset :disabled="saving" class="min-w-0 space-y-6">
           <div class="flex gap-2 overflow-x-auto border-b border-gray-100 pb-3 dark:border-dark-700">
             <button
               v-for="tab in settingsTabs"
@@ -754,7 +754,7 @@
           </div>
 
           <div v-else-if="activeSettingsTab === 'scope'" class="space-y-5">
-            <ModerationUpstreamAccountSelector v-model="configForm.upstream_account_ids" v-model:scope="configForm.upstream_account_scope" :groups="groups" @busy="upstreamSelecting = $event">
+            <ModerationUpstreamAccountSelector v-model="configForm.upstream_account_ids" v-model:scope="configForm.upstream_account_scope" :groups="groups" :disabled="saving" @busy="upstreamSelecting = $event">
               <template #badge><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.moderationUpstreamAccountScope" :user-id="auth.user?.id" /></template>
             </ModerationUpstreamAccountSelector>
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1111,11 +1111,11 @@
               </div>
             </div>
           </div>
-        </div>
+        </fieldset>
 
         <template #footer>
           <div class="flex justify-end gap-2">
-            <button type="button" class="btn btn-secondary" @click="settingsOpen = false">{{ t('common.cancel') }}</button>
+            <button type="button" class="btn btn-secondary" :disabled="saving" @click="closeSettings">{{ t('common.cancel') }}</button>
             <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving || upstreamSelecting" @click="saveConfig">
               <Icon v-if="saving" name="refresh" size="sm" class="animate-spin" />
               <Icon v-else name="check" size="sm" />
@@ -1957,7 +1957,7 @@ async function loadStatus(silent = true) {
 }
 
 async function saveConfig() {
-  if (upstreamSelecting.value) return
+  if (saving.value || upstreamSelecting.value) return
   saving.value = true
   try {
     const modelFilterPayload = buildModelFilterPayload()
@@ -2111,7 +2111,10 @@ async function clearFlaggedHashes() {
   }
 }
 
+function closeSettings() { if (!saving.value) settingsOpen.value = false }
+
 function openSettings() {
+  if (saving.value) return
   configForm.upstream_account_scope = savedUpstreamScope.value.scope
   configForm.upstream_account_ids = [...savedUpstreamScope.value.ids]
   activeSettingsTab.value = 'basic'

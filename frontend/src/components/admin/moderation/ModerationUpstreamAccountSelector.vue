@@ -1,5 +1,5 @@
 <template>
-  <section class="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-dark-700" data-testid="moderation-upstream-selector">
+  <fieldset :disabled="disabled" class="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-dark-700" data-testid="moderation-upstream-selector">
     <h3 class="flex items-center gap-2 text-base font-semibold">{{ t('admin.riskControl.upstreamAccounts') }}<slot name="badge" /></h3>
     <p class="text-sm text-gray-500">{{ t('admin.riskControl.upstreamAccountsHint') }}</p>
     <div class="flex flex-wrap gap-4 text-sm">
@@ -7,6 +7,14 @@
       <label class="flex items-center gap-2"><input v-model="scope" type="radio" value="selected" data-testid="moderation-upstream-selected" />{{ t('admin.riskControl.selectedUpstreamAccounts') }}</label>
     </div>
     <template v-if="scope === 'selected'">
+      <details v-if="selected.length" class="rounded border border-gray-200 p-2 dark:border-dark-600" data-testid="moderation-selected-ids">
+        <summary class="cursor-pointer text-sm">{{ t('admin.riskControl.manageSelectedUpstream', { count: selected.length }) }}</summary>
+        <label class="mt-2 block text-sm">{{ t('admin.riskControl.findSelectedUpstream') }}<input v-model="selectedSearch" type="search" class="input mt-1" data-testid="moderation-selected-search" /></label>
+        <div class="mt-2 flex max-h-32 flex-wrap gap-2 overflow-auto">
+          <button v-for="id in visibleSelected" :key="id" type="button" class="btn btn-secondary" :data-testid="`moderation-remove-${id}`" @click="remove(id)">#{{ id }} · {{ t('common.remove') }}</button>
+        </div>
+        <p class="mt-1 text-xs text-gray-500">{{ t('admin.riskControl.selectedUpstreamRecoveryHint') }}</p>
+      </details>
       <p v-if="!selected.length" role="status" class="text-sm text-amber-700 dark:text-amber-300">{{ t('admin.riskControl.emptyUpstreamAccounts') }}</p>
       <QualityAccountSelector
         v-model="selected" v-model:search="search" v-model:group="group" v-model:type="type"
@@ -21,11 +29,11 @@
         <template #account-details="{ account }"><span class="ml-1 text-xs text-gray-500">{{ account.platform }} · {{ account.type }}</span></template>
       </QualityAccountSelector>
     </template>
-  </section>
+  </fieldset>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { AccountListItem } from '@/types'
@@ -34,7 +42,7 @@ import { qualityAccountTypeOptions } from '@/utils/qualityAccountFilter'
 
 const { t } = useI18n()
 const emit = defineEmits<{ busy: [value: boolean] }>()
-defineProps<{ groups: { id: number; name: string }[] }>()
+const props = defineProps<{ groups: { id: number; name: string }[]; disabled?: boolean }>()
 const selected = defineModel<number[]>({ required: true })
 const scope = defineModel<'all' | 'selected'>('scope', { required: true })
 const search = ref(''), group = ref(''), type = ref(''), statuses = ref<string[]>([]), manualScope = ref<'all' | 'manual'>('manual')
@@ -45,12 +53,16 @@ const typeOptions = [...qualityAccountTypeOptions,
   { value: 'bedrock', label: 'admin.riskControl.bedrockType' },
   { value: 'service_account', label: 'admin.riskControl.serviceAccountType' },
 ]
-const disabledReason = (_account: AccountListItem) => ''
+const disabledReason = (account: AccountListItem) => account.moderation_scope_eligible === true ? '' : t('admin.riskControl.ineligibleUpstreamAccount')
+const selectedSearch = ref('')
+const visibleSelected = computed(() => selected.value.filter(id => !selectedSearch.value.trim() || String(id) === selectedSearch.value.trim().replace(/^#/, '')).slice(0, 50))
+function remove(id: number) { if (props.disabled) return; invalidate(); selected.value = selected.value.filter(value => value !== id) }
 let revision = 0, controller: AbortController | undefined
 function invalidate() { revision++; controller?.abort(); loading.value = false; selecting.value = false }
 function filters() { return { search: search.value.trim(), group: group.value, type: type.value, lite: 'true' } }
 async function loadPage(target = 1) {
   invalidate()
+  accounts.value = []; page.value = 1; pages.value = 1; total.value = 0
   if (scope.value !== 'selected') return
   const ticket = revision, params = filters()
   controller = new AbortController()
@@ -63,9 +75,10 @@ async function loadPage(target = 1) {
     if (ticket === revision) error.value = t('admin.riskControl.upstreamAccountsLoadFailed')
   } finally { if (ticket === revision) loading.value = false }
 }
-function selectPage() { selected.value = [...new Set([...selected.value, ...accounts.value.map(a => a.id)])] }
-function clear() { invalidate(); selected.value = [] }
+function selectPage() { if (props.disabled || loading.value || error.value) return; selected.value = [...new Set([...selected.value, ...accounts.value.filter(a => !disabledReason(a)).map(a => a.id)])] }
+function clear() { if (props.disabled) return; invalidate(); selected.value = [] }
 async function selectAll() {
+  if (props.disabled) return
   invalidate()
   const ticket = revision, params = filters(), ids = new Set(selected.value)
   controller = new AbortController(); selecting.value = true; error.value = ''
@@ -73,7 +86,7 @@ async function selectAll() {
     for (let target = 1; ; target++) {
       const result = await adminAPI.accounts.list(target, 100, params, { signal: controller.signal })
       if (ticket !== revision) return
-      for (const account of result.items) ids.add(account.id)
+      for (const account of result.items) if (!disabledReason(account)) ids.add(account.id)
       if (ids.size > 10000) throw Error('selection limit')
       if (target >= result.pages) break
     }

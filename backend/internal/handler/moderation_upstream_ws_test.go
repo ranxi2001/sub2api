@@ -125,3 +125,33 @@ func TestModerationUpstreamWebSocketTurnIdentityAfterFailover(t *testing.T) {
 	require.Len(t, frames, 2)
 	require.Equal(t, int32(3), audits.Load(), "replay does not audit twice; genuinely new third turn must audit")
 }
+
+func TestModerationUpstreamWebSocketCurrentAliasControlsScope(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModeHTTPBridge} {
+		t.Run(mode, func(t *testing.T) {
+			var audits atomic.Int32
+			audit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				audits.Add(1)
+				body, _ := io.ReadAll(r.Body)
+				require.Contains(t, string(body), "second blocked input")
+				_, _ = w.Write([]byte(`{"results":[{"category_scores":{"sexual":0.99}}]}`))
+			}))
+			defer audit.Close()
+			raw, err := json.Marshal(map[string]any{"enabled": true, "mode": "pre_block", "all_groups": true, "model_filter": map[string]any{"type": "include", "models": []string{"public-b"}}, "sample_rate": 100, "base_url": audit.URL, "api_keys": []string{"fixture"}, "upstream_account_scope": "selected", "upstream_account_ids": []int64{9951}, "upstream_account_bindings": map[int64]service.ModerationUpstreamBinding{9951: {Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, GroupIDs: []int64{4301}}}})
+			require.NoError(t, err)
+			h, up := newIssue600NetworkHarness(t, mode, "none", false, nil, issue600FixtureOptions{modelMapping: map[string]string{"public-a": "gpt-5.1", "public-b": "gpt-5.1"}, moderationSettings: map[string]string{service.SettingKeyContentModerationConfig: string(raw)}})
+			issue600Send(t, h, `{"type":"response.create","model":"public-a","input":"first"}`, 1, false)
+			require.Zero(t, audits.Load())
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			require.NoError(t, h.clientConn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"public-b","input":"second blocked input"}`)))
+			_, event, err := h.clientConn.Read(ctx)
+			require.NoError(t, err)
+			require.Contains(t, string(event), "content_policy_violation")
+			issue600Finish(t, h, nil)
+			frames, _ := up.snapshot()
+			require.Len(t, frames, 1)
+			require.Equal(t, int32(1), audits.Load())
+		})
+	}
+}

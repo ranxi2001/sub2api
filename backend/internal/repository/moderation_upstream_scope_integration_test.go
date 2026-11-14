@@ -1,6 +1,6 @@
 //go:build integration
 
-package repository
+package repository_test
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -23,10 +24,10 @@ import (
 
 func TestModerationUpstreamPostgresAdminRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	client := testEntClient(t)
-	accounts := NewAccountRepository(client, integrationDB, nil)
-	groups := NewGroupRepository(client, integrationDB)
-	settings := NewSettingRepository(client)
+	client, moderationDB := repository.ModerationScopeTestClient(t)
+	accounts := repository.NewAccountRepository(client, moderationDB, nil)
+	groups := repository.NewGroupRepository(client, moderationDB)
+	settings := repository.NewSettingRepository(client)
 	old, oldErr := settings.GetValue(ctx, service.SettingKeyContentModerationConfig)
 	t.Cleanup(func() {
 		if oldErr == nil {
@@ -40,16 +41,16 @@ func TestModerationUpstreamPostgresAdminRoundTrip(t *testing.T) {
 	account := &service.Account{Name: fmt.Sprintf("moderation-scope-%d", suffix), Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{}, Extra: map[string]any{}}
 	require.NoError(t, accounts.Create(ctx, account))
 	t.Cleanup(func() {
-		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM scheduler_outbox WHERE account_id=$1`, account.ID)
-		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id=$1`, account.ID)
+		_, _ = moderationDB.ExecContext(ctx, `DELETE FROM scheduler_outbox WHERE account_id=$1`, account.ID)
+		_, _ = moderationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id=$1`, account.ID)
 	})
 	group := &service.Group{Name: fmt.Sprintf("moderation-scope-group-%d", suffix), Platform: service.PlatformOpenAI, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard, RateMultiplier: 1}
 	require.NoError(t, groups.Create(ctx, group))
-	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, `DELETE FROM groups WHERE id=$1`, group.ID) })
+	t.Cleanup(func() { _, _ = moderationDB.ExecContext(ctx, `DELETE FROM groups WHERE id=$1`, group.ID) })
 	user, err := client.User.Create().SetEmail(fmt.Sprintf("moderation-scope-%d@example.invalid", suffix)).SetPasswordHash("synthetic-not-a-login").SetRole(service.RoleAdmin).SetStatus(service.StatusActive).Save(ctx)
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, user.ID) })
-	users := NewUserRepository(client, integrationDB)
+	t.Cleanup(func() { _, _ = moderationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, user.ID) })
+	users := repository.NewUserRepository(client, moderationDB)
 	actor, err := users.GetByID(ctx, user.ID)
 	require.NoError(t, err)
 	auth := service.NewAuthService(nil, nil, nil, nil, &config.Config{JWT: config.JWTConfig{Secret: "synthetic-moderation-integration-secret", ExpireHour: 1}}, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -106,6 +107,15 @@ func TestModerationUpstreamPostgresAdminRoundTrip(t *testing.T) {
 	require.Error(t, err)
 	w = request(newRouter(), http.MethodPut, body, token)
 	require.Equal(t, 400, w.Code, w.Body.String())
+	// Rebinding requires a successful removal save, then a deliberate re-add.
+	w = request(newRouter(), http.MethodPut, `{"upstream_account_scope":"selected","upstream_account_ids":[]}`, token)
+	require.Equal(t, 200, w.Code, w.Body.String())
+	w = request(newRouter(), http.MethodPut, body, token)
+	require.Equal(t, 200, w.Code, w.Body.String())
+	raw, err = settings.GetValue(ctx, service.SettingKeyContentModerationConfig)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(raw), &stored))
+	require.Equal(t, []int64{group.ID}, stored.UpstreamAccountBindings[account.ID].GroupIDs)
 	require.NoError(t, accounts.Delete(ctx, account.ID))
 	w = request(newRouter(), http.MethodPut, body, token)
 	require.Equal(t, 400, w.Code, w.Body.String())

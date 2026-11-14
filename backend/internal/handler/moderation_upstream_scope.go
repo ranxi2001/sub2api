@@ -17,6 +17,7 @@ import (
 )
 
 const upstreamAuditStateKey = "content_moderation.upstream_state"
+const upstreamAuditFailureStatusKey = "content_moderation.local_failure_status"
 
 type upstreamAuditState struct {
 	mu          sync.Mutex
@@ -43,6 +44,9 @@ func prepareUpstreamAudit(c *gin.Context, log *zap.Logger, coordinator *security
 	}
 	cfg, err := legacy.UpstreamModerationConfig(c.Request.Context())
 	state := &upstreamAuditState{request: buildSecurityAuditRequest(c, apiKey, subject, protocol, model, body, stage).Clone(), config: cfg, configErr: err, legacy: legacy, coordinator: coordinator, log: log, turn: turn}
+	if isSecurityAuditWebSocketStage(stage) {
+		state.request.Model = strings.TrimSpace(model)
+	}
 	c.Set(upstreamAuditStateKey, state)
 	bindUpstreamAuditGate(c, state)
 }
@@ -90,6 +94,12 @@ func (s *upstreamAuditState) check(ctx context.Context, account *service.Account
 	if req.Protocol == "openai_alpha_search" {
 		req.Protocol = service.ContentModerationProtocolOpenAIResponses
 		req.Body, _ = json.Marshal(map[string]string{"input": string(req.Body)})
+	} else if req.Protocol == "openai_embeddings" && gjson.GetBytes(req.Body, "input").IsArray() {
+		parts := []string{}
+		for _, item := range gjson.GetBytes(req.Body, "input").Array() {
+			parts = append(parts, item.String())
+		}
+		req.Body, _ = json.Marshal(map[string]string{"input": strings.Join(parts, "\n")})
 	} else if req.Protocol == service.ContentModerationProtocolOpenAIImages && gjson.GetBytes(req.Body, "request.items").IsArray() {
 		prompts := []string{}
 		for _, item := range gjson.GetBytes(req.Body, "request.items").Array() {
@@ -144,6 +154,7 @@ func upstreamAuditUnavailable(log *zap.Logger, account *service.Account, err err
 
 func writeSelectedUpstreamAuditError(c *gin.Context, decision *securityaudit.Decision) {
 	status, code, message := securityAuditStatus(decision), securityAuditErrorCode(decision), securityAuditMessage(decision)
+	c.Set(upstreamAuditFailureStatusKey, status)
 	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
 	service.SetOpsLocalErrorType(c, "permission_error", code)
 	payload := gin.H{"error": gin.H{"type": "permission_error", "code": code, "message": message}}

@@ -30,13 +30,13 @@ func moderationUpstreamBinding(a *Account) ModerationUpstreamBinding {
 	return ModerationUpstreamBinding{Platform: a.Platform, Type: a.Type, GroupIDs: slices.Compact(groups)}
 }
 
-func validModerationUpstreamAccount(a *Account) bool {
+func ModerationUpstreamAccountEligible(a *Account) bool {
 	if a == nil || a.ID <= 0 {
 		return false
 	}
 	switch a.Platform {
 	case PlatformAnthropic:
-		return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken || a.Type == AccountTypeAPIKey || a.Type == AccountTypeBedrock || a.Type == AccountTypeUpstream
+		return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken || a.Type == AccountTypeAPIKey || a.Type == AccountTypeBedrock || a.Type == AccountTypeServiceAccount || a.Type == AccountTypeUpstream
 	case PlatformOpenAI:
 		return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken || a.Type == AccountTypeAPIKey || a.Type == AccountTypeUpstream
 	case PlatformGemini:
@@ -81,7 +81,7 @@ func (s *ContentModerationService) updateUpstreamScope(ctx context.Context, cfg 
 			return infraerrors.BadRequest("INVALID_MODERATION_UPSTREAM_ACCOUNT", "Account validation unavailable")
 		}
 		a, err := s.accountRepo.GetByID(ctx, id)
-		if err != nil || !validModerationUpstreamAccount(a) {
+		if err != nil || !ModerationUpstreamAccountEligible(a) {
 			return infraerrors.BadRequest("INVALID_MODERATION_UPSTREAM_ACCOUNT", fmt.Sprintf("Upstream account %d is missing or has an unsupported platform/type", id))
 		}
 		binding := moderationUpstreamBinding(a)
@@ -135,7 +135,7 @@ func (s *ContentModerationService) UpstreamModerationApplies(ctx context.Context
 		return false, fmt.Errorf("missing upstream binding for account %d", a.ID)
 	}
 	current, err := s.accountRepo.GetByID(ctx, a.ID)
-	if err != nil || !validModerationUpstreamAccount(current) {
+	if err != nil || !ModerationUpstreamAccountEligible(current) {
 		return false, fmt.Errorf("upstream account %d is unavailable", a.ID)
 	}
 	for _, candidate := range []*Account{a, current} {

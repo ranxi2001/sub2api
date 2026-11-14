@@ -34,7 +34,7 @@ func TestModerationUpstreamHTTPDispatchFamilies(t *testing.T) {
 	}{
 		{"chat", "/v1/chat/completions", `{"model":"gpt-5.1","messages":[{"role":"user","content":"fixture input"}]}`, service.PlatformOpenAI, (*OpenAIGatewayHandler).ChatCompletions},
 		{"messages", "/v1/messages", `{"model":"gpt-5.1","max_tokens":20,"messages":[{"role":"user","content":"fixture input"}]}`, service.PlatformOpenAI, (*OpenAIGatewayHandler).Messages},
-		{"embeddings", "/v1/embeddings", `{"model":"text-embedding-3-small","input":"fixture input"}`, service.PlatformOpenAI, (*OpenAIGatewayHandler).Embeddings},
+		{"embeddings", "/v1/embeddings", `{"model":"text-embedding-3-small","input":["fixture input","second independent input"]}`, service.PlatformOpenAI, (*OpenAIGatewayHandler).Embeddings},
 		{"alpha", "/v1/alpha/search", `{"model":"gpt-5.1","commands":{"search_query":[{"q":"fixture input"}]}}`, service.PlatformOpenAI, (*OpenAIGatewayHandler).AlphaSearch},
 		{"grok-tts", "/v1/audio/speech", `{"input":"fixture input","voice":"eve"}`, service.PlatformGrok, func(h *OpenAIGatewayHandler, c *gin.Context) { h.GrokVoice(c, "tts") }},
 	} {

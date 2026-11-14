@@ -86,3 +86,18 @@ func TestModerationUpstreamPersistenceAndValidation(t *testing.T) {
 	_, err = fresh.UpstreamModerationApplies(ctx, &stored, input)
 	require.Error(t, err)
 }
+
+func TestModerationUpstreamEligibility(t *testing.T) {
+	for _, test := range []struct {
+		platform, kind string
+		allowed        bool
+	}{
+		{PlatformAnthropic, AccountTypeServiceAccount, true}, {PlatformAnthropic, AccountTypeBedrock, true},
+		{PlatformOpenAI, AccountTypeOAuth, true}, {PlatformOpenAI, AccountTypeAPIKey, true},
+		{PlatformGemini, AccountTypeServiceAccount, true}, {PlatformGrok, AccountTypeOAuth, true},
+		{PlatformTypeSafe, AccountTypeAPIKey, true}, {PlatformOpenAI, "bps", false},
+		{PlatformTypeSafe, AccountTypeOAuth, false}, {"customer", AccountTypeAPIKey, false},
+	} {
+		require.Equal(t, test.allowed, ModerationUpstreamAccountEligible(&Account{ID: 1, Platform: test.platform, Type: test.kind}), "%s/%s", test.platform, test.kind)
+	}
+}
