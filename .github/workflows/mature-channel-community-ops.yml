@@ -223,6 +223,9 @@ jobs:
       - name: QQ frontend business regression
         working-directory: frontend
         run: pnpm exec vitest run src/components/admin/qqbot/__tests__ src/views/admin/__tests__/QQBotView.spec.ts src/views/admin/__tests__/QQBotSetup.spec.ts src/views/admin/__tests__/QQBotActivities.spec.ts src/views/admin/__tests__/QQBotRecords.spec.ts src/components/admin/__tests__/QQBotBindings.spec.ts src/components/user/profile/__tests__/ProfileQQBotCard.spec.ts src/views/auth/__tests__/QQBotBindView.spec.ts src/views/auth/__tests__/QQBotTransferView.spec.ts src/api/__tests__/qqbot.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: Account import regression
+        working-directory: frontend
+        run: pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - name: Frontend production build
         run: pnpm --dir frontend run build
       - uses: actions/upload-artifact@v7
@@ -338,3 +341,35 @@ jobs:
         if: always()
         working-directory: backend
         run: go build -o "$RUNNER_TEMP/mature-server" ./cmd/server
+
+  after-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v6
+        with: { node-version: '22' }
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/after-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/after-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Provider actual components after
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/after-browser/node_modules/playwright
+          MATURE_SCREENSHOT_DIR: ${{ runner.temp }}/after-evidence/providers
+        run: node .github/scripts/mature-providers-after.mjs
+      - name: Provider account import and group creation after
+        if: always()
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/after-browser/node_modules/playwright/index.mjs
+          EVIDENCE_DIR: ${{ runner.temp }}/after-evidence/accounts
+        run: node .github/scripts/mature-account-after.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-after-${{ github.sha }}
+          path: ${{ runner.temp }}/after-evidence/
