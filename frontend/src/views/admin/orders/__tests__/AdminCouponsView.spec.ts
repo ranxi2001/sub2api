@@ -5,6 +5,8 @@ import type { SimpleUser } from '@/api/admin/usage'
 
 const api = vi.hoisted(() => ({ templates: vi.fn(), list: vi.fn(), issue: vi.fn() }))
 const searchUsers = vi.hoisted(() => vi.fn())
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 1 } }) }))
+vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template: '<span />' } }))
 vi.mock('@/api/coupons', () => ({ adminCouponAPI: api }))
 vi.mock('@/api/admin/usage', () => ({ searchUsers, default: { searchUsers } }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string) => key }) }))

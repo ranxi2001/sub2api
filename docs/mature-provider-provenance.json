@@ -48,5 +48,32 @@
     "license": "LGPL-3.0",
     "notices_preserved": true,
     "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+  },
+  {
+    "source_repository": "mizaawa/zayuapi",
+    "source_commit": "a71aa9615ccb55a19973908c9f261b5ba25a48c6",
+    "source_path": "backend/internal/handler/admin/provider_remote_test.go",
+    "source_blob": "a25a84e980e9d4586193fa4e6c4cdfb504ebd109",
+    "target_path": "backend/internal/handler/admin/mature_provider_protocol_test.go",
+    "license": "LGPL-3.0",
+    "adaptation": "source protocol assertions retained/extracted; SQL persistence tested independently; fictional hosts only"
+  },
+  {
+    "source_repository": "mizaawa/zayuapi",
+    "source_commit": "a71aa9615ccb55a19973908c9f261b5ba25a48c6",
+    "source_path": "backend/internal/handler/admin/provider_security_test.go",
+    "source_blob": "204f91507a2a4bc0df8470f1bec60b0c3c782f82",
+    "target_path": "backend/internal/handler/admin/mature_provider_ip_test.go",
+    "license": "LGPL-3.0",
+    "adaptation": "source protocol assertions retained/extracted; SQL persistence tested independently; fictional hosts only"
+  },
+  {
+    "source_repository": "mizaawa/zayuapi",
+    "source_commit": "a71aa9615ccb55a19973908c9f261b5ba25a48c6",
+    "source_path": "backend/internal/handler/admin/provider_newapi_auth_test.go",
+    "source_blob": "4cb0aa92d04acf57207363bd0c88490fc9eab6de",
+    "target_path": "backend/internal/handler/admin/mature_provider_auth_protocol_test.go",
+    "license": "LGPL-3.0",
+    "adaptation": "source protocol assertions retained/extracted; SQL persistence tested independently; fictional hosts only"
   }
 ]

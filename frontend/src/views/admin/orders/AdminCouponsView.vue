@@ -1,6 +1,6 @@
 <template>
   <AppLayout><div class="space-y-6">
-    <section class="card space-y-3 p-6"><div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('coupon.adminTitle') }}</h2><button class="btn btn-primary" @click="form = blank()">{{ t('coupon.create') }}</button></div><p class="text-sm text-gray-500">{{ t('coupon.rules') }}</p></section>
+    <section class="card space-y-3 p-6"><div class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('coupon.adminTitle') }} <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.qqRewardCoupons" :user-id="auth.user?.id" /></h2><button class="btn btn-primary" @click="form = blank()">{{ t('coupon.create') }}</button></div><p class="text-sm text-gray-500">{{ t('coupon.rules') }}</p></section>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-700 dark:bg-red-950">{{ error }}</p><p v-if="notice" role="status" class="text-green-600">{{ notice }}</p>
     <form v-if="form" class="card space-y-4 p-6" @submit.prevent="save"><h3 class="font-semibold">{{ t(form.id ? 'coupon.edit' : 'coupon.create') }}</h3><p class="text-sm text-gray-500">{{ t('coupon.templateHint') }}</p>
       <fieldset :disabled="busy" class="grid gap-4 md:grid-cols-3">
@@ -68,6 +68,10 @@
   <CouponUsageHistory admin /></div></AppLayout>
 </template>
 <script setup lang="ts">
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useAuthStore } from '@/stores/auth'
+const auth = useAuthStore()
 import CouponUsageHistory from '@/components/payment/CouponUsageHistory.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onClickOutside } from '@vueuse/core'
