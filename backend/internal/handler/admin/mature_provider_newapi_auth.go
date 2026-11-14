@@ -173,28 +173,15 @@ func newAPIAccessError(envelope map[string]any) error {
 	return nil
 }
 
-// validProviderScope accepts a permission name such as api_key:reveal.
+// Only known permission labels may enter a public error. Arbitrary upstream
+// strings, even identifier-shaped ones, can contain a reflected credential.
 func validProviderScope(scope string) bool {
-	if scope == "" || len(scope) > 64 {
+	switch scope {
+	case "profile:read", "profile:write", "api_key:read", "api_key:write", "api_key:create", "api_key:update", "api_key:delete", "api_key:reveal", "usage:read", "group:read", "groups:read", "log:read", "model:read":
+		return true
+	default:
 		return false
 	}
-	for _, char := range scope {
-		if !providerScopeChar(char) {
-			return false
-		}
-	}
-	return true
-}
-
-// providerScopeChar reports whether char may appear in a scope name.
-func providerScopeChar(char rune) bool {
-	switch {
-	case char >= 'a' && char <= 'z', char >= '0' && char <= '9':
-		return true
-	case char == '_', char == ':', char == '-', char == '.':
-		return true
-	}
-	return false
 }
 
 // newAPIAccountID returns the account ID in a /api/user/self profile, or ""
