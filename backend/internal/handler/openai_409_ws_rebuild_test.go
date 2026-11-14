@@ -179,6 +179,8 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		headers.Set("Authorization", "Bearer sk-handler-cyber-test")
 		authSetup = func(key *service.APIKey, cfg *config.Config) *service.APIKeyService {
 			key.Status = service.StatusActive
+			key.User.Concurrency = 1
+			key.Group = &service.Group{ID: *key.GroupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 			return service.NewAPIKeyService(&wsRevalidationKeyRepoStub{current: key}, nil, nil, nil, nil, nil, cfg)
 		}
 	}
