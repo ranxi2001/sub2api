@@ -153,7 +153,9 @@ func TestPriceNotificationsScheduledOnlyAndSourceFailure(t *testing.T) {
 	snapshot := priceTestSnapshot("USD 2")
 	var sourceErr error
 	bot.SetPriceSnapshotProvider(priceSourceFunc(func(context.Context, time.Time) (PriceSnapshot, error) { return snapshot, sourceErr }))
-	at := time.Now()
+	// PostgreSQL timestamptz stores microseconds; keep the simulated exact
+	// boundary representable so rounding cannot postpone the source read.
+	at := time.Now().Truncate(time.Microsecond)
 	snapshot.NextCheck = at.Add(time.Second)
 	due, err := bot.checkPriceChanges(ctx, at)
 	require.NoError(t, err)
