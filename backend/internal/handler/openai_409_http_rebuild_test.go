@@ -259,6 +259,18 @@ func TestOpenAI409HTTPTaskRebuild(t *testing.T) {
 	}
 }
 
+func TestOpenAI409HTTPRebuildOwnerCooldown(t *testing.T) {
+	for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, stream := range []bool{false, true} {
+			for _, cooldown := range []string{"rate_limited", "overloaded"} {
+				t.Run(fmt.Sprintf("%s/stream=%t/%s", accountType, stream, cooldown), func(t *testing.T) {
+					runHTTPRebuildFixture(t, accountType, stream, "intent", "completed", cooldown, "")
+				})
+			}
+		}
+	}
+}
+
 func TestOpenAI409HTTPControlNormalization(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
@@ -456,6 +468,7 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	noOpaque := strings.HasSuffix(pointer, "_no_opaque")
 	pointer = strings.TrimSuffix(pointer, "_no_opaque")
 	mixed := strings.HasPrefix(boundary, "mixed/")
+	ownerCooldown := boundary == "rate_limited" || boundary == "overloaded"
 	clients := issue805Redis(t)
 	observer := clients()
 	patchCall := httpRebuildCall("apply_patch", "call_patch_once", map[string]any{"path": "sum.go", "source": httpRebuildSource})
@@ -660,9 +673,18 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		require.Len(t, ownersA, 1)
 	}
 	accounts[0].Schedulable = false
+	cooldownUntil := time.Now().Add(7 * 24 * time.Hour)
+	if ownerCooldown {
+		accounts[0].Schedulable = true
+		if boundary == "rate_limited" {
+			accounts[0].RateLimitResetAt = &cooldownUntil
+		} else {
+			accounts[0].OverloadUntil = &cooldownUntil
+		}
+	}
 	disabled, err := (openAIImagesFailoverAccountRepo{accounts: accounts}).GetByID(context.Background(), 1)
 	require.NoError(t, err)
-	require.False(t, disabled.Schedulable)
+	require.False(t, disabled.IsSchedulable())
 	switch boundary {
 	case "pointer_only":
 		history = nil
@@ -681,7 +703,7 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		accounts[1].Schedulable = false
 	}
 	status, answer = request(history, first)
-	if boundary != "" && !mixed {
+	if boundary != "" && !mixed && !ownerCooldown {
 		if boundary == "strict" {
 			require.Len(t, transport.snapshot(), 1, "HTTP_POINTER_STRICT_A_STATE_LEAK: disabled A pointer must never reach B under default strict policy; response=%s", answer)
 		}
@@ -808,7 +830,13 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	require.Equal(t, 1, tools.patches)
 	require.Equal(t, 1, tools.verifications)
 	require.Equal(t, []string{httpRebuildSession, httpRebuildSession, httpRebuildSession}, sessions)
-	require.False(t, accounts[0].Schedulable)
+	require.Equal(t, ownerCooldown, accounts[0].Schedulable, "continuation must not change the owner's scheduling flag")
+	if boundary == "rate_limited" {
+		require.Equal(t, cooldownUntil, *accounts[0].RateLimitResetAt)
+	}
+	if boundary == "overloaded" {
+		require.Equal(t, cooldownUntil, *accounts[0].OverloadUntil)
+	}
 	wires = transport.snapshot()
 	require.Len(t, wires, 3, "one A generation and exactly two B generations")
 	require.Equal(t, int64(2), wires[2].account)

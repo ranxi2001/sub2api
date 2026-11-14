@@ -97,7 +97,7 @@ func TestOpenAI409OmissionSettingDefaultsOff(t *testing.T) {
 func TestOpenAI409OmissionCannotClearRecoveryBarriers(t *testing.T) {
 	s := &OpenAIGatewayService{settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
 	body := []byte(`{"input":[{"type":"agent_message","encrypted_content":"OLD"},{"role":"user","content":"continue"}]}`)
-	for _, reason := range []string{"delivery_pending", "store_unavailable", "owner_conflict", "owner_rate_limited", "owner_overloaded", "http_previous_response_unsupported"} {
+	for _, reason := range []string{"delivery_pending", "store_unavailable", "owner_conflict", "http_previous_response_unsupported"} {
 		ctx := context.WithValue(context.Background(), openAIAgentRecoveryContextKey{}, &openAIAgentRecoveryRequest{owner: &openAIAgentRecoveryBinding{accountID: 1}})
 		_, clean, changed := s.TryOmitOpenAI409History(ctx, nil, body, "fixture", "gpt-5.1", &OpenAIAgentRecoveryError{Reason: reason})
 		require.False(t, changed, reason)
@@ -231,34 +231,38 @@ func TestOpenAI409ReadableReasoningRetainsUnknownShapesAsText(t *testing.T) {
 }
 
 func TestOpenAI409RebuildRechecksOriginalDeliveryBeforeSend(t *testing.T) {
-	for _, fence := range []string{"pending", "failed", "conflict"} {
-		t.Run(fence, func(t *testing.T) {
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
-			issue715LearnRoute(t, svc, &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, issue715OpaqueBody)
-			body := strings.TrimSuffix(issue715OpaqueBody, "]}") + `,{"role":"user","content":"complete the existing task"}]}`
-			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
-			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
-			ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(body), "fixture-session", "gpt-6-astra")
-			next, clean, changed, err := svc.TryRebuildOpenAI409History(ctx, c, []byte(body), "fixture-session", "gpt-6-astra", openAIAgentRecoveryError("owner_unavailable"))
-			require.NoError(t, err)
-			require.True(t, changed)
-			key := openAIAgentRecoveryFromContext(ctx).keys[0]
-			binding := svc.agentMessageRecovery.bindings[key]
-			switch fence {
-			case "pending":
-				binding.pending = "fixture-unconfirmed"
-			case "failed":
-				binding.failed = true
-			case "conflict":
-				binding.conflicted = true
+	for _, reason := range []string{"owner_unavailable", "owner_rate_limited", "owner_overloaded"} {
+		t.Run(reason, func(t *testing.T) {
+			for _, fence := range []string{"pending", "failed", "conflict"} {
+				t.Run(fence, func(t *testing.T) {
+					svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+					issue715LearnRoute(t, svc, &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, issue715OpaqueBody)
+					body := strings.TrimSuffix(issue715OpaqueBody, "]}") + `,{"role":"user","content":"complete the existing task"}]}`
+					c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+					c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+					ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, []byte(body), "fixture-session", "gpt-6-astra")
+					next, clean, changed, err := svc.TryRebuildOpenAI409History(ctx, c, []byte(body), "fixture-session", "gpt-6-astra", openAIAgentRecoveryError(reason))
+					require.NoError(t, err)
+					require.True(t, changed)
+					key := openAIAgentRecoveryFromContext(ctx).keys[0]
+					binding := svc.agentMessageRecovery.bindings[key]
+					switch fence {
+					case "pending":
+						binding.pending = "fixture-unconfirmed"
+					case "failed":
+						binding.failed = true
+					case "conflict":
+						binding.conflicted = true
+					}
+					svc.agentMessageRecovery.bindings[key] = binding
+					req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewReader(clean))
+					require.NoError(t, err)
+					finish, err := svc.prepareOpenAIAgentRecoveryAttempt(next, &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, req)
+					defer finish(false)
+					require.Error(t, err, "sanitization must not erase a later delivery fence")
+					require.Equal(t, binding, svc.agentMessageRecovery.bindings[key])
+				})
 			}
-			svc.agentMessageRecovery.bindings[key] = binding
-			req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewReader(clean))
-			require.NoError(t, err)
-			finish, err := svc.prepareOpenAIAgentRecoveryAttempt(next, &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, req)
-			defer finish(false)
-			require.Error(t, err, "sanitization must not erase a later delivery fence")
-			require.Equal(t, binding, svc.agentMessageRecovery.bindings[key])
 		})
 	}
 }
