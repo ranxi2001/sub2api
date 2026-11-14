@@ -326,8 +326,8 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	// No database is provided: unsupported commands must not read saved results,
-	// delete conversations, reserve model usage, or invoke an upstream model.
+	// The fixture permits only final delivery authorization; unsupported commands
+	// cannot read results, delete conversations, reserve usage or call models.
 	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL = server.URL
 	s.tokenURL = server.URL + "/token"
@@ -335,12 +335,14 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 	c.AppID, c.AppSecret, c.BaseURL = "app", "test-secret", server.URL+"/v1"
 	for i, content := range []string{"/查看结果 task-id", "/新对话", "/清空", "/不存在"} {
 		j := Job{TransientReply: true, GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
+		c = expectRepairDelivery(t, s, c, 1)
 		require.NoError(t, s.message(context.Background(), c, &j, Event{Content: content}))
 		require.Len(t, replies, i+1)
 		require.Contains(t, replies[i], "帮助")
 	}
 	j := Job{TransientReply: true, GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
 	before := len(replies)
+	c = expectRepairDelivery(t, s, c, 1)
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := strings.Join(replies[before:], "\n")
 	require.Contains(t, help, "我的余额")

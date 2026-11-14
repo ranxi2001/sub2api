@@ -24,6 +24,12 @@ func expectRepairDelivery(t *testing.T, s *Service, c Config, requests int) Conf
 	s.db = db
 	s.encryptor = repairDeliveryFixtureEncryptor{}
 	t.Cleanup(func() { require.NoError(t, mock.ExpectationsWereMet()); _ = db.Close() })
+	expectRepairDeliverySnapshot(t, mock, c, requests)
+	return c
+}
+
+func expectRepairDeliverySnapshot(t *testing.T, mock sqlmock.Sqlmock, c Config, requests int) {
+	t.Helper()
 	raw, err := json.Marshal(c)
 	require.NoError(t, err)
 	for range requests {
@@ -32,5 +38,4 @@ func expectRepairDelivery(t *testing.T, s *Service, c Config, requests int) Conf
 		mock.ExpectQuery("SELECT value FROM settings").WithArgs(configKey).WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(string(raw)))
 		mock.ExpectRollback()
 	}
-	return c
 }

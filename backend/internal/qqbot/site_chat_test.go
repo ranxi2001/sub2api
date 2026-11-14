@@ -121,11 +121,7 @@ func TestSiteChatRejectsForgedIdentityPartialAndDisabledImageTools(t *testing.T)
 			require.Error(t, err)
 			require.Nil(t, turn.SiteQuery)
 			require.Empty(t, turn.ImagePrompt)
-			expectedCalls := 1
-			if name == "partial stream" {
-				expectedCalls = 3
-			}
-			require.Equal(t, expectedCalls, calls)
+			require.Equal(t, 1, calls, "incomplete generation must not replay a submitted POST")
 		})
 	}
 }
