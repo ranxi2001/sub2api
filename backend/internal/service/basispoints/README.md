@@ -223,3 +223,17 @@ these ceilings are not throughput or memory-use guarantees.
 - Failure/cancellation retains usage and withholds unvalidated tools. Readers
   stop at cancellation without waiting for EOF, including correction and image
   compaction readers. This does not add a BPS WebSocket transport.
+
+# Context policy and current encrypted input
+
+The bridge forwards an explicitly supplied `context_management` array, including
+an empty array, without injecting a fixed compaction threshold when it is absent.
+Upstream defaults then apply. Clients that require the former 920000 threshold
+can declare it explicitly. This does not extend a model's context window.
+
+The optional encrypted-history omission path never replaces the last meaningful
+message or tool result's encrypted payload with a placeholder. Trailing reasoning,
+additional tool declarations, tool-search output and compaction triggers do not
+make that current input historical. Such requests fail with a safe input path and
+require the original plaintext. Older encrypted history may still use the existing
+explicit omission option; this does not recover or decrypt its missing content.

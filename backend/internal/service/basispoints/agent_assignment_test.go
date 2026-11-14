@@ -8,7 +8,7 @@ import (
 
 func TestNewEncryptedAssignmentsFailBeforeOmission(t *testing.T) {
 	for _, top := range []bool{false, true} {
-		for _, tail := range []string{"", "additional_tools", "tool_search_output", "compaction_trigger"} {
+		for _, tail := range []string{"", "additional_tools", "tool_search_output", "compaction_trigger", "reasoning"} {
 			item := object{"type": "agent_message", "content": []any{object{"type": "input_text", "text": "Readable header"}}}
 			if top {
 				item["encrypted_content"] = "SYNTHETIC_PRIVATE_PAYLOAD"

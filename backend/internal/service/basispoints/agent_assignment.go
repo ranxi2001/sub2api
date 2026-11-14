@@ -20,17 +20,15 @@ func encryptedAgentPath(item object, index int) string {
 // substitute for its unreadable payload, even if a readable header is present.
 func validateNewAgentMessage(input any) error {
 	items, _ := input.([]any)
-	for index := len(items) - 1; index >= 0; index-- {
-		item, _ := items[index].(object)
-		switch text(item["type"]) {
-		case "additional_tools", "tool_search_output", "compaction_trigger":
-			continue
-		case "agent_message":
-			if path := encryptedAgentPath(item, index); path != "" {
-				return &ContentValidationError{Path: path, ContentType: "encrypted_content", message: "basispoints cannot read a new encrypted agent assignment; resend the task using the original plaintext collaboration path"}
-			}
+	index := lastMeaningfulInput(items)
+	if index < 0 {
+		return nil
+	}
+	item, _ := items[index].(object)
+	if text(item["type"]) == "agent_message" {
+		if path := encryptedAgentPath(item, index); path != "" {
+			return &ContentValidationError{Path: path, ContentType: "encrypted_content", message: "basispoints cannot read a new encrypted agent assignment; resend the task using the original plaintext collaboration path"}
 		}
-		break
 	}
 	return nil
 }
@@ -73,4 +71,17 @@ func plaintextPromptParameters(name, namespace string, parameters object) object
 	props["message"] = schema
 	result["properties"] = props
 	return result
+}
+
+// Metadata and reasoning tails do not turn the current assignment into history.
+func lastMeaningfulInput(items []any) int {
+	for index := len(items) - 1; index >= 0; index-- {
+		item, _ := items[index].(object)
+		switch text(item["type"]) {
+		case "additional_tools", "tool_search_output", "compaction_trigger", "reasoning":
+			continue
+		}
+		return index
+	}
+	return -1
 }
