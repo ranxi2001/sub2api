@@ -412,6 +412,29 @@ jobs:
           test "$result" -ne 0
           ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-provider-identity-red.log"
           grep -q 'identity change must end the previous balance episode' "$RUNNER_TEMP/mature-provider-identity-red.log"
+      - name: RED uncertain local persistence after remote key creation
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/handler/admin/mature_provider_keys.go
+          cp "$target" "$RUNNER_TEMP/mature-keys-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-keys-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 407eea6822cd27a1772f41ff75615bc50592d941
+          git show 407eea6822cd27a1772f41ff75615bc50592d941:"$target" > "$target"
+          set +e
+          (cd backend && go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersKeyCreationIdempotency/persistence_failure$' -count=1 -v) > "$RUNNER_TEMP/mature-key-persistence-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-key-persistence-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-key-persistence-red.log"
+          grep -q 'local persistence failure after upstream creation must be classified as uncertain' "$RUNNER_TEMP/mature-key-persistence-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-key-persistence-red-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-key-persistence-red.log
       - name: Candidate business HTTP assertions
         working-directory: backend
         run: |
