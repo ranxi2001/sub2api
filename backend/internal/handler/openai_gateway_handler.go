@@ -894,6 +894,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 	}
 
+	// Normalize the finite replay metadata before either immutable body copy or
+	// the recovery digest is frozen. Each attempt derives from these same bytes.
+	if prepared, err := h.gatewayService.PrepareOpenAIAgentReplayBody(body); err != nil {
+		h.handleOpenAIAgentRecoveryError(c, err, streamStarted)
+		return
+	} else {
+		body = prepared
+	}
+
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
