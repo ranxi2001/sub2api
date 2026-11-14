@@ -117,3 +117,14 @@ F2：优惠券付款在订单行锁内重读持久状态，并与无券订单共
 F3：每次最终 QQ files/messages 请求在 token 获取之后持有数据库配置共享锁，锁内核对当前 enabled、AppID/凭据、群和相关策略，HTTP 有界20秒；配置保存使用现有独占锁。因此保存返回后旧授权不能再启动新的发送。图片上传与后续消息逐次重新授权；公告已有共享锁保持原路径，避免重复加锁。模型生成本身不持有配置锁，不要求撤回已经在途的消息。真实 PG 双 Service 实例 + model/QQ peer barrier 验证，纯格式单测显式模拟持久授权读取。
 
 修复阶段远程工作流 `mature-review-repairs.yml` 对旧生产 blob 和 clean candidate 分别运行相同断言，逐 case 检查成功/失败标记，拒绝 skip/compile/panic/无测试作为 RED。升级回归读取固定 production 迁移目录验证 fresh/upgrade、多实例迁移、旧版本忽略新表/继续 canonical 写入、再次升级和 checksum 不可变。只证明数据库兼容；旧二进制不包含安全修复，存在未完成机器人任务或付款时不应混用旧执行worker。
+
+
+## 父复审 R1/R2/R3 补充
+
+R1：`CANCELLED/EXPIRED` 保持真实订单状态；仅已付款且 `coupon.review_required` 的订单显示现有管理员重试入口。拒绝确认不发送请求，接受审核才发送 `confirm:true`，API默认false；服务器限长并严格解析请求，在支付服务重读订单后校验审核确认。保留现有管理员认证、付款/退款检查、人工审核审计和履约幂等，不扩大自动入账。修复沿用原新功能提示ID，不重新公告。
+
+R2：最终发送与配置保存的回归使用三个独立连接池，固定发送者和保存者backend PID，并通过 `pg_locks`、`pg_stat_activity`、`pg_blocking_pids` 确认同一个advisory key的真实共享/独占锁竞争；观察到等待后才释放假QQ对端。轮询时钟仅作观察节奏和失败上界，不能作为成功证明。
+
+R3：普通 moderation 的持久 `started` 只表示不重放的领取记录，不能代替最终授权。禁言和撤回先在锁外取得token，再在共享配置锁内读取当前配置与started操作，校验enabled/群/AppID/AppSecret/sandbox/策略/豁免/有效期，持锁完成实际POST restrict_chat_setting或DELETE messages。撤销时取消操作，结果未知时仍不自动重放。公告、回复、图片上传/消息、自动通知和举报专用执行路径各保留其最终共享锁，配置保存使用同一独占锁；不要求撤回已开始的请求。
+
+修复后候选继续普通整合已发布production：`96b4c2d99` 合并 `999d599f4`、`f0eca1267` 合并 `e90811e27`，新增生产路径逐blob保持一致，无迁移冲突或重编号。旧61原生图片保留，新人工审核before4图源码b98/captureb669已原生上传下载hash一致；新after图以实际生成head记录。父独审未整项clear，所有运行结论以PR精确head和artifact检查点为准。

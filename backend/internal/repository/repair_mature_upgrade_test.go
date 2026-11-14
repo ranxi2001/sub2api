@@ -41,10 +41,21 @@ func TestRepairMatureProductionUpgradeAndRollbackBoundary(t *testing.T) {
 		after, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
 		require.Equal(t, before, after, "applied production migration must remain immutable: %s", name)
-		// Execute only embedded migration bytes after exact equality with the
-		// pinned production archive; environment input selects evidence, not SQL.
-		baseline[name] = &fstest.MapFile{Data: after}
 	}
+	// Enumerate executable names/data from embed.FS only. The production archive
+	// selects the previously applied subset after the equality proof above.
+	embeddedFiles, err := fs.Glob(migrations.FS, "*.sql")
+	require.NoError(t, err)
+	for _, name := range embeddedFiles {
+		if _, err := fs.Stat(productionFiles, name); err != nil {
+			require.True(t, os.IsNotExist(err))
+			continue
+		}
+		data, err := migrations.FS.ReadFile(name)
+		require.NoError(t, err)
+		baseline[name] = &fstest.MapFile{Data: data}
+	}
+	require.Len(t, baseline, len(files))
 	for _, fresh := range []bool{false, true} {
 		t.Run(fmt.Sprintf("fresh_%t", fresh), func(t *testing.T) {
 			name := fmt.Sprintf("repair_upgrade_%d", time.Now().UnixNano())
