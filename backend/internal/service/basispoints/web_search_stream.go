@@ -100,12 +100,19 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 		if response != nil {
 			state.usage = addRepairUsage(state.usage, response["usage"])
 		}
-		if err != nil {
-			return err
-		}
 		if state.id == "" {
 			state.id = text(response["id"])
 			state.model = text(response["model"])
+		}
+		// Publish billed generation usage before waiting for search/continuation,
+		// so a later client cancellation does not erase completed rounds.
+		if state.id != "" && state.usage != nil {
+			if emitErr := state.emit("response.in_progress", object{"response": object{"id": state.id, "model": state.model, "status": "in_progress", "output": []any{}, "usage": state.usage}}); emitErr != nil {
+				return emitErr
+			}
+		}
+		if err != nil {
+			return err
 		}
 		if state.id == "" {
 			return searchRequestError("missing_response_id")
