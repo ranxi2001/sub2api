@@ -6187,6 +6187,7 @@
                           { value: 'brave', label: 'Brave Search' },
                           { value: 'tavily', label: 'Tavily' },
                           { value: 'deepseek', label: 'DeepSeek' },
+                          { value: 'exa', label: 'Exa' },
                         ]"
                         class="w-36"
                         @click.stop
