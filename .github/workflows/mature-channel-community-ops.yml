@@ -252,3 +252,31 @@ jobs:
         with:
           name: mature-network-${{ github.sha }}
           path: ${{ runner.temp }}/mature-network-evidence/
+
+  account-before:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v6
+        with: { node-version: '22' }
+      - name: Frozen source and dependencies
+        run: |
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          git worktree add --detach "$RUNNER_TEMP/account-before" 37dc4620a41a68abaeab329358c15821c41e3f7f
+          pnpm --dir "$RUNNER_TEMP/account-before/frontend" install --frozen-lockfile
+          npm install --prefix "$RUNNER_TEMP/account-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/account-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Actual account import baseline
+        env:
+          MATURE_BASE_ROOT: ${{ runner.temp }}/account-before
+          EVIDENCE_DIR: ${{ runner.temp }}/account-before-evidence
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/account-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/mature-account-before.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-account-before-${{ github.sha }}
+          path: ${{ runner.temp }}/account-before-evidence/

@@ -10,6 +10,7 @@ import QQBotActivityTemplates from '@/components/admin/qqbot/QQBotActivityTempla
 import { configSections, pickSection, cloneConfig, type ConfigSection } from '@/components/admin/qqbot/configSections'
 import type { QQBotConfig, QQSetupRequest } from '@/api/qqbot'
 const api = vi.hoisted(() => ({ config: vi.fn(), runtime: vi.fn(), saveSetup: vi.fn(), setupOptions: vi.fn(), setupChecks: vi.fn(), setupProbe: vi.fn(), activityTemplates: vi.fn(), applyActivityTemplate: vi.fn(), saveSection: vi.fn() }))
+vi.mock('@/components/admin/qqbot/QQCommunityNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('@/api/qqbot', async original => ({ ...await original<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 let server: QQBotConfig

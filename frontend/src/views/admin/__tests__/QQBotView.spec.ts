@@ -12,6 +12,7 @@ import en from '@/i18n/locales/en'
 import { configSections, pickSection, cloneConfig } from '@/components/admin/qqbot/configSections'
 import { defaultAutonomousConfig, defaultModerationConfig, type QQSetupRequest, type QQBotConfig, type QQMemberOption } from '@/api/qqbot'
 const api = vi.hoisted(() => ({ config: vi.fn(), setupOptions: vi.fn(), saveSetup: vi.fn(), saveSection: vi.fn(), runtime: vi.fn(), groupInfo: vi.fn(), bindings: vi.fn(), members: vi.fn(), deleteDiscoveredGroup: vi.fn(), probe: vi.fn(), configHistory: vi.fn(), commands: vi.fn(), chatPreview: vi.fn(), sendAnnouncement: vi.fn() }))
+vi.mock('@/components/admin/qqbot/QQCommunityNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('@/api/qqbot', async original => ({ ...await original<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 const wrappers: VueWrapper[] = []

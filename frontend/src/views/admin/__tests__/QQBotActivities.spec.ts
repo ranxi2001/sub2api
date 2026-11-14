@@ -13,6 +13,7 @@ import QQActivityPreview from '@/components/admin/qqbot/QQActivityPreview.vue'
 import QQBotActivitiesView from '../QQBotActivitiesView.vue'
 
 const api = vi.hoisted(() => ({ activityPreview: vi.fn(), rankingConfig: vi.fn(), saveRankings: vi.fn(), rewardCodes: vi.fn(), checkinConfig: vi.fn(), saveCheckin: vi.fn(), inviteConfig: vi.fn(), saveInvite: vi.fn(), transferConfig: vi.fn(), saveTransfer: vi.fn(), lotteryConfig: vi.fn(), saveLottery: vi.fn(), lotteryDraws: vi.fn(), lotteryState: vi.fn() }))
+vi.mock('@/components/admin/qqbot/QQCommunityNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
 const couponApi = vi.hoisted(() => ({ templates: vi.fn() }))
 vi.mock('@/api/coupons', () => ({ adminCouponAPI: couponApi }))

@@ -8,6 +8,7 @@ import QQBotRecordsView from '../QQBotRecordsView.vue'
 import type { QQActivityRecord } from '@/api/qqbot'
 
 const api = vi.hoisted(() => ({ activityRecords: vi.fn() }))
+vi.mock('@/components/admin/qqbot/QQCommunityNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 const participant = { member_id: 'invitee-openid', user_id: 0, email: '', nickname: '', bound: false, user_status: '', user_deleted: false }
