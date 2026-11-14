@@ -113,9 +113,9 @@ func TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure(t *testing.T) {
 
 	for _, control := range []struct {
 		name, phase, errorType, owner string
-		status                       int
-		upstream                     any
-		business, countTokens        bool
+		status                        int
+		upstream                      any
+		business, countTokens         bool
 	}{
 		{name: "recovered_failover", phase: "upstream", errorType: "upstream_error", owner: "provider", status: 200, upstream: 502},
 		{name: "business", phase: "upstream", errorType: "upstream_error", owner: "provider", status: 503, upstream: 503, business: true},
