@@ -62,8 +62,7 @@ jobs:
             python3 - <<'PYCODE'
           import pathlib, re, subprocess
           source = subprocess.check_output(['git', 'show', 'HEAD:backend/internal/service/openai_auth_connections.go'], text=True)
-          helper = re.search(r'func \(s \*OpenAIOAuthReauthService\) managementConnectionAccount\(.*?
-\}', source, re.S)
+          helper = re.search(r'func \(s \*OpenAIOAuthReauthService\) managementConnectionAccount\(.*?\n\}', source, re.S)
           assert helper is not None
           target = pathlib.Path('backend/internal/service/connection_type_red_compat.go')
           assert not target.exists()
