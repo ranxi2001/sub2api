@@ -100,6 +100,7 @@ func TestExcelBPSToolCorrectionPreservesRouteAndUsage(t *testing.T) {
 				}
 				require.Len(t, upstream.requests, attempts)
 				require.NotNil(t, result)
+				require.Nil(t, result.ServiceTier, "an omitted BPS tier must not be recorded as executed priority")
 				require.Equal(t, attempts*10, result.Usage.InputTokens)
 				require.Equal(t, attempts*2, result.Usage.OutputTokens)
 				require.Equal(t, "resp_0", result.ResponseID)
@@ -112,7 +113,7 @@ func TestExcelBPSToolCorrectionPreservesRouteAndUsage(t *testing.T) {
 					require.True(t, checked.bodies[i].closed.Load())
 					require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.bodies[i], "model").String())
 					require.Equal(t, "xhigh", gjson.GetBytes(upstream.bodies[i], "reasoning_effort").String())
-					require.Equal(t, "priority", gjson.GetBytes(upstream.bodies[i], "service_tier").String())
+					require.False(t, gjson.GetBytes(upstream.bodies[i], "service_tier").Exists(), "correction attempts must omit the rejected field")
 					require.False(t, gjson.GetBytes(upstream.bodies[i], "tools").Exists())
 					require.Equal(t, fmt.Sprint(i+1), gjson.GetBytes(upstream.bodies[i], "metadata.agent_iteration").String())
 					require.Equal(t, gjson.GetBytes(upstream.bodies[0], "metadata.task_id").String(), gjson.GetBytes(upstream.bodies[i], "metadata.task_id").String())
