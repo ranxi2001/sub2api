@@ -216,7 +216,8 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 		}
 		call := nativeSearch[0]
 		publicID := "ws_" + fingerprint([]any{state.id, text(call["call_id"])})
-		public := object{"id": publicID, "type": "web_search_call", "status": "in_progress", "action": object{"type": "search", "query": queries[0]}}
+		action := object{"type": "search", "query": queries[0]}
+		public := object{"id": publicID, "type": "web_search_call", "status": "in_progress", "action": action}
 		if err = state.emit("response.output_item.added", object{"item": public, "output_index": offset + index}); err != nil {
 			return err
 		}
@@ -234,7 +235,7 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 		}
 		state.completedSearch = true
 		public["status"] = "completed"
-		public["action"].(object)["sources"] = result.Sources
+		action["sources"] = result.Sources
 		output[index] = public
 		if err = state.emit("response.web_search_call.completed", object{"item_id": publicID, "output_index": offset + index}); err != nil {
 			return err
