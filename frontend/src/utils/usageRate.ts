@@ -73,6 +73,176 @@ export const usagePerMinute = (total: number | null | undefined, window: UsageRa
   return total / minutes
 }
 
+/**
+ * What the Token usage trend needs to turn one bucket's totals into per-minute
+ * rates. The window and granularity are captured when the trend is requested,
+ * like UsageRateWindow. The server zone is the current public setting: it may
+ * arrive after the trend, and without it the rates are unknown.
+ */
+export interface UsageTrendRateContext {
+  /** start_date/end_date sent with the trend request, and when it was sent. */
+  window: UsageRateWindow
+  /** The granularity sent with the trend request ('hour' or 'day'). */
+  granularity: string
+  /** IANA zone the backend formats bucket labels in (public settings server_timezone). */
+  serverTimezone?: string | null
+  /** That zone's UTC offset such as "+08:00", used when the name is not an IANA zone. */
+  serverUTCOffset?: string | null
+}
+
+interface Interval {
+  start: number
+  end: number
+}
+
+const HOUR_BUCKET = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):00$/
+const UTC_OFFSET = /^([+-])(\d{2}):(\d{2})$/
+const HOUR_MS = 3_600_000
+// Every UTC offset in use lies within ±14 hours.
+const MAX_OFFSET_MS = 15 * HOUR_MS
+// Offset changes are found by sampling this often, then narrowed to the second.
+const OFFSET_SAMPLE_MS = 30 * 60_000
+const zoneFormatters = new Map<string, Intl.DateTimeFormat | null>()
+
+const zoneFormatter = (zone: string): Intl.DateTimeFormat | null => {
+  if (!zoneFormatters.has(zone)) {
+    let formatter: Intl.DateTimeFormat | null = null
+    try {
+      formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: zone,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+      })
+    } catch {
+      // Go also accepts names such as "Local" that Intl rejects.
+    }
+    zoneFormatters.set(zone, formatter)
+  }
+  return zoneFormatters.get(zone) ?? null
+}
+
+/** The zone's UTC offset in ms at an instant (whole seconds). */
+const zoneOffsetAt = (formatter: Intl.DateTimeFormat, instant: number): number => {
+  const part: Record<string, number> = {}
+  for (const { type, value } of formatter.formatToParts(instant)) part[type] = Number(value)
+  const wall = Date.UTC(part.year, part.month - 1, part.day, part.hour, part.minute, part.second)
+  return wall - Math.floor(instant / 1000) * 1000
+}
+
+/** Split [from, to) into spans that each keep one UTC offset. Bounds are whole seconds. */
+const offsetSpans = (formatter: Intl.DateTimeFormat, from: number, to: number): Array<Interval & { offset: number }> => {
+  const spans: Array<Interval & { offset: number }> = []
+  let spanStart = from
+  let offset = zoneOffsetAt(formatter, from)
+  for (let sampled = from; sampled < to;) {
+    const next = Math.min(sampled + OFFSET_SAMPLE_MS, to)
+    if (zoneOffsetAt(formatter, next) !== offset) {
+      let before = sampled
+      let after = next
+      while (after - before > 1000) {
+        const mid = before + Math.floor((after - before) / 2000) * 1000
+        if (zoneOffsetAt(formatter, mid) === offset) before = mid
+        else after = mid
+      }
+      spans.push({ start: spanStart, end: after, offset })
+      spanStart = after
+      offset = zoneOffsetAt(formatter, after)
+      sampled = after
+    } else {
+      sampled = next
+    }
+  }
+  spans.push({ start: spanStart, end: to, offset })
+  return spans
+}
+
+/**
+ * The UTC intervals whose server wall-clock time lies in [wallStart, wallEnd),
+ * both given as Date.UTC of the wall time. The backend groups a trend bucket
+ * by its TO_CHAR label, so a DST fold puts two (or more) separate intervals in
+ * one bucket and a DST gap leaves out the skipped wall times. Null when the
+ * server zone is not known.
+ */
+const serverWallIntervals = (ctx: UsageTrendRateContext, wallStart: number, wallEnd: number): Interval[] | null => {
+  const formatter = ctx.serverTimezone ? zoneFormatter(ctx.serverTimezone) : null
+  if (!formatter) {
+    const offset = UTC_OFFSET.exec(ctx.serverUTCOffset ?? '')
+    if (!offset) return null
+    const offsetMs = (Number(offset[2]) * 60 + Number(offset[3])) * 60_000 * (offset[1] === '-' ? -1 : 1)
+    return [{ start: wallStart - offsetMs, end: wallEnd - offsetMs }]
+  }
+  const intervals: Interval[] = []
+  for (const span of offsetSpans(formatter, wallStart - MAX_OFFSET_MS, wallEnd + MAX_OFFSET_MS)) {
+    const start = Math.max(span.start, wallStart - span.offset)
+    const end = Math.min(span.end, wallEnd - span.offset)
+    if (end > start) intervals.push({ start, end })
+  }
+  return intervals
+}
+
+const trendBucketIntervals = (label: string, ctx: UsageTrendRateContext): Interval[] | null => {
+  if (ctx.granularity === 'hour') {
+    const hour = HOUR_BUCKET.exec(label)
+    if (!hour) return null
+    const [year, month, day, h] = hour.slice(1).map(Number)
+    return serverWallIntervals(ctx, Date.UTC(year, month - 1, day, h), Date.UTC(year, month - 1, day, h + 1))
+  }
+  if (ctx.granularity === 'day') {
+    const date = DATE_ONLY.exec(label)
+    if (!date) return null
+    const [year, month, day] = date.slice(1).map(Number)
+    return serverWallIntervals(ctx, Date.UTC(year, month - 1, day), Date.UTC(year, month - 1, day + 1))
+  }
+  return null
+}
+
+/**
+ * Minutes a trend bucket covers within the requested range, up to when the
+ * trend was requested: the first hour of a rolling range or the hour in
+ * progress count only their own minutes. A range side that was not sent is
+ * bounded by the bucket alone. Returns null when it cannot be worked out,
+ * including while the server zone is unknown.
+ */
+export const usageTrendBucketMinutes = (label: string, ctx: UsageTrendRateContext | null | undefined): number | null => {
+  if (!ctx || !Number.isFinite(ctx.window.now)) return null
+  let rangeStart = -Infinity
+  let rangeEnd = ctx.window.now
+  if (ctx.window.start) {
+    const start = parseBoundary(ctx.window.start, false)
+    if (start == null) return null
+    rangeStart = start
+  }
+  if (ctx.window.end) {
+    const end = parseBoundary(ctx.window.end, true)
+    if (end == null) return null
+    rangeEnd = Math.min(rangeEnd, end)
+  }
+  const intervals = trendBucketIntervals(label, ctx)
+  if (!intervals) return null
+  let covered = 0
+  for (const interval of intervals) {
+    covered += Math.max(0, Math.min(interval.end, rangeEnd) - Math.max(interval.start, rangeStart))
+  }
+  const minutes = covered / 60_000
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : null
+}
+
+/** Average RPM and TPM (all tokens, cache included) of one trend bucket. */
+export const usageTrendRates = (
+  point: { date: string; requests: number; total_tokens: number },
+  ctx: UsageTrendRateContext | null | undefined
+): { rpm: number | null; tpm: number | null } => {
+  const minutes = usageTrendBucketMinutes(point.date, ctx)
+  const perMinute = (total: number) =>
+    minutes != null && Number.isFinite(total) && total >= 0 ? total / minutes : null
+  return { rpm: perMinute(point.requests), tpm: perMinute(point.total_tokens) }
+}
+
 /** "196.4", "0.52", "13.89M"; tiny positive rates show as "<0.01". */
 export const formatUsageRate = (value: number | null): string => {
   if (value == null) return '—'
