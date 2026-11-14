@@ -44,7 +44,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
-      - run: pnpm --dir frontend exec vitest run src/components/account/__tests__/ExcelBPSSearchOptions.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/views/admin/__tests__/AutoConfigView.spec.ts src/composables/__tests__/useExcelBPSDefaults.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts
+      - run: pnpm --dir frontend exec vitest run src/components/account/__tests__/ExcelBPSSearchOptions.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/views/admin/__tests__/AutoConfigView.spec.ts src/composables/__tests__/useExcelBPSDefaults.spec.ts src/utils/__tests__/qualityRulePatch.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts
       - run: pnpm --dir frontend typecheck
       - name: Install isolated screenshot browser
         run: |

@@ -879,7 +879,7 @@ export default {
         oauthPassthrough: 'Auto passthrough (auth only)',
         excelBPS: 'Excel / BPS protocol',
         excelBPSOmitUnsupportedTools: 'Keep BPS and omit unsupported hosted tools',
-        excelBPSOmitUnsupportedToolsDesc: 'Off by default: declarations for live web search (external_web_access=true), high search context or image generation use native Codex, even with tool_choice=auto before any tool executes. Enable to keep BPS, omit hosted tools unsupported by the bridge and tell the model they are unavailable. This does not add search or image generation support; client function tools are unaffected. Forced tool choices return 400; tool_choice=none does not trigger tool fallback. Fallback reasons appear in response headers and excel_bps.native_fallback diagnostic logs.',
+        excelBPSOmitUnsupportedToolsDesc: 'Omit hosted tools that BPS cannot execute and tell the model they are unavailable. When account web search is separately enabled, supported searches run through the current BPS account. Other hosted capabilities such as image generation retain their own routing rules. Client functions and custom tools are unaffected. Unsupported forced hosted choices fail explicitly; tool_choice=none does not trigger fallback.',
         excelBPSCacheCreationAsInput: 'Bill cache creation as regular input',
         excelBPSMihomo: 'BPS session proxy (use with caution)',
         excelBPSProxySource: 'Exit source',

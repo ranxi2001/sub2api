@@ -86,6 +86,7 @@ export function qualityBPSError(bps: QualityBPSPolicy): string {
 export function qualityBPSPayload(bps: QualityBPSPolicy): QualityBPSPolicy {
   return {
     ...bps,
+    web_search: bps.web_search === true, web_search_auto: bps.web_search === true && bps.web_search_auto === true,
     recovery_interval_minutes: bps.recovery_interval_minutes ?? DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES,
     models: bps.all_models ? [] : [...bps.models],
     target_group_id: bps.auto_move_on_403 ? bps.target_group_id : 0,

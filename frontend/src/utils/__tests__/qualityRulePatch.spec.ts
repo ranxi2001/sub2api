@@ -371,3 +371,18 @@ describe('complete template selected fields', () => {
     expect(copied.quality.remove_models).toBeUndefined(); expect(copied.quality.bps).toBeUndefined()
   })
 })
+
+
+describe('BPS search rule roundtrip', () => {
+  it('preserves search settings in copies and detects an action edit', () => {
+    const original = plan()
+    original.pelican_config!.quality!.action = 'enable_bps'
+    original.pelican_config!.quality!.bps = { ...bps(), web_search: true, web_search_auto: true }
+    const copied = copyQualityRuleConfig(original.pelican_config!)
+    expect(copied.quality.bps).toMatchObject({ web_search: true, web_search_auto: true })
+    const changed = { ...original, pelican_config: copied }
+    copied.quality.bps!.web_search_auto = false
+    expect(qualityRuleFieldValue(original, 'action')).not.toEqual(qualityRuleFieldValue(changed, 'action'))
+    expect(qualityBPSPayload({ ...bps(), web_search: false, web_search_auto: true })).toMatchObject({ web_search: false, web_search_auto: false })
+  })
+})
