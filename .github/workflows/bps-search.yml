@@ -28,6 +28,8 @@ jobs:
         run: go test -race ./internal/service/basispoints -run 'Test(WebSearch|AlphaSearch|ToolChoice|CurrentEncrypted|CompactionPolicy)' -count=1 -v
       - working-directory: backend
         run: go test -race -tags=unit ./internal/service -run 'Test(ExcelBPSAccountSearch|ExcelBPSSearch|BPSSearchDefaults)' -count=1 -v -timeout=10m
+      - working-directory: backend
+        run: go test -tags=integration ./internal/repository -run '^TestQuality(BPSSnapshotEqualDefaultsAndManualChanges|EnableBPSRestoreAfterAccountEditorSave|BPSSearchRestorePreservesManualChanges)$' -count=1 -v -timeout=10m
   search-ui:
     runs-on: ubuntu-latest
     timeout-minutes: 20

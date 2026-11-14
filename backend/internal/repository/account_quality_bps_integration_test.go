@@ -316,3 +316,19 @@ func TestQualityEnableBPSRequiresExcelAuthorization(t *testing.T) {
 	f.exec(`INSERT INTO openai_excel_oauth_credentials(account_id,credentials_ciphertext) VALUES($1,'test-encrypted-grant')`)
 	// The worker callback, tested separately, clears preparation automatically.
 }
+
+func TestQualityBPSSearchRestorePreservesManualChanges(t *testing.T) {
+	for _, key := range []string{service.ExcelBPSWebSearchKey, service.ExcelBPSWebSearchAutoKey} {
+		t.Run(key, func(t *testing.T) {
+			f := newQualityBPSFixture(t, `{}`, &service.QualityPolicy{Action: service.QualityActionEnableBPS, AutoRestore: true, BPS: &service.QualityBPSPolicy{FailureThreshold: 1, PassThreshold: 1, AllModels: true, WebSearch: true, WebSearchAuto: true}})
+			require.Equal(t, "bps_enabled", f.apply("failed"))
+			require.Equal(t, true, f.extra()[key])
+			repo := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
+			account, err := repo.GetByID(context.Background(), f.account)
+			require.NoError(t, err)
+			delete(account.Extra, key)
+			require.NoError(t, repo.Update(context.Background(), account))
+			require.Equal(t, "restore_conflict", f.apply("passed"), "manually disabling an enabled search option must retain the ownership conflict")
+		})
+	}
+}

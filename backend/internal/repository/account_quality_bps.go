@@ -264,7 +264,7 @@ func qualityBPSDefaultJSON(key string) json.RawMessage {
 	case service.ExcelBPS403RecoveryIntervalMinutesKey:
 		return json.RawMessage(`60`)
 	case "openai_excel_bps", service.ExcelBPSOmitUnsupportedToolsKey,
-		service.ExcelBPSIgnoreEncryptedContentKey,
+		service.ExcelBPSIgnoreEncryptedContentKey, service.ExcelBPSWebSearchKey, service.ExcelBPSWebSearchAutoKey,
 		"openai_excel_bps_auto_disable_on_403", service.ExcelBPSAutoRecoverOn403Key, service.ExcelBPSAutoMoveOn403Key,
 		"openai_excel_bps_mihomo", "openai_excel_bps_cache_creation_as_input":
 		return json.RawMessage(`false`)
