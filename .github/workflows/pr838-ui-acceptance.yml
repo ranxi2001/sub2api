@@ -58,6 +58,15 @@ jobs:
           pnpm --dir frontend install --frozen-lockfile
           ln -s "$GITHUB_WORKSPACE/frontend/node_modules" .pr838-baseline/frontend/node_modules
           bash .github/scripts/ci-ubuntu-mirrors.sh
+          # The mirror transport stalled for the whole job while installing
+          # Chromium dependencies. Use the signed Ubuntu archive directly for
+          # this isolated runner, and bound each network attempt.
+          for mirror_list in /etc/apt/apt-mirrors.txt /etc/apt/apt-security-mirrors.txt; do
+            if [ -f "$mirror_list" ]; then
+              printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee "$mirror_list" >/dev/null
+            fi
+          done
+          printf '%s\n' 'Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";' 'Acquire::Retries "2";' | sudo tee /etc/apt/apt.conf.d/99-sub2api-ci-timeouts >/dev/null
           npm install --prefix "$RUNNER_TEMP/pr838-browser" --no-save --ignore-scripts playwright@1.56.1
           node "$RUNNER_TEMP/pr838-browser/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Build complete before and after applications with project Vite and CSS
