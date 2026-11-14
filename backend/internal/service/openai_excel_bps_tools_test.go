@@ -41,7 +41,7 @@ func TestExcelBPSToolFallbackPolicy(t *testing.T) {
 		{"disabled image", map[string]any{"type": "image_generation"}, "none", ""},
 		{"forced search", map[string]any{"type": "web_search"}, map[string]any{"type": "web_search"}, "tool_choice"},
 		{"forced image", map[string]any{"type": "image_generation"}, map[string]any{"type": "image_generation"}, "tool_choice"},
-		{"required search", map[string]any{"type": "web_search", "external_web_access": true}, "required", "web_search"},
+		{"unsupported choice", map[string]any{"type": "web_search", "external_web_access": true}, "unsupported", "web_search"},
 	}
 	for _, tc := range cases {
 		for _, omit := range []bool{false, true} {
