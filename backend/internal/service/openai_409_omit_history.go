@@ -567,10 +567,13 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 
 // A rebuilt request is a new native Responses conversation. An API-key
 // account's ordinary passthrough preference must not route this prepared
-// request around the native input and delivery checks.
+// request around the native input and delivery checks. Subsequent single-owner
+// turns must keep the learned native route too; exact route/credentials/wire
+// validation still runs before sending.
 func openAI409UsesNativeAPIKey(ctx context.Context, account *Account) bool {
 	r := openAIAgentRecoveryFromContext(ctx)
-	return r != nil && r.omittedHistory && account != nil && account.IsOpenAIApiKey()
+	return r != nil && account != nil && account.IsOpenAIApiKey() &&
+		(r.omittedHistory || (r.ownerBindingRequired() && r.owner.accountID == account.ID))
 }
 
 func openAIRecoveryWireRefusal(ctx context.Context, stage string) error {

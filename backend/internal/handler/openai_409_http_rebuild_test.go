@@ -638,6 +638,15 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		}
 		if previous.Exists() {
 			history = append([]string(nil), history...)
+			if pointer == "passthrough" && previous.Get("id").String() == "resp_rebuild_B" {
+				filtered := history[:0]
+				for _, item := range history {
+					if item != httpRebuildAgentA {
+						filtered = append(filtered, item)
+					}
+				}
+				history = filtered // only B's established opaque owner remains
+			}
 			var field string
 			switch pointer {
 			case "message_namespace":
