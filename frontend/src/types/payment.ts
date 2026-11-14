@@ -108,6 +108,7 @@ export interface CheckoutInfoResponse {
 // ==================== Orders ====================
 
 export interface PaymentOrder {
+  coupon?: { id: number; name: string; discount_amount: number; bonus_amount: number; review_required: boolean }
   id: number
   user_id: number
   amount: number

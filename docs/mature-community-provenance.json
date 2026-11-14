@@ -4123,5 +4123,126 @@
     "adaptation": "QQ lottery chance grant dependency extracted; direct-recharge subsystem is outside QQ source package",
     "source_notices": [],
     "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/service/payment_order.go",
+    "source_blob": "095948dba19225c7493fdf810391ed36fda09384",
+    "target_path": "backend/internal/service/payment_order.go",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/service/payment_order_lifecycle.go",
+    "source_blob": "74a418be1b0ae1344effe9758c9ee365de52eea7",
+    "target_path": "backend/internal/service/payment_order_lifecycle.go",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/service/payment_fulfillment.go",
+    "source_blob": "8e42750f0fed23c8a215798db39aa3b52e03dcf9",
+    "target_path": "backend/internal/service/payment_fulfillment.go",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/service/payment_service.go",
+    "source_blob": "4c83eb314a18b063ec003bb1dfcd7120d17307af",
+    "target_path": "backend/internal/service/payment_service.go",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/service/payment_resume_service.go",
+    "source_blob": "93eb5f4acd40b4141c8036ba59573d3a9d9b9410",
+    "target_path": "backend/internal/service/payment_resume_service.go",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/handler/payment_handler.go",
+    "source_blob": "5f15bfcb66a2e3563794e640adbaa9ba5bf82056",
+    "target_path": "backend/internal/handler/payment_handler.go",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/handler/admin/payment_handler.go",
+    "source_blob": "f2a7a1dbb9541698cff2fd0c79de6faa6906bf36",
+    "target_path": "backend/internal/handler/admin/payment_handler.go",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/handler/auth_wechat_oauth.go",
+    "source_blob": "8da94a6f42cba5c5378b1752524b3f351e17911e",
+    "target_path": "backend/internal/handler/auth_wechat_oauth.go",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/types/payment.ts",
+    "source_blob": "4057d263388113978f42aaa969f77a6587567ca1",
+    "target_path": "frontend/src/types/payment.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/user/PaymentView.vue",
+    "source_blob": "95855ef3a8102f96497334fa1a78725c04d02c55",
+    "target_path": "frontend/src/views/user/PaymentView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/orders/AdminOrdersView.vue",
+    "source_blob": "5c2540846708b246374ca7a746782803fe6d5a21",
+    "target_path": "frontend/src/views/admin/orders/AdminOrdersView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "only coupon-related integration adapted into the existing fork file; fee selection, gateway and canonical behavior retained; coupon resume tokens versioned for safe rollback",
+    "source_notices": [],
+    "notices_preserved": true
   }
 ]
