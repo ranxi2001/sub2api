@@ -3487,7 +3487,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if next, clean, changed, rebuildErr := h.gatewayService.TryRebuildOpenAI409History(ctx, c, wsAttemptMessage, sessionHash, wsForwardModel, err); rebuildErr != nil {
 					err = rebuildErr
 				} else if changed {
-					ctx, firstMessage, wsAttemptMessage, previousResponseID = next, clean, clean, ""
+					ctx, wsAttemptMessage, previousResponseID = next, clean, ""
 					previousResponseCanMove = true
 					ctx = service.ResetOpenAIWSReadableProviderSession(ctx, c)
 					c.Request = c.Request.WithContext(ctx)

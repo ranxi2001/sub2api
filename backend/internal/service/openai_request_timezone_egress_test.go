@@ -310,7 +310,7 @@ func TestOpenAI409PhysicalTimezonePreservesReadableTask(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					defer conn.CloseNow()
+					defer func() { _ = conn.CloseNow() }()
 					_, body, err := conn.Read(ctx)
 					if err != nil {
 						t.Error(err)
@@ -333,7 +333,7 @@ func TestOpenAI409PhysicalTimezonePreservesReadableTask(t *testing.T) {
 				} else {
 					conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 					require.NoError(t, err)
-					defer conn.CloseNow()
+					defer func() { _ = conn.CloseNow() }()
 					wrapped := &coderOpenAIWSClientConn{conn: conn, timezoneBinding: &requestTimezoneBinding{svc, account}, requestTimezone: "Asia/Tokyo"}
 					require.NoError(t, wrapped.WriteFrame(ctx, coderws.MessageText, original))
 				}
