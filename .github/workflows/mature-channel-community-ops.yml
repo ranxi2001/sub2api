@@ -607,6 +607,14 @@ jobs:
           SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/after-browser/node_modules/playwright/index.mjs
           EVIDENCE_DIR: ${{ runner.temp }}/after-evidence/community
         run: node .github/scripts/mature-community-after.mjs
+      - name: Payment before and coupon reward checkout after
+        if: always()
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/after-browser/node_modules/playwright/index.mjs
+          EVIDENCE_DIR: ${{ runner.temp }}/after-evidence/payment
+        run: |
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          node .github/scripts/mature-payment-comparison.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
