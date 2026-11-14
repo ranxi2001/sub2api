@@ -620,3 +620,35 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
           key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-race-${{ github.sha }}
+
+  wiring:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-wiring-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+      - name: Generate dependency graph from current source
+        working-directory: backend
+        run: |
+          go generate ./cmd/server
+          mkdir -p "$RUNNER_TEMP/wiring-evidence"
+          cp cmd/server/wire_gen.go "$RUNNER_TEMP/wiring-evidence/"
+          git diff -- cmd/server/wire_gen.go go.mod go.sum > "$RUNNER_TEMP/wiring-evidence/diff.patch"
+          git diff --exit-code -- cmd/server/wire_gen.go go.mod go.sum
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-wiring-${{ github.sha }}
+          path: ${{ runner.temp }}/wiring-evidence/
