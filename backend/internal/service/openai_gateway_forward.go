@@ -179,6 +179,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if projectionErr != nil {
 		return nil, projectionErr
 	}
+	if projected := openAIAgentRecoveryFromContext(ctx); projected != openAIAgentRecoveryFromContext(c.Request.Context()) {
+		// Response observers use gin's context, while final send checks use ctx.
+		// Both must see the same delivery fence for this attempt. Restore only
+		// the recovery value afterwards, keeping unrelated context additions.
+		originalRecovery := openAIAgentRecoveryFromContext(c.Request.Context())
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAIAgentRecoveryContextKey{}, projected))
+		defer func() {
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAIAgentRecoveryContextKey{}, originalRecovery))
+		}()
+	}
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return nil, err
 	}
