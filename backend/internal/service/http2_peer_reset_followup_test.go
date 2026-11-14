@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -74,6 +76,117 @@ func TestHTTP2CCSemanticFailureBeforeReset(t *testing.T) {
 			})
 		}
 	}
+}
+
+const http2FollowupDataOnlyMultilineError = "data: {\"error\":\ndata: {\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"synthetic semantic failure\"}\ndata: }\n\n"
+
+func TestHTTP2CCDataOnlyMultilineSemanticFailureBeforeReset(t *testing.T) {
+	for _, mode := range []string{"responses", "messages"} {
+		t.Run(mode, func(t *testing.T) {
+			rec, c, result, err := http2FollowupCCConvert(t, mode, http2FollowupCCPartial+http2FollowupDataOnlyMultilineError)
+			require.Error(t, err)
+			require.NotNil(t, result)
+			require.Contains(t, rec.Body.String(), "context_length_exceeded", "F4 multiline data-only semantic failure must survive reset: %s", mode)
+			require.Contains(t, rec.Body.String(), "synthetic semantic failure")
+			require.Contains(t, rec.Body.String(), "partial")
+			require.Equal(t, 3, result.Usage.InputTokens)
+			require.Equal(t, 1, result.Usage.OutputTokens)
+			require.Equal(t, http.StatusOK, rec.Code)
+			marker, ok := GetOpsStreamError(c)
+			require.True(t, ok)
+			require.Nil(t, marker.TransportFailure)
+			require.Equal(t, "invalid_request_error", marker.ErrType)
+			require.True(t, marker.RequestScoped)
+			require.Equal(t, "context_length_exceeded", marker.Code)
+			require.Equal(t, http.StatusBadRequest, marker.IntendedStatus)
+			_, _, reset := OpenAIUpstreamStreamReadErrorDetails(err)
+			require.False(t, reset)
+			var failover *UpstreamFailoverError
+			require.NotErrorAs(t, err, &failover)
+			assertHTTP2FollowupTerminal(t, rec.Body.String(), mode, "context_length_exceeded")
+		})
+	}
+}
+
+func TestHTTP2CCDataOnlyMultilineIncompleteStillResets(t *testing.T) {
+	for _, mode := range []string{"responses", "messages"} {
+		for name, fragment := range map[string]string{
+			"missing_delimiter": strings.TrimSuffix(http2FollowupDataOnlyMultilineError, "\n"),
+			"truncated_data":    "data: {\"error\":\ndata: {\"code\":\"context_length_exceeded\",\"message\":\"cut",
+			"invalid_delimited": "data: {\"error\":\ndata: {\"code\":\"context_length_exceeded\"}\n\n",
+		} {
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				rec, c, result, err := http2FollowupCCConvert(t, mode, http2FollowupCCPartial+fragment)
+				require.Error(t, err)
+				code, _, reset := OpenAIUpstreamStreamReadErrorDetails(err)
+				require.True(t, reset, "incomplete multiline error must retain reset attribution")
+				require.Equal(t, OpenAIUpstreamHTTP2StreamErrorCode, code)
+				marker, ok := GetOpsStreamError(c)
+				require.True(t, ok)
+				require.NotNil(t, marker.TransportFailure)
+				require.Equal(t, 3, result.Usage.InputTokens)
+				require.Equal(t, 1, result.Usage.OutputTokens)
+				require.NotContains(t, rec.Body.String(), "context_length_exceeded")
+				assertHTTP2FollowupTerminal(t, rec.Body.String(), mode, code)
+			})
+		}
+	}
+}
+
+func TestHTTP2CCOrdinaryChunksEmitBeforeDelimiter(t *testing.T) {
+	reader, writer := io.Pipe()
+	t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{StatusCode: 200, Header: http.Header{}, Body: reader}
+	emitted := make(chan string, 2)
+	finished := make(chan ccStreamScanState, 1)
+	go func() {
+		finished <- (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).scanCCStream(c, resp, rawChatCompletionsTestAccount(), "test", "synthetic", time.Now(), func(chunk *apicompat.ChatCompletionsChunk) {
+			emitted <- chunk.ID
+		})
+	}()
+	// Neither ordinary chunk waits for the event delimiter, and a usage-only
+	// chunk retains exactly the same fast path and cumulative usage.
+	_, err := io.WriteString(writer, strings.TrimSuffix(http2FollowupCCPartial, "\n"))
+	require.NoError(t, err)
+	select {
+	case id := <-emitted:
+		require.Equal(t, "synthetic", id)
+	case <-time.After(2 * time.Second):
+		t.Fatal("ordinary CC output must emit before the delimiter or another upstream read")
+	}
+	_, err = io.WriteString(writer, "\ndata: {\"id\":\"usage\",\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":2,\"total_tokens\":9}}\n")
+	require.NoError(t, err)
+	select {
+	case id := <-emitted:
+		require.Equal(t, "usage", id)
+	case <-time.After(2 * time.Second):
+		t.Fatal("ordinary CC usage must emit before its delimiter")
+	}
+	_, err = io.WriteString(writer, "\ndata: [DONE]\n\n")
+	require.NoError(t, err)
+	_ = writer.Close()
+	state := <-finished
+	require.NoError(t, state.Err)
+	require.True(t, state.SawDone)
+	require.Equal(t, 7, state.Usage.InputTokens)
+	require.Equal(t, 2, state.Usage.OutputTokens)
+}
+
+func TestHTTP2CCMultilineEventBufferBounded(t *testing.T) {
+	// A stream of fragments without a delimiter must not grow without bound.
+	line := "data: " + strings.Repeat(" ", 1024) + "\n"
+	source := strings.NewReader("data: {\n" + strings.Repeat(line, openAIFirstOutputStageMaxBytes/len(line)+2))
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	state := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).scanCCStream(c,
+		&http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(source)}, rawChatCompletionsTestAccount(), "test", "synthetic", time.Now(), func(*apicompat.ChatCompletionsChunk) { t.Error("fragments must not emit chunks") })
+	require.EqualError(t, state.Err, "upstream error event exceeds size limit")
+	require.Empty(t, state.SemanticFailure)
+	require.False(t, state.SawDone)
 }
 
 func TestHTTP2CCIncompleteSemanticEventStillResets(t *testing.T) {

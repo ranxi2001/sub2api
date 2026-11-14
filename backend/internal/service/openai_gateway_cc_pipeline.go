@@ -301,43 +301,56 @@ func (s *OpenAIGatewayService) scanCCStream(
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
 	var st ccStreamScanState
-	var errorData []string
-	stagingError := false
-	errorBytes := 0
+	var pendingData strings.Builder
+	stagingEvent := false
+	eventBytes := 0
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if eventType, ok := extractOpenAISSEEventLine(line); ok && eventType == "error" {
-			stagingError = true
+			stagingEvent = true
 		}
-		if payload, ok := extractOpenAISSEDataLine(line); ok && (gjson.Get(payload, "error").IsObject() || gjson.Get(payload, "type").String() == "error") {
-			stagingError = true
+		payload, isData := extractOpenAISSEDataLine(line)
+		if isData {
+			trimmed := strings.TrimSpace(payload)
+			// Complete ordinary chunks retain their immediate per-line delivery.
+			// A JSON fragment may be the start of a data-only multiline error;
+			// retain it with all subsequent data until the SSE delimiter.
+			if trimmed != "" && trimmed != "[DONE]" && (!gjson.Valid(payload) || gjson.Get(payload, "error").IsObject() || gjson.Get(payload, "type").String() == "error") {
+				stagingEvent = true
+			}
 		}
-		if stagingError {
-			errorBytes += len(line)
-			if errorBytes > openAIFirstOutputStageMaxBytes {
+		if stagingEvent {
+			// Include framing bytes so even empty data lines have a fixed bound.
+			if len(line)+1 > openAIFirstOutputStageMaxBytes-eventBytes {
 				st.Err = errors.New("upstream error event exceeds size limit")
 				return st
 			}
+			eventBytes += len(line) + 1
 			if payload, ok := extractOpenAISSEDataLine(line); ok {
-				errorData = append(errorData, payload)
+				pendingData.WriteString(payload)
+				pendingData.WriteByte('\n')
 			}
 			if line != "" {
 				continue
 			}
-			payload := strings.Join(errorData, "\n")
+			payload = pendingData.String()
 			if gjson.Valid(payload) && gjson.Get(payload, "error").IsObject() {
 				st.SemanticFailure = []byte(payload)
 				st.Err = errors.New("upstream semantic stream failure")
 				return st
 			}
-			// An incomplete or invalid error cannot hide a subsequent reset.
-			errorData, stagingError, errorBytes = nil, false, 0
-			continue
+			pendingData.Reset()
+			stagingEvent, eventBytes = false, 0
+			// Invalid/truncated events cannot hide a subsequent read reset.
+			if !gjson.Valid(payload) {
+				continue
+			}
+			// Multiline non-error chunks and usage use the same conversion path.
+			isData = true
 		}
-		payload, ok := extractOpenAISSEDataLine(line)
-		if !ok {
+		if !isData {
 			continue
 		}
 		payload = strings.TrimSpace(payload)
