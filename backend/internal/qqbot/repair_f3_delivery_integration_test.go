@@ -4,10 +4,13 @@ package qqbot
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -118,7 +121,14 @@ func TestRepairF3RunningGenerationCannotSendAfterRevocation(t *testing.T) {
 func TestRepairF3ConfigSaveOrdersWithFinalHTTPBoundary(t *testing.T) {
 	db := testDB(t)
 	s := savedBot(t, db)
-	writer := newMatureFixtureService(db, testEncryptor{}, true, nil)
+	writerDB := repairIndependentPool(t, db)
+	observer := repairIndependentPool(t, db)
+	writer := newMatureFixtureService(writerDB, testEncryptor{}, true, nil)
+	db.SetMaxOpenConns(1)
+	writerDB.SetMaxOpenConns(1)
+	var senderPID, writerPID int
+	require.NoError(t, db.QueryRow(`SELECT pg_backend_pid()`).Scan(&senderPID))
+	require.NoError(t, writerDB.QueryRow(`SELECT pg_backend_pid()`).Scan(&writerPID))
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -151,12 +161,7 @@ func TestRepairF3ConfigSaveOrdersWithFinalHTTPBoundary(t *testing.T) {
 	c.Enabled = false
 	saved := make(chan error, 1)
 	go func() { _, err := writer.SaveConfig(ctx, c); saved <- err }()
-	select {
-	case err := <-saved:
-		require.NoError(t, err)
-		t.Fatal("F3 configuration committed while the final send authorization lock was absent")
-	case <-time.After(200 * time.Millisecond):
-	}
+	repairWaitForConfigLock(t, ctx, observer, writerPID, senderPID, saved)
 	unblock.Do(func() { close(release) })
 	require.NoError(t, <-sent)
 	require.NoError(t, <-saved)
@@ -165,4 +170,51 @@ func TestRepairF3ConfigSaveOrdersWithFinalHTTPBoundary(t *testing.T) {
 	old.Enabled = true
 	require.Error(t, s.send(ctx, old, j, "must not start", nil, 2))
 	require.EqualValues(t, 1, calls.Load(), "F3 no new HTTP send after revocation commit")
+}
+
+// Separate pools retain the same synthetic schema, with independent backend PIDs.
+func repairIndependentPool(t *testing.T, original *sql.DB) *sql.DB {
+	t.Helper()
+	var schema string
+	require.NoError(t, original.QueryRow(`SELECT current_schema()`).Scan(&schema))
+	u, err := url.Parse(os.Getenv("QQBOT_TEST_DSN"))
+	require.NoError(t, err)
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	db, err := sql.Open("postgres", u.String())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+func repairWaitForConfigLock(t *testing.T, ctx context.Context, observer *sql.DB, waiterPID, senderPID int, saved <-chan error) {
+	t.Helper()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting bool
+		err := observer.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM pg_locks waiter JOIN pg_locks holder
+ ON holder.locktype=waiter.locktype AND holder.database=waiter.database
+ AND holder.classid=waiter.classid AND holder.objid=waiter.objid AND holder.objsubid=waiter.objsubid
+ JOIN pg_stat_activity activity ON activity.pid=waiter.pid
+ WHERE waiter.pid=$1 AND holder.pid=$2 AND waiter.locktype='advisory'
+ AND waiter.classid=0 AND waiter.objid=71427101 AND waiter.objsubid=1
+ AND waiter.mode='ExclusiveLock' AND NOT waiter.granted AND holder.mode='ShareLock' AND holder.granted
+ AND activity.wait_event_type='Lock' AND $2=ANY(pg_blocking_pids($1)))`, waiterPID, senderPID).Scan(&waiting)
+		require.NoError(t, err)
+		if waiting {
+			t.Logf("R2 observed config backend %d waiting on sender backend %d advisory 71427101", waiterPID, senderPID)
+			return
+		}
+		select {
+		case err := <-saved:
+			require.NoError(t, err)
+			t.Fatal("F3 configuration committed while the final send authorization lock was absent")
+		case <-ctx.Done():
+			t.Fatal("R2 never observed actual config lock contention before deadline")
+		case <-ticker.C:
+		}
+	}
 }
