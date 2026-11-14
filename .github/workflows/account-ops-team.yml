@@ -9,6 +9,7 @@ on:
       - 'frontend/src/components/admin/operations/__tests__/AccountOps*'
       - 'frontend/src/api/admin/accountOps.ts'
       - 'frontend/src/views/admin/AccountOpsView.vue'
+      - 'frontend/src/components/admin/operations/MatureProvidersPanel.vue'
       - '.github/workflows/account-ops-team.yml'
       - '.github/scripts/account-ops-team-screenshots.mjs'
   workflow_dispatch:
@@ -47,7 +48,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
-      - run: pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOps src/components/common/__tests__/NewFeatureBadge.spec.ts src/views/admin/__tests__/AccountOpsView.spec.ts
+      - run: pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOps src/components/common/__tests__/NewFeatureBadge.spec.ts src/views/admin/__tests__/AccountOpsView.spec.ts src/views/admin/__tests__/MatureProviders.spec.ts
       - run: pnpm --dir frontend run build
       - name: Install screenshot browser
         run: |

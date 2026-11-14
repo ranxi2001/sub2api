@@ -5,6 +5,7 @@
         <div class="flex items-center gap-2"><h2 class="text-xl font-semibold">{{ t('matureProviders.title') }}</h2><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.matureProviders" :user-id="auth.user?.id" /></div>
         <p class="mt-1 text-sm text-gray-500">{{ t('matureProviders.description') }}</p>
       </div>
+      <div class="flex items-center gap-2"><a href="/admin/account-ops" class="btn btn-secondary">{{ t('accountOps.accountRules') }}</a><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.accountOpsProviderBalance" :user-id="auth.user?.id" /></div>
       <button class="btn btn-primary" data-testid="provider-add" @click="edit()">{{ t('matureProviders.add') }}</button>
     </header>
     <form class="flex flex-wrap gap-2" @submit.prevent="search">

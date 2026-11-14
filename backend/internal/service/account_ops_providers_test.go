@@ -79,6 +79,11 @@ func TestAccountOpsProviderBalanceIsSharedAndDoesNotFallBackToKeyQuota(t *testin
 		})
 	}
 	old, _, _, _ := cfg.ThresholdGroupCriteria(cfg.Groups[0].ID, "balance_threshold")
+	cfg.Groups[0].AccountIDs = append(cfg.Groups[0].AccountIDs, 3)
+	cfg.BalanceThresholds = append(cfg.BalanceThresholds, AccountOpsBalanceRule{AccountID: 3, Enabled: true, Threshold: 50, Unit: "USD"})
+	withExtraKey, _, _, _ := cfg.ThresholdGroupCriteria(cfg.Groups[0].ID, "balance_threshold")
+	require.Equal(t, old, withExtraKey, "adding a Key must not reopen the same provider wallet episode")
+
 	cfg.Groups[0].ProviderID = 8
 	updated, _, _, _ := cfg.ThresholdGroupCriteria(cfg.Groups[0].ID, "balance_threshold")
 	require.NotEqual(t, old, updated, "relinking must invalidate queued alerts and recoveries")

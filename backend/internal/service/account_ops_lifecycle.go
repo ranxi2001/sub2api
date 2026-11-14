@@ -26,7 +26,7 @@ func (s *AccountOpsService) SetOAuthLifecycle(ctx context.Context, id int64, val
 	if err != nil {
 		return err
 	}
-	if account.Type != AccountTypeOAuth {
+	if account == nil || account.Type != AccountTypeOAuth {
 		return accountOpsConfigValidation("lifecycle applies only to OAuth accounts")
 	}
 	return s.accounts.UpdateExtra(ctx, id, map[string]any{accountOpsOAuthLifecycleKey: value})

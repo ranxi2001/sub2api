@@ -455,6 +455,30 @@ func accountOpsGroupCriteria(c AccountOpsConfig, kind string, members []accountO
 	if len(parts) == 0 {
 		return "", false, alert, recovery
 	}
+	// A provider wallet keeps its episode when keys are added or reordered.
+	// Only a different provider or a changed set of thresholds invalidates it.
+	if kind == "balance_threshold" && parts[0].ProviderID > 0 {
+		providerID := parts[0].ProviderID
+		criteria := []string{}
+		seen := map[string]bool{}
+		shared := true
+		for _, p := range parts {
+			if p.ProviderID != providerID {
+				shared = false
+				break
+			}
+			if !seen[p.Criteria] {
+				criteria = append(criteria, p.Criteria)
+				seen[p.Criteria] = true
+			}
+		}
+		if shared {
+			sort.Strings(criteria)
+			raw, _ := json.Marshal([]any{providerID, criteria})
+			sum := sha256.Sum256(raw)
+			return hex.EncodeToString(sum[:]), true, alert, recovery
+		}
+	}
 	sort.Slice(parts, func(i, j int) bool { return parts[i].ID < parts[j].ID })
 	if len(parts) == 1 && parts[0].ProviderID == 0 {
 		return parts[0].Criteria, true, alert, recovery
