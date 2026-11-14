@@ -1,6 +1,6 @@
 # 成熟渠道与 QQ 社群运维功能对照（已实施，联合验收中）
 
-冻结基线 `37dc4620a41a68abaeab329358c15821c41e3f7f`。渠道来源 [mizaawa/zayuapi v0.2.219](https://github.com/mizaawa/zayuapi/tree/a71aa9615ccb55a19973908c9f261b5ba25a48c6)，QQ 来源 [DeanZFC/sub2api-custom v0.2.21-custom.4](https://github.com/DeanZFC/sub2api-custom/tree/5876d7d864dae405c2a3b65074fb556f6985adb8)。本清单勾选表示完整功能及验证验收，代码片段或单项测试不能代替完成。
+初始冻结基线 `37dc4620a41a68abaeab329358c15821c41e3f7f`；独审修复阶段按用户新授权通过普通 merge `cc6d40b43` 整合 production `aa0b1abfe5b32c483b32c70fe0c813659ef58083`，保留双方功能、测试和历史。渠道来源 [mizaawa/zayuapi v0.2.219](https://github.com/mizaawa/zayuapi/tree/a71aa9615ccb55a19973908c9f261b5ba25a48c6)，QQ 来源 [DeanZFC/sub2api-custom v0.2.21-custom.4](https://github.com/DeanZFC/sub2api-custom/tree/5876d7d864dae405c2a3b65074fb556f6985adb8)。本清单勾选表示完整功能及验证验收，代码片段或单项测试不能代替完成。
 
 ## 原有功能与兼容性
 
@@ -92,9 +92,9 @@ QQ 外部模型/平台请求使用禁止 private/特殊用途地址、DNS 固定
 
 迁移 345～348 是独立服务商表；350～378 为 QQ/coupon 依赖的新编号迁移，来源旧迁移编号映射记录在逐文件 provenance。未覆盖本 fork 已有迁移。原 `account_ops_notifications_v1`、账号机器人 webhook、canonical channels/upstream_channels/accounts/account_groups、账单、价格和权限数据保持原接口。
 
-应用回退到冻结基线会忽略新表和独立 settings；不能自动撤销回退前已明确执行的远端 key 创建、奖励、转账或优惠券消费。数据清理必须单独迁移；不在此 PR 附可误执行的 DROP/DOWN。现有固定加密密钥不可更换，否则新旧加密凭据都可能失效。本 PR 不包含部署、生产配置修改、merge、ready 或 release。
+应用回退到冻结基线会忽略新表和独立 settings；不能自动撤销回退前已明确执行的远端 key 创建、奖励、转账或优惠券消费。数据清理必须单独迁移；不在此 PR 附可误执行的 DROP/DOWN。现有固定加密密钥不可更换，否则新旧加密凭据都可能失效。本 PR 不包含部署、生产配置修改、PR merge、ready 或 release；feature 分支内的 production 历史整合已获用户授权。
 
-before/after 图只使用真实 Vue 组件与合成数据，不能代表生产验证或完整端到端验收。图片存 artifact，不提交 PNG 源码。45 张原生 PR 附件已上传并下载核对 SHA256（8 张冻结基线、37 张 after/compare；after 渲染提交为 c58e8e263）。独立只读审查和精确最终 head 全 CI 仍是交付门禁，未有证据时保持未勾选。
+before/after 图只使用真实 Vue 组件与合成数据，不能代表生产验证或完整端到端验收。图片存 artifact，不提交 PNG 源码。61 条原生 PR 图片链接已保留并核对 SHA256：初始8张基线、c58的37张after/compare以及b98的16张差异重拍；b98当前37图另有21张与既有附件逐字节一致。capture SHA不随后续修复变更。独立只读审查和精确最终 head 全 CI 仍是交付门禁，未有证据时保持未勾选。
 
 优惠券的微信支付恢复上下文携带签名的 coupon_id。带券恢复 token 使用独立类型，旧二进制会拒绝该类型，避免回退时忽略优惠并生成全价订单；无券恢复继续使用旧类型。服务器核对请求 coupon 与签名上下文一致，并在创建订单时重新验证归属和有效性。管理员订单详情展示只包含名称/优惠金额/赠额/待审核状态的摘要，需明确确认原优惠利益后手动重试冲突到账。
 
@@ -105,4 +105,15 @@ before/after 图只使用真实 Vue 组件与合成数据，不能代表生产�
 
 后续新增明确拒绝/未知创建结果的 UI 断言、上游 scope 凭据反射断言，均先取得远程旧实现行为 RED，再修复实现。另修复通用 CI 的独立数据库 fixture 与原 securityaudit 空数组 fixture，未削弱已有业务断言。最终结果以 PR 当前 head 的 Checks 与 artifact `STATUS.md` 为准。
 
-历史 Issue805 工作流在更新后的 production 定义中引用了冻结基线不存在的辅助脚本，已观测到执行前 exit127；不能计为通过或业务 RED。本 PR 不引入不相关的新基线源码来掩盖该差异，需协调者/工作流 owner 核对。独立只读源码审查由协调者安排，尚无审查结论；因此全范围验收方框仍保留未勾选。
+历史 Issue805 工作流曾因冻结基线缺辅助脚本而在断言前 exit127，该结果不是行为 RED。新授权的普通 production merge 已引入其已接受的完整 helper/guard/workflow，修复新头必须重新执行。独立只读审查已经给出 F1/F2/F3 阻断；writer 的实现和动态测试不能替代父协调者对最终固定头的独立复审，验收方框保持未勾选。
+
+
+## 独审 F1/F2/F3 修复边界
+
+F1：生成 POST 一旦可能提交，timeout/DeadlineExceeded/EOF/截断响应、网关5xx和不完整模型输出均停止重放；没有声明上游支持稳定幂等。仅 HTTP trace 未取得连接且错误确认为 dial 失败时允许有界重试。实际已知用量保留，未知不补零。`TestRepairF1SubmittedGenerationIsNotReplayed` 使用真实 siteChatTurn 和 loopback 记录完整 POST 数；确定未提交控制由 `TestRepairF1DefinitelyUnsubmittedDialCanRetry` 覆盖。
+
+F2：优惠券付款在订单行锁内重读持久状态，并与无券订单共用 canonical 恢复谓词：普通 grace、内嵌 BEpusdt 历史窗口和 EasyPay 原始 expires_at+24h；后台不可恢复已取消订单。超窗/不可恢复但已验证付款的订单保留原状态、真实交易号/金额/paid_at，释放未消费券并标记人工审核。重复回调不会履约；管理员明确批准后按原承诺利益处理，可用券在同事务消费，已复用/作废券沿用现有 honor 规则。原 provider/金额/instance 校验和退款边界保留。
+
+F3：每次最终 QQ files/messages 请求在 token 获取之后持有数据库配置共享锁，锁内核对当前 enabled、AppID/凭据、群和相关策略，HTTP 有界20秒；配置保存使用现有独占锁。因此保存返回后旧授权不能再启动新的发送。图片上传与后续消息逐次重新授权；公告已有共享锁保持原路径，避免重复加锁。模型生成本身不持有配置锁，不要求撤回已经在途的消息。真实 PG 双 Service 实例 + model/QQ peer barrier 验证，纯格式单测显式模拟持久授权读取。
+
+修复阶段远程工作流 `mature-review-repairs.yml` 对旧生产 blob 和 clean candidate 分别运行相同断言，逐 case 检查成功/失败标记，拒绝 skip/compile/panic/无测试作为 RED。升级回归读取固定 production 迁移目录验证 fresh/upgrade、多实例迁移、旧版本忽略新表/继续 canonical 写入、再次升级和 checksum 不可变。只证明数据库兼容；旧二进制不包含安全修复，存在未完成机器人任务或付款时不应混用旧执行worker。

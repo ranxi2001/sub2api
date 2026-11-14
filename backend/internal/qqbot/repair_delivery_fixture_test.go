@@ -2,9 +2,10 @@ package qqbot
 
 import (
 	"encoding/json"
+	"testing"
+
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 type repairDeliveryFixtureEncryptor struct{}

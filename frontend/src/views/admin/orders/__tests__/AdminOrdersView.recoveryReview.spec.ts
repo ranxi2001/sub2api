@@ -5,7 +5,7 @@ import AdminOrdersView from '../AdminOrdersView.vue'
 const api = vi.hoisted(() => ({ getOrders: vi.fn(), retryRecharge: vi.fn() }))
 vi.mock('@/api/admin/payment', () => ({ adminPaymentAPI: api }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string) => key }) }))
 
 const fixtures = ['CANCELLED', 'EXPIRED'].map((status, i) => ({
   id: i + 11, status, paid_at: '2026-11-14T12:00:00Z',
