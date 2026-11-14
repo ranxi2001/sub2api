@@ -155,9 +155,7 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 				var in, out int64
 				require.NoError(t, db.QueryRow(`SELECT kind,status,result_text,input_tokens,output_tokens FROM qq_bot_jobs WHERE message_id='current'`).Scan(&kind, &status, &text, &in, &out))
 				wantIn, wantOut := int64(11), int64(7)
-				if scenario == "empty-promise" {
-					wantIn, wantOut = 33, 21
-				} else if scenario != "text" && scenario != "disabled" && scenario != "invalid-tool" {
+				if scenario != "empty-promise" && scenario != "text" && scenario != "disabled" && scenario != "invalid-tool" {
 					wantIn, wantOut = 22, 14
 				}
 				require.Equal(t, wantIn, in)
@@ -181,7 +179,9 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 				case "limit":
 					require.Contains(t, text, "今日使用次数已达上限")
 				case "disable-during-chat":
+					wantStatus = "delivery_failed"
 					require.Contains(t, text, "功能未启用")
+					require.Zero(t, deliveries.Load(), "a changed image authorization cannot start an old reply")
 				default:
 					require.Equal(t, "还需要确定尺寸吗？", text)
 				}
@@ -201,11 +201,7 @@ func TestQQBotChatImageToolExecutionAndLimits(t *testing.T) {
 				// including after a model failure or failed image delivery.
 				enqueueSharedTestEvent(t, s, c, e, groupAtMessageCreate)
 				s.runOne(ctx)
-				wantChats := 1
-				if scenario == "empty-promise" {
-					wantChats = 3
-				}
-				require.EqualValues(t, wantChats, chats.Load())
+				require.EqualValues(t, 1, chats.Load(), "an incomplete or missing action never replays a submitted generation")
 				require.EqualValues(t, wantImages, images.Load())
 			})
 		}
