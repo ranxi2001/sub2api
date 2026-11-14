@@ -23,9 +23,11 @@ func TestIssue854OwnerContinuation(t *testing.T) {
 
 func TestIssue854OwnerFailurePersistence(t *testing.T) {
 	for _, mode := range readableWSModes {
-		t.Run(mode, func(t *testing.T) {
-			runReadableWSContinuation(t, mode, "issue854_guard_refusal")
-		})
+		for _, connection := range []string{"guard", "fresh"} {
+			t.Run(mode+"/"+connection, func(t *testing.T) {
+				runReadableWSContinuation(t, mode, "issue854_"+connection+"_refusal")
+			})
+		}
 	}
 }
 

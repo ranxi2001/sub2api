@@ -195,8 +195,10 @@ func TestIssue854BeforeSendRecoveryGuards(t *testing.T) {
 		cause       error
 		recoverable bool
 	}{
-		{"owner_unavailable", openAIAgentRecoveryError("owner_unavailable"), true},
-		{"route_changed", openAIAgentRecoveryError("route_changed"), true},
+		{"owner_unavailable", &openAIWSOwnerRouteError{cause: openAIAgentRecoveryError("owner_unavailable")}, true},
+		{"route_changed", &openAIWSOwnerRouteError{cause: openAIAgentRecoveryError("route_changed")}, true},
+		{"late_owner_fence", openAIAgentRecoveryError("owner_unavailable"), false},
+		{"route_store_failure", &openAIWSOwnerRouteError{cause: openAIAgentRecoveryError("store_unavailable")}, false},
 		{"wire_integrity", openAIAgentRecoveryError("wire_changed"), false},
 		{"conflicting_owners", openAIAgentRecoveryError("owner_conflict"), false},
 		{"delivery_pending", openAIAgentRecoveryError("delivery_pending"), false},

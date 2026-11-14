@@ -58,6 +58,13 @@ type openAIWSLostOwnerEvidenceError struct{ cause error }
 func (e *openAIWSLostOwnerEvidenceError) Error() string { return e.cause.Error() }
 func (e *openAIWSLostOwnerEvidenceError) Unwrap() error { return e.cause }
 
+// Only the account/route compatibility check may grant this evidence. The same
+// public code from a later integrity or delivery fence stays terminal.
+type openAIWSOwnerRouteError struct{ cause error }
+
+func (e *openAIWSOwnerRouteError) Error() string { return e.cause.Error() }
+func (e *openAIWSOwnerRouteError) Unwrap() error { return e.cause }
+
 // Called only before the current generation's first physical write. A guard
 // refusal on an internal retry is not proof that earlier work was unsent.
 func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) error {
@@ -66,8 +73,9 @@ func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) err
 	if errors.As(err, &lost) {
 		return closed
 	}
+	var route *openAIWSOwnerRouteError
 	var recovery *OpenAIAgentRecoveryError
-	if turn < 1 || !errors.As(err, &recovery) || !gjson.ValidBytes(body) {
+	if turn < 1 || !errors.As(err, &route) || !errors.As(err, &recovery) || !gjson.ValidBytes(body) {
 		return closed
 	}
 	switch recovery.Reason {

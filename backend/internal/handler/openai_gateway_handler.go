@@ -3184,6 +3184,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	bindOpenAIPriorityObservation(c, apiKey.GroupID, reqModel, firstMessage)
 	ctx = c.Request.Context()
 	setOpsEndpointContext(c, "", int16(service.RequestTypeWSV2))
+	service.BeginOpsStreamTurn(c, 1)
 
 	// Connection-wide audit identity survives proxy restarts/failover, whose
 	// transport-local turn counters restart at 1. Replays keep the current

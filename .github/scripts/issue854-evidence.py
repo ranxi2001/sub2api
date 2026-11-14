@@ -19,7 +19,7 @@ def inventory(suite):
         return LEAVES, PARENTS, {n for n in LEAVES if n.endswith("/guard_live")}, ("WS_READABLE_B_DISPATCH_MISSING", "The proven encrypted agent owner is currently unavailable")
     if suite == "persistence":
         root = "TestIssue854OwnerFailurePersistence"
-        leaves = {f"{root}/{mode}" for mode in MODES}
+        leaves = {f"{root}/{mode}/{connection}" for mode in MODES for connection in ("guard", "fresh")}
         return leaves, {root}, leaves, ("ISSUE854_FAILURE_NOT_PERSISTED",)
     if suite == "upstream":
         root = "TestIssue854UpstreamOwnerRateLimit"

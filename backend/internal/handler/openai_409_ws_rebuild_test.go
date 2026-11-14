@@ -176,7 +176,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	headers := http.Header{"Session_id": {"fixture-readable-ws-session"}, "Thread-Id": {"fixture-readable-ws-thread"}}
 	settings := map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: fmt.Sprint(scenario != "off")}
 	issue854 := strings.HasPrefix(scenario, "issue854_")
-	issue854Failure := scenario == "issue854_guard_refusal"
+	issue854Failure := scenario == "issue854_guard_refusal" || scenario == "issue854_fresh_refusal"
 	var failureRepo *ingressRejectOpsRepo
 	var configureHandler func(*OpenAIGatewayHandler)
 	if issue854Failure {
@@ -346,7 +346,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 			require.NoError(t, probe.Del(context.Background(), key).Err())
 		}
 	}
-	if scenario == "issue854_fresh" || strings.HasPrefix(scenario, "issue854_guard_") {
+	if strings.HasPrefix(scenario, "issue854_fresh") || strings.HasPrefix(scenario, "issue854_guard_") {
 		issue600Finish(t, h, headers)
 		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		conn, _, err := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
@@ -431,12 +431,16 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		require.Equal(t, int16(service.RequestTypeWSV2), *entry.RequestType)
 		require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.Get(entry.ErrorBody, "error.code").String())
 		require.Equal(t, "websocket", gjson.Get(entry.ErrorBody, "error.protocol").String())
-		require.EqualValues(t, 2, gjson.Get(entry.ErrorBody, "error.turn").Int())
-		require.Equal(t, "before_upstream_write", gjson.Get(entry.ErrorBody, "error.phase").String())
+		wantTurn, wantSends, wantPhase := 2, 2, "before_upstream_write"
+		if scenario == "issue854_fresh_refusal" {
+			wantTurn, wantSends, wantPhase = 1, 1, "before_dispatch"
+		}
+		require.EqualValues(t, wantTurn, gjson.Get(entry.ErrorBody, "error.turn").Int())
+		require.Equal(t, wantPhase, gjson.Get(entry.ErrorBody, "error.phase").String())
 		require.Equal(t, gjson.False, gjson.Get(entry.ErrorBody, "error.request_written").Type)
 		require.NotContains(t, entry.ErrorBody, "fixture-opaque-A")
 		require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.GetBytes(secondRaw, "error.code").String())
-		require.Equal(t, 2, sends, "failed turn cannot reach either upstream")
+		require.Equal(t, wantSends, sends, "failed turn cannot reach either upstream")
 		return
 	}
 	if scenario != "completed" && !issue854 && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
