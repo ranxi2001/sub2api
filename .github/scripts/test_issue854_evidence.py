@@ -27,7 +27,7 @@ class EvidenceTest(unittest.TestCase):
             for phase, code in (("RED", 1), ("GREEN", 0)):
                 raw = transcript(phase, suite)
                 gate.validate(phase, code, raw, suite)
-                for pollution in ("build failed", "setup failed", "no tests to run", "panic", "DATA RACE", "--- SKIP: fixture", "crash"):
+                for pollution in ("build failed", "setup failed", "requires real redis-server in CI", "no tests to run", "panic", "DATA RACE", "--- SKIP: fixture", "crash"):
                     with self.assertRaises(ValueError):
                         gate.validate(phase, code, raw + "\n" + pollution, suite)
                 with self.assertRaises(ValueError):
@@ -37,7 +37,7 @@ class EvidenceTest(unittest.TestCase):
         for phase, code in (("RED", 1), ("GREEN", 0)):
             raw = transcript(phase)
             gate.validate(phase, code, raw)
-            for pollution in ("panic: fixture", "DATA RACE", "build failed", "setup failed", "no tests to run", "--- SKIP: x", "signal: killed", "fatal error", "test timed out", "crash"):
+            for pollution in ("panic: fixture", "DATA RACE", "build failed", "setup failed", "requires real redis-server in CI", "no tests to run", "--- SKIP: x", "signal: killed", "fatal error", "test timed out", "crash"):
                 with self.subTest(phase=phase, pollution=pollution), self.assertRaises(ValueError):
                     gate.validate(phase, code, raw + "\n" + pollution)
             with self.assertRaises(ValueError):

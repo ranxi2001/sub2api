@@ -34,6 +34,8 @@ def validate(phase, status, raw, suite="lifecycle"):
     if phase not in ("RED", "GREEN"):
         raise ValueError("invalid phase")
     common.check_clean(raw)
+    if "requires real redis-server in CI" in raw:
+        raise ValueError("fixture setup failure")
     events = []
     for line in raw.splitlines():
         try:

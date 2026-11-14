@@ -30,6 +30,15 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture dependency
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          if ! command -v redis-server >/dev/null; then
+            brew install redis
+          fi
+          redis-server --version
       - name: Validate evidence parser mutations
         run: python3 -m unittest discover -s .github/scripts -p 'test_issue854_evidence.py'
       - name: RED exact baseline production blobs with candidate tests
@@ -46,6 +55,7 @@ jobs:
                 if git cat-file -e "$baseline:$target" 2>/dev/null; then
                   printf '%s %s\n' "$(git rev-parse "$baseline:$target")" "$target" >> "$RUNNER_TEMP/issue854-evidence/baseline-blobs.txt"
                   git show "$baseline:$target" > "$RUNNER_TEMP/issue854-red/$target"
+                  test "$(git hash-object "$RUNNER_TEMP/issue854-red/$target")" = "$(git rev-parse "$baseline:$target")"
                 else
                   rm -- "$RUNNER_TEMP/issue854-red/$target"
                 fi ;;
