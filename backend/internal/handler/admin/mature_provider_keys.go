@@ -186,7 +186,7 @@ func (h *ChannelHandler) resolveMatureProviderKey(ctx context.Context, id int64,
 			return e
 		}
 		base := strings.TrimRight(s.record.BaseURL, "/")
-		if platform == service.PlatformGrok || platform == service.PlatformCustom {
+		if platform == service.PlatformGrok {
 			base += "/v1"
 		}
 		credentials = map[string]any{"api_key": key.secret, "base_url": base}

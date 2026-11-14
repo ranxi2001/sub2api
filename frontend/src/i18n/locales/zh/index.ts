@@ -43,7 +43,7 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
-  ...coupon,
+  coupon,
   ...qqbot,
   matureProviders,
   apiKeyModelPolicy,
