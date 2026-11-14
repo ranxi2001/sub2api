@@ -26,7 +26,7 @@ func TestQuality5xxProductionProviderAppliesBeforeReturning(t *testing.T) {
 	rdb := queuetest.NewClient(mr.Addr())
 	defer func() { _ = rdb.Close() }()
 	repo := &immediateQualityAccountRepo{}
-	svc := ProvideRateLimitService(repo, nil, &config.Config{}, nil, nil, nil, nil, nil, nil, nil, nil, rdb)
+	svc := ProvideRateLimitService(repo, nil, &config.Config{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, rdb)
 	require.NotNil(t, svc.qualityTrigger)
 	defer func() { _ = svc.qualityTrigger.queue.Close() }()
 	svc.observeQualityStatus(context.Background(), &Account{ID: 12, Type: AccountTypeOAuth}, 503)

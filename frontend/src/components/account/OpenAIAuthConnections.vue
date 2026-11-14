@@ -55,10 +55,15 @@
     </div>
     <div v-if="authorization" class="space-y-2" data-testid="connection-authorization">
       <p>{{ t('openaiAuth.authorizing', { label: authorization.label }) }}</p>
-      <a :href="authorization.auth_url" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">{{ t('openaiAuth.open') }}</a>
-      <label :for="`connection-callback-${accountId}`" class="input-label">{{ t('openaiAuth.callback') }}</label>
-      <input :id="`connection-callback-${accountId}`" v-model="callback" class="input" autocomplete="off" spellcheck="false" />
-      <button type="button" class="btn btn-secondary btn-sm" @click="complete" :disabled="busy || !callback.trim()">{{ t('openaiAuth.complete') }}</button>
+      <template v-if="!authorization.submitted">
+        <a :href="authorization.auth_url" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">{{ t('openaiAuth.open') }}</a>
+        <label :for="`connection-callback-${accountId}`" class="input-label">{{ t('openaiAuth.callback') }}</label>
+        <input :id="`connection-callback-${accountId}`" v-model="callback" class="input" autocomplete="off" spellcheck="false" :disabled="busy" />
+        <button type="button" class="btn btn-secondary btn-sm" @click="complete" :disabled="busy || !callback.trim()">{{ t('openaiAuth.complete') }}</button>
+      </template>
+      <p v-else role="status" data-testid="authorization-result">{{ t(busy ? 'openaiAuth.authorizationChecking' : 'openaiAuth.authorizationUnconfirmed') }}</p>
+      <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="checkAuthorization" data-testid="check-authorization">{{ t('openaiAuth.checkAuthorization') }}</button>
+      <button type="button" class="btn btn-secondary btn-sm" :disabled="busy" @click="clearSecrets">{{ t('openaiAuth.cancel') }}</button>
     </div>
     <div v-if="rotation" class="space-y-2">
       <label :for="`connection-rotate-${accountId}`" class="input-label">{{ t('openaiAuth.rotateLabel', { label: rotation.label }) }}</label>
@@ -78,7 +83,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { authorizeConnection, completeConnection, createAuthConnection, listAuthConnections, revokeConnection, rotateConnectionAPIKey, updateAuthConnection, useLegacyConnections, type OAuthConnectionKind, type OpenAIAuthConnection } from '@/api/admin/openaiAuthConnections'
+import { authorizeConnection, completeConnection, connectionAuthorizationStatus, createAuthConnection, listAuthConnections, revokeConnection, rotateConnectionAPIKey, updateAuthConnection, useLegacyConnections, type OAuthConnectionKind, type OpenAIAuthConnection } from '@/api/admin/openaiAuthConnections'
 
 const props = defineProps<{ accountId: number; accountType: string; active: boolean }>()
 const { t } = useI18n()
@@ -91,7 +96,7 @@ const rotationKey = ref('')
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
-const authorization = ref<{ id: string; label: string; auth_url: string; session_id: string } | null>(null)
+const authorization = ref<{ id: string; label: string; auth_url: string; session_id: string; submitted: boolean } | null>(null)
 const rotation = ref<OpenAIAuthConnection | null>(null)
 const revocation = ref<OpenAIAuthConnection | null>(null)
 let generation = 0
@@ -103,7 +108,7 @@ async function reload() {
   if (current === generation && eligible.value) connections.value = next
 }
 async function run(action: (id: number, current: number) => Promise<void>) {
-  if (!eligible.value) return
+  if (!eligible.value || busy.value) return
   const current = generation
   const id = props.accountId
   busy.value = true; error.value = ''; notice.value = ''
@@ -122,13 +127,47 @@ async function mutate(c: OpenAIAuthConnection, action: 'select' | 'disable' | 'e
 }
 async function legacy() { await run(async (id, current) => { await useLegacyConnections(id); if (current === generation) await reload() }) }
 async function authorize(c: OpenAIAuthConnection) {
+  if (busy.value) return
   clearSecrets()
-  await run(async (id, current) => { const next = await authorizeConnection(id, c.id); if (current === generation) authorization.value = { ...next, id: c.id, label: c.label } })
+  await run(async (id, current) => { const next = await authorizeConnection(id, c.id); if (current === generation) authorization.value = { ...next, id: c.id, label: c.label, submitted: false } })
+}
+async function confirmAuthorization(id: number, current: number, selected: NonNullable<typeof authorization.value>) {
+  const result = await connectionAuthorizationStatus(id, selected.id, selected.session_id)
+  if (current !== generation || authorization.value !== selected) return
+  if (result.status === 'saved') {
+    clearSecrets()
+    notice.value = t('openaiAuth.authorizationSaved')
+    await reload()
+  } else {
+    notice.value = t(result.status === 'waiting' && !selected.submitted ? 'openaiAuth.authorizationWaiting' : 'openaiAuth.authorizationUnconfirmed')
+  }
+}
+async function checkAuthorization() {
+  const selected = authorization.value
+  if (!selected || busy.value) return
+  await run(async (id, current) => { await confirmAuthorization(id, current, selected) })
 }
 async function complete() {
-  const selected = authorization.value; if (!selected) return
+  const selected = authorization.value; if (!selected || selected.submitted || busy.value || !callback.value.trim()) return
   const url = callback.value.trim(); callback.value = ''
-  await run(async (id, current) => { await completeConnection(id, selected.id, selected.session_id, url); if (current === generation) { clearSecrets(); await reload() } })
+  selected.submitted = true
+  selected.auth_url = ''
+  await run(async (id, current) => {
+    try {
+      await completeConnection(id, selected.id, selected.session_id, url)
+    } catch {
+      // A lost response can follow a committed credential write. Query the
+      // receipt once; never resend the callback or infer success from active.
+      if (current !== generation || authorization.value !== selected) return
+      try { await confirmAuthorization(id, current, selected) } catch {
+        if (current === generation) error.value = t('openaiAuth.authorizationUnconfirmed')
+      }
+      return
+    }
+    if (current === generation && authorization.value === selected) {
+      clearSecrets(); notice.value = t('openaiAuth.authorizationSaved'); await reload()
+    }
+  })
 }
 async function rotate() {
   const selected = rotation.value; if (!selected) return

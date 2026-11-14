@@ -251,3 +251,31 @@ func TestAccountOpsValidationErrorPreservesPersistedConfiguration(t *testing.T) 
 	require.NotContains(t, err.Error(), "private database")
 	require.Equal(t, before, settings.raw)
 }
+
+func TestAccountOpsBalanceCollectionStateAndHistoricalValue(t *testing.T) {
+	now := time.Now()
+	received, expired := now.Add(-2*time.Hour), now.Add(-time.Hour)
+	a := &Account{ID: 1, Type: AccountTypeAPIKey, Extra: map[string]any{UpstreamBillingProbeExtraKey: &UpstreamBillingProbeSnapshot{Status: "ok", Balance: &UpstreamBalanceSnapshot{Status: "ok", ReceivedAt: &received, FreshUntil: &expired, Data: map[string]any{"remaining": 42.0, "unit": "USD"}}}}}
+	item := opsBalanceAccount(a, now)
+	require.False(t, item.ProbeEnabled)
+	require.Equal(t, "stale", item.BalanceStatus)
+	require.Nil(t, item.Balance, "historical values must not trigger alerts or recovery")
+	require.NotNil(t, item.LastKnownBalance)
+	require.Equal(t, 42.0, *item.LastKnownBalance)
+	a.Extra[UpstreamBillingProbeEnabledExtraKey] = true
+	require.True(t, opsBalanceAccount(a, now).ProbeEnabled)
+	snapshot, ok := a.Extra[UpstreamBillingProbeExtraKey].(*UpstreamBillingProbeSnapshot)
+	require.True(t, ok)
+	snapshot.Balance.Status = "failed"
+	require.Nil(t, opsBalanceAccount(a, now).LastKnownBalance)
+	snapshot.Balance.Status = "ok"
+	future := now.Add(time.Hour)
+	snapshot.Balance.ReceivedAt = &future
+	require.Nil(t, opsBalanceAccount(a, now).LastKnownBalance)
+	a.Extra = nil
+	item = opsBalanceAccount(a, now)
+	require.False(t, item.ProbeEnabled)
+	require.Equal(t, "unknown", item.BalanceStatus)
+	require.Nil(t, item.Balance)
+	require.Nil(t, item.LastKnownBalance)
+}

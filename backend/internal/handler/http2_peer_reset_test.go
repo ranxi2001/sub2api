@@ -372,6 +372,11 @@ func TestHTTP2PeerResetPartialImages(t *testing.T) {
 // a recovered nil-fixture panic is not valid acceptance evidence.
 func newHTTP2PeerResetHandler(t *testing.T, upstream service.HTTPUpstream, accounts ...service.Account) *OpenAIGatewayHandler {
 	t.Helper()
+	return newHTTP2PeerResetHandlerWithUsage(t, upstream, &openAIWSUsageHandlerUsageLogRepoStub{}, accounts...)
+}
+
+func newHTTP2PeerResetHandlerWithUsage(t *testing.T, upstream service.HTTPUpstream, usageRepo service.UsageLogRepository, accounts ...service.Account) *OpenAIGatewayHandler {
+	t.Helper()
 	if len(accounts) == 0 {
 		for i := int64(1); i <= 2; i++ {
 			accounts = append(accounts, service.Account{ID: i, Name: "synthetic", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Priority: int(i), Credentials: map[string]any{"access_token": "synthetic"}})
@@ -384,7 +389,7 @@ func newHTTP2PeerResetHandler(t *testing.T, upstream service.HTTPUpstream, accou
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billing.Stop)
-	gateway := service.NewOpenAIGatewayService(repo, nil, &openAIWSUsageHandlerUsageLogRepoStub{}, nil, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), nil, billing, upstream, service.NewDeferredService(repo, nil, time.Minute), nil, nil, nil, nil, nil, nil, nil)
+	gateway := service.NewOpenAIGatewayService(repo, nil, usageRepo, nil, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), nil, billing, upstream, service.NewDeferredService(repo, nil, time.Minute), nil, nil, nil, nil, nil, nil, nil)
 	t.Cleanup(gateway.CloseOpenAIWSPool)
 	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 	h.maxAccountSwitches = 2
@@ -658,6 +663,105 @@ func TestHTTP2PeerResetWebSocketTurnPersistence(t *testing.T) {
 			require.Equal(t, "transport_error", repo.entries[1].ErrorType)
 			require.Equal(t, 101, repo.entries[1].StatusCode)
 			require.Nil(t, repo.entries[1].UpstreamStatusCode)
+		})
+	}
+}
+
+func TestHTTP2CCSemanticFailureOwnershipAndSLA(t *testing.T) {
+	testHTTP2CCSemanticFailureOwnershipAndSLA(t, false)
+}
+
+func TestHTTP2CCDataOnlyMultilineOwnershipAndSLA(t *testing.T) {
+	testHTTP2CCSemanticFailureOwnershipAndSLA(t, true)
+}
+
+func testHTTP2CCSemanticFailureOwnershipAndSLA(t *testing.T, multiline bool) {
+	t.Helper()
+	for _, mode := range []string{"responses", "messages"} {
+		t.Run(mode, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 8)
+			var submissions atomic.Int32
+			upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				submissions.Add(1)
+				if r.ProtoMajor != 2 || !strings.HasSuffix(r.URL.Path, "/chat/completions") {
+					t.Error("fixture must use the real HTTP2 CC conversion boundary")
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				errorEvent := "event: error\ndata: {\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"synthetic semantic failure\"}}\n\n"
+				if multiline {
+					errorEvent = "data: {\"error\":\ndata: {\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\",\"message\":\"synthetic semantic failure\"}\ndata: }\n\n"
+				}
+				_, _ = io.WriteString(w, "data: {\"id\":\"synthetic\",\"model\":\"gpt-5.1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"partial\"}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\n"+errorEvent)
+				w.(http.Flusher).Flush()
+				panic(http.ErrAbortHandler)
+			}))
+			upstream.EnableHTTP2 = true
+			upstream.StartTLS()
+			defer upstream.Close()
+			base, err := url.Parse(upstream.URL)
+			require.NoError(t, err)
+			account := service.Account{ID: 1, Name: "synthetic", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+				Credentials: map[string]any{"api_key": "synthetic", "base_url": "https://example.invalid"},
+				Extra:       map[string]any{openai_compat.ExtraKeyResponsesMode: string(openai_compat.ResponsesSupportModeForceChatCompletions)}}
+			usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+			h := newHTTP2PeerResetHandlerWithUsage(t, &peerResetHTTPUpstream{client: upstream.Client(), base: base}, usageRepo, account)
+			repo := &ingressRejectOpsRepo{}
+			ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			router := gin.New()
+			router.Use(OpsErrorLoggerMiddleware(ops))
+			endpoint := "/v1/" + mode
+			body := `{"model":"gpt-5.1","stream":true,"input":"synthetic"}`
+			handler := h.Responses
+			if mode == "messages" {
+				handler = h.Messages
+				body = `{"model":"gpt-5.1","stream":true,"max_tokens":8,"messages":[{"role":"user","content":"synthetic"}]}`
+			}
+			router.POST(endpoint, func(c *gin.Context) {
+				seed, _ := newOpenAIResponsesFailoverTestContext(t, c.Request.Context())
+				for key, value := range seed.Keys {
+					c.Set(key, value)
+				}
+				key, _ := middleware2.GetAPIKeyFromContext(c)
+				key.Group.AllowMessagesDispatch = true
+				handler(c)
+			})
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(body)))
+			for len(opsErrorLogQueue) > 0 {
+				flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
+			}
+			require.Equal(t, int32(1), submissions.Load(), "a semantic failure after submission must never replay generation: %s", rec.Body.String())
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Len(t, repo.entries, 1)
+			entry := repo.entries[0]
+			if multiline {
+				require.Equal(t, "client", entry.ErrorOwner, "F4 multiline data-only context rejection must retain client ownership: %s", mode)
+			} else {
+				require.Equal(t, "client", entry.ErrorOwner, "F4 complete CC context rejection must retain client ownership after reset: %s", mode)
+			}
+			require.True(t, entry.IsBusinessLimited, "F4 context rejection must retain its SLA exclusion after reset")
+			require.NotEqual(t, "transport_error", entry.ErrorType)
+			require.Contains(t, entry.ErrorBody, "context_length_exceeded")
+			require.Equal(t, http.StatusBadRequest, entry.StatusCode)
+			require.Contains(t, rec.Body.String(), "partial")
+			require.Contains(t, rec.Body.String(), "context_length_exceeded")
+			require.NotContains(t, rec.Body.String(), "upstream_http2_stream_error")
+			require.NotContains(t, rec.Body.String(), "response.completed")
+			require.NotContains(t, rec.Body.String(), "message_stop")
+			terminal := "event: response.failed\n"
+			if mode == "messages" {
+				terminal = "event: error\n"
+			}
+			require.Equal(t, 1, strings.Count(rec.Body.String(), terminal))
+			require.NotContains(t, rec.Body.String(), "[DONE]")
+			select {
+			case usage := <-usageRepo.created:
+				require.Equal(t, 3, usage.InputTokens, "partial input usage must survive semantic rejection")
+				require.Equal(t, 1, usage.OutputTokens, "partial output usage must survive semantic rejection")
+			case <-time.After(2 * time.Second):
+				t.Fatal("partial usage must reach the real handler usage recorder")
+			}
 		})
 	}
 }

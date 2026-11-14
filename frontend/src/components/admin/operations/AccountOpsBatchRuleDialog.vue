@@ -1,16 +1,16 @@
 <template>
   <BaseDialog
     :show="show"
-    :title="t('accountOps.batchRuleTitle')"
+    :title="accounts.length === 1 ? t('accountOps.editRule') : t('accountOps.batchRuleTitle')"
     :width="isMixed ? 'wide' : 'normal'"
     @close="close"
   >
     <form id="account-ops-batch-rule-form" class="space-y-5" @submit.prevent="save">
       <div class="space-y-3">
         <p class="text-sm font-medium text-gray-900 dark:text-gray-100">
-          {{ isMixed ? t('accountOps.batchMixedRuleScope') : t('accountOps.batchRuleScope', { count: accounts.length }) }}
+          {{ accounts.length === 1 ? accounts[0]?.account_name : isMixed ? t('accountOps.batchMixedRuleScope') : t('accountOps.batchRuleScope', { count: accounts.length }) }}
         </p>
-        <p class="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+        <p v-if="accounts.length > 1" class="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
           {{ t('accountOps.batchReplaceHint') }}
         </p>
         <p v-if="!validSelection" role="alert" class="text-sm text-red-600 dark:text-red-400">
@@ -32,7 +32,7 @@
           <legend class="px-1 text-sm font-semibold text-gray-900 dark:text-gray-100">
             {{ t(section.metric === 'quota' ? 'accountOps.batchQuotaRules' : 'accountOps.batchBalanceRules') }}
           </legend>
-          <details class="rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
+          <details v-if="accounts.length > 1" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
             <summary class="cursor-pointer text-xs text-gray-600 dark:text-gray-300">
               {{ t('accountOps.selectedAccounts', { count: section.accounts.length }) }}
             </summary>
@@ -136,7 +136,7 @@
         data-testid="save-batch-rules"
         :disabled="busy || !validSelection || mixedUnits"
       >
-        {{ busy ? t('common.loading') : t('accountOps.saveBatchRules', { count: accounts.length }) }}
+        {{ busy ? t('common.loading') : accounts.length === 1 ? t('accountOps.saveRule') : t('accountOps.saveBatchRules', { count: accounts.length }) }}
       </button>
     </template>
   </BaseDialog>

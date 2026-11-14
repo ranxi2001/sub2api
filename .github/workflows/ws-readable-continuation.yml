@@ -198,6 +198,24 @@ jobs:
           if [ "$PHASE" = RED ]; then
             bash .github/scripts/exclude-later-400-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/residual-400-exclusions.txt"
             bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
+            # The service test package also compiles unrelated fixtures added by
+            # newer production. Match their historical APIs in this disposable
+            # RED only; keep every selected 409/ticket test and all GREEN tests.
+            for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go; do
+              candidate_blob=$(git rev-parse "$CANDIDATE_SHA:$target")
+              test "$(git hash-object "$tested_tree/$target")" = "$candidate_blob"
+              if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                expected=$(git rev-parse "$baseline:$target")
+                git show "$baseline:$target" > "$tested_tree/$target"
+                actual=$(git hash-object "$tested_tree/$target")
+                test "$actual" = "$expected"
+                printf 'path=%s baseline=%s candidate=%s candidate_blob=%s expected=%s actual=%s\n' "$target" "$baseline" "$CANDIDATE_SHA" "$candidate_blob" "$expected" "$actual" >> "$RUNNER_TEMP/ws-evidence/residual-service-fixtures.txt"
+              else
+                rm -- "$tested_tree/$target"
+                test ! -e "$tested_tree/$target"
+                printf 'path=%s baseline=%s candidate=%s candidate_blob=%s baseline_blob=absent actual=absent\n' "$target" "$baseline" "$CANDIDATE_SHA" "$candidate_blob" >> "$RUNNER_TEMP/ws-evidence/residual-service-fixtures.txt"
+              fi
+            done
           fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_409_ws_ticket_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_payload.go backend/internal/service/openai_gateway_passthrough.go; do
             git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/residual-blobs.txt"

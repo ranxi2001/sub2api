@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -92,6 +93,24 @@ func (s *OpenAIGatewayService) readOpenAIUpstreamErrorWithCompleteness(resp *htt
 // failoverOpenAIUpstreamHTTPError 对 >=400 的上游响应做 failover 判定：命中时
 // 记录 ops 事件、执行账号级错误处置并返回 *UpstreamFailoverError；未命中返回
 // nil，调用方继续走各自端点格式的非 failover 错误处理链。
+const openAICompatTempUnschedAttemptKey = "openai_compat_temp_unsched_attempt"
+
+type openAICompatTempUnschedAttempt struct {
+	response  *http.Response
+	accountID int64
+	memo      *tempUnschedAttemptMemo
+}
+
+func openAICompatTempUnschedContext(c *gin.Context, response *http.Response, account *Account) context.Context {
+	ctx := c.Request.Context()
+	value, _ := c.Get(openAICompatTempUnschedAttemptKey)
+	checked, ok := value.(*openAICompatTempUnschedAttempt)
+	if ok && checked.response == response && account != nil && checked.accountID == account.ID {
+		return context.WithValue(ctx, tempUnschedAttemptMemoKey{}, checked.memo)
+	}
+	return ctx
+}
+
 func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	ctx context.Context,
 	c *gin.Context,
@@ -104,6 +123,12 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 	tempUnscheduled := false
 	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
+		// The compatibility error writer processes this same response next if
+		// the threshold is pending. Share only this response's evaluation;
+		// another upstream attempt must receive its own counter observation.
+		memo := &tempUnschedAttemptMemo{}
+		ctx = context.WithValue(ctx, tempUnschedAttemptMemoKey{}, memo)
+		c.Set(openAICompatTempUnschedAttemptKey, &openAICompatTempUnschedAttempt{response: resp, accountID: account.ID, memo: memo})
 		tempUnscheduled = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, upstreamModel) == ErrorPolicyTempUnscheduled
 		shouldFailover = tempUnscheduled
 	}
@@ -278,7 +303,9 @@ type ccStreamScanState struct {
 	FirstTokenMs *int
 	// SawDone 表示上游发出了 [DONE] 哨兵。
 	SawDone bool
-	// Err 为 scanner 读错误（客户端 context 取消不属于此类，会原样带出）。
+	// SemanticFailure is authoritative only after valid JSON and an SSE delimiter.
+	SemanticFailure []byte
+	// Err 为上游语义失败或 scanner 读错误（客户端 context 取消会原样带出）。
 	// 非 nil 时调用方必须跳过 finalize 并返回 usage-incomplete 错误，避免
 	// 把上游截断伪装成正常收尾。
 	Err error
@@ -298,12 +325,56 @@ func (s *OpenAIGatewayService) scanCCStream(
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
 	var st ccStreamScanState
+	var pendingData strings.Builder
+	stagingEvent := false
+	eventBytes := 0
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 	for scanner.Scan() {
 		line := scanner.Text()
-		payload, ok := extractOpenAISSEDataLine(line)
-		if !ok {
+		if eventType, ok := extractOpenAISSEEventLine(line); ok && eventType == "error" {
+			stagingEvent = true
+		}
+		payload, isData := extractOpenAISSEDataLine(line)
+		if isData {
+			trimmed := strings.TrimSpace(payload)
+			// Complete ordinary chunks retain their immediate per-line delivery.
+			// A JSON fragment may be the start of a data-only multiline error;
+			// retain it with all subsequent data until the SSE delimiter.
+			if trimmed != "" && trimmed != "[DONE]" && (!gjson.Valid(payload) || gjson.Get(payload, "error").IsObject() || gjson.Get(payload, "type").String() == "error") {
+				stagingEvent = true
+			}
+		}
+		if stagingEvent {
+			// Include framing bytes so even empty data lines have a fixed bound.
+			if len(line)+1 > openAIFirstOutputStageMaxBytes-eventBytes {
+				st.Err = errors.New("upstream error event exceeds size limit")
+				return st
+			}
+			eventBytes += len(line) + 1
+			if payload, ok := extractOpenAISSEDataLine(line); ok {
+				_, _ = pendingData.WriteString(payload)
+				_ = pendingData.WriteByte('\n')
+			}
+			if line != "" {
+				continue
+			}
+			payload = pendingData.String()
+			if gjson.Valid(payload) && gjson.Get(payload, "error").IsObject() {
+				st.SemanticFailure = []byte(payload)
+				st.Err = errors.New("upstream semantic stream failure")
+				return st
+			}
+			pendingData.Reset()
+			stagingEvent, eventBytes = false, 0
+			// Invalid/truncated events cannot hide a subsequent read reset.
+			if !gjson.Valid(payload) {
+				continue
+			}
+			// Multiline non-error chunks and usage use the same conversion path.
+			isData = true
+		}
+		if !isData {
 			continue
 		}
 		payload = strings.TrimSpace(payload)

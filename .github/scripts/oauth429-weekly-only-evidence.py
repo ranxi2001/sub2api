@@ -80,4 +80,14 @@ else:
     ]
     for name in required:
         assert "TestOAuth429WeeklyOnly" + name in passed, "missing regression: " + name
+    if mode == "green":
+        for name in (
+            "TestCompatErrorPipelineCountsEachResponseOnce",
+            "TestFastPathThenGeneralHandler_CountsOne502UntilThreshold",
+            "TestPendingModel401_DoesNotDisableWholeAccount",
+            "TestCredential401_StillDisablesDespitePendingModelRule",
+            "TestOpenAIWSAfterOutput_Generic500AndExplicit502NeedAfterStream",
+            "TestMemoryTempUnschedTriggerDelayedResetKeepsNewRound",
+        ):
+            assert name in passed, "missing candidate-only regression: " + name
 print(f"Validated {mode.upper()}: {len(passed)} passed events, {len(failed)} failed events")

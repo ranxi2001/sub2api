@@ -1,0 +1,67 @@
+name: BPS diagnostics and authorization
+
+on:
+  pull_request:
+    paths:
+      - backend/internal/service/basispoints/**
+      - backend/internal/service/openai_auth_connection*
+      - backend/internal/handler/admin/openai_auth_connections*
+      - frontend/src/components/account/OpenAIAuthConnections.vue
+      - frontend/src/components/account/__tests__/OpenAIAuthConnections.spec.ts
+      - frontend/src/api/admin/openaiAuthConnections.ts
+      - .github/scripts/bps-auth-preview.mjs
+      - .github/workflows/bps-diagnostics-auth.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-and-receipt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - working-directory: backend
+        run: go test -race ./internal/service/basispoints -count=1 -v
+      - working-directory: backend
+        run: go test -race -tags=unit ./internal/service ./internal/handler/admin ./internal/server/middleware -run 'Test(ExcelBPSToolArgumentsDiagnostic|ConnectionAuthorizationStatus|OpenAIConnectionManagement|OpenAIConnectionHandlerAccountType|OpenAIAuthConnection|Audit)' -count=1 -v -timeout=10m
+  authorization-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vitest run src/components/account/__tests__/OpenAIAuthConnections.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts
+      - run: pnpm --dir frontend typecheck
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/bps-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/bps-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Render actual authorization component with synthetic callbacks
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/bps-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/bps-auth-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/bps-auth-evidence"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bps-auth-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/bps-auth-evidence
+          retention-days: 30

@@ -22,18 +22,20 @@ type AccountOpsUsageWindow struct {
 	ResetsAt    *time.Time `json:"resets_at,omitempty"`
 }
 type AccountOpsBalanceAccount struct {
-	AccountID     int64                   `json:"account_id"`
-	AccountName   string                  `json:"account_name"`
-	GroupID       string                  `json:"group_id"`
-	GroupName     string                  `json:"group_name"`
-	GroupMode     string                  `json:"group_mode"`
-	Platform      string                  `json:"platform"`
-	Type          string                  `json:"type"`
-	Balance       *float64                `json:"balance"`
-	Unit          string                  `json:"unit"`
-	BalanceStatus string                  `json:"balance_status"`
-	ReceivedAt    *time.Time              `json:"received_at"`
-	UsageWindows  []AccountOpsUsageWindow `json:"usage_windows"`
+	AccountID        int64                   `json:"account_id"`
+	AccountName      string                  `json:"account_name"`
+	GroupID          string                  `json:"group_id"`
+	GroupName        string                  `json:"group_name"`
+	GroupMode        string                  `json:"group_mode"`
+	Platform         string                  `json:"platform"`
+	Type             string                  `json:"type"`
+	Balance          *float64                `json:"balance"`
+	Unit             string                  `json:"unit"`
+	BalanceStatus    string                  `json:"balance_status"`
+	ProbeEnabled     bool                    `json:"probe_enabled"`
+	LastKnownBalance *float64                `json:"last_known_balance,omitempty"`
+	ReceivedAt       *time.Time              `json:"received_at"`
+	UsageWindows     []AccountOpsUsageWindow `json:"usage_windows"`
 }
 
 func opsNumber(v any) (float64, bool) {
@@ -85,6 +87,7 @@ func opsBalanceAccount(a *Account, now time.Time) AccountOpsBalanceAccount {
 		item.Unit = "%"
 		return item
 	}
+	item.ProbeEnabled = upstreamBillingProbeEnabled(a)
 	snap := decodeUpstreamBillingProbeSnapshot(a.Extra)
 	if snap == nil || snap.Balance == nil {
 		return item
@@ -98,12 +101,15 @@ func opsBalanceAccount(a *Account, now time.Time) AccountOpsBalanceAccount {
 	if b.Status != "ok" {
 		return item
 	}
-	if !opsFresh(b.ReceivedAt, b.FreshUntil, now) {
-		item.BalanceStatus = "stale"
-		return item
-	}
 	if unlimited, ok := b.Data["unlimited"].(bool); ok && unlimited {
 		item.BalanceStatus = "unsupported"
+		return item
+	}
+	if !opsFresh(b.ReceivedAt, b.FreshUntil, now) {
+		if n, ok := opsNumber(b.Data["remaining"]); ok && b.ReceivedAt != nil && !b.ReceivedAt.After(now) {
+			item.LastKnownBalance = &n
+		}
+		item.BalanceStatus = "stale"
 		return item
 	}
 	n, ok := opsNumber(b.Data["remaining"])

@@ -3394,6 +3394,41 @@ func TestOpenAIGatewayServiceRecordUsage_ServiceTierNeverRaisedByUpstreamRespons
 	require.InDelta(t, baseCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_ExcelBPSOmittedTierBillsStandard(t *testing.T) {
+	for _, observed := range []string{"default", "priority"} {
+		t.Run(observed, func(t *testing.T) {
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			userRepo := &openAIRecordUsageUserRepoStub{}
+			svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+			usage := OpenAIUsage{InputTokens: 100, OutputTokens: 50}
+			result := &OpenAIForwardResult{
+				RequestID:                   "resp_bps_omitted_tier",
+				UpstreamEndpoint:            "/basispoints/api/responses",
+				UpstreamResponseServiceTier: observed,
+				Usage:                       usage,
+				Model:                       "gpt-5.4",
+				Duration:                    time.Second,
+			}
+			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+				Result: result,
+				APIKey: &APIKey{ID: 1021},
+				User:   &User{ID: 2021},
+				Account: &Account{ID: 3021, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+					Extra: map[string]any{"openai_excel_bps": true}},
+			})
+			require.NoError(t, err)
+			require.Nil(t, result.ServiceTier, "an omitted outbound tier must not be upgraded by the response")
+			require.NotNil(t, usageRepo.lastLog)
+			require.Nil(t, usageRepo.lastLog.ServiceTier)
+			expected := expectedOpenAICost(t, svc, "gpt-5.4", usage, svc.cfg.Default.RateMultiplier)
+			require.InDelta(t, expected.TotalCost, usageRepo.lastLog.TotalCost, 1e-12)
+			require.InDelta(t, QuantizeUsageBillingAmount(expected.ActualCost), usageRepo.lastLog.ActualCost, 1e-12)
+			require.Equal(t, 1, userRepo.deductCalls)
+			require.InDelta(t, usageRepo.lastLog.ActualCost, userRepo.lastAmount, 1e-12)
+		})
+	}
+}
+
 func TestOpenAIGatewayServiceRecordUsage_HeaderTimeoutRetriesAddSurcharge(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)

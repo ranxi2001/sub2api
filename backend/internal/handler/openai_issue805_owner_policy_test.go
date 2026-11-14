@@ -80,6 +80,28 @@ func issue805Owners(t *testing.T, client *redis.Client) map[string]string {
 	return result
 }
 
+// GJSON Get deliberately scans through an invalid prefix to the first array.
+// A pending:<token>:[1,account,...] fence therefore exposes the same account ID
+// as a committed record. Only a complete JSON route may seed a stable snapshot.
+func issue805CompletedOwner(raw string, accountID int64) bool {
+	if !json.Valid([]byte(raw)) {
+		return false
+	}
+	record := gjson.Parse(raw)
+	return record.IsArray() && len(record.Array()) == 4 && record.Get("0").Int() == 1 && record.Get("1").Int() == accountID
+}
+
+func TestIssue805OwnerSnapshotRequiresCommittedRecord(t *testing.T) {
+	route := `[1,1,"` + strings.Repeat("a", 64) + `","` + strings.Repeat("b", 64) + `"]`
+	pending := "pending:fixture-token:" + route
+	require.EqualValues(t, 1, gjson.Get(pending, "1").Int(), "the old account-only predicate accepts an unfinished fence")
+	require.False(t, issue805CompletedOwner(pending, 1), "pending ownership must never be captured as the immutable original route")
+	require.False(t, issue805CompletedOwner("failed", 1))
+	require.False(t, issue805CompletedOwner("conflict", 1))
+	require.False(t, issue805CompletedOwner(route, 2))
+	require.True(t, issue805CompletedOwner(route, 1))
+}
+
 func TestIssue805HTTPCompletedHistorySelectsAlternative(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprint("stream=", stream), func(t *testing.T) {

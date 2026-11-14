@@ -5,6 +5,7 @@
  */
 export const NEW_FEATURE_NOTICES = {
   adminUsagePlatform: 'admin-usage-platform-filter-initial-announcement',
+  usageTrendRate: 'usage-trend-tooltip-rpm-tpm-initial-announcement',
   priorityCacheWeight: 'priority-cache-weight-initial-announcement',
   openai409OmitEncryptedHistory: 'openai-409-omit-encrypted-history-beta',
   openai400OmitEncryptedHistory: 'openai-400-omit-encrypted-history-beta',
@@ -58,4 +59,5 @@ export const NEW_FEATURE_NOTICES = {
   openaiImageHeaderTimeoutGroups: 'openai-image-header-timeout-groups-initial-announcement',
   oauthInitialModelSelection: 'oauth-initial-model-selection-initial-announcement',
   usageRateCard: 'usage-rpm-tpm-card-initial-announcement',
+  tempUnschedStreamCountWindow: 'temp-unsched-stream-timing-count-window',
 } as const

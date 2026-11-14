@@ -303,6 +303,10 @@ func (b *Bridge) transformWithRepairs(ctx context.Context, reader io.Reader, wri
 		}
 		failure := &BridgeFailure{Message: err.Error(), FailureStage: failureStage,
 			RejectedTool: rejectedTool, RepairSkippedReason: repairSkippedReason}
+		var argumentError toolArgumentsSchemaError
+		if errors.As(err, &argumentError) {
+			failure.ToolArguments = argumentError.Diagnostic
+		}
 		if text(terminalResponse["status"]) == "completed" {
 			failure.UpstreamTerminalEvent = "response.completed"
 		}

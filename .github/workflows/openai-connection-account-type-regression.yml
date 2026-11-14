@@ -56,6 +56,18 @@ jobs:
               backend/internal/service/openai_auth_connection_oauth.go \
               backend/internal/service/openai_auth_connection_legacy.go \
               backend/internal/service/openai_auth_connection_routing.go
+            # The new status endpoint compiles with a management helper absent
+            # from this old baseline. Retain that exact helper only: the restored
+            # List/Create methods still run their historical account-type logic.
+            python3 - <<'PYCODE'
+          import pathlib, re, subprocess
+          source = subprocess.check_output(['git', 'show', 'HEAD:backend/internal/service/openai_auth_connections.go'], text=True)
+          helper = re.search(r'func \(s \*OpenAIOAuthReauthService\) managementConnectionAccount\(.*?\n\}', source, re.S)
+          assert helper is not None
+          target = pathlib.Path('backend/internal/service/connection_type_red_compat.go')
+          assert not target.exists()
+          target.write_text('package service\nimport ("context"; infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors")\n' + helper.group(0) + '\n')
+          PYCODE
           fi
           git rev-parse HEAD | tee "$RUNNER_TEMP/connection-proof/head.txt"
           git diff --name-only | tee "$RUNNER_TEMP/connection-proof/restored-paths.txt"

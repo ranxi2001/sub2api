@@ -1,4 +1,10 @@
 export default {
+  "checkAuthorization": "Check authorization status",
+  "authorizationChecking": "Checking whether the credentials were saved…",
+  "authorizationUnconfirmed": "This authorization has not been confirmed. Check again shortly; do not submit the same callback twice. If it remains unconfirmed, generate a new authorization link.",
+  "authorizationSaved": "Authorization credentials saved. Check the model list separately for availability.",
+  "authorizationWaiting": "Waiting for login and callback submission.",
+
   "refreshUncertain": "Refresh did not finish safely. Inference is paused. An active connection can recover a saved replacement; a disabled connection requires reauthorization or unlinking. Its old refresh token will not be retried.",
   "recoverRefresh": "Recover saved refresh",
   "bpsResponsesOnly": "BPS connections support Responses only. Chat Completions and Messages bridges are unavailable.",

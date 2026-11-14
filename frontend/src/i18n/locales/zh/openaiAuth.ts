@@ -1,4 +1,10 @@
 export default {
+  "checkAuthorization": "检查授权状态",
+  "authorizationChecking": "正在确认账号是否已保存…",
+  "authorizationUnconfirmed": "尚未确认本次授权是否保存。请稍后检查状态，不要重复提交同一个回调。若仍无法确认，请重新生成授权链接。",
+  "authorizationSaved": "授权凭据已保存。模型是否可用请另行查看模型列表。",
+  "authorizationWaiting": "等待登录和回调提交。",
+
   "refreshUncertain": "刷新未能安全完成，推理已暂停。可用连接可恢复已保存的替换凭据；已停用连接须重新授权或解绑。不会重试旧 refresh token。",
   "recoverRefresh": "恢复已保存的刷新",
   "bpsResponsesOnly": "BPS 连接仅支持 Responses，暂不提供 Chat Completions 和 Messages 桥接。",

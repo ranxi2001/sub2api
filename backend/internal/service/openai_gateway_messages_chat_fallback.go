@@ -245,6 +245,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	usage := scan.Usage
 
 	if scan.Err != nil {
+		if len(scan.SemanticFailure) > 0 {
+			scan.Err = writeNativeAnthropicSemanticFailure(c, scan.SemanticFailure, originalModel)
+		}
 		// Broken upstream read: skip finalization so no synthetic message_stop
 		// masks the truncation, and surface the error to flag usage incomplete
 		// (mirrors forwardResponsesViaRawChatCompletions).

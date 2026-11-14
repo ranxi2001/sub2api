@@ -10,17 +10,19 @@ func TestBPSServiceTierWireContract(t *testing.T) {
 		name    string
 		input   any
 		present bool
-		want    string
 		invalid bool
 	}{
 		{name: "missing"}, {name: "null", present: true},
-		{name: "priority", present: true, input: "priority", want: "priority"},
-		{name: "fast alias", present: true, input: " Fast ", want: "priority"},
-		{name: "auto", present: true, input: "auto", want: "auto"},
-		{name: "default", present: true, input: "default", want: "default"},
+		{name: "priority", present: true, input: "priority"},
+		{name: "fast alias", present: true, input: " Fast "},
+		{name: "auto", present: true, input: "auto"},
+		{name: "default", present: true, input: "default"},
 		{name: "unknown", present: true, input: "private-tier", invalid: true},
 		{name: "flex", present: true, input: "flex", invalid: true},
 		{name: "object", present: true, input: object{"token": "must-not-echo"}, invalid: true},
+		{name: "number", present: true, input: 1, invalid: true},
+		{name: "boolean", present: true, input: true, invalid: true},
+		{name: "array", present: true, input: []any{"priority"}, invalid: true},
 		{name: "empty", present: true, input: "", invalid: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -43,13 +45,8 @@ func TestBPSServiceTierWireContract(t *testing.T) {
 			if err = json.Unmarshal(body, &wire); err != nil {
 				t.Fatal(err)
 			}
-			if text(wire["service_tier"]) != tc.want {
-				t.Fatalf("tier=%v want %q", wire["service_tier"], tc.want)
-			}
-			if tc.want == "" {
-				if _, ok := wire["service_tier"]; ok {
-					t.Fatal("missing tier must remain absent")
-				}
+			if _, exists := wire["service_tier"]; exists {
+				t.Fatal("compatibility tier must not reach the BPS endpoint")
 			}
 			body, _, err = bridge.Reprepare(raw)
 			if err != nil {
@@ -58,8 +55,8 @@ func TestBPSServiceTierWireContract(t *testing.T) {
 			if err = json.Unmarshal(body, &wire); err != nil {
 				t.Fatal(err)
 			}
-			if text(wire["service_tier"]) != tc.want {
-				t.Fatal("Reprepare lost tier")
+			if _, exists := wire["service_tier"]; exists {
+				t.Fatal("Reprepare must not reintroduce the compatibility tier")
 			}
 		})
 	}

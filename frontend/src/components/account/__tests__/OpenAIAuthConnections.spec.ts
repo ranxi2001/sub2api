@@ -96,4 +96,62 @@ describe('independent OpenAI connection management through actual API client', (
     expect(adapter.mock.calls.some(([c]) => c.url === '/admin/accounts/42/auth-connections/use-legacy' && c.method === 'post')).toBe(true)
     w.unmount()
   })
+
+  it('confirms a saved callback after a lost response without submitting it again', async () => {
+    const initial = adapter.getMockImplementation()!
+    adapter.mockImplementation(async (config: InternalAxiosRequestConfig) => {
+      if (config.url?.endsWith('/callback')) throw new Error('network interrupted PRIVATE_CALLBACK')
+      if (config.url?.endsWith('/authorization-status')) return { config, status: 200, statusText: 'OK', headers: {}, data: { code: 0, data: { status: 'saved' } } }
+      return initial(config)
+    })
+    const w = mount(OpenAIAuthConnections, { props: { accountId: 42, accountType: 'oauth', active: true } }); await flushPromises()
+    await w.findAll('button').find(b => b.text() === 'openaiAuth.authorize')!.trigger('click'); await flushPromises()
+    await w.get('#connection-callback-42').setValue('https://example.invalid/callback?code=PRIVATE_CODE&state=PRIVATE_STATE')
+    await w.findAll('button').find(b => b.text() === 'openaiAuth.complete')!.trigger('click'); await flushPromises()
+    expect(w.text()).toContain('openaiAuth.authorizationSaved')
+    expect(w.find('[data-testid="connection-authorization"]').exists()).toBe(false)
+    expect(adapter.mock.calls.filter(([c]) => c.url.endsWith('/callback'))).toHaveLength(1)
+    const status = adapter.mock.calls.find(([c]) => c.url.endsWith('/authorization-status'))![0]
+    expect(JSON.parse(status.data)).toEqual({ session_id: 'synthetic-session' })
+    expect(w.html()).not.toContain('PRIVATE_'); expect(localStorage.length).toBe(0); w.unmount()
+  })
+
+  it('keeps an already active connection unconfirmed and offers status-only retry', async () => {
+    const initial = adapter.getMockImplementation()!
+    adapter.mockImplementation(async (config: InternalAxiosRequestConfig) => {
+      if (config.url?.endsWith('/callback')) throw new Error('lost response')
+      if (config.url?.endsWith('/authorization-status')) return { config, status: 200, statusText: 'OK', headers: {}, data: { code: 0, data: { status: 'unconfirmed' } } }
+      return initial(config)
+    })
+    const w = mount(OpenAIAuthConnections, { props: { accountId: 42, accountType: 'oauth', active: true } }); await flushPromises()
+    await w.findAll('button').find(b => b.text() === 'openaiAuth.authorize')!.trigger('click'); await flushPromises()
+    await w.get('#connection-callback-42').setValue('https://example.invalid/?code=PRIVATE_CODE')
+    const submit = w.findAll('button').find(b => b.text() === 'openaiAuth.complete')!
+    await submit.trigger('click'); await flushPromises()
+    expect(w.text()).toContain('openaiAuth.authorizationUnconfirmed')
+    expect(w.text()).not.toContain('openaiAuth.authorizationSaved')
+    expect(w.find('#connection-callback-42').exists()).toBe(false)
+    await w.get('[data-testid="check-authorization"]').trigger('click'); await flushPromises()
+    expect(adapter.mock.calls.filter(([c]) => c.url.endsWith('/callback'))).toHaveLength(1)
+    expect(adapter.mock.calls.filter(([c]) => c.url.endsWith('/authorization-status'))).toHaveLength(2)
+    expect(w.html()).not.toContain('PRIVATE_'); w.unmount()
+  })
+
+  it('ignores late authorization completion after switching accounts', async () => {
+    const initial = adapter.getMockImplementation()!
+    let finish!: (value: unknown) => void
+    adapter.mockImplementation(async (config: InternalAxiosRequestConfig) => {
+      if (config.url?.endsWith('/callback')) return new Promise(resolve => { finish = resolve })
+      return initial(config)
+    })
+    const w = mount(OpenAIAuthConnections, { props: { accountId: 42, accountType: 'oauth', active: true } }); await flushPromises()
+    await w.findAll('button').find(b => b.text() === 'openaiAuth.authorize')!.trigger('click'); await flushPromises()
+    await w.get('#connection-callback-42').setValue('https://example.invalid/?code=PRIVATE_CODE')
+    await w.findAll('button').find(b => b.text() === 'openaiAuth.complete')!.trigger('click'); await flushPromises()
+    await w.setProps({ accountId: 43 }); await flushPromises()
+    finish({ config: {}, status: 200, statusText: 'OK', headers: {}, data: { code: 0, data: {} } }); await flushPromises()
+    expect(w.text()).not.toContain('openaiAuth.authorizationSaved')
+    expect(w.find('[data-testid="connection-authorization"]').exists()).toBe(false)
+    w.unmount()
+  })
 })

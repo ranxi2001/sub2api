@@ -10,7 +10,7 @@ candidate="${3:-$(git -C "$tree" rev-parse HEAD)}"
 if test -f "$tree/backend/internal/service/http2_gateway_test_support.go"; then
   exit 0
 fi
-for target in backend/internal/handler/http2_peer_reset_test.go backend/internal/service/http2_peer_reset_test.go backend/internal/service/http2_peer_reset_adapters_test.go; do
+for target in backend/internal/handler/http2_peer_reset_test.go backend/internal/service/http2_peer_reset_test.go backend/internal/service/http2_peer_reset_adapters_test.go backend/internal/service/http2_peer_reset_followup_test.go; do
   if git -C "$tree" cat-file -e "$baseline:$target" 2>/dev/null; then
     printf 'refusing to exclude baseline HTTP2 test: %s\n' "$target" >&2
     exit 1

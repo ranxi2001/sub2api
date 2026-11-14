@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ubuntu's authoritative DNS outage can block both Azure and primary mirrors.
-# Keep both MIT and Ubuntu HTTPS mirrors so a single outage does not block CI.
+# Keep MIT and Ubuntu HTTPS mirrors so a single mirror outage cannot block CI.
 # apt retains Ubuntu's signed
 # Release/package verification. Never apply this helper to a production host.
 set -euo pipefail
