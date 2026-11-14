@@ -13,7 +13,7 @@ env:
 jobs:
   issue854-behavior:
     if: github.event_name == 'pull_request' && github.head_ref == 'fix/issue854-ws-owner-continuation'
-    runs-on: ubuntu-latest
+    runs-on: macos-15-intel
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
