@@ -205,7 +205,10 @@ jobs:
             # The service test package also compiles unrelated fixtures added by
             # newer production. Match their historical APIs in this disposable
             # RED only; keep every selected 409/ticket test and all GREEN tests.
-            for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go; do
+            # PR855 route-evidence types and later production BPS search APIs
+            # are absent in this baseline. Their unselected tests follow the
+            # pinned historical APIs too; the selected ticket oracle stays current.
+            for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go backend/internal/service/openai_excel_bps_search_test.go backend/internal/service/openai_ws_agent_recovery_test.go; do
               candidate_blob=$(git rev-parse "$CANDIDATE_SHA:$target")
               test "$(git hash-object "$tested_tree/$target")" = "$candidate_blob"
               if git cat-file -e "$baseline:$target" 2>/dev/null; then
