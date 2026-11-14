@@ -2,12 +2,6 @@ name: Mature channel and community operations
 on:
   push:
     branches: [feat/mature-channel-community-ops]
-  pull_request:
-    paths:
-      - '**/*mature_provider*'
-      - '**/*provider_operations*'
-      - '**/qqbot/**'
-      - '.github/workflows/mature-channel-community-ops.yml'
 permissions:
   contents: read
 jobs:
@@ -122,3 +116,46 @@ jobs:
         with:
           name: mature-before-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/mature-before-evidence/
+
+  provider-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: RED existing page lacks provider management
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mature-ui-evidence"
+          target=frontend/src/views/admin/UpstreamChannelOperationsView.vue
+          cp "$target" "$RUNNER_TEMP/provider-current.vue"
+          trap 'cp "$RUNNER_TEMP/provider-current.vue" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          git show 37dc4620a41a68abaeab329358c15821c41e3f7f:"$target" > "$target"
+          set +e
+          (cd frontend && pnpm exec vitest run src/views/admin/__tests__/MatureProviders.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism) > "$RUNNER_TEMP/mature-ui-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-ui-evidence/red.log"
+          test "$result" -ne 0
+          grep -q 'channel operations must expose provider CRUD' "$RUNNER_TEMP/mature-ui-evidence/red.log"
+          ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found' "$RUNNER_TEMP/mature-ui-evidence/red.log"
+      - name: GREEN provider interactions
+        working-directory: frontend
+        run: pnpm exec vitest run src/views/admin/__tests__/MatureProviders.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-ui-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-ui-evidence/
