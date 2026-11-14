@@ -366,12 +366,16 @@ func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string, source ..
 	}
 	errorBody := map[string]any{"type": "upstream_error", "message": message}
 	if len(source) > 0 {
-		// Preserve only the standard error identity fields, not an arbitrary
-		// upstream envelope. The caller already sanitized the message.
-		for _, field := range []string{"code", "type", "param"} {
-			value := gjson.GetBytes(source[0], "error."+field)
-			if value.Type == gjson.String && value.String() != "" {
-				errorBody[field] = value.String()
+		if code, safeMessage, ok := OpenAIUpstreamRecoveryRateLimit(statusCode, source[0]); ok {
+			errorBody = map[string]any{"type": "rate_limit_error", "code": code, "message": safeMessage}
+		} else {
+			// Preserve only the standard error identity fields, not an arbitrary
+			// upstream envelope. The caller already sanitized the message.
+			for _, field := range []string{"code", "type", "param"} {
+				value := gjson.GetBytes(source[0], "error."+field)
+				if value.Type == gjson.String && value.String() != "" {
+					errorBody[field] = value.String()
+				}
 			}
 		}
 	}
@@ -620,16 +624,19 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 			return nil, admissionErr
 		}
-		// Freeze the first-send boundary. Rejected-field network attempts remain
-		// in forwarding and in the compatible helper-entry legacy timer.
-		if forwardStart.IsZero() {
-			forwardStart = requesttiming.Now(ctx)
-		}
 		if recovery := openAIWSAgentRecoveryFromContext(ctx); recovery != nil {
 			source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
 			if err := recovery.begin(latest, source, body, upstreamReq, "http_bridge"); err != nil {
+				if forwardStart.IsZero() {
+					return nil, openAIWSUnsentAgentTurn(err, source, originalModel, turn)
+				}
 				return nil, openAIWSAgentRecoveryClose(err)
 			}
+		}
+		// Only crossing the physical send boundary makes this turn ineligible
+		// for unsent recovery, including any later rejected-field attempt.
+		if forwardStart.IsZero() {
+			forwardStart = requesttiming.Now(ctx)
 		}
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
@@ -710,7 +717,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, actualModel)
 		}
 		clientError := buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg)
-		if preserveAgentHistory {
+		_, _, safeOwnerLimit := OpenAIUpstreamRecoveryRateLimit(resp.StatusCode, respBody)
+		if preserveAgentHistory || safeOwnerLimit {
 			clientError = buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg, respBody)
 		}
 		if writeErr := writeClientMessage(clientError); writeErr == nil {

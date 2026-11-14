@@ -3350,7 +3350,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	ctx = h.gatewayService.WithOpenAIWSAgentRecovery(ctx, c, firstMessage, sessionHash, wsForwardModel)
 	ctx = service.WithOpenAIGuardianParentAffinity(ctx, c, firstMessage, reqModel)
 	if next, clean, changed, rebuildErr := h.gatewayService.PrepareOpenAI409ReadableContinuation(ctx, c, firstMessage, sessionHash, wsForwardModel); rebuildErr != nil {
-		h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, rebuildErr)
+		h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, rebuildErr, c)
 		return
 	} else if changed {
 		ctx, firstMessage, previousResponseID = next, clean, ""
@@ -3478,7 +3478,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			requestPlatform,
 		)
 		if err != nil {
-			if h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, err) {
+			if h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, err, c) {
 				return
 			}
 			if errors.Is(err, service.ErrPriorityLatencyUnavailable) {
@@ -4105,10 +4105,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				next, clean, changed, rebuildErr := h.gatewayService.RebuildOpenAIWSUnsentTurn(ctx, c, raw, sessionHash, currentForwardModel)
 				if rebuildErr != nil {
-					h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, rebuildErr)
+					h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, rebuildErr, c)
 					return
 				}
 				if !changed {
+					if h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, err, c) {
+						return
+					}
 					closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account eligibility changed; reconnect with complete context")
 					return
 				}
@@ -4160,7 +4163,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				reqModel, wsRouteModel, wsForwardModel = currentModel, currentRouteModel, currentForwardModel
 				channelMappingWS = mapping
 				wsAttemptMessage, previousResponseID, previousResponseCanMove = clean, "", true
-				failedAccountIDs[account.ID] = struct{}{}
+				if !service.OpenAIWSUnsentTurnKeepsAccount(err) {
+					failedAccountIDs[account.ID] = struct{}{}
+				}
 				switchCount++
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				if !ensureUserSlotHeld() {
@@ -4168,6 +4173,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				reqLog.Info("openai.websocket_readable_continuation", zap.Bool("context_loss", true), zap.Int("switch_count", switchCount))
 				break
+			}
+			if h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, err, c) {
+				releaseTurnSlots()
+				return
 			}
 			if isOpenAIRPMError(err) {
 				releaseTurnSlots()
@@ -4633,6 +4642,11 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 
+	if code, message, ok := service.OpenAIUpstreamRecoveryRateLimit(statusCode, responseBody); ok {
+		service.SetOpsUpstreamError(c, statusCode, message, "")
+		h.handleStreamingAwareErrorWithCode(c, statusCode, "rate_limit_error", code, message, streamStarted, false)
+		return
+	}
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)

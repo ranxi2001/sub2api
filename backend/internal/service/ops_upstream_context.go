@@ -185,7 +185,16 @@ func IsOpsRequestScopedError(c *gin.Context) bool {
 // 可用账号等），以及上游 2xx 正文或事件里携带的错误结果（NonStream 标记非流式正文）。
 // 由于 HTTP 状态码停留在 2xx，ops_error_logger 中间件在 status<400 分支消费该标记并
 // 补记错误日志；标记方是 handler.handleStreamingAwareError 或各 service 的带内检测。
+// OpsRecoveryFailure is trusted local compatibility evidence, never populated
+// from an upstream error envelope or client metadata.
+type OpsRecoveryFailure struct {
+	Protocol       string
+	Phase          string
+	RequestWritten *bool // nil means no proof of whether the generation was sent
+}
+
 type OpsStreamError struct {
+	RecoveryFailure  *OpsRecoveryFailure
 	TransportFailure *OpsTransportFailure
 	// BridgeFailure is set only by the local BPS conversion boundary. It keeps
 	// real upstream HTTP evidence while assigning failure ownership to gateway.

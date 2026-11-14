@@ -61,3 +61,14 @@ func writeOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte,
 func WriteOpenAIUpstreamClientError(c *gin.Context, statusCode int, body []byte, upstreamMsg string) {
 	writeOpenAIUpstreamClientError(c, statusCode, body, upstreamMsg)
 }
+
+// OpenAIUpstreamRecoveryRateLimit preserves one explicitly safe provider code.
+// A matching prefix, arbitrary message/param, or contradictory HTTP status is
+// not trusted evidence and must retain the ordinary public error mapping.
+func OpenAIUpstreamRecoveryRateLimit(status int, body []byte) (code, message string, ok bool) {
+	const ownerRateLimit = "encrypted_agent_recovery_owner_rate_limited"
+	if status != http.StatusTooManyRequests || gjson.GetBytes(body, "error.code").String() != ownerRateLimit {
+		return "", "", false
+	}
+	return ownerRateLimit, "The upstream encrypted agent owner is temporarily rate limited. Resume this conversation after its limit resets.", true
+}

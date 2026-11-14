@@ -16,10 +16,11 @@ import (
 // Constructed only at transport boundaries before the CURRENT generation has
 // been written. Neither a transport failure nor lack of output proves this.
 type openAIWSUnsentTurnError struct {
-	cause error
-	body  []byte
-	model string
-	turn  int
+	cause       error
+	body        []byte
+	model       string
+	turn        int
+	keepAccount bool // an owner mismatch does not disqualify a healthy selected account
 }
 
 func (e *openAIWSUnsentTurnError) Error() string {
@@ -38,6 +39,40 @@ func openAIWSUnsentTurn(err error, body []byte, model string, turn int) error {
 		return err // Auth, quota, model policy, store failures and sent work stay terminal.
 	}
 	return &openAIWSUnsentTurnError{cause: err, body: append([]byte(nil), body...), model: model, turn: turn}
+}
+
+// Retains send-boundary evidence even when the specific guard is terminal.
+type openAIWSRecoveryBeforeSendError struct{ cause error }
+
+func (e *openAIWSRecoveryBeforeSendError) Error() string { return e.cause.Error() }
+func (e *openAIWSRecoveryBeforeSendError) Unwrap() error { return e.cause }
+func OpenAIWSAgentRecoveryBeforeSend(err error) bool {
+	var before *openAIWSRecoveryBeforeSendError
+	return errors.As(err, &before)
+}
+
+// Called only before the current generation's first physical write. A guard
+// refusal on an internal retry is not proof that earlier work was unsent.
+func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) error {
+	closed := openAIWSAgentRecoveryClose(&openAIWSRecoveryBeforeSendError{cause: err})
+	var recovery *OpenAIAgentRecoveryError
+	if turn < 1 || !errors.As(err, &recovery) || !gjson.ValidBytes(body) {
+		return closed
+	}
+	switch recovery.Reason {
+	case "owner_unavailable", "route_changed":
+		// Rebuild still checks completed ownership, delivery fences, readable
+		// intent, tool results and final payload integrity. Do not turn wire
+		// mutation, pending/failed/conflicting ownership or store errors into retries.
+	default:
+		return closed
+	}
+	return &openAIWSUnsentTurnError{cause: closed, body: append([]byte(nil), body...), model: model, turn: turn, keepAccount: true}
+}
+
+func OpenAIWSUnsentTurnKeepsAccount(err error) bool {
+	var unsent *openAIWSUnsentTurnError
+	return errors.As(err, &unsent) && unsent.keepAccount
 }
 
 func OpenAIWSUnsentTurnPayload(err error) ([]byte, string, int, bool) {

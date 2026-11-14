@@ -826,6 +826,11 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 	}
 
+	if code, message, ok := OpenAIUpstreamRecoveryRateLimit(resp.StatusCode, body); ok {
+		setOpsUpstreamError(c, resp.StatusCode, message, "")
+		c.JSON(resp.StatusCode, gin.H{"error": gin.H{"type": "rate_limit_error", "code": code, "message": message}})
+		return nil, fmt.Errorf("upstream owner rate limited: %d", resp.StatusCode)
+	}
 	// Return appropriate error response
 	var errType, errMsg string
 	var statusCode int

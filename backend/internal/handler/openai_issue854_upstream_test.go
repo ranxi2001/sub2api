@@ -49,7 +49,7 @@ func TestIssue854UpstreamOwnerRateLimit(t *testing.T) {
 				h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 				h.maxAccountSwitches = 1
 				key := &service.APIKey{ID: 99, UserID: 100, Key: "fixture-issue854-client", Status: service.StatusActive, AllowLongContext: true,
-					User:  &service.User{ID: 100, Status: service.StatusActive, Concurrency: 1},
+					User:  &service.User{ID: 100, Status: service.StatusActive},
 					Group: &service.Group{ID: 3132, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}}
 				key.GroupID = &key.Group.ID
 				h.apiKeyService = service.NewAPIKeyService(&wsRevalidationKeyRepoStub{current: key}, nil, nil, nil, nil, nil, cfg)
