@@ -5,7 +5,7 @@
         <input v-model="enabled" type="checkbox" data-testid="excel-bps-web-search" class="h-4 w-4 rounded text-primary-600" />
         {{ t('admin.accounts.openai.excelBPSWebSearch') }}
       </label>
-      <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.bpsAccountSearch" :user-id="auth.user?.id" />
+      <NewFeatureBadge v-if="auth.user?.id != null" :notice-id="NEW_FEATURE_NOTICES.bpsAccountSearch" :user-id="auth.user?.id" />
     </div>
     <p class="text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelBPSWebSearchDesc') }}</p>
     <label class="flex items-center gap-2 text-sm">

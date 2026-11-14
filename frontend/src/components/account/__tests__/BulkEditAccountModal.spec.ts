@@ -155,6 +155,8 @@ describe('BulkEditAccountModal', () => {
       openai_excel_bps_proxy_source: 'mihomo',
       openai_excel_bps_cache_creation_as_input: false,
       openai_excel_bps_ignore_encrypted_content: false,
+      openai_excel_bps_web_search: false,
+      openai_excel_bps_web_search_auto: false,
       openai_excel_bps_omit_unsupported_tools: false,
       openai_excel_bps_auto_disable_on_403: false,
       openai_excel_bps_auto_recover_on_403: false,
