@@ -68,14 +68,14 @@ jobs:
           raw = (p / 'test.jsonl').read_text()
           events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
           outcomes = {e['Test']: e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass', 'fail', 'skip')}
-          cases = ['TestRepairF1SubmittedGenerationIsNotReplayed/' + protocol + '/' + failure for protocol in ('chat_completions', 'responses') for failure in ('headers_timeout', 'eof', 'truncated_body')]
+          cases = ['TestRepairF1SubmittedGenerationIsNotReplayed/' + protocol + '/' + failure for protocol in ('chat_completions', 'responses') for failure in ('headers_timeout', 'attempt_deadline', 'eof', 'truncated_body')]
           assert not any(e['Action'] == 'skip' for e in events), 'No skipped evidence'
           assert all(s not in raw.lower() for s in ('build failed', 'no tests to run', 'undefined:', 'panic:')), 'Invalid RED fixture/build'
           assert outcomes.get('TestRepairF1DefinitelyUnsubmittedDialCanRetry') == 'pass', 'Safe unsubmitted control must pass'
           if os.environ['PHASE'] == 'red':
               assert int((p / 'exit-code.txt').read_text()) != 0
               assert all(outcomes.get(case) == 'fail' for case in cases), outcomes
-              assert raw.count('F1 accepted generation POST must not be replayed after uncertain response') >= 6
+              assert raw.count('F1 accepted generation POST must not be replayed after uncertain response') >= 8
           else:
               assert int((p / 'exit-code.txt').read_text()) == 0
               assert all(outcomes.get(case) == 'pass' for case in cases), outcomes

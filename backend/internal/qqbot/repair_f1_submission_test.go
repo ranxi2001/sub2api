@@ -26,7 +26,7 @@ func repairF1Reply(protocol string) string {
 // complete generation POST bodies, not reservations or eventual QQ messages.
 func TestRepairF1SubmittedGenerationIsNotReplayed(t *testing.T) {
 	for _, protocol := range []string{"chat_completions", "responses"} {
-		for _, failure := range []string{"headers_timeout", "eof", "truncated_body"} {
+		for _, failure := range []string{"headers_timeout", "attempt_deadline", "eof", "truncated_body"} {
 			t.Run(protocol+"/"+failure, func(t *testing.T) {
 				var posts atomic.Int32
 				entered, release := make(chan struct{}), make(chan struct{})
@@ -42,7 +42,7 @@ func TestRepairF1SubmittedGenerationIsNotReplayed(t *testing.T) {
 						return
 					}
 					close(entered)
-					if failure == "headers_timeout" {
+					if failure == "headers_timeout" || failure == "attempt_deadline" {
 						<-release // The full POST was accepted before headers time out.
 						return
 					}
@@ -60,6 +60,9 @@ func TestRepairF1SubmittedGenerationIsNotReplayed(t *testing.T) {
 				defer unblock.Do(func() { close(release) })
 				s := newMatureFixtureService(nil, nil, false, nil)
 				transport := &http.Transport{ResponseHeaderTimeout: 150 * time.Millisecond}
+				if failure == "attempt_deadline" {
+					transport.ResponseHeaderTimeout = 0
+				}
 				defer transport.CloseIdleConnections()
 				s.http = &http.Client{Transport: matureFixtureTransport{base: transport}, CheckRedirect: noRedirect}
 				c := DefaultConfig()
@@ -69,7 +72,7 @@ func TestRepairF1SubmittedGenerationIsNotReplayed(t *testing.T) {
 					err  error
 				}
 				done := make(chan outcome, 1)
-				ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
 				go func() {
 					turn, err := s.siteChatTurn(ctx, c, []Message{{Role: "user", Content: "synthetic generation"}})
