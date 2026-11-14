@@ -71,3 +71,15 @@ func TestUpstreamDialerSetsKeepAliveAndUserTimeoutOnTheSocket(t *testing.T) {
 		"TCP_USER_TIMEOUT": 30000,
 	}, got)
 }
+
+// A socket option the kernel refuses must not fail the dial: TCP_USER_TIMEOUT
+// does not apply to a UDP socket, so setting it there returns an error.
+func TestUpstreamDialerIgnoresUserTimeoutFailure(t *testing.T) {
+	packetConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = packetConn.Close() })
+
+	conn, err := newUpstreamDialer().DialContext(context.Background(), "udp", packetConn.LocalAddr().String())
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+}
