@@ -748,6 +748,8 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	// 非空 responseBody 表示已建立连接后收到的语义错误事件；握手响应头
 	// 可能只是成功连接时的全局快照，不能用于普通模型的 429 账号级限流。
 	// 实际拨号 HTTP 429 使用 nil responseBody，必须保留响应头。
+	// 保留调用方从真实输出状态传入的 stream phase；有事件体并不代表已输出
+	// （例如 prewarm），不能在此把所有语义 429 一律视为流前或流中。
 	if len(responseBody) > 0 {
 		ctx = context.WithValue(ctx, openAI429WeeklyHeadersKey{}, headers)
 		headers = openAIWSSemantic429Headers(account, model, headers)

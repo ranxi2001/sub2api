@@ -1,0 +1,82 @@
+name: PR838 WebSocket output phase
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai_ws_*.go'
+      - 'backend/internal/service/temp_unsched*'
+      - 'backend/internal/service/ratelimit_service.go'
+      - '.github/workflows/pr838-ws-phase.yml'
+      - '.github/scripts/pr838-ws-phase-evidence.py'
+permissions:
+  contents: read
+concurrency:
+  group: pr838-ws-phase-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  forwarding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        behavior: [red, green]
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      BEHAVIOR: ${{ matrix.behavior }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact candidate tests and bounded historical production sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
+          baseline=cf2c96ddf377e60a3df7fdd636c37669d6167d17
+          for target in backend/internal/service/openai_ws_forwarder_v2.go backend/internal/service/openai_ws_forwarder_ingress.go; do
+            original=$(git rev-parse "$baseline:$target")
+            candidate=$(git rev-parse "$CANDIDATE:$target")
+            if [ "$BEHAVIOR" = red ]; then git show "$baseline:$target" > "$target"; fi
+            actual=$(git hash-object "$target")
+            expected="$candidate"
+            if [ "$BEHAVIOR" = red ]; then expected="$original"; fi
+            test "$actual" = "$expected"
+            printf '%s baseline=%s candidate=%s actual=%s\n' "$target" "$original" "$candidate" "$actual" >> evidence/source-blobs.txt
+          done
+          git diff --exit-code -- '*_test.go'
+          target=backend/internal/service/temp_unsched_ws_forward_test.go
+          expected=$(git rev-parse "$CANDIDATE:$target")
+          test "$(git hash-object "$target")" = "$expected"
+          printf '%s %s\n' "$expected" "$target" > evidence/retained-tests.txt
+          printf 'No tests excluded; only the two listed production files restored in RED.\n' > evidence/compilation-boundary.txt
+          git diff --stat > evidence/source-diff.txt
+      - name: Real forwarding entries with race and unchanged safety controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          regression='^TestTempUnschedWSForwardAfterOutputSemantic429$'
+          if [ "$BEHAVIOR" = green ]; then
+            regression='^Test(TempUnschedWSForwardAfterOutputSemantic429|CompatErrorPipeline|FastPathThenGeneralHandler|PendingModel401|Credential401|OpenAIWSAfterOutput|MemoryTempUnschedTrigger|OAuth429WeeklyOnly)'
+          fi
+          printf 'cd backend && go test -race -json -tags=unit ./internal/service -run %q -count=1 -timeout=10m\n' "$regression" > evidence/command.txt
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/service -run "$regression" -count=1 -timeout=10m) > "evidence/$BEHAVIOR.jsonl" 2> "evidence/$BEHAVIOR.stderr"
+          result=$?
+          set -e
+          printf '%s\n' "$result" > evidence/exit.txt
+          python3 .github/scripts/pr838-ws-phase-evidence.py "$BEHAVIOR" "evidence/$BEHAVIOR.jsonl" "$result"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr838-ws-phase-${{ matrix.behavior }}-${{ github.event.pull_request.head.sha }}
+          path: evidence/
+          if-no-files-found: error
