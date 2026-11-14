@@ -277,3 +277,36 @@ func TestWebSearchPrivateToolInstructionsAndStructuredAnswer(t *testing.T) {
 	require.NotContains(t, string(encoded), "I will search.")
 	require.Equal(t, "response.completed", events[len(events)-1]["type"])
 }
+
+func TestWebSearchPublishesCompletedRoundUsageBeforeCancellation(t *testing.T) {
+	wire, bridge, plan := prepareSearch(t, searchSource(), false, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := bridge.StreamWithSearch(ctx, searchRound(0, searchCall(0)), wire, plan, func(ctx context.Context, _ string) (SearchResult, error) {
+		<-ctx.Done()
+		return SearchResult{}, ctx.Err()
+	}, func(context.Context, []byte) (io.ReadCloser, error) { return nil, nil })
+	observed := make(chan string, 1)
+	go func() {
+		_ = readEvents(stream, func(_ string, raw []byte) error {
+			var event object
+			if decode(raw, &event) == nil {
+				response, _ := event["response"].(object)
+				usage, _ := response["usage"].(object)
+				if usage != nil {
+					observed <- fmt.Sprint(usage["input_tokens"])
+					return io.EOF
+				}
+			}
+			return nil
+		})
+	}()
+	select {
+	case usage := <-observed:
+		require.Equal(t, "10", usage)
+	case <-time.After(2 * time.Second):
+		t.Fatal("completed model usage remained hidden behind search")
+	}
+	cancel()
+	_ = stream.Close()
+}

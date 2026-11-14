@@ -45,8 +45,7 @@ URLs actually present in final text. No fixed four-search limit is imposed.
 
 The loop has a 10-minute context deadline, 90 seconds per search including its
 slot wait, 16 concurrent search HTTP operations per process, 2 MiB per search
-result and 32 MiB continuation/aggregate output limits. Search wait emits progress
-heartbeats. Client cancellation closes active response bodies and cancels searches
+result and 32 MiB continuation/aggregate output limits. The gateway sends SSE keepalives while search waits. Client cancellation closes active response bodies and cancels searches
 and continuation requests. These bounds are not an unlimited-runtime promise.
 
 All completed BPS generation rounds contribute to final model token usage, also

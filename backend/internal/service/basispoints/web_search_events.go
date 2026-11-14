@@ -14,13 +14,13 @@ type searchTextObserver struct {
 	state    *searchOutputStream
 	offset   int
 	buffered bool
-	deltas   map[searchTextKey]string
+	deltas   map[searchTextKey]*strings.Builder
 	ids      map[int]string
 	pending  map[string]bool
 }
 
 func newSearchTextObserver(state *searchOutputStream, offset int, buffered bool) *searchTextObserver {
-	return &searchTextObserver{state: state, offset: offset, buffered: buffered, deltas: map[searchTextKey]string{}, ids: map[int]string{}, pending: map[string]bool{}}
+	return &searchTextObserver{state: state, offset: offset, buffered: buffered, deltas: map[searchTextKey]*strings.Builder{}, ids: map[int]string{}, pending: map[string]bool{}}
 }
 func searchIndex(value any) (int, error) {
 	n, err := strconv.Atoi(fmt.Sprint(value))
@@ -91,10 +91,15 @@ func (o *searchTextObserver) observe(kind string, payload object) error {
 			return searchRequestError("invalid_text_delta")
 		}
 		key := searchTextKey{index: index, part: part, field: field}
-		if len(o.deltas[key])+len(delta) > 16<<20 {
+		builder := o.deltas[key]
+		if builder == nil {
+			builder = new(strings.Builder)
+			o.deltas[key] = builder
+		}
+		if builder.Len()+len(delta) > 16<<20 {
 			return searchRequestError("text_too_large")
 		}
-		o.deltas[key] += delta
+		_, _ = builder.WriteString(delta)
 	}
 	if o.buffered {
 		return nil
@@ -140,7 +145,7 @@ func (o *searchTextObserver) validate(response object) error {
 		if key.field == "refusal" {
 			textField = "refusal"
 		}
-		if text(part[textField]) != value {
+		if text(part[textField]) != value.String() {
 			return searchRequestError("terminal_text_changed")
 		}
 	}
