@@ -68,3 +68,39 @@ jobs:
         with:
           name: mature-contract-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/mature-evidence/
+
+  before-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Freeze before source
+        run: |
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          git worktree add --detach "$RUNNER_TEMP/mature-before" 37dc4620a41a68abaeab329358c15821c41e3f7f
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir "$RUNNER_TEMP/mature-before/frontend" install --frozen-lockfile
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mature-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/mature-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Real baseline components in both languages and viewport sizes
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/mature-browser/node_modules/playwright
+          MATURE_BASE_ROOT: ${{ runner.temp }}/mature-before
+          MATURE_SCREENSHOT_DIR: ${{ runner.temp }}/mature-before-evidence
+        run: node .github/scripts/mature-providers-before.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-before-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/mature-before-evidence/
