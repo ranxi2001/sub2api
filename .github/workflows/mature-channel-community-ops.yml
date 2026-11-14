@@ -280,3 +280,38 @@ jobs:
         with:
           name: mature-account-before-${{ github.sha }}
           path: ${{ runner.temp }}/account-before-evidence/
+
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: mature, POSTGRES_PASSWORD: isolated-test-only, POSTGRES_DB: mature }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U mature" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MATURE_TEST_POSTGRES: host=127.0.0.1 port=5432 user=mature password=isolated-test-only dbname=mature sslmode=disable
+      QQBOT_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Candidate business HTTP assertions
+        working-directory: backend
+        run: go test -tags=integration ./internal/server/routes -run '^TestMature' -count=1 -v -timeout=5m
+      - name: Candidate handler assertions
+        if: always()
+        working-directory: backend
+        run: go test ./internal/handler/admin ./internal/handler -run '^Test(Mature|QQBot)' -count=1 -v -timeout=5m
+      - name: QQ business isolated database
+        if: always()
+        working-directory: backend
+        run: go test -tags=integration ./internal/qqbot -count=1 -timeout=10m
+      - name: Server build
+        if: always()
+        working-directory: backend
+        run: go build -o "$RUNNER_TEMP/mature-server" ./cmd/server

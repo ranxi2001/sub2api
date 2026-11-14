@@ -1091,6 +1091,7 @@ func registerChannelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	admin.POST("/providers/:id/keys", h.Admin.Channel.CreateMatureProviderKey)
 	if h.Admin.Account != nil && h.Admin.Channel != nil {
 		h.Admin.Account.SetUpstreamChannelService(h.Admin.Channel.UpstreamChannelService())
+		h.Admin.Account.SetMatureProviderCatalog(h.Admin.Channel)
 	}
 	admin.GET("/upstream-channels", h.Admin.Channel.ListUpstreamChannels)
 	admin.POST("/upstream-channels", h.Admin.Channel.MutateUpstreamChannel)

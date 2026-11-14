@@ -18,6 +18,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func (h *AccountHandler) SetMatureProviderCatalog(catalog *ChannelHandler) {
+	h.providerCatalog = catalog
+}
+
 func (h *ChannelHandler) withMatureProviderSession(ctx context.Context, id, revision int64, run func(*providerSession) error) error {
 	r, err := h.channelService.MatureProviderRepository()
 	if err != nil {
