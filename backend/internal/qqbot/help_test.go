@@ -47,7 +47,8 @@ func TestHelpListsAllCommandsInOneMessage(t *testing.T) {
 				want = append(want, strings.TrimPrefix(name, "/"))
 			}
 			c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: "/disabled"}, CustomCommand{Command: "/我的余额", Enabled: true}, CustomCommand{Command: "/我的", Enabled: true}, CustomCommand{Command: "/举报垃圾信息", Enabled: true})
-			j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: strings.Repeat("m", 128), MessageID: "help", CreatedAt: time.Now()}
+			j := Job{TransientReply: true, EventType: groupMessageCreate, GroupID: "group", MemberID: strings.Repeat("m", 128), MessageID: "help", CreatedAt: time.Now()}
+			c = expectRepairDelivery(t, s, c, 1)
 			require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 			require.Len(t, *replies, 1, "all commands must fit one message without truncation")
 			reply := (*replies)[0]
@@ -128,7 +129,8 @@ func TestHelpRejectsArgumentsAndPageCallbacks(t *testing.T) {
 	c := DefaultConfig()
 	c.CustomCommands = []CustomCommand{{Command: "/disabled", Enabled: false}, {Command: "/hello", Enabled: true, Reply: "hello"}, {Command: "/a", Enabled: true}, {Command: "/b", Enabled: true}, {Command: "/c", Enabled: true}}
 	for _, arg := range []string{"0", "-1", "abc", "9999999999999999999999999", "1", "2"} {
-		j := Job{GroupID: "group", MessageID: "invalid", CreatedAt: time.Now()}
+		j := Job{TransientReply: true, GroupID: "group", MessageID: "invalid", CreatedAt: time.Now()}
+		c = expectRepairDelivery(t, s, c, 1)
 		require.NoError(t, s.sendHelp(context.Background(), c, j, arg))
 		require.Nil(t, (*replies)[len(*replies)-1].Keyboard)
 		require.Equal(t, "用法：帮助", (*replies)[len(*replies)-1].text())
@@ -149,8 +151,9 @@ func TestHelpRejectsArgumentsAndPageCallbacks(t *testing.T) {
 
 func TestInteractionReplyUsesEventIDAndClickingMember(t *testing.T) {
 	s, replies := helpTestSender(t)
-	j := Job{EventType: interactionCreate, GroupID: "group", MemberID: "clicker", MessageID: "outer-event-id", CreatedAt: time.Now()}
-	require.NoError(t, s.message(context.Background(), DefaultConfig(), &j, Event{Content: "/帮助"}))
+	j := Job{TransientReply: true, EventType: interactionCreate, GroupID: "group", MemberID: "clicker", MessageID: "outer-event-id", CreatedAt: time.Now()}
+	c := expectRepairDelivery(t, s, DefaultConfig(), 1)
+	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	require.Len(t, *replies, 1)
 	for i, reply := range *replies {
 		require.Equal(t, "outer-event-id", reply.EventID)
@@ -192,7 +195,8 @@ func TestHelpStopsAfterSendFailure(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		c.CustomCommands = append(c.CustomCommands, CustomCommand{Command: fmt.Sprintf("/custom%d", i), Enabled: true})
 	}
-	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
+	j := Job{TransientReply: true, GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
+	c = expectRepairDelivery(t, s, c, 1)
 	require.Error(t, s.sendHelp(context.Background(), c, j, ""))
 	require.Equal(t, []int{1}, sequences, "a failed menu send must be returned to the caller")
 }

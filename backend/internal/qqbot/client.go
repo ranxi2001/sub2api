@@ -639,7 +639,7 @@ func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job
 	}
 	deliveredText := limitText(text, 1800)
 	if len(img) > 0 {
-		data, err := s.qqRequest(ctx, c, base+"/files", map[string]any{"file_type": 1, "file_name": generatedImageFileName(img), "file_data": base64.StdEncoding.EncodeToString(img), "srv_send_msg": false})
+		data, err := s.authorizedQQDelivery(ctx, c, j, base+"/files", map[string]any{"file_type": 1, "file_name": generatedImageFileName(img), "file_data": base64.StdEncoding.EncodeToString(img), "srv_send_msg": false})
 		if err != nil {
 			return err
 		}
@@ -673,7 +673,7 @@ func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job
 			body["keyboard"] = keyboard
 		}
 	}
-	raw, err := s.qqRequest(ctx, c, base+"/messages", body)
+	raw, err := s.authorizedQQDelivery(ctx, c, j, base+"/messages", body)
 	if err != nil {
 		return err
 	}
@@ -686,6 +686,52 @@ func (s *Service) sendFormattedWithKeyboard(ctx context.Context, c Config, j Job
 	}
 	shareable := (j.Kind == "chat" || j.Kind == "ambient_chat" || j.Kind == "image") && j.ShareHistory && j.Error == ""
 	return s.rememberSentMessage(ctx, c, j, raw, deliveredText, len(img) > 0, shareable)
+}
+
+// Token acquisition happens before the config lock: it can wait on HTTP and
+// tokenGate, and configuration saving must never depend on either. Each final
+// files/messages HTTP request then holds the existing cross-instance shared
+// config lock through response completion. SaveConfig's exclusive lock makes a
+// successful save a fence against subsequent sends using an obsolete identity.
+func (s *Service) authorizedQQDelivery(parent context.Context, previous Config, j Job, path string, body any) ([]byte, error) {
+	if s.db == nil {
+		return nil, ErrDisabled
+	}
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
+	defer cancel()
+	token, err := s.token(ctx, previous)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	current, err := s.lockConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if !current.Enabled || !current.allows(j.GroupID) || (j.AppID != "" && current.AppID != j.AppID) || deliveryAuthorization(current) != deliveryAuthorization(previous) {
+		return nil, ErrDisabled
+	}
+	if j.EventType == priceNotificationEvent || j.EventType == healthNotificationEvent || j.EventType == rankingNotificationEvent {
+		if !allowsNotification(current, j) || current.NotificationQuietHours.active(time.Now()) {
+			return nil, ErrDisabled
+		}
+	}
+	return s.qqRequestMethodWithToken(ctx, current, token, http.MethodPost, path, body)
+}
+
+// Bind the generation/delivery to the credential and policy snapshot that
+// authorized it. No fingerprint or secret is returned through an API or log.
+func deliveryAuthorization(c Config) string {
+	return ConfigVersion(struct {
+		AppID, AppSecret, BaseURL, APIKey, ImageBaseURL, ImageAPIKey string
+		Sandbox, ChatDisabled, ImageEnabled                          bool
+		Groups                                                       []string
+		Policies                                                     []GroupPolicy
+	}{c.AppID, c.AppSecret, c.BaseURL, c.APIKey, c.ImageBaseURL, c.ImageAPIKey, c.Sandbox, c.ChatDisabled, c.ImageEnabled, c.AllowedGroups, c.GroupPolicies})
 }
 
 func limitText(s string, n int) string {

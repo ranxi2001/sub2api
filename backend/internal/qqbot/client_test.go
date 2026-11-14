@@ -133,7 +133,8 @@ func TestImagesGenerateThenReuseSavedBytesForDelivery(t *testing.T) {
 	c.AppSecret = "qq-secret"
 	img, err := s.generateImage(context.Background(), c, "cat")
 	require.NoError(t, err)
-	j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: "member", MessageID: "msg", CreatedAt: time.Now()}
+	j := Job{TransientReply: true, EventType: groupMessageCreate, GroupID: "group", MemberID: "member", MessageID: "msg", CreatedAt: time.Now()}
+	c = expectRepairDelivery(t, s, c, 4)
 	require.NoError(t, s.send(context.Background(), c, j, "", img, 2))
 	require.NoError(t, s.send(context.Background(), c, j, "", img, 3))
 	require.Equal(t, 1, generates)
@@ -182,7 +183,8 @@ func TestGroupTextRepliesUseMarkdownWithConsistentMentions(t *testing.T) {
 		{"long explicit mention", groupMessageCreate, memberID, strings.Repeat("中", 1900), mention + "\n" + strings.Repeat("中", 1799-len([]rune(mention+"\n"))) + "…", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			j := Job{EventType: tc.eventType, GroupID: "group", MemberID: tc.memberID, MessageID: "incoming", CreatedAt: time.Now()}
+			j := Job{TransientReply: true, EventType: tc.eventType, GroupID: "group", MemberID: tc.memberID, MessageID: "incoming", CreatedAt: time.Now()}
+			c = expectRepairDelivery(t, s, c, 1)
 			require.NoError(t, s.send(context.Background(), c, j, tc.text, nil, 1))
 			require.Equal(t, tc.wantType, reply.MsgType)
 			require.Equal(t, tc.want, reply.text())
@@ -210,7 +212,8 @@ func TestGroupMentionMarkdownRejectionDoesNotSendLiteralTagFallback(t *testing.T
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	c.AppID, c.AppSecret = "app", "qq-secret"
-	j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: "member", MessageID: "incoming", CreatedAt: time.Now()}
+	j := Job{TransientReply: true, EventType: groupMessageCreate, GroupID: "group", MemberID: "member", MessageID: "incoming", CreatedAt: time.Now()}
+	c = expectRepairDelivery(t, s, c, 1)
 	require.ErrorContains(t, s.send(context.Background(), c, j, emailBindingAccepted, nil, 1), "40034127")
 	require.Equal(t, 1, calls)
 }
@@ -331,12 +334,12 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 	c := DefaultConfig()
 	c.AppID, c.AppSecret, c.BaseURL = "app", "test-secret", server.URL+"/v1"
 	for i, content := range []string{"/查看结果 task-id", "/新对话", "/清空", "/不存在"} {
-		j := Job{GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
+		j := Job{TransientReply: true, GroupID: "group", MessageID: strconv.Itoa(i), CreatedAt: time.Now()}
 		require.NoError(t, s.message(context.Background(), c, &j, Event{Content: content}))
 		require.Len(t, replies, i+1)
 		require.Contains(t, replies[i], "帮助")
 	}
-	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
+	j := Job{TransientReply: true, GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
 	before := len(replies)
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := strings.Join(replies[before:], "\n")

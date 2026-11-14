@@ -260,6 +260,7 @@ func TestPriceNotificationConfigAndProactiveDelivery(t *testing.T) {
 	s.qqURL = server.URL
 	s.tokenURL = server.URL + "/token"
 	j := Job{AppID: "app", GroupID: "group", EventType: priceNotificationEvent}
+	c = expectRepairDelivery(t, s, c, 1)
 	require.NoError(t, s.sendPriceNotification(context.Background(), c, j, "通知正文"))
 	j.GroupID = "other"
 	require.ErrorIs(t, s.sendPriceNotification(context.Background(), c, j, "通知正文"), ErrDisabled)

@@ -160,7 +160,8 @@ func TestGIFGenerateEditAndQQDeliveryPreserveBytes(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, data, result)
-			j := Job{GroupID: "group", MessageID: "msg", CreatedAt: time.Now()}
+			j := Job{TransientReply: true, GroupID: "group", MessageID: "msg", CreatedAt: time.Now()}
+			c = expectRepairDelivery(t, s, c, 3)
 			require.Error(t, s.send(context.Background(), c, j, "", result, 2))
 			require.NoError(t, s.send(context.Background(), c, j, "", result, 3))
 			require.Equal(t, 1, calls)

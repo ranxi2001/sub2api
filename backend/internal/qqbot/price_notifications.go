@@ -486,7 +486,7 @@ func (s *Service) sendPriceNotification(ctx context.Context, c Config, j Job, te
 	}
 	// Deliberately separate from passive replies: no fabricated msg_id, event_id
 	// or AI call. Unknown delivery outcomes are never auto-replayed.
-	_, err := s.qqRequest(ctx, c, "/v2/groups/"+url.PathEscape(j.GroupID)+"/messages", map[string]any{
+	_, err := s.authorizedQQDelivery(ctx, c, j, "/v2/groups/"+url.PathEscape(j.GroupID)+"/messages", map[string]any{
 		"msg_type": 2, "markdown": map[string]string{"content": text},
 	})
 	if err != nil {

@@ -56,6 +56,7 @@ func TestAutomaticNotificationMentionAllDelivery(t *testing.T) {
 			s := newMatureFixtureService(nil, nil, false, nil)
 			s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 			j := Job{AppID: "app", GroupID: "group", MemberID: "winner", EventType: tc.event}
+			c = expectRepairDelivery(t, s, c, 1)
 			require.NoError(t, s.sendPriceNotification(context.Background(), c, j, "通知正文"))
 			require.Equal(t, 1, requests)
 		})
@@ -88,6 +89,7 @@ func TestAutomaticNotificationMentionAllLengthBoundary(t *testing.T) {
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	j := Job{AppID: "app", GroupID: "group", EventType: priceNotificationEvent}
 	limit := 1800 - len([]rune("<qqbot-at-everyone />\n"))
+	c = expectRepairDelivery(t, s, c, 1)
 	require.NoError(t, s.sendPriceNotification(context.Background(), c, j, strings.Repeat("字", limit)))
 	require.ErrorContains(t, s.sendPriceNotification(context.Background(), c, j, strings.Repeat("字", limit+1)), "通知内容过长")
 	require.Equal(t, 1, requests)
