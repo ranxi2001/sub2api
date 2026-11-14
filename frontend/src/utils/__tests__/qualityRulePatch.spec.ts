@@ -17,7 +17,7 @@ const plan = (): ScheduledTestPlan => ({
 })
 const bps = (): QualityBPSPolicy => ({
   failure_threshold: 2, usage_percent: 0, require_all: false, all_models: false, models: ['gpt-6-astra'],
-  omit_unsupported_tools: true, ignore_encrypted_content: true, auto_disable_on_403: false,
+  omit_unsupported_tools: true, ignore_encrypted_content: true, web_search: false, web_search_auto: false, auto_disable_on_403: false,
   auto_move_on_403: false, target_group_id: -1, session_proxy: false, proxy_source: 'mihomo', cache_creation_as_input: false,
   pass_threshold: 2, hold_on_usage: true, recovery_interval_minutes: 60,
 })
