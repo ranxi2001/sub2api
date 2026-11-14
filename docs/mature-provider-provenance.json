@@ -7,7 +7,7 @@
     "target_path": "backend/internal/handler/admin/mature_provider_remote.go",
     "license": "LGPL-3.0",
     "notices_preserved": true,
-    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+    "adaptation": "protocol helpers adapted; SQL CAS/row-lock persistence, encrypted sessions, public-only transport and redacted errors; independent review pending"
   },
   {
     "source_repository": "mizaawa/zayuapi",
@@ -17,7 +17,7 @@
     "target_path": "backend/internal/handler/admin/mature_provider_newapi_auth.go",
     "license": "LGPL-3.0",
     "notices_preserved": true,
-    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+    "adaptation": "protocol helpers adapted; SQL CAS/row-lock persistence, encrypted sessions, public-only transport and redacted errors; independent review pending"
   },
   {
     "source_repository": "mizaawa/zayuapi",
@@ -27,7 +27,7 @@
     "target_path": "backend/internal/handler/admin/mature_provider_session.go",
     "license": "LGPL-3.0",
     "notices_preserved": true,
-    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+    "adaptation": "protocol helpers adapted; SQL CAS/row-lock persistence, encrypted sessions, public-only transport and redacted errors; independent review pending"
   },
   {
     "source_repository": "mizaawa/zayuapi",
@@ -37,7 +37,7 @@
     "target_path": "backend/internal/handler/admin/mature_provider_key_remote.go",
     "license": "LGPL-3.0",
     "notices_preserved": true,
-    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+    "adaptation": "protocol helpers adapted; SQL CAS/row-lock persistence, encrypted sessions, public-only transport and redacted errors; independent review pending"
   },
   {
     "source_repository": "mizaawa/zayuapi",
@@ -47,7 +47,7 @@
     "target_path": "backend/internal/handler/admin/mature_provider_key_types.go",
     "license": "LGPL-3.0",
     "notices_preserved": true,
-    "adaptation": "protocol helpers; persistence replaced with SQL CAS and row locks; integration in progress"
+    "adaptation": "protocol helpers adapted; SQL CAS/row-lock persistence, encrypted sessions, public-only transport and redacted errors; independent review pending"
   },
   {
     "source_repository": "mizaawa/zayuapi",

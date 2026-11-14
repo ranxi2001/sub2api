@@ -1,4 +1,4 @@
-# 成熟渠道与 QQ 社群运维功能对照（实施中）
+# 成熟渠道与 QQ 社群运维功能对照（已实施，联合验收中）
 
 冻结基线 `37dc4620a41a68abaeab329358c15821c41e3f7f`。渠道来源 [mizaawa/zayuapi v0.2.219](https://github.com/mizaawa/zayuapi/tree/a71aa9615ccb55a19973908c9f261b5ba25a48c6)，QQ 来源 [DeanZFC/sub2api-custom v0.2.21-custom.4](https://github.com/DeanZFC/sub2api-custom/tree/5876d7d864dae405c2a3b65074fb556f6985adb8)。本清单勾选表示完整功能及验证验收，代码片段或单项测试不能代替完成。
 
@@ -27,37 +27,37 @@
 
 | 验收 | 能力 | 固定来源模块（backend/internal/qqbot，另注除外） | 适配/验证边界 |
 | --- | --- | --- | --- |
-| [ ] | 回调 challenge、Ed25519、timestamp、AppID、2MiB 限额 | handler/qq_bot_handler.go、webhook.go | 持久去重/重放窗口，签名失败不能写队列 |
-| [ ] | 持久队列、跨实例 claim、崩溃/过期处理 | store.go、service.go、chat_execution.go | 结果未知不重放外部/付费副作用 |
+| [ ] | 回调 challenge、Ed25519、timestamp、AppID、2MiB 限额 | handler/qq_bot_handler.go、client.go、store.go | 持久去重/重放窗口，签名失败不能写队列 |
+| [ ] | 持久队列、跨实例 claim、崩溃/过期处理 | store.go、service.go、types.go（ChatExecution） | 结果未知不重放外部/付费副作用 |
 | [ ] | 总配置、模块 CAS、历史、加密、AppID 切换保护 | config.go、config_sections.go、setup.go | 默认禁用，密钥不进响应/审计，版本冲突保留草稿 |
 | [ ] | 快速配置与诊断、能力预览/测试 | setup*.go、operations*.go、chat_preview.go | 真实模型测试显式确认；本任务只 mock |
-| [ ] | 本站聊天/图片独立专用 key 与额度 | site_ai.go、setup*.go | fork API key 权限、计费、事务与撤销兼容 |
-| [ ] | 网站码/邮件绑定、解绑、用户资料入口 | binding*.go、email_binding.go、admin_bindings.go | 本人确认、AppID/群/成员隔离、绑定转移与审计 |
+| [ ] | 本站聊天/图片独立专用 key 与额度 | setup.go、service/qq_bot_setup.go | fork API key 权限、计费、事务与撤销兼容 |
+| [ ] | 网站码/邮件绑定、解绑、用户资料入口 | store.go、email_binding.go、admin_bindings.go | 本人确认、AppID/群/成员隔离、绑定转移与审计 |
 | [ ] | 转账申请/确认/历史 | transfer*.go | 双方身份、额度、账本与余额同事务、幂等 |
-| [ ] | 群发现、备注、能力、策略、配额 | group_info.go、group_policies.go | 持久限流/冷却，真实群权限与配置区别 |
-| [ ] | 群管理员聊天授权、成员目录/临时摘要 | group_admins.go、members.go、member_hints.go | 聊天权限不赋予资金/站点管理权限 |
-| [ ] | Chat Completions / Responses 聊天、有限重试 | model*.go、chat*.go | DNS rebinding/redirect/private IP，已发送请求谨慎重试 |
+| [ ] | 群发现、备注、能力、策略、配额 | group_info.go、types.go、config.go、store.go | 持久限流/冷却，真实群权限与配置区别 |
+| [ ] | 群管理员聊天授权、成员目录/临时摘要 | group_admins.go、member_directory.go、recent_members.go | 聊天权限不赋予资金/站点管理权限 |
+| [ ] | Chat Completions / Responses 聊天、有限重试 | client.go、site_chat.go、site_chat_retry.go、chat_reply.go | DNS rebinding/redirect/private IP，已发送请求谨慎重试 |
 | [ ] | 独立聊天/图片密钥、生成、编辑、GIF | image*.go、chat_image_tool.go | 禁止跨地址复用凭据，媒体下载 SSRF/体积限制 |
-| [ ] | 图片理解、明确引用、图片意图确认/待确认方案 | references*.go、image_intent.go | 成员隔离、来源引用、过期/重复确认 |
-| [ ] | 成员历史与上下文、群共享上下文 | group_history.go、group_messages.go、member_context.go | AppID/群/成员隔离及清理策略 |
+| [ ] | 图片理解、明确引用、图片意图确认/待确认方案 | image_references.go、message_references.go、image_intent*.go | 成员隔离、来源引用、过期/重复确认 |
+| [ ] | 成员历史与上下文、群共享上下文 | group_history.go、group_messages.go、service.go | AppID/群/成员隔离及清理策略 |
 | [ ] | 自主接话、跟进、预算/队列/投递 | autonomous*.go | 默认关闭，多实例额度/抢占/避免重复投递 |
 | [ ] | 防刷屏撤回/禁言、豁免、治理记录 | moderation*.go、spam*.go | 默认关闭，官方角色验证；未知结果不重试 |
 | [ ] | 手动群公告、@所有人、取消/状态/分段 | announcements.go | 显式确认、持久幂等、权限/发送失败分类 |
 | [ ] | 价格、分组倍率、启停/删除与分时通知 | price*.go | fork canonical 计费解析兼容 |
 | [ ] | 渠道状态、被动故障与恢复通知 | channel_status.go、health*.go | 不主动付费探测、不把未知当正常 |
-| [ ] | 模型价格、本人今日用量、自然语言站点查询 | prices.go、site_queries.go、usage.go | 本人绑定、公开报价与个人权限隔离 |
-| [ ] | 自定义命令、帮助菜单、知识库、命令中心 | custom_commands.go、knowledge.go、help.go、command_centers.go | 配置验证、作用域、输出脱敏 |
+| [ ] | 模型价格、本人今日用量、自然语言站点查询 | member_insights.go、site_queries.go、site_account_queries.go | 本人绑定、公开报价与个人权限隔离 |
+| [ ] | 自定义命令、帮助菜单、知识库、命令中心 | custom_commands.go、site_knowledge.go、help.go、command_centers.go | 配置验证、作用域、输出脱敏 |
 | [ ] | 每日随机签到、充值门槛、连续签到奖 | checkin*.go、activities.go | 北京时间、账户级唯一、余额/账本/预算同事务 |
 | [ ] | 一次性/周期成长、金额达标日 | growth*.go | 已消耗进度不回退、奖励快照、迟到记录/退款边界 |
-| [ ] | 邀请奖、官方邀请事件、入退群记录 | invitations*.go、membership*.go | 重进不重复、双方绑定、每日上限 |
+| [ ] | 邀请奖、官方邀请事件、入退群记录 | invite.go、service.go、membership_diagnostics.go | 重进不重复、双方绑定、每日上限 |
 | [ ] | 抽奖、充值次数、保底、余额/次数/实物/自定义奖 | lottery.go、reward*.go | fork 有效充值/退款语义，次数与奖品原子提交 |
 | [ ] | 每日 Token/消费排行榜、榜单奖励 | rankings*.go | 隐私、历史规则快照、预算不足保留资格 |
 | [ ] | 活动模板、每日硬预算、奖励管理/发放 | activity_templates.go、growth_rewards.go | 多实例账本锁；默认财务副作用关闭 |
 | [ ] | 优惠券与支付依赖 | coupons.go、internal/coupon、支付关联 | 完整适配本 fork coupon/payment/ledger；不能删掉来源实际奖励类型 |
-| [ ] | 运行总览、群管理、功能连接、活动奖励、成员账户、记录诊断 UI | frontend/views/admin/QQBot*、components/admin/qqbot | 双语、桌面手机、旧地址兼容、功能提示 |
+| [ ] | 运行总览、群管理、功能连接、活动奖励、成员账户、记录诊断 UI | frontend/src/views/admin/QQBot*、components/admin/qqbot | 双语、桌面手机、旧地址兼容、功能提示 |
 | [ ] | 绑定/转账公开确认页、个人资料卡 | auth/QQBotBindView、QQBotTransferView、ProfileQQBotCard | user/tenant/成员隔离与确认 |
 
-源文件逐一 SHA/额外版权行核对保存在 artifact `source-audit/qqbot-file-provenance.json`（356 blobs 已核固定 Git blob）；这是来源核对，不是已移植/已验收证明。来源模块精确文件名以该 manifest 为准。
+源文件逐一 SHA/额外版权行核对保存在 artifact `source-audit/qqbot-file-provenance.json`（356 blobs 已核固定 Git blob）；这是来源核对，不是已移植/已验收证明。来源模块精确文件名以该 manifest 为准。已移植文件与目标路径见同目录 `mature-community-provenance.json`（386 项）与 `mature-provider-provenance.json`（8 项）；清单中的源码文件名均对应固定来源。服务商 CRUD/UI 采用本 fork 原生接口重新实现，协议辅助函数按 manifest 逐文件适配。
 
 ## 必须保留的交付门禁
 
@@ -84,7 +84,7 @@
 
 QQ 管理入口 `/admin/qqbot/overview`；配置、快速接入、群管理、活动奖励、绑定、记录保留固定来源页面和旧地址跳转。用户资料页提供绑定卡；公开确认页 `/qqbot/bind`、`/qqbot/transfer`，实际后端确认 API 使用有期 token。回调 `/api/v1/qqbot/webhook` 限制 2MiB、验证 AppID、签名和时间窗；challenge 只签合法短 token。业务消息、活动、通知均由持久队列与来源配置门禁控制，新安装默认关闭。管理 UI 的模型能力测试须用户显式确认，服务器也检查确认字段。本任务所有外部请求与财务副作用只用隔离 fixtures/mock 验证。
 
-QQ 外部模型/平台请求使用禁止 private/特殊用途地址、DNS 固定到 socket、禁止重定向/环境代理的 transport。本系统内部 AI 仅使用服务器接线提供的固定 loopback origin，并验证当前配置的独立聊天/图片专用 key 身份；任意用户输入的内网 URL 没有该例外。图片下载同样校验目标地址及大小。来源中聊天/图片独立 key、群成员上下文、通知、签到、邀请、抽奖、成长、排行、转账和优惠券功能继续适配，未验收项不能用开关隐藏后视为完成。
+QQ 外部模型/平台请求使用禁止 private/特殊用途地址、DNS 固定到 socket、禁止重定向/环境代理的 transport。本系统内部 AI 仅使用服务器接线提供的固定 loopback origin，并验证当前配置的独立聊天/图片专用 key 身份；任意用户输入的内网 URL 没有该例外。图片下载同样校验目标地址及大小。来源中聊天/图片独立 key、群成员上下文、通知、签到、邀请、抽奖、成长、排行、转账和优惠券功能继续适配，全部来源模块已经接线，未验收项不能用开关隐藏后视为完成。
 
 优惠券管理 `/admin/orders/coupons` 与用户 `/coupons` 使用来源固定规则快照；充值选择器沿用本 fork 的支付方式/实例费率范围，优惠调整付款基数和到账额，不覆盖现有费率策略。预留/取消释放/付款消费都有数据库事务；付款后优惠券冲突保留已收款事实并进入管理员审核，不能静默少到账。退款不重新发券，成长/签到的赠额不算有效充值，也不触发充值返利。
 
@@ -94,6 +94,15 @@ QQ 外部模型/平台请求使用禁止 private/特殊用途地址、DNS 固定
 
 应用回退到冻结基线会忽略新表和独立 settings；不能自动撤销回退前已明确执行的远端 key 创建、奖励、转账或优惠券消费。数据清理必须单独迁移；不在此 PR 附可误执行的 DROP/DOWN。现有固定加密密钥不可更换，否则新旧加密凭据都可能失效。本 PR 不包含部署、生产配置修改、merge、ready 或 release。
 
-before/after 图只使用真实 Vue 组件与合成数据，不能代表生产验证或完整端到端验收。图片存 artifact，不提交 PNG 源码。原生 PR 附件上传与下载 hash、独立只读审查、精确最终 head 全 CI 和完整数据库兼容回归仍是交付门禁，未有证据时保持未勾选。
+before/after 图只使用真实 Vue 组件与合成数据，不能代表生产验证或完整端到端验收。图片存 artifact，不提交 PNG 源码。45 张原生 PR 附件已上传并下载核对 SHA256（8 张冻结基线、37 张 after/compare；after 渲染提交为 c58e8e263）。独立只读审查和精确最终 head 全 CI 仍是交付门禁，未有证据时保持未勾选。
 
 优惠券的微信支付恢复上下文携带签名的 coupon_id。带券恢复 token 使用独立类型，旧二进制会拒绝该类型，避免回退时忽略优惠并生成全价订单；无券恢复继续使用旧类型。服务器核对请求 coupon 与签名上下文一致，并在创建订单时重新验证归属和有效性。管理员订单详情展示只包含名称/优惠金额/赠额/待审核状态的摘要，需明确确认原优惠利益后手动重试冲突到账。
+
+
+## 已取得的远程验证与尚未满足的门禁
+
+专用组合回归 [run 43620106126](https://github.com/ranxi2001/sub2api/actions/runs/43620106126) 在 `c58e8e26322c6b1651544ab3bd94e9cf8d825674` 全部通过：provider HTTP/真实 PostgreSQL、完整 QQ 隔离数据库与全迁移链、coupon 财务与 canonical 账号导入兼容、race、前端测试与 production/server/embed 构建、Wire 一致性、真实 UI 渲染。该结果仅证明该提交的检查范围，不代表后续提交已经通过。
+
+后续新增明确拒绝/未知创建结果的 UI 断言、上游 scope 凭据反射断言，均先取得远程旧实现行为 RED，再修复实现。另修复通用 CI 的独立数据库 fixture 与原 securityaudit 空数组 fixture，未削弱已有业务断言。最终结果以 PR 当前 head 的 Checks 与 artifact `STATUS.md` 为准。
+
+历史 Issue805 工作流在更新后的 production 定义中引用了冻结基线不存在的辅助脚本，已观测到执行前 exit127；不能计为通过或业务 RED。本 PR 不引入不相关的新基线源码来掩盖该差异，需协调者/工作流 owner 核对。独立只读源码审查由协调者安排，尚无审查结论；因此全范围验收方框仍保留未勾选。
