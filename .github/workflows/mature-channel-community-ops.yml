@@ -40,16 +40,17 @@ jobs:
           base=37dc4620a41a68abaeab329358c15821c41e3f7f
           git fetch --no-tags --depth=1 origin "$base"
           git worktree add --detach "$RUNNER_TEMP/mature-red" "$base"
-          cp backend/internal/server/routes/mature_providers*_test.go "$RUNNER_TEMP/mature-red/backend/internal/server/routes/"
+          cp backend/internal/server/routes/mature_*_test.go "$RUNNER_TEMP/mature-red/backend/internal/server/routes/"
           cd "$RUNNER_TEMP/mature-red/backend"
           set +e
-          go test -tags=integration ./internal/server/routes -run '^TestMatureProviders(HTTPContract|PostgresCRUD)$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/red.log" 2>&1
+          go test -tags=integration ./internal/server/routes -run '^TestMature(Providers(HTTPContract|PostgresCRUD)|QQBotWebhookSafeDefault)$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/mature-evidence/red.log"
           test "$result" -ne 0
           ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/red.log"
           grep -q -- '--- FAIL: TestMatureProvidersHTTPContract/admin' "$RUNNER_TEMP/mature-evidence/red.log"
+          grep -q -- '--- FAIL: TestMatureQQBotWebhookSafeDefault' "$RUNNER_TEMP/mature-evidence/red.log"
           grep -q -- '--- FAIL: TestMatureProvidersPostgresCRUD' "$RUNNER_TEMP/mature-evidence/red.log"
           grep -q 'actual  : 404' "$RUNNER_TEMP/mature-evidence/red.log"
       - name: RED credentials against first catalog increment
@@ -59,7 +60,7 @@ jobs:
           base=620d37ee42b0439a9ce1bd497064a990594ca192
           git fetch --no-tags --depth=1 origin "$base"
           git worktree add --detach "$RUNNER_TEMP/mature-credentials-red" "$base"
-          cp backend/internal/server/routes/mature_providers*_test.go "$RUNNER_TEMP/mature-credentials-red/backend/internal/server/routes/"
+          cp backend/internal/server/routes/mature_*_test.go "$RUNNER_TEMP/mature-credentials-red/backend/internal/server/routes/"
           cd "$RUNNER_TEMP/mature-credentials-red/backend"
           set +e
           go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersCredentialsAndMetadata$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/credentials-red.log" 2>&1
@@ -74,7 +75,7 @@ jobs:
         working-directory: backend
         run: |
           set -o pipefail
-          go test -tags=integration ./internal/server/routes -run '^TestMatureProviders' -count=1 -v 2>&1 | tee "$RUNNER_TEMP/mature-evidence/green.log"
+          go test -tags=integration ./internal/server/routes -run '^TestMature' -count=1 -v 2>&1 | tee "$RUNNER_TEMP/mature-evidence/green.log"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
