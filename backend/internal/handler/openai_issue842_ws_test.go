@@ -125,7 +125,7 @@ func TestIssue842WSReplayMetadata(t *testing.T) {
 								}
 							}
 							return true
-							}, time.Second, 5*time.Millisecond)
+						}, time.Second, 5*time.Millisecond)
 						original = issue805Owners(t, probe)
 						issue600Finish(t, producer, http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}})
 					}
