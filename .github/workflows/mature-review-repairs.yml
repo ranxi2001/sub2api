@@ -85,3 +85,104 @@ jobs:
         with:
           name: repair-f1-${{ matrix.phase }}-${{ github.sha }}
           path: ${{ runner.temp }}/repair-f1/
+
+  f2:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [red, green]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: repair
+          POSTGRES_PASSWORD: synthetic-fixture-only
+          POSTGRES_DB: repair
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U repair"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      COUPON_TEST_DSN: postgres://repair:synthetic-fixture-only@127.0.0.1:5432/repair?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Bind F2 tests and pre-fix production blobs
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repair-f2"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/repair-f2/candidate.txt"
+          sha256sum backend/internal/service/repair_f2_coupon_recovery_test.go > "$RUNNER_TEMP/repair-f2/test-sha256.txt"
+          baseline=b98e6acb2dc772651b6a597d40cce311f96a2ba5
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for name in payment_fulfillment.go payment_coupons.go payment_easypay_recovery.go payment_order_lifecycle.go; do
+            path="backend/internal/service/$name"
+            if [ "$PHASE" = red ]; then
+              git show "$baseline:$path" > "$path"
+              test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            fi
+            git hash-object "$path" >> "$RUNNER_TEMP/repair-f2/production-blobs.txt"
+          done
+      - name: PostgreSQL payment recovery oracle
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestRepairF2' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/repair-f2/test.jsonl" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/repair-f2/exit-code.txt"
+          cat "$RUNNER_TEMP/repair-f2/test.jsonl"
+          python3 - <<'PYORACLE'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'repair-f2'
+          raw = (p / 'test.jsonl').read_text()
+          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          outcomes = {e['Test']: e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass', 'fail', 'skip')}
+          rejected = ['TestRepairF2BackgroundPaymentCannotReverseCancellation/' + actor + '/coupon_true' for actor in ('user', 'admin')]
+          controls = ['TestRepairF2BackgroundPaymentCannotReverseCancellation/' + actor + '/coupon_false' for actor in ('user', 'admin')]
+          for provider in ('alipay', 'bepusdt', 'easypay'):
+              root = 'TestRepairF2ProviderRecoveryWindowsApplyToCoupons/' + provider
+              rejected.append(root + '/outside_true/coupon_true')
+              controls.append(root + '/outside_true/coupon_false')
+              controls.extend(root + '/outside_false/coupon_' + value for value in ('false', 'true'))
+          assert not any(e['Action'] == 'skip' for e in events), 'No skipped database evidence'
+          assert all(s not in raw.lower() for s in ('build failed', 'no tests to run', 'undefined:', 'panic:')), 'Invalid RED fixture/build'
+          assert all(outcomes.get(case) == 'pass' for case in controls), outcomes
+          if os.environ['PHASE'] == 'red':
+              assert int((p / 'exit-code.txt').read_text()) != 0
+              assert all(outcomes.get(case) == 'fail' for case in rejected), outcomes
+              assert raw.count('F2 background paid response must not reverse committed cancellation') >= 2
+              assert raw.count('F2 coupon must preserve the canonical provider recovery deadline') >= 3
+          else:
+              assert int((p / 'exit-code.txt').read_text()) == 0
+              assert all(outcomes.get(case) == 'pass' for case in rejected), outcomes
+          PYORACLE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-f2-${{ matrix.phase }}-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-f2/
