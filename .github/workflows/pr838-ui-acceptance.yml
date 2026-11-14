@@ -22,8 +22,6 @@ jobs:
       CANDIDATE: ${{ github.event.pull_request.head.sha }}
       # Full production frontend before this feature; never overlay components.
       BASELINE: b347249687db84dac3f5272189fda6cf86eb9035
-      EVIDENCE_DIR: ${{ runner.temp }}/pr838-ui
-      SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/pr838-browser/node_modules/playwright/index.mjs
     steps:
       - uses: actions/checkout@v6
         with:
@@ -45,6 +43,10 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Configure isolated evidence paths after runner allocation
+        run: |
+          printf 'EVIDENCE_DIR=%s/pr838-ui\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'SUB2API_PLAYWRIGHT_MODULE=%s/pr838-browser/node_modules/playwright/index.mjs\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Prepare exact locked frontend and isolated browser
         run: |
           set -euo pipefail
