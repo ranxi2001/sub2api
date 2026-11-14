@@ -31,7 +31,7 @@ func newRepairF2Fixture(t *testing.T, withCoupon bool, provider string) repairF2
 	u := matureCouponTestUser(t, s.entClient)
 	cfg := &PaymentConfig{BalanceRechargeMultiplier: 1, MaxPendingOrders: 10, OrderTimeoutMin: 15}
 	req := CreateOrderRequest{UserID: u.ID, Amount: 100, OrderType: payment.OrderTypeBalance}
-	pay := 100.0
+	pay, bonus := 100.0, 0.0
 	if withCoupon {
 		tpl, err := s.SaveCouponTemplate(ctx, 0, CouponTemplate{Name: "F2 synthetic", Kind: "fixed", Currency: "CNY", MinAmount: 100, Value: 10, ValidDays: 7, Enabled: true})
 		require.NoError(t, err)
@@ -42,9 +42,9 @@ func newRepairF2Fixture(t *testing.T, withCoupon bool, provider string) repairF2
 		req.CouponID = ids[0]
 		req.couponQuote, err = couponRechargeQuote(item, cfg, 100, "CNY")
 		require.NoError(t, err)
-		pay = req.couponQuote.PayAmount
+		pay, bonus = req.couponQuote.PayAmount, req.couponQuote.BonusAmount
 	}
-	o, err := s.createOrderInTx(ctx, req, &User{ID: u.ID, Email: u.Email}, nil, cfg, 100, pay, 0, pay, 0, nil)
+	o, err := s.createOrderInTx(ctx, req, &User{ID: u.ID, Email: u.Email}, nil, cfg, 100, pay, 0, pay, bonus, nil)
 	require.NoError(t, err)
 	// A legacy provider binding exercises the real registry/query/confirmation
 	// path without any live provider configuration or transport.
