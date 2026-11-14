@@ -1798,3 +1798,12 @@ describe('explicit upstream channel on account creation', () => {
   expect(w.find('[data-testid="confirm-create-channel"]').exists()).toBe(true)
  })
 })
+
+describe('mature provider import entry', () => {
+  it('offers provider selection for OpenAI API Key and Responses accounts', async () => {
+    const w = mountModal()
+    await selectButtonByText(w, 'OpenAI')
+    await selectButtonByText(w, 'API Key')
+    expect(w.find('[data-testid="provider-import-mode"]').exists(), 'API Key and Responses accounts must offer provider import').toBe(true)
+  })
+})

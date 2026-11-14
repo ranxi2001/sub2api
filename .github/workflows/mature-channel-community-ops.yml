@@ -200,6 +200,22 @@ jobs:
           test "$result" -ne 0
           grep -q 'community operations must be reachable' "$RUNNER_TEMP/mature-ui-evidence/community-red.log"
           ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found' "$RUNNER_TEMP/mature-ui-evidence/community-red.log"
+      - name: RED account import entry before implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=frontend/src/components/account/CreateAccountModal.vue
+          cp "$target" "$RUNNER_TEMP/account-current.vue"
+          trap 'cp "$RUNNER_TEMP/account-current.vue" "$target"' EXIT
+          git show 37dc4620a41a68abaeab329358c15821c41e3f7f:"$target" > "$target"
+          set +e
+          (cd frontend && pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts -t 'mature provider import entry' --maxWorkers=1 --minWorkers=1 --no-file-parallelism) > "$RUNNER_TEMP/mature-ui-evidence/account-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-ui-evidence/account-red.log"
+          test "$result" -ne 0
+          grep -q 'API Key and Responses accounts must offer provider import' "$RUNNER_TEMP/mature-ui-evidence/account-red.log"
+          ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found' "$RUNNER_TEMP/mature-ui-evidence/account-red.log"
       - name: GREEN provider interactions
         working-directory: frontend
         run: pnpm exec vitest run src/views/admin/__tests__/MatureCommunityNav.spec.ts src/views/admin/__tests__/MatureProviders.spec.ts src/views/admin/__tests__/UpstreamChannelOperationsView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
