@@ -35,8 +35,13 @@ func (o *searchTextObserver) observe(kind string, payload object) error {
 			o.state.id = text(response["id"])
 			o.state.model = text(response["model"])
 			if o.state.id != "" {
-				return o.state.emit("response.created", object{"response": object{"id": o.state.id, "model": o.state.model, "status": "in_progress", "output": []any{}}})
+				if err := o.state.emit("response.created", object{"response": object{"id": o.state.id, "model": o.state.model, "status": "in_progress", "output": []any{}}}); err != nil {
+					return err
+				}
 			}
+		}
+		if usage, ok := response["usage"].(object); ok && o.state.id != "" {
+			return o.state.emit("response.in_progress", object{"response": object{"id": o.state.id, "model": o.state.model, "status": "in_progress", "output": []any{}, "usage": addRepairUsage(o.state.usage, usage)}})
 		}
 		return nil
 	}

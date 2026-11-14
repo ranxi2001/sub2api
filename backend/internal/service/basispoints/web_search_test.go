@@ -242,3 +242,38 @@ func TestAlphaSearchResultRejectsUnverifiedAndMalformedResponses(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Sources, 1)
 }
+
+func TestWebSearchHistorySurvivesDisablingSearchNextTurn(t *testing.T) {
+	for _, choice := range []any{nil, "none"} {
+		source := testSource()
+		source["tool_choice"] = choice
+		source["input"] = []any{object{"type": "web_search_call", "id": "old_search", "action": object{"query": "earlier", "sources": []any{object{"url": "https://example.com"}}}}, message("user", "Continue without search")}
+		raw, _ := json.Marshal(source)
+		body, plan, err := NormalizeWebSearchRequest(raw, true, false)
+		require.NoError(t, err)
+		require.Nil(t, plan)
+		require.Contains(t, string(body), "Historical web search metadata")
+		require.Contains(t, string(body), "output_text")
+		_, _, err = Prepare(body, "scope", nil)
+		require.NoError(t, err)
+	}
+}
+
+func TestWebSearchPrivateToolInstructionsAndStructuredAnswer(t *testing.T) {
+	source := searchSource()
+	source["text"] = object{"format": object{"type": "json_object"}}
+	wire, bridge, plan := prepareSearch(t, source, false, nil)
+	var prepared object
+	require.NoError(t, decode(wire, &prepared))
+	input := repairValue[[]any](t, prepared["input"])
+	tail, _ := json.Marshal(input[len(input)-1])
+	require.Contains(t, string(tail), "native run_officejs")
+	require.Contains(t, string(tail), serverSearchTool)
+	stream := bridge.StreamWithSearch(context.Background(), searchRound(0, searchAnswer("commentary", "I will search."), searchCall(0)), wire, plan, func(context.Context, string) (SearchResult, error) { return SearchResult{Results: []object{}}, nil }, func(context.Context, []byte) (io.ReadCloser, error) {
+		return searchRound(1, searchAnswer("final", `{"answer":"done"}`)), nil
+	})
+	events := repairEvents(t, stream)
+	encoded, _ := json.Marshal(events)
+	require.NotContains(t, string(encoded), "I will search.")
+	require.Equal(t, "response.completed", events[len(events)-1]["type"])
+}
