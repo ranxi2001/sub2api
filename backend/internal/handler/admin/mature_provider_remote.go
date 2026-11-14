@@ -359,6 +359,15 @@ func field(data map[string]any, keys ...string) *float64 {
 	return nil
 }
 
+// Balances can be debts. Spend/recharge remain nonnegative, but a signed
+// balance is an observed value and must still participate in low alerts.
+func providerBalanceField(data map[string]any, key string) *float64 {
+	if value, ok := number(data[key]); ok && value > -1e12 && value < 1e12 {
+		return &value
+	}
+	return nil
+}
+
 func divide(value *float64, factor float64) *float64 {
 	if value == nil || factor <= 0 {
 		return nil
@@ -374,14 +383,6 @@ type providerProbe struct {
 	secret string
 	// userID is the account ID that New API reports in /api/user/self.
 	userID string
-}
-
-func probeProvider(ctx context.Context, provider providerRecord, secret string) (providerProbe, error) {
-	client, err := providerSessionHTTPClient()
-	if err != nil {
-		return providerProbe{}, err
-	}
-	return probeProviderAccount(ctx, provider, secret, client)
 }
 
 func probeProviderWithClient(ctx context.Context, provider providerRecord, secret string, client *http.Client) (providerMetrics, error) {
@@ -469,7 +470,7 @@ func probeProviderAccount(ctx context.Context, provider providerRecord, secret s
 			return providerProbe{secret: rotatedSecret}, err
 		}
 		return providerProbe{metrics: providerMetrics{
-			Balance:       field(profile, "balance"),
+			Balance:       providerBalanceField(profile, "balance"),
 			TodaySpend:    field(stats, "today_actual_cost", "today_cost"),
 			TotalRecharge: field(profile, "total_recharged"),
 			TotalSpend:    field(stats, "total_actual_cost", "total_cost"),
@@ -493,7 +494,7 @@ func probeProviderAccount(ctx context.Context, provider providerRecord, secret s
 			return providerProbe{secret: rotatedSecret}, errors.New("the New API quota conversion is unavailable")
 		}
 		metrics := providerMetrics{
-			Balance:    divide(field(profile, "quota"), quotaPerUnit),
+			Balance:    divide(providerBalanceField(profile, "quota"), quotaPerUnit),
 			TotalSpend: divide(field(profile, "used_quota"), quotaPerUnit),
 			Currency:   "USD",
 		}

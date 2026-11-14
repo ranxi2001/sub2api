@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -17,18 +16,12 @@ import (
 
 const (
 	// providerKeyNamePrefix marks keys that this panel creates upstream.
-	providerKeyNamePrefix       = "[Sub2API]"
-	providerKeyBindingExtraKey  = "provider_binding"
-	providerKeyPageSize         = 100
-	providerKeyMaxPages         = 50
-	providerKeyOperationTimeout = 25 * time.Second
-	providerKeyResponseLimit    = 8 << 20
+	providerKeyNamePrefix      = "[Sub2API]"
+	providerKeyBindingExtraKey = "provider_binding"
+	providerKeyPageSize        = 100
+	providerKeyMaxPages        = 50
+	providerKeyResponseLimit   = 8 << 20
 )
-
-// providerSessionHTTPClient builds the DNS-pinned, redirect-free provider
-// client for balance probes and key sessions. Tests replace it to reach a
-// local TLS server.
-var providerSessionHTTPClient = providerHTTPClient
 
 var (
 	errProviderKeyMissing           = errors.New("provider API key no longer exists")
@@ -60,33 +53,6 @@ func (e *providerKeyCreateUncertainError) Error() string {
 
 func (e *providerKeyCreateUncertainError) Unwrap() error { return e.cause }
 
-type providerOptionView struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	SiteType  string     `json:"site_type"`
-	BaseURL   string     `json:"base_url"`
-	Status    string     `json:"status"`
-	State     string     `json:"state"`
-	LastError string     `json:"last_error,omitempty"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-}
-
-// providerImportState is the import picker's view of a provider's last
-// observed connection: connected, sync_failed, pending or not_authenticated.
-// Only not_authenticated keeps the provider from being chosen.
-func providerImportState(record providerRecord) string {
-	switch {
-	case record.Status == "connected":
-		return "connected"
-	case record.Status == "":
-		return "pending"
-	case record.ErrorKind == "auth":
-		return "not_authenticated"
-	default:
-		return "sync_failed"
-	}
-}
-
 type providerKeyView struct {
 	ID              string   `json:"id"`
 	Name            string   `json:"name"`
@@ -109,19 +75,9 @@ type providerGroupView struct {
 	KeyName     string   `json:"key_name"`
 }
 
-type providerKeyCreateInput struct {
-	GroupID string `json:"group_id"`
-}
-
 type providerCreatedKey struct {
 	keyID string
 	name  string
-}
-
-type providerResolvedKey struct {
-	record  providerRecord
-	key     providerKeyView
-	baseURL string
 }
 
 // providerCreateFailure classifies a failed creation request. Only a definite

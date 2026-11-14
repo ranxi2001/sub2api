@@ -43,7 +43,7 @@ const router=createRouter({history:createWebHistory(),routes:[{path:'/:pathMatch
    page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>new URL(route.request().url()).origin==='http://127.0.0.1:4196'?route.continue():route.abort())
    await page.goto('http://127.0.0.1:4196/purchase?lang='+lang,{waitUntil:'networkidle'})
    await page.getByRole('button',{name:/^(¥|￥)?100$/}).first().click()
-   if(!before){await page.locator('#recharge-coupon').selectOption('7');await page.waitForFunction(()=>window.calls.some(c=>c.url==='/payment/coupons/7/quote'));await page.getByText('Example reward coupon',{exact:false}).first().waitFor()}
+   if(!before){await page.locator('#recharge-coupon').selectOption('7');await page.waitForFunction(()=>window.calls.some(c=>c.url==='/payment/coupons/7/quote'));await page.getByTestId('recharge-discount-row').waitFor()}
    for(const [size,width,height] of [['desktop',1440,1000],['mobile',390,844]]){
     await page.setViewportSize({width,height});const file='payment-'+mode+'-'+lang+'-'+size+'.png';await page.screenshot({path:path.join(out,file),fullPage:true});captures.push(file)
     const widths=await page.evaluate(()=>[document.body.scrollWidth,innerWidth]);assert.ok(widths[0]<=widths[1]+2)
