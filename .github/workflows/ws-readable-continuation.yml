@@ -1,0 +1,316 @@
+name: WS readable continuation TDD
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [RED, GREEN, BOTH]
+        default: BOTH
+        description: Five real WS adapters against accepted baseline and production candidate
+  pull_request:
+    paths:
+      - 'backend/internal/handler/openai_409_*'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/service/openai_ws*'
+      - 'backend/internal/service/openai_409_*'
+      - 'backend/internal/service/openai_agent_message*'
+      - '.github/scripts/assert-ws-readable.py'
+      - '.github/scripts/test_assert_ws_readable.py'
+      - '.github/scripts/exclude-later-400-red-fixtures.sh'
+      - '.github/scripts/exclude-later-http2-red-fixtures.sh'
+      - 'backend/internal/service/openai_gateway_passthrough.go'
+      - '.github/scripts/prepare-moderation-red-fixtures.sh'
+      - '.github/workflows/ws-readable-continuation.yml'
+permissions:
+  contents: read
+
+jobs:
+  validator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Evidence self-tests
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s .github/scripts -p 'test_assert_ws_readable.py' -v 2>&1 | tee "$RUNNER_TEMP/ws-validator.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-readable-validator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/ws-validator.log
+          if-no-files-found: error
+  transport:
+    needs: validator
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: ${{ fromJSON(inputs.phase == 'RED' && '["RED"]' || inputs.phase == 'GREEN' && '["GREEN"]' || '["RED","GREEN"]') }}
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASELINE_SHA: 5e83d0b73611a447b425ad5692f883de120da9ed
+      PHASE: ${{ matrix.phase }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Immutable candidate tests and baseline production
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/ws-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/ws-evidence/candidate.txt"
+          git rev-parse "$BASELINE_SHA" > "$RUNNER_TEMP/ws-evidence/baseline.txt"
+          if [ "$PHASE" = RED ]; then
+            git worktree add --detach "$RUNNER_TEMP/ws-red" "$CANDIDATE_SHA"
+            cd "$RUNNER_TEMP/ws-red"
+            while IFS= read -r target; do
+              case "$target" in *_test.go) continue ;; esac
+              if git cat-file -e "$BASELINE_SHA:$target" 2>/dev/null; then
+                git show "$BASELINE_SHA:$target" > "$target"
+                test "$(git hash-object "$target")" = "$(git rev-parse "$BASELINE_SHA:$target")"
+              else
+                rm -- "$target"
+              fi
+            done < <(git diff --no-renames --name-only "$BASELINE_SHA" "$CANDIDATE_SHA" -- 'backend/**/*.go')
+            git diff --exit-code "$BASELINE_SHA" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          fi
+          git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/transport-400-exclusions.txt"
+            bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/transport-moderation-fixtures.txt"
+          fi
+          for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/handler/openai_gateway_handler.go; do
+            git hash-object "$target" >> "$RUNNER_TEMP/ws-evidence/blobs.txt"
+          done
+      - name: Same-client five-adapter actual continuation
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          if [ "$PHASE" = RED ]; then tested_tree="$RUNNER_TEMP/ws-red"; fi
+          set +e
+          (cd "$tested_tree/backend" && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409WSReadableContinuation$' -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/transport.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-evidence/transport.jsonl"
+          python3 .github/scripts/assert-ws-readable.py "$PHASE" "$result" "$RUNNER_TEMP/ws-evidence/transport.jsonl" ws
+      - name: GREEN delivery and eligibility boundaries
+        if: matrix.phase == 'GREEN'
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409WSReadableBoundaries$' -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/boundaries.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-evidence/boundaries.jsonl"
+          python3 .github/scripts/assert-ws-readable.py GREEN "$result" "$RUNNER_TEMP/ws-evidence/boundaries.jsonl" ws-boundaries
+      - name: GREEN typed current-frame admission guards
+        if: ${{ !cancelled() && matrix.phase == 'GREEN' }}
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json ./internal/service -run '^TestOpenAI409WSUnsentTurnBoundary$' -count=1 -timeout=5m) 2>&1 | tee "$RUNNER_TEMP/ws-evidence/unsent-guards.jsonl"
+      - name: Reject actual-wire ambiguous oracle mutations
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409WSAmbiguousOracleMutations$' -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/oracle.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-evidence/oracle.jsonl"
+          python3 .github/scripts/assert-ws-readable.py GREEN "$result" "$RUNNER_TEMP/ws-evidence/oracle.jsonl" ws-oracle
+      - name: Actual transport review counterexamples and repaired candidate
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          baseline=b5892afda5d176cf4ec5c346b07add48f224ab28
+          git rev-parse "$baseline" > "$RUNNER_TEMP/ws-evidence/review-baseline.txt"
+          if [ "$PHASE" = RED ]; then
+            git worktree add --detach "$RUNNER_TEMP/ws-review-red" "$CANDIDATE_SHA"
+            tested_tree="$RUNNER_TEMP/ws-review-red"
+            while IFS= read -r target; do
+              case "$target" in *_test.go) continue ;; esac
+              if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                git show "$baseline:$target" > "$tested_tree/$target"
+                test "$(git hash-object "$tested_tree/$target")" = "$(git rev-parse "$baseline:$target")"
+              else
+                rm -- "$tested_tree/$target"
+              fi
+            done < <(git diff --no-renames --name-only "$baseline" "$CANDIDATE_SHA" -- 'backend/**/*.go')
+            git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          fi
+          git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-400-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/review-400-exclusions.txt"
+            bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
+            bash .github/scripts/prepare-moderation-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/review-moderation-fixtures.txt"
+          fi
+          for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_forwarder_payload.go; do
+            git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/review-blobs.txt"
+          done
+          set +e
+          (cd "$tested_tree/backend" && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409WSReviewRepairs$' -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/review.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-evidence/review.jsonl"
+          python3 .github/scripts/assert-ws-readable.py "$PHASE" "$result" "$RUNNER_TEMP/ws-evidence/review.jsonl" ws-review
+      - name: Residual headers tools and ticket actual transport counterexamples
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          baseline=94bb4a53e9e5057990cd851ab0620d99b116ad41
+          git rev-parse "$baseline" > "$RUNNER_TEMP/ws-evidence/residual-baseline.txt"
+          if [ "$PHASE" = RED ]; then
+            git worktree add --detach "$RUNNER_TEMP/ws-residual-red" "$CANDIDATE_SHA"
+            tested_tree="$RUNNER_TEMP/ws-residual-red"
+            while IFS= read -r target; do
+              case "$target" in *_test.go) continue ;; esac
+              if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                git show "$baseline:$target" > "$tested_tree/$target"
+                test "$(git hash-object "$tested_tree/$target")" = "$(git rev-parse "$baseline:$target")"
+              else
+                rm -- "$tested_tree/$target"
+              fi
+            done < <(git diff --no-renames --name-only "$baseline" "$CANDIDATE_SHA" -- 'backend/**/*.go')
+            git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          fi
+          git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-400-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/residual-400-exclusions.txt"
+            bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
+            bash .github/scripts/prepare-moderation-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/residual-moderation-fixtures.txt"
+            # The service test package also compiles unrelated fixtures added by
+            # newer production. Match their historical APIs in this disposable
+            # RED only; keep every selected 409/ticket test and all GREEN tests.
+            for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go; do
+              candidate_blob=$(git rev-parse "$CANDIDATE_SHA:$target")
+              test "$(git hash-object "$tested_tree/$target")" = "$candidate_blob"
+              if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                expected=$(git rev-parse "$baseline:$target")
+                git show "$baseline:$target" > "$tested_tree/$target"
+                actual=$(git hash-object "$tested_tree/$target")
+                test "$actual" = "$expected"
+                printf 'path=%s baseline=%s candidate=%s candidate_blob=%s expected=%s actual=%s\n' "$target" "$baseline" "$CANDIDATE_SHA" "$candidate_blob" "$expected" "$actual" >> "$RUNNER_TEMP/ws-evidence/residual-service-fixtures.txt"
+              else
+                rm -- "$tested_tree/$target"
+                test ! -e "$tested_tree/$target"
+                printf 'path=%s baseline=%s candidate=%s candidate_blob=%s baseline_blob=absent actual=absent\n' "$target" "$baseline" "$CANDIDATE_SHA" "$candidate_blob" >> "$RUNNER_TEMP/ws-evidence/residual-service-fixtures.txt"
+              fi
+            done
+          fi
+          for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_409_ws_ticket_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_payload.go backend/internal/service/openai_gateway_passthrough.go; do
+            git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/residual-blobs.txt"
+          done
+          # Run both independently even when one oracle fails. Neither a
+          # compilation failure nor a missing diagnostic is accepted as RED.
+          failed=0
+          for suite in ws-residual ws-ticket; do
+            package=handler
+            test_name=TestOpenAI409WSResidualRepairs
+            if [ "$suite" = ws-ticket ]; then package=service; test_name=TestOpenAI409WSTicketBoundEgress; fi
+            set +e
+            (cd "$tested_tree/backend" && go test -race -json -tags=unit "./internal/$package" -run "^$test_name$" -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/$suite.jsonl" 2>&1
+            result=$?
+            set -e
+            cat "$RUNNER_TEMP/ws-evidence/$suite.jsonl"
+            python3 .github/scripts/assert-ws-readable.py "$PHASE" "$result" "$RUNNER_TEMP/ws-evidence/$suite.jsonl" "$suite" || failed=1
+          done
+          test "$failed" = 0
+      - name: Native namespace semantics against ceed and candidate
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          baseline=ceed61d478116dc0ef1ccf5c830bb6bb3d995270
+          git rev-parse "$baseline" > "$RUNNER_TEMP/ws-evidence/native-namespace-baseline.txt"
+          if [ "$PHASE" = RED ]; then
+            git worktree add --detach "$RUNNER_TEMP/ws-native-namespace-red" "$CANDIDATE_SHA"
+            tested_tree="$RUNNER_TEMP/ws-native-namespace-red"
+            while IFS= read -r target; do
+              case "$target" in *_test.go) continue ;; esac
+              if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                git show "$baseline:$target" > "$tested_tree/$target"
+                test "$(git hash-object "$tested_tree/$target")" = "$(git rev-parse "$baseline:$target")"
+              else
+                rm -- "$tested_tree/$target"
+              fi
+            done < <(git diff --no-renames --name-only "$baseline" "$CANDIDATE_SHA" -- 'backend/**/*.go')
+            git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          fi
+          git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          if [ "$PHASE" = RED ]; then
+            bash .github/scripts/exclude-later-400-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/namespace-400-exclusions.txt"
+            bash .github/scripts/prepare-moderation-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/namespace-moderation-fixtures.txt"
+          fi
+          for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_ws_agent_recovery.go; do
+            git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/native-namespace-blobs.txt"
+          done
+          set +e
+          (cd "$tested_tree/backend" && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409WSNativeNamespaceRecovery$' -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/native-namespace.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-evidence/native-namespace.jsonl"
+          python3 .github/scripts/assert-ws-readable.py "$PHASE" "$result" "$RUNNER_TEMP/ws-evidence/native-namespace.jsonl" ws-native-namespace
+      - name: Restored same-client task must pass current audit before B dispatch
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          baseline=112d342e9d1fb1ac5c2796d980eded4d71f646d9
+          target=backend/internal/handler/openai_gateway_handler.go
+          git rev-parse "$baseline" > "$RUNNER_TEMP/ws-evidence/recovered-audit-baseline.txt"
+          if [ "$PHASE" = RED ]; then
+            git worktree add --detach "$RUNNER_TEMP/ws-recovered-audit-red" "$CANDIDATE_SHA"
+            tested_tree="$RUNNER_TEMP/ws-recovered-audit-red"
+            git show "$baseline:$target" > "$tested_tree/$target"
+            test "$(git hash-object "$tested_tree/$target")" = "$(git rev-parse "$baseline:$target")"
+          fi
+          git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
+          for target in backend/internal/handler/openai_gateway_handler.go backend/internal/handler/openai_409_ws_audit_test.go backend/internal/handler/openai_ws_v2_passthrough_cyber_test.go; do
+            printf '%s %s\n' "$target" "$(git hash-object "$tested_tree/$target")" >> "$RUNNER_TEMP/ws-evidence/recovered-audit-blobs.txt"
+          done
+          set +e
+          (cd "$tested_tree/backend" && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409WSRecoveredAudit$' -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/recovered-audit.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-evidence/recovered-audit.jsonl"
+          python3 .github/scripts/assert-ws-readable.py "$PHASE" "$result" "$RUNNER_TEMP/ws-evidence/recovered-audit.jsonl" ws-recovered-audit
+      - name: GREEN restored audit keeps original identity and fresh next-turn policy
+        if: ${{ !cancelled() && matrix.phase == 'GREEN' }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409WSRecoveredAuditNextTurn$' -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/recovered-audit-next.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-evidence/recovered-audit-next.jsonl"
+          python3 .github/scripts/assert-ws-readable.py GREEN "$result" "$RUNNER_TEMP/ws-evidence/recovered-audit-next.jsonl" ws-recovered-audit-next
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-readable-${{ matrix.phase }}-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/ws-evidence/
+          if-no-files-found: error

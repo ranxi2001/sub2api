@@ -135,13 +135,21 @@ func TestOpenAI400OmitHistoryHTTP(t *testing.T) {
 				require.Equal(t, http.StatusOK, first.Code, first.Body.String())
 				owners := issue805Owners(t, clients())
 				require.Len(t, owners, 1)
-				if scenario != "standalone" {
+				if scenario == "after409" {
 					accounts[0].Schedulable = false
 				}
 				answer := issue758Request(t, newNode(scenario != "400_off"), followup)
 				mu.Lock()
 				defer mu.Unlock()
-				if scenario == "400_off" {
+				if scenario == "after409" {
+					// The readable 409 rebuild now converts reasoning as well. B
+					// accepts its first portable payload; there is no 400 to retry.
+					require.Equal(t, http.StatusOK, answer.Code, answer.Body.String())
+					require.Len(t, bodies, 2, "one producer and one readable B continuation")
+					require.NotEqual(t, identities[0], identities[1])
+					require.NotContains(t, string(bodies[1]), "fixture-400-reasoning")
+					require.Contains(t, answer.Body.String(), "continued from readable history")
+				} else if scenario == "400_off" {
 					require.Equal(t, http.StatusBadRequest, answer.Code, answer.Body.String())
 					require.Len(t, bodies, 2, "one producer, one rejected continuation")
 				} else {

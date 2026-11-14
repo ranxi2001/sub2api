@@ -64,6 +64,24 @@ func (r openAIImagesFailoverAccountRepo) accountsForPlatform(platform string) []
 	return out
 }
 
+func (r openAIImagesFailoverAccountRepo) ListModelAvailabilityCandidates(_ context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]service.Account, error) {
+	var out []service.Account
+	for _, platform := range platforms {
+		for _, account := range r.accountsForPlatform(platform) {
+			matches := groupID == nil && (includeGrouped || len(account.GroupIDs) == 0)
+			if groupID != nil {
+				for _, id := range account.GroupIDs {
+					matches = matches || id == *groupID
+				}
+			}
+			if matches {
+				out = append(out, account)
+			}
+		}
+	}
+	return out, nil
+}
+
 type openAIImagesFailoverHTTPUpstream struct {
 	service.HTTPUpstream
 	mu         sync.Mutex

@@ -5,6 +5,7 @@ on:
     branches: [production]
     paths:
       - 'backend/**'
+      - '.github/scripts/prepare-moderation-red-fixtures.sh'
       - '.github/workflows/issue805-owner-policy.yml'
   workflow_dispatch:
 
@@ -70,6 +71,8 @@ jobs:
             fi
           done < <(git diff --no-renames --name-only "$baseline" "$EXPECTED_HEAD_SHA" -- 'backend/**/*.go')
           git diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          git diff --exit-code "$EXPECTED_HEAD_SHA" -- 'backend/**/*_test.go'
+          bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/http2-exclusions.txt"
           # These unrelated context-policy tests require newer production symbols.
           # Use their baseline versions only in this disposable RED checkout so
           # compilation can reach the unchanged Issue805 business assertions.
@@ -80,48 +83,22 @@ jobs:
             echo "$target test=baseline expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
             test "$expected" = "$actual"
           done
-          # These later Beta tests reference settings absent from the old
-          # production baseline. Exclude only these unrelated files in RED;
-          # the clean GREEN checkout and dedicated Beta workflow retain them.
-          for omission_test in backend/internal/handler/openai_409_omit_history_test.go backend/internal/handler/openai_400_omit_history_test.go; do
+          # The later omission fixtures require a Beta setting absent from this
+          # baseline. The readable/task-rebuild fixtures import its settings and
+          # usage helpers. Exclude this exact dependency set only in the old
+          # Issue805 RED; GREEN and each feature's own TDD job retain them.
+          for omission_test in backend/internal/handler/openai_409_omit_history_test.go backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_409_http_rebuild_test.go backend/internal/handler/openai_409_shadow_http_test.go backend/internal/handler/openai_409_shadow_race_test.go backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/handler/openai_400_omit_history_test.go; do
             git cat-file -e "$EXPECTED_HEAD_SHA:$omission_test"
             rm -- "$omission_test"
             test ! -e "$omission_test"
             echo "$omission_test test=candidate-only actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
           done
-          # HTTP2 handler regressions depend on candidate-only unit helpers
-          # removed by the exact production overlay above. They are unrelated
-          # to Issue805 and are omitted only in this disposable old-source RED.
-          omission_test=backend/internal/handler/http2_peer_reset_test.go
-          if git cat-file -e "$EXPECTED_HEAD_SHA:$omission_test" 2>/dev/null; then
-            if git cat-file -e "$baseline:$omission_test" 2>/dev/null; then exit 1; fi
-            candidate=$(git rev-parse "$EXPECTED_HEAD_SHA:$omission_test")
-            rm -- "$omission_test"
-            test ! -e "$omission_test"
-            echo "$omission_test test=candidate-only candidate=$candidate actual=absent reason=unavailable-unit-helpers" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
-          fi
-          # Account-scope tests require production symbols introduced after
-          # this baseline. Keep them in GREEN and their dedicated acceptance;
-          # omit only this unrelated feature from the disposable old-source RED.
-          while IFS= read -r target; do
-            candidate=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
-            rm -- "$target"
-            test ! -e "$target"
-            echo "$target test=candidate-only candidate=$candidate actual=absent reason=moderation-scope-not-in-baseline" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
-          done < <(git ls-files 'backend/internal/handler/moderation_upstream*_test.go')
-          # The shared WS fixture gained an optional moderation repository only
-          # in PR848; its pre-feature version preserves the Issue805 contract.
-          target=backend/internal/handler/openai_ws_v2_passthrough_cyber_test.go
-          fixture_base=4189ed821d6e4308b2f5fc3791b73d2eb53cda8a
-          git fetch --no-tags --depth=1 origin "$fixture_base"
-          git show "$fixture_base:$target" > "$target"
-          expected=$(git rev-parse "$fixture_base:$target")
-          actual=$(git hash-object "$target")
-          test "$expected" = "$actual"
-          echo "$target test=pre-moderation-scope expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+          # The pinned HTTP2 exclusion helper above already handles the handler
+          # fixture absent from this baseline; do not remove it a second time.
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/moderation-fixtures.txt"
           # The selected regression and its shared harness must remain exact
           # candidate blobs. The clean GREEN checkout retains all new tests.
-          for target in backend/internal/handler/openai_issue805_delivery_test.go backend/internal/handler/openai_issue805_owner_policy_test.go backend/internal/handler/openai_issue805_ws_test.go backend/internal/handler/openai_issue715_recovery_test.go; do
+          for target in backend/internal/handler/openai_issue805_delivery_test.go backend/internal/handler/openai_issue805_owner_policy_test.go backend/internal/handler/openai_issue805_ws_test.go backend/internal/handler/openai_issue715_recovery_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do
             expected=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
             actual=$(git hash-object "$target")
             echo "$target test=candidate expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"

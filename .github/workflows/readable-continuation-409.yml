@@ -1,0 +1,131 @@
+name: Readable continuation 409 RED GREEN
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_409_*'
+      - 'backend/internal/service/openai_agent_message_*'
+      - 'backend/internal/service/openai_gateway_forward.go'
+      - 'backend/internal/service/openai_gateway_request_body.go'
+      - 'backend/internal/handler/openai_409_*'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/handler/openai_responses_failover_cancel_test.go'
+      - '.github/scripts/assert-readable-continuation.py'
+      - '.github/scripts/test_assert_readable_continuation.py'
+      - '.github/workflows/readable-continuation-409.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-validator:
+    name: Evidence validator self-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Accept valid evidence and reject injected contamination
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s .github/scripts -p 'test_assert_readable_continuation.py' -v 2>&1 | tee "$RUNNER_TEMP/readable-validator-self-tests.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: readable-validator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/readable-validator-self-tests.log
+          if-no-files-found: error
+  http:
+    name: HTTP ${{ matrix.phase }}
+    needs: evidence-validator
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      # Each job has a disposable independent checkout of the identical head.
+      # RED restores pinned production callers and retains the candidate tests.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Pin candidate and unchanged behavioral test
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD > "$RUNNER_TEMP/readable-$PHASE-provenance.txt"
+          for target in backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do
+            test "$(git hash-object "$target")" = "$(git rev-parse "HEAD:$target")"
+            git rev-parse "HEAD:$target" >> "$RUNNER_TEMP/readable-$PHASE-provenance.txt"
+          done
+      - name: Restore fixed production blob in RED checkout only
+        if: matrix.phase == 'RED'
+        run: |
+          set -euo pipefail
+          baseline=dbed7697aa56e76c6eb48c4914fa441496b67bdd
+          # Restore the matching production callers too: later HTTP rebuild
+          # APIs must not turn the original reasoning RED into a compile error.
+          for target in backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_agent_message_recovery_error.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_codex_transform.go backend/internal/handler/openai_gateway_handler.go; do
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+            git rev-parse "$baseline:$target" >> "$RUNNER_TEMP/readable-RED-provenance.txt"
+          done
+          # Future shadow calls/fields do not exist in this original baseline.
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go; do
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          done
+          ! git cat-file -e "$baseline:backend/internal/service/openai_ws_readable_continuation.go" 2>/dev/null
+          rm -- backend/internal/service/openai_ws_readable_continuation.go
+          # Keep the selected HTTP tests intact and remove only new production.
+          for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go; do
+            ! git cat-file -e "$baseline:$target" 2>/dev/null
+            rm -- "$target"
+          done
+      - name: Same HTTP JSON and SSE behavior in both checkouts
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestOpenAI409ReadableContinuationHTTP$' -count=1 -timeout=5m) > "$RUNNER_TEMP/readable-$PHASE.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/readable-$PHASE.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py "$PHASE" "$result" "$RUNNER_TEMP/readable-$PHASE.jsonl"
+      - name: GREEN omission and delivery safeguards
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OmitOpenAIHistorical|OpenAI409(OmitHistory|Replay|Omission|ReadableReasoning|Rebuild|OAuth)|UpdateSettingsOpenAI409|Issue715(OutputPending|PendingLookup|ObservedPending|HTTPFailedDelivery|HTTPRecoveryKeepsHardRestrictions|HTTPRecoveryCannotBypassLongContext|HTTPPartialOutput))' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/readable-GREEN-safeguards.log"
+          python3 ../.github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/readable-GREEN-safeguards.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: readable-continuation-${{ matrix.phase }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/readable-*
+          if-no-files-found: error

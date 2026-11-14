@@ -61,6 +61,11 @@ func newOpenAIResponsesFailoverTestHandlerWithCache(t *testing.T, upstream servi
 
 func newOpenAIResponsesFailoverTestHandlerWithSettings(t *testing.T, upstream service.HTTPUpstream, cache service.GatewayCache, settings *service.SettingService, fixtureAccounts ...service.Account) *OpenAIGatewayHandler {
 	t.Helper()
+	return newOpenAIResponsesFailoverTestHandlerWithUsage(t, upstream, cache, settings, nil, fixtureAccounts...)
+}
+
+func newOpenAIResponsesFailoverTestHandlerWithUsage(t *testing.T, upstream service.HTTPUpstream, cache service.GatewayCache, settings *service.SettingService, usage service.UsageLogRepository, fixtureAccounts ...service.Account) *OpenAIGatewayHandler {
+	t.Helper()
 	accounts := []service.Account{
 		{
 			ID:          1,
@@ -97,7 +102,7 @@ func newOpenAIResponsesFailoverTestHandlerWithSettings(t *testing.T, upstream se
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
 		nil,
-		nil,
+		usage,
 		nil,
 		nil,
 		nil,
@@ -106,11 +111,11 @@ func newOpenAIResponsesFailoverTestHandlerWithSettings(t *testing.T, upstream se
 		cfg,
 		nil,
 		nil,
-		nil,
+		service.NewBillingService(cfg, nil),
 		nil,
 		nil,
 		upstream,
-		nil,
+		&service.DeferredService{},
 		nil,
 		nil,
 		nil,

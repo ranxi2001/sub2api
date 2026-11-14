@@ -35,6 +35,12 @@ func newGuardEvaluator(scanner PromptScanner, repo JobRepository, metrics Metric
 }
 
 func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapshot PromptSnapshot) (*PromptDecision, error) {
+	return g.evaluate(ctx, cfg, snapshot, true)
+}
+
+// Memory-only async jobs share the scanner bulkheads, but persist through the
+// async completion transaction so the configured penalty hook still runs.
+func (g *GuardEvaluator) evaluate(ctx context.Context, cfg ActiveConfig, snapshot PromptSnapshot, recordBlocking bool) (*PromptDecision, error) {
 	if g == nil || g.scanner == nil {
 		if g != nil && g.metrics != nil {
 			g.metrics.Observe(DecisionUnavailable, 0)
@@ -150,8 +156,9 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 		"latency_ms": aggregated.LatencyMS, "guard_endpoint_id": aggregated.GuardEndpointID, "stage": snapshot.Stage,
 		"status": "completed",
 	}))
-	if g.repo != nil {
-		if _, recordErr := g.repo.RecordBlocking(ctx, snapshot.Redacted(), cfg.ConfigVersion, aggregated, cfg.StorePassEvents); recordErr != nil {
+	if g.repo != nil && recordBlocking {
+		storedResult := promptResultForRetention(snapshot, aggregated)
+		if _, recordErr := g.repo.RecordBlocking(ctx, snapshot.Redacted(), cfg.ConfigVersion, storedResult, cfg.StorePassEvents); recordErr != nil {
 			if g.metrics != nil {
 				g.metrics.IncRecordFailed()
 			}
@@ -176,6 +183,16 @@ func (g *GuardEvaluator) Evaluate(ctx context.Context, cfg ActiveConfig, snapsho
 		}))
 	}
 	return decision, nil
+}
+
+func promptResultForRetention(snapshot PromptSnapshot, result *NormalizedResult) *NormalizedResult {
+	if result == nil || !snapshot.NoBodyRetention {
+		return result
+	}
+	copy := *result
+	copy.ScannerEvidence = nil
+	copy.UnknownCategories = nil
+	return &copy
 }
 
 func logGuardFailure(snapshot PromptSnapshot, cfg ActiveConfig, kind DecisionKind, code, guardEndpointID string, latency time.Duration) {

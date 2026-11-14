@@ -2,9 +2,9 @@ package securityaudit
 
 import (
 	"context"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"time"
 )
 
 const (
@@ -85,6 +85,7 @@ type Request struct {
 	Protocol        string
 	Model           string
 	Body            []byte
+	NoBodyRetention bool
 	Stage           string
 	PenaltyContext  PenaltyRequestContext
 }
@@ -118,12 +119,17 @@ type PromptSnapshot struct {
 	MessageCount       int    `json:"message_count"`
 	Stage              string `json:"stage"`
 
-	PenaltyContext PenaltyRequestContext `json:"penalty_context,omitempty"`
-	ScanText       string                `json:"-"`
+	PenaltyContext  PenaltyRequestContext `json:"penalty_context,omitempty"`
+	ScanText        string                `json:"-"`
+	NoBodyRetention bool                  `json:"no_body_retention,omitempty"`
 }
 
 func (s PromptSnapshot) Redacted() PromptSnapshot {
 	s.ScanText = ""
+	if s.NoBodyRetention {
+		s.FullPrompt = "[Recovered context withheld]"
+		s.RedactedPreview = "[Recovered context withheld]"
+	}
 	return s
 }
 
