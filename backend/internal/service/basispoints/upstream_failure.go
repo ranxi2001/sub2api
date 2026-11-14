@@ -116,7 +116,7 @@ func failureIdentifierStatus(identifier string) int {
 		return http.StatusInternalServerError
 	case "overloaded_error", "service_unavailable":
 		return http.StatusServiceUnavailable
-	case "api_error", "basispoints_upstream_error", "basispoints_upstream_cancelled", "basispoints_protocol_error":
+	case "api_error", "basispoints_upstream_error", "basispoints_upstream_cancelled", "basispoints_protocol_error", "basispoints_search_failed":
 		return http.StatusBadGateway
 	default:
 		return 0
