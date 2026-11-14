@@ -1027,7 +1027,7 @@ export default {
         excelBPSWebSearchAuto: '自动提供搜索工具',
         excelBPSWebSearchAutoDesc: '客户端未声明搜索时也允许模型按任务选择搜索。需先开启联网搜索；尊重禁用工具、必选工具和指定工具。仅缓存搜索不会转为联网搜索。',
         excelBPSIgnoreEncryptedContent: '忽略历史中的加密消息内容',
-        excelBPSIgnoreEncryptedContentDesc: '用过多代理协作的旧 Codex 会话里，子代理的中间消息是只有原生 Codex 能读取的密文，BPS 无法转发，整个会话每轮都会报 encrypted_content 错误。勾选后，转发前把消息和工具结果中的加密内容替换为固定的已省略提示，保留其余文本、消息顺序和工具调用关系，使旧会话可以继续。模型看不到被省略的内容；明文消息（如子代理的最终结论）和推理记录不受影响。',
+        excelBPSIgnoreEncryptedContentDesc: '用过多代理协作的旧 Codex 会话里，子代理的中间消息是只有原生 Codex 能读取的密文，BPS 无法转发，整个会话每轮都会报 encrypted_content 错误。勾选后，转发前把消息和工具结果中的加密内容替换为固定的已省略提示，保留其余文本、消息顺序和工具调用关系，使旧会话可以继续。模型看不到被省略的内容；明文消息（如子代理的最终结论）和推理记录不受影响。当前任务消息或工具结果中的密文不会被省略，需改用原始明文。',
         excelBPSCacheCreationAsInputDesc: '勾选后, BPS 缓存创建 token 计入普通输入并按输入价格计费, 返回下游的缓存创建用量同步归零. 总输入和缓存读取不变, 不影响上游实际缓存.',
         excelBPSDesc: '使用本账号已有的 ChatGPT OAuth 凭据，经 Excel 接口转发 Responses 请求。无需 GitHub 登录或 sidecar；关闭后恢复原 Codex 路径。',
         excelBPSAllModels: '对所有模型启用（兼容原设置）',
