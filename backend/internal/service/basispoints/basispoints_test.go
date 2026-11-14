@@ -71,13 +71,8 @@ func TestPrepareWireShapeAndDeterminism(t *testing.T) {
 	if bridge.RequestedEffort != "max" || bridge.Effort != "xhigh" {
 		t.Fatal("requested and effective effort must remain distinguishable")
 	}
-	management, ok := first["context_management"].([]any)
-	if !ok || len(management) != 1 {
-		t.Fatal("default context compaction contract missing")
-	}
-	entry, _ := management[0].(object)
-	if entry["type"] != "compaction" || fmt.Sprint(entry["compact_threshold"]) != "920000" {
-		t.Fatalf("unexpected default compaction threshold: %+v", entry)
+	if _, exists := first["context_management"]; exists {
+		t.Fatal("absent client compaction policy must not inject a fixed threshold")
 	}
 	for _, field := range []string{"tools", "reasoning", "include", "service_tier", "instructions"} {
 		if _, exists := first[field]; exists {
