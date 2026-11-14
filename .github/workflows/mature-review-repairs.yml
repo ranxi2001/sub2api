@@ -26,7 +26,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: mature-repair-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
           restore-keys: |
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
@@ -42,7 +42,7 @@ jobs:
           sha256sum backend/internal/qqbot/repair_f1_submission_test.go > "$RUNNER_TEMP/repair-f1/test-sha256.txt"
           baseline=b98e6acb2dc772651b6a597d40cce311f96a2ba5
           git fetch --no-tags --depth=1 origin "$baseline"
-          for name in site_chat_retry.go site_chat.go client.go; do
+          for name in site_chat_retry.go site_chat.go client.go config.go service.go types.go price_notifications.go; do
             path="backend/internal/qqbot/$name"
             if [ "$PHASE" = red ]; then
               git show "$baseline:$path" > "$path"
@@ -91,7 +91,7 @@ jobs:
       fail-fast: false
       matrix:
         phase: [red, green]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     services:
       postgres:
@@ -120,7 +120,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: mature-repair-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
           restore-keys: |
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
@@ -191,7 +191,7 @@ jobs:
       fail-fast: false
       matrix:
         phase: [red, green]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     services:
       postgres:
@@ -220,7 +220,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: mature-repair-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
           restore-keys: |
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
@@ -236,7 +236,7 @@ jobs:
           sha256sum backend/internal/qqbot/repair_f3_delivery_integration_test.go > "$RUNNER_TEMP/repair-f3/test-sha256.txt"
           baseline=b98e6acb2dc772651b6a597d40cce311f96a2ba5
           git fetch --no-tags --depth=1 origin "$baseline"
-          for name in client.go config.go service.go; do
+          for name in client.go config.go service.go types.go price_notifications.go site_chat_retry.go site_chat.go; do
             path="backend/internal/qqbot/$name"
             if [ "$PHASE" = red ]; then
               git show "$baseline:$path" > "$path"
