@@ -882,7 +882,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 		item := AccountWithConcurrency{
 			Account:                 accountResponse,
-			ModerationScopeEligible: service.ModerationUpstreamAccountEligible(&acc),
+			ModerationScopeEligible: service.ModerationUpstreamAccountEligible(acc),
 			simpleMode:              h.isSimpleMode(),
 			CurrentConcurrency:      concurrencyCounts[acc.ID],
 			SchedulerScore:          schedulerScores[acc.ID],

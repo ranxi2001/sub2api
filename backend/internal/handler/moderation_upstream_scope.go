@@ -43,9 +43,13 @@ func prepareUpstreamAudit(c *gin.Context, log *zap.Logger, coordinator *security
 		}
 	}
 	cfg, err := legacy.UpstreamModerationConfig(c.Request.Context())
-	state := &upstreamAuditState{request: buildSecurityAuditRequest(c, apiKey, subject, protocol, model, body, stage).Clone(), config: cfg, configErr: err, legacy: legacy, coordinator: coordinator, log: log, turn: turn}
-	if isSecurityAuditWebSocketStage(stage) {
-		state.request.Model = strings.TrimSpace(model)
+	state := &upstreamAuditState{request: securityaudit.Request{Stage: stage}, config: cfg, configErr: err, legacy: legacy, coordinator: coordinator, log: log, turn: turn}
+	// Legacy group-only traffic needs no retained content copy or account gate.
+	if cfg != nil || err != nil {
+		state.request = buildSecurityAuditRequest(c, apiKey, subject, protocol, model, body, stage).Clone()
+		if isSecurityAuditWebSocketStage(stage) {
+			state.request.Model = strings.TrimSpace(model)
+		}
 	}
 	c.Set(upstreamAuditStateKey, state)
 	bindUpstreamAuditGate(c, state)
