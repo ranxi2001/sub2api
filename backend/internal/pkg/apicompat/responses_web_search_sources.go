@@ -27,9 +27,9 @@ type webSearchResult struct {
 }
 
 // webSearchCallResults is the web_search_tool_result content for one call: a
-// search's action.sources, or the single page a completed open_page opened.
-// Sources are decoded entry by entry, so one malformed entry cannot fail the
-// terminal event that carries the call.
+// search's action.sources, or the single page an open_page opened. Callers
+// pass completed calls only. Sources and the page URL are decoded leniently, so
+// a malformed value cannot fail the terminal event that carries the call.
 func webSearchCallResults(item *ResponsesOutput) json.RawMessage {
 	results := []webSearchResult{}
 	if action := item.Action; action != nil {
@@ -42,8 +42,11 @@ func webSearchCallResults(item *ResponsesOutput) json.RawMessage {
 					results = append(results, newWebSearchResult(rawURL))
 				}
 			}
-		} else if action.Type == "open_page" && item.Status == "completed" && action.URL != "" {
-			results = append(results, newWebSearchResult(action.URL))
+		} else if action.Type == "open_page" {
+			var pageURL string
+			if json.Unmarshal(action.URL, &pageURL) == nil && pageURL != "" {
+				results = append(results, newWebSearchResult(pageURL))
+			}
 		}
 	}
 	out, _ := json.Marshal(results)

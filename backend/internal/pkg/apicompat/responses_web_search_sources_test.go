@@ -100,11 +100,31 @@ func TestWebSearchOpenPageReturnsSinglePage(t *testing.T) {
 
 func TestWebSearchOpenPageRequiresCompletedURL(t *testing.T) {
 	for name, item := range map[string]string{
-		"in progress": `{"type":"web_search_call","id":"ws_1","status":"in_progress","action":{"type":"open_page","url":"https://docs.example/page"}}`,
-		"empty url":   `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"open_page","url":""}}`,
+		"empty url": `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"open_page","url":""}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			require.JSONEq(t, `[]`, nonStreamingWebSearchResults(t, item)["srvtoolu_ws_1"])
+		})
+	}
+}
+
+func TestWebSearchNonStringActionURLKeepsEvent(t *testing.T) {
+	for name, url := range map[string]string{"number": `123`, "object": `{"a":1}`, "array": `["a"]`} {
+		t.Run(name, func(t *testing.T) {
+			raw := `{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"open_page","url":` + url + `}}`
+			got := nonStreamingWebSearchResults(t, raw)
+			require.JSONEq(t, `[]`, got["srvtoolu_ws_1"])
+			require.JSONEq(t, `[]`, streamingWebSearchResults(t, raw)["srvtoolu_ws_1"])
+		})
+	}
+}
+
+func TestWebSearchCallsThatDidNotCompleteProduceNoBlocks(t *testing.T) {
+	for _, status := range []string{"failed", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			raw := `{"type":"web_search_call","id":"ws_1","status":"` + status + `","action":{"type":"search","query":"q","sources":[{"url":"https://a.example/1"}]}}`
+			require.Empty(t, nonStreamingWebSearchResults(t, raw))
+			require.Empty(t, streamingWebSearchResults(t, raw))
 		})
 	}
 }
