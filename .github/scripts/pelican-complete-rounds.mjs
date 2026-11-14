@@ -19,6 +19,8 @@ export async function completeScheduledRounds(c) {
   const tables = { account: 'scheduled_test_plans', group: 'pelican_group_test_plans' }
 
   async function accountHistory(label, expected) {
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.goto(`${origin}/admin/accounts`)
     const projections = []
     for (const account of accounts) {
@@ -94,6 +96,8 @@ export async function completeScheduledRounds(c) {
   async function groupHistory(label, expected) {
     const listed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-test-results'
       && response.request().method() === 'GET' && response.status() === 200)
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.goto(`${origin}/admin/pelican-tests`)
     const response = await listed
     const list = unwrap(await response.json())
@@ -271,6 +275,8 @@ export async function completeScheduledRounds(c) {
 
   async function editAccount(mode) {
     state.active_gate = `ui-edit-account-${mode}`
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.goto(`${origin}/admin/accounts`)
     await openAccount(accounts[0])
     await dialog().getByRole('button', { name: 'Scheduled tests', exact: true }).click()
@@ -297,6 +303,8 @@ export async function completeScheduledRounds(c) {
     assert.deepEqual(stored.pelican_config, body.pelican_config)
     await form.waitFor({ state: 'hidden' })
     await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.reload()
     await openAccount(accounts[0])
     const listRead = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/admin/accounts/${accounts[0].id}/scheduled-test-plans`
@@ -322,6 +330,8 @@ export async function completeScheduledRounds(c) {
 
   async function editGroup(mode) {
     state.active_gate = `ui-edit-group-${mode}`
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.goto(`${origin}/admin/pelican-tests`)
     await page.getByTestId(`pelican-plan-edit-${groupPlanId}`).click()
     const form = page.getByTestId('pelican-test-editor')
@@ -347,6 +357,8 @@ export async function completeScheduledRounds(c) {
     await page.waitForLoadState('networkidle')
     const listRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-tests'
       && response.request().method() === 'GET')
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.reload()
     const listResponse = await listRead
     assert.equal(listResponse.status(), 200)

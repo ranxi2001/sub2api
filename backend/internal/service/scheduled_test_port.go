@@ -39,6 +39,7 @@ type PelicanTestConfig struct {
 type ScheduledTestPlan struct {
 	// Populated only from the repository's one-shot manual trigger marker.
 	ManualQualityRun      bool              `json:"-"`
+	ManualQualityRunID    string            `json:"-"`
 	QualityBatchEvaluated bool              `json:"-"`
 	QualityBatchModels    map[string]string `json:"-"`
 	// Request-only: importing configuration preserves this target's ownership.
