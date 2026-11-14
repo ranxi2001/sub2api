@@ -70,7 +70,7 @@ jobs:
               upstream) test_name=TestIssue854UpstreamOwnerRateLimit ;;
               ws-upstream) test_name=TestIssue854WSOwnerRateLimit ;;
               r1) test_name=TestIssue854FreshOwnerSelection ;;
-              http-empty-image) test_name='TestIssue854HTTPTransformMatrix$/.*\/.*\/empty_image' ;;
+              http-empty-image) test_name='TestIssue854HTTPTransformMatrix$/.*/.*/empty_image' ;;
               http-transform) test_name=TestIssue854HTTPTransformMatrix ;;
               http-route) test_name=TestIssue854HTTPRouteAdmission ;;
             esac

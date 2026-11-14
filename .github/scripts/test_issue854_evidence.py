@@ -23,7 +23,7 @@ def transcript(phase, suite="lifecycle"):
 
 class EvidenceTest(unittest.TestCase):
     def test_other_suites(self):
-        for suite in ("persistence", "upstream", "ws-upstream", "r1", "http-transform", "http-route", "http-empty-image"):
+        for suite in ("persistence", "upstream", "ws-upstream", "r1", "http-empty-image"):
             for phase, code in (("RED", 1), ("GREEN", 0)):
                 raw = transcript(phase, suite)
                 gate.validate(phase, code, raw, suite)
@@ -32,6 +32,16 @@ class EvidenceTest(unittest.TestCase):
                         gate.validate(phase, code, raw + "\n" + pollution, suite)
                 with self.assertRaises(ValueError):
                     gate.validate(phase, code, raw.replace('"Action": "run"', '"Action": "skip"', 1), suite)
+
+    def test_updated_policy_matrix_green(self):
+        for suite in ("http-transform", "http-route"):
+            raw = transcript("GREEN", suite)
+            gate.validate("GREEN", 0, raw, suite)
+            for polluted in (raw + "\npanic: fixture", raw + "\n" + raw, ""):
+                with self.assertRaises(ValueError):
+                    gate.validate("GREEN", 0, polluted, suite)
+            with self.assertRaises(ValueError):
+                gate.validate("RED", 1, raw, suite)
 
     def test_valid_and_polluted(self):
         for phase, code in (("RED", 1), ("GREEN", 0)):

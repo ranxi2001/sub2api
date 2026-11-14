@@ -33,12 +33,11 @@ def inventory(suite):
         root = "TestIssue854HTTPTransformMatrix"
         cases = ("metadata", "message_namespace", "tool_namespace", "empty_image", "reasoning_summary", "compaction_order", "timezone_manual", "timezone_auto", "lite", "reserved_alias", "namespace_declaration", "namespace_flatten", "schema_null", "new_task")
         leaves = {f"{root}/{account}/stream={stream}/{case}" for account in ("apikey", "oauth") for stream in ("false", "true") for case in cases}
-        failures = {n for n in leaves if n.rsplit("/", 1)[1] in {"message_namespace", "empty_image", "timezone_manual", "lite", "schema_null"} or ("/apikey/" in n and n.endswith("/tool_namespace")) or ("/oauth/" in n and n.endswith(("/metadata", "/namespace_flatten")))}
-        return leaves, {root}, failures, ("HTTP_REBUILD_B_DISPATCH_MISSING", "encrypted_agent_recovery_wire_changed")
+        return leaves, {root}, set(), ()
     if suite == "http-route":
         root = "TestIssue854HTTPRouteAdmission"
         leaves = {f"{root}/stream={stream}/native_available={available}" for stream in ("false", "true") for available in ("false", "true")}
-        return leaves, {root}, {n for n in leaves if n.endswith("=true")}, ("HTTP_REBUILD_B_DISPATCH_MISSING", "encrypted_agent_recovery_route_changed")
+        return leaves, {root}, set(), ()
     if suite == "postgres":
         root = "TestIssue854PostgresRoundtrip"
         return {f"{root}/{name}" for name in ("ws_guard", "ws_fresh", "sse")}, {root}, set(), ()
@@ -58,6 +57,8 @@ def validate(phase, status, raw, suite="lifecycle"):
     leaves, parents, red_failures, markers = inventory(suite)
     if phase not in ("RED", "GREEN"):
         raise ValueError("invalid phase")
+    if phase == "RED" and suite in ("http-transform", "http-route"):
+        raise ValueError("updated policy matrix is a GREEN gate; use the named empty-image RED and archived original matrix")
     common.check_clean(raw)
     if "requires real redis-server in CI" in raw:
         raise ValueError("fixture setup failure")
