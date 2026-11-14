@@ -111,8 +111,8 @@ export const adminPaymentAPI = {
   },
 
   /** Retry recharge for a failed order */
-  retryRecharge(id: number) {
-    return apiClient.post(`/admin/payment/orders/${id}/retry`)
+  retryRecharge(id: number, confirm = false) {
+    return apiClient.post(`/admin/payment/orders/${id}/retry`, { confirm })
   },
 
   /** Process a refund */

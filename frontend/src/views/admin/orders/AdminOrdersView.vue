@@ -30,7 +30,7 @@
               <Icon name="x" size="sm" />
               {{ t('payment.orders.cancel') }}
             </button>
-            <button v-if="row.status === 'FAILED'" @click="handleRetryOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
+            <button v-if="row.status === 'FAILED' || (row.paid_at && row.coupon?.review_required && ['CANCELLED', 'EXPIRED'].includes(row.status))" @click="handleRetryOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
               <Icon name="refresh" size="sm" />
               {{ t('payment.admin.retry') }}
             </button>
@@ -239,8 +239,9 @@ async function handleCancelOrder(order: PaymentOrder) {
 }
 
 async function handleRetryOrder(order: PaymentOrder) {
-  if (order.coupon?.review_required && !window.confirm(t('coupon.honorConfirm'))) return
-  try { await adminPaymentAPI.retryRecharge(order.id); appStore.showSuccess(t('payment.admin.retrySuccess')); loadOrders() }
+  const confirmedReview = Boolean(order.coupon?.review_required)
+  if (confirmedReview && !window.confirm(t('coupon.honorConfirm'))) return
+  try { await adminPaymentAPI.retryRecharge(order.id, confirmedReview); appStore.showSuccess(t('payment.admin.retrySuccess')); loadOrders() }
   catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
 }
 
