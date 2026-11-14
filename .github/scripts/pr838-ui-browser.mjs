@@ -69,13 +69,16 @@ async function screenshot(name, locator) {
   manifest.screenshots.push({ name, mode, frontend: mode === 'before' ? manifest.baseline : manifest.candidate, backend: manifest.candidate })
 }
 async function login(labels) {
-  await page.goto(origin + '/login?redirect=/admin/accounts')
+  // Complete first-login acknowledgment on the ordinary profile page before
+  // entering administration. The baseline accounts page starts protected API
+  // requests immediately and produces a 423 rejection before acknowledgment.
+  await page.goto(origin + '/login?redirect=/profile')
   await page.locator('#email').fill('reviewer@example.invalid')
   await page.locator('#password').fill('Fixture-Only-838-Password!')
   const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/v1/auth/login' && r.request().method() === 'POST')
   await page.locator('button[type=submit]').click()
   assert.equal((await response).status(), 200)
-  await page.waitForURL(url => url.pathname === '/admin/accounts')
+  await page.waitForURL(url => url.pathname === '/profile')
   // Actual first-login tour and compliance UI; no injected auth/consent state.
   const tour = page.locator('.driver-popover')
   if (await tour.waitFor({ state: 'visible', timeout: 3000 }).then(() => true, () => false)) {
@@ -89,7 +92,10 @@ async function login(labels) {
     await compliance.locator('button.btn-primary').click()
     assert.equal((await accepted).status(), 200); await compliance.waitFor({ state: 'hidden' })
   }
-  await page.reload()
+  await page.goto(origin + '/admin/accounts')
+  if (await tour.waitFor({ state: 'visible', timeout: 3000 }).then(() => true, () => false)) {
+    await page.keyboard.press('Escape'); await tour.waitFor({ state: 'hidden' })
+  }
   await page.getByRole('button', { name: labels.create, exact: true }).waitFor()
 }
 async function api(method, path, body) {
@@ -143,7 +149,7 @@ try {
       manifest.external.push({ origin: url.origin, path: url.pathname }); return route.abort('blockedbyclient')
     })
     page = await context.newPage(); page.setDefaultTimeout(20000)
-    page.on('pageerror', error => manifest.errors.push({ lang, mode, name: error.name, message: error.message }))
+    page.on('pageerror', error => manifest.errors.push({ lang, mode, name: error.name, message: error.message, stack: error.stack, path: new URL(page.url()).pathname }))
     mode = 'before'; await login(labels)
     const legacyName = `PR838 ${lang} legacy529`
     const legacy = await api('POST', '/admin/accounts', { name: legacyName, platform: 'anthropic', type: 'apikey',
