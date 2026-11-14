@@ -23,7 +23,7 @@ def transcript(phase, suite="lifecycle"):
 
 class EvidenceTest(unittest.TestCase):
     def test_other_suites(self):
-        for suite in ("persistence", "upstream", "ws-upstream", "r1"):
+        for suite in ("persistence", "upstream", "ws-upstream", "r1", "http-transform", "http-route", "http-empty-image"):
             for phase, code in (("RED", 1), ("GREEN", 0)):
                 raw = transcript(phase, suite)
                 gate.validate(phase, code, raw, suite)

@@ -25,6 +25,20 @@ def inventory(suite):
         root = "TestIssue854FreshOwnerSelection"
         leaves = {f"{root}/{mode}/{case}" for mode in MODES for case in ("disabled", "cooldown", "off", "pending", "failed", "conflict", "unfinished")}
         return leaves, {root}, {n for n in leaves if n.endswith(("/disabled", "/cooldown"))}, ("ISSUE854_R1_INITIAL_OWNER_REFUSED", "encrypted_agent_recovery_owner_")
+    if suite == "http-empty-image":
+        root = "TestIssue854HTTPTransformMatrix"
+        leaves = {f"{root}/{account}/stream={stream}/empty_image" for account in ("apikey", "oauth") for stream in ("false", "true")}
+        return leaves, {root}, leaves, ("HTTP_REBUILD_B_DISPATCH_MISSING", "encrypted_agent_recovery_wire_changed")
+    if suite == "http-transform":
+        root = "TestIssue854HTTPTransformMatrix"
+        cases = ("metadata", "message_namespace", "tool_namespace", "empty_image", "reasoning_summary", "compaction_order", "timezone_manual", "timezone_auto", "lite", "reserved_alias", "namespace_declaration", "namespace_flatten", "schema_null", "new_task")
+        leaves = {f"{root}/{account}/stream={stream}/{case}" for account in ("apikey", "oauth") for stream in ("false", "true") for case in cases}
+        failures = {n for n in leaves if n.rsplit("/", 1)[1] in {"message_namespace", "empty_image", "timezone_manual", "lite", "schema_null"} or ("/apikey/" in n and n.endswith("/tool_namespace")) or ("/oauth/" in n and n.endswith(("/metadata", "/namespace_flatten")))}
+        return leaves, {root}, failures, ("HTTP_REBUILD_B_DISPATCH_MISSING", "encrypted_agent_recovery_wire_changed")
+    if suite == "http-route":
+        root = "TestIssue854HTTPRouteAdmission"
+        leaves = {f"{root}/stream={stream}/native_available={available}" for stream in ("false", "true") for available in ("false", "true")}
+        return leaves, {root}, {n for n in leaves if n.endswith("=true")}, ("HTTP_REBUILD_B_DISPATCH_MISSING", "encrypted_agent_recovery_route_changed")
     if suite == "postgres":
         root = "TestIssue854PostgresRoundtrip"
         return {f"{root}/{name}" for name in ("ws_guard", "ws_fresh", "sse")}, {root}, set(), ()
