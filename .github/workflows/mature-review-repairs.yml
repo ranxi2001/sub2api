@@ -144,6 +144,12 @@ jobs:
             fi
             git hash-object "$path" >> "$RUNNER_TEMP/repair-f2/production-blobs.txt"
           done
+          if [ "$PHASE" = red ]; then
+            target=backend/internal/handler/admin/payment_handler.go
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+            git hash-object "$target" >> "$RUNNER_TEMP/repair-f2/production-blobs.txt"
+          fi
       - name: PostgreSQL payment recovery oracle
         env:
           PHASE: ${{ matrix.phase }}
@@ -322,6 +328,9 @@ jobs:
           set -o pipefail
           test -z "$(git status --porcelain)"
           (cd frontend && pnpm exec vitest run src/views/admin/orders/__tests__/AdminOrdersView.recoveryReview.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism) 2>&1 | tee "$RUNNER_TEMP/repair-ui/green.log"
+      - name: Actual repaired order review before and after
+        run: |
+          EVIDENCE_DIR="$RUNNER_TEMP/repair-ui/comparison" SUB2API_PLAYWRIGHT_MODULE="$RUNNER_TEMP/repair-browser/node_modules/playwright/index.mjs" node .github/scripts/mature-repair-order-review.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -365,7 +374,7 @@ jobs:
       - name: Pin merged production migrations and runner identity
         run: |
           set -euo pipefail
-          base=aa0b1abfe5b32c483b32c70fe0c813659ef58083
+          base=e90811e27bc442763a496027f935a7bb1fb4396b
           git fetch --no-tags --depth=1 origin "$base"
           git merge-base --is-ancestor "$base" HEAD
           test "$(git rev-parse HEAD:backend/internal/repository/migrations_runner.go)" = "$(git rev-parse "$base:backend/internal/repository/migrations_runner.go")"
