@@ -76,9 +76,16 @@ func (r *scheduledTestPlanRepository) ListDue(ctx context.Context, now time.Time
 }
 
 func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.ScheduledTestPlan) (*service.ScheduledTestPlan, error) {
+	// Configuration saves cannot cancel a newer pending manual run or revive
+	// one already consumed by a claimant. Read its intent from the locked row.
+	// Explicitly pausing/removing quality configuration still cancels it.
 	const query = `
 		UPDATE scheduled_test_plans
-		SET model_id = $2, cron_expression = $3, enabled = $4, max_results = $5, auto_recover = $6, next_run_at = $7, updated_at = NOW(), pelican_config = $8
+		SET model_id = $2, cron_expression = $3, enabled = $4, max_results = $5, auto_recover = $6,
+ next_run_at = CASE WHEN $4 AND $8::jsonb->'quality' IS NOT NULL AND pelican_config->>'_manual_quality_run'='true'
+ THEN next_run_at ELSE $7 END, updated_at = NOW(),
+ pelican_config = CASE WHEN $4 AND $8::jsonb->'quality' IS NOT NULL AND pelican_config->>'_manual_quality_run'='true'
+ THEN $8::jsonb || jsonb_build_object('_manual_quality_run',true,'_manual_quality_run_id',pelican_config->'_manual_quality_run_id') ELSE $8::jsonb END
 		WHERE id = $1 AND COALESCE(pelican_config->'quality'->>'action','') <> 'openai_two_fa_admission'
 		RETURNING id, account_id, model_id, cron_expression, enabled, max_results, auto_recover, last_run_at, next_run_at, created_at, updated_at, pelican_config, running_until
 	`
@@ -330,12 +337,14 @@ func scanPlan(row scannable, withAccountName ...bool) (*service.ScheduledTestPla
 			return nil, err
 		}
 		var internal struct {
-			ManualQualityRun bool `json:"_manual_quality_run"`
+			ManualQualityRun   bool   `json:"_manual_quality_run"`
+			ManualQualityRunID string `json:"_manual_quality_run_id"`
 		}
 		if err := json.Unmarshal(config, &internal); err != nil {
 			return nil, err
 		}
 		p.ManualQualityRun = internal.ManualQualityRun
+		p.ManualQualityRunID = internal.ManualQualityRunID
 	}
 	return p, nil
 }
@@ -374,9 +383,21 @@ func (r *scheduledTestPlanRepository) ClaimPelican(ctx context.Context, plan *se
 	if !locked {
 		return false, nil
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE scheduled_test_plans
- SET running_until = $3, next_run_at = $4, pelican_config = pelican_config - '_manual_quality_run'
+	var manualQualityRun bool
+	var manualQualityRunID string
+	err = tx.QueryRowContext(ctx, `WITH candidate AS (
+ SELECT id AS candidate_id, COALESCE(pelican_config->>'_manual_quality_run','false')='true' AS manual_quality_run,
+ COALESCE(pelican_config->>'_manual_quality_run_id','') AS manual_quality_run_id
+ FROM scheduled_test_plans WHERE id=$1 FOR UPDATE
+ ) UPDATE scheduled_test_plans
+ SET running_until = $3, next_run_at = $4, pelican_config = pelican_config - '_manual_quality_run' - '_manual_quality_run_id'
+ FROM candidate
  WHERE id = $1 AND enabled = true
+ AND id=candidate_id
+ AND manual_quality_run=$9 AND manual_quality_run_id=$10
+ -- A 5xx probe may substitute a different question/configuration. Only the
+ -- scheduled claimant may consume an explicit manual request.
+ AND (NOT $7 OR NOT manual_quality_run)
  AND (next_run_at <= $2 OR ($7 AND pelican_config->'quality'->>'trigger_on_upstream_5xx'='true'))
  AND (NOT $7 OR (pelican_config->'quality'->>'trigger_on_upstream_5xx'='true'
    AND EXISTS (SELECT 1 FROM accounts WHERE accounts.id=account_id AND type='oauth')
@@ -387,28 +408,26 @@ func (r *scheduledTestPlanRepository) ClaimPelican(ctx context.Context, plan *se
  AND (rest.state->>'retest_after')::timestamptz>$2)
  AND EXISTS (SELECT 1 FROM accounts WHERE accounts.id = account_id AND deleted_at IS NULL)
  AND NOT EXISTS (SELECT 1 FROM scheduled_test_plans other WHERE other.account_id = scheduled_test_plans.account_id
- AND other.id <> scheduled_test_plans.id AND other.pelican_config IS NOT NULL AND other.running_until > $2)`, plan.ID, now, until, next, plan.UpdatedAt, plan.NextRunAt, plan.TriggerSource == "upstream_5xx", plan.TriggerObservedAt)
-	if err != nil {
-		return false, err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
+ AND other.id <> scheduled_test_plans.id AND other.pelican_config IS NOT NULL AND other.running_until > $2)
+ RETURNING manual_quality_run,manual_quality_run_id`, plan.ID, now, until, next, plan.UpdatedAt, plan.NextRunAt, plan.TriggerSource == "upstream_5xx", plan.TriggerObservedAt, plan.ManualQualityRun, plan.ManualQualityRunID).Scan(&manualQualityRun, &manualQualityRunID)
+	claimed := err == nil
+	if err != nil && err != sql.ErrNoRows {
 		return false, err
 	}
 	var bpsRecoveryPending bool
-	if n == 1 && plan.PelicanConfig != nil && plan.PelicanConfig.Quality != nil {
+	if claimed && plan.PelicanConfig != nil && plan.PelicanConfig.Quality != nil {
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
  SELECT 1 FROM account_quality_states WHERE plan_id=$1 AND state->>'action'=$2)`,
 			plan.ID, service.QualityActionEnableBPS).Scan(&bpsRecoveryPending); err != nil {
 			return false, err
 		}
 	}
-	if n == 1 && plan.PelicanConfig != nil && plan.PelicanConfig.Quality != nil && plan.PelicanConfig.Quality.Action == service.QualityActionRemoveModel {
+	if claimed && plan.PelicanConfig != nil && plan.PelicanConfig.Quality != nil && plan.PelicanConfig.Quality.Action == service.QualityActionRemoveModel {
 		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT (state->>'quality_5xx_episode')::bigint FROM account_quality_states WHERE plan_id=$1),0)`, plan.ID).Scan(&plan.Quality5xxEpisode); err != nil {
 			return false, err
 		}
 	}
-	if n == 1 && plan.PelicanConfig != nil && plan.PelicanConfig.Quality != nil && plan.PelicanConfig.Quality.OAuth401MaxRounds > 0 {
+	if claimed && plan.PelicanConfig != nil && plan.PelicanConfig.Quality != nil && plan.PelicanConfig.Quality.OAuth401MaxRounds > 0 {
 		if err := claimQualityOAuth401Tx(ctx, tx, plan, until); err != nil {
 			return false, err
 		}
@@ -416,12 +435,18 @@ func (r *scheduledTestPlanRepository) ClaimPelican(ctx context.Context, plan *se
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	if n == 1 && plan.PelicanConfig != nil {
+	if claimed {
+		// The bypass belongs to the marker actually consumed under this lease,
+		// never to an earlier in-memory selection or an input configuration.
+		plan.ManualQualityRun = manualQualityRun
+		plan.ManualQualityRunID = manualQualityRunID
+	}
+	if claimed && plan.PelicanConfig != nil {
 		config := *plan.PelicanConfig
 		config.BPSRecoveryPending = bpsRecoveryPending
 		plan.PelicanConfig = &config
 	}
-	return n == 1, nil
+	return claimed, nil
 }
 
 func (r *scheduledTestPlanRepository) FinishPelican(ctx context.Context, id int64, until, finished time.Time) error {

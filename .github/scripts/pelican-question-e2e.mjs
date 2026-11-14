@@ -226,6 +226,8 @@ async function browser() {
           prompt_mode: input.prompt_mode, pelican_question: input.pelican_question })
       }
     })
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.goto(`${origin}/login?redirect=/admin/accounts`)
     await page.locator('#email').fill('reviewer@example.invalid')
     await page.locator('#password').fill('Fixture-Only-795-Password!')
@@ -256,6 +258,8 @@ async function browser() {
     assert.equal(state.requestFailures.length, 0, 'bootstrap transport must complete')
     state.pageErrors = []
     state.consoleErrors = []
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.reload()
     await page.getByRole('row').filter({ hasText: accounts[0].name }).waitFor()
     assert.ok(await page.locator('link[rel=stylesheet]').count(), 'real application CSS loaded')
@@ -374,6 +378,8 @@ async function browser() {
     state.scenarios.push({ name: stage, status: 'passed', question_repetition_permitted: true })
 
     stage = 'manual-localstorage-reload-history-dom'
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.reload()
     assert.deepEqual((await readRecords(accounts[0]))[0], aRecord)
     assert.deepEqual((await readRecords(accounts[1]))[0], bRecord)
@@ -394,6 +400,8 @@ async function browser() {
     await detail.getByRole('button', { name: 'Close', exact: true }).click()
     await panel.getByRole('button', { name: 'Close', exact: true }).click()
     await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.goto(`${origin}/admin/pelican-tests`)
     await page.getByTestId('pelican-tests-create').click()
     const editor = page.getByTestId('pelican-test-editor')
@@ -424,6 +432,8 @@ async function browser() {
       boundary: 'disabled creation only; no scheduled RunDue, /run or result acceptance claimed' })
 
     stage = 'account-scheduled-ui-create-a-b'
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.goto(`${origin}/admin/accounts`)
     const plans = []
     const planProjection = plan => ({ id: String(plan.id), account_id: String(plan.account_id),
@@ -702,6 +712,8 @@ async function browser() {
     }
 
     stage = 'group-scheduled-ui-enable'
+    // Finish background metrics before deliberate document navigation; keep request failures strict.
+    await page.waitForLoadState('networkidle')
     await page.goto(`${origin}/admin/pelican-tests`)
     const groupPlanId = String(created.id)
     const groupId = groups[0].id

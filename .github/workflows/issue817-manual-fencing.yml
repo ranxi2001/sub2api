@@ -1,0 +1,124 @@
+name: Issue817 manual request fencing
+
+on:
+  push:
+    branches: [fix/issue817-ack-fencing-20261114]
+  pull_request:
+    paths:
+      - 'backend/internal/repository/account_quality.go'
+      - 'backend/internal/repository/scheduled_test_repo.go'
+      - 'backend/internal/repository/quality_manual_fencing_integration_test.go'
+      - 'backend/internal/service/scheduled_test_port.go'
+      - '.github/workflows/issue817-manual-fencing.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue817-manual-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manual-fencing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        behavior: [red, green]
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sub2api_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sub2api_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      SUB2API_TEST_POSTGRES_DSN: 'host=127.0.0.1 port=5432 dbname=sub2api_test user=postgres password=postgres sslmode=disable TimeZone=UTC'
+      SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:6379/0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ matrix.behavior }}
+      - name: Record exact head and isolate baseline sources
+        working-directory: ${{ matrix.behavior }}
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          BEHAVIOR: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/head.txt
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          if [ "$BEHAVIOR" = red ]; then
+            original=4189ed821d6e4308b2f5fc3791b73d2eb53cda8a
+            git fetch --no-tags --depth=1 origin "$original"
+            for source in backend/internal/repository/account_quality.go backend/internal/repository/scheduled_test_repo.go; do
+              git rev-parse "$original:$source" >> evidence/original-blobs.txt
+              git show "$original:$source" > "$source"
+            done
+            git diff --stat > evidence/red-source-diff.txt
+          else
+            git diff --exit-code
+          fi
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ matrix.behavior }}/backend/go.mod
+          cache-dependency-path: ${{ matrix.behavior }}/backend/go.sum
+      - name: Real worker and persisted manual requests with race detection
+        working-directory: ${{ matrix.behavior }}
+        env:
+          CI: 'true'
+          BEHAVIOR: ${{ matrix.behavior }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pattern='^(TestIssue817ManualWorkerInterleaving|TestIssue817ManualUpdateInterleaving)$'
+          required=(TestIssue817ManualWorkerInterleaving TestIssue817ManualUpdateInterleaving)
+          if [ "$BEHAVIOR" = green ]; then
+            required+=(TestIssue817ManualGenerationAndLeaseFencing TestIssue817QuotaSkipPreservesPending5xxExecution TestIssue817QuotaSkipPreserves401AndOwnership TestIssue817QuotaSkipRetainsActualIsolationOwnership TestIssue817ManualTriggerIsOneShotAndLeaseFenced TestQuality5xxClaimKeepsCronAndCoalescesScheduledRun TestQuality5xxFinishConsumesCrossedCronWithoutOverwritingEdits TestQualityRetestRestBlocksEveryClaimUntilDeadline)
+            pattern='^(TestIssue817|TestQuality5xxClaimKeepsCronAndCoalescesScheduledRun|TestQuality5xxFinishConsumesCrossedCronWithoutOverwritingEdits|TestQualityRetestRestBlocksEveryClaimUntilDeadline)'
+          fi
+          set +e
+          bash .github/scripts/issue817-race-gate.sh "$BEHAVIOR" "$PWD" "$pattern" > evidence/manual-fencing.log 2>&1
+          result=$?
+          set -e
+          cat evidence/manual-fencing.log
+          test "$(cat evidence/binary-identity-ok.txt)" = passed
+          if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|segmentation fault|SIGSEGV|\[build failed\]' evidence/manual-fencing.log; then
+            exit 1
+          fi
+          if [ "$BEHAVIOR" = red ]; then
+            test "$result" -eq 1
+            for name in "${required[@]}"; do
+              grep -F -- "--- FAIL: $name (" evidence/manual-fencing.log
+            done
+            grep -F '5xx worker must not consume a pending manual request with substituted configuration' evidence/manual-fencing.log
+            grep -F 'configuration save must preserve the newer pending manual request' evidence/manual-fencing.log
+          else
+            test "$result" -eq 0
+            for name in "${required[@]}"; do
+              grep -F -- "--- PASS: $name (" evidence/manual-fencing.log
+            done
+            for child in never_run previous_completed_run; do
+              grep -F -- "--- PASS: TestIssue817QuotaSkipPreservesPending5xxExecution/$child (" evidence/manual-fencing.log
+            done
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue817-manual-${{ matrix.behavior }}-${{ github.event_name }}-${{ github.run_id }}
+          path: ${{ matrix.behavior }}/evidence/
+          if-no-files-found: error
