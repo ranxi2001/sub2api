@@ -89,12 +89,15 @@
         </div>
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">
-          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.status') }}</div>
+          <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t(detail.type === 'transport_error' ? 'usage.errors.detail.clientHttpStatus' : 'admin.ops.errorDetail.status') }}</div>
           <div class="mt-1">
             <span :class="['inline-flex items-center rounded-lg px-2 py-1 text-xs font-black ring-1 ring-inset shadow-sm', statusClass]">
               {{ detail.status_code }}
             </span>
           </div>
+          <p v-if="detail.type === 'transport_error' && detail.status_code >= 200 && detail.status_code < 300" class="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            {{ t('usage.errors.detail.streamFailedAfterHeaders') }}
+          </p>
         </div>
 
         <div class="rounded-xl bg-gray-50 p-4 dark:bg-dark-900">

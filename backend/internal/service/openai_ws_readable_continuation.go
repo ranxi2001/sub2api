@@ -51,10 +51,21 @@ func OpenAIWSAgentRecoveryBeforeSend(err error) bool {
 	return errors.As(err, &before)
 }
 
+// Losing ownership already observed on this socket is not ordinary account
+// unavailability. It must never become permission to discard that fence.
+type openAIWSLostOwnerEvidenceError struct{ cause error }
+
+func (e *openAIWSLostOwnerEvidenceError) Error() string { return e.cause.Error() }
+func (e *openAIWSLostOwnerEvidenceError) Unwrap() error { return e.cause }
+
 // Called only before the current generation's first physical write. A guard
 // refusal on an internal retry is not proof that earlier work was unsent.
 func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) error {
 	closed := openAIWSAgentRecoveryClose(&openAIWSRecoveryBeforeSendError{cause: err})
+	var lost *openAIWSLostOwnerEvidenceError
+	if errors.As(err, &lost) {
+		return closed
+	}
 	var recovery *OpenAIAgentRecoveryError
 	if turn < 1 || !errors.As(err, &recovery) || !gjson.ValidBytes(body) {
 		return closed

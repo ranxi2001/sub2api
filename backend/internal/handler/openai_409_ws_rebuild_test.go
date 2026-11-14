@@ -338,8 +338,13 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		accounts.mu.Lock()
 		accounts.disableAdmission = 2
 		accounts.mu.Unlock()
-	} else {
+	} else if scenario != "issue854_lost_owner" {
 		accounts.disable(1)
+	}
+	if scenario == "issue854_lost_owner" {
+		for key := range owners {
+			require.NoError(t, probe.Del(context.Background(), key).Err())
+		}
 	}
 	if scenario == "issue854_fresh" || strings.HasPrefix(scenario, "issue854_guard_") {
 		issue600Finish(t, h, headers)
@@ -391,6 +396,17 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
+	if scenario == "issue854_lost_owner" {
+		require.NoError(t, readErr)
+		require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.GetBytes(secondRaw, "error.code").String())
+		require.Equal(t, 1, sends, "loss of previously observed owner evidence must refuse before any generation")
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		a, err := accounts.GetByID(context.Background(), 1)
+		require.NoError(t, err)
+		require.True(t, a.Schedulable, "this refusal must come from owner evidence, not account admission")
+		return
+	}
 	if issue854Failure {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

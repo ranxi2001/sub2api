@@ -89,10 +89,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd backend && go test -race -tags=unit ./internal/handler -run '^Test(OpenAI409(WSReadableBoundaries|WSReviewRepairs|WSResidualRepairs|WSNativeNamespaceRecovery|WSRecoveredAudit|WSRecoveredAuditNextTurn|WSAmbiguousOracleMutations|HTTPTaskRebuild|HTTPRebuildBoundaries|HTTPToolDefinitionOracle)|Issue854HTTPContinuation|Issue805|Issue758WS)' -count=1 -json -timeout=10m) > "$RUNNER_TEMP/issue854-evidence/contracts.jsonl" 2>&1
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^Test(OpenAI409(WSReadableBoundaries|WSReviewRepairs|WSResidualRepairs|WSNativeNamespaceRecovery|WSRecoveredAudit|WSRecoveredAuditNextTurn|WSAmbiguousOracleMutations|HTTPTaskRebuild|HTTPRebuildBoundaries|HTTPToolDefinitionOracle)|Issue854HTTPContinuation|Issue854LostOwnerEvidence|Issue805|Issue758WS)' -count=1 -json -timeout=10m) > "$RUNNER_TEMP/issue854-evidence/contracts.jsonl" 2>&1
           python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue854-evidence/contracts.jsonl"
           python3 .github/scripts/assert-ws-readable.py GREEN 0 "$RUNNER_TEMP/issue854-evidence/contracts.jsonl" ws-boundaries
-          (cd backend && go test -race -tags=unit ./internal/service -run '^Test(OpenAI409WSUnsentTurnBoundary|Issue715WS|OpenAI409WS|OpenAIWS.*(Agent|Replay))' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/service-contracts.jsonl" 2>&1
+          (cd backend && go test -race -tags=unit ./internal/service -run '^Test(Issue854BeforeSendRecoveryGuards|OpenAI409WSUnsentTurnBoundary|Issue715WS|OpenAI409WS|OpenAIWS.*(Agent|Replay))' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/service-contracts.jsonl" 2>&1
           python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue854-evidence/service-contracts.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
@@ -304,6 +304,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Frontend typecheck and critical vitest
         run: make test-frontend
+      - name: Issue854 transport failure presentation
+        if: github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation'
+        run: pnpm --dir frontend exec vitest run src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts src/views/admin/ops/components/__tests__/OpsErrorDetailModal.spec.ts
 
   golangci-lint:
     runs-on: ubuntu-latest

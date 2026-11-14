@@ -253,7 +253,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	for _, key := range r.request.keys {
 		if r.known[key] && !r.request.known[key] {
-			return openAIAgentRecoveryError("owner_unavailable")
+			return &openAIWSLostOwnerEvidenceError{cause: openAIAgentRecoveryError("owner_unavailable")}
 		}
 	}
 	// These call sites have already selected a native Responses socket or

@@ -21,7 +21,13 @@ func (h *OpenAIGatewayHandler) handleOpenAIAgentRecoveryError(c *gin.Context, er
 	if streamStarted || c.GetBool(opsStreamKey) {
 		protocol = "sse"
 	}
-	markOpenAIRecoveryFailure(c, recovery, protocol, "before_dispatch", boolPointer(false))
+	// HTTP forwarders can return a compatibility error after a provider read;
+	// the HTTP handler alone cannot prove an unsent generation.
+	phase := "before_response"
+	if streamStarted || c.Writer.Written() {
+		phase = "forwarding"
+	}
+	markOpenAIRecoveryFailure(c, recovery, protocol, phase, nil)
 	committed := streamStarted || c.Writer.Written()
 	if !committed && !recovery.RetryAt.IsZero() {
 		seconds := max(int64(1), int64((time.Until(recovery.RetryAt)+time.Second-1)/time.Second))

@@ -36,3 +36,9 @@ func TestIssue854HTTPContinuation(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue854LostOwnerEvidence(t *testing.T) {
+	for _, mode := range readableWSModes {
+		t.Run(mode, func(t *testing.T) { runReadableWSContinuation(t, mode, "issue854_lost_owner") })
+	}
+}

@@ -3359,6 +3359,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
+	opsTurnOffset := 0
 	var forbiddenBudget grokForbiddenFailoverBudget
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
@@ -3737,7 +3738,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					moderationLogicalTurn++
 				}
 				c.Set(securityAuditWSTurnContextKey, moderationLogicalTurn)
-				service.BeginOpsStreamTurn(c, turn)
+				service.BeginOpsStreamTurn(c, opsTurnOffset+turn)
 				// 连接级 cyber session gate 也在 BeforeRequest 先执行，使 native 与
 				// passthrough ingress 都能在 BeforeTurn 及上游写入前无副作用地拒绝。
 				// BeforeTurn 中保留同一检查作为防御式兜底。
@@ -4075,6 +4076,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// transport, never the connection's warmup or a failed generation.
 				releaseTurnSlots()
 				if switchCount >= maxAccountSwitches || !service.OpenAIWSIngressCanFailover(ctx, c) {
+					if h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, err, c) {
+						return
+					}
 					closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account eligibility changed; continuation budget exhausted")
 					return
 				}
@@ -4162,6 +4166,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				reqModel, wsRouteModel, wsForwardModel = currentModel, currentRouteModel, currentForwardModel
 				channelMappingWS = mapping
+				opsTurnOffset += turn - 1
 				wsAttemptMessage, previousResponseID, previousResponseCanMove = clean, "", true
 				if !service.OpenAIWSUnsentTurnKeepsAccount(err) {
 					failedAccountIDs[account.ID] = struct{}{}

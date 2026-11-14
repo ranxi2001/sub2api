@@ -114,3 +114,21 @@ it.each(['user', 'upstream'])('explains %s balance failures and preserves diagno
   expect(wrapper.find('pre').text()).toContain('insufficient balance')
   wrapper.unmount()
 })
+
+it('labels HTTP 200 as wire status when the stream failed', async () => {
+  vi.clearAllMocks()
+  mocks.listRequestErrorUpstreamErrors.mockResolvedValue({ items: [] })
+  mocks.getRequestErrorDetail.mockResolvedValue({
+    id: 1, status_code: 200, phase: 'network', type: 'transport_error',
+    message: 'Upstream connection reset', upstream_status_code: null,
+  })
+  const wrapper = shallowMount(OpsErrorDetailModal, {
+    props: { show: true, errorId: 1, errorType: 'request' },
+    global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Icon: true } },
+  })
+  await flushPromises()
+  expect(wrapper.text()).toContain('usage.errors.detail.clientHttpStatus')
+  expect(wrapper.text()).toContain('usage.errors.detail.streamFailedAfterHeaders')
+  expect(wrapper.text()).toContain('200')
+  wrapper.unmount()
+})
