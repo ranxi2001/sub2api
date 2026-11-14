@@ -22,6 +22,7 @@
     </div>
     <div class="space-y-3">
       <div><p class="font-medium">{{ t('qualityOps.bpsOptions') }}</p><p class="text-xs text-gray-500">{{ t('qualityOps.bpsOptionsHint') }}</p></div>
+      <ExcelBPSSearchOptions v-model:enabled="bps.web_search" v-model:automatic="bps.web_search_auto" />
       <div v-for="[key, label] in bpsToggles" :key="key">
         <label class="flex items-center gap-2"><input v-model="bps[key]" type="checkbox" :disabled="key === 'auto_recover_on_403' && !bps.auto_disable_on_403" :data-testid="`quality-bps-${key}`" />{{ t(`admin.accounts.openai.excelBPS${label}`) }}</label>
         <p class="mt-1 pl-6 text-xs text-gray-500">{{ t(`admin.accounts.openai.excelBPS${label}Desc`) }}</p>
@@ -66,6 +67,7 @@
 // 质量运维的规则表单和添加/编辑账号弹窗共用这一份，改一处三处一致。
 import { useI18n } from 'vue-i18n'
 import { MAX_BPS_RECOVERY_INTERVAL_MINUTES } from '@/utils/excelBPSRecovery'
+import ExcelBPSSearchOptions from '@/components/account/ExcelBPSSearchOptions.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QualityBPSRestoreOptions from './QualityBPSRestoreOptions.vue'
 import type { QualityBPSPolicy } from '@/types'
