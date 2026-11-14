@@ -48,7 +48,12 @@ func newRepairF2Fixture(t *testing.T, withCoupon bool, provider string) repairF2
 	require.NoError(t, err)
 	// A legacy provider binding exercises the real registry/query/confirmation
 	// path without any live provider configuration or transport.
-	o, err = s.entClient.PaymentOrder.UpdateOneID(o.ID).SetPaymentType(provider).Save(ctx)
+	// Legacy records do not carry an instance snapshot. Coupon accounting keeps
+	// its currency in recharge_coupon_orders; an incomplete provider snapshot
+	// would be rejected before reaching the recovery boundary being tested.
+	snapshot := o.ProviderSnapshot
+	delete(snapshot, "currency")
+	o, err = s.entClient.PaymentOrder.UpdateOneID(o.ID).SetPaymentType(provider).SetProviderSnapshot(snapshot).Save(ctx)
 	require.NoError(t, err)
 	users := &mockUserRepo{getByIDUser: &User{ID: u.ID}}
 	users.updateBalanceFn = func(ctx context.Context, id int64, amount float64) error {
