@@ -283,7 +283,7 @@ jobs:
           path: ${{ runner.temp }}/repair-f3/
 
   manual-review-ui:
-    runs-on: ubuntu-24.04-arm
+    runs-on: macos-15-intel
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

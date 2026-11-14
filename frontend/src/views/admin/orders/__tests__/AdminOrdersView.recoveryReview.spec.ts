@@ -3,7 +3,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import AdminOrdersView from '../AdminOrdersView.vue'
 
 const api = vi.hoisted(() => ({ getOrders: vi.fn(), retryRecharge: vi.fn() }))
-vi.mock('@/api/admin/payment', () => ({ adminPaymentAPI: api }))
+vi.mock('@/api/admin/payment', () => ({ adminPaymentAPI: api, default: api }))
+vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
+vi.mock('@/components/admin/payment/AdminRefundDialog.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn(), showSuccess: vi.fn() }) }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string) => key }) }))
 
