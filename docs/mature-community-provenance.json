@@ -3247,5 +3247,41 @@
     "target_path": "frontend/src/composables/useQQGroupNames.ts",
     "license": "LGPL-3.0",
     "adaptation": "QQ frontend dependency; fork API integration pending"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/service/payment_coupons.go",
+    "source_blob": "25e87e51e07f72f4f0dce7ac2d3aa4c783f2b4bf",
+    "target_path": "backend/internal/service/payment_coupons.go",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon dependencies; preserve fork provider fee selection and payment state machine; validation pending"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/service/payment_coupons_test.go",
+    "source_blob": "f13a99512b4336afd0c8908eb80b825f8a6f59fe",
+    "target_path": "backend/internal/service/payment_coupons_test.go",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon dependencies; preserve fork provider fee selection and payment state machine; validation pending"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/handler/payment_coupon_handler.go",
+    "source_blob": "2837dafa6cf69b75571c1a846b024bdc11928bd7",
+    "target_path": "backend/internal/handler/payment_coupon_handler.go",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon dependencies; preserve fork provider fee selection and payment state machine; validation pending"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "backend/internal/handler/admin/payment_coupon_handler.go",
+    "source_blob": "1db09f01383149f88ef7d02f0d27ad344b653cb8",
+    "target_path": "backend/internal/handler/admin/payment_coupon_handler.go",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon dependencies; preserve fork provider fee selection and payment state machine; validation pending"
   }
 ]

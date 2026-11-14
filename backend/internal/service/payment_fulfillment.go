@@ -186,6 +186,9 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 }
 
 func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string) error {
+	if orderHasCoupon(o) {
+		return s.confirmCouponOrder(ctx, o, tradeNo, paid, pk)
+	}
 	previousStatus := o.Status
 	now := time.Now()
 	grace := now.Add(-paymentGraceMinutes * time.Minute)
@@ -322,6 +325,14 @@ func (s *PaymentService) ExecuteBalanceFulfillment(ctx context.Context, oid int6
 	}
 	if o.Status != OrderStatusPaid && o.Status != OrderStatusFailed && o.Status != OrderStatusRecharging {
 		return infraerrors.BadRequest("INVALID_STATUS", "order cannot fulfill in status "+o.Status)
+	}
+	if orderHasCoupon(o) {
+		if o.PaidAt == nil {
+			return infraerrors.BadRequest("INVALID_STATUS", "order is not paid")
+		}
+		if review, _ := o.ProviderSnapshot["coupon_review_required"].(bool); review {
+			return infraerrors.Conflict("COUPON_REVIEW_REQUIRED", "Coupon use conflict requires administrator review")
+		}
 	}
 	lease, err := s.acquirePaymentFulfillmentLease(ctx, o)
 	if err != nil {
@@ -1001,6 +1012,35 @@ func (s *PaymentService) RetryFulfillment(ctx context.Context, oid int64) error 
 	}
 	if !isSupportedPaymentOrderType(o.OrderType) {
 		return infraerrors.BadRequest("INVALID_ORDER_TYPE", "unsupported order type")
+	}
+	if review, _ := o.ProviderSnapshot["coupon_review_required"].(bool); review {
+		tx, e := s.entClient.Tx(ctx)
+		if e != nil {
+			return e
+		}
+		defer func() { _ = tx.Rollback() }()
+		// An explicit admin retry honors the original promised benefit.
+		result, e := tx.ExecContext(ctx, `UPDATE payment_orders SET provider_snapshot=provider_snapshot-'coupon_review_required' WHERE id=$1 AND status='FAILED' AND paid_at IS NOT NULL AND provider_snapshot->>'coupon_review_required'='true'`, oid)
+		if e != nil {
+			return e
+		}
+		count, e := result.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if count != 1 {
+			return infraerrors.Conflict("INVALID_STATUS", "order status changed during coupon review")
+		}
+
+		if _, e = tx.ExecContext(ctx, `UPDATE recharge_coupon_orders SET status='honored',used_at=NOW() WHERE order_id=$1 AND status='conflict'`, oid); e != nil {
+			return e
+		}
+		if _, e = tx.ExecContext(ctx, `INSERT INTO payment_audit_logs(order_id,action,operator,detail,created_at) VALUES($1,'COUPON_CONFLICT_HONORED','admin','{"reason":"manual retry approved original coupon benefit"}',NOW())`, fmt.Sprint(oid)); e != nil {
+			return e
+		}
+		if e = tx.Commit(); e != nil {
+			return e
+		}
 	}
 	s.writeAuditLog(ctx, oid, "RECHARGE_RETRY", "admin", map[string]any{"detail": "admin manual retry"})
 	return s.executeFulfillment(ctx, oid)

@@ -234,6 +234,7 @@ func (h *PaymentHandler) GetLimits(c *gin.Context) {
 
 // CreateOrderRequest is the request body for creating a payment order.
 type CreateOrderRequest struct {
+	CouponID          int64   `json:"coupon_id,omitempty"`
 	PaymentSubtype    string  `json:"payment_subtype,omitempty"`
 	Amount            float64 `json:"amount"`
 	PaymentType       string  `json:"payment_type" binding:"required"`
@@ -280,6 +281,7 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 		mobile = *req.IsMobile
 	}
 	result, err := h.paymentService.CreateOrder(c.Request.Context(), service.CreateOrderRequest{
+		CouponID:        req.CouponID,
 		UserID:          subject.UserID,
 		Amount:          req.Amount,
 		PaymentType:     req.PaymentType,

@@ -20,6 +20,7 @@ jobs:
           --health-cmd "pg_isready -U mature"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
+      COUPON_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
       QQBOT_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
       MATURE_TEST_POSTGRES: host=127.0.0.1 port=5432 user=mature password=isolated-test-only dbname=mature sslmode=disable
     steps:
@@ -308,6 +309,7 @@ jobs:
         options: --health-cmd "pg_isready -U mature" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       MATURE_TEST_POSTGRES: host=127.0.0.1 port=5432 user=mature password=isolated-test-only dbname=mature sslmode=disable
+      COUPON_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
       QQBOT_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
     steps:
       - uses: actions/checkout@v6
@@ -327,6 +329,10 @@ jobs:
         if: always()
         working-directory: backend
         run: go test -tags=integration ./internal/qqbot -count=1 -timeout=10m
+      - name: Coupon accounting and isolation regressions
+        if: always()
+        working-directory: backend
+        run: go test -tags=unit ./internal/service -run '^Test(Coupon|QQBot)' -count=1 -v -timeout=10m
       - name: Server build
         if: always()
         working-directory: backend
