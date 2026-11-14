@@ -178,6 +178,9 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 			if plan.Required && !state.completedSearch {
 				return searchRequestError("required_search_missing")
 			}
+			if plan.RequiredAny && !state.completedSearch && clientCalls == 0 {
+				return searchRequestError("required_tool_missing")
+			}
 			state.output = append(state.output, output...)
 			response["output"], response["usage"], response["id"] = state.output, state.usage, state.id
 			if b.structured == nil && bufferText {

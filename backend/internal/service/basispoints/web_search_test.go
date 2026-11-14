@@ -310,3 +310,41 @@ func TestWebSearchPublishesCompletedRoundUsageBeforeCancellation(t *testing.T) {
 	cancel()
 	_ = stream.Close()
 }
+
+func TestWebSearchRequiredAcceptsEitherDeclaredClientOrSearch(t *testing.T) {
+	for _, mode := range []string{"search", "client", "missing"} {
+		t.Run(mode, func(t *testing.T) {
+			source := searchSource()
+			source["tools"] = append(repairValue[[]any](t, source["tools"]), object{"type": "function", "name": "other"})
+			source["tool_choice"] = "required"
+			wire, bridge, plan := prepareSearch(t, source, false, nil)
+			require.True(t, plan.RequiredAny)
+			item := searchCall(0)
+			if mode == "client" {
+				item = repairCall("client", "Call", `{"name":"other","arguments":{}}`)
+			}
+			if mode == "missing" {
+				item = searchAnswer("plain", "No tool")
+			}
+			calls := 0
+			stream := bridge.StreamWithSearch(context.Background(), searchRound(0, item), wire, plan, func(context.Context, string) (SearchResult, error) {
+				calls++
+				return SearchResult{Results: []object{}}, nil
+			}, func(context.Context, []byte) (io.ReadCloser, error) {
+				return searchRound(1, searchAnswer("answer", "Done")), nil
+			})
+			events := repairEvents(t, stream)
+			terminal := events[len(events)-1]["type"]
+			if mode == "missing" {
+				require.Equal(t, "response.failed", terminal)
+			} else {
+				require.Equal(t, "response.completed", terminal)
+			}
+			if mode == "search" {
+				require.Equal(t, 1, calls)
+			} else {
+				require.Zero(t, calls)
+			}
+		})
+	}
+}
