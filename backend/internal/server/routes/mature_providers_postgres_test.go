@@ -24,7 +24,7 @@ import (
 
 // Only existing production constructors are used, including in the RED run.
 // The PostgreSQL fixture is isolated and never uses application configuration.
-func TestMatureProvidersPostgresCRUD(t *testing.T) {
+func matureProviderDatabase(t *testing.T) *sql.DB {
 	dsn := os.Getenv("MATURE_TEST_POSTGRES")
 	require.NotEmpty(t, dsn, "explicit isolated PostgreSQL DSN is required")
 	db, err := sql.Open("postgres", dsn)
@@ -52,6 +52,11 @@ func TestMatureProvidersPostgresCRUD(t *testing.T) {
 			}
 		}
 	}
+	return isolated
+}
+
+func TestMatureProvidersPostgresCRUD(t *testing.T) {
+	isolated := matureProviderDatabase(t)
 	newRouter := func() *gin.Engine {
 		r := gin.New()
 		ch := admin.NewChannelHandler(service.NewChannelService(repository.NewChannelRepository(isolated), nil, nil, nil, nil), nil, nil)
