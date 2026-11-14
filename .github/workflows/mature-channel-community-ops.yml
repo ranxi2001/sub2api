@@ -258,7 +258,7 @@ jobs:
         run: pnpm exec vitest run src/components/admin/qqbot/__tests__ src/views/admin/__tests__/QQBotView.spec.ts src/views/admin/__tests__/QQBotSetup.spec.ts src/views/admin/__tests__/QQBotActivities.spec.ts src/views/admin/__tests__/QQBotRecords.spec.ts src/components/admin/__tests__/QQBotBindings.spec.ts src/components/user/profile/__tests__/ProfileQQBotCard.spec.ts src/views/auth/__tests__/QQBotBindView.spec.ts src/views/auth/__tests__/QQBotTransferView.spec.ts src/api/__tests__/qqbot.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - name: Account import regression
         working-directory: frontend
-        run: pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+        run: pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - name: Coupon reward payment UI regressions
         working-directory: frontend
         run: pnpm exec vitest run src/components/payment/__tests__/RechargeCouponPicker.spec.ts src/views/admin/orders/__tests__/AdminCouponsView.spec.ts src/views/user/__tests__/UserCouponsView.spec.ts src/views/user/__tests__/PaymentView.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
@@ -470,6 +470,30 @@ jobs:
         with:
           name: mature-handler-red-${{ github.sha }}
           path: ${{ runner.temp }}/mature-handler-red.log
+      - name: RED observed debt and unconverted quota currency
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/handler/admin/mature_provider_remote.go
+          cp "$target" "$RUNNER_TEMP/mature-protocol-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-protocol-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 5f96a6f0a94a88322dd5a97b3ee15e235007179b
+          git show 5f96a6f0a94a88322dd5a97b3ee15e235007179b:"$target" > "$target"
+          set +e
+          (cd backend && go test ./internal/handler/admin -run '^TestMatureProvider(NegativeBalanceRemainsObserved|CurrencyDoesNotRelabelQuota)$' -count=1 -v) > "$RUNNER_TEMP/mature-metrics-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-metrics-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-metrics-red.log"
+          grep -q -- '--- FAIL: TestMatureProviderNegativeBalanceRemainsObserved' "$RUNNER_TEMP/mature-metrics-red.log"
+          grep -q -- '--- FAIL: TestMatureProviderCurrencyDoesNotRelabelQuota' "$RUNNER_TEMP/mature-metrics-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-metrics-red-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-metrics-red.log
       - name: Candidate handler assertions
         if: always()
         working-directory: backend
