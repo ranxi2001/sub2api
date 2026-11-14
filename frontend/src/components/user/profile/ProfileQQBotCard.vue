@@ -1,4 +1,5 @@
 <template>
+  <RouterLink to="/coupons" class="text-sm text-primary-600 underline">{{ t('coupon.title') }}</RouterLink>
   <section v-if="state?.enabled || state?.binding" class="card space-y-4 p-6">
     <h2 class="text-lg font-semibold">{{ t('qqbot.bindingTitle') }}</h2>
     <p class="text-sm text-gray-500">{{ t('qqbot.bindingHelp') }}</p>

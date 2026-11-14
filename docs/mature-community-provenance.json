@@ -3283,5 +3283,86 @@
     "target_path": "backend/internal/handler/admin/payment_coupon_handler.go",
     "license": "LGPL-3.0",
     "adaptation": "coupon dependencies; preserve fork provider fee selection and payment state machine; validation pending"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/payment/RechargeCouponPicker.vue",
+    "source_blob": "8bfebce35aec4f56b2de9cc49a31d0cf3e544452",
+    "target_path": "frontend/src/components/payment/RechargeCouponPicker.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/payment/CouponUsageHistory.vue",
+    "source_blob": "f6267c59f218fdddfe9afc5c47465f5725fca67c",
+    "target_path": "frontend/src/components/payment/CouponUsageHistory.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/payment/__tests__/RechargeCouponPicker.spec.ts",
+    "source_blob": "3a52fe2108b347a1db720ea7e08be86dbd7b308c",
+    "target_path": "frontend/src/components/payment/__tests__/RechargeCouponPicker.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/i18n/locales/zh/coupon.ts",
+    "source_blob": "b26d3fcc7149b093404a8197c8a6adb349f8c084",
+    "target_path": "frontend/src/i18n/locales/zh/coupon.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/i18n/locales/en/coupon.ts",
+    "source_blob": "94fa948ddc97234ceffdb2174aa2e693ddc38202",
+    "target_path": "frontend/src/i18n/locales/en/coupon.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/user/UserCouponsView.vue",
+    "source_blob": "b37f580ca4b166a229ef86097aaca76b74c35b49",
+    "target_path": "frontend/src/views/user/UserCouponsView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/user/__tests__/UserCouponsView.spec.ts",
+    "source_blob": "31674b76d8c9d595e6d0f20dbea5a51cfa21c896",
+    "target_path": "frontend/src/views/user/__tests__/UserCouponsView.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/orders/AdminCouponsView.vue",
+    "source_blob": "c214104ae4d634c1543a9b3a09d1a9593439f797",
+    "target_path": "frontend/src/views/admin/orders/AdminCouponsView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/orders/__tests__/AdminCouponsView.spec.ts",
+    "source_blob": "4a70c2bd55487d2990c0056bfd2f900565747416",
+    "target_path": "frontend/src/views/admin/orders/__tests__/AdminCouponsView.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "coupon reward dependency UI; verify fork payment fees"
   }
 ]

@@ -338,19 +338,47 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Candidate business HTTP assertions
         working-directory: backend
-        run: go test -tags=integration ./internal/server/routes -run '^TestMature' -count=1 -v -timeout=5m
+        run: |
+          set -o pipefail
+          go test -tags=integration ./internal/server/routes -run '^TestMature' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/mature-http.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-http-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-http.log
       - name: Candidate handler assertions
         if: always()
         working-directory: backend
-        run: go test ./internal/handler/admin ./internal/handler -run '^Test(Mature|QQBot)' -count=1 -v -timeout=5m
+        run: |
+          set -o pipefail
+          go test ./internal/handler/admin ./internal/handler -run '^Test(Mature|QQBot)' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/mature-handlers.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-handlers-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-handlers.log
       - name: QQ business isolated database
         if: always()
         working-directory: backend
-        run: go test -tags=integration ./internal/qqbot -count=1 -timeout=10m
+        run: |
+          set -o pipefail
+          go test -tags=integration ./internal/qqbot -count=1 -timeout=10m 2>&1 | tee "$RUNNER_TEMP/mature-qqdb.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-qqdb-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-qqdb.log
       - name: Coupon accounting and isolation regressions
         if: always()
         working-directory: backend
-        run: go test -tags=unit ./internal/service -run '^Test(Coupon|QQBot)' -count=1 -v -timeout=10m
+        run: |
+          set -o pipefail
+          go test -tags=unit ./internal/service -run '^Test(Coupon|QQBot)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/mature-coupon.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-coupon-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-coupon.log
       - name: Server build
         if: always()
         working-directory: backend

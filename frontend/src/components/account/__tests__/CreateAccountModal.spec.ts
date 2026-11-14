@@ -1,3 +1,4 @@
+vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template: '<span />' } }))
 vi.mock('@/api/admin/upstreamChannels', () => ({ listUpstreamChannels: vi.fn(), readChannelBindings: vi.fn(), bindChannelAccounts: vi.fn() }))
 import { readChannelBindings, listUpstreamChannels } from '@/api/admin/upstreamChannels'
 import UpstreamChannelSelector from '../UpstreamChannelSelector.vue'

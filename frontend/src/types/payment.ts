@@ -199,6 +199,7 @@ export interface ProviderInstance {
 // ==================== Request / Response ====================
 
 export interface CreateOrderRequest {
+  coupon_id?: number
   amount: number
   payment_type: string
   payment_subtype?: string
