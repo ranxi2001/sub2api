@@ -147,8 +147,10 @@ func logReadableWSDispatchFailure(t *testing.T, h *openAIWSPassthroughHandlerHar
 	var peerClose coderws.CloseError
 	require.ErrorAs(t, clientErr, &peerClose)
 	require.Equal(t, coderws.StatusPolicyViolation, peerClose.Code)
+	require.Eventually(t, func() bool {
+		return h.requestLogs.FilterMessage("openai.websocket_proxy_failed").Len() == 1
+	}, 3*time.Second, 5*time.Millisecond, "expected one actual failed B dispatch")
 	entries := h.requestLogs.FilterMessage("openai.websocket_proxy_failed").All()
-	require.Len(t, entries, 1, "expected one actual failed B dispatch")
 	require.Equal(t, int64(2), entries[0].ContextMap()["account_id"])
 	var reported error
 	for _, field := range entries[0].Context {
