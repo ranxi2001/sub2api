@@ -631,6 +631,13 @@ func (s *AccountOpsService) recheckThreshold(ctx context.Context, e *AccountOpsE
 				}
 			}
 			if e.Phase == "recovery" {
+				if accountOpsProviderID(c, e.AccountID) > 0 {
+					fresh, state := s.assessThresholdGroup(query, group, members, e.Kind, c, time.Now())
+					if state != "resolved" || fresh == nil {
+						return "deferred", nil
+					}
+					e.Details = fresh.Details
+				}
 				return "active", nil
 			}
 			fresh, state := s.assessThresholdGroup(query, group, members, e.Kind, c, time.Now())

@@ -100,3 +100,23 @@ func TestAccountOpsProviderKeepsNativeCurrency(t *testing.T) {
 	require.Nil(t, event)
 	require.Equal(t, "suppressed", state, "do not compare a CNY wallet with a USD threshold")
 }
+
+func TestAccountOpsProviderRecoveryRechecksCurrentWallet(t *testing.T) {
+	now := time.Now()
+	balance := 100.0
+	a := &Account{ID: 1, Type: AccountTypeAPIKey}
+	accounts := &opsProviderAccounts{accountOpsGroupAccounts: accountOpsGroupAccounts{items: map[int64]*Account{1: a}}, providers: []MatureProvider{{ID: 7, Status: "connected", ObservedAt: &now, Metrics: ProviderMetrics{Balance: &balance, Currency: "USD"}}}}
+	svc := NewAccountOpsService(&accountOpsSettingsStub{}, &opsOnceRepoStub{eligible: true}, nil)
+	svc.SetNotificationDependencies(accounts, nil, false, "UTC")
+	cfg := defaultAccountOpsConfig()
+	cfg.Groups = []AccountOpsGroup{{ID: "manual-provider-7", ProviderID: 7, Name: "Shared", AccountIDs: []int64{1}}}
+	cfg.BalanceThresholds = []AccountOpsBalanceRule{{AccountID: 1, Enabled: true, Threshold: 50, Unit: "USD"}}
+	event := &AccountOpsEvent{AccountID: 1, GroupID: "manual-provider-7", Kind: "balance_threshold", Phase: "recovery"}
+	state, err := svc.recheckThreshold(context.Background(), event, cfg)
+	require.NoError(t, err)
+	require.Equal(t, "active", state)
+	accounts.providers = nil
+	state, err = svc.recheckThreshold(context.Background(), event, cfg)
+	require.NoError(t, err)
+	require.Equal(t, "deferred", state, "removed provider must not announce recovery using an old snapshot")
+}
