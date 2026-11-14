@@ -326,3 +326,66 @@ jobs:
         with:
           name: repair-manual-ui-${{ github.sha }}
           path: ${{ runner.temp }}/repair-ui/
+  upgrade:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: repair
+          POSTGRES_PASSWORD: synthetic-fixture-only
+          POSTGRES_DB: repair
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U repair"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MATURE_UPGRADE_DSN: postgres://repair:synthetic-fixture-only@127.0.0.1:5432/repair?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Pin merged production migrations and runner identity
+        run: |
+          set -euo pipefail
+          base=aa0b1abfe5b32c483b32c70fe0c813659ef58083
+          git fetch --no-tags --depth=1 origin "$base"
+          git merge-base --is-ancestor "$base" HEAD
+          test "$(git rev-parse HEAD:backend/internal/repository/migrations_runner.go)" = "$(git rev-parse "$base:backend/internal/repository/migrations_runner.go")"
+          mkdir -p "$RUNNER_TEMP/repair-upgrade/source" "$RUNNER_TEMP/repair-upgrade/evidence"
+          git archive "$base" backend/migrations | tar -x -C "$RUNNER_TEMP/repair-upgrade/source"
+          git rev-parse HEAD "$base" > "$RUNNER_TEMP/repair-upgrade/evidence/identity.txt"
+      - name: Fresh upgrade mixed-version and application rollback compatibility
+        run: |
+          set -euo pipefail
+          export MATURE_PRODUCTION_MIGRATIONS="$RUNNER_TEMP/repair-upgrade/source/backend/migrations"
+          (cd backend && go test ./internal/repository -run '^TestRepairMatureProductionUpgradeAndRollbackBoundary$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/repair-upgrade/evidence/test.jsonl" 2>&1
+          cat "$RUNNER_TEMP/repair-upgrade/evidence/test.jsonl"
+          python3 - <<'PYORACLE'
+          import json, os
+          from pathlib import Path
+          rows=[json.loads(s) for s in (Path(os.environ['RUNNER_TEMP'])/'repair-upgrade/evidence/test.jsonl').read_text().splitlines() if s.startswith('{')]
+          outcomes={r['Test']:r['Action'] for r in rows if r.get('Test') and r['Action'] in ('pass','fail','skip')}
+          assert all(outcomes.get('TestRepairMatureProductionUpgradeAndRollbackBoundary/fresh_'+v)=='pass' for v in ('false','true')),outcomes
+          assert not any(r['Action']=='skip' for r in rows)
+          PYORACLE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-upgrade-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-upgrade/evidence/
