@@ -41,12 +41,12 @@ createApp(RouterView).use(createPinia()).use(router).use(i18n).mount('#app');
     if (id.endsWith('/src/components/layout/AppLayout.vue')) return '<template><main class="mx-auto max-w-7xl p-5"><slot /></main></template>'
   }, configureServer(vite) { vite.middlewares.use((req, res, next) => { if (!req.url?.startsWith('/admin/')) return next(); res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><div id="app"></div><script type="module" src="/.mature-community-preview.js"></script>') }) } }, (vue.default || vue)()], server: { host: '127.0.0.1', port: 4197, strictPort: true }, optimizeDeps: { entries: [], include: ['vue', 'pinia', 'vue-router', 'vue-i18n', 'axios'] } })
   await server.listen(); browser = await chromium.launch({ headless: true })
-  for (const lang of ['zh', 'en']) for (const view of ['overview', 'setup', 'groups']) {
+  for (const lang of ['zh', 'en']) for (const view of ['overview', 'setup', 'groups', 'coupons']) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, timezoneId: 'UTC' })
     page.on('pageerror', e => errors.push(e.message))
     await page.route('**/*', route => new URL(route.request().url()).origin === 'http://127.0.0.1:4197' ? route.continue() : route.abort())
-    await page.goto('http://127.0.0.1:4197/admin/qqbot/' + view + '?lang=' + lang, { waitUntil: 'networkidle' })
-    await page.locator('h1').waitFor()
+    await page.goto('http://127.0.0.1:4197' + (view === 'coupons' ? '/admin/orders/coupons' : '/admin/qqbot/' + view) + '?lang=' + lang, { waitUntil: 'networkidle' })
+    await page.locator('h1,h2').first().waitFor()
     assert.equal(await page.locator('[role="alert"]').count(), 0, await page.locator('body').innerText())
     for (const [size, width, height] of [['desktop', 1440, 1000], ['mobile', 390, 844]]) {
       await page.setViewportSize({ width, height })

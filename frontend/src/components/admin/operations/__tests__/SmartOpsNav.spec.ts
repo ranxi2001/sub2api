@@ -65,6 +65,7 @@ describe('SmartOpsNav', () => {
     useAuthStore().user = { id: 42, role: 'observer' } as User
     const wrapper = await mountAt('/admin/pelican-tests')
     expect(hrefs(wrapper)).not.toContain('/admin/ai-ops')
+    expect(hrefs(wrapper)).not.toContain('/admin/qqbot/overview')
   })
 
   it('keeps the AI notice in the normal nav flow so dismissing it reserves no space', async () => {

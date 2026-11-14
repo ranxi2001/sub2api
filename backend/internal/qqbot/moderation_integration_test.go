@@ -82,6 +82,7 @@ func newModerationHarness(t *testing.T) *moderationHarness {
 	return h
 }
 func (h *moderationHarness) configure(s *Service) {
+	s.http = &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect, Transport: matureFixtureTransport{base: &http.Transport{Proxy: nil}}}
 	s.qqURL = h.server.URL
 	s.tokenURL = h.server.URL + "/token"
 }
