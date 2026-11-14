@@ -257,6 +257,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		logFields = append(logFields, zap.Bool("compat_turn_state_attached", true))
 	}
 	logger.L().Debug("openai messages: model mapping applied", logFields...)
+	if account.Platform == PlatformOpenAI {
+		apicompat.IncludeWebSearchSources(responsesReq)
+	}
 
 	// 4. Marshal Responses request body, then apply the ChatGPT/Codex transform.
 	responsesBody, err := json.Marshal(responsesReq)
