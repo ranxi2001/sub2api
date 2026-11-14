@@ -292,6 +292,12 @@ jobs:
       - uses: actions/setup-node@v6
         with: { node-version: '22' }
       - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Isolated browser and frozen page before evidence
+        run: |
+          git fetch --no-tags --depth=1 origin b98e6acb2dc772651b6a597d40cce311f96a2ba5
+          npm install --prefix "$RUNNER_TEMP/repair-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/repair-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          EVIDENCE_DIR="$RUNNER_TEMP/repair-ui/before" REPAIR_CAPTURE_MODE=before SUB2API_PLAYWRIGHT_MODULE="$RUNNER_TEMP/repair-browser/node_modules/playwright/index.mjs" node .github/scripts/mature-repair-order-review.mjs
       - name: RED actual order page has no approval for paid recovery holds
         run: |
           set -euo pipefail
