@@ -78,8 +78,8 @@ func TestRepairR3ModerationRevocationAfterTokenWait(t *testing.T) {
 					want = 1
 				}
 				require.Equal(t, want, operations.Load(), "R3 committed revocation must prevent old moderation HTTP operation")
-				h.s.runModeration(ctx)
 				if change != "unchanged" {
+					h.s.runModeration(ctx)
 					require.Zero(t, operations.Load(), "R3 revoked operations must not replay")
 				}
 			})
