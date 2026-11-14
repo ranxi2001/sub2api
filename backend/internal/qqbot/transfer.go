@@ -338,6 +338,30 @@ func (s *Service) ConfirmTransfer(ctx context.Context, token string) error {
 	amount, _ := decimal.NewFromString(amountStr)
 	netAmount, _ := decimal.NewFromString(netAmountStr)
 
+	// Lock both participants in stable order before validating either. A
+	// concurrent disable/delete cannot turn a credit into a silent zero-row
+	// update after the sender was debited.
+	participants, err := tx.QueryContext(ctx, `SELECT id FROM users WHERE id IN ($1,$2) ORDER BY id FOR NO KEY UPDATE`, fromUID, toUID)
+	if err != nil {
+		return err
+	}
+	count := 0
+	for participants.Next() {
+		var id int64
+		if err = participants.Scan(&id); err != nil {
+			_ = participants.Close()
+			return err
+		}
+		count++
+	}
+	err = participants.Err()
+	_ = participants.Close()
+	if err != nil {
+		return err
+	}
+	if count != 2 || !expiresAt.After(time.Now()) {
+		return ErrTransferInvalid
+	}
 	// Verify sender's balance under lock (same clock as database).
 	var senderBalanceStr string
 	err = tx.QueryRowContext(ctx,
@@ -354,25 +378,33 @@ func (s *Service) ConfirmTransfer(ctx context.Context, token string) error {
 
 	// Verify recipient still exists.
 	var recipientExists bool
-	_ = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL)`,
 		toUID).Scan(&recipientExists)
+	if err != nil {
+		return err
+	}
 	if !recipientExists {
 		return errors.New("收款方账号不存在，转账已取消。")
 	}
 
-	// Debit sender, credit recipient using exact decimal strings.
-	if _, err = tx.ExecContext(ctx,
-		`UPDATE users SET balance=balance-$1,updated_at=NOW()
-		 WHERE id=$2 AND status='active' AND deleted_at IS NULL`,
-		amount.StringFixed(8), fromUID); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx,
-		`UPDATE users SET balance=balance+$1,updated_at=NOW()
-		 WHERE id=$2 AND status='active' AND deleted_at IS NULL`,
-		netAmount.StringFixed(8), toUID); err != nil {
-		return err
+	// Check both affected-row counts; PostgreSQL triggers may reject a row
+	// without returning a SQL error. Any missing credit rolls everything back.
+	for _, change := range []struct {
+		id     int64
+		amount string
+	}{{fromUID, amount.Neg().StringFixed(8)}, {toUID, netAmount.StringFixed(8)}} {
+		result, e := tx.ExecContext(ctx, `UPDATE users SET balance=balance+$1,updated_at=NOW() WHERE id=$2 AND status='active' AND deleted_at IS NULL`, change.amount, change.id)
+		if e != nil {
+			return e
+		}
+		n, e := result.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if n != 1 {
+			return ErrTransferInvalid
+		}
 	}
 
 	// Receipt and balances commit atomically. No token or token hash enters history.

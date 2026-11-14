@@ -257,6 +257,9 @@ jobs:
       - name: Account import regression
         working-directory: frontend
         run: pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: Coupon reward payment UI regressions
+        working-directory: frontend
+        run: pnpm exec vitest run src/components/payment/__tests__/RechargeCouponPicker.spec.ts src/views/admin/orders/__tests__/AdminCouponsView.spec.ts src/views/user/__tests__/UserCouponsView.spec.ts src/views/user/__tests__/PaymentView.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - name: Frontend production build
         run: pnpm --dir frontend run build
       - uses: actions/upload-artifact@v7
@@ -527,6 +530,12 @@ jobs:
           SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/after-browser/node_modules/playwright/index.mjs
           EVIDENCE_DIR: ${{ runner.temp }}/after-evidence/accounts
         run: node .github/scripts/mature-account-after.mjs
+      - name: QQ actual overview, setup and group management
+        if: always()
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/after-browser/node_modules/playwright/index.mjs
+          EVIDENCE_DIR: ${{ runner.temp }}/after-evidence/community
+        run: node .github/scripts/mature-community-after.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
