@@ -136,6 +136,12 @@ func BindOpenAIRequestTimezone(req *http.Request, proxy string) (*http.Request, 
 	}
 	clone := req.Clone(req.Context())
 	rewriteRequestTimezoneHeaders(clone.Header, name)
+	// A rebuilt/explicitly preserved task already has a verified input and
+	// tools snapshot. Keep that body at the physical transport boundary;
+	// automatic egress timezone still applies to the header metadata.
+	if openAIAgentRecoveryPreservesHistory(req.Context()) {
+		return clone, nil
+	}
 	if req.GetBody == nil || (req.Header.Get("Content-Type") != "" && !strings.HasPrefix(strings.ToLower(req.Header.Get("Content-Type")), "application/json")) {
 		return clone, nil
 	}

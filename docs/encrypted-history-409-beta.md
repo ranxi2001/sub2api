@@ -35,3 +35,11 @@ HTTP 当前轮尚未发送时，原账号的本地 `owner_rate_limited`（429）
 如果后续一般兼容逻辑会删除整个 reasoning 或可读 reasoning.content，仍会拒绝该输入，而不是静默丢弃。此时服务器记录 `openai.encrypted_history_409_refused`、`stage=input_integrity`，不含正文、凭据或密文摘要，客户端错误码保持 `encrypted_agent_recovery_wire_changed`。并非所有历史形态都保证可恢复，未知供应商接受度需另行验证。
 
 CI 使用真实 handler、隔离 Redis 和 localhost HTTP/WebSocket 假上游。五适配器回归保留同一客户端，执行 A 工具请求、管理员停用 A、B 复用已完成结果、后续工具验证和正常 terminal；另有关闭开关、无意图、B 不可用、交付未确认及 B 发送后断线的边界。远程 RED/GREEN 必须逐叶核验且不能含编译、panic、race、skip 污染；当前源码本身不代表这些检查已通过。真实供应商验收需要另行授权的隔离环境、两个受控账号和预算，不能用合成 CI 冒充。
+
+## 重建后的发送表示
+
+HTTP 重建请求会在原始可读快照验证通过后，按目标账号执行有限的 namespace、工具 schema、Lite 和手动时区转换，并在独立请求上下文中固定结果。OAuth 输出专用消息元数据在 OAuth 快照生成前移除；后续兼容处理不得再改变冻结的任务、工具参数或结果。完整性检查失败时，日志记录固定的 `http_projection_source`、`apikey_projection_source`、`oauth_projection_source`、`input_integrity` 或 `controls_integrity` 阶段，不记录内容或摘要。
+
+API Key 账号开启普通透传时，重建请求使用原生 Responses 构造与交付流程；普通请求仍使用透传。其他尚不支持重建的账号路线在选号时排除，避免先选中再本地拒绝。WS 新连接首帧没有会话指针、但已有可读任务和原 owner 时，初次选号发现 owner 不可用也会进入一次有界重建。
+
+重建或显式完整历史保护请求的正文在物理发送前不再按自动出口时区改写，以免验证后更改用户任务；HTTP 时区请求头仍可按出口更新，普通请求的自动时区行为不变。手动时区在 HTTP 重建投影中处理。缺少可读任务、未完成工具或交付不确定时继续停止，不以重新计算最终摘要掩盖变化。

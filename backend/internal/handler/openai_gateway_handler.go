@@ -3367,6 +3367,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	var rpmAdmission openAIRPMAdmission
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	wsAttemptMessage := append([]byte(nil), firstMessage...)
+	initialSelectionCanRebuild := true
 	waitForWSSameAccountRetry := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
 		if !service.OpenAIWSAgentRecoveryCanRetry(ctx) {
 			return false
@@ -3478,6 +3479,23 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			requestPlatform,
 		)
 		if err != nil {
+			// No transport has been invoked on this path. A known owner's
+			// unavailability may only be discovered by initial selection, after
+			// the eager rebuild skipped a single-owner frame without pointers.
+			if initialSelectionCanRebuild && switchCount < maxAccountSwitches && requestPlatform == service.PlatformOpenAI {
+				initialSelectionCanRebuild = false
+				if next, clean, changed, rebuildErr := h.gatewayService.TryRebuildOpenAI409History(ctx, c, wsAttemptMessage, sessionHash, wsForwardModel, err); rebuildErr != nil {
+					err = rebuildErr
+				} else if changed {
+					ctx, firstMessage, wsAttemptMessage, previousResponseID = next, clean, clean, ""
+					previousResponseCanMove = true
+					ctx = service.ResetOpenAIWSReadableProviderSession(ctx, c)
+					c.Request = c.Request.WithContext(ctx)
+					switchCount++
+					reqLog.Info("openai.websocket_initial_readable_continuation", zap.Bool("context_loss", true))
+					continue
+				}
+			}
 			if h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, err) {
 				return
 			}
@@ -4037,6 +4055,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			},
 		}
 
+		initialSelectionCanRebuild = false
 		wsFirstMessage := wsAttemptMessage
 		// 切组/会话失配防护：previous_response_id 未在当前分组命中粘连账号（StickyPreviousHit=false），
 		// 说明该会话链不属于本次调度到的账号，原样转发会触发上游会话链鉴权失败（“鉴权失败，请检查 API Key”）。
