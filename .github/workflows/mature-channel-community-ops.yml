@@ -491,6 +491,10 @@ jobs:
         with:
           name: mature-coupon-${{ github.sha }}
           path: ${{ runner.temp }}/mature-coupon.log
+      - name: Canonical database compatibility and provider import
+        if: always()
+        working-directory: backend
+        run: go test -tags=integration ./internal/repository -run '^TestMatureProviderImportPreservesCanonicalData$' -count=1 -v -timeout=10m
       - name: Server build
         if: always()
         working-directory: backend

@@ -71,3 +71,27 @@
 - [ ] 独立只读 review 由协调者另派；本线程唯一 implementation writer。
 
 本地沿用 `docs/channel-operations.md` 限制；不运行动态 Go、Docker、全量 build/lint/vue-tsc/Wire。不 merge、ready、deploy、release、改生产配置或发送真实消息。
+
+## 当前实现的运行接口（验收状态仍以上表与 PR 精确 head 证据为准）
+
+服务商目录位于 `/admin/channel-operations` 上方，原渠道统计保持可用。`/admin/providers` 支持 GET/POST，`/:id` 支持 GET/PUT/DELETE；PUT/DELETE 必须携带读取时的 revision，DELETE 另需 confirm。字段 `site_type` 为 sub2api/newapi，`auth_mode` 为 token/password；凭据只接收入站，不在读取响应中返回。`/:id/refresh` 是账号资料/消费元数据读取，不是生成测试。上游需要验证码/两步验证时显示具体登录状态，不尝试绕过。
+
+`refresh_interval_seconds=0` 默认禁止后台刷新。显式设置 30～86400 秒后，由具有后台任务职责的实例按 SQL 原子 claim 执行；同一服务商的会话与 refresh token 更新受数据库行锁保护。低余额阈值采用读数来源币种；未知值不作零值或恢复。低余额事件保存于 `mature_provider_alerts`，反复低样本更新同一未结束 episode，不发送外部消息。更新后的登录凭据使用现有固定 AES-GCM 密钥；换站点/账号/认证类型不会继承旧登录。刷新令牌轮换与读数更新在会话锁内持久化。
+
+新增 API Key/Responses 账号时可切换“手动填写/从服务商导入”。`/:id/keys` 和 `/:id/groups` 只返回密钥/分组元数据；创建账号时由服务器读取完整 key 并写入原 canonical 账号创建流程。导入要求完整管理员权限，不对 observer 或 scoped key 开放。原价格、分组、成本、上游渠道绑定、计费行为保留。导入流程不自动启动模型探测。
+
+创建远端 key 使用 `POST /admin/providers/:id/keys`，必须携带 group_id、revision、confirm=true 和 Idempotency-Key。服务端先提交持久 operation 记录，再发送远端创建；成功和失败结果持久重放。进程中断或未知结果不能重发同一操作，管理员需先刷新上游 key 列表核对。token/group/key API 使用校验后的公网 IP 建连，禁止重定向和环境代理。完整凭据不进入上述列表响应、审计附加数据或公开错误文本。
+
+QQ 管理入口 `/admin/qqbot/overview`；配置、快速接入、群管理、活动奖励、绑定、记录保留固定来源页面和旧地址跳转。用户资料页提供绑定卡；公开确认页 `/qqbot/bind`、`/qqbot/transfer`，实际后端确认 API 使用有期 token。回调 `/api/v1/qqbot/webhook` 限制 2MiB、验证 AppID、签名和时间窗；challenge 只签合法短 token。业务消息、活动、通知均由持久队列与来源配置门禁控制，新安装默认关闭。管理 UI 的模型能力测试须用户显式确认，服务器也检查确认字段。本任务所有外部请求与财务副作用只用隔离 fixtures/mock 验证。
+
+QQ 外部模型/平台请求使用禁止 private/特殊用途地址、DNS 固定到 socket、禁止重定向/环境代理的 transport。本系统内部 AI 仅使用服务器接线提供的固定 loopback origin，并验证当前配置的独立聊天/图片专用 key 身份；任意用户输入的内网 URL 没有该例外。图片下载同样校验目标地址及大小。来源中聊天/图片独立 key、群成员上下文、通知、签到、邀请、抽奖、成长、排行、转账和优惠券功能继续适配，未验收项不能用开关隐藏后视为完成。
+
+优惠券管理 `/admin/orders/coupons` 与用户 `/coupons` 使用来源固定规则快照；充值选择器沿用本 fork 的支付方式/实例费率范围，优惠调整付款基数和到账额，不覆盖现有费率策略。预留/取消释放/付款消费都有数据库事务；付款后优惠券冲突保留已收款事实并进入管理员审核，不能静默少到账。退款不重新发券，成长/签到的赠额不算有效充值，也不触发充值返利。
+
+## 升级、回滚与证据边界
+
+迁移 345～348 是独立服务商表；350～378 为 QQ/coupon 依赖的新编号迁移，来源旧迁移编号映射记录在逐文件 provenance。未覆盖本 fork 已有迁移。原 `account_ops_notifications_v1`、账号机器人 webhook、canonical channels/upstream_channels/accounts/account_groups、账单、价格和权限数据保持原接口。
+
+应用回退到冻结基线会忽略新表和独立 settings；不能自动撤销回退前已明确执行的远端 key 创建、奖励、转账或优惠券消费。数据清理必须单独迁移；不在此 PR 附可误执行的 DROP/DOWN。现有固定加密密钥不可更换，否则新旧加密凭据都可能失效。本 PR 不包含部署、生产配置修改、merge、ready 或 release。
+
+before/after 图只使用真实 Vue 组件与合成数据，不能代表生产验证或完整端到端验收。图片存 artifact，不提交 PNG 源码。原生 PR 附件上传与下载 hash、独立只读审查、精确最终 head 全 CI 和完整数据库兼容回归仍是交付门禁，未有证据时保持未勾选。
