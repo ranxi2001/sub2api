@@ -18,6 +18,7 @@ func ProvideQQBotService(db *sql.DB, encryptor SecretEncryptor, cfg *config.Conf
 		}
 	})
 	s.SetBindingEmailDelivery(&qqBotBindingEmail{email: email, settings: settings, users: users})
+	s.SetManagedSiteOrigin(qqBotInternalBaseURL(cfg.Server.Port))
 	status := &qqBotChannelStatus{monitor: monitor, settings: settings, groups: groups}
 	s.SetChannelStatusProvider(status)
 	s.SetHealthSnapshotProvider(status)

@@ -86,6 +86,8 @@ type MatureProviderRepository interface {
 	UpdateMatureProvider(context.Context, int64, MatureProviderInput) (*MatureProvider, error)
 	DeleteMatureProvider(context.Context, int64, int64) error
 	WithMatureProviderSession(context.Context, int64, int64, func(*MatureProvider, string) (ProviderSessionUpdate, error)) (*MatureProvider, error)
+	ReserveMatureProviderKey(context.Context, int64, string, string) (bool, int, []byte, error)
+	CompleteMatureProviderKey(context.Context, int64, string, string, int, []byte) error
 }
 
 type ProviderSessionUpdate struct {

@@ -18,6 +18,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -410,6 +411,15 @@ func imageResult(ctx context.Context, raw []byte) ([]byte, error) {
 func publicIP(ip net.IP) bool {
 	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
 		return false
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	for _, prefix := range botBlockedPrefixes {
+		if prefix.Contains(addr.Unmap()) {
+			return false
+		}
 	}
 	v4 := ip.To4()
 	return v4 == nil || v4[0] != 100 || v4[1] < 64 || v4[1] > 127

@@ -72,11 +72,29 @@ jobs:
           ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/credentials-red.log"
           grep -q -- '--- FAIL: TestMatureProvidersCredentialsAndMetadata' "$RUNNER_TEMP/mature-evidence/credentials-red.log"
           grep -q 'actual  : 400' "$RUNNER_TEMP/mature-evidence/credentials-red.log"
+      - name: RED account import conflict against frozen production
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp backend/internal/handler/admin/mature_provider_import_test.go "$RUNNER_TEMP/mature-red/backend/internal/handler/admin/"
+          cd "$RUNNER_TEMP/mature-red/backend"
+          set +e
+          go test ./internal/handler/admin -run '^TestMatureProviderImportRejectsMixedManualCredential$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/import-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-evidence/import-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/import-red.log"
+          grep -q 'actual  : 200' "$RUNNER_TEMP/mature-evidence/import-red.log"
       - name: Candidate HTTP contract
         working-directory: backend
         run: |
           set -o pipefail
           go test -tags=integration ./internal/server/routes -run '^TestMature' -count=1 -v 2>&1 | tee "$RUNNER_TEMP/mature-evidence/green.log"
+      - name: Candidate account import and QQ confirmation boundaries
+        if: always()
+        working-directory: backend
+        run: go test ./internal/handler/admin ./internal/handler -run '^TestMature' -count=1 -v
       - name: QQ source business unit regressions
         if: always()
         working-directory: backend

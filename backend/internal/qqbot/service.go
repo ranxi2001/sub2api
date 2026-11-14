@@ -17,6 +17,7 @@ import (
 )
 
 type Service struct {
+	managedSiteBase       string
 	siteAI                SiteAIProvider
 	db                    *sql.DB
 	encryptor             Encryptor
@@ -48,7 +49,9 @@ func New(db *sql.DB, encryptor Encryptor, ready bool, invalidate func(context.Co
 	if invalidate == nil {
 		invalidate = func(context.Context, int64) {}
 	}
-	return &Service{db: db, encryptor: encryptor, encryptionReady: ready, invalidate: invalidate, priceWake: make(chan struct{}, 1), tokenGate: make(chan struct{}, 1), http: &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect}, imageDownload: downloadImage, tokenURL: "https://bots.qq.com/app/getAppAccessToken", qqURL: "https://api.sgroup.qq.com"}
+	s := &Service{db: db, encryptor: encryptor, encryptionReady: ready, invalidate: invalidate, priceWake: make(chan struct{}, 1), tokenGate: make(chan struct{}, 1), imageDownload: downloadImage, tokenURL: "https://bots.qq.com/app/getAppAccessToken", qqURL: "https://api.sgroup.qq.com"}
+	s.http = newBotHTTPClient(s)
+	return s
 }
 func (s *Service) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,6 +97,7 @@ func (s *Service) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
+	s.http.CloseIdleConnections()
 }
 func (s *Service) maintenance(ctx context.Context) {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM qq_bot_pending_image_plans WHERE expires_at<NOW() OR EXISTS(SELECT 1 FROM qq_bot_jobs j WHERE j.id=job_id AND j.status NOT IN ('running','completed'))`)
