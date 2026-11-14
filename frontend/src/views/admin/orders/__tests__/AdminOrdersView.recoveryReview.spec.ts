@@ -42,7 +42,7 @@ describe('coupon recovery manual review', () => {
     await w.get('[data-order="11"]').findAll('button').find(b => b.text() === 'payment.admin.retry')!.trigger('click')
     await flushPromises()
     expect(api.retryRecharge).toHaveBeenCalledTimes(1)
-    expect(api.retryRecharge).toHaveBeenCalledWith(11)
+    expect(api.retryRecharge).toHaveBeenCalledWith(11, true)
     w.unmount()
   })
 })
