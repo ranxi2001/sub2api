@@ -182,6 +182,17 @@ func TestRepairF2ProviderRecoveryWindowsApplyToCoupons(t *testing.T) {
 							item, err := coupon.ReadOwned(ctx, f.s.entClient, f.couponID, f.o.UserID, false)
 							require.NoError(t, err)
 							require.Equal(t, "available", item.Status)
+							// Repeated provider delivery must remain on hold; only the
+							// existing explicit administrator action can honor it.
+							require.NoError(t, f.s.confirmPayment(ctx, f.o.ID, "repair-f2-late-trade", f.o.PayAmount, provider, nil))
+							require.Zero(t, f.s.entClient.User.GetX(ctx, f.o.UserID).Balance)
+							require.NoError(t, f.s.RetryFulfillment(ctx, f.o.ID))
+							require.Equal(t, OrderStatusCompleted, f.s.entClient.PaymentOrder.GetX(ctx, f.o.ID).Status)
+							require.Equal(t, 100.0, f.s.entClient.User.GetX(ctx, f.o.UserID).Balance)
+							require.Error(t, f.s.RetryFulfillment(ctx, f.o.ID))
+							item, err = coupon.ReadOwned(ctx, f.s.entClient, f.couponID, f.o.UserID, false)
+							require.NoError(t, err)
+							require.Equal(t, "used", item.Status, "F2 manual approval cannot leave the coupon reusable")
 						}
 					} else {
 						require.Equal(t, OrderStatusCompleted, current.Status, "F2 eligible provider recovery must remain available")
