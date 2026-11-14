@@ -195,6 +195,13 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		account := selection.Account
+		if identity.BeforeGeneration != nil {
+			if err := identity.BeforeGeneration(ctx, account); err != nil {
+				selection.ReleaseFunc()
+				releaseJoint()
+				return nil, err
+			}
+		}
 		if joint.leaseID == "" {
 			leaseID := generateRequestID()
 			acquireCtx, cancelAcquire := context.WithTimeout(ctx, liveRedisOperationTimeout)

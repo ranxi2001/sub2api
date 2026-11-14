@@ -405,3 +405,26 @@ func TestAccountHandlerListSchedulerScoreIgnoresPagination(t *testing.T) {
 	require.Less(t, payload.Data.Items[0].SchedulerScore.BaseScore, 3.75)
 	require.Empty(t, payload.Data.Items[0].SchedulerScores)
 }
+
+func TestModerationUpstreamAccountCatalogEligibility(t *testing.T) {
+	router, adminSvc := setupAccountListRouter()
+	adminSvc.accounts = []service.Account{
+		{ID: 801, Name: "Vertex fixture", Platform: service.PlatformAnthropic, Type: service.AccountTypeServiceAccount, Credentials: map[string]any{}},
+		{ID: 802, Name: "Unsupported fixture", Platform: service.PlatformTypeSafe, Type: service.AccountTypeOAuth, Credentials: map[string]any{}},
+	}
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts?lite=1", nil))
+	require.Equal(t, 200, w.Code)
+	var got struct {
+		Data struct {
+			Items []struct {
+				ID       int64 `json:"id"`
+				Eligible bool  `json:"moderation_scope_eligible"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got.Data.Items, 2)
+	require.True(t, got.Data.Items[0].Eligible)
+	require.False(t, got.Data.Items[1].Eligible)
+}

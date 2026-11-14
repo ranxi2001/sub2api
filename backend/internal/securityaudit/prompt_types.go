@@ -3,6 +3,8 @@ package securityaudit
 import (
 	"context"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 const (
@@ -67,6 +69,9 @@ const (
 )
 
 type Request struct {
+	UpstreamAccount *service.Account
+	UpstreamConfig  *service.ContentModerationConfig
+	SkipPrompt      bool
 	RequestID       string
 	UserID          int64
 	Username        string

@@ -40,7 +40,7 @@ func (u *nativeImageRouteUpstream) Do(req *http.Request, _ string, _ int64, _ in
 	return u.client.Do(forwarded)
 }
 
-func newNativeImageRoute(t *testing.T, delay time.Duration, status int) (*httptest.Server, *atomic.Int64) {
+func newNativeImageRoute(t *testing.T, delay time.Duration, status int, configure ...func(*OpenAIGatewayHandler, service.AccountRepository, *gin.Engine)) (*httptest.Server, *atomic.Int64) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	var calls atomic.Int64
@@ -90,11 +90,14 @@ func newNativeImageRoute(t *testing.T, delay time.Duration, status int) (*httpte
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		groupID := int64(1)
-		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 1, GroupID: &groupID, Group: &service.Group{ID: 1, AllowImageGeneration: true}, User: &service.User{ID: 1}})
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 1, UserID: 1, GroupID: &groupID, Group: &service.Group{ID: 1, Platform: service.PlatformOpenAI, AllowImageGeneration: true}, User: &service.User{ID: 1}})
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1})
 	})
 	router.POST("/v1/images/generations", handler.Images)
 	router.POST("/v1/images/edits", handler.Images)
+	for _, apply := range configure {
+		apply(handler, repo, router)
+	}
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	return server, &calls

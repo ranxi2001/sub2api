@@ -244,6 +244,14 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 		h.failTask(taskID, http.StatusGatewayTimeout, imageTaskErrorPayload("timeout_error", "image generation task timed out"))
 		return
 	}
+	// JSON whitespace keepalives may commit 200 before a local policy denial.
+	// The worker's semantic result is independent of that transport status.
+	if status, ok := taskCtx.Get(upstreamAuditFailureStatusKey); ok {
+		if code, ok := status.(int); ok && code >= 400 {
+			h.failTask(taskID, code, extractImageTaskError(body))
+			return
+		}
+	}
 	statusCode := recorder.Code
 	if statusCode == 0 {
 		statusCode = http.StatusOK

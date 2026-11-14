@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
+import { createPinia } from 'pinia'
 import { config, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import SecurityAuditNav from '@/components/admin/security/SecurityAuditNav.vue'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
@@ -13,6 +14,7 @@ const {
   getStatus,
   listLogs,
   getGroups,
+  listAccounts,
   getProxies,
   testAPIKeys,
   showError,
@@ -24,6 +26,7 @@ const {
   getStatus: vi.fn(),
   listLogs: vi.fn(),
   getGroups: vi.fn(),
+  listAccounts: vi.fn(),
   getProxies: vi.fn(),
   testAPIKeys: vi.fn(),
   showError: vi.fn(),
@@ -33,6 +36,7 @@ const {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    accounts: { list: listAccounts },
     riskControl: {
       getConfig,
       updateConfig,
@@ -59,6 +63,7 @@ vi.mock('@/api/admin/riskControl', () => ({
   manageModerationUser: vi.fn(),
 }))
 config.global.stubs.RouterLink = RouterLinkStub
+config.global.plugins = [...(config.global.plugins ?? []), createPinia()]
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
@@ -805,4 +810,73 @@ describe('TypeSafe optional category contract', () => {
     expect(wrapper.get('[data-test="audit-score-control_bypass"]').text()).toContain('admin.riskControl.categoryDisabled')
     wrapper.unmount()
   })
+})
+
+
+describe('RiskControlView upstream scope parent integration', () => {
+  it('saves the full hidden selection, reloads persisted values, and discards cancelled edits', async () => {
+    getConfig.mockReset(); updateConfig.mockReset(); listAccounts.mockReset(); showError.mockReset()
+    let stored = { ...baseConfig(), upstream_account_scope: 'selected' as const, upstream_account_ids: [999, 121] }
+    getConfig.mockImplementation(async () => structuredClone(stored))
+    getStatus.mockResolvedValue(runtimeStatus())
+    getGroups.mockResolvedValue([{ id: 4301, name: 'Demo', platform: 'openai' }])
+    getProxies.mockResolvedValue([])
+    listLogs.mockResolvedValue({ items: [], total: 0, page: 1, pages: 1 })
+    listAccounts.mockResolvedValue({ items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth', moderation_scope_eligible: true }], page: 1, pages: 3, total: 125 })
+    updateConfig.mockImplementation(async payload => { stored = { ...stored, ...JSON.parse(JSON.stringify(payload)) }; return structuredClone(stored) })
+    const create = () => mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    let wrapper = create(); await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="quality-select-page"]').trigger('click')
+    await wrapper.get('#moderation-upstream-search').setValue('#125'); await flushPromises()
+    expect(listAccounts.mock.lastCall?.[2]).toMatchObject({ search: '#125' })
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click'); await flushPromises()
+    expect(showError).not.toHaveBeenCalled()
+    expect(stored.upstream_account_scope).toBe('selected')
+    expect(stored.upstream_account_ids).toEqual([999, 121, 1])
+    wrapper.unmount(); wrapper = create(); await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click'); await flushPromises()
+    expect((wrapper.get('[data-account-id="1"] input').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-testid="quality-clear-selection"]').trigger('click')
+    await findButtonByText(wrapper, 'common.cancel').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click'); await flushPromises()
+    expect((wrapper.get('[data-account-id="1"] input').element as HTMLInputElement).checked).toBe(true)
+    expect(stored.upstream_account_ids).toEqual([999, 121, 1])
+    wrapper.unmount()
+  })
+  it('locks save during batch and locks edits and close during PUT, then preserves draft after rejection', async () => {
+    getConfig.mockReset(); updateConfig.mockReset(); listAccounts.mockReset(); showError.mockReset()
+    getConfig.mockResolvedValue({ ...baseConfig(), upstream_account_scope: 'selected', upstream_account_ids: [999] })
+    getStatus.mockResolvedValue(runtimeStatus()); getGroups.mockResolvedValue([]); getProxies.mockResolvedValue([])
+    listLogs.mockResolvedValue({ items: [], total: 0, page: 1, pages: 1 })
+    const result = { items: [{ id: 1, name: 'Fixture', platform: 'openai', type: 'oauth', moderation_scope_eligible: true }], page: 1, pages: 1, total: 1 }
+    listAccounts.mockResolvedValue(result)
+    const wrapper = mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    await flushPromises(); await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click'); await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click'); await flushPromises()
+    let releaseBatch!: (value: typeof result) => void
+    listAccounts.mockImplementationOnce(() => new Promise(resolve => { releaseBatch = resolve }))
+    await wrapper.get('[data-testid="quality-select-all"]').trigger('click')
+    expect(findButtonByText(wrapper, 'admin.riskControl.saveConfig').attributes('disabled')).toBeDefined()
+    releaseBatch(result); await flushPromises()
+    let rejectSave!: (error: Error) => void
+    updateConfig.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject }))
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-testid="moderation-upstream-selector"]').attributes('disabled')).toBeDefined()
+    expect(findButtonByText(wrapper, 'common.cancel').attributes('disabled')).toBeDefined()
+    wrapper.findComponent(BaseDialogStub).vm.$emit('close'); await flushPromises()
+    expect(wrapper.find('[data-testid="moderation-upstream-selector"]').exists()).toBe(true)
+    expect(updateConfig.mock.lastCall?.[0].upstream_account_ids).toEqual([999, 1])
+    rejectSave(new Error('fixture rejected')); await flushPromises()
+    expect(wrapper.get('[data-testid="moderation-upstream-selector"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="moderation-remove-999"]').exists()).toBe(true)
+    updateConfig.mockImplementation(async payload => ({ ...baseConfig(), ...JSON.parse(JSON.stringify(payload)) }))
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click'); await flushPromises()
+    expect(updateConfig.mock.lastCall?.[0].upstream_account_ids).toEqual([999, 1])
+    expect(wrapper.find('[data-testid="moderation-upstream-selector"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
 })
