@@ -1,4 +1,13 @@
 export default {
+  "providerBalanceSource": "供应商平台余额",
+  "providerRefreshDisabled": "供应商定时刷新未开启，请在渠道运维中设置。",
+  "manageProviderBalance": "查看／刷新供应商余额",
+  "linkProvider": "关联供应商余额",
+  "providerBalanceHint": "选择渠道运维中的供应商后，整组共用该平台的余额；从供应商导入的 Key 自动归组。提醒阈值与收件人在账号运维中配置。",
+  "memberBalanceSource": "使用组内首个账号余额",
+  "loadProviders": "加载供应商",
+  "providersUnavailable": "供应商目录读取失败，请重试。",
+
   "oauthLifecycle": "账号用途",
   "oauthTemporary": "速抛／临时号",
   "oauthLongTerm": "长期号",

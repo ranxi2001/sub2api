@@ -1,4 +1,13 @@
 export default {
+  "providerBalanceSource": "Provider wallet balance",
+  "providerRefreshDisabled": "Scheduled provider refresh is off. Configure it in channel operations.",
+  "manageProviderBalance": "View / refresh provider balance",
+  "linkProvider": "Link provider wallet",
+  "providerBalanceHint": "Link a provider from channel operations to share its balance across the group. Imported keys are grouped automatically. Notification thresholds and recipients are managed here.",
+  "memberBalanceSource": "Use the first member’s balance",
+  "loadProviders": "Load providers",
+  "providersUnavailable": "Could not load the provider catalog. Try again.",
+
   "oauthLifecycle": "Account lifecycle",
   "oauthTemporary": "Disposable / temporary",
   "oauthLongTerm": "Long term",

@@ -183,6 +183,15 @@ func (s *AccountOpsService) Observe(account *Account, status int, headers http.H
 		name = name[:120]
 	}
 	group := accountOpsGroupAssignment(account, c)
+	// Linked wallets use one authoritative balance-threshold episode. Request
+	// failures from individual keys must not send a second low-balance alert.
+	if kind == "balance_low" && accountOpsProviderID(c, account.ID) > 0 {
+		for _, rule := range c.BalanceThresholds {
+			if rule.Enabled && thresholdAccountGroup(nil, rule.AccountID, c).ID == group.ID {
+				return
+			}
+		}
+	}
 	event := AccountOpsEvent{AccountID: account.ID, AccountName: string(name), GroupID: group.ID, GroupName: group.Name, Kind: kind, Signal: signal, HTTPStatus: status}
 	// The hot request path never waits for SMTP or the database. Raw errors and credentials do not enter the queue.
 	select {

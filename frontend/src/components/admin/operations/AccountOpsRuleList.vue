@@ -61,6 +61,7 @@
               <p class="font-medium text-gray-900 dark:text-gray-100">{{ row.group.name }}</p>
               <p class="mt-1 text-xs text-gray-500">{{ row.group.site || row.group.provider || '—' }} · {{ t('accountOps.groupMemberCount', { count: row.accounts.length }) }}</p>
               <p class="mt-1 max-w-72 truncate text-xs text-gray-500" :title="row.memberNames">{{ row.memberNames || t('accountOps.noAccountGroups') }}</p>
+              <a v-if="row.group.provider_id" href="/admin/channel-operations" class="mt-1 inline-block text-xs text-primary-600">{{ t('accountOps.providerBalanceSource') }} #{{ row.group.provider_id }}</a>
               <p v-if="row.balanceAccounts.length > 1" class="mt-1 text-xs text-gray-500">{{ t('accountOps.sharedBalanceHint') }}</p>
               <AccountOpsLifecycleSelector v-for="account in row.quotaAccounts" :key="account.account_id" :account="account" :disabled="selectionUnavailable" @updated="emit('refresh')" />
             </td>
