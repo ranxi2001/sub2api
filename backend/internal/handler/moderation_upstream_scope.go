@@ -37,12 +37,17 @@ func prepareUpstreamAudit(c *gin.Context, log *zap.Logger, coordinator *security
 	turn, _ := securityAuditWSTurn(c)
 	if old, ok := c.Get(upstreamAuditStateKey); ok {
 		if state, ok := old.(*upstreamAuditState); ok && state.turn == turn && state.request.Stage == stage {
+			bindUpstreamAuditGate(c, state)
 			return
 		}
 	}
 	cfg, err := legacy.UpstreamModerationConfig(c.Request.Context())
 	state := &upstreamAuditState{request: buildSecurityAuditRequest(c, apiKey, subject, protocol, model, body, stage).Clone(), config: cfg, configErr: err, legacy: legacy, coordinator: coordinator, log: log, turn: turn}
 	c.Set(upstreamAuditStateKey, state)
+	bindUpstreamAuditGate(c, state)
+}
+
+func bindUpstreamAuditGate(c *gin.Context, state *upstreamAuditState) {
 	service.SetUpstreamModerationGate(c, func(ctx context.Context, account *service.Account) error {
 		decision := state.check(ctx, account)
 		if decision == nil || decision.AllowNextStage {

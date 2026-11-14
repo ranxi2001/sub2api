@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
+import { createPinia } from 'pinia'
 import { config, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import SecurityAuditNav from '@/components/admin/security/SecurityAuditNav.vue'
 import type { DOMWrapper, VueWrapper } from '@vue/test-utils'
@@ -59,6 +60,7 @@ vi.mock('@/api/admin/riskControl', () => ({
   manageModerationUser: vi.fn(),
 }))
 config.global.stubs.RouterLink = RouterLinkStub
+config.global.plugins = [...(config.global.plugins ?? []), createPinia()]
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({

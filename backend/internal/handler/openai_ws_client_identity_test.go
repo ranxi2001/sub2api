@@ -82,9 +82,10 @@ type issue600SwitchRepo struct {
 func (r *issue600SwitchRepo) UpdateExtra(context.Context, int64, map[string]any) error { return nil }
 
 type issue600FixtureOptions struct {
-	switchAccount    bool
-	switchAfterTurns int
-	disableCyber     bool
+	moderationSettings map[string]string
+	switchAccount      bool
+	switchAfterTurns   int
+	disableCyber       bool
 }
 
 type issue600Upstream struct {
@@ -211,6 +212,9 @@ func newIssue600NetworkHarness(t *testing.T, mode, namespace string, strict bool
 	http.DefaultClient = &http.Client{Transport: route}
 	t.Cleanup(func() { http.DefaultClient = oldClient })
 	settings := map[string]string{service.SettingKeyCyberSessionIdentityStrictEnabled: strconv.FormatBool(strict)}
+	for key, value := range opts.moderationSettings {
+		settings[key] = value
+	}
 	if opts.disableCyber {
 		settings[service.SettingKeyCyberSessionBlockEnabled] = "false"
 	}

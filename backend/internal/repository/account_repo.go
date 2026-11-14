@@ -1443,7 +1443,11 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 		q = q.Where(predicate)
 	}
 	if search != "" {
-		q = q.Where(dbaccount.NameContainsFold(search))
+		if id, err := strconv.ParseInt(strings.TrimPrefix(strings.TrimSpace(search), "#"), 10, 64); err == nil && id > 0 {
+			q = q.Where(dbaccount.Or(dbaccount.IDEQ(id), dbaccount.NameContainsFold(search)))
+		} else {
+			q = q.Where(dbaccount.NameContainsFold(search))
+		}
 	}
 	if groupID == service.AccountListGroupUngrouped {
 		q = q.Where(dbaccount.Not(dbaccount.HasAccountGroups()))

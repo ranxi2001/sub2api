@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: moderation-upstream-scope-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   behavioral-red:
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
         with:
           name: moderation-scope-red-${{ github.sha }}
           path: ${{ runner.temp }}/moderation-scope
-  ui-baseline:
+  ui-evidence:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -55,6 +55,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Frontend integration and existing selector regressions
+        run: |
+          pnpm --dir frontend exec vitest run src/components/admin/moderation/__tests__/ModerationUpstreamAccountSelector.spec.ts src/components/admin/operations/__tests__/QualityAccountSelector.spec.ts src/views/admin/__tests__/RiskControlView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
+          pnpm --dir frontend run build
       - name: Isolated browser
         run: |
           npm install --prefix "$RUNNER_TEMP/scope-browser" --no-save --ignore-scripts playwright@1.56.1

@@ -42,7 +42,7 @@ func validModerationUpstreamAccount(a *Account) bool {
 		return a.Type == AccountTypeOAuth || a.Type == AccountTypeAPIKey || a.Type == AccountTypeServiceAccount || a.Type == AccountTypeUpstream
 	case PlatformAntigravity, PlatformGrok:
 		return a.Type == AccountTypeOAuth || a.Type == AccountTypeAPIKey
-	case PlatformDeepseek, PlatformKimi, PlatformZhipu, PlatformMiniMax, PlatformQwen, PlatformTypeSafe:
+	case PlatformDeepseek, PlatformKimi, PlatformZhipu, PlatformMiniMax, PlatformQwen, PlatformTypeSafe, PlatformOpenCodeGo, PlatformCommandCode, PlatformCline, PlatformMistral:
 		return a.Type == AccountTypeAPIKey
 	default:
 		return false
