@@ -292,7 +292,7 @@ jobs:
         run: make test-integration
 
   frontend:
-    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation') && 'macos-15-intel' || vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
