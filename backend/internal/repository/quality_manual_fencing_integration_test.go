@@ -126,6 +126,14 @@ func TestIssue817ManualUpdateInterleaving(t *testing.T) {
 	require.NotEmpty(t, updated.ManualQualityRunID)
 	require.Equal(t, manual.ManualQualityRunID, updated.ManualQualityRunID)
 	require.Equal(t, old.PelicanConfig.RuleName, updated.PelicanConfig.RuleName)
+	require.NoError(t, svc.TriggerQuality(ctx, old.ID))
+	newest, err := f.plans.GetByID(ctx, old.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, updated.ManualQualityRunID, newest.ManualQualityRunID)
+	updated, err = svc.UpdatePlan(ctx, updated)
+	require.NoError(t, err)
+	require.Equal(t, newest.ManualQualityRunID, updated.ManualQualityRunID, "an older pending snapshot cannot replace the newer generation")
+	require.Equal(t, newest.NextRunAt, updated.NextRunAt)
 
 	// A save prepared while the request was pending must not resurrect it once
 	// a worker has consumed it. Pausing remains an explicit cancellation.
@@ -182,17 +190,22 @@ func TestIssue817ManualGenerationAndLeaseFencing(t *testing.T) {
 	require.Error(t, f.plans.TriggerQuality(ctx, newer.ID))
 	// Model lease expiry, then accept a new request while the old worker is
 	// still alive. Its finish must leave the newer pending request intact.
-	_, err = integrationDB.Exec(`UPDATE scheduled_test_plans SET running_until=NOW()-INTERVAL '1 second' WHERE id=$1`, newer.ID)
+	expiredUntil := time.Now().Add(-time.Second).Truncate(time.Microsecond)
+	_, err = integrationDB.Exec(`UPDATE scheduled_test_plans SET running_until=$2 WHERE id=$1`, newer.ID, expiredUntil)
 	require.NoError(t, err)
 	require.NoError(t, f.plans.TriggerQuality(ctx, newer.ID))
 	pending, err := f.plans.GetByID(ctx, newer.ID)
 	require.NoError(t, err)
-	require.NoError(t, f.plans.FinishPelican(ctx, newer.ID, until, time.Now()))
+	finished := time.Now().Truncate(time.Microsecond)
+	require.NoError(t, f.plans.FinishPelican(ctx, newer.ID, expiredUntil, finished))
 	current, err := f.plans.GetByID(ctx, newer.ID)
 	require.NoError(t, err)
 	require.Equal(t, pending.ManualQualityRunID, current.ManualQualityRunID)
 	require.True(t, current.ManualQualityRun)
 	require.Equal(t, pending.NextRunAt, current.NextRunAt)
+	require.Nil(t, current.RunningUntil, "the old expired lease really finished; this is not a mismatched-lease no-op")
+	require.NotNil(t, current.LastRunAt)
+	require.Equal(t, finished, *current.LastRunAt)
 
 	// Legacy bool-only requests remain claimable, with no public config field.
 	_, err = integrationDB.Exec(`UPDATE scheduled_test_plans SET pelican_config=pelican_config-'_manual_quality_run_id' WHERE id=$1`, newer.ID)
@@ -201,7 +214,8 @@ func TestIssue817ManualGenerationAndLeaseFencing(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, legacy.ManualQualityRun)
 	require.Empty(t, legacy.ManualQualityRunID)
-	claimed, err = f.plans.ClaimPelican(ctx, legacy, now, until.Add(time.Minute), now.Add(time.Hour))
+	legacyNow := time.Now().Add(time.Second).Truncate(time.Microsecond)
+	claimed, err = f.plans.ClaimPelican(ctx, legacy, legacyNow, legacyNow.Add(15*time.Minute), legacyNow.Add(time.Hour))
 	require.NoError(t, err)
 	require.True(t, claimed)
 }
