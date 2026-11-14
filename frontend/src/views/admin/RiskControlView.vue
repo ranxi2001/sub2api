@@ -754,7 +754,7 @@
           </div>
 
           <div v-else-if="activeSettingsTab === 'scope'" class="space-y-5">
-            <ModerationUpstreamAccountSelector v-model="configForm.upstream_account_ids" v-model:scope="configForm.upstream_account_scope" :groups="groups">
+            <ModerationUpstreamAccountSelector v-model="configForm.upstream_account_ids" v-model:scope="configForm.upstream_account_scope" :groups="groups" @busy="upstreamSelecting = $event">
               <template #badge><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.moderationUpstreamAccountScope" :user-id="auth.user?.id" /></template>
             </ModerationUpstreamAccountSelector>
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1116,7 +1116,7 @@
         <template #footer>
           <div class="flex justify-end gap-2">
             <button type="button" class="btn btn-secondary" @click="settingsOpen = false">{{ t('common.cancel') }}</button>
-            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving" @click="saveConfig">
+            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving || upstreamSelecting" @click="saveConfig">
               <Icon v-if="saving" name="refresh" size="sm" class="animate-spin" />
               <Icon v-else name="check" size="sm" />
               {{ saving ? t('common.saving') : t('admin.riskControl.saveConfig') }}
@@ -1288,6 +1288,8 @@ const defaultBlockMessage = () => t('admin.riskControl.defaultBlockMessage')
 
 const loading = ref(true)
 const saving = ref(false)
+const upstreamSelecting = ref(false)
+const savedUpstreamScope = ref<{ scope: 'all' | 'selected'; ids: number[] }>({ scope: 'all', ids: [] })
 const logsLoading = ref(false)
 const statusLoading = ref(false)
 const apiKeyTesting = ref(false)
@@ -1863,6 +1865,7 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.sample_rate = config.sample_rate ?? 100
   configForm.upstream_account_scope = config.upstream_account_scope ?? 'all'
   configForm.upstream_account_ids = [...(config.upstream_account_ids ?? [])]
+  savedUpstreamScope.value = { scope: configForm.upstream_account_scope, ids: [...configForm.upstream_account_ids] }
   configForm.all_groups = config.all_groups
   configForm.group_ids = Array.isArray(config.group_ids) ? [...config.group_ids] : []
   configForm.record_non_hits = config.record_non_hits
@@ -1954,6 +1957,7 @@ async function loadStatus(silent = true) {
 }
 
 async function saveConfig() {
+  if (upstreamSelecting.value) return
   saving.value = true
   try {
     const modelFilterPayload = buildModelFilterPayload()
@@ -1973,7 +1977,7 @@ async function saveConfig() {
       retry_count: Number(configForm.retry_count) || 0,
       sample_rate: Number(configForm.sample_rate) || 0,
       upstream_account_scope: configForm.upstream_account_scope,
-      upstream_account_ids: [...configForm.upstream_account_ids],
+      upstream_account_ids: configForm.upstream_account_scope === 'all' ? [] : [...configForm.upstream_account_ids],
       all_groups: configForm.all_groups,
       group_ids: configForm.all_groups ? [] : [...configForm.group_ids],
       record_non_hits: configForm.record_non_hits,
@@ -2108,6 +2112,8 @@ async function clearFlaggedHashes() {
 }
 
 function openSettings() {
+  configForm.upstream_account_scope = savedUpstreamScope.value.scope
+  configForm.upstream_account_ids = [...savedUpstreamScope.value.ids]
   activeSettingsTab.value = 'basic'
   settingsOpen.value = true
 }

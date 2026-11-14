@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -50,6 +51,7 @@ func validModerationUpstreamAccount(a *Account) bool {
 }
 
 func (s *ContentModerationService) updateUpstreamScope(ctx context.Context, cfg *ContentModerationConfig, input UpdateContentModerationConfigInput) error {
+	previousIDs := append([]int64(nil), cfg.UpstreamAccountIDs...)
 	if input.UpstreamAccountScope != nil {
 		if *input.UpstreamAccountScope != ModerationUpstreamAll && *input.UpstreamAccountScope != ModerationUpstreamSelected {
 			return infraerrors.BadRequest("INVALID_MODERATION_UPSTREAM_SCOPE", "Unknown upstream account scope")
@@ -83,10 +85,10 @@ func (s *ContentModerationService) updateUpstreamScope(ctx context.Context, cfg 
 			return infraerrors.BadRequest("INVALID_MODERATION_UPSTREAM_ACCOUNT", fmt.Sprintf("Upstream account %d is missing or has an unsupported platform/type", id))
 		}
 		binding := moderationUpstreamBinding(a)
-		if input.UpstreamAccountIDs == nil {
+		if slices.Contains(previousIDs, id) {
 			previous, ok := cfg.UpstreamAccountBindings[id]
 			if !ok || previous.Platform != binding.Platform || previous.Type != binding.Type || !slices.Equal(previous.GroupIDs, binding.GroupIDs) {
-				return infraerrors.BadRequest("STALE_MODERATION_UPSTREAM_ACCOUNT", fmt.Sprintf("Review and reselect changed upstream account %d", id))
+				return infraerrors.BadRequest("STALE_MODERATION_UPSTREAM_ACCOUNT", fmt.Sprintf("Remove and save before reselecting changed upstream account %d", id))
 			}
 		}
 		bindings[id] = binding
@@ -175,4 +177,14 @@ func CheckUpstreamModeration(ctx context.Context, c *gin.Context, account *Accou
 		}
 	}
 	return nil
+}
+
+// UpstreamModerationDeniedError marks a local policy response already written
+// by the ingress gate. It must never enter provider retry/health/usage handling.
+type UpstreamModerationDeniedError struct{ Message string }
+
+func (e *UpstreamModerationDeniedError) Error() string { return e.Message }
+func IsUpstreamModerationDenied(err error) bool {
+	var denied *UpstreamModerationDeniedError
+	return errors.As(err, &denied)
 }

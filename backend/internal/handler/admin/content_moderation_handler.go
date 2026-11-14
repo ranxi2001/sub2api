@@ -30,12 +30,14 @@ func NewContentModerationHandlerWithSafetyPrompt(svc *service.ContentModerationS
 }
 
 type contentModerationConfigRequest struct {
-	Engine        *string                                               `json:"engine"`
-	EngineConfigs map[string]service.UpdateContentModerationEngineInput `json:"engine_configs"`
-	Enabled       *bool                                                 `json:"enabled"`
-	Mode          *string                                               `json:"mode"`
-	BaseURL       *string                                               `json:"base_url"`
-	Model         *string                                               `json:"model"`
+	UpstreamAccountScope *string                                               `json:"upstream_account_scope"`
+	UpstreamAccountIDs   *[]int64                                              `json:"upstream_account_ids"`
+	Engine               *string                                               `json:"engine"`
+	EngineConfigs        map[string]service.UpdateContentModerationEngineInput `json:"engine_configs"`
+	Enabled              *bool                                                 `json:"enabled"`
+	Mode                 *string                                               `json:"mode"`
+	BaseURL              *string                                               `json:"base_url"`
+	Model                *string                                               `json:"model"`
 	// 审计请求使用的代理服务器：null 不修改；0 清除（直连）；>0 指定代理。
 	ProxyID              *int64              `json:"proxy_id"`
 	APIKey               *string             `json:"api_key"`
@@ -102,6 +104,7 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 	}
 	cfg, err := h.service.UpdateConfig(c.Request.Context(), service.UpdateContentModerationConfigInput{
 		Engine: req.Engine, EngineConfigs: req.EngineConfigs,
+		UpstreamAccountScope: req.UpstreamAccountScope, UpstreamAccountIDs: req.UpstreamAccountIDs,
 		Enabled:                        req.Enabled,
 		Mode:                           req.Mode,
 		BaseURL:                        req.BaseURL,

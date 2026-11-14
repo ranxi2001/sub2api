@@ -13,3 +13,14 @@ Keep existing pre-route admission and prompt audit semantics. Defer ONLY account
 Acceptance starts with a real WS handler/scheduler + loopback audit/provider fixture: a non-selected account must produce generation with zero audit calls. Baseline currently audits and blocks; RED must be a business assertion. Extend with selected deny (zero generation writes), HTTP types/stream modes, failover, WS next turn/native/pool/bridge, persistence/validation, selector integration and A→B→C badge behavior. Capture rendered original UI remotely before changing it. No external provider/network fixture requests.
 
 UI: reuse QualityAccountSelector with fixed manual selection, server search and pagination, stable selected-ID union across hidden pages, cancellable/fenced asynchronous reads and batch selection. Account filters describe discovery only; saved IDs control policy. Chinese and English explain group AND account semantics and empty selection. Add registered NewFeatureBadge.
+
+
+## Review repairs and explicit operational semantics
+
+The admin HTTP DTO passes scope and IDs to service validation; stored binding metadata remains server-owned. A retained ID whose platform/type/group membership changed cannot be silently rebound by an unrelated save or by resubmitting the same IDs. Remove it and save, then select it again to explicitly approve a new binding. Switching to all clears the selection in the UI.
+
+Post-selection policy errors use a typed local denial. HTTP callers return after their existing slot/queue release, and the scheduler also ignores that error defensively. WebSocket denials carry the existing local-admission sentinel. JSON image keepalive responses finish with one JSON document; SSE stays framed as an error event. Async workers rebind the immutable state to their own response context.
+
+Audit turn identity is connection-wide, independent of transport counters that restart during same-account retry or failover. A replay retains the prior decision; a newly received client turn advances the audit identity even when its body is identical. All legacy audit entry points were traced, including protocol adapters, media, batch submit, Live creation, cached-content creation, embeddings and alpha/standalone search. Alpha commands and batch-item prompts are derived from the frozen original request for selected-account moderation; existing pre-route prompt auditing is unchanged.
+
+Remote fixtures distinguish configuration persistence, actual generation writes, and rendered UI. Neither an offline browser adapter nor a configuration-only test proves routing acceptance. The acceptance workflow requires named tests and rejects compilation/setup errors, panic, race, skipped/missing tests and crashes.

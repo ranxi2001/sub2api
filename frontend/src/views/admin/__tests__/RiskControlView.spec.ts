@@ -14,6 +14,7 @@ const {
   getStatus,
   listLogs,
   getGroups,
+  listAccounts,
   getProxies,
   testAPIKeys,
   showError,
@@ -25,6 +26,7 @@ const {
   getStatus: vi.fn(),
   listLogs: vi.fn(),
   getGroups: vi.fn(),
+  listAccounts: vi.fn(),
   getProxies: vi.fn(),
   testAPIKeys: vi.fn(),
   showError: vi.fn(),
@@ -34,6 +36,7 @@ const {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    accounts: { list: listAccounts },
     riskControl: {
       getConfig,
       updateConfig,
@@ -805,6 +808,40 @@ describe('TypeSafe optional category contract', () => {
     expect(wrapper.get('[data-test="audit-score-jailbreak"]').text()).toContain('admin.riskControl.categoryHit')
     expect(wrapper.get('[data-test="audit-score-jailbreak"]').text()).toContain('80.0% / 80.0%')
     expect(wrapper.get('[data-test="audit-score-control_bypass"]').text()).toContain('admin.riskControl.categoryDisabled')
+    wrapper.unmount()
+  })
+})
+
+
+describe('RiskControlView upstream scope parent integration', () => {
+  it('saves the full hidden selection, reloads persisted values, and discards cancelled edits', async () => {
+    let stored = { ...baseConfig(), upstream_account_scope: 'selected' as const, upstream_account_ids: [999, 121] }
+    getConfig.mockImplementation(async () => structuredClone(stored))
+    getStatus.mockResolvedValue(runtimeStatus())
+    getGroups.mockResolvedValue([{ id: 4301, name: 'Demo', platform: 'openai' }])
+    getProxies.mockResolvedValue([])
+    listLogs.mockResolvedValue({ items: [], total: 0, page: 1, pages: 1 })
+    listAccounts.mockResolvedValue({ items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth' }], page: 1, pages: 3, total: 125 })
+    updateConfig.mockImplementation(async payload => { stored = { ...stored, ...payload }; return structuredClone(stored) })
+    const create = () => mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
+    let wrapper = create(); await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="quality-select-page"]').trigger('click')
+    await wrapper.get('#moderation-upstream-search').setValue('#125'); await flushPromises()
+    expect(listAccounts.mock.lastCall?.[2]).toMatchObject({ search: '#125' })
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click'); await flushPromises()
+    expect(stored.upstream_account_ids).toEqual([999, 121, 1])
+    wrapper.unmount(); wrapper = create(); await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click'); await flushPromises()
+    expect((wrapper.get('[data-account-id="1"] input').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-testid="quality-clear-selection"]').trigger('click')
+    await findButtonByText(wrapper, 'common.cancel').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click'); await flushPromises()
+    expect((wrapper.get('[data-account-id="1"] input').element as HTMLInputElement).checked).toBe(true)
+    expect(stored.upstream_account_ids).toEqual([999, 121, 1])
     wrapper.unmount()
   })
 })

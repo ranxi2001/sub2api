@@ -73,6 +73,8 @@ func TestModerationUpstreamPersistenceAndValidation(t *testing.T) {
 	require.Error(t, err, "moving accounts cannot widen scope")
 	_, err = fresh.UpdateConfig(ctx, UpdateContentModerationConfigInput{})
 	require.Error(t, err, "unrelated saves cannot silently rebind a moved account")
+	_, err = fresh.UpdateConfig(ctx, UpdateContentModerationConfigInput{UpstreamAccountIDs: &ids})
+	require.Error(t, err, "resubmitting unchanged IDs cannot silently rebind moved accounts")
 	delete(accounts.accounts, 1)
 	_, err = fresh.UpstreamModerationApplies(ctx, &stored, input)
 	require.Error(t, err, "deleted account must fail closed")

@@ -1171,6 +1171,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}()
 			return h.gatewayService.Forward(rpmAdmission.forwardContext(c.Request.Context(), account), c, account, attemptBody)
 		}()
+		if service.IsUpstreamModerationDenied(err) {
+			return
+		}
 		if result != nil {
 			result.HeaderTimeoutRetries = headerTimeoutRetries
 		}
@@ -1837,6 +1840,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardAsAnthropic(rpmAdmission.forwardContext(c.Request.Context(), account), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}()
+		if service.IsUpstreamModerationDenied(err) {
+			return
+		}
 		if result != nil {
 			result.HeaderTimeoutRetries = headerTimeoutRetries
 		}
@@ -3129,6 +3135,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	ctx = c.Request.Context()
 	setOpsEndpointContext(c, "", int16(service.RequestTypeWSV2))
 
+	// Connection-wide audit identity survives proxy restarts/failover, whose
+	// transport-local turn counters restart at 1. Replays keep the current
+	// state; only newly received follow-up frames advance this counter.
+	moderationLogicalTurn := 1
+	c.Set(securityAuditWSTurnContextKey, moderationLogicalTurn)
 	if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, firstMessage, "first_turn"); decision != nil && !decision.AllowNextStage {
 		writeSecurityAuditWSError(ctx, wsConn, decision)
 		closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
@@ -3661,7 +3672,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return nil
 			},
 			BeforeRequestWithClientPayload: func(turn int, payload, clientPayload []byte, originalModel string) error {
-				c.Set(securityAuditWSTurnContextKey, turn)
+				if turn > 1 {
+					moderationLogicalTurn++
+				}
+				c.Set(securityAuditWSTurnContextKey, moderationLogicalTurn)
 				service.BeginOpsStreamTurn(c, turn)
 				// 连接级 cyber session gate 也在 BeforeRequest 先执行，使 native 与
 				// passthrough ingress 都能在 BeforeTurn 及上游写入前无副作用地拒绝。
@@ -3729,11 +3743,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, clientPayload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
-					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
+					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), errOpenAIWSLocalAdmissionRejected)
 				}
 				if decision := checkSelectedUpstreamAudit(c, c.Request.Context(), account); decision != nil && !decision.AllowNextStage {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
-					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
+					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), errOpenAIWSLocalAdmissionRejected)
 				}
 				return nil
 			},

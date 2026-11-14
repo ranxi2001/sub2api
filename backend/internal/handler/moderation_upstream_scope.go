@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -48,13 +48,19 @@ func prepareUpstreamAudit(c *gin.Context, log *zap.Logger, coordinator *security
 }
 
 func bindUpstreamAuditGate(c *gin.Context, state *upstreamAuditState) {
+	// WS ingress owns protocol errors and per-turn selection checks. Its HTTP
+	// bridge must never write an HTTP error to the upgraded response writer.
+	if isSecurityAuditWebSocketStage(state.request.Stage) {
+		service.SetUpstreamModerationGate(c, nil)
+		return
+	}
 	service.SetUpstreamModerationGate(c, func(ctx context.Context, account *service.Account) error {
 		decision := state.check(ctx, account)
 		if decision == nil || decision.AllowNextStage {
 			return nil
 		}
 		writeSelectedUpstreamAuditError(c, decision)
-		return errors.New(securityAuditMessage(decision))
+		return &service.UpstreamModerationDeniedError{Message: securityAuditMessage(decision)}
 	})
 }
 
@@ -78,6 +84,21 @@ func (s *upstreamAuditState) check(ctx context.Context, account *service.Account
 	}
 	req := s.request.Clone()
 	req.UpstreamAccount, req.UpstreamConfig, req.SkipPrompt = account, s.config, true
+	// Keep the original request frozen; derive audit text only for transport
+	// envelopes not understood by the legacy prompt extractor. Prompt audit
+	// still receives the untouched ingress request at its existing stage.
+	if req.Protocol == "openai_alpha_search" {
+		req.Protocol = service.ContentModerationProtocolOpenAIResponses
+		req.Body, _ = json.Marshal(map[string]string{"input": string(req.Body)})
+	} else if req.Protocol == service.ContentModerationProtocolOpenAIImages && gjson.GetBytes(req.Body, "request.items").IsArray() {
+		prompts := []string{}
+		for _, item := range gjson.GetBytes(req.Body, "request.items").Array() {
+			prompts = append(prompts, item.Get("prompt").String())
+		}
+		req.Body, _ = json.Marshal(map[string]string{"prompt": strings.Join(prompts, "\n")})
+	} else if isSecurityAuditWebSocketStage(req.Stage) && gjson.GetBytes(req.Body, "response.input").Exists() {
+		req.Body = []byte(gjson.GetBytes(req.Body, "response").Raw)
+	}
 	input := service.ContentModerationCheckInput{
 		RequestID: req.RequestID, UserID: req.UserID, UserEmail: req.UserEmail,
 		APIKeyID: req.APIKeyID, APIKeyName: req.APIKeyName, GroupID: req.GroupID, GroupName: req.GroupName,
@@ -132,7 +153,14 @@ func writeSelectedUpstreamAuditError(c *gin.Context, decision *securityaudit.Dec
 	if strings.Contains(c.Request.URL.Path, "/v1beta/") {
 		payload = gin.H{"error": gin.H{"code": status, "message": message, "status": "PERMISSION_DENIED"}}
 	}
-	if c.Writer.Written() {
+	if service.OpenAIImagesJSONKeepalivePresent(c) {
+		committed := service.StopOpenAIImagesJSONKeepaliveCommitted(c)
+		if committed {
+			c.JSON(http.StatusOK, payload)
+		} else {
+			c.JSON(status, payload)
+		}
+	} else if c.Writer.Written() {
 		service.MarkOpsStreamError(c, code, message, status)
 		data, _ := json.Marshal(payload)
 		_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", data)

@@ -500,7 +500,7 @@ export default {
       selectedUpstreamAccounts: "Only selected upstream accounts",
       emptyUpstreamAccounts: "No accounts selected: this policy audits no requests.",
       findUpstreamAccounts: "Find upstream accounts by name or #ID",
-      upstreamSelectionHint: "Filters only change this list. Selected IDs remain selected across pages and filters. Deleted accounts or changed platform, type or group membership require review and reselection; affected requests fail closed.",
+      upstreamSelectionHint: "Filters only change this list. Selected IDs remain selected across pages and filters. Deleted accounts or changed platform, type or group membership require review; affected requests fail closed. Remove the account and save before selecting it again.",
       upstreamAccountsLoadFailed: "Could not load all accounts. Selection was preserved. Retry or select fewer than 10,000 accounts.",
       upstreamType: "Upstream",
       bedrockType: "AWS Bedrock",

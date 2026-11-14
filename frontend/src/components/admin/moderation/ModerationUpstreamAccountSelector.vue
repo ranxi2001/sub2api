@@ -33,6 +33,7 @@ import QualityAccountSelector from '@/components/admin/operations/QualityAccount
 import { qualityAccountTypeOptions } from '@/utils/qualityAccountFilter'
 
 const { t } = useI18n()
+const emit = defineEmits<{ busy: [value: boolean] }>()
 defineProps<{ groups: { id: number; name: string }[] }>()
 const selected = defineModel<number[]>({ required: true })
 const scope = defineModel<'all' | 'selected'>('scope', { required: true })
@@ -82,5 +83,6 @@ async function selectAll() {
 }
 // Filters only discover accounts; selection is an independent persistent ID set.
 watch([search, group, type, scope], () => { void loadPage(1) }, { immediate: true, flush: 'sync' })
-onBeforeUnmount(invalidate)
+watch(selecting, value => emit('busy', value), { flush: 'sync' })
+onBeforeUnmount(() => { invalidate(); emit('busy', false) })
 </script>

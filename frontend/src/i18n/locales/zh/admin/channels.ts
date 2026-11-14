@@ -500,7 +500,7 @@ export default {
       selectedUpstreamAccounts: "仅指定上游账号",
       emptyUpstreamAccounts: "尚未选择账号：此规则不会审计任何请求。",
       findUpstreamAccounts: "按名称或 #ID 查找上游账号",
-      upstreamSelectionHint: "筛选仅改变列表；翻页或修改筛选不会丢失已选 ID。账号删除或平台、类型、分组归属变化后，受影响请求将安全拒绝，需检查并重新选择。",
+      upstreamSelectionHint: "筛选仅改变列表；翻页或修改筛选不会丢失已选 ID。账号删除或平台、类型、分组归属变化后，受影响请求将安全拒绝，需检查、移除该账号并保存后再重新选择。",
       upstreamAccountsLoadFailed: "无法加载完整账号列表，已保留原选择。请重试或将选择控制在 10,000 个以内。",
       upstreamType: "上游账号",
       bedrockType: "AWS Bedrock",

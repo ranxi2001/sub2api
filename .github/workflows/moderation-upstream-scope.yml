@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: moderation-upstream-scope-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   behavioral-red:
     runs-on: ubuntu-latest
@@ -34,7 +34,8 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/moderation-scope/red.log"
           test "$result" -ne 0
-          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/moderation-scope/red.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|fatal error:|DATA RACE|signal:|segmentation fault' "$RUNNER_TEMP/moderation-scope/red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestModerationUpstreamScopeUnselectedDoesNotAudit' "$RUNNER_TEMP/moderation-scope/red.log"
           grep -q 'unselected upstream account must make zero audit calls' "$RUNNER_TEMP/moderation-scope/red.log"
       - uses: actions/upload-artifact@v7
         if: always()
@@ -46,6 +47,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
         with:
           version: 9
@@ -88,7 +91,11 @@ jobs:
           git rev-parse HEAD > "$RUNNER_TEMP/moderation-scope-green/head.txt"
           set -o pipefail
           cd backend
-          go test -race -tags=unit ./internal/handler ./internal/service ./internal/securityaudit -run 'TestModerationUpstream|TestOpenAIResponsesWebSocket_ContentModeration|Test.*SecurityAudit|Test.*Queue.*Auth|Test.*Turn.*Admission' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/moderation-scope-green/green.log"
+          go test -race -tags=unit ./internal/handler ./internal/handler/admin ./internal/service ./internal/securityaudit -run 'TestModerationUpstream|TestOpenAIResponsesWebSocket_ContentModeration|Test.*SecurityAudit|Test.*Queue.*Auth|Test.*Turn.*Admission|TestAPIKeyAdmissionRealForwardingHandlersRejectBeforeUpstream|TestOpenAIWSRevalidationFollowup|TestOpenAIWSRevalidationNativeImagePermissionTiming' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/moderation-scope-green/green.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|fatal error:|DATA RACE|signal:|segmentation fault' "$RUNNER_TEMP/moderation-scope-green/green.log"; then exit 1; fi
+          for name in TestModerationUpstreamScopeUnselectedDoesNotAudit TestModerationUpstreamHTTPSelectionAndFailover TestModerationUpstreamWebSocketModesAndTurns TestModerationUpstreamPersistenceAndValidation TestModerationUpstreamAdminSaveReloadAndAuthorization TestModerationUpstreamWebSocketTurnIdentityAfterFailover TestModerationUpstreamImagesJSONKeepaliveAndAsync TestModerationUpstreamSystemOneLocalDenial; do
+            grep -q -- "--- PASS: $name" "$RUNNER_TEMP/moderation-scope-green/green.log"
+          done
       - uses: actions/upload-artifact@v7
         if: always()
         with:

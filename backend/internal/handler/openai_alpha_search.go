@@ -216,6 +216,9 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			}
 			return h.gatewayService.ForwardAlphaSearch(rpmAdmission.forwardContext(c.Request.Context(), account), c, account, forwardBody)
 		}()
+		if service.IsUpstreamModerationDenied(err) {
+			return
+		}
 		if h.handleOpenAIRPMForwardError(c, err, streamStarted, false) {
 			return
 		}

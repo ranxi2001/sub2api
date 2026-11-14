@@ -3,10 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,11 +18,13 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-
 func TestModerationUpstreamWebSocketModesAndTurns(t *testing.T) {
 	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModeHTTPBridge} {
 		for _, namespace := range []string{"none", "oauth"} {
 			for _, scenario := range []string{"unselected", "deny", "next-turn", "failover"} {
+				if scenario == "failover" && namespace != "oauth" {
+					continue
+				}
 				t.Run(mode+"/"+namespace+"/"+scenario, func(t *testing.T) {
 					var audits atomic.Int32
 					audit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -45,9 +48,6 @@ func TestModerationUpstreamWebSocketModesAndTurns(t *testing.T) {
 					require.NoError(t, err)
 					opts := issue600FixtureOptions{moderationSettings: map[string]string{service.SettingKeyContentModerationConfig: string(raw)}}
 					if scenario == "failover" {
-						if namespace != "oauth" {
-							return
-						}
 						opts.switchAccount = true
 					}
 					h, up := newIssue600NetworkHarness(t, mode, namespace, false, nil, opts)
@@ -95,4 +95,33 @@ func TestModerationUpstreamWebSocketModesAndTurns(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestModerationUpstreamWebSocketTurnIdentityAfterFailover(t *testing.T) {
+	var audits atomic.Int32
+	audit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		audits.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		score := "0.01"
+		if strings.Contains(string(body), "blocked-third") {
+			score = "0.99"
+		}
+		_, _ = fmt.Fprintf(w, `{"results":[{"category_scores":{"sexual":%s}}]}`, score)
+	}))
+	defer audit.Close()
+	raw, err := json.Marshal(map[string]any{"enabled": true, "mode": "pre_block", "all_groups": true, "sample_rate": 100, "base_url": audit.URL, "api_keys": []string{"fixture"}, "upstream_account_scope": "selected", "upstream_account_ids": []int64{9951, 9952}, "upstream_account_bindings": map[int64]service.ModerationUpstreamBinding{9951: {Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, GroupIDs: []int64{4301}}, 9952: {Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, GroupIDs: []int64{4301}}}})
+	require.NoError(t, err)
+	h, up := newIssue600NetworkHarness(t, service.OpenAIWSIngressModeHTTPBridge, "oauth", false, nil, issue600FixtureOptions{switchAfterTurns: 1, moderationSettings: map[string]string{service.SettingKeyContentModerationConfig: string(raw)}})
+	issue600Send(t, h, `{"type":"response.create","model":"gpt-5.1","input":"first"}`, 1, false)
+	issue600Send(t, h, `{"type":"response.create","model":"gpt-5.1","input":"second"}`, 2, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, h.clientConn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"blocked-third"}`)))
+	_, event, err := h.clientConn.Read(ctx)
+	require.NoError(t, err)
+	require.Contains(t, string(event), "content_policy_violation")
+	issue600Finish(t, h, nil)
+	frames, _ := up.snapshot()
+	require.Len(t, frames, 2)
+	require.Equal(t, int32(3), audits.Load(), "replay does not audit twice; genuinely new third turn must audit")
 }
