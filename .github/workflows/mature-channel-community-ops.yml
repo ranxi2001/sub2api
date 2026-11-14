@@ -346,6 +346,31 @@ jobs:
         with:
           name: mature-http-${{ github.sha }}
           path: ${{ runner.temp }}/mature-http.log
+      - name: RED unsafe provider errors and missing probe confirmation
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin 796a73f9e5b5c0a936ba5e074c3ab84506de1961
+          files=(backend/internal/handler/admin/mature_provider_key_types.go backend/internal/handler/qq_bot_handler.go backend/internal/handler/qq_bot_setup_handler.go)
+          mkdir -p "$RUNNER_TEMP/mature-handler-original"
+          for target in "${files[@]}"; do cp "$target" "$RUNNER_TEMP/mature-handler-original/$(basename "$target")"; git show 796a73f9e5b5c0a936ba5e074c3ab84506de1961:"$target" > "$target"; done
+          restore(){ for target in "${files[@]}"; do cp "$RUNNER_TEMP/mature-handler-original/$(basename "$target")" "$target"; done; }
+          trap restore EXIT
+          set +e
+          (cd backend && go test ./internal/handler/admin ./internal/handler -run '^TestMature(ProviderReflectedCredentialIsNotPublic|QQProbeRequiresExplicitConfirmation)$' -count=1 -v) > "$RUNNER_TEMP/mature-handler-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-handler-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-handler-red.log"
+          grep -q -- '--- FAIL: TestMatureProviderReflectedCredentialIsNotPublic' "$RUNNER_TEMP/mature-handler-red.log"
+          grep -q -- '--- FAIL: TestMatureQQProbeRequiresExplicitConfirmation' "$RUNNER_TEMP/mature-handler-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-handler-red-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-handler-red.log
       - name: Candidate handler assertions
         if: always()
         working-directory: backend
