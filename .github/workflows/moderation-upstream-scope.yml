@@ -69,3 +69,24 @@ jobs:
         with:
           name: moderation-scope-ui-${{ github.sha }}
           path: ${{ runner.temp }}/moderation-scope-ui
+  backend-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Selected upstream execution and admission regressions
+        run: |
+          mkdir -p "$RUNNER_TEMP/moderation-scope-green"
+          git rev-parse HEAD > "$RUNNER_TEMP/moderation-scope-green/head.txt"
+          set -o pipefail
+          cd backend
+          go test -race -tags=unit ./internal/handler ./internal/service ./internal/securityaudit -run 'TestModerationUpstream|TestOpenAIResponsesWebSocket_ContentModeration|Test.*SecurityAudit|Test.*Queue.*Auth|Test.*Turn.*Admission' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/moderation-scope-green/green.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: moderation-scope-green-${{ github.sha }}
+          path: ${{ runner.temp }}/moderation-scope-green

@@ -3609,6 +3609,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
 			return
 		}
+		if decision := checkSelectedUpstreamAudit(c, ctx, account); decision != nil && !decision.AllowNextStage {
+			writeSecurityAuditWSError(ctx, wsConn, decision)
+			closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
+			return
+		}
 		hooks := &service.OpenAIWSIngressHooks{
 			ClientLifecycleContext:      clientLifecycleCtx,
 			InitialRequestModel:         reqModel,
@@ -3722,7 +3727,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for your account in this group", denied), nil)
 				}
-				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
+				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, clientPayload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
+					writeSecurityAuditWSError(ctx, wsConn, decision)
+					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
+				}
+				if decision := checkSelectedUpstreamAudit(c, c.Request.Context(), account); decision != nil && !decision.AllowNextStage {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
 					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
 				}

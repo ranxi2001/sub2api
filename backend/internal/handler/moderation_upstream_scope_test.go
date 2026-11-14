@@ -27,11 +27,15 @@ func TestModerationUpstreamScopeUnselectedDoesNotAudit(t *testing.T) {
 	defer audit.Close()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
-		if err != nil { return }
+		if err != nil {
+			return
+		}
 		defer func() { _ = conn.CloseNow() }()
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		if _, _, err := conn.Read(ctx); err != nil { return }
+		if _, _, err := conn.Read(ctx); err != nil {
+			return
+		}
 		generationWrites.Add(1)
 		_ = conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_scope","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`))
 		_, _, _ = conn.Read(ctx)
