@@ -256,6 +256,10 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 			return
 		}
 
+		if gateErr := service.CheckUpstreamModeration(c.Request.Context(), c, account); gateErr != nil {
+			accountReleaseFunc()
+			return
+		}
 		upstream, err := svc.CreateUpstream(c.Request.Context(), account, req, mappedModel, publicID, ttl)
 		accountReleaseFunc()
 		if err != nil {

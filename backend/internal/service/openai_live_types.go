@@ -43,6 +43,7 @@ type LiveCallRequest struct {
 }
 
 type LiveCallIdentity struct {
+	BeforeGeneration       func(context.Context, *Account) error
 	APIKeyConcurrencyLimit int
 	APIKeyID               int64
 	UserID                 int64

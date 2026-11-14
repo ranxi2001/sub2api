@@ -1423,6 +1423,7 @@ export interface GrokModelDiagnostics {
 }
 
 export interface Account {
+  moderation_scope_eligible?: boolean
   upstream_channel_binding?: import('@/api/admin/upstreamChannels').ChannelBinding
  excel_bps_credential_state?: ExcelBPSCredentialState
   id: number

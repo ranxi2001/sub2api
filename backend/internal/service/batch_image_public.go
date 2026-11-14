@@ -48,16 +48,17 @@ type BatchImageUserGroupRateRepository interface {
 }
 
 type BatchImageSubmitRequest struct {
-	Model            string                 `json:"model"`
-	TaskName         string                 `json:"task_name"`
-	ParentBatchID    string                 `json:"parent_batch_id"`
-	Provider         string                 `json:"provider"`
-	Items            []BatchImageSubmitItem `json:"items"`
-	ResponseMimeType string                 `json:"response_mime_type"`
-	AspectRatio      string                 `json:"aspect_ratio"`
-	ImageSize        string                 `json:"image_size"`
-	Metadata         map[string]string      `json:"metadata"`
-	SessionID        *string                `json:"-"`
+	BeforeGeneration func(context.Context, *Account) error `json:"-"`
+	Model            string                                `json:"model"`
+	TaskName         string                                `json:"task_name"`
+	ParentBatchID    string                                `json:"parent_batch_id"`
+	Provider         string                                `json:"provider"`
+	Items            []BatchImageSubmitItem                `json:"items"`
+	ResponseMimeType string                                `json:"response_mime_type"`
+	AspectRatio      string                                `json:"aspect_ratio"`
+	ImageSize        string                                `json:"image_size"`
+	Metadata         map[string]string                     `json:"metadata"`
+	SessionID        *string                               `json:"-"`
 }
 
 type BatchImageSubmitItem struct {
@@ -234,6 +235,11 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	provider, account, err := s.selectProviderAndAccount(ctx, owner, normalized.Provider, normalized.Model)
 	if err != nil {
 		return nil, err
+	}
+	if req.BeforeGeneration != nil {
+		if err := req.BeforeGeneration(ctx, account); err != nil {
+			return nil, err
+		}
 	}
 	pricingSnapshot, err := s.resolvePricingSnapshot(ctx, owner, normalized, provider.Name(), account)
 	if err != nil {

@@ -397,8 +397,8 @@
         </div>
       </template>
 
-      <BaseDialog :show="settingsOpen" :title="t('admin.riskControl.settingsTitle')" width="extra-wide" @close="settingsOpen = false">
-        <div class="space-y-6">
+      <BaseDialog :show="settingsOpen" :title="t('admin.riskControl.settingsTitle')" width="extra-wide" :show-close-button="!saving" :close-on-escape="!saving" @close="closeSettings">
+        <fieldset :disabled="saving" class="min-w-0 space-y-6">
           <div class="flex gap-2 overflow-x-auto border-b border-gray-100 pb-3 dark:border-dark-700">
             <button
               v-for="tab in settingsTabs"
@@ -410,6 +410,7 @@
             >
               {{ tab.label }}
             </button>
+            <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.moderationUpstreamAccountScope" :user-id="auth.user?.id" />
           </div>
 
           <div v-if="activeSettingsTab === 'basic'" class="space-y-5">
@@ -753,6 +754,9 @@
           </div>
 
           <div v-else-if="activeSettingsTab === 'scope'" class="space-y-5">
+            <ModerationUpstreamAccountSelector v-model="configForm.upstream_account_ids" v-model:scope="configForm.upstream_account_scope" :groups="groups" :disabled="saving" @busy="upstreamSelecting = $event">
+              <template #badge><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.moderationUpstreamAccountScope" :user-id="auth.user?.id" /></template>
+            </ModerationUpstreamAccountSelector>
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.riskControl.groupScope') }}</h3>
@@ -1107,12 +1111,12 @@
               </div>
             </div>
           </div>
-        </div>
+        </fieldset>
 
         <template #footer>
           <div class="flex justify-end gap-2">
-            <button type="button" class="btn btn-secondary" @click="settingsOpen = false">{{ t('common.cancel') }}</button>
-            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving" @click="saveConfig">
+            <button type="button" class="btn btn-secondary" :disabled="saving" @click="closeSettings">{{ t('common.cancel') }}</button>
+            <button type="button" class="btn btn-primary inline-flex items-center gap-2" :disabled="saving || upstreamSelecting" @click="saveConfig">
               <Icon v-if="saving" name="refresh" size="sm" class="animate-spin" />
               <Icon v-else name="check" size="sm" />
               {{ saving ? t('common.saving') : t('admin.riskControl.saveConfig') }}
@@ -1209,6 +1213,10 @@
 import { moderationThresholdDefaults, moderationCategorySettings, moderationScoreRows as buildModerationScoreRows, optionalModerationCategories } from '@/utils/contentModerationCategories'
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ModerationUpstreamAccountSelector from '@/components/admin/moderation/ModerationUpstreamAccountSelector.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useAuthStore } from '@/stores/auth'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import SecurityAuditNav from '@/components/admin/security/SecurityAuditNav.vue'
@@ -1275,10 +1283,13 @@ const { t } = useI18n()
 const moderationUsersMounted = ref(false)
 const moderationUsersExpanded = ref(false)
 const appStore = useAppStore()
+const auth = useAuthStore()
 const defaultBlockMessage = () => t('admin.riskControl.defaultBlockMessage')
 
 const loading = ref(true)
 const saving = ref(false)
+const upstreamSelecting = ref(false)
+const savedUpstreamScope = ref<{ scope: 'all' | 'selected'; ids: number[] }>({ scope: 'all', ids: [] })
 const logsLoading = ref(false)
 const statusLoading = ref(false)
 const apiKeyTesting = ref(false)
@@ -1323,6 +1334,8 @@ const configForm = reactive({
   timeout_ms: 3000,
   retry_count: 2,
   sample_rate: 100,
+  upstream_account_scope: 'all' as 'all' | 'selected',
+  upstream_account_ids: [] as number[],
   all_groups: true,
   group_ids: [] as number[],
   record_non_hits: false,
@@ -1850,6 +1863,9 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.timeout_ms = config.timeout_ms || 3000
   configForm.retry_count = config.retry_count ?? 2
   configForm.sample_rate = config.sample_rate ?? 100
+  configForm.upstream_account_scope = config.upstream_account_scope ?? 'all'
+  configForm.upstream_account_ids = [...(config.upstream_account_ids ?? [])]
+  savedUpstreamScope.value = { scope: configForm.upstream_account_scope, ids: [...configForm.upstream_account_ids] }
   configForm.all_groups = config.all_groups
   configForm.group_ids = Array.isArray(config.group_ids) ? [...config.group_ids] : []
   configForm.record_non_hits = config.record_non_hits
@@ -1941,6 +1957,7 @@ async function loadStatus(silent = true) {
 }
 
 async function saveConfig() {
+  if (saving.value || upstreamSelecting.value) return
   saving.value = true
   try {
     const modelFilterPayload = buildModelFilterPayload()
@@ -1959,6 +1976,8 @@ async function saveConfig() {
       timeout_ms: Number(configForm.timeout_ms) || 3000,
       retry_count: Number(configForm.retry_count) || 0,
       sample_rate: Number(configForm.sample_rate) || 0,
+      upstream_account_scope: configForm.upstream_account_scope,
+      upstream_account_ids: configForm.upstream_account_scope === 'all' ? [] : [...configForm.upstream_account_ids],
       all_groups: configForm.all_groups,
       group_ids: configForm.all_groups ? [] : [...configForm.group_ids],
       record_non_hits: configForm.record_non_hits,
@@ -2092,7 +2111,12 @@ async function clearFlaggedHashes() {
   }
 }
 
+function closeSettings() { if (!saving.value) settingsOpen.value = false }
+
 function openSettings() {
+  if (saving.value) return
+  configForm.upstream_account_scope = savedUpstreamScope.value.scope
+  configForm.upstream_account_ids = [...savedUpstreamScope.value.ids]
   activeSettingsTab.value = 'basic'
   settingsOpen.value = true
 }

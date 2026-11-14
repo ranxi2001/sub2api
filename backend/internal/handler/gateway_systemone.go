@@ -192,6 +192,9 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		if accountRelease != nil {
 			accountRelease()
 		}
+		if service.IsUpstreamModerationDenied(forwardErr) {
+			return
+		}
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
 		if forwardErr != nil {

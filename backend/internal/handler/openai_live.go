@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -128,6 +129,9 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 	}
 
 	identity := liveCallIdentity(c, apiKey, subject.UserID, subscription)
+	identity.BeforeGeneration = func(ctx context.Context, account *service.Account) error {
+		return service.CheckUpstreamModeration(ctx, c, account)
+	}
 	identity.KeyReservation = keyReservation
 	if keyReservation != nil {
 		// Use the limit that actually admitted the reservation: while waiting,
@@ -141,6 +145,9 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 	identity.UserRequestID = userResult.RequestID
 	created, err := h.gatewayService.CreateLiveCall(c.Request.Context(), request, identity, subject.Concurrency)
 	if err != nil {
+		if c.IsAborted() {
+			return
+		}
 		h.writeLiveCreateError(c, err)
 		return
 	}

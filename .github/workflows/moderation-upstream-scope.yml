@@ -1,0 +1,126 @@
+name: Moderation upstream scope acceptance
+on:
+  push:
+    branches: [feat/moderation-upstream-account-scope]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: moderation-upstream-scope-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  behavioral-red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Pinned original implementation with candidate regression
+        run: |
+          mkdir -p "$RUNNER_TEMP/moderation-scope"
+          git rev-parse HEAD > "$RUNNER_TEMP/moderation-scope/head.txt"
+          cp backend/internal/handler/moderation_upstream_scope_test.go "$RUNNER_TEMP/scope_test.go"
+          git checkout --detach 4189ed821
+          cp "$RUNNER_TEMP/scope_test.go" backend/internal/handler/moderation_upstream_scope_test.go
+          cd backend
+          set +e
+          go test ./internal/handler -run '^TestModerationUpstreamScopeUnselectedDoesNotAudit$' -count=1 -v > "$RUNNER_TEMP/moderation-scope/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/moderation-scope/red.log"
+          test "$result" -ne 0
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|fatal error:|DATA RACE|signal:|segmentation fault' "$RUNNER_TEMP/moderation-scope/red.log"; then exit 1; fi
+          grep -q -- '--- FAIL: TestModerationUpstreamScopeUnselectedDoesNotAudit' "$RUNNER_TEMP/moderation-scope/red.log"
+          grep -q 'unselected upstream account must make zero audit calls' "$RUNNER_TEMP/moderation-scope/red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: moderation-scope-red-${{ github.sha }}
+          path: ${{ runner.temp }}/moderation-scope
+  ui-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Frontend integration and existing selector regressions
+        run: |
+          pnpm --dir frontend exec vitest run src/components/admin/moderation/__tests__/ModerationUpstreamAccountSelector.spec.ts src/components/admin/operations/__tests__/QualityAccountSelector.spec.ts src/views/admin/__tests__/RiskControlView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
+          pnpm --dir frontend run build
+      - name: Isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/scope-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/scope-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Render actual baseline settings
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/moderation-scope-ui
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/scope-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/moderation-scope-preview.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: moderation-scope-ui-${{ github.sha }}
+          path: ${{ runner.temp }}/moderation-scope-ui
+  backend-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Selected upstream execution and admission regressions
+        run: |
+          mkdir -p "$RUNNER_TEMP/moderation-scope-green"
+          git rev-parse HEAD > "$RUNNER_TEMP/moderation-scope-green/head.txt"
+          set -o pipefail
+          cd backend
+          go test -race -tags=unit ./internal/handler ./internal/handler/admin ./internal/service ./internal/securityaudit -run 'TestModerationUpstream|TestOpenAIResponsesWebSocket_ContentModeration|Test.*SecurityAudit|Test.*Queue.*Auth|Test.*Turn.*Admission|TestCoordinator|TestAPIKeyAdmissionRealForwardingHandlersRejectBeforeUpstream|TestOpenAIWSRevalidationFollowup|TestOpenAIWSRevalidationNativeImagePermissionTiming' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/moderation-scope-green/green.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|fatal error:|DATA RACE|signal:|segmentation fault' "$RUNNER_TEMP/moderation-scope-green/green.log"; then exit 1; fi
+          for name in TestModerationUpstreamScopeUnselectedDoesNotAudit TestModerationUpstreamHTTPSelectionAndFailover TestModerationUpstreamWebSocketModesAndTurns TestModerationUpstreamPersistenceAndValidation TestModerationUpstreamAdminSaveReloadAndAuthorization TestModerationUpstreamWebSocketTurnIdentityAfterFailover TestModerationUpstreamImagesJSONKeepaliveAndAsync TestModerationUpstreamSystemOneLocalDenial TestModerationUpstreamHTTPDispatchFamilies TestModerationUpstreamWebSocketCurrentAliasControlsScope TestModerationUpstreamEligibility TestModerationUpstreamAccountCatalogEligibility; do
+            grep -q -- "--- PASS: $name" "$RUNNER_TEMP/moderation-scope-green/green.log"
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: moderation-scope-green-${{ github.sha }}
+          path: ${{ runner.temp }}/moderation-scope-green
+  postgres-persistence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Authenticated handler and real PostgreSQL persistence
+        run: |
+          mkdir -p "$RUNNER_TEMP/moderation-scope-postgres"
+          git rev-parse HEAD > "$RUNNER_TEMP/moderation-scope-postgres/head.txt"
+          set -o pipefail
+          cd backend
+          go test -tags=integration ./internal/repository -run '^TestModerationUpstreamPostgresAdminRoundTrip$' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/moderation-scope-postgres/postgres.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|fatal error:|DATA RACE|signal:|segmentation fault' "$RUNNER_TEMP/moderation-scope-postgres/postgres.log"; then exit 1; fi
+          grep -q -- '--- PASS: TestModerationUpstreamPostgresAdminRoundTrip' "$RUNNER_TEMP/moderation-scope-postgres/postgres.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: moderation-scope-postgres-${{ github.sha }}
+          path: ${{ runner.temp }}/moderation-scope-postgres
