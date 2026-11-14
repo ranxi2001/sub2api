@@ -62,7 +62,7 @@ jobs:
           defect=ea1f3a28d8d1839e92ac5e48c6e9d7aeb90b0fff
           red_tree="$RUNNER_TEMP/http2-successor-red"
           test "$(git -C "$red_tree" rev-parse HEAD)" = "$defect"
-          for test_source in backend/internal/service/http2_peer_reset_followup_test.go backend/internal/handler/http2_cc_semantic_followup_test.go; do
+          for test_source in backend/internal/service/http2_peer_reset_followup_test.go backend/internal/handler/http2_peer_reset_test.go; do
             git show "HEAD:$test_source" > "$red_tree/$test_source"
             expected=$(git rev-parse "HEAD:$test_source")
             actual=$(git hash-object "$red_tree/$test_source")
@@ -148,7 +148,7 @@ jobs:
           # candidate GREEN below. The older overlays remove TransportFailure;
           # keep their original regression set instead of compiling new tests
           # against a source contract predating that field.
-          done < <(git ls-files 'backend/internal/handler/http2*_test.go' 'backend/internal/service/http2*_test.go' 'backend/internal/repository/http2*_test.go' ':!backend/internal/handler/http2_cc_semantic_followup_test.go' ':!backend/internal/service/http2_peer_reset_followup_test.go' ':!backend/internal/repository/http2_ai_ops_identity_integration_test.go')
+          done < <(git ls-files 'backend/internal/handler/http2*_test.go' 'backend/internal/service/http2*_test.go' 'backend/internal/repository/http2*_test.go' ':!backend/internal/service/http2_peer_reset_followup_test.go' ':!backend/internal/repository/http2_ai_ops_identity_integration_test.go')
           cd "$red_tree"
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/http2-evidence/red-source-checkpoint.txt"
           mapfile -t targets < <(git diff --name-only "$baseline" "$reviewed" -- 'backend/**/*.go' ':!backend/**/*_test.go' ':!backend/**/*_test_support.go')
