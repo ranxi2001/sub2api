@@ -7,7 +7,7 @@ import type { InternalAxiosRequestConfig } from 'axios'
 import { getAutoConfig } from '@/api/admin/autoConfig'
 import { defaultExcelBPSDefaults } from '@/utils/excelBPSDefaults'
 vi.mock('@/api/admin/autoConfig', () => ({ getAutoConfig: vi.fn() }))
-beforeEach(() => { vi.mocked(getAutoConfig).mockResolvedValue({ excel_bps: defaultExcelBPSDefaults() } as Awaited<ReturnType<typeof getAutoConfig>>) })
+beforeEach(() => { setActivePinia(createPinia()); vi.mocked(getAutoConfig).mockResolvedValue({ excel_bps: defaultExcelBPSDefaults() } as Awaited<ReturnType<typeof getAutoConfig>>) })
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
