@@ -395,6 +395,23 @@ jobs:
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: RED provider identity must resolve old balance alerts
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/repository/mature_providers.go
+          cp "$target" "$RUNNER_TEMP/mature-provider-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-provider-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 2e2e6def253c07eb1a48f2a9e58c137f87c2bdc9
+          git show 2e2e6def253c07eb1a48f2a9e58c137f87c2bdc9:"$target" > "$target"
+          set +e
+          (cd backend && go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersRefreshClaimAndLowBalance$' -count=1 -v) > "$RUNNER_TEMP/mature-provider-identity-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-provider-identity-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-provider-identity-red.log"
+          grep -q 'identity change must end the previous balance episode' "$RUNNER_TEMP/mature-provider-identity-red.log"
       - name: Candidate business HTTP assertions
         working-directory: backend
         run: |

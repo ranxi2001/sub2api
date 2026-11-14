@@ -132,6 +132,7 @@ func (h *ChannelHandler) refreshMatureProvider(ctx context.Context, id, revision
 		if e != nil {
 			return u, e
 		}
+		defer client.CloseIdleConnections()
 		probe, e := probeProviderAccount(ctx, providerProtocolRecord(p), secret, client)
 		if probe.secret != "" {
 			renewed, encryptErr := h.providerEncryptor.Encrypt(probe.secret)

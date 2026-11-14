@@ -46,8 +46,10 @@ func (r *channelRepository) WithMatureProviderSession(parent context.Context, id
 	if err != nil {
 		return nil, err
 	}
-	if err = updateMatureProviderAlert(ctx, tx, p); err != nil {
-		return nil, err
+	if u.Metrics != nil {
+		if err = updateMatureProviderAlert(ctx, tx, p); err != nil {
+			return nil, err
+		}
 	}
 	// Persist a rotated refresh token even when the following metadata request
 	// fails. Otherwise a successful exchange would strand the saved credential.

@@ -5,6 +5,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -89,4 +90,13 @@ func TestMatureProvidersRefreshClaimAndLowBalance(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM mature_provider_alerts WHERE provider_id=$1`, p.Data.ID).Scan(&count))
 	require.Equal(t, 1, count, "repeated low samples must not create duplicate alert episodes")
+	var revision int64
+	require.NoError(t, db.QueryRow(`SELECT revision FROM mature_providers WHERE id=$1`, p.Data.ID).Scan(&revision))
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest("PUT", fmt.Sprintf("/api/v1/admin/providers/%d", p.Data.ID), strings.NewReader(fmt.Sprintf(`{"name":"Changed identity","site_type":"sub2api","base_url":"https://other.example.invalid","revision":%d}`, revision)))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM mature_provider_alerts WHERE provider_id=$1 AND resolved_at IS NULL`, p.Data.ID).Scan(&count))
+	require.Zero(t, count, "identity change must end the previous balance episode")
 }

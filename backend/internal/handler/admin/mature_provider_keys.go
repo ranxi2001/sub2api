@@ -40,6 +40,7 @@ func (h *ChannelHandler) withMatureProviderSession(ctx context.Context, id, revi
 		if e != nil {
 			return u, e
 		}
+		defer client.CloseIdleConnections()
 		session := &providerSession{record: providerProtocolRecord(p), secret: secret, remote: providerRemote{client: client, base: p.BaseURL}}
 		e = session.authenticate(ctx)
 		if e == nil {
