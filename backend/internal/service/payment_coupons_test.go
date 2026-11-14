@@ -88,8 +88,8 @@ func couponTestDB(t *testing.T) (*PaymentService, *sql.DB) {
 func TestCouponPostgresLifecycle(t *testing.T) {
 	s, db := couponTestDB(t)
 	ctx := context.Background()
-	u := invoiceTestUser(t, s.entClient)
-	other := invoiceTestUser(t, s.entClient)
+	u := matureCouponTestUser(t, s.entClient)
+	other := matureCouponTestUser(t, s.entClient)
 	template, err := s.SaveCouponTemplate(ctx, 0, CouponTemplate{Name: "满100减10", Kind: "fixed", Currency: "CNY", MinAmount: 100, Value: 10, ValidDays: 7, Enabled: true, MaxIssues: 10, PerUserLimit: 5})
 	require.NoError(t, err)
 	issue := CouponIssueRequest{TemplateID: template.ID, UserIDs: []int64{u.ID}, Quantity: 1, RequestID: "coupon-test-request-001"}
@@ -248,7 +248,7 @@ func TestCouponPostgresLifecycle(t *testing.T) {
 func TestCouponPaymentFulfillmentAndManualReview(t *testing.T) {
 	s, _ := couponTestDB(t)
 	ctx := context.Background()
-	u := invoiceTestUser(t, s.entClient)
+	u := matureCouponTestUser(t, s.entClient)
 	template, err := s.SaveCouponTemplate(ctx, 0, CouponTemplate{Name: "test", Kind: "fixed", Currency: "CNY", MinAmount: 100, Value: 10, ValidDays: 7, Enabled: true})
 	require.NoError(t, err)
 	ids, err := s.IssueCoupons(ctx, CouponIssueRequest{TemplateID: template.ID, UserIDs: []int64{u.ID}, Quantity: 2, RequestID: "fulfillment-coupon-request"})
@@ -328,7 +328,7 @@ func TestCouponOrderSummaryDoesNotExposeProviderCredentials(t *testing.T) {
 func TestCouponCancellationPaymentRaceAndExpiredReservation(t *testing.T) {
 	s, db := couponTestDB(t)
 	ctx := context.Background()
-	u := invoiceTestUser(t, s.entClient)
+	u := matureCouponTestUser(t, s.entClient)
 	tpl, err := s.SaveCouponTemplate(ctx, 0, CouponTemplate{Name: "race", Kind: "fixed", Currency: "CNY", MinAmount: 100, Value: 10, ValidDays: 7, Enabled: true})
 	require.NoError(t, err)
 	ids, err := s.IssueCoupons(ctx, CouponIssueRequest{TemplateID: tpl.ID, UserIDs: []int64{u.ID}, Quantity: 4, RequestID: "race-payment-coupon-batch"})
@@ -362,4 +362,11 @@ func TestCouponCancellationPaymentRaceAndExpiredReservation(t *testing.T) {
 		require.Equal(t, "used", c.Status)
 	}
 	require.Equal(t, 400.0, credited)
+}
+
+func matureCouponTestUser(t *testing.T, client *dbent.Client) *dbent.User {
+	t.Helper()
+	user, err := client.User.Create().SetEmail(fmt.Sprintf("coupon-%d@example.invalid", time.Now().UnixNano())).SetPasswordHash("synthetic").Save(context.Background())
+	require.NoError(t, err)
+	return user
 }

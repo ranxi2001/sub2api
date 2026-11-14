@@ -425,6 +425,29 @@ jobs:
         with:
           name: mature-handlers-${{ github.sha }}
           path: ${{ runner.temp }}/mature-handlers.log
+      - name: RED transfer atomicity against imported implementation
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/qqbot/transfer.go
+          cp "$target" "$RUNNER_TEMP/mature-transfer-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-transfer-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 796a73f9e5b5c0a936ba5e074c3ab84506de1961
+          git show 796a73f9e5b5c0a936ba5e074c3ab84506de1961:"$target" > "$target"
+          set +e
+          (cd backend && go test -tags=integration ./internal/qqbot -run '^TestMatureTransferRollsBackWhenRecipientIsNotCredited$' -count=1 -v) > "$RUNNER_TEMP/mature-transfer-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-transfer-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|file does not exist' "$RUNNER_TEMP/mature-transfer-red.log"
+          grep -q 'a transfer must roll back unless the recipient is credited' "$RUNNER_TEMP/mature-transfer-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-transfer-red-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-transfer-red.log
       - name: QQ business isolated database
         if: always()
         working-directory: backend
