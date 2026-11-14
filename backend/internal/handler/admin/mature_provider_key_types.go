@@ -188,7 +188,7 @@ func providerKeyError(err error) error {
 func providerFailureMessage(err error) string {
 	var refused *providerAPIError
 	if errors.As(err, &refused) {
-		return "Provider rejected the request: " + refused.message
+		return "Provider rejected the request; check permissions and selected group"
 	}
 	return providerPublicError(err)
 }

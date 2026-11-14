@@ -265,7 +265,7 @@ export const qqbotAPI = {
   setupOptions: async () => (await apiClient.get<QQSetupOptions>('/admin/qqbot/setup/options')).data,
   setupChecks: async () => (await apiClient.get<QQSetupReadiness>('/admin/qqbot/setup/checks')).data,
   saveSetup: async (request: QQSetupRequest) => (await apiClient.put<QQBotConfig>('/admin/qqbot/setup', request)).data,
-  setupProbe: async (kind: string) => (await apiClient.post<QQSetupProbe>('/admin/qqbot/setup/probe/' + kind, {}, { timeout: 230000 })).data,
+  setupProbe: async (kind: string) => (await apiClient.post<QQSetupProbe>('/admin/qqbot/setup/probe/' + kind, { confirm: true }, { timeout: 230000 })).data,
   activityTemplates: async () => (await apiClient.get<Record<'current' | 'light' | 'active', QQActivityBundle>>('/admin/qqbot/activity-templates')).data,
   applyActivityTemplate: async (request: { version: string; template: 'light' | 'active'; budget: number; confirmed: boolean }) => (await apiClient.post<QQBotConfig>('/admin/qqbot/activity-templates', request)).data,
 
@@ -302,7 +302,7 @@ export const qqbotAPI = {
   deleteDiscoveredGroup: async (groupID: string) => (await apiClient.delete('/admin/qqbot/groups', { data: { group_id: groupID } })).data,
   bindings: async (search: string, page: number) => (await apiClient.get<QQAdminBindingsPage>('/admin/qqbot/bindings', { params: { search, page, page_size: 20 } })).data,
   unbind: async (binding: QQAdminBinding) => (await apiClient.delete(`/admin/qqbot/bindings/${binding.user_id}`, { data: { app_id: binding.app_id, member_id: binding.member_id, created_at: binding.created_at } })).data,
-  probe: async (kind: 'qq' | 'chat' | 'image' | 'vision' | 'tools' | 'image_edit') => (await apiClient.post<{message: string}>(`/admin/qqbot/test/${kind}`, {}, { timeout: 230000 })).data,
+  probe: async (kind: 'qq' | 'chat' | 'image' | 'vision' | 'tools' | 'image_edit') => (await apiClient.post<{message: string}>(`/admin/qqbot/test/${kind}`, { confirm: true }, { timeout: 230000 })).data,
   binding: async () => (await apiClient.get<QQBindingState>('/user/qqbot/binding')).data,
   createCode: async () => (await apiClient.post<QQBindingRequest>('/user/qqbot/binding-code')).data,
   confirm: async (member_id: string) => (await apiClient.post('/user/qqbot/binding-confirm', { member_id })).data,

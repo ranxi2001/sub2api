@@ -114,9 +114,6 @@ func (h *ChannelHandler) RefreshMatureProvider(c *gin.Context) {
 	response.Success(c, out)
 }
 
-// Keep imported protocol helpers' error text free of server-generated secrets.
-func redactProviderRemoteMessage(_ string) string { return "Provider rejected the operation" }
-
 func (h *ChannelHandler) refreshMatureProvider(ctx context.Context, id, revision int64) (*service.MatureProvider, error) {
 	r, err := h.channelService.MatureProviderRepository()
 	if err != nil {

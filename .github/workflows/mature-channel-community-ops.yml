@@ -31,6 +31,15 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
       - name: Freeze candidate identity
         run: |
           mkdir -p "$RUNNER_TEMP/mature-evidence"
@@ -127,6 +136,14 @@ jobs:
         with:
           name: mature-contract-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/mature-evidence/
+
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
 
   before-ui:
     if: github.sha == '59d409b49df3dd90815a054cb6dffdd405c06c3e'
@@ -259,6 +276,15 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
       - name: RED pinned imported QQ transport before hardening
         shell: bash
         run: |
@@ -286,6 +312,14 @@ jobs:
         with:
           name: mature-network-${{ github.sha }}
           path: ${{ runner.temp }}/mature-network-evidence/
+
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
 
   account-before:
     if: github.sha == 'a51c3e8d8e61c897a3a2aad9dd1cdc7d9b114c56'
@@ -336,6 +370,15 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
       - name: Candidate business HTTP assertions
         working-directory: backend
         run: |
@@ -408,6 +451,14 @@ jobs:
         if: always()
         working-directory: backend
         run: go build -o "$RUNNER_TEMP/mature-server" ./cmd/server
+
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
 
   after-ui:
     runs-on: ubuntu-latest

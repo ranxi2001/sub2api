@@ -72,6 +72,9 @@ func (h *QQBotHandler) SetupProbe(c *gin.Context) {
 	if !requireQQBotAdmin(c) {
 		return
 	}
+	if !requireQQBotProbeConfirmation(c) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 220*time.Second)
 	defer cancel()
 	result, err := h.bot.SetupProbe(ctx, c.Param("kind"))

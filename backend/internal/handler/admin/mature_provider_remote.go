@@ -497,12 +497,31 @@ func probeProviderAccount(ctx context.Context, provider providerRecord, secret s
 			TotalSpend: divide(field(profile, "used_quota"), quotaPerUnit),
 			Currency:   "USD",
 		}
+		// New API exposes a display preference independently of its quota
+		// conversion. Convert only with an explicit exchange rate; otherwise
+		// retain the source quota-unit label instead of inventing a currency.
+		quotaScale := 1.0
+		switch strings.ToUpper(providerText(status["quota_display_type"])) {
+		case "USD":
+			metrics.Currency = "USD"
+		case "CNY":
+			if rate, ok := number(status["usd_exchange_rate"]); ok && rate > 0 && rate < 1e6 {
+				metrics.Currency = "CNY"
+				quotaScale = rate
+			} else {
+				metrics.Currency = "quota_units"
+			}
+		default:
+			metrics.Currency = "quota_units"
+		}
+		metrics.Balance = divide(metrics.Balance, 1/quotaScale)
+		metrics.TotalSpend = divide(metrics.TotalSpend, 1/quotaScale)
 		location, _ := time.LoadLocation("Asia/Shanghai")
 		now := time.Now().In(location)
 		start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location).Unix()
 		path := fmt.Sprintf("/api/log/self/stat?type=2&start_timestamp=%d&end_timestamp=%d", start, now.Add(time.Second).Unix())
 		if daily, err := r.request(ctx, http.MethodGet, path, nil); err == nil {
-			metrics.TodaySpend = divide(field(daily, "quota"), quotaPerUnit)
+			metrics.TodaySpend = divide(field(daily, "quota"), quotaPerUnit/quotaScale)
 		}
 		// New API self/profile has no canonical cumulative recharge field.
 		// Leave it unknown instead of presenting quota + spend as payments.

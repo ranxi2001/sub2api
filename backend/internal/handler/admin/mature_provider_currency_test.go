@@ -29,5 +29,7 @@ func TestMatureProviderCurrencyDoesNotRelabelQuota(t *testing.T) {
 	// quota_per_unit defines source quota units. A display-currency preference
 	// cannot silently label those units USD; either convert or preserve units.
 	require.NotEqual(t, "USD", result.metrics.Currency, "display currency must not relabel unconverted quota as USD")
+	require.Equal(t, "CNY", result.metrics.Currency)
+	require.InDelta(t, 70, *result.metrics.Balance, 1e-9)
 	require.Nil(t, result.metrics.TotalRecharge)
 }

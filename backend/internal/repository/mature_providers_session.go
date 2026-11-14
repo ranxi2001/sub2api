@@ -12,7 +12,7 @@ import (
 // row lock also prevents a concurrent edit from changing the destination while
 // a credential is in flight. Never use a process mutex for single-use tokens.
 func (r *channelRepository) WithMatureProviderSession(parent context.Context, id, revision int64, run func(*service.MatureProvider, string) (service.ProviderSessionUpdate, error)) (*service.MatureProvider, error) {
-	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 35*time.Second)
 	defer cancel()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -26,6 +26,9 @@ func (r *channelRepository) WithMatureProviderSession(parent context.Context, id
 	}
 	if revision > 0 && p.Revision != revision {
 		return nil, service.ErrMatureProviderConflict
+	}
+	if err = parent.Err(); err != nil {
+		return nil, err
 	}
 	u, operationErr := run(p, cipher)
 	if u.Cipher == nil && u.Metrics == nil && u.Status == "" {
