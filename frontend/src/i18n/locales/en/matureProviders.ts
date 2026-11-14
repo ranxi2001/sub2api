@@ -50,5 +50,22 @@ export default {
   "confirmDelete": "Confirm deletion",
   "currencyUnknown": "Unknown currency",
   "conflict": "This record changed elsewhere. Your draft is preserved. Review the latest record before reopening the editor.",
-  "failed": "The operation failed. Retry or check the provider configuration."
+  "failed": "The operation failed. Retry or check the provider configuration.",
+  "importTitle": "Import from provider",
+  "importNote": "Select a saved dashboard login and upstream key. The server copies the complete key into the account.",
+  "chooseProvider": "Choose a provider",
+  "refreshList": "Refresh list",
+  "chooseKey": "Choose a key",
+  "refreshKeys": "Refresh keys",
+  "createKey": "Create a provider key",
+  "chooseGroup": "Choose an upstream group",
+  "refreshGroups": "Refresh groups",
+  "keyName": "Key name",
+  "chooseGroupFirst": "Generated after group selection",
+  "confirmKey": "I confirm creating a new API key on this provider. This changes the remote account.",
+  "create": "Create",
+  "keyUncertain": "Creation could not be confirmed. Close this dialog and refresh the key list before starting another operation.",
+  "manual": "Enter manually",
+  "useProvider": "Import from provider",
+  "selectKeyRequired": "Choose a provider and an available key."
 }

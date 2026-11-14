@@ -94,11 +94,11 @@ func (r *channelRepository) UpdateMatureProvider(parent context.Context, id int6
 	// A single conditional update is the cross-instance compare-and-swap. An
 	// identity change invalidates observations; it never carries old metrics.
 	p, err := scanMatureProvider(r.db.QueryRowContext(ctx, `UPDATE mature_providers SET
- status=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13 IS NOT NULL THEN 'unknown' ELSE status END,
- metrics=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13 IS NOT NULL THEN '{"balance":null,"today_spend":null,"total_spend":null,"total_recharge":null,"currency":""}'::jsonb ELSE metrics END,
- observed_at=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13 IS NOT NULL THEN NULL ELSE observed_at END,
- credential_cipher=COALESCE($13,CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13 IS NOT NULL THEN '' ELSE credential_cipher END),
- last_error=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13 IS NOT NULL THEN '' ELSE last_error END,
+ status=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN 'unknown' ELSE status END,
+ metrics=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN '{"balance":null,"today_spend":null,"total_spend":null,"total_recharge":null,"currency":""}'::jsonb ELSE metrics END,
+ observed_at=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN NULL ELSE observed_at END,
+ credential_cipher=COALESCE($13,CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN '' ELSE credential_cipher END),
+ last_error=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN '' ELSE last_error END,
  auth_mode=$10,account=$11,user_id=$12,name=$3,site_type=$4,base_url=$5,notes=$6,cost_multiplier=$7,low_balance_threshold=$8,suppress_low_balance_alert=$9,revision=revision+1,updated_at=NOW()
  WHERE id=$1 AND revision=$2 RETURNING `+matureProviderColumns, id, *in.Revision, in.Name, in.SiteType, in.BaseURL, in.Notes, in.CostMultiplier, in.LowBalanceThreshold, in.SuppressLowBalanceAlert, in.AuthMode, in.Account, in.UserID, in.CredentialCipher))
 	if errors.Is(err, service.ErrMatureProviderNotFound) {

@@ -13,6 +13,7 @@ import QQBotOverviewView from '@/views/admin/QQBotOverviewView.vue'
 import QQBotRecordsView from '@/views/admin/QQBotRecordsView.vue'
 
 const api = vi.hoisted(() => ({ members: vi.fn(), jobs: vi.fn(), moderationRecords: vi.fn(), config: vi.fn(), runtime: vi.fn(), overview: vi.fn(), diagnose: vi.fn() }))
+vi.mock('@/components/admin/qqbot/QQCommunityNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('@/api/qqbot', async original => ({ ...await original<typeof import('@/api/qqbot')>(), qqbotAPI: api }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 const members: QQMemberOption[] = [

@@ -50,5 +50,22 @@ export default {
   "confirmDelete": "确认删除",
   "currencyUnknown": "币种未知",
   "conflict": "记录已被其他操作修改。草稿已保留，请核对最新记录后重新打开编辑。",
-  "failed": "操作失败，请重试或检查服务商配置。"
+  "failed": "操作失败，请重试或检查服务商配置。",
+  "importTitle": "从服务商导入",
+  "importNote": "选择已保存的管理凭据和上游密钥，完整密钥由服务器写入账号。",
+  "chooseProvider": "选择服务商",
+  "refreshList": "刷新列表",
+  "chooseKey": "选择密钥",
+  "refreshKeys": "刷新密钥",
+  "createKey": "从服务商创建密钥",
+  "chooseGroup": "选择上游分组",
+  "refreshGroups": "刷新分组",
+  "keyName": "密钥名称",
+  "chooseGroupFirst": "选择分组后生成",
+  "confirmKey": "确认在该服务商创建新的 API Key。此操作会修改远端账号。",
+  "create": "创建",
+  "keyUncertain": "创建结果未能确认。请关闭窗口并刷新密钥列表核对，勿直接重复创建。",
+  "manual": "手动填写",
+  "useProvider": "从服务商导入",
+  "selectKeyRequired": "请选择服务商及可用密钥。"
 }
