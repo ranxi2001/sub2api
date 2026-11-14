@@ -43,7 +43,11 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 	}
 	r := openAIAgentRecoveryFromContext(ctx)
 	allowed := refusal.Reason == "owner_unavailable" || refusal.Reason == "route_changed" || refusal.Reason == "wire_changed" ||
+		refusal.Reason == "owner_rate_limited" || refusal.Reason == "owner_overloaded" ||
 		refusal.Reason == "http_previous_response_unsupported" || (refusal.Reason == "owner_conflict" && r != nil && r.mixedOwners)
+	// A known owner's cooldown is another pre-send availability failure. Under
+	// the explicit lossy policy, rebuild readable context for normal selection
+	// without clearing that cooldown or retrying a dispatched generation.
 	if !allowed || s == nil || r == nil || r.disallowLearning || r.omittedHistory || r.delivery != nil || s.settingService == nil ||
 		!s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
 		return ctx, body, false, nil
