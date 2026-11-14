@@ -589,7 +589,17 @@ func writeNativeAnthropicSemanticFailure(c *gin.Context, payload []byte, model s
 	}
 	safeBody, _ := json.Marshal(body)
 	if c.Writer.Written() {
-		MarkOpsStreamFailure(c, errType, code, message, status)
+		if contextRejected {
+			// The code establishes a request rejection even if the provider's
+			// message is generic. Do not inherit attempt attribution or SLA
+			// ownership from the surrounding HTTP200 stream.
+			MarkOpsStreamErrorValue(c, OpsStreamError{
+				ErrType: errType, Code: code, Message: message, IntendedStatus: status,
+				CountTowardsSLA: true, RequestScoped: true,
+			})
+		} else {
+			MarkOpsStreamFailure(c, errType, code, message, status)
+		}
 		if strings.Contains(c.Request.URL.Path, "/responses") {
 			_, _ = fmt.Fprint(c.Writer, buildOpenAIResponseFailedSSE("", model, time.Now().Unix(), safeBody, message))
 		} else {
