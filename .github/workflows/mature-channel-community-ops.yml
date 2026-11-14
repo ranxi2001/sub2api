@@ -39,6 +39,8 @@ jobs:
             ~/go/pkg/mod
           key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
           restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
       - name: Freeze candidate identity
         run: |
@@ -184,7 +186,7 @@ jobs:
 
   provider-ui:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
         with:
@@ -262,6 +264,13 @@ jobs:
         run: pnpm exec vitest run src/components/payment/__tests__/RechargeCouponPicker.spec.ts src/views/admin/orders/__tests__/AdminCouponsView.spec.ts src/views/user/__tests__/UserCouponsView.spec.ts src/views/user/__tests__/PaymentView.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - name: Frontend production build
         run: pnpm --dir frontend run build
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Embedded production server build
+        working-directory: backend
+        run: CGO_ENABLED=0 go build -tags embed -trimpath -ldflags "-X main.Commit=${{ github.sha }}" -o "$RUNNER_TEMP/mature-embedded-server" ./cmd/server
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -287,6 +296,8 @@ jobs:
             ~/go/pkg/mod
           key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
           restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
       - name: RED pinned imported QQ transport before hardening
         shell: bash
@@ -381,6 +392,8 @@ jobs:
             ~/go/pkg/mod
           key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
           restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
             mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
       - name: Candidate business HTTP assertions
         working-directory: backend
@@ -499,6 +512,18 @@ jobs:
         if: always()
         working-directory: backend
         run: go build -o "$RUNNER_TEMP/mature-server" ./cmd/server
+      - name: Regenerate and verify dependency wiring remotely
+        if: always()
+        working-directory: backend
+        run: |
+          go generate ./cmd/server
+          cp cmd/server/wire_gen.go "$RUNNER_TEMP/mature-wire_gen.go"
+          git diff --exit-code -- cmd/server/wire_gen.go go.mod go.sum
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-wire-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-wire_gen.go
 
       - uses: actions/cache/save@v6
         if: always()
@@ -545,3 +570,36 @@ jobs:
         with:
           name: mature-after-${{ github.sha }}
           path: ${{ runner.temp }}/after-evidence/
+
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOMAXPROCS: '2'
+      GOGC: '50'
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-race-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-race-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+      - name: Race detector on QQ protocol, context, queue and coupon logic
+        working-directory: backend
+        run: go test -race ./internal/qqbot ./internal/coupon -count=1 -timeout=10m
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-race-${{ github.sha }}
