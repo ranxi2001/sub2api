@@ -16,7 +16,7 @@ func TestMatureQQProbeRequiresExplicitConfirmation(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			// A deterministic disabled configuration; an unknown capability cannot
 			// contact a model even in the old implementation.
 			mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"value"}))

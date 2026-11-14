@@ -74,9 +74,10 @@ func spamReportOperationCancellation(reason spamReportSourceReason, kind string)
 		detail = "原消息撤回未确认成功，且不符合超过安全撤回时限后仅禁言的条件。"
 	}
 	operation := "当前操作"
-	if kind == "mute" {
+	switch kind {
+	case "mute":
 		operation = "当前禁言操作"
-	} else if kind == "recall" {
+	case "recall":
 		operation = "当前撤回操作"
 	}
 	return string(reason) + "：" + detail + operation + "已取消；此前已完成的操作结果不受影响。"

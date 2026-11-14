@@ -100,7 +100,7 @@ func spamReportCallbackFingerprint(c Config, e Event, eventType string, eligible
 			member := strings.TrimPrefix(mention, "!")
 			valid := ok && member != "" && member != "all" && len(member) <= 128
 			for _, r := range member {
-				if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+				if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-", r) {
 					valid = false
 				}
 			}
@@ -309,14 +309,6 @@ func (s *Service) rememberSpamReportSource(ctx context.Context, snapshot Config,
 
 type spamReportQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}
-
-func (s *Service) loadSpamReportEvidence(ctx context.Context, db spamReportQueryer, c Config, group, reference, reportID string) (*spamReportSource, error) {
-	if reportID == "" {
-		return nil, nil
-	}
-	source, _, err := s.inspectSpamReportSourceForReport(ctx, db, c, group, reference, reportID)
-	return source, err
 }
 
 func (s *Service) maintainSpamReports(ctx context.Context) {

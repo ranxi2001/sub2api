@@ -247,7 +247,9 @@ func TestPriceNotificationConfigAndProactiveDelivery(t *testing.T) {
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		require.EqualValues(t, 2, body["msg_type"])
-		require.Equal(t, "通知正文", body["markdown"].(map[string]any)["content"])
+		markdown, ok := body["markdown"].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "通知正文", markdown["content"])
 		for _, key := range []string{"msg_id", "event_id", "msg_seq", "content"} {
 			require.NotContains(t, body, key)
 		}

@@ -50,7 +50,7 @@ func (r *channelRepository) ListMatureProviders(parent context.Context, search, 
 	if err != nil {
 		return out, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		p, e := scanMatureProvider(rows)
 		if e != nil {

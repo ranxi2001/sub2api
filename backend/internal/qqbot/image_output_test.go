@@ -104,11 +104,11 @@ func TestGIFGenerateEditAndQQDeliveryPreserveBytes(t *testing.T) {
 					if edit {
 						require.Equal(t, "/v1/images/edits", r.URL.Path)
 						require.NoError(t, r.ParseMultipartForm(1<<20))
-						defer r.MultipartForm.RemoveAll()
+						defer func() { _ = r.MultipartForm.RemoveAll() }()
 						require.Equal(t, "gif", r.FormValue("output_format"))
 						f, header, err := r.FormFile("image")
 						require.NoError(t, err)
-						defer f.Close()
+						defer func() { _ = f.Close() }()
 						require.Equal(t, "image/jpeg", header.Header.Get("Content-Type"))
 						source, err := io.ReadAll(f)
 						require.NoError(t, err)

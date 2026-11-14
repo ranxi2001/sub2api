@@ -465,7 +465,7 @@ func (s *Service) runModeration(parent context.Context) {
 				status, detail = "cancelled", spamReportOperationCancellation(spamSourcePolicyChanged, kind)
 			} else if kind == "recall" && !source.SentAt.Add(spamReportRecallWindow).After(time.Now()) {
 				status, detail = "expired", spamReportOperationCancellation(spamSourceRecallExpired, kind)
-			} else if kind == "mute" && !recallSucceeded && !(recallSkipped && time.Until(source.SentAt.Add(spamReportRecallWindow)) < 5*time.Second) {
+			} else if kind == "mute" && !recallSucceeded && (!recallSkipped || time.Until(source.SentAt.Add(spamReportRecallWindow)) >= 5*time.Second) {
 				status, detail = "cancelled", spamReportOperationCancellation(spamSourceRecallUnconfirmed, kind)
 			}
 		}
