@@ -129,6 +129,15 @@ export default {
     copyToClipboard: '复制到剪贴板',
     copied: '已复制！',
     importToCcSwitch: '导入到 CCS',
+    importToMagpie: '导入到 Magpie',
+    magpieImport: {
+      preview: '在 Magpie 桌面端预览供应商配置，确认后才会保存',
+      openHelp: '如果 Magpie 没有打开，请确认桌面端已安装，并允许浏览器打开它。',
+      settingsUnavailable: '无法读取站点的 API 地址设置。请刷新页面后重试。',
+      unsupportedGroup: '此密钥的分组无法自动导入。请通过「使用密钥」查看可用配置。',
+      invalidBase: 'API 地址无效。请使用不含账号、查询参数或片段的 HTTPS 地址；本机或局域网可使用 HTTP。',
+      invalidKey: '此密钥为空或格式无效，无法导入到 Magpie。'
+    },
     enable: '启用',
     disable: '禁用',
     nameLabel: '名称',
