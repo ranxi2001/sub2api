@@ -8,6 +8,7 @@ export interface ProviderMetrics {
   currency: string
 }
 export interface MatureProvider {
+  refresh_interval_seconds: number
   id: number
   revision: number
   name: string
@@ -28,6 +29,7 @@ export interface MatureProvider {
   last_error?: string
 }
 export interface ProviderInput {
+  refresh_interval_seconds?: number
   name: string
   site_type: 'sub2api' | 'newapi'
   base_url: string

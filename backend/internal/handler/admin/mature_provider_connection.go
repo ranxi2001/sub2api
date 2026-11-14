@@ -26,6 +26,9 @@ func ProvideMatureChannelHandler(channels *service.ChannelService, billing *serv
 	if cfg != nil && cfg.Totp.EncryptionKeyConfigured {
 		h.SetMatureProviderDependencies(encryptor, nil)
 	}
+	if cfg != nil && cfg.RunsBackgroundJobs() {
+		h.startMatureProviderRefresh()
+	}
 	return h
 }
 
@@ -101,14 +104,25 @@ func (h *ChannelHandler) RefreshMatureProvider(c *gin.Context) {
 		matureProviderError(c, service.ErrMatureProviderValidation)
 		return
 	}
-	r, err := h.channelService.MatureProviderRepository()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 25*time.Second)
+	defer cancel()
+	out, err := h.refreshMatureProvider(ctx, id, in.Revision)
 	if err != nil {
 		matureProviderError(c, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 25*time.Second)
-	defer cancel()
-	out, err := r.WithMatureProviderSession(ctx, id, in.Revision, func(p *service.MatureProvider, cipher string) (service.ProviderSessionUpdate, error) {
+	response.Success(c, out)
+}
+
+// Keep imported protocol helpers' error text free of server-generated secrets.
+func redactProviderRemoteMessage(_ string) string { return "Provider rejected the operation" }
+
+func (h *ChannelHandler) refreshMatureProvider(ctx context.Context, id, revision int64) (*service.MatureProvider, error) {
+	r, err := h.channelService.MatureProviderRepository()
+	if err != nil {
+		return nil, err
+	}
+	return r.WithMatureProviderSession(ctx, id, revision, func(p *service.MatureProvider, cipher string) (service.ProviderSessionUpdate, error) {
 		u := service.ProviderSessionUpdate{}
 		if h.providerEncryptor == nil || cipher == "" {
 			return u, service.ErrMatureProviderValidation
@@ -138,12 +152,4 @@ func (h *ChannelHandler) RefreshMatureProvider(c *gin.Context) {
 		}
 		return u, nil
 	})
-	if err != nil {
-		matureProviderError(c, err)
-		return
-	}
-	response.Success(c, out)
 }
-
-// Keep imported protocol helpers' error text free of server-generated secrets.
-func redactProviderRemoteMessage(_ string) string { return "Provider rejected the operation" }

@@ -32,6 +32,7 @@ type ProviderMetrics struct {
 
 // Provider records do not participate in routing, billing, or channel ownership.
 type MatureProvider struct {
+	RefreshIntervalSeconds  int             `json:"refresh_interval_seconds"`
 	AuthMode                string          `json:"auth_mode"`
 	Account                 string          `json:"account"`
 	UserID                  string          `json:"user_id"`
@@ -53,6 +54,7 @@ type MatureProvider struct {
 }
 
 type MatureProviderInput struct {
+	RefreshIntervalSeconds  *int     `json:"refresh_interval_seconds"`
 	AuthMode                string   `json:"auth_mode"`
 	Account                 string   `json:"account"`
 	UserID                  string   `json:"user_id"`
@@ -88,6 +90,7 @@ type MatureProviderRepository interface {
 	WithMatureProviderSession(context.Context, int64, int64, func(*MatureProvider, string) (ProviderSessionUpdate, error)) (*MatureProvider, error)
 	ReserveMatureProviderKey(context.Context, int64, string, string) (bool, int, []byte, error)
 	CompleteMatureProviderKey(context.Context, int64, string, string, int, []byte) error
+	ClaimMatureProviderRefresh(context.Context) (int64, int64, error)
 }
 
 type ProviderSessionUpdate struct {
@@ -109,6 +112,9 @@ func (s *ChannelService) MatureProviderRepository() (MatureProviderRepository, e
 // This is lexical validation only: storing a record must not resolve DNS or
 // contact an upstream. Every future network request must validate at dial time.
 func ValidateMatureProviderInput(in *MatureProviderInput) error {
+	if in.RefreshIntervalSeconds != nil && *in.RefreshIntervalSeconds != 0 && (*in.RefreshIntervalSeconds < 30 || *in.RefreshIntervalSeconds > 86400) {
+		return ErrMatureProviderValidation
+	}
 	if in.AuthMode == "" {
 		in.AuthMode = "token"
 	}

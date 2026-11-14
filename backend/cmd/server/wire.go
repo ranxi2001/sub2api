@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/qqbot"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
@@ -88,6 +89,7 @@ func providePluginHostInfo(buildInfo handler.BuildInfo) service.PluginHostInfo {
 }
 
 func provideCleanup(
+	providerChannels *admin.ChannelHandler,
 	qqBot *qqbot.Service,
 	balanceNotify *service.BalanceNotifyService,
 	autoCreditEmail *service.AutoCreditEmailWorker,
@@ -265,6 +267,12 @@ func provideCleanup(
 			{"OpsSystemLogSink", func() error {
 				if opsSystemLogSink != nil {
 					opsSystemLogSink.Stop()
+				}
+				return nil
+			}},
+			{"MatureProviderRefresh", func() error {
+				if providerChannels != nil {
+					providerChannels.StopMatureProviderRefresh()
 				}
 				return nil
 			}},

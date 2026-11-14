@@ -67,5 +67,7 @@ export default {
   "keyUncertain": "创建结果未能确认。请关闭窗口并刷新密钥列表核对，勿直接重复创建。",
   "manual": "手动填写",
   "useProvider": "从服务商导入",
-  "selectKeyRequired": "请选择服务商及可用密钥。"
+  "selectKeyRequired": "请选择服务商及可用密钥。",
+  "refreshInterval": "自动刷新间隔（秒）",
+  "refreshIntervalNote": "默认 0 关闭自动访问；开启后填写 30～86400 秒。低余额事件保存在本站，默认不发送外部消息。"
 }

@@ -10,12 +10,12 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-const matureProviderColumns = `auth_mode,account,user_id,(credential_cipher<>''),last_error,id,revision,name,site_type,base_url,notes,cost_multiplier,low_balance_threshold,suppress_low_balance_alert,status,metrics,observed_at,updated_at`
+const matureProviderColumns = `refresh_interval_seconds,auth_mode,account,user_id,(credential_cipher<>''),last_error,id,revision,name,site_type,base_url,notes,cost_multiplier,low_balance_threshold,suppress_low_balance_alert,status,metrics,observed_at,updated_at`
 
 func scanMatureProvider(row interface{ Scan(...any) error }, extra ...any) (*service.MatureProvider, error) {
 	var p service.MatureProvider
 	var raw []byte
-	args := []any{&p.AuthMode, &p.Account, &p.UserID, &p.HasCredential, &p.LastError, &p.ID, &p.Revision, &p.Name, &p.SiteType, &p.BaseURL, &p.Notes, &p.CostMultiplier, &p.LowBalanceThreshold, &p.SuppressLowBalanceAlert, &p.Status, &raw, &p.ObservedAt, &p.UpdatedAt}
+	args := []any{&p.RefreshIntervalSeconds, &p.AuthMode, &p.Account, &p.UserID, &p.HasCredential, &p.LastError, &p.ID, &p.Revision, &p.Name, &p.SiteType, &p.BaseURL, &p.Notes, &p.CostMultiplier, &p.LowBalanceThreshold, &p.SuppressLowBalanceAlert, &p.Status, &raw, &p.ObservedAt, &p.UpdatedAt}
 	err := row.Scan(append(args, extra...)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrMatureProviderNotFound
@@ -79,7 +79,7 @@ func (r *channelRepository) CreateMatureProvider(parent context.Context, in serv
 	}
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
-	return scanMatureProvider(r.db.QueryRowContext(ctx, `INSERT INTO mature_providers(name,site_type,base_url,notes,cost_multiplier,low_balance_threshold,suppress_low_balance_alert,auth_mode,account,user_id,credential_cipher) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,'')) RETURNING `+matureProviderColumns, in.Name, in.SiteType, in.BaseURL, in.Notes, in.CostMultiplier, in.LowBalanceThreshold, in.SuppressLowBalanceAlert, in.AuthMode, in.Account, in.UserID, in.CredentialCipher))
+	return scanMatureProvider(r.db.QueryRowContext(ctx, `INSERT INTO mature_providers(name,site_type,base_url,notes,cost_multiplier,low_balance_threshold,suppress_low_balance_alert,auth_mode,account,user_id,credential_cipher,refresh_interval_seconds) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE($11,''),COALESCE($12,0)) RETURNING `+matureProviderColumns, in.Name, in.SiteType, in.BaseURL, in.Notes, in.CostMultiplier, in.LowBalanceThreshold, in.SuppressLowBalanceAlert, in.AuthMode, in.Account, in.UserID, in.CredentialCipher, in.RefreshIntervalSeconds))
 }
 
 func (r *channelRepository) UpdateMatureProvider(parent context.Context, id int64, in service.MatureProviderInput) (*service.MatureProvider, error) {
@@ -99,8 +99,8 @@ func (r *channelRepository) UpdateMatureProvider(parent context.Context, id int6
  observed_at=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN NULL ELSE observed_at END,
  credential_cipher=COALESCE($13,CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN '' ELSE credential_cipher END),
  last_error=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN '' ELSE last_error END,
- auth_mode=$10,account=$11,user_id=$12,name=$3,site_type=$4,base_url=$5,notes=$6,cost_multiplier=$7,low_balance_threshold=$8,suppress_low_balance_alert=$9,revision=revision+1,updated_at=NOW()
- WHERE id=$1 AND revision=$2 RETURNING `+matureProviderColumns, id, *in.Revision, in.Name, in.SiteType, in.BaseURL, in.Notes, in.CostMultiplier, in.LowBalanceThreshold, in.SuppressLowBalanceAlert, in.AuthMode, in.Account, in.UserID, in.CredentialCipher))
+ refresh_interval_seconds=COALESCE($14,refresh_interval_seconds),auth_mode=$10,account=$11,user_id=$12,name=$3,site_type=$4,base_url=$5,notes=$6,cost_multiplier=$7,low_balance_threshold=$8,suppress_low_balance_alert=$9,revision=revision+1,updated_at=NOW()
+ WHERE id=$1 AND revision=$2 RETURNING `+matureProviderColumns, id, *in.Revision, in.Name, in.SiteType, in.BaseURL, in.Notes, in.CostMultiplier, in.LowBalanceThreshold, in.SuppressLowBalanceAlert, in.AuthMode, in.Account, in.UserID, in.CredentialCipher, in.RefreshIntervalSeconds))
 	if errors.Is(err, service.ErrMatureProviderNotFound) {
 		return nil, r.matureProviderMissingRevision(ctx, id)
 	}

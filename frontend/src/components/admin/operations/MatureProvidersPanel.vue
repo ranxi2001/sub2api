@@ -59,6 +59,8 @@
             <label class="text-sm">{{ t('matureProviders.cost') }}<input v-model="cost" type="number" min="0" max="1000000000" step="any" class="input mt-1 w-full" /></label>
             <label class="text-sm">{{ t('matureProviders.threshold') }}<input v-model="threshold" type="number" min="0" max="1000000000" step="any" class="input mt-1 w-full" /></label>
           </div>
+          <label class="block text-sm">{{ t('matureProviders.refreshInterval') }}<input v-model.number="draft.refresh_interval_seconds" type="number" min="0" max="86400" step="1" class="input mt-1 w-full" /></label>
+          <p class="text-xs text-gray-500">{{ t('matureProviders.refreshIntervalNote') }}</p>
           <p class="text-xs text-gray-500">{{ t('matureProviders.costNote') }}</p>
           <label class="flex items-center gap-2 text-sm"><input v-model="draft.suppress_low_balance_alert" type="checkbox" />{{ t('matureProviders.suppress') }}</label>
           <label class="block text-sm">{{ t('matureProviders.notes') }}<textarea v-model="draft.notes" maxlength="1000" rows="2" class="input mt-1 w-full" /></label>
@@ -84,7 +86,7 @@ const query = ref(''), status = ref(''), loading = ref(false), error = ref(''), 
 const states = ['unknown', 'connected', 'disconnected'] as const
 const metrics = ['balance', 'today_spend', 'total_spend', 'total_recharge'] as const
 const formOpen = ref(false), editID = ref<number | null>(null), saving = ref(false), deleting = ref<MatureProvider | null>(null)
-const defaults = (): ProviderInput => ({ name: '', site_type: 'sub2api', base_url: '', notes: '', cost_multiplier: null, low_balance_threshold: null, suppress_low_balance_alert: false, auth_mode: 'token', account: '', user_id: '' })
+const defaults = (): ProviderInput => ({ refresh_interval_seconds: 0, name: '', site_type: 'sub2api', base_url: '', notes: '', cost_multiplier: null, low_balance_threshold: null, suppress_low_balance_alert: false, auth_mode: 'token', account: '', user_id: '' })
 const draft = ref<ProviderInput>(defaults()), credential = ref(''), refreshToken = ref(''), cost = ref<string | number>(''), threshold = ref<string | number>('')
 let controller: AbortController | undefined, generation = 0, alive = true
 function amount(p: MatureProvider, field: typeof metrics[number]) {
@@ -103,7 +105,7 @@ function search() { page.value = 1; error.value = ''; void load() }
 function changePage(delta: number) { page.value += delta; error.value = ''; void load() }
 function edit(p?: MatureProvider) {
   error.value = ''; editID.value = p?.id ?? null
-  draft.value = p ? { name: p.name, site_type: p.site_type, base_url: p.base_url, notes: p.notes, cost_multiplier: p.cost_multiplier, low_balance_threshold: p.low_balance_threshold, suppress_low_balance_alert: p.suppress_low_balance_alert ?? false, auth_mode: p.auth_mode || 'token', account: p.account || '', user_id: p.user_id || '', revision: p.revision } : defaults()
+  draft.value = p ? { refresh_interval_seconds: p.refresh_interval_seconds || 0, name: p.name, site_type: p.site_type, base_url: p.base_url, notes: p.notes, cost_multiplier: p.cost_multiplier, low_balance_threshold: p.low_balance_threshold, suppress_low_balance_alert: p.suppress_low_balance_alert ?? false, auth_mode: p.auth_mode || 'token', account: p.account || '', user_id: p.user_id || '', revision: p.revision } : defaults()
   credential.value = ''; refreshToken.value = ''; cost.value = p?.cost_multiplier ?? ''; threshold.value = p?.low_balance_threshold ?? ''; formOpen.value = true
 }
 function close() { if (saving.value) return; formOpen.value = false; credential.value = ''; refreshToken.value = ''; error.value = '' }

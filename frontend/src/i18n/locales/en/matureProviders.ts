@@ -67,5 +67,7 @@ export default {
   "keyUncertain": "Creation could not be confirmed. Close this dialog and refresh the key list before starting another operation.",
   "manual": "Enter manually",
   "useProvider": "Import from provider",
-  "selectKeyRequired": "Choose a provider and an available key."
+  "selectKeyRequired": "Choose a provider and an available key.",
+  "refreshInterval": "Automatic refresh interval (seconds)",
+  "refreshIntervalNote": "0 disables background requests. Set 30–86400 seconds to enable them. Low balance episodes are stored locally; external notifications are disabled by default."
 }
