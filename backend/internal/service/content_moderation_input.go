@@ -256,20 +256,35 @@ func (collector moderationTextCollector) collectLastResponsesInput(input gjson.R
 		if len(array) == 0 {
 			return
 		}
-		last := array[len(array)-1]
-		if !collector.isResponsesUserTextItem(last) {
-			return
+		// Agent turns commonly end in a tool result or an assistant item.
+		// Keep the latest readable user input and the tool outputs that follow
+		// it, rather than treating a non-user tail as an empty request. Delta
+		// requests may contain only tool outputs, which still need auditing.
+		start := 0
+		for i := len(array) - 1; i >= 0; i-- {
+			if collector.isResponsesUserTextItem(array[i]) {
+				start = i
+				break
+			}
 		}
-		collector.collectContentValue(last.Get("content"), parts, images)
-		if last.Get("type").String() == "input_text" || last.Get("text").Exists() {
-			collector.collectContentValue(last, parts, images)
+		for _, item := range array[start:] {
+			collector.collectResponsesAuditItem(item, parts, images)
 		}
 	case input.IsObject():
-		if collector.isResponsesUserTextItem(input) {
-			collector.collectContentValue(input.Get("content"), parts, images)
-			if input.Get("type").String() == "input_text" || input.Get("text").Exists() {
-				collector.collectContentValue(input, parts, images)
-			}
+		collector.collectResponsesAuditItem(input, parts, images)
+	}
+}
+
+func (collector moderationTextCollector) collectResponsesAuditItem(item gjson.Result, parts *[]string, images *[]string) {
+	switch item.Get("type").String() {
+	case "function_call_output", "custom_tool_call_output":
+		collector.collectContentValue(item.Get("output"), parts, images)
+		return
+	}
+	if collector.isResponsesUserTextItem(item) {
+		collector.collectContentValue(item.Get("content"), parts, images)
+		if item.Get("type").String() == "input_text" || item.Get("text").Exists() {
+			collector.collectContentValue(item, parts, images)
 		}
 	}
 }

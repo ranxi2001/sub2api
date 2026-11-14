@@ -1070,6 +1070,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 	content := extractContentModerationInput(input.Protocol, input.Body, true, input.noBodyRetention)
 	if content.IsEmpty() {
 		slog.Info("content_moderation.skip_empty_input",
+			"request_id", input.RequestID,
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
@@ -1080,6 +1081,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 	}
 	content.Normalize()
 	slog.Info("content_moderation.input_extracted",
+		"request_id", input.RequestID,
 		"user_id", input.UserID,
 		"api_key_id", input.APIKeyID,
 		"group_id", contentModerationLogGroupID(input.GroupID),

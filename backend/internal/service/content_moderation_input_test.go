@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 当数组末尾不是用户消息时（典型场景：Agent 工具循环结束于 tool/assistant），
-// 应直接跳过审计——不再回溯查找历史中的某条用户消息。
+// Anthropic、Chat 和 Gemini 保留各自当前轮边界；Responses 的工具续轮
+// 必须提取最近用户输入及其后的工具结果，不能因数组末项类型而跳过。
 
 func TestExtractContentModerationInput_AnthropicAgentToolLoopSkipsAudit(t *testing.T) {
 	body := []byte(`{
@@ -150,7 +150,7 @@ func TestExtractContentModerationInput_GeminiMultiTurnExtractsLatestUser(t *test
 	require.Equal(t, "Q2", input.Text)
 }
 
-func TestExtractContentModerationInput_ResponsesAgentToolLoopSkipsAudit(t *testing.T) {
+func TestExtractContentModerationInput_ResponsesAgentToolLoopAuditsCurrentTurn(t *testing.T) {
 	body := []byte(`{
 		"input":[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"运行测试"}]},
@@ -161,7 +161,7 @@ func TestExtractContentModerationInput_ResponsesAgentToolLoopSkipsAudit(t *testi
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Empty(t, input.Text)
+	require.Equal(t, "运行测试 all passed", input.Text)
 	require.Empty(t, input.Images)
 }
 
@@ -179,7 +179,7 @@ func TestExtractContentModerationInput_ResponsesLastUserMessageExtracted(t *test
 	require.Equal(t, "latest", input.Text)
 }
 
-func TestExtractContentModerationInput_ResponsesLastIsAssistantSkipped(t *testing.T) {
+func TestExtractContentModerationInput_ResponsesLastIsAssistantKeepsUser(t *testing.T) {
 	body := []byte(`{
 		"input":[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"q1"}]},
@@ -189,6 +189,6 @@ func TestExtractContentModerationInput_ResponsesLastIsAssistantSkipped(t *testin
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Empty(t, input.Text)
+	require.Equal(t, "q1", input.Text)
 	require.Empty(t, input.Images)
 }
