@@ -369,10 +369,24 @@ func sanitizeGroupOpenAIFast(group *Group) {
 	if group == nil || !groupSupportsOpenAIFast(group.Platform) {
 		if group != nil {
 			group.ForceOpenAIFast = false
+			group.ForceOpenAIUltrafast = false
 			group.FreeOpenAIFast = false
 			group.FreeOpenAIUltrafast = false
 		}
 	}
+}
+
+// validateGroupOpenAIForcedServiceTier 拒绝同时强制 Fast 与 Ultrafast：一次请求
+// 只能携带一个 service_tier，两者并存没有确定语义。须在 sanitizeGroupOpenAIFast
+// 之后调用，使不支持该能力的平台先被清零而不是误报。
+func validateGroupOpenAIForcedServiceTier(group *Group) error {
+	if group != nil && group.ForceOpenAIFast && group.ForceOpenAIUltrafast {
+		return infraerrors.BadRequest(
+			"GROUP_OPENAI_FORCED_SERVICE_TIER_CONFLICT",
+			"force_openai_fast and force_openai_ultrafast cannot both be enabled",
+		)
+	}
+	return nil
 }
 
 func normalizeCreateGroupInputForSimpleMode(input *CreateGroupInput) {
@@ -633,6 +647,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		AllowMessagesDispatch:           input.AllowMessagesDispatch,
 		AllowLive:                       input.AllowLive,
 		ForceOpenAIFast:                 input.ForceOpenAIFast,
+		ForceOpenAIUltrafast:            input.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  input.FreeOpenAIFast,
 		FreeOpenAIUltrafast:             input.FreeOpenAIUltrafast,
 		RequireOAuthOnly:                input.RequireOAuthOnly,
@@ -650,6 +665,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	sanitizeGroupOpenAIFast(group)
+	if err := validateGroupOpenAIForcedServiceTier(group); err != nil {
+		return nil, err
+	}
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
 	}
@@ -1036,6 +1054,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.ForceOpenAIFast != nil {
 		group.ForceOpenAIFast = *input.ForceOpenAIFast
 	}
+	if input.ForceOpenAIUltrafast != nil {
+		group.ForceOpenAIUltrafast = *input.ForceOpenAIUltrafast
+	}
 	if input.FreeOpenAIFast != nil {
 		group.FreeOpenAIFast = *input.FreeOpenAIFast
 	}
@@ -1090,6 +1111,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	sanitizeGroupOpenAIFast(group)
+	if err := validateGroupOpenAIForcedServiceTier(group); err != nil {
+		return nil, err
+	}
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
 	}

@@ -223,6 +223,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.True(t, duplicate.StreamOnly)
 	require.True(t, duplicate.CodexCLIOnly, "duplicating a group must preserve its client restriction")
 	require.True(t, duplicate.BlockSubagents)
+	require.Equal(t, source.ForceOpenAIUltrafast, duplicate.ForceOpenAIUltrafast)
 	require.Equal(t, source.FreeOpenAIFast, duplicate.FreeOpenAIFast)
 	require.Equal(t, source.FreeOpenAIUltrafast, duplicate.FreeOpenAIUltrafast)
 	require.Equal(t, source.ModelAllowlist, duplicate.ModelAllowlist)

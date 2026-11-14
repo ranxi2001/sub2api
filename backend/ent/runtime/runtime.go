@@ -1233,6 +1233,10 @@ func init() {
 	groupDescForceOpenaiFast := groupFields[53].Descriptor()
 	// group.DefaultForceOpenaiFast holds the default value on creation for the force_openai_fast field.
 	group.DefaultForceOpenaiFast = groupDescForceOpenaiFast.Default.(bool)
+	// groupDescForceOpenaiUltrafast is the schema descriptor for force_openai_ultrafast field.
+	groupDescForceOpenaiUltrafast := groupFields[51].Descriptor()
+	// group.DefaultForceOpenaiUltrafast holds the default value on creation for the force_openai_ultrafast field.
+	group.DefaultForceOpenaiUltrafast = groupDescForceOpenaiUltrafast.Default.(bool)
 	// groupDescFreeOpenaiFast is the schema descriptor for free_openai_fast field.
 	groupDescFreeOpenaiFast := groupFields[54].Descriptor()
 	// group.DefaultFreeOpenaiFast holds the default value on creation for the free_openai_fast field.

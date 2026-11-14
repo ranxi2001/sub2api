@@ -59,6 +59,7 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "groups", "allow_live", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "force_openai_fast", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "stream_only", "boolean", 0, false)
+	requireColumn(t, tx, "groups", "force_openai_ultrafast", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_fast", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_ultrafast", "boolean", 0, false)
 
