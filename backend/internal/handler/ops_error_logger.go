@@ -1154,6 +1154,17 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			logOpsStreamError(c, ops, status)
 			return
 		}
+		// A complete context rejection has already been classified at the
+		// semantic boundary. The captured terminal's generic message cannot
+		// discard its request ownership or SLA exclusion.
+		if marked, ok := service.GetOpsStreamError(c); ok && marked.RequestScoped &&
+			service.IsOpsContextLimitRejection(marked.IntendedStatus, 0, marked.Code+" "+marked.Message) {
+			logOpsStreamError(c, ops, status)
+			if opsStreamErrorsAllRequestScoped(service.GetOpsStreamErrors(c)) {
+				logOpsRecoveredUpstream(c, ops, status)
+			}
+			return
+		}
 		body := w.capturedBytes()
 		parsed := parseOpsErrorResponse(body)
 		if !parsed.StreamFailure {

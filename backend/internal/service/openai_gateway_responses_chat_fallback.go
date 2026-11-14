@@ -355,6 +355,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	})
 
 	if scan.Err != nil {
+		if len(scan.SemanticFailure) > 0 {
+			scan.Err = writeNativeAnthropicSemanticFailure(c, scan.SemanticFailure, originalModel)
+		}
 		return &OpenAIForwardResult{
 			RequestID:                     requestID,
 			UpstreamHeaders:               resp.Header,
