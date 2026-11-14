@@ -87,6 +87,20 @@ jobs:
           test "$result" -ne 0
           ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/import-red.log"
           grep -q 'actual  : 200' "$RUNNER_TEMP/mature-evidence/import-red.log"
+      - name: RED refresh policy against first catalog increment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp backend/internal/server/routes/mature_providers_refresh_postgres_test.go "$RUNNER_TEMP/mature-credentials-red/backend/internal/server/routes/"
+          cd "$RUNNER_TEMP/mature-credentials-red/backend"
+          set +e
+          go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersRefreshClaimAndLowBalance$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/refresh-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-evidence/refresh-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/refresh-red.log"
+          grep -q 'actual  : 400' "$RUNNER_TEMP/mature-evidence/refresh-red.log"
       - name: Candidate HTTP contract
         working-directory: backend
         run: |
