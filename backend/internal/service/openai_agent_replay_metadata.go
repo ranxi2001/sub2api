@@ -1,12 +1,15 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 )
 
 // PrepareOpenAIAgentReplayBody is a pre-snapshot stage, never a final-wire
@@ -21,6 +24,34 @@ func (s *OpenAIGatewayService) PrepareOpenAIAgentReplayBody(body []byte) ([]byte
 		return nil, openAIAgentRecoveryError("wire_changed")
 	}
 	return normalizeOpenAIReplayMetadata(body)
+}
+
+func normalizeOpenAIResponsesReasoningContentReplayProtected(body []byte, protected bool) ([]byte, bool, error) {
+	if protected {
+		return body, false, nil
+	}
+	return normalizeOpenAIResponsesReasoningContentReplay(body)
+}
+
+func normalizeOpenAIAPIKeyStoreFalseReasoningReplayProtected(body []byte, knownStoreFalse, protected bool) ([]byte, bool, error) {
+	if protected {
+		return body, false, nil
+	}
+	return normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, knownStoreFalse)
+}
+
+// The allowlist is internal and fixed. Never attach bodies, ciphertext, item
+// digests, route URLs or credentials, including in unexpected-stage fallback.
+func openAIAgentRecoveryRefusal(ctx context.Context, stage string) error {
+	switch stage {
+	case "input_integrity", "body_unreadable", "unsupported_adapter", "route_identity":
+	default:
+		stage = "route_identity"
+	}
+	if r := openAIAgentRecoveryFromContext(ctx); r != nil && r.disableOwnerBinding {
+		logger.FromContext(ctx).Warn("openai.encrypted_agent_recovery_refused", zap.String("stage", stage))
+	}
+	return openAIAgentRecoveryError("wire_changed")
 }
 
 // Shared with readable Beta preparation. This deliberately excludes OAuth
