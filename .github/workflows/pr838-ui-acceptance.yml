@@ -81,6 +81,15 @@ jobs:
           docker compose -p pr838-ui -f .github/fixtures/pr838-ui/compose.yml pull postgres redis
           docker compose -p pr838-ui -f .github/fixtures/pr838-ui/compose.yml up -d --wait --wait-timeout 300
           docker network inspect pr838-ui_isolated --format '{{json .Internal}}' > "$EVIDENCE_DIR/network-internal.json"
+          # Reach the isolated bridge directly from its host; published loopback
+          # ports were refused even after the in-container health check passed.
+          app_id=$(docker compose -p pr838-ui -f .github/fixtures/pr838-ui/compose.yml ps -q app)
+          app_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$app_id")
+          test -n "$app_ip"
+          app_origin="http://$app_ip:8080"
+          docker inspect --format '{{json .NetworkSettings}}' "$app_id" > "$EVIDENCE_DIR/container-network.json"
+          curl --noproxy '*' --fail --silent --show-error --connect-timeout 3 --max-time 10 --retry 3 --retry-connrefused "$app_origin/health" > "$EVIDENCE_DIR/host-health.json"
+          printf 'SUB2API_TEST_APP_ORIGIN=%s\n' "$app_origin" >> "$GITHUB_ENV"
       - name: Actual administration, HTTP persistence, SQL readback and browser notices
         run: |
           set -euo pipefail

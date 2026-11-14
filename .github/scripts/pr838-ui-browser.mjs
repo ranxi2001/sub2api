@@ -9,6 +9,8 @@ import { pathToFileURL } from 'node:url'
 
 const output = process.env.EVIDENCE_DIR, origin = 'http://127.0.0.1:4198'
 if (!output || process.env.GITHUB_ACTIONS !== 'true') throw Error('Isolated CI only')
+const appOrigin = process.env.SUB2API_TEST_APP_ORIGIN
+if (!appOrigin) throw Error('Disposable application origin required')
 assert.equal(JSON.parse(readFileSync(join(output, 'network-internal.json'))), true)
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 const manifest = {
@@ -29,7 +31,7 @@ const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 const server = createServer((req, res) => {
   const pathname = new URL(req.url, origin).pathname
   if (/^\/(?:api\/|setup\/|health$)/.test(pathname)) {
-    const upstream = httpRequest('http://127.0.0.1:18080' + req.url, { method: req.method, headers: { ...req.headers, host: '127.0.0.1:18080' } }, response => {
+    const upstream = httpRequest(appOrigin + req.url, { method: req.method, headers: { ...req.headers, host: new URL(appOrigin).host } }, response => {
       if (/^\/api\/v1\/admin\/accounts(?:\/\d+)?$/.test(pathname)) manifest.http.push({ mode, method: req.method, path: pathname, status: response.statusCode })
       res.writeHead(response.statusCode, response.headers); response.pipe(res)
     })
