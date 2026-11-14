@@ -11,6 +11,71 @@ env:
   EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
+  issue854-behavior:
+    if: github.event_name == 'pull_request' && github.head_ref == 'fix/issue854-ws-owner-continuation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Assert exact candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          git diff --exit-code
+          mkdir -p "$RUNNER_TEMP/issue854-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue854-evidence/candidate.txt"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Validate evidence parser mutations
+        run: python3 -m unittest discover -s .github/scripts -p 'test_issue854_evidence.py'
+      - name: RED exact baseline production blobs with candidate tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
+          git worktree add --detach "$RUNNER_TEMP/issue854-red" "$EXPECTED_HEAD_SHA"
+          git diff --name-only "$baseline" "$EXPECTED_HEAD_SHA" -- backend | while IFS= read -r target; do
+            case "$target" in
+              *_test.go) continue ;;
+              *.go)
+                if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                  git rev-parse "$baseline:$target" >> "$RUNNER_TEMP/issue854-evidence/baseline-blobs.txt"
+                  git show "$baseline:$target" > "$RUNNER_TEMP/issue854-red/$target"
+                else
+                  rm -- "$RUNNER_TEMP/issue854-red/$target"
+                fi ;;
+            esac
+          done
+          cd "$RUNNER_TEMP/issue854-red"
+          git diff --stat > "$RUNNER_TEMP/issue854-evidence/red-diff.txt"
+          set +e
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue854OwnerContinuation$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/red.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/issue854-evidence/red.jsonl"
+          python3 .github/scripts/issue854-evidence.py RED "$status" "$RUNNER_TEMP/issue854-evidence/red.jsonl"
+      - name: GREEN clean candidate and lifecycle race checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          git diff --exit-code
+          set +e
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestIssue854OwnerContinuation$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/green.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/issue854-evidence/green.jsonl"
+          python3 .github/scripts/issue854-evidence.py GREEN "$status" "$RUNNER_TEMP/issue854-evidence/green.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue854-evidence-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue854-evidence/
+
   pelican-round-evidence:
     if: github.event_name == 'pull_request' && github.head_ref == 'fix/issue795-round-evidence-followup-20261112'
     runs-on: ubuntu-latest

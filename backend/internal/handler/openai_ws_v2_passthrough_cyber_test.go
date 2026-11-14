@@ -60,6 +60,10 @@ func newOpenAIWSPassthroughHandlerHarnessWithKey(t *testing.T, upstreamURL strin
 }
 
 func newOpenAIWSPassthroughHandlerHarnessWithAudit(t *testing.T, upstreamURL string, clientHeaders http.Header, extraSettings map[string]string, gatewayCache service.GatewayCache, configureKey func(*service.APIKey), configureHandler func(*OpenAIGatewayHandler), configure ...func(*service.Account, *config.Config, *service.HTTPUpstream, *service.AccountRepository)) *openAIWSPassthroughHandlerHarness {
+	return newOpenAIWSPassthroughHandlerHarnessWithAuth(t, upstreamURL, clientHeaders, extraSettings, gatewayCache, configureKey, configureHandler, nil, configure...)
+}
+
+func newOpenAIWSPassthroughHandlerHarnessWithAuth(t *testing.T, upstreamURL string, clientHeaders http.Header, extraSettings map[string]string, gatewayCache service.GatewayCache, configureKey func(*service.APIKey), configureHandler func(*OpenAIGatewayHandler), authSetup func(*service.APIKey, *config.Config) *service.APIKeyService, configure ...func(*service.Account, *config.Config, *service.HTTPUpstream, *service.AccountRepository)) *openAIWSPassthroughHandlerHarness {
 	t.Helper()
 	if gatewayCache == nil {
 		gatewayCache = testutil.NewRedisGatewayCache(t)
@@ -166,10 +170,16 @@ func newOpenAIWSPassthroughHandlerHarnessWithAudit(t *testing.T, upstreamURL str
 			return zapcore.NewTee(core, requestCore)
 		}))
 		c.Request = c.Request.WithContext(logger.IntoContext(c.Request.Context(), observed))
-		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
-		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+		if authSetup == nil {
+			c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+		}
 		c.Next()
 	})
+	if authSetup != nil {
+		h.apiKeyService = authSetup(apiKey, cfg)
+		router.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(h.apiKeyService, nil, cfg)))
+	}
 	router.GET("/openai/v1/responses", func(c *gin.Context) {
 		h.ResponsesWebSocket(c)
 		finalHeaders <- c.Request.Header.Clone()

@@ -173,6 +173,15 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	defer provider.Close()
 	headers := http.Header{"Session_id": {"fixture-readable-ws-session"}, "Thread-Id": {"fixture-readable-ws-thread"}}
 	settings := map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: fmt.Sprint(scenario != "off")}
+	issue854 := strings.HasPrefix(scenario, "issue854_")
+	var authSetup func(*service.APIKey, *config.Config) *service.APIKeyService
+	if issue854 {
+		headers.Set("Authorization", "Bearer sk-handler-cyber-test")
+		authSetup = func(key *service.APIKey, cfg *config.Config) *service.APIKeyService {
+			key.Status = service.StatusActive
+			return service.NewAPIKeyService(&wsRevalidationKeyRepoStub{current: key}, nil, nil, nil, nil, nil, cfg)
+		}
+	}
 	identityCase, modelCase := scenario == "identity" || strings.HasPrefix(scenario, "header_"), scenario == "bridge_model"
 	customTools := strings.HasPrefix(scenario, "tools_")
 	nativeNamespace := scenario == "native_namespace"
@@ -191,9 +200,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		settings[service.SettingKeyCyberSessionIdentityStrictEnabled] = "true"
 	}
 	var accounts *readableWSAccounts
-	h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, provider.URL, headers,
+	h := newOpenAIWSPassthroughHandlerHarnessWithAuth(t, provider.URL, headers,
 		settings,
-		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true },
+		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true }, nil, authSetup,
 		func(a *service.Account, cfg *config.Config, upstream *service.HTTPUpstream, repo *service.AccountRepository) {
 			a.ID, a.Priority = 1, 0
 			a.Credentials["api_key"] = "fixture-readable-ws-A"
@@ -317,6 +326,21 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	} else {
 		accounts.disable(1)
 	}
+	if scenario == "issue854_fresh" || scenario == "issue854_guard_live" {
+		issue600Finish(t, h, headers)
+		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		conn, _, err := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
+		cancel()
+		require.NoError(t, err)
+		h.clientConn = conn
+		t.Cleanup(func() { _ = conn.CloseNow() })
+		if scenario == "issue854_guard_live" {
+			issue715WSSend(t, conn, create([]string{httpRebuildMessage("user", "issue854-warm-B")}, ""))
+			warm := issue715WSRead(t, conn)
+			require.Contains(t, string(warm), "issue854-warm-B-complete")
+			extraSends = 1
+		}
+	}
 	if scenario == "b_disabled" {
 		accounts.disable(2)
 	}
@@ -352,7 +376,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
-	if scenario != "completed" && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
+	if scenario != "completed" && !issue854 && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
 		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
 		closeCtx, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelClose()
@@ -409,6 +433,10 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	} else if smartMode != "" {
 		require.Equal(t, 2, sends, "WS_REVIEW_SMART_SESSION_STALE: close=%v terminal=%s", readErr, secondRaw)
 	}
+	if scenario == "issue854_guard_live" && sends != 3 {
+		require.Equal(t, 2, sends)
+		logReadableWSDispatchFailure(t, h, readErr)
+	}
 	require.Equal(t, 2+extraSends, sends, "WS_READABLE_B_DISPATCH_MISSING: same client must automatically replace disabled A before any next generation; close=%v terminal=%s", readErr, secondRaw)
 	if modelCase {
 		accounts.mu.Lock()
@@ -459,6 +487,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	oracle.mu.Lock()
 	defer oracle.mu.Unlock()
 	expectedIdentities := []string{"Bearer fixture-readable-ws-A", "Bearer fixture-readable-ws-B", "Bearer fixture-readable-ws-B"}
+	if scenario == "issue854_guard_live" {
+		expectedIdentities = append(expectedIdentities, "Bearer fixture-readable-ws-B")
+	}
 	if modelCase {
 		expectedIdentities = append([]string{"Bearer fixture-readable-ws-A"}, expectedIdentities...)
 		require.Equal(t, "gpt-5.4", gjson.GetBytes(oracle.frames[1], "model").String(), "A actually accepted M2 before the later omission")
