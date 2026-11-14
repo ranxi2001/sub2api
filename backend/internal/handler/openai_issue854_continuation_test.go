@@ -44,3 +44,11 @@ func TestIssue854LostOwnerEvidence(t *testing.T) {
 		t.Run(mode, func(t *testing.T) { runReadableWSContinuation(t, mode, "issue854_lost_owner") })
 	}
 }
+
+func TestIssue854FreshOwnerSelection(t *testing.T) {
+	for _, mode := range readableWSModes {
+		for _, state := range []string{"disabled", "cooldown", "off", "pending", "failed", "conflict", "unfinished"} {
+			t.Run(mode+"/"+state, func(t *testing.T) { runReadableWSContinuation(t, mode, "issue854_r1_"+state) })
+		}
+	}
+}

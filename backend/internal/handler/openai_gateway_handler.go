@@ -3369,6 +3369,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	var rpmAdmission openAIRPMAdmission
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	wsAttemptMessage := append([]byte(nil), firstMessage...)
+	initialDispatchStarted := false
 	waitForWSSameAccountRetry := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
 		if !service.OpenAIWSAgentRecoveryCanRetry(ctx) {
 			return false
@@ -3480,6 +3481,46 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			requestPlatform,
 		)
 		if err != nil {
+			if !initialDispatchStarted && requestPlatform == service.PlatformOpenAI &&
+				switchCount < maxAccountSwitches && service.OpenAIWSInitialOwnerCanRebuild(err) {
+				next, clean, changed, rebuildErr := h.gatewayService.RebuildOpenAIWSUnsentTurn(ctx, c, wsAttemptMessage, sessionHash, wsForwardModel)
+				if rebuildErr != nil {
+					h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, rebuildErr, c)
+					return
+				}
+				if changed {
+					c.Request = c.Request.WithContext(next)
+					permissions := openAIWSQueueTurnPermissions(reqModel, clean)
+					permissions.Models = service.APIKeyModelCandidates(apiKey, permissions.Models)
+					next = service.WithAPIKeyQueueRequestPermissions(next, permissions)
+					if authErr := h.concurrencyHelper.RevalidateTurnAuth(next); authErr != nil {
+						closeOpenAIWSAdmissionError(wsConn, reqLog, "openai.websocket_rebuild_auth_rejected", authErr)
+						return
+					}
+					if billingErr := h.checkRegionalBillingEligibility(next, apiKey, subscription); billingErr != nil {
+						closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "billing check failed")
+						return
+					}
+					if contextErr := h.gatewayService.CheckAPIKeyLongContext(next, apiKey, clean, reqModel, wsRouteModel, wsForwardModel); contextErr != nil {
+						rejectAPIKeyLongContextWS(wsConn, contextErr)
+						return
+					}
+					if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, clean, "first_turn"); decision != nil && !decision.AllowNextStage {
+						writeSecurityAuditWSError(next, wsConn, decision)
+						closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
+						return
+					}
+					// Existing first-turn hooks still enforce client identity, selected
+					// account moderation, permissions, slots and final payload checks.
+					setCyberTurnBody(1, clean, firstIdentityDecision.effective)
+					ctx = service.ResetOpenAIWSReadableProviderSession(next, c)
+					c.Request = c.Request.WithContext(ctx)
+					firstMessage, wsAttemptMessage, previousResponseID, previousResponseCanMove = clean, clean, "", true
+					firstTurnQueuePermissions = permissions
+					switchCount++
+					continue
+				}
+			}
 			if h.handleOpenAIWSAgentRecoveryError(ctx, wsConn, err, c) {
 				return
 			}
@@ -4067,6 +4108,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			// Carry that frame's timestamps into the new ingress attempt too.
 			hooks.InitialTurnStartedAt = firstTurnStartedAt
 			hooks.InitialFrameArrivedAt = firstFrameArrivedAt
+			initialDispatchStarted = true
 			err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks)
 			if err == nil {
 				reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
@@ -5098,6 +5140,16 @@ func closeOpenAIWSFailoverExhausted(c *gin.Context, conn *coderws.Conn, failover
 		}
 	}
 
+	if failoverErr != nil {
+		if code, safeMessage, ok := service.OpenAIUpstreamRecoveryRateLimit(failoverErr.StatusCode, failoverErr.ResponseBody); ok {
+			errorCode, message = code, safeMessage
+			payload, _ := json.Marshal(gin.H{"type": "error", "status": intendedStatus,
+				"error": gin.H{"type": errorType, "code": errorCode, "message": message}})
+			writeCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+			_ = service.WriteCapturedWSClient(writeCtx, conn, coderws.MessageText, payload)
+			cancel()
+		}
+	}
 	service.MarkOpsStreamFailure(c, errorType, errorCode, message, intendedStatus)
 	closeOpenAIClientWS(conn, closeStatus, message)
 }

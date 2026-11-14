@@ -21,6 +21,17 @@ def inventory(suite):
         root = "TestIssue854OwnerFailurePersistence"
         leaves = {f"{root}/{mode}/{connection}" for mode in MODES for connection in ("guard", "fresh")}
         return leaves, {root}, leaves, ("ISSUE854_FAILURE_NOT_PERSISTED",)
+    if suite == "r1":
+        root = "TestIssue854FreshOwnerSelection"
+        leaves = {f"{root}/{mode}/{case}" for mode in MODES for case in ("disabled", "cooldown", "off", "pending", "failed", "conflict", "unfinished")}
+        return leaves, {root}, {n for n in leaves if n.endswith(("/disabled", "/cooldown"))}, ("ISSUE854_R1_INITIAL_OWNER_REFUSED", "encrypted_agent_recovery_owner_")
+    if suite == "postgres":
+        root = "TestIssue854PostgresRoundtrip"
+        return {f"{root}/{name}" for name in ("ws_guard", "ws_fresh", "sse")}, {root}, set(), ()
+    if suite == "ws-upstream":
+        root = "TestIssue854WSOwnerRateLimit"
+        leaves = {f"{root}/{mode}/encrypted_agent_recovery_{code}" for mode in MODES for code in ("owner_rate_limited", "untrusted_fixture")}
+        return leaves, {root}, {n for n in leaves if n.endswith("owner_rate_limited")}, ("ISSUE854_WS_OWNER_LIMIT_CODE_LOST",)
     if suite == "upstream":
         root = "TestIssue854UpstreamOwnerRateLimit"
         parents = {root}

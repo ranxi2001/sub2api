@@ -186,7 +186,7 @@ func newOpenAIWSPassthroughHandlerHarnessWithAuth(t *testing.T, upstreamURL stri
 		handlerDone <- struct{}{}
 	})
 	if h.opsService != nil {
-		router.Use(OpsErrorLoggerMiddleware(h.opsService))
+		router.Use(middleware.RequestLogger(), OpsErrorLoggerMiddleware(h.opsService))
 	}
 	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
@@ -194,9 +194,10 @@ func newOpenAIWSPassthroughHandlerHarnessWithAuth(t *testing.T, upstreamURL stri
 
 	wsURL := "ws" + strings.TrimPrefix(handlerServer.URL, "http") + "/openai/v1/responses"
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
-	clientConn, _, err := coderws.Dial(dialCtx, wsURL, &coderws.DialOptions{HTTPHeader: clientHeaders})
+	clientConn, response, err := coderws.Dial(dialCtx, wsURL, &coderws.DialOptions{HTTPHeader: clientHeaders})
 	cancelDial()
 	require.NoError(t, err)
+	require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
 	t.Cleanup(func() { _ = clientConn.CloseNow() })
 
 	return &openAIWSPassthroughHandlerHarness{
