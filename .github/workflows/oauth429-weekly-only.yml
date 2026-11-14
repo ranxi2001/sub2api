@@ -52,10 +52,12 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/oauth429-red" "$CANDIDATE"
           while read -r expected target; do
             test "$(git rev-parse "$BASELINE:$target")" = "$expected"
+            candidate_blob=$(git rev-parse "$CANDIDATE:$target")
             git show "$BASELINE:$target" > "$RUNNER_TEMP/oauth429-red/$target"
             actual=$(git hash-object "$RUNNER_TEMP/oauth429-red/$target")
             test "$actual" = "$expected"
             printf '%s %s %s\n' "$BASELINE" "$actual" "$target" >> evidence/restored-blobs.txt
+            printf '%s %s %s\n' "$CANDIDATE" "$candidate_blob" "$target" >> evidence/candidate-source-blobs.txt
           done <<'BLOBS'
           ab9d5251a4acec7c17b0adb0f21ae59a71f89067 backend/internal/service/openai_disable_scheduling_429.go
           849aec6c598b9ca5e94f218f76e7d7266505ae57 backend/internal/service/openai_gateway_service.go
@@ -71,7 +73,6 @@ jobs:
           0e4455ea613b07f2775c793346bd0b8fa0257fd5 backend/internal/service/openai_quota_service.go
           26744ab312ed9552b375487d34052fd8b7f28da1 backend/internal/service/openai_quota_usage_snapshot.go
           BLOBS
-          git -C "$RUNNER_TEMP/oauth429-red" diff --stat > evidence/red-diff.txt
           git ls-files 'backend/internal/service/*429*test.go' 'backend/internal/repository/oauth429_weekly_only*test.go' > evidence/retained-tests.txt
           while IFS= read -r test_file; do
             candidate_blob=$(git hash-object "$test_file")
@@ -80,6 +81,19 @@ jobs:
             printf '%s %s\n' "$candidate_blob" "$test_file" >> evidence/retained-test-blobs.txt
           done < evidence/retained-tests.txt
           git -C "$RUNNER_TEMP/oauth429-red" diff --exit-code -- '*_test.go'
+          # This later, unrelated regression requires the candidate-only WS
+          # stream-phase helper. Exclude it only from this disposable old-source
+          # checkout; GREEN explicitly runs all six tests with candidate sources.
+          excluded=backend/internal/service/temp_unsched_pending_test.go
+          if git cat-file -e "$BASELINE:$excluded" 2>/dev/null; then echo 'historical-exclusion-baseline-present' >&2; exit 1; fi
+          candidate_blob=$(git rev-parse "$CANDIDATE:$excluded")
+          test "$(git hash-object "$RUNNER_TEMP/oauth429-red/$excluded")" = "$candidate_blob"
+          if grep -q '^func TestOAuth429WeeklyOnly' "$excluded"; then echo 'historical-exclusion-target-regression' >&2; exit 1; fi
+          rm -- "$RUNNER_TEMP/oauth429-red/$excluded"
+          test ! -e "$RUNNER_TEMP/oauth429-red/$excluded"
+          printf '%s baseline=absent candidate=%s red=absent reason=candidate-only-WS-stream-phase-helper\n' "$excluded" "$candidate_blob" > evidence/excluded-tests.txt
+          git -C "$RUNNER_TEMP/oauth429-red" diff --exit-code -- '*_test.go' ":!$excluded"
+          git -C "$RUNNER_TEMP/oauth429-red" diff --stat > evidence/red-diff.txt
       - name: Require behavioral RED from unchanged service regressions
         shell: bash
         run: |
@@ -183,7 +197,7 @@ jobs:
           git rev-parse HEAD HEAD^{tree} > evidence/candidate.txt
           git diff --exit-code
           set +e
-          (cd backend && go test -race -json -tags=unit ./internal/service -run '^Test(OAuth429WeeklyOnly|DisableScheduling429|RateLimitDisableSchedulingOn429|OpenAIGatewayDisableSchedulingOn429|Managed429WeeklyPolicy|Weekly429Threshold|TOTPRotationOn429|OpenAIStream429|OpenAIQuotaRecovery|CalculateOpenAI429ResetTime)' -count=1 -timeout=10m) > evidence/green.jsonl 2> evidence/green.stderr
+          (cd backend && go test -race -json -tags=unit ./internal/service -run '^Test(OAuth429WeeklyOnly|DisableScheduling429|RateLimitDisableSchedulingOn429|OpenAIGatewayDisableSchedulingOn429|Managed429WeeklyPolicy|Weekly429Threshold|TOTPRotationOn429|OpenAIStream429|OpenAIQuotaRecovery|CalculateOpenAI429ResetTime|CompatErrorPipelineCountsEachResponseOnce|FastPathThenGeneralHandler_CountsOne502UntilThreshold|PendingModel401_DoesNotDisableWholeAccount|Credential401_StillDisablesDespitePendingModelRule|OpenAIWSAfterOutput_Generic500AndExplicit502NeedAfterStream|MemoryTempUnschedTriggerDelayedResetKeepsNewRound)' -count=1 -timeout=10m) > evidence/green.jsonl 2> evidence/green.stderr
           result=$?
           set -e
           printf '%s\n' "$result" > evidence/green-exit.txt

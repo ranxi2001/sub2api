@@ -1,0 +1,52 @@
+# Disposable Actions installation. No upstream, SMTP, host config or egress.
+services:
+  postgres:
+    image: postgres:18.1-alpine3.23
+    container_name: pr838-ui-pg
+    environment:
+      POSTGRES_PASSWORD: fixture-only-postgres
+      POSTGRES_DB: sub2api_test
+    networks: [isolated]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d sub2api_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 45
+  redis:
+    image: redis:8.4-alpine
+    command: [redis-server, --save, "", --appendonly, "no"]
+    networks: [isolated]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 45
+  app:
+    image: pr838-ui-app:${CANDIDATE:?required}
+    networks: [isolated]
+    environment:
+      AUTO_SETUP: "true"
+      ADMIN_EMAIL: reviewer@example.invalid
+      ADMIN_PASSWORD: Fixture-Only-838-Password!
+      JWT_SECRET: fixture-only-pr838-jwt-not-real-0123456789abcdef
+      DATABASE_HOST: postgres
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: fixture-only-postgres
+      DATABASE_DBNAME: sub2api_test
+      DATABASE_SSLMODE: disable
+      REDIS_HOST: redis
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "8080"
+      SERVER_MODE: release
+      TZ: UTC
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -T, "3", -O, /dev/null, http://localhost:8080/health]
+      interval: 3s
+      timeout: 5s
+      retries: 90
+networks:
+  isolated:
+    internal: true

@@ -6,6 +6,30 @@ stream/WS sites that separate permanent-policy evidence from temporary cooldown 
 All public fixtures are fictional. Local work is static only; dynamic evidence is
 produced by `.github/workflows/oauth429-weekly-only.yml` on GitHub Actions.
 
+## Historical-source compilation boundary
+
+The service RED worktree starts at the exact candidate SHA and restores only the
+13 pinned production blobs listed in the workflow from the baseline above.
+`restored-blobs.txt` and `candidate-source-blobs.txt` record both sides. The old
+WS implementation intentionally remains unchanged: adding the newer
+`openAIWSForwardStreamPhaseContext` helper would alter the counterexample.
+
+Only `backend/internal/service/temp_unsched_pending_test.go` is excluded from
+this disposable service RED worktree. It is absent at the baseline and its WS
+test references that candidate-only helper; none of its tests or fixtures is a
+weekly429 regression dependency. `excluded-tests.txt` records its exact
+candidate blob and the reason. The candidate checkout keeps the entire file;
+the race-enabled GREEN command and evidence validator require all six of its
+top-level regressions to pass, including response counting, pending/credential
+401 controls, WS stream phase and delayed counter reset.
+
+All weekly429 service/repository test blobs stay identical to the candidate,
+with the full list and hashes in `retained-tests.txt` and
+`retained-test-blobs.txt`. No other test modification is allowed in the service
+RED worktree. Cache, expiry and PostgreSQL query RED worktrees retain all tests
+and their existing source boundaries. A compile/setup failure, skip, panic or
+missing target assertion still cannot satisfy the behavioral RED validator.
+
 An opted-in OAuth owner is permanently disabled only on an actual upstream 429
 when valid explicitly identified 10080-minute usage is strictly above its own
 threshold (default 98). Primary and secondary are judged independently. A 5h,

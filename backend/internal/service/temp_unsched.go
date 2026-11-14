@@ -33,6 +33,14 @@ type OpenAIAPIKeyHealthCache interface {
 	RecordOpenAIAPIKeyHealthFailure(ctx context.Context, accountID int64, windowMinutes, threshold int) (count int64, tripped bool, err error)
 }
 
+// TempUnschedTriggerCounter 在固定时间窗口内累计临时不可调度规则的匹配次数。
+// 窗口从第一次匹配开始，到期后键自动消失。冷却写入成功后，调用方用 Increment
+// 返回的 epoch 做 Reset：只有 epoch 仍是这一轮时才删除，迟到的 Reset 不能清掉新一轮计数。
+type TempUnschedTriggerCounter interface {
+	Increment(ctx context.Context, key string, windowMinutes int) (count int64, epoch string, err error)
+	Reset(ctx context.Context, key string, epoch string) error
+}
+
 // TimeoutCounterCache 超时计数器缓存接口
 type TimeoutCounterCache interface {
 	// IncrementTimeoutCount 增加账户的超时计数，返回当前计数值

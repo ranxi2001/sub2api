@@ -59,4 +59,5 @@ export const NEW_FEATURE_NOTICES = {
   openaiImageHeaderTimeoutGroups: 'openai-image-header-timeout-groups-initial-announcement',
   oauthInitialModelSelection: 'oauth-initial-model-selection-initial-announcement',
   usageRateCard: 'usage-rpm-tpm-card-initial-announcement',
+  tempUnschedStreamCountWindow: 'temp-unsched-stream-timing-count-window',
 } as const

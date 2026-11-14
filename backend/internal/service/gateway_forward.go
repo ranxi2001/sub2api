@@ -1030,9 +1030,32 @@ func (s *GatewayService) isStickyAccountUpstreamRestricted(ctx context.Context, 
 	return s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel)
 }
 
+// anthropicStreamErrorStatus 把 Claude SSE error.type 映射到临时不可调度规则使用的状态码。
+// 无法识别的类型返回 0，避免用臆造状态码误匹配规则。
+func anthropicStreamErrorStatus(body []byte) int {
+	switch strings.TrimSpace(gjson.GetBytes(body, "error.type").String()) {
+	case "overloaded_error":
+		return 529
+	case "rate_limit_error":
+		return http.StatusTooManyRequests
+	case "authentication_error":
+		return http.StatusUnauthorized
+	case "permission_error":
+		return http.StatusForbidden
+	case "api_error":
+		return http.StatusInternalServerError
+	case "timeout_error":
+		return http.StatusGatewayTimeout
+	default:
+		return 0
+	}
+}
+
 // sseStreamErrorEventFailover 把上游 HTTP 200 + SSE 流体内的 event:error 帧转为
 // UpstreamFailoverError：尚未向客户端写出内容且错误类型为 overloaded_error 时按 529
 // 处理并触发账号侧副作用，其余按 403；同时登记 stream_error 运维记录。
+// 客户端已经开始收到内容后，默认不触发临时不可调度；只有 stream_timing=after_stream
+// 的规则可以按上面的语义状态码匹配。
 func (s *GatewayService) sseStreamErrorEventFailover(ctx context.Context, c *gin.Context, account *Account, resp *http.Response, rawData, model string, outputStarted bool) *UpstreamFailoverError {
 	body := []byte(rawData)
 	semanticStatus := http.StatusForbidden
@@ -1044,6 +1067,11 @@ func (s *GatewayService) sseStreamErrorEventFailover(ctx context.Context, c *gin
 			Body:       io.NopCloser(bytes.NewReader(body)),
 		}
 		s.handleFailoverSideEffects(ctx, syntheticResp, account, model)
+	} else if outputStarted && s != nil && s.rateLimitService != nil && account != nil {
+		if status := anthropicStreamErrorStatus(body); status > 0 {
+			phaseCtx := withTempUnschedStreamPhase(ctx, tempUnschedPhaseMidStreamOptIn)
+			_ = s.rateLimitService.attemptTempUnschedulable(phaseCtx, account, status, body, model)
+		}
 	}
 
 	upstreamMsg := sanitizeUpstreamErrorMessage(

@@ -93,6 +93,24 @@ func (s *OpenAIGatewayService) readOpenAIUpstreamErrorWithCompleteness(resp *htt
 // failoverOpenAIUpstreamHTTPError 对 >=400 的上游响应做 failover 判定：命中时
 // 记录 ops 事件、执行账号级错误处置并返回 *UpstreamFailoverError；未命中返回
 // nil，调用方继续走各自端点格式的非 failover 错误处理链。
+const openAICompatTempUnschedAttemptKey = "openai_compat_temp_unsched_attempt"
+
+type openAICompatTempUnschedAttempt struct {
+	response  *http.Response
+	accountID int64
+	memo      *tempUnschedAttemptMemo
+}
+
+func openAICompatTempUnschedContext(c *gin.Context, response *http.Response, account *Account) context.Context {
+	ctx := c.Request.Context()
+	value, _ := c.Get(openAICompatTempUnschedAttemptKey)
+	checked, ok := value.(*openAICompatTempUnschedAttempt)
+	if ok && checked.response == response && account != nil && checked.accountID == account.ID {
+		return context.WithValue(ctx, tempUnschedAttemptMemoKey{}, checked.memo)
+	}
+	return ctx
+}
+
 func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	ctx context.Context,
 	c *gin.Context,
@@ -105,6 +123,12 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 	tempUnscheduled := false
 	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
+		// The compatibility error writer processes this same response next if
+		// the threshold is pending. Share only this response's evaluation;
+		// another upstream attempt must receive its own counter observation.
+		memo := &tempUnschedAttemptMemo{}
+		ctx = context.WithValue(ctx, tempUnschedAttemptMemoKey{}, memo)
+		c.Set(openAICompatTempUnschedAttemptKey, &openAICompatTempUnschedAttempt{response: resp, accountID: account.ID, memo: memo})
 		tempUnscheduled = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, upstreamModel) == ErrorPolicyTempUnscheduled
 		shouldFailover = tempUnscheduled
 	}

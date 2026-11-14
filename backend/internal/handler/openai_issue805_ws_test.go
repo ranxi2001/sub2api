@@ -149,7 +149,7 @@ func TestIssue805WSCompletedHistoryAcrossNodesAndTurns(t *testing.T) {
 					return false
 				}
 				for _, raw := range owners {
-					if gjson.Get(raw, "1").Int() != 1 {
+					if !issue805CompletedOwner(raw, 1) {
 						return false
 					}
 				}
@@ -162,6 +162,7 @@ func TestIssue805WSCompletedHistoryAcrossNodesAndTurns(t *testing.T) {
 			answer := issue715WSRead(t, consumer.clientConn)
 			require.Equal(t, "response.completed", gjson.GetBytes(answer, "type").String(), string(answer))
 			require.Contains(t, string(answer), "existing ledger balance 18")
+			require.Contains(t, string(answer), "fixture-task-produced-by-B", "the ownership assertion requires an actually delivered new B item")
 			require.Eventually(t, func() bool {
 				owners := issue805Owners(t, probe)
 				if len(owners) != 2 {
@@ -172,7 +173,7 @@ func TestIssue805WSCompletedHistoryAcrossNodesAndTurns(t *testing.T) {
 						if raw != old {
 							return false
 						}
-					} else if gjson.Get(raw, "1").Int() != 2 {
+					} else if !issue805CompletedOwner(raw, 2) {
 						return false
 					}
 				}
@@ -290,7 +291,7 @@ func TestIssue805WSRejectsUnsafeHistoryBeforeNetworkSend(t *testing.T) {
 						return false
 					}
 					for _, raw := range owners {
-						if gjson.Get(raw, "1").Int() != 1 {
+						if !issue805CompletedOwner(raw, 1) {
 							return false
 						}
 					}
@@ -371,7 +372,7 @@ func TestIssue805WSNewBOutputWaitsForCrossNodeCommit(t *testing.T) {
 					return false
 				}
 				for _, raw := range owners {
-					if gjson.Get(raw, "1").Int() != 1 {
+					if !issue805CompletedOwner(raw, 1) {
 						return false
 					}
 				}
@@ -427,7 +428,7 @@ func TestIssue805WSNewBOutputWaitsForCrossNodeCommit(t *testing.T) {
 				if old, found := original[key]; found {
 					require.Equal(t, old, raw)
 				} else {
-					require.EqualValues(t, 2, gjson.Get(raw, "1").Int(), "new output must retain real B after commit")
+					require.True(t, issue805CompletedOwner(raw, 2), "new output must retain committed real B after commit: %s", raw)
 				}
 			}
 		})

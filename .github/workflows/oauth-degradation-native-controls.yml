@@ -75,10 +75,37 @@ jobs:
   postgres:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # Same images as integration_harness_test.go. Provision before the race
+    # binary starts; keep its migrations, real connections and all regressions.
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sub2api_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sub2api_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       CI: 'true'
       GOMAXPROCS: '2'
       GOFLAGS: '-p=2'
+      SUB2API_TEST_POSTGRES_DSN: 'postgres://postgres:postgres@127.0.0.1:5432/sub2api_test?sslmode=disable&TimeZone=UTC'
+      SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:6379/0'
     steps:
       - uses: actions/checkout@v6
         with:

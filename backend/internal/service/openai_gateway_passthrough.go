@@ -1859,6 +1859,7 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffectsWithC
 		if isGrokContentPolicyRejection(http.StatusForbidden, payload) {
 			return http.StatusForbidden, false
 		}
+		ctx = withTempUnschedStreamPhase(ctx, tempUnschedPhaseMidStreamLegacy)
 		s.handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, firstNonEmpty(canonicalModel...)), account, statusCode, nil, payload)
 		return statusCode, false
 	}
@@ -1883,8 +1884,22 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffectsWithC
 			// 只有 OAuth/SetupToken 的 Spark 配额 429 才需要保留 headers 读取明确的 5h/7d reset。
 			accountHeaders = openAIWSSemantic429Headers(account, model, headers)
 		}
+		ctx = withTempUnschedStreamPhase(ctx, tempUnschedPhaseMidStreamLegacy)
 		return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, accountHeaders, payload, model)
 	default:
+		// 中途 502 / 通用 upstream_error 默认不产生账号副作用。
+		// 只有显式 stream_timing=after_stream 的规则可以在关键词匹配后冷却。
+		if s == nil || s.rateLimitService == nil || account == nil || !account.ShouldHandleErrorCode(statusCode) {
+			return statusCode, false
+		}
+		ctx = withTempUnschedStreamPhase(ctx, tempUnschedPhaseMidStreamOptIn)
+		model := firstNonEmpty(canonicalModel...)
+		if model == "" {
+			model = firstNonEmpty(gjson.GetBytes(payload, "model").String(), gjson.GetBytes(payload, "response.model").String())
+		}
+		if s.rateLimitService.attemptTempUnschedulable(ctx, account, statusCode, payload, model) == tempUnschedTriggered {
+			return statusCode, true
+		}
 		return statusCode, false
 	}
 }

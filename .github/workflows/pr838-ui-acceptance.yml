@@ -1,0 +1,117 @@
+name: PR838 isolated administration acceptance
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'frontend/src/components/account/**'
+      - 'frontend/src/stores/newFeatureNotices.ts'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - '.github/fixtures/pr838-ui/**'
+      - '.github/scripts/pr838-ui-*.mjs'
+      - '.github/workflows/pr838-ui-acceptance.yml'
+permissions:
+  contents: read
+concurrency:
+  group: pr838-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  administration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      # Full production frontend before this feature; never overlay components.
+      BASELINE: b347249687db84dac3f5272189fda6cf86eb9035
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BASELINE }}
+          path: .pr838-baseline
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Configure isolated evidence paths after runner allocation
+        run: |
+          printf 'EVIDENCE_DIR=%s/pr838-ui\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'SUB2API_PLAYWRIGHT_MODULE=%s/pr838-browser/node_modules/playwright/index.mjs\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Prepare exact locked frontend and isolated browser
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          git rev-parse HEAD > "$EVIDENCE_DIR/candidate.txt"
+          git -C .pr838-baseline rev-parse HEAD > "$EVIDENCE_DIR/baseline.txt"
+          cmp frontend/package.json .pr838-baseline/frontend/package.json
+          cmp frontend/pnpm-lock.yaml .pr838-baseline/frontend/pnpm-lock.yaml
+          pnpm --dir frontend install --frozen-lockfile
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" .pr838-baseline/frontend/node_modules
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          # The mirror transport stalled for the whole job while installing
+          # Chromium dependencies. Use the signed Ubuntu archive directly for
+          # this isolated runner, and bound each network attempt.
+          for mirror_list in /etc/apt/apt-mirrors.txt /etc/apt/apt-security-mirrors.txt; do
+            if [ -f "$mirror_list" ]; then
+              printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee "$mirror_list" >/dev/null
+            fi
+          done
+          printf '%s\n' 'Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";' 'Acquire::Retries "2";' | sudo tee /etc/apt/apt.conf.d/99-sub2api-ci-timeouts >/dev/null
+          npm install --prefix "$RUNNER_TEMP/pr838-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/pr838-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Build complete before and after applications with project Vite and CSS
+        run: node .github/scripts/pr838-ui-build.mjs
+      - name: Build isolated real backend and pre-pull dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pr838-runtime"
+          (cd backend && CGO_ENABLED=0 go build -trimpath -ldflags="-X main.Commit=$CANDIDATE" -o "$RUNNER_TEMP/pr838-runtime/server" ./cmd/server)
+          cp -R backend/resources "$RUNNER_TEMP/pr838-runtime/resources"
+          docker build -f .github/fixtures/pr838-ui/Dockerfile -t "pr838-ui-app:$CANDIDATE" "$RUNNER_TEMP/pr838-runtime"
+          docker compose -p pr838-ui -f .github/fixtures/pr838-ui/compose.yml pull postgres redis
+          docker compose -p pr838-ui -f .github/fixtures/pr838-ui/compose.yml up -d --wait --wait-timeout 300
+          docker network inspect pr838-ui_isolated --format '{{json .Internal}}' > "$EVIDENCE_DIR/network-internal.json"
+          # Reach the isolated bridge directly from its host; published loopback
+          # ports were refused even after the in-container health check passed.
+          app_id=$(docker compose -p pr838-ui -f .github/fixtures/pr838-ui/compose.yml ps -q app)
+          app_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$app_id")
+          test -n "$app_ip"
+          app_origin="http://$app_ip:8080"
+          docker inspect --format '{{json .NetworkSettings}}' "$app_id" > "$EVIDENCE_DIR/container-network.json"
+          curl --noproxy '*' --fail --silent --show-error --connect-timeout 3 --max-time 10 --retry 3 --retry-connrefused "$app_origin/health" > "$EVIDENCE_DIR/host-health.json"
+          printf 'SUB2API_TEST_APP_ORIGIN=%s\n' "$app_origin" >> "$GITHUB_ENV"
+      - name: Actual administration, HTTP persistence, SQL readback and browser notices
+        run: |
+          set -euo pipefail
+          status=0
+          node .github/scripts/pr838-ui-browser.mjs > "$EVIDENCE_DIR/browser.log" 2>&1 || status=$?
+          printf '%s\n' "$status" > "$EVIDENCE_DIR/browser-exit.txt"
+          cat "$EVIDENCE_DIR/browser.log"
+          exit "$status"
+      - name: Preserve logs and stop only disposable CI installation
+        if: always()
+        run: |
+          mkdir -p "$EVIDENCE_DIR"
+          docker compose -p pr838-ui -f .github/fixtures/pr838-ui/compose.yml logs --no-color > "$EVIDENCE_DIR/installation.log" 2>&1
+          docker compose -p pr838-ui -f .github/fixtures/pr838-ui/compose.yml down -v
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr838-ui-${{ env.CANDIDATE }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/pr838-ui/*.json
+            ${{ runner.temp }}/pr838-ui/*.txt
+            ${{ runner.temp }}/pr838-ui/*.log
+            ${{ runner.temp }}/pr838-ui/*.png
+          if-no-files-found: error
+          retention-days: 30
