@@ -102,8 +102,22 @@ for (const [label, sha] of [['before', baseline], ['after', candidate]]) {
         if(kind==='http') assert.equal((await dialog.locator('p.text-amber-700').count()),label==='after'?1:0)
         manifest.assertions.push({label,locale,device,check:kind+' actual detail shape',pass:true})
         // Scroll the actual modal: preserve project CSS and viewport. No resized full-panel composite.
-        const statusLabel=dialog.locator('.grid > div').nth(7)
-        await statusLabel.scrollIntoViewIfNeeded()
+        // Select the actual numeric status badge, not a positional metadata
+        // card. A preceding summary field must not move status off-screen.
+        const statusLabel=dialog.locator('.grid > div').filter({
+          has: page.locator('span').filter({hasText: new RegExp(`^${rows[n].status_code}$`)})
+        })
+        assert.equal(await statusLabel.count(), 1, 'one actual status card')
+        await statusLabel.evaluate(e=>e.scrollIntoView({block:'center',behavior:'instant'}))
+        const box=await statusLabel.boundingBox()
+        assert(box && box.y >= 50 && box.y+box.height <= viewport.height-20, 'entire status card must be inside viewport')
+        if(kind==='http' && label==='after') {
+          const warning=statusLabel.locator('p.text-amber-700')
+          assert.equal(await warning.count(),1)
+          const warningBox=await warning.boundingBox()
+          assert(warningBox && warningBox.y >= 50 && warningBox.y+warningBox.height <= viewport.height-20, 'failure warning must be inside viewport')
+        }
+        manifest.assertions.push({label,locale,device,check:kind+' status card viewport bounds',pass:true,box})
         await shot(kind+'-detail-status')
         if(kind==='ws') { await dialog.locator('pre').first().scrollIntoViewIfNeeded(); await shot('ws-detail-diagnostics') }
         await dialog.getByRole('button',{name:'Close modal',exact:true}).click()
