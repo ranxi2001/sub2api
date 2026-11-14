@@ -1,5 +1,7 @@
 # Shadow 生命周期修复与下一 WS 具名 RED
 
+> 历史设计与测试阶段记录：下方“待执行”“尚未实现”“下一片”均描述当时 checkpoint，不代表 PR #834 最终实现。当前能力、Redis 保留边界和未覆盖范围见 [Responses 有损可读续接](encrypted-history-readable-continuation.md#当前实现与边界)；动态结果以 PR 当前 head 的 Actions 为准。
+
 本增量优先处理独审 `e593` 的 1 P1 + 3 P2，保留同 PR 未完成的 WS 实现。没有本机动态运行；所有新增回归、RED/GREEN 和变异的执行结果均待远端验证。
 
 ## 生产修复

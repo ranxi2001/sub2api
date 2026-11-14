@@ -1,5 +1,7 @@
 # Future readable shadow：提交边界与恢复约束
 
+> 历史设计与测试阶段记录：下方“待执行”“尚未实现”“下一片”均描述当时 checkpoint，不代表 PR #834 最终实现。当前能力、Redis 保留边界和未覆盖范围见 [Responses 有损可读续接](encrypted-history-readable-continuation.md#当前实现与边界)；动态结果以 PR 当前 head 的 Actions 为准。
+
 此增量实现未来 HTTP 请求仅回带同一 opaque agent item 时，恢复之前实际观测并成功交付的同任务上下文。它沿用显式开启的有损续聊 Beta 设置；原始未知历史没有可用线索时不能编造。当前可读意图始终优先，不依赖 shadow 存在。
 
 ## 第一片范围

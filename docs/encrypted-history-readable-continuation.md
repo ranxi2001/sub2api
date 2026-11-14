@@ -1,4 +1,4 @@
-# HTTP 的自动有损可读续接
+# Responses 的自动有损可读续接
 
 管理员开启现有 Beta 设置 `openai_409_omit_encrypted_history_enabled` 后，HTTP Responses 可以从可用的最新 user 任务、显式 instructions 或结构化任务摘要自动重建请求，省略不能迁移的旧 opaque 历史，并选择合格账号建立新的 upstream 会话。无需客户端确认、重开会话或重新输入。默认仍为 `false`；它与进程配置 `disable_encrypted_agent_owner_binding` 的完整密文跨账号尝试是两个独立选项。没有新增设置、迁移或公告 ID。
 
@@ -12,21 +12,24 @@
 
 已完成 A/B 记录的账号差异和 pending/failed/conflict 分开处理。所有原 opaque item 都要扫描，重建后保留原 key 引用，在实际发送前再次读取交付屏障，不清除或覆写 A owner。新 B 输出继续先 reserve、成功下游写后 commit；拒绝和未知交付不能触发自动重放。沿用不含正文的 `openai.encrypted_history_409_omitted` 审计标识，不增加阻断客户端的通知。
 
-## 首片范围与后续 gate
+## 当前实现与边界
 
-| 场景 | 本增量状态 |
+以下描述 PR #834 的最终产品行为；具体提交是否通过动态验证，以该 PR 当前 head 的 Actions 和正文为准，不把测试代码存在或旧 head 成功当作当前验收。
+
+| 场景 | 实现与验证边界 |
 | --- | --- |
-| 原生 API-key HTTP JSON / SSE，同一 session，A 停调度后 B 可读续接 | 已编写真实 localhost HTTP + Redis 回归，动态结果待 Actions |
-| summary-only / 可读 content + 密文 / store=true 历史 | 转换后发送，回归检查可读内容及一次生成 |
-| B 拒绝、B 输出 reserve-before-write / commit-after-write、下游写失败 | 同一 HTTP 回归含对应断言，待远端验证 |
-| 默认关闭、无任何可读意图、pointer-only、pending/unknown delivery、篡改 input/tools | 独立保护与回归保留；无意图无法重建，不扩大成所有 opaque 历史拒绝 |
-| 原生 OAuth HTTP（system/tool/ID 与最终发包） | 已有生产候选与独立实际网络回归，候选 GREEN 待 Actions |
-| 有可读原始任务/结构摘要的 opaque 历史 | 已实现候选；同客户端 A→B→B 受控工具循环待远端 GREEN |
-| previous_response_id / conversation + 足够可读任务 | 已实现联合重建；不要求完整无损历史，候选 GREEN 待 Actions |
-| 混合 A/B fence、工具定义丢失的 mutation | 48 个混合 fence、8 个工具 wire mutation、2 个 source mutant 验证待 Actions |
-| future shadow/摘要 | 必须在同 PR 后续实现 tenant/key/group/model/任务关联/TTL；本片不存储客户任务正文 |
-| WS HTTP bridge、native、pooled shared、pooled dedicated | 均未实现/未验收本模式；HTTP 测试不覆盖 WS |
-| 真实供应商 A/B 兼容 | 未执行；由监督使用获准自有账号另做有界验证 |
+| 原生 API-key / OAuth HTTP JSON、SSE | 可读任务、结构摘要和 provider pointer 联合重建；最终发送检查任务、tools/schema、instructions 与交付屏障 |
+| WebSocket HTTP bridge、原生共享/独占池和 passthrough | 只在当前轮尚未发送且原账号不再合格时重建并重新选号；已发送或交付不明的轮次不重放 |
+| 后续请求只回带同一 opaque agent item | Beta 开启时可从之前成功交付的同任务 readable shadow 恢复；原始未知历史无可用记录时不编造 |
+| 混合 A/B 历史、pending/failed/conflict、旧 owner 消失 | 逐项保留并在发送前复查屏障，旧记录不改写为新账号 |
+| 模型/权限/额度/账号/并发、工具副作用 | 重新准入；完整工具调用与已完成结果保留，不自动重做外部工具 |
+| 审核 | 恢复的任务和上下文在发送前重新接受提示词及所选上游审核；普通请求仍按既有提取规则。服务端恢复标记禁止正文进入审计持久队列、摘录或处罚证据 |
+| 非 Beta 的完整密文 owner-binding opt-out | 独立路径；本 PR 不宣称修复 Issue #842 的普通元数据规范化矩阵 |
+| 真实供应商兼容 | 既往维护报告记录了 `afa7dbd6f` 的 API-key HTTP response-pointer A→B 工具循环；不代表当前 head、OAuth、opaque-agent 或 WS 的真实供应商验收 |
+
+Readable shadow 使用共享 Redis，按用户/API Key、分组、模型、会话和精确任务隔离。每个用户/API Key 总计最多 8 条，每条最多 64 KiB，TTL 最多 30 分钟；不回退到本地存储。它包含可读任务上下文，只有 Beta 开启时发布/恢复，管理员应将其纳入 Redis 的数据保留范围。投递 epoch 和原 owner 独立，失效、冲突、过期或存储不可用时不能借用旧任务。详见 [shadow 约束](future-readable-shadow.md)。
+
+没有新增数据库迁移或设置。旧版不能消费新 shadow 的完整恢复语义；回退时关闭 Beta、排空在途请求及旧 WS 后按正常流程切换，不以清空 owner 记录恢复会话。此次源码合并本身不改变线上开关或部署版本。
 
 ## 远端验证
 

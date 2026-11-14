@@ -1,5 +1,7 @@
 # HTTP 可读任务重建：生产候选与远端 TDD
 
+> 历史设计与测试阶段记录：下方“待执行”“尚未实现”“下一片”均描述当时 checkpoint，不代表 PR #834 最终实现。当前能力、Redis 保留边界和未覆盖范围见 [Responses 有损可读续接](encrypted-history-readable-continuation.md#当前实现与边界)；动态结果以 PR 当前 head 的 Actions 为准。
+
 测试检查点 `5d8d14b960c2beda3627ee514ee09eead32a771a` 已在 [run 43441932069](https://github.com/ranxi2001/sub2api/actions/runs/43441932069) 取得固定 `96ba36a85edab665ad5a035788fc07a40fd18762` 生产源码的业务 RED：36 个 leaf 均命中 B 未发送的指定断言，30 个 owner_unavailable、6 个 OAuth http_previous_response_unsupported，无运行污染。当前在此 RED 后实现生产候选及独审 oracle 修复；候选 GREEN 和新增 mutation 仍须 Actions 执行，不视为已验收。
 
 ## 本片目标
