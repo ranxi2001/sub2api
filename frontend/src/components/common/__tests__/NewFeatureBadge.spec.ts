@@ -31,6 +31,7 @@ describe('NewFeatureBadge', () => {
     ['admin usage platform', NEW_FEATURE_NOTICES.adminUsagePlatform],
     ['user ID copy', NEW_FEATURE_NOTICES.userIdCopy],
     ['Antigravity usage query', NEW_FEATURE_NOTICES.antigravityUsageQuery],
+    ['account operations team notifications', NEW_FEATURE_NOTICES.accountOpsTeam],
     ['OpenAI cache write TTL', NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h],
     ['EasyPay refund code', NEW_FEATURE_NOTICES.easyPayRefundSuccessCode],
     ['payment provider fees', NEW_FEATURE_NOTICES.paymentProviderFees],

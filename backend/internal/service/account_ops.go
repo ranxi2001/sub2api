@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/mail"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,12 +39,10 @@ func ValidateAccountOpsConfig(c AccountOpsConfig) (err error) {
 	if c.CooldownMinutes < 5 || c.CooldownMinutes > 1440 {
 		return errors.New("cooldown_minutes must be between 5 and 1440")
 	}
-	if c.Recipient != "" {
-		address, err := mail.ParseAddress(c.Recipient)
-		if err != nil || address.Address != c.Recipient || strings.ContainsAny(c.Recipient, "\r\n") || len(c.Recipient) > 254 {
-			return errors.New("recipient must be one email address")
-		}
+	if _, err := parseAccountOpsRecipients(c.Recipient); err != nil {
+		return err
 	}
+
 	if err := validateAccountOpsExtras(c); err != nil {
 		return err
 	}

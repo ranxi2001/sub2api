@@ -22,6 +22,7 @@ type AccountOpsUsageWindow struct {
 	ResetsAt    *time.Time `json:"resets_at,omitempty"`
 }
 type AccountOpsBalanceAccount struct {
+	OAuthLifecycle   string                  `json:"oauth_lifecycle,omitempty"`
 	AccountID        int64                   `json:"account_id"`
 	AccountName      string                  `json:"account_name"`
 	GroupID          string                  `json:"group_id"`
@@ -278,6 +279,9 @@ func (s *AccountOpsService) thresholdAccounts(ctx context.Context, apiOnly bool)
 			continue
 		}
 		item := opsBalanceAccount(a, now)
+		if a.Type == AccountTypeOAuth {
+			item.OAuthLifecycle = accountOpsOAuthLifecycle(a)
+		}
 		group := accountOpsGroupAssignment(a, c)
 		item.GroupID, item.GroupName, item.GroupMode = group.ID, group.Name, group.Mode
 		if a.Type == AccountTypeOAuth {

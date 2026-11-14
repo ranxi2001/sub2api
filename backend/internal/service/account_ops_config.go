@@ -324,7 +324,11 @@ func (s *AccountOpsService) saveConfigWithRuleScope(ctx context.Context, c Accou
 	}
 	c.BalanceThresholds = append([]AccountOpsBalanceRule(nil), c.BalanceThresholds...)
 	c.QuotaThresholds = append([]AccountOpsQuotaRule(nil), c.QuotaThresholds...)
-	c.Recipient = strings.TrimSpace(c.Recipient)
+	recipients, err := parseAccountOpsRecipients(c.Recipient)
+	if err != nil {
+		return accountOpsConfigValidation(err.Error())
+	}
+	c.Recipient = strings.Join(recipients, ", ")
 	if len(c.Webhooks) > 5 || len(c.BalanceThresholds)+len(c.QuotaThresholds) > 1000 {
 		return accountOpsConfigValidation("too many robot destinations or threshold rules")
 	}

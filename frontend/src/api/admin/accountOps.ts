@@ -36,7 +36,12 @@ export interface AccountOpsQuotaThreshold {
   notify_recovery?: boolean
 }
 export type AccountOpsObservationStatus = 'ok' | 'stale' | 'failed' | 'unsupported' | 'unknown'
+export type AccountOpsOAuthLifecycle = 'temporary' | 'long_term'
+export async function setAccountOpsOAuthLifecycle(id: number, lifecycle: AccountOpsOAuthLifecycle): Promise<void> {
+  await apiClient.put(`/admin/account-ops/accounts/${id}/lifecycle`, { lifecycle })
+}
 export interface AccountOpsThresholdAccount {
+  oauth_lifecycle?: AccountOpsOAuthLifecycle
   account_id: number
   account_name: string
   group_id?: string

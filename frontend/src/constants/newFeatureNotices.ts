@@ -8,6 +8,7 @@ export const NEW_FEATURE_NOTICES = {
   matureProviderImport: 'mature-provider-account-import-initial-announcement',
   qqCommunity: 'qq-community-operations-initial-announcement',
   qqRewardCoupons: 'qq-reward-coupons-initial-announcement',
+  accountOpsTeam: 'account-ops-channel-team-notifications',
   moderationUpstreamAccountScope: 'moderation-upstream-account-scope',
   adminUsagePlatform: 'admin-usage-platform-filter-initial-announcement',
   usageTrendRate: 'usage-trend-tooltip-rpm-tpm-initial-announcement',
