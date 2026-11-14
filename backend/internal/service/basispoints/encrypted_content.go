@@ -22,8 +22,9 @@ func StripEncryptedContent(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	input, _ := source["input"].([]any)
+	current := lastMeaningfulInput(input)
 	changed := false
-	for _, rawItem := range input {
+	for itemIndex, rawItem := range input {
 		item, _ := rawItem.(object)
 		field := "content"
 		switch text(item["type"]) {
@@ -35,6 +36,9 @@ func StripEncryptedContent(raw []byte) ([]byte, error) {
 		}
 		if text(item["type"]) == "agent_message" {
 			if value, exists := item["encrypted_content"]; exists && value != nil && value != "" {
+				if itemIndex == current {
+					return nil, currentEncryptedInputError(fmt.Sprintf("input[%d].encrypted_content", itemIndex))
+				}
 				marker := object{"type": "input_text", "text": encryptedContentOmitted}
 				switch content := item["content"].(type) {
 				case []any:
@@ -58,6 +62,9 @@ func StripEncryptedContent(raw []byte) ([]byte, error) {
 		}
 		for index, rawPart := range parts {
 			if part, _ := rawPart.(object); text(part["type"]) == "encrypted_content" {
+				if itemIndex == current {
+					return nil, currentEncryptedInputError(fmt.Sprintf("input[%d].%s[%d]", itemIndex, field, index))
+				}
 				parts[index] = object{"type": kind, "text": encryptedContentOmitted}
 				changed = true
 			}
@@ -67,4 +74,8 @@ func StripEncryptedContent(raw []byte) ([]byte, error) {
 		return raw, nil
 	}
 	return json.Marshal(source)
+}
+
+func currentEncryptedInputError(path string) error {
+	return &ContentValidationError{Path: path, ContentType: "encrypted_content", message: "basispoints cannot omit encrypted content from the current task; resend the original plaintext"}
 }

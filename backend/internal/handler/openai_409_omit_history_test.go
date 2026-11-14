@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
@@ -39,11 +40,14 @@ func (s *omit409SettingsRepo) GetMultiple(_ context.Context, _ []string) (map[st
 
 func TestOpenAI409OmitHistoryHTTP(t *testing.T) {
 	for _, stream := range []bool{false, true} {
-		for _, scenario := range []string{"off", "paused", "route_changed", "no_accounts", "current_task", "upstream_rejects"} {
+		for _, scenario := range []string{"off", "paused", "route_changed", "no_accounts", "current_task", "upstream_rejects",
+			"rate_limited", "rate_limited_off", "rate_limited_no_accounts", "rate_limited_current_task",
+			"overloaded", "overloaded_off", "overloaded_no_accounts", "overloaded_current_task"} {
 			t.Run(fmt.Sprintf("%s/stream=%t", scenario, stream), func(t *testing.T) {
 				clients := issue805Redis(t)
 				var mu sync.Mutex
 				var bodies [][]byte
+				var authorizations []string
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					body, err := io.ReadAll(r.Body)
 					if err != nil {
@@ -52,6 +56,7 @@ func TestOpenAI409OmitHistoryHTTP(t *testing.T) {
 					}
 					mu.Lock()
 					bodies = append(bodies, body)
+					authorizations = append(authorizations, r.Header.Get("Authorization"))
 					n := len(bodies)
 					mu.Unlock()
 					if n > 1 && scenario == "upstream_rejects" {
@@ -92,29 +97,57 @@ func TestOpenAI409OmitHistoryHTTP(t *testing.T) {
 				originalOwners := issue805Owners(t, clients())
 				require.Len(t, originalOwners, 1)
 				accounts[0].Schedulable = false
+				cooldown := time.Now().Add(7 * 24 * time.Hour)
+				rateLimited := strings.HasPrefix(scenario, "rate_limited")
+				overloaded := strings.HasPrefix(scenario, "overloaded")
+				if rateLimited || overloaded {
+					accounts[0].Schedulable = true
+					if rateLimited {
+						accounts[0].RateLimitResetAt = &cooldown
+					} else {
+						accounts[0].OverloadUntil = &cooldown
+					}
+				}
 				if scenario == "route_changed" {
 					accounts[0].Schedulable = true
 					accounts[0].Credentials["api_key"] = "fixture-rotated"
 				}
-				if scenario == "no_accounts" {
+				if strings.HasSuffix(scenario, "no_accounts") {
 					accounts[1].Schedulable = false
 				}
 				followup := issue715Body(true, stream)
-				if scenario == "current_task" {
+				if strings.HasSuffix(scenario, "current_task") {
 					followup = fmt.Sprintf(`{"model":"gpt-5.1","stream":%t,"input":[%s]}`, stream, issue715Agent)
 				}
-				answer := issue758Request(t, newNode(scenario != "off"), followup)
+				answer := issue758Request(t, newNode(!strings.HasSuffix(scenario, "off")), followup)
 				mu.Lock()
 				defer mu.Unlock()
 				switch scenario {
-				case "off", "current_task":
+				case "off":
 					require.Equal(t, http.StatusConflict, answer.Code, answer.Body.String())
 					require.Len(t, bodies, 1)
-				case "no_accounts":
+				case "rate_limited_off", "overloaded_off":
+					status, reason := http.StatusTooManyRequests, "owner_rate_limited"
+					if overloaded {
+						status, reason = http.StatusServiceUnavailable, "owner_overloaded"
+					}
+					require.Equal(t, status, answer.Code, answer.Body.String())
+					require.Contains(t, answer.Body.String(), "encrypted_agent_recovery_"+reason)
+					require.NotEmpty(t, answer.Header().Get("Retry-After"))
+					require.Len(t, bodies, 1)
+				case "current_task", "rate_limited_current_task", "overloaded_current_task":
+					require.Equal(t, http.StatusUnprocessableEntity, answer.Code, answer.Body.String())
+					require.Contains(t, answer.Body.String(), "readable_intent_missing")
+					require.Len(t, bodies, 1)
+				case "no_accounts", "rate_limited_no_accounts", "overloaded_no_accounts":
 					require.GreaterOrEqual(t, answer.Code, 400)
 					require.Len(t, bodies, 1)
 				default:
 					require.Len(t, bodies, 2, "one original request and exactly one sanitized continuation")
+					if rateLimited || overloaded {
+						require.Equal(t, []string{"Bearer fixture-omit-0", "Bearer fixture-omit-1"}, authorizations,
+							"continuation must use the eligible alternative, not the original owner")
+					}
 					require.NotContains(t, string(bodies[1]), "fixture-task-reference-715")
 					require.Contains(t, string(bodies[1]), "Historical encrypted content omitted")
 					for _, path := range []string{"input.1", "input.2", "input.3", "input.4"} {
@@ -126,6 +159,12 @@ func TestOpenAI409OmitHistoryHTTP(t *testing.T) {
 						require.Equal(t, http.StatusOK, answer.Code, answer.Body.String())
 						require.Contains(t, answer.Body.String(), "continued from visible history")
 					}
+				}
+				if rateLimited {
+					require.Equal(t, cooldown, *accounts[0].RateLimitResetAt, "rebuild must preserve the owner's cooldown")
+				}
+				if overloaded {
+					require.Equal(t, cooldown, *accounts[0].OverloadUntil, "rebuild must preserve the owner's overload")
 				}
 				require.Equal(t, originalOwners, issue805Owners(t, clients()), "omission must not clear or rewrite the original owner")
 			})
@@ -178,7 +217,8 @@ func TestOpenAI409ReplayMetadataHTTP(t *testing.T) {
 					mu.Unlock()
 					if n > 1 {
 						rule := gjson.GetBytes(body, "input.5")
-						valid := !rule.Get("id").Exists() && !rule.Get("status").Exists() && rule.Get("summary").IsArray() &&
+						valid := !rule.Get("id").Exists() && !rule.Get("status").Exists() && rule.Get("type").String() == "message" &&
+							!rule.Get("encrypted_content").Exists() &&
 							!gjson.GetBytes(body, "input.1.id").Exists() && !gjson.GetBytes(body, "input.1.call_id").Exists() &&
 							gjson.GetBytes(body, "input.1.sequence").Raw == "9007199254740993" &&
 							strings.Contains(string(body), "Historical encrypted content omitted") &&
@@ -232,7 +272,7 @@ func TestOpenAI409ReplayMetadataHTTP(t *testing.T) {
 					require.Equal(t, http.StatusOK, answer.Code, answer.Body.String())
 					issue758CompletedResponse(t, answer.Body.String(), stream)
 				}
-				for _, path := range []string{"input.1.content", "input.1.sequence", "input.2", "input.3", "input.4", "input.5.encrypted_content"} {
+				for _, path := range []string{"input.1.content", "input.1.sequence", "input.2", "input.3", "input.4"} {
 					require.JSONEq(t, gjson.Get(followup, path).Raw, gjson.GetBytes(bodies[1], path).Raw, path)
 				}
 				require.Equal(t, owners, issue805Owners(t, clients()), "old ownership remains intact")

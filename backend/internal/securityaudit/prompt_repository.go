@@ -187,6 +187,56 @@ func (r *PostgreSQLRepository) Complete(ctx context.Context, job *Job, result *N
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	event, err := completePromptAuditTx(ctx, tx, job, result, storePassEvents, finding)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+// Recovered text never enters the durable queue or payload store. Its finished
+// metadata and penalty are committed together using the same hook and completion
+// transaction as Runner.Complete; failed penalty writes roll back the event too.
+func (r *PostgreSQLRepository) RecordRecoveredAsync(ctx context.Context, snapshot PromptSnapshot, configVersion int64, result *NormalizedResult, storePassEvents bool) (*Event, error) {
+	if r == nil || r.db == nil || result == nil || !snapshot.NoBodyRetention {
+		return nil, errors.New("recovered async completion requires private snapshot and result")
+	}
+	result = promptResultForRetention(snapshot, result)
+	var finding func(*sql.Tx, PromptSnapshot, *NormalizedResult) error
+	if r.prepareFinding != nil && result.Action == ActionBlock {
+		var err error
+		finding, err = r.prepareFinding(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	job, err := insertJob(ctx, tx, snapshot.Redacted(), ModeAsync, configVersion, "processing", 1)
+	if err != nil {
+		return nil, err
+	}
+	job.Snapshot = snapshot.Redacted()
+	if _, err = tx.ExecContext(ctx, `UPDATE prompt_audit_jobs SET attempts=1, processing_started_at=NOW() WHERE id=$1`, job.ID); err != nil {
+		return nil, err
+	}
+	event, err := completePromptAuditTx(ctx, tx, job, result, storePassEvents, finding)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func completePromptAuditTx(ctx context.Context, tx *sql.Tx, job *Job, result *NormalizedResult, storePassEvents bool, finding func(*sql.Tx, PromptSnapshot, *NormalizedResult) error) (*Event, error) {
 	updateResult, err := tx.ExecContext(ctx, `
 		UPDATE prompt_audit_jobs SET status='done', processed_at=NOW(), updated_at=NOW(),
 			last_error_code='', last_error_message=''
@@ -205,9 +255,6 @@ func (r *PostgreSQLRepository) Complete(ctx context.Context, job *Job, result *N
 		if err := finding(tx, job.Snapshot, result); err != nil {
 			return nil, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	return event, nil
 }

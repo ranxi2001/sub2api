@@ -8,11 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func openAI400HistoryRecoveryApplied(ctx context.Context) bool {
-	r := openAIAgentRecoveryFromContext(ctx)
-	return r != nil && r.omitted400History
-}
-
 func (s *SettingService) IsOpenAI400OmitEncryptedHistoryEnabled(ctx context.Context) bool {
 	if s == nil || s.settingRepo == nil || ctx.Err() != nil {
 		return false
@@ -62,7 +57,14 @@ func (s *OpenAIGatewayService) prepareOpenAI400HistoryRecovery(ctx context.Conte
 	if r.delivery == nil || len(r.delivery.keys) != 0 || len(r.outputs) != 0 {
 		return refuse("delivery_unconfirmed")
 	}
-	if r.preservesHistory() && openAIAgentRecoveryInputDigest(body) != r.inputDigest {
+	expectedInput := r.inputDigest
+	if r.omittedHistory && r.apiReplayPrepared {
+		expectedInput = r.apiInputDigest
+	}
+	if r.omittedHistory && r.oauthReplayPrepared {
+		expectedInput = r.oauthInputDigest
+	}
+	if r.preservesHistory() && openAIAgentRecoveryInputDigest(body) != expectedInput {
 		return refuse("history_integrity")
 	}
 	if s.checkOpenAIAgentRecoveryRecords(ctx, r, r.delivery.binding) != nil {
@@ -85,6 +87,16 @@ func (s *OpenAIGatewayService) prepareOpenAI400HistoryRecovery(ctx context.Conte
 	// remains unchanged. Original keys/known/owner are retained for record and
 	// route checks; omitted inputs must never be published as consumed inputs.
 	next.inputDigest = openAIAgentRecoveryInputDigest(clean)
+	if next.omittedHistory && next.apiReplayPrepared {
+		// The retry skips native adaptation, so its final-send expectation must
+		// include this omission while retaining the frozen controls and route.
+		next.apiInputDigest = next.inputDigest
+	}
+	if next.omittedHistory && next.oauthReplayPrepared {
+		// This is the already-built native body. Authorize only the explicit
+		// 400 input transformation; retain the frozen controls and route.
+		next.oauthInputDigest = next.inputDigest
+	}
 	next.items = openAIAgentRecoveryItemDigests(clean)
 	d.Applied, d.Decision = true, "same_account_retry_scheduled"
 	c.Set(openAI400HistoryDiagnosticKey, d)

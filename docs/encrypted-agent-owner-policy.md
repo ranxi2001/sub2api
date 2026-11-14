@@ -1,5 +1,7 @@
 # 加密 agent 历史账号策略
 
+后台“409 忽略/历史省略”Beta 开关属于另一个明确有损的路径，见 [HTTP 可读历史续接](encrypted-history-readable-continuation.md)。下述进程配置控制完整密文尝试，不等同于该后台开关。
+
 默认仍按已登记的账号和原生 Responses 路线恢复加密 `agent_message`。原账号限流或过载时，保留原等待提示和恢复时间。管理员可显式允许完整历史尝试普通账号池中的其他合格账号：
 
 ```yaml

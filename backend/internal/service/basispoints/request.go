@@ -244,7 +244,6 @@ func prepareWithInheritedCatalog(raw []byte, scope string, replay *ReplayCache, 
 	output := object{
 		"model": model, "model_selection": "explicit", "stream": true, "store": false,
 		"input": append(prologue, translated...), "reasoning_effort": effort,
-		"context_management": []any{object{"type": "compaction", "compact_threshold": 920000}},
 		"metadata": object{
 			"task_id": fingerprint([]any{scope, conversation}),
 			"turn_id": fingerprint([]any{scope, input[:turnEnd]}), "agent_iteration": fmt.Sprint(iteration),
