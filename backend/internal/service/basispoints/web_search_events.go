@@ -48,6 +48,9 @@ func (o *searchTextObserver) observe(kind string, payload object) error {
 	item, _ := payload["item"].(object)
 	if isTool(item) {
 		if kind == "response.output_item.done" {
+			if len(o.pending) >= 1024 {
+				return searchRequestError("too_many_tool_items")
+			}
 			o.pending[text(item["call_id"])+"\x00"+text(item["id"])] = true
 		}
 		return nil
