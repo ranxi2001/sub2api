@@ -33,8 +33,11 @@ func (r *channelRepository) ReserveMatureProviderKey(parent context.Context, id 
 	if err != nil {
 		return false, 0, nil, err
 	}
-	if stored != hash || !status.Valid {
+	if stored != hash {
 		return false, 0, nil, service.ErrMatureProviderConflict
+	}
+	if !status.Valid {
+		return false, 0, nil, service.ErrMatureProviderKeyPending
 	}
 	return false, int(status.Int64), body, nil
 }

@@ -20,6 +20,7 @@ var (
 	ErrMatureProviderValidation = infraerrors.BadRequest("PROVIDER_VALIDATION", "Invalid provider configuration")
 	ErrMatureProviderConflict   = infraerrors.Conflict("PROVIDER_REVISION", "Provider changed; reload before saving")
 	ErrMatureProviderNotFound   = infraerrors.NotFound("PROVIDER_NOT_FOUND", "Provider not found")
+	ErrMatureProviderKeyPending = infraerrors.Conflict("PROVIDER_KEY_CREATE_PENDING", "The previous key creation is pending or unconfirmed; inspect upstream keys before creating another")
 )
 
 type ProviderMetrics struct {

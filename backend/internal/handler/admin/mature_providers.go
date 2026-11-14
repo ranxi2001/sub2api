@@ -15,7 +15,7 @@ import (
 )
 
 func matureProviderError(c *gin.Context, err error) {
-	if errors.Is(err, service.ErrMatureProviderValidation) || errors.Is(err, service.ErrMatureProviderConflict) || errors.Is(err, service.ErrMatureProviderNotFound) {
+	if errors.Is(err, service.ErrMatureProviderValidation) || errors.Is(err, service.ErrMatureProviderConflict) || errors.Is(err, service.ErrMatureProviderNotFound) || errors.Is(err, service.ErrMatureProviderKeyPending) {
 		response.ErrorFrom(c, err)
 		return
 	}

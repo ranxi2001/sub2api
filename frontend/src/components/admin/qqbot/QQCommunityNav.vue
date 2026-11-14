@@ -1,8 +1,10 @@
 <template>
   <nav :aria-label="t('qqbot.title')" class="mb-5 flex flex-wrap items-center gap-2">
-    <RouterLink v-for="item in items" :key="item.path" :to="`/admin/qqbot/${item.path}`" class="btn btn-secondary" active-class="!border-primary-500 !text-primary-600">{{ t(item.label) }}</RouterLink>
-    <RouterLink to="/admin/orders/coupons" class="btn btn-secondary">{{ t('coupon.adminTitle') }}</RouterLink><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.qqRewardCoupons" :user-id="auth.user?.id" />
-    <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.qqCommunity" :user-id="auth.user?.id" />
+    <div v-for="item in items" :key="item.path" class="flex items-center gap-1">
+      <RouterLink :to="`/admin/qqbot/${item.path}`" class="btn btn-secondary" active-class="!border-primary-500 !text-primary-600">{{ t(item.label) }}</RouterLink>
+      <NewFeatureBadge v-if="item.path === 'overview'" :notice-id="NEW_FEATURE_NOTICES.qqCommunity" :user-id="auth.user?.id" />
+    </div>
+    <div class="flex items-center gap-1"><RouterLink to="/admin/orders/coupons" class="btn btn-secondary">{{ t('coupon.adminTitle') }}</RouterLink><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.qqRewardCoupons" :user-id="auth.user?.id" /></div>
   </nav>
 </template>
 <script setup lang="ts">

@@ -138,6 +138,7 @@ func (h *ChannelHandler) CreateMatureProviderKey(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 25*time.Second)
 	defer cancel()
 	var created providerCreatedKey
+	attempted := false
 	err = h.withMatureProviderSession(ctx, id, in.Revision, func(s *providerSession) error {
 		groups, e := s.listGroups(ctx)
 		if e != nil {
@@ -145,6 +146,7 @@ func (h *ChannelHandler) CreateMatureProviderKey(c *gin.Context) {
 		}
 		for _, group := range groups {
 			if group.ID == in.GroupID {
+				attempted = true
 				created, e = s.createKey(ctx, group)
 				return e
 			}
@@ -158,7 +160,7 @@ func (h *ChannelHandler) CreateMatureProviderKey(c *gin.Context) {
 		reason := "PROVIDER_KEY_CREATE_FAILED"
 		message := "Provider refused the operation; review the saved configuration"
 		var uncertain *providerKeyCreateUncertainError
-		if errors.As(err, &uncertain) {
+		if errors.As(err, &uncertain) || (attempted && created.keyID != "") {
 			reason = "PROVIDER_KEY_CREATE_UNCERTAIN"
 			message = "Creation result is unknown; refresh keys before starting a new operation"
 		}
@@ -170,7 +172,7 @@ func (h *ChannelHandler) CreateMatureProviderKey(c *gin.Context) {
 	finish, stop := context.WithTimeout(context.Background(), 8*time.Second)
 	defer stop()
 	if err = r.CompleteMatureProviderKey(finish, id, keyHash, inputHash, status, body); err != nil {
-		matureProviderError(c, err)
+		c.JSON(http.StatusBadGateway, gin.H{"code": http.StatusBadGateway, "reason": "PROVIDER_KEY_CREATE_UNCERTAIN", "message": "The result could not be saved; inspect upstream keys before starting a new operation"})
 		return
 	}
 	c.Data(status, "application/json", body)
