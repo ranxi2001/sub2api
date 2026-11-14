@@ -19,6 +19,7 @@ on:
       - '.github/scripts/assert-future-shadow.py'
       - '.github/scripts/test_assert_future_shadow.py'
       - '.github/scripts/mutate-future-shadow.py'
+      - '.github/scripts/prepare-moderation-red-fixtures.sh'
       - '.github/workflows/future-shadow.yml'
 permissions:
   contents: read
@@ -100,6 +101,7 @@ jobs:
           if [ "$PHASE" = RED ]; then
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA"
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/shadow-evidence/moderation-fixtures.txt"
           fi
           for target in backend/internal/handler/openai_409_shadow_http_test.go backend/internal/service/openai_agent_message_delivery.go backend/internal/service/openai_409_omit_history.go; do
             git hash-object "$target" >> "$RUNNER_TEMP/shadow-evidence/blobs.txt"

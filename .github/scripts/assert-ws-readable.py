@@ -17,6 +17,8 @@ SUITES = {
     "ws-residual": ("TestOpenAI409WSResidualRepairs", {"header_apikey", "header_oauth", "tools_omitted", "tools_explicit"}),
     "ws-ticket": ("TestOpenAI409WSTicketBoundEgress", {"ctx_pool", "shared", "dedicated"}),
     "ws-native-namespace": ("TestOpenAI409WSNativeNamespaceRecovery", {"ctx_pool", "shared", "dedicated", "passthrough"}),
+    "ws-recovered-audit": ("TestOpenAI409WSRecoveredAudit", {f"{mode}/{policy}" for mode in MODES for policy in ("prompt", "selected")}),
+    "ws-recovered-audit-next": ("TestOpenAI409WSRecoveredAuditNextTurn", set(MODES)),
     "oauth-shadow": ("TestOpenAI409FutureShadowOAuth", {f"stream={stream}/{case}" for stream in ("false", "true") for case in ("recover", "write_failed", "pending_owner", "store_read_failed", "two_known_tasks", "fresh_intent")}),
     "pointer": ("TestOpenAI409HTTPReadablePointerWithoutOpaque", {f"{account}/stream={stream}/{pointer}" for account in ("apikey", "oauth") for stream in ("false", "true") for pointer in ("previous", "conversation")}),
     "pointer-boundaries": ("TestOpenAI409HTTPPointerWithoutOpaqueBoundaries", {f"{account}/stream={stream}/{case}" for account in ("apikey", "oauth") for stream in ("false", "true") for case in ("strict", "pointer_only", "foreign_user", "b_disabled")}),
@@ -27,7 +29,7 @@ SUITES = {
     "audit-async": ("TestRecoveredContextAsyncEnforcement", {"admission", "penalty"}),
     "ws-oracle": ("TestOpenAI409WSAmbiguousOracleMutations", {f"{transport}/{mutation}" for transport in ("http_bridge", "socket") for mutation in ("valid", "wrong_credential", "old_pointer", "missing_result", "unrelated_eof")}),
 }
-RED_SUITES = {"ws", "ws-review", "ws-residual", "ws-ticket", "ws-native-namespace", "shadow-races", "audit-provenance", "audit-persistence", "audit-async"}
+RED_SUITES = {"ws", "ws-review", "ws-residual", "ws-ticket", "ws-native-namespace", "ws-recovered-audit", "shadow-races", "audit-provenance", "audit-persistence", "audit-async"}
 # Fixed e593 source in shadow-review-repair.yml. These outcomes were accepted
 # from actual provider-wire evidence; never infer them from the observed log.
 STRICT_POINTER_BASELINE = {
@@ -39,6 +41,8 @@ STRICT_POINTER_BASELINE = {
 
 
 def diagnostic(suite, name):
+    if suite == "ws-recovered-audit":
+        return ("WS_RECOVERED_AUDIT_DISPATCHED", "audit-fixture-B-received-restored")
     if suite == "ws-native-namespace":
         return ("WS_NATIVE_NAMESPACE_B_DISPATCH_MISSING", "namespace tool", "conflicts with a top-level tool of the same name")
     if suite == "ws-ticket":

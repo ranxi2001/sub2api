@@ -5,6 +5,7 @@ on:
     branches: [production]
     paths:
       - 'backend/**'
+      - '.github/scripts/prepare-moderation-red-fixtures.sh'
       - '.github/workflows/issue805-owner-policy.yml'
   workflow_dispatch:
 
@@ -94,25 +95,7 @@ jobs:
           done
           # The pinned HTTP2 exclusion helper above already handles the handler
           # fixture absent from this baseline; do not remove it a second time.
-          # Account-scope tests require production symbols introduced after
-          # this baseline. Keep them in GREEN and their dedicated acceptance;
-          # omit only this unrelated feature from the disposable old-source RED.
-          while IFS= read -r target; do
-            candidate=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
-            rm -- "$target"
-            test ! -e "$target"
-            echo "$target test=candidate-only candidate=$candidate actual=absent reason=moderation-scope-not-in-baseline" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
-          done < <(git ls-files 'backend/internal/handler/moderation_upstream*_test.go')
-          # The shared WS fixture gained an optional moderation repository only
-          # in PR848; its pre-feature version preserves the Issue805 contract.
-          target=backend/internal/handler/openai_ws_v2_passthrough_cyber_test.go
-          fixture_base=4189ed821d6e4308b2f5fc3791b73d2eb53cda8a
-          git fetch --no-tags --depth=1 origin "$fixture_base"
-          git show "$fixture_base:$target" > "$target"
-          expected=$(git rev-parse "$fixture_base:$target")
-          actual=$(git hash-object "$target")
-          test "$expected" = "$actual"
-          echo "$target test=pre-moderation-scope expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/moderation-fixtures.txt"
           # The selected regression and its shared harness must remain exact
           # candidate blobs. The clean GREEN checkout retains all new tests.
           for target in backend/internal/handler/openai_issue805_delivery_test.go backend/internal/handler/openai_issue805_owner_policy_test.go backend/internal/handler/openai_issue805_ws_test.go backend/internal/handler/openai_issue715_recovery_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do

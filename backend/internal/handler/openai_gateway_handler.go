@@ -3683,6 +3683,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
 			return
 		}
+		// Only the explicit unsent-rebuild recheck supplies restored audit text.
+		// Client identity continues to resolve from the immutable original frame.
+		var rebuiltAuditBody []byte
 		hooks := &service.OpenAIWSIngressHooks{
 			ClientLifecycleContext:      clientLifecycleCtx,
 			InitialRequestModel:         reqModel,
@@ -3799,7 +3802,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for your account in this group", denied), nil)
 				}
-				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, clientPayload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
+				auditBody := clientPayload
+				if rebuiltAuditBody != nil {
+					auditBody = rebuiltAuditBody
+				}
+				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, auditBody, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
 					writeSecurityAuditWSError(ctx, wsConn, decision)
 					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), errOpenAIWSLocalAdmissionRejected)
 				}
@@ -4112,8 +4119,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				// Re-run current-frame identity/model/moderation checks on restored
 				// readable text, carrying its no-retention provenance.
-				if err := hooks.BeforeRequestWithClientPayload(turn, clean, raw, currentModel); err != nil {
-					closeOpenAIWSAdmissionError(wsConn, reqLog, "openai.websocket_rebuild_policy_rejected", err)
+				rebuiltAuditBody = clean
+				auditErr := hooks.BeforeRequestWithClientPayload(turn, clean, raw, currentModel)
+				rebuiltAuditBody = nil
+				if auditErr != nil {
+					closeOpenAIWSAdmissionError(wsConn, reqLog, "openai.websocket_rebuild_policy_rejected", auditErr)
 					return
 				}
 				cyberTurn := takeCyberTurnBody(turn)

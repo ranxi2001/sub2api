@@ -33,6 +33,19 @@ def raw(events):
 
 
 class WSReadableEvidenceTest(unittest.TestCase):
+    def test_recovered_audit_red_requires_actual_restored_B_completion(self):
+        suite = "ws-recovered-audit"
+        events = evidence("RED", suite)
+        GATE.validate("RED", 1, raw(events), suite)
+        for event in events:
+            if event["Action"] != "output":
+                continue
+            original = event["Output"]
+            event["Output"] = "WS_RECOVERED_AUDIT_DISPATCHED: unrelated client close"
+            with self.assertRaises(ValueError):
+                GATE.validate("RED", 1, raw(events), suite)
+            event["Output"] = original
+
     def strict_baseline(self, failures):
         events = evidence("GREEN", "strict-pointer")
         root, _ = GATE.SUITES["strict-pointer"]
