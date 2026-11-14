@@ -18,11 +18,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/image/draw"
@@ -83,10 +85,11 @@ func noRedirect(_ *http.Request, _ []*http.Request) error { return http.ErrUseLa
 // Preserve retry evidence without exposing upstream bodies, URLs or credentials.
 // Callers decide whether their operation is safe to retry.
 type requestFailure struct {
-	StatusCode int
-	RetryAfter string
-	cause      error
-	message    string
+	NotSubmitted bool
+	StatusCode   int
+	RetryAfter   string
+	cause        error
+	message      string
 }
 
 func (e *requestFailure) Error() string { return e.message }
@@ -113,9 +116,15 @@ func (s *Service) requestBody(ctx context.Context, method, endpoint, key string,
 		req.Header.Set("Authorization", "Bearer "+key)
 	}
 	req.Header.Set("Content-Type", contentType)
+	var connected atomic.Bool
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }}))
 	resp, err := s.http.Do(req)
 	if err != nil {
-		return nil, "", &requestFailure{cause: err, message: "服务连接失败或超时，请查看调用记录"}
+		// Absence of a response is not proof that a generation was unsubmitted.
+		// Only a failed dial before any connection was obtained is safe to replay.
+		var op *net.OpError
+		unsubmitted := !connected.Load() && errors.As(err, &op) && op.Op == "dial"
+		return nil, "", &requestFailure{NotSubmitted: unsubmitted, cause: err, message: "服务连接失败或超时，请查看调用记录"}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

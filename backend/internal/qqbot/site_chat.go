@@ -59,6 +59,10 @@ func (s *Service) siteChatTurnOnce(ctx context.Context, c Config, messages []Mes
 	raw, ct, err := s.chatRequestWithToolChoice(ctx, c, input, tools, choice)
 	in, out, usageComplete := chatResponseUsage(raw, ct)
 	if err != nil {
+		var failure *requestFailure
+		if errors.As(err, &failure) && failure.NotSubmitted {
+			usageComplete = true // A failed dial consumed no model tokens.
+		}
 		return chatTurnResult{InputTokens: in, OutputTokens: out, ChatExecution: ChatExecution{UsageComplete: usageComplete}}, err
 	}
 	turn, err := parseChatTurnWith(raw, ct, func(result chatTurnResult, calls []chatToolCall) (chatTurnResult, error) {

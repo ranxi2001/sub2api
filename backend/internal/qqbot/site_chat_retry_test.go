@@ -20,7 +20,7 @@ func fastChatRetryPolicy() chatRetryPolicy {
 func TestChatRetryClassifiesStatusAndPolicyErrors(t *testing.T) {
 	for _, status := range []int{400, 401, 402, 403, 404, 408, 422, 425, 429, 500, 502, 503, 504} {
 		_, retry, _ := chatRetryDecision(&requestFailure{StatusCode: status}, time.Now())
-		require.Equal(t, status == 408 || status == 425 || status == 429 || status >= 500, retry, "HTTP %d", status)
+		require.False(t, retry, "HTTP %d is not proof that generation was unsubmitted", status)
 	}
 	for _, tc := range []struct{ reason, code string }{{"length", "output_limit"}, {"max_output_tokens", "output_limit"}, {"content_filter", "content_filter"}} {
 		details, err := json.Marshal(map[string]string{"reason": tc.reason})
@@ -37,7 +37,7 @@ func TestChatRetryClassifiesStatusAndPolicyErrors(t *testing.T) {
 	}
 }
 
-func TestChatRetryAccumulatesUsageAndDropsRejectedActions(t *testing.T) {
+func TestChatRetryRetainsKnownUsageAndDropsUncertainActions(t *testing.T) {
 	for _, complete := range []bool{false, true} {
 		t.Run(boolText(complete), func(t *testing.T) {
 			calls := 0
@@ -51,12 +51,12 @@ func TestChatRetryAccumulatesUsageAndDropsRejectedActions(t *testing.T) {
 				result.Text = "成功"
 				return result, nil
 			}, fastChatRetryPolicy())
-			require.NoError(t, err)
-			require.Equal(t, "成功", turn.Text)
+			require.Error(t, err)
+			require.Empty(t, turn.Text)
 			require.Empty(t, turn.ImagePrompt)
-			require.EqualValues(t, 6, turn.InputTokens)
-			require.EqualValues(t, 6, turn.OutputTokens)
-			require.Equal(t, ChatExecution{Attempts: 3, Retries: 2, UsageComplete: complete, LastErrorCode: "incomplete_response"}, turn.ChatExecution)
+			require.EqualValues(t, 1, turn.InputTokens)
+			require.EqualValues(t, 2, turn.OutputTokens)
+			require.Equal(t, ChatExecution{Attempts: 1, Retries: 0, UsageComplete: complete, LastErrorCode: "incomplete_response"}, turn.ChatExecution)
 		})
 	}
 	turn, err := retryChatTurn(context.Background(), func(context.Context) (chatTurnResult, error) {
@@ -68,7 +68,7 @@ func TestChatRetryAccumulatesUsageAndDropsRejectedActions(t *testing.T) {
 	require.EqualValues(t, 4, turn.InputTokens)
 }
 
-func TestChatRetryTimeoutsLeaveBudgetForAnotherAttempt(t *testing.T) {
+func TestChatRetryTimeoutWithoutSubmissionProofStops(t *testing.T) {
 	calls := 0
 	policy := fastChatRetryPolicy()
 	policy.maxAttempt = 5 * time.Millisecond
@@ -80,9 +80,9 @@ func TestChatRetryTimeoutsLeaveBudgetForAnotherAttempt(t *testing.T) {
 		}
 		return chatTurnResult{Text: "recovered", ChatExecution: ChatExecution{UsageComplete: true}}, nil
 	}, policy)
-	require.NoError(t, err)
-	require.Equal(t, 2, calls)
-	require.Equal(t, "timeout", turn.ChatExecution.LastErrorCode)
+	require.Error(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, "uncertain", turn.ChatExecution.LastErrorCode)
 	require.False(t, turn.ChatExecution.UsageComplete)
 }
 
@@ -165,12 +165,12 @@ func TestSiteChatPermanentAndIncompleteResults(t *testing.T) {
 	}
 }
 
-func TestSiteChatRetriesOnlyTransientSSEErrors(t *testing.T) {
+func TestSiteChatNeverReplaysSubmittedSSEErrors(t *testing.T) {
 	for _, tc := range []struct {
 		code     string
 		attempts int
 	}{
-		{"server_error", 3}, {"rate_limit_exceeded", 3}, {"content_filter", 1}, {"insufficient_quota", 1},
+		{"server_error", 1}, {"rate_limit_exceeded", 1}, {"content_filter", 1}, {"insufficient_quota", 1},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
 			event, err := json.Marshal(map[string]string{"type": "error", "code": tc.code, "message": "sensitive upstream message must not leak"})

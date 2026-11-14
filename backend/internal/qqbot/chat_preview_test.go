@@ -160,10 +160,10 @@ func TestChatPreviewMenuAndReadOnlyToolsAcrossProtocols(t *testing.T) {
 					require.ErrorContains(t, err, "试问模型调用失败")
 					require.NotContains(t, err.Error(), "private-provider-token")
 					require.NotNil(t, out.ChatExecution)
-					require.Equal(t, 3, out.ChatExecution.Attempts)
-					require.Equal(t, 2, out.ChatExecution.Retries)
+					require.Equal(t, 1, out.ChatExecution.Attempts)
+					require.Zero(t, out.ChatExecution.Retries)
 					require.False(t, out.ChatExecution.UsageComplete)
-					require.Equal(t, 3, calls)
+					require.Equal(t, 1, calls)
 				} else {
 					require.NoError(t, err)
 					require.NotNil(t, out.KnowledgeSources)

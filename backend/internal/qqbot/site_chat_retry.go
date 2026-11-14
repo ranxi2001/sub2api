@@ -27,8 +27,8 @@ func incompleteChatResponse(message string) error {
 	return chatResponseError{Code: "incomplete_response", Message: message, Retryable: true}
 }
 
-// Only known transient API errors are retried. Policy, quota, length and
-// unknown failures retain the original single-attempt behavior.
+// Classify model errors without interpreting partial or failed responses as
+// evidence that a generation POST was never submitted.
 func chatCompletionFailure(status string, rawError, details json.RawMessage) error {
 	var failure struct {
 		Code string `json:"code"`
@@ -169,30 +169,30 @@ func chatRetryDecision(err error, now time.Time) (string, bool, time.Duration) {
 		return "canceled", false, 0
 	}
 	var failure *requestFailure
-	if errors.As(err, &failure) && failure.StatusCode != 0 {
-		status := failure.StatusCode
-		retry := status == http.StatusRequestTimeout || status == http.StatusTooEarly || status == http.StatusTooManyRequests || status >= 500 && status <= 599
-		return fmt.Sprintf("http_%d", status), retry, chatRetryAfter(failure.RetryAfter, now)
+	if errors.As(err, &failure) {
+		if failure.NotSubmitted {
+			return "not_submitted", true, 0
+		}
+		if failure.StatusCode != 0 {
+			// A proxy's 5xx/timeout cannot establish whether the model ran.
+			// No configured upstream promises verifiable generation idempotency.
+			return fmt.Sprintf("http_%d", failure.StatusCode), false, chatRetryAfter(failure.RetryAfter, now)
+		}
+		return "uncertain", false, 0
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "timeout", true, 0
+		return "uncertain", false, 0
 	}
 	var networkError net.Error
-	if errors.As(err, &networkError) {
-		if networkError.Timeout() {
-			return "timeout", true, 0
-		}
-		return "transport", true, 0
-	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return "incomplete_response", true, 0
+	if errors.As(err, &networkError) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return "uncertain", false, 0
 	}
 	var responseError chatResponseError
 	if errors.As(err, &responseError) {
-		return responseError.Code, responseError.Retryable, 0
+		return responseError.Code, false, 0
 	}
 	if errors.Is(err, errChatActionMissing) {
-		return "missing_action", true, 0
+		return "missing_action", false, 0
 	}
 	return "invalid_response", false, 0
 }

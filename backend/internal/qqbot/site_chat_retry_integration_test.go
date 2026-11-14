@@ -7,11 +7,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,13 +106,17 @@ func TestQQSiteChatRetryRecoversBeforeSingleFinalDelivery(t *testing.T) {
 		t.Run(protocol, func(t *testing.T) {
 			const answer = "重试成功，只发送这条回复。"
 			h := newSiteChatRetryHarness(t, protocol, http.StatusOK, func(w http.ResponseWriter, _ *http.Request, attempt int32) {
-				if attempt < 3 {
-					w.WriteHeader(http.StatusServiceUnavailable)
-					fmt.Fprint(w, `{"error":{"message":"private provider failure"}}`)
-					return
-				}
 				_, _ = w.Write(textToolTestJSON(t, protocol, answer))
 			})
+			var dials atomic.Int32
+			transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+				if dials.Add(1) <= 2 {
+					return nil, &net.OpError{Op: "dial", Net: network, Err: syscall.ECONNREFUSED}
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, address)
+			}}
+			t.Cleanup(transport.CloseIdleConnections)
+			h.s.http = &http.Client{Transport: matureFixtureTransport{base: transport}, CheckRedirect: noRedirect}
 			e := h.enqueue(t, "请继续回答我的问题")
 			h.s.runOne(context.Background())
 			j, execution := h.result(t)
@@ -118,11 +124,11 @@ func TestQQSiteChatRetryRecoversBeforeSingleFinalDelivery(t *testing.T) {
 			require.Equal(t, answer, j.ResultText)
 			require.Equal(t, answer, h.sentText())
 			require.Empty(t, j.Error)
-			require.EqualValues(t, 3, h.calls.Load())
+			require.EqualValues(t, 1, h.calls.Load(), "failed dials never submitted a generation")
 			require.EqualValues(t, 1, h.deliveries.Load())
 			require.Equal(t, 3, execution.Attempts)
 			require.Equal(t, 2, execution.Retries)
-			require.False(t, execution.UsageComplete, "HTTP failures have unknown usage")
+			require.True(t, execution.UsageComplete, "failed dials have known zero usage")
 			require.NotEmpty(t, execution.LastErrorCode)
 			require.EqualValues(t, 11, j.InputTokens)
 			require.EqualValues(t, 7, j.OutputTokens)
@@ -130,7 +136,7 @@ func TestQQSiteChatRetryRecoversBeforeSingleFinalDelivery(t *testing.T) {
 			// QQ redelivery of the same incoming event cannot repeat the recovered turn.
 			enqueueSharedTestEvent(t, h.s, h.c, e, groupAtMessageCreate)
 			h.s.runOne(context.Background())
-			require.EqualValues(t, 3, h.calls.Load())
+			require.EqualValues(t, 1, h.calls.Load(), "failed dials never submitted a generation")
 			require.EqualValues(t, 1, h.deliveries.Load())
 			h.requireSingleQuota(t)
 		})
@@ -143,7 +149,7 @@ func TestQQSiteChatRetryFailureStopsAndRepliesOnce(t *testing.T) {
 			name     string
 			status   int
 			attempts int
-		}{{"transient_exhausted", http.StatusServiceUnavailable, 3}, {"permanent_auth", http.StatusUnauthorized, 1}} {
+		}{{"uncertain_service_error", http.StatusServiceUnavailable, 1}, {"permanent_auth", http.StatusUnauthorized, 1}} {
 			t.Run(protocol+"/"+failure.name, func(t *testing.T) {
 				h := newSiteChatRetryHarness(t, protocol, http.StatusOK, func(w http.ResponseWriter, _ *http.Request, _ int32) {
 					w.WriteHeader(failure.status)
@@ -167,50 +173,40 @@ func TestQQSiteChatRetryFailureStopsAndRepliesOnce(t *testing.T) {
 	}
 }
 
-func TestQQSiteChatRetryPartialQueryExecutesOnlyCompletedAction(t *testing.T) {
+func TestQQSiteChatPartialQueryNeverExecutesOrRegenerates(t *testing.T) {
 	for _, protocol := range []string{"chat_completions", "responses"} {
 		t.Run(protocol, func(t *testing.T) {
 			args := `{"kind":"channel_status","model":"","activity":"","page":1}`
-			h := newSiteChatRetryHarness(t, protocol, http.StatusOK, func(w http.ResponseWriter, _ *http.Request, attempt int32) {
-				switch attempt {
-				case 1:
-					w.WriteHeader(http.StatusServiceUnavailable)
-				case 2:
-					w.Header().Set("Content-Type", "text/event-stream")
-					stream := string(siteQueryTestResponse(t, protocol, args, true))
-					if protocol == "responses" {
-						stream = strings.Split(stream, `data: {"type":"response.completed"`)[0]
-						stream += "data: {\"type\":\"response.in_progress\",\"response\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}\n\n"
-					} else {
-						stream = strings.Split(stream, `data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"`)[0]
-						stream += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\n"
-					}
-					fmt.Fprint(w, stream)
-				default:
-					_, _ = w.Write(siteQueryTestResponse(t, protocol, args, false))
+			h := newSiteChatRetryHarness(t, protocol, http.StatusOK, func(w http.ResponseWriter, _ *http.Request, _ int32) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				stream := string(siteQueryTestResponse(t, protocol, args, true))
+				if protocol == "responses" {
+					stream = strings.Split(stream, `data: {"type":"response.completed"`)[0]
+					stream += "data: {\"type\":\"response.in_progress\",\"response\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}\n\n"
+				} else {
+					stream = strings.Split(stream, `data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"`)[0]
+					stream += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\n"
 				}
+				_, _ = fmt.Fprint(w, stream)
 			})
 			var queries atomic.Int32
 			h.s.SetChannelStatusProvider(channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) {
-				require.EqualValues(t, 3, h.calls.Load(), "partial tools must not execute")
 				queries.Add(1)
 				return channelStatusFixture(), nil
 			}))
 			h.enqueue(t, "现在渠道稳不稳？")
 			h.s.runOne(context.Background())
 			j, execution := h.result(t)
-			require.Equal(t, "completed", j.Status)
-			require.Equal(t, "site_query:channel_status", j.DecisionReason)
-			require.EqualValues(t, 3, h.calls.Load())
-			require.EqualValues(t, 1, queries.Load())
+			require.Equal(t, "failed", j.Status)
+			require.EqualValues(t, 1, h.calls.Load())
+			require.Zero(t, queries.Load(), "an incomplete tool response cannot execute")
 			require.EqualValues(t, 1, h.deliveries.Load())
-			require.Contains(t, h.sentText(), "查询时间：")
-			require.NotContains(t, h.sentText(), "回复生成失败")
-			require.Equal(t, 3, execution.Attempts)
-			require.Equal(t, 2, execution.Retries)
-			require.False(t, execution.UsageComplete)
-			require.EqualValues(t, 16, j.InputTokens, "known usage includes the incomplete attempt")
-			require.EqualValues(t, 9, j.OutputTokens)
+			require.Contains(t, h.sentText(), "回复生成失败")
+			require.Equal(t, 1, execution.Attempts)
+			require.Zero(t, execution.Retries)
+			require.True(t, execution.UsageComplete)
+			require.EqualValues(t, 5, j.InputTokens, "retain the partial response's actual known usage")
+			require.EqualValues(t, 2, j.OutputTokens)
 			h.requireSingleQuota(t)
 		})
 	}
