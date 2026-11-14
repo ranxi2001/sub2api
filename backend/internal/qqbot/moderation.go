@@ -501,14 +501,11 @@ func (s *Service) runModeration(parent context.Context) {
 	}
 	requestCtx, requestCancel := context.WithDeadline(ctx, expires)
 	defer requestCancel()
-	base := "/v2/groups/" + url.PathEscape(group)
 	muteUntil := now.Add(time.Duration(seconds) * time.Second)
 	if report {
 		err = s.executeSpamReportOperation(requestCtx, c, id)
-	} else if kind == "mute" {
-		_, err = s.qqRequestMethod(requestCtx, c, http.MethodPost, base+"/restrict_chat_setting", map[string]any{"members": []any{map[string]string{"op": "add", "member_openid": member, "mute_expire_at": muteUntil.Format(time.RFC3339)}}})
 	} else {
-		_, err = s.qqRequestMethod(requestCtx, c, http.MethodDelete, base+"/messages/"+url.PathEscape(message), nil)
+		err = s.executeModerationOperation(requestCtx, c, id)
 	}
 	status, detail = "succeeded", ""
 	if err != nil {
@@ -517,6 +514,9 @@ func (s *Service) runModeration(parent context.Context) {
 		} else {
 			status, detail = "unconfirmed", limitText(err.Error()+"；操作未确认成功，未自动重试", 250)
 		}
+	}
+	if errors.Is(err, errModerationRevoked) {
+		status, detail = "cancelled", "配置或授权已变更，取消处罚"
 	}
 	if errors.Is(err, errSpamReportRevoked) {
 		status, detail = "cancelled", spamReportOperationCancellation(spamReportRevocationReason(err), kind)
@@ -537,6 +537,57 @@ func (s *Service) runModeration(parent context.Context) {
 		return
 	}
 	_ = finishTx.Commit()
+}
+
+var errModerationRevoked = errors.New("moderation authorization revoked")
+
+// Started is a durable no-replay claim, not authorization to use stale policy.
+// Acquire credentials before the shared config lock, then retain that lock
+// through the actual QQ operation. SaveConfig uses its exclusive counterpart.
+func (s *Service) executeModerationOperation(ctx context.Context, previous Config, operationID int64) error {
+	token, err := s.token(ctx, previous)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	current, err := s.lockConfig(ctx, tx)
+	if err != nil {
+		return err
+	}
+	var group, member, message, kind, policy string
+	var seconds int
+	var expires time.Time
+	err = tx.QueryRowContext(ctx, `SELECT i.group_id,i.member_id,o.message_id,o.kind,i.policy_hash,i.mute_seconds,o.expires_at
+ FROM qq_bot_moderation_operations o JOIN qq_bot_moderation_incidents i ON i.id=o.incident_id
+ WHERE o.id=$1 AND o.status='started' AND i.app_id=$2 AND i.sandbox=$3
+ AND i.reason NOT IN ('spam_advertising','spam_phishing','spam_scam')`, operationID, previous.AppID, previous.Sandbox).Scan(&group, &member, &message, &kind, &policy, &seconds, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errModerationRevoked
+	}
+	if err != nil {
+		return err
+	}
+	if current.AppID != previous.AppID || current.AppSecret != previous.AppSecret || current.Sandbox != previous.Sandbox || !current.moderates(group) || current.moderationExempt(group, member) || policy != moderationPolicy(current) || !expires.After(time.Now()) {
+		return errModerationRevoked
+	}
+	base := "/v2/groups/" + url.PathEscape(group)
+	switch kind {
+	case "mute":
+		until := time.Now().Add(time.Duration(seconds) * time.Second).Format(time.RFC3339)
+		_, err = s.qqRequestMethodWithToken(ctx, current, token, http.MethodPost, base+"/restrict_chat_setting", map[string]any{"members": []any{map[string]string{"op": "add", "member_openid": member, "mute_expire_at": until}}})
+	case "recall":
+		_, err = s.qqRequestMethodWithToken(ctx, current, token, http.MethodDelete, base+"/messages/"+url.PathEscape(message), nil)
+	default:
+		return errModerationRevoked
+	}
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) maintainModeration(ctx context.Context) {
