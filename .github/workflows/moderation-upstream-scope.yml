@@ -1,0 +1,71 @@
+name: Moderation upstream scope acceptance
+on:
+  push:
+    branches: [feat/moderation-upstream-account-scope]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: moderation-upstream-scope-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  behavioral-red:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Pinned original implementation with candidate regression
+        run: |
+          mkdir -p "$RUNNER_TEMP/moderation-scope"
+          git rev-parse HEAD > "$RUNNER_TEMP/moderation-scope/head.txt"
+          cp backend/internal/handler/moderation_upstream_scope_test.go "$RUNNER_TEMP/scope_test.go"
+          git checkout --detach 4189ed821
+          cp "$RUNNER_TEMP/scope_test.go" backend/internal/handler/moderation_upstream_scope_test.go
+          cd backend
+          set +e
+          go test ./internal/handler -run '^TestModerationUpstreamScopeUnselectedDoesNotAudit$' -count=1 -v > "$RUNNER_TEMP/moderation-scope/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/moderation-scope/red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/moderation-scope/red.log"
+          grep -q 'unselected upstream account must make zero audit calls' "$RUNNER_TEMP/moderation-scope/red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: moderation-scope-red-${{ github.sha }}
+          path: ${{ runner.temp }}/moderation-scope
+  ui-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/scope-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/scope-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Render actual baseline settings
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/moderation-scope-ui
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/scope-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/moderation-scope-preview.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: moderation-scope-ui-${{ github.sha }}
+          path: ${{ runner.temp }}/moderation-scope-ui
