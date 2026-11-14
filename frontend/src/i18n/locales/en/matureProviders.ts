@@ -69,5 +69,6 @@ export default {
   "useProvider": "Import from provider",
   "selectKeyRequired": "Choose a provider and an available key.",
   "refreshInterval": "Automatic refresh interval (seconds)",
-  "refreshIntervalNote": "0 disables background requests. Set 30–86400 seconds to enable them. Low balance episodes are stored locally; external notifications are disabled by default."
+  "refreshIntervalNote": "0 disables background requests. Set 30–86400 seconds to enable them. Low balance episodes are stored locally; external notifications are disabled by default.",
+  "keyRejected": "The provider rejected this operation. Review the configuration and upstream group, then confirm a new attempt."
 }

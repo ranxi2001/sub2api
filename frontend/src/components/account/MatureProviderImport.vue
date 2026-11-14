@@ -53,10 +53,15 @@ async function createKey() {
   try {
     const result = await api.post<{ key_id: string }>(`/admin/providers/${providerID.value}/keys`, { group_id: groupID.value, revision: provider.value.revision, confirm: true }, { headers: { 'Idempotency-Key': operationKey } })
     keyID.value = result.data.key_id || ''; creating.value = false; await fetchKeys()
-  } catch {
-    // Transport failure cannot prove the upstream write failed. This dialog
-    // never resubmits automatically; refresh and inspect existing keys first.
-    uncertain.value = true; error.value = t('matureProviders.keyUncertain')
+  } catch (e) {
+    const reason = (e as { reason?: string })?.reason
+    if (reason === 'PROVIDER_KEY_CREATE_FAILED' || reason === 'PROVIDER_VALIDATION' || reason === 'PROVIDER_REVISION') {
+      confirmed.value = false; operationKey = ''; error.value = t('matureProviders.keyRejected')
+    } else {
+      // A pending result or transport failure cannot prove the write failed.
+      // Keep the operation blocked until the operator inspects upstream keys.
+      uncertain.value = true; error.value = t('matureProviders.keyUncertain')
+    }
   } finally { busy.value = false }
 }
 watch(() => props.platform, () => { providerID.value = 0; keyID.value = ''; selected() })

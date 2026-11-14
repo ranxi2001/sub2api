@@ -69,5 +69,6 @@ export default {
   "useProvider": "从服务商导入",
   "selectKeyRequired": "请选择服务商及可用密钥。",
   "refreshInterval": "自动刷新间隔（秒）",
-  "refreshIntervalNote": "默认 0 关闭自动访问；开启后填写 30～86400 秒。低余额事件保存在本站，默认不发送外部消息。"
+  "refreshIntervalNote": "默认 0 关闭自动访问；开启后填写 30～86400 秒。低余额事件保存在本站，默认不发送外部消息。",
+  "keyRejected": "服务商已拒绝此操作。请核对配置和上游分组后重新确认创建。"
 }
