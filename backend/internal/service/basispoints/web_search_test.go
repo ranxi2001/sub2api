@@ -143,7 +143,7 @@ func TestWebSearchRejectsMixedAndRepeatedCallsBeforeExecution(t *testing.T) {
 	for _, mode := range []string{"mixed", "repeated", "missing", "backend-error"} {
 		t.Run(mode, func(t *testing.T) {
 			source := searchSource()
-			source["tools"] = append(source["tools"].([]any), object{"type": "function", "name": "other"})
+			source["tools"] = append(repairValue[[]any](t, source["tools"]), object{"type": "function", "name": "other"})
 			if mode == "missing" {
 				source["tool_choice"] = object{"type": "web_search"}
 			}
