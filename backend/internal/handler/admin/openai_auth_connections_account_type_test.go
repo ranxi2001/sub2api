@@ -56,6 +56,7 @@ func TestOpenAIConnectionHandlerAccountType(t *testing.T) {
 			router.PATCH(prefix+"/:connection_id", h.UpdateAuthConnection)
 			router.POST(prefix+"/:connection_id/authorize", h.BeginConnectionAuthorization)
 			router.POST(prefix+"/:connection_id/callback", h.CompleteConnectionAuthorization)
+			router.POST(prefix+"/:connection_id/authorization-status", h.ConnectionAuthorizationStatus)
 			router.POST(prefix+"/:connection_id/revoke", h.RevokeAuthConnection)
 			router.PUT(prefix+"/:connection_id/api-key", h.RotateConnectionAPIKey)
 			cases := []struct{ name, method, suffix, body string }{
@@ -66,6 +67,7 @@ func TestOpenAIConnectionHandlerAccountType(t *testing.T) {
 				cases = append(cases, []struct{ name, method, suffix, body string }{
 					{"authorize", "POST", "/" + id + "/authorize", ""},
 					{"callback", "POST", "/" + id + "/callback", `{"session_id":"synthetic","callback_url":"https://example.invalid"}`},
+					{"authorization_status", "POST", "/" + id + "/authorization-status", `{"session_id":"1234567890abcdef1234567890abcdef"}`},
 					{"revoke", "POST", "/" + id + "/revoke", `{"revision":1}`},
 					{"rotate", "PUT", "/" + id + "/api-key", `{"revision":1,"api_key":"synthetic"}`},
 					{"legacy", "POST", "/use-legacy", ""},

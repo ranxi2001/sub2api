@@ -56,7 +56,7 @@ func (b *Bridge) functionCodeTransportEnvelope(arguments object) (object, bool, 
 	// executable text. Both decisions use the complete original schema.
 	if code == "" && info.Schema != nil {
 		if err := validateToolNumberBudget(args); err != nil {
-			return nil, true, toolArgumentsSchemaError{}
+			return nil, true, newToolArgumentsError(info, err)
 		}
 		if info.Schema.Validate(args) != nil {
 			delete(args, "code")

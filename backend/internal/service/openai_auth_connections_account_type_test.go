@@ -85,6 +85,10 @@ func TestOpenAIConnectionManagementRejectsAPIKey(t *testing.T) {
 			_, e := s.BeginConnectionAuthorization(context.Background(), 42, id)
 			return e
 		},
+		"authorization_status": func(s *OpenAIOAuthReauthService) error {
+			_, e := s.ConnectionAuthorizationStatus(context.Background(), 42, id, "1234567890abcdef1234567890abcdef")
+			return e
+		},
 		"callback": func(s *OpenAIOAuthReauthService) error {
 			return s.CompleteConnectionAuthorization(context.Background(), 42, id, "synthetic", "https://example.invalid")
 		},
