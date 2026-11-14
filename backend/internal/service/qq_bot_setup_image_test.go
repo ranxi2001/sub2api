@@ -100,7 +100,7 @@ func TestQQBotManagedImageKeyOnlySupportedPlatformsReuseIndependentKey(t *testin
 	for _, platform := range platforms {
 		t.Run(platform, func(t *testing.T) {
 			groupID := int64(2)
-			key := &APIKey{ID: 12, UserID: 7, GroupID: &groupID, Key: APIKeyStoredValue("image-secret"), Status: StatusActive, Quota: 40, QuotaUsed: 9}
+			key := &APIKey{ID: 12, UserID: 7, GroupID: &groupID, Key: "image-secret", Status: StatusActive, Quota: 40, QuotaUsed: 9}
 			p := setupProvider(key)
 			groups, ok := p.groups.(qqSetupGroups)
 			require.True(t, ok)
@@ -149,7 +149,7 @@ func TestQQBotManagedImageKeyKeepsAccessIdentityAndSpendingChecks(t *testing.T) 
 	for _, mode := range []string{"gate-disabled", "inactive", "exclusive", "subscription", "quota-change", "disabled-key", "expired-key", "exhausted-key", "rotated-key", "wrong-owner"} {
 		t.Run(mode, func(t *testing.T) {
 			groupID := int64(2)
-			key := &APIKey{ID: 12, UserID: 7, GroupID: &groupID, Key: APIKeyStoredValue("image-secret"), Status: StatusActive, Quota: 40, QuotaUsed: 9}
+			key := &APIKey{ID: 12, UserID: 7, GroupID: &groupID, Key: "image-secret", Status: StatusActive, Quota: 40, QuotaUsed: 9}
 			p := setupProvider(key)
 			groups, ok := p.groups.(qqSetupGroups)
 			require.True(t, ok)
@@ -175,7 +175,7 @@ func TestQQBotManagedImageKeyKeepsAccessIdentityAndSpendingChecks(t *testing.T) 
 			case "exhausted-key":
 				key.QuotaUsed = 40
 			case "rotated-key":
-				key.Key = APIKeyStoredValue("rotated")
+				key.Key = "rotated"
 			case "wrong-owner":
 				key.UserID = 99
 			}

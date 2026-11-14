@@ -185,6 +185,9 @@ jobs:
       - name: GREEN provider interactions
         working-directory: frontend
         run: pnpm exec vitest run src/views/admin/__tests__/MatureCommunityNav.spec.ts src/views/admin/__tests__/MatureProviders.spec.ts src/views/admin/__tests__/UpstreamChannelOperationsView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: QQ frontend business regression
+        working-directory: frontend
+        run: pnpm exec vitest run src/components/admin/qqbot/__tests__ src/views/admin/__tests__/QQBotView.spec.ts src/views/admin/__tests__/QQBotSetup.spec.ts src/views/admin/__tests__/QQBotActivities.spec.ts src/views/admin/__tests__/QQBotRecords.spec.ts src/components/admin/__tests__/QQBotBindings.spec.ts src/components/user/profile/__tests__/ProfileQQBotCard.spec.ts src/views/auth/__tests__/QQBotBindView.spec.ts src/views/auth/__tests__/QQBotTransferView.spec.ts src/api/__tests__/qqbot.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
       - name: Frontend production build
         run: pnpm --dir frontend run build
       - uses: actions/upload-artifact@v7

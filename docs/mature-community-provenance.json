@@ -2572,5 +2572,680 @@
     "target_path": "backend/migrations/377_qq_bot_growth_amount_days.sql",
     "license": "LGPL-3.0",
     "adaptation": "renumbered additive migration; compatibility verification pending"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/api/qqbot.ts",
+    "source_blob": "18a7bd5255735bbfb11b8353b880cad4da6af1e4",
+    "target_path": "frontend/src/api/qqbot.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/QQBotBindings.vue",
+    "source_blob": "61fae6a678f5b40671668177753976886fb4a8e6",
+    "target_path": "frontend/src/components/admin/QQBotBindings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/user/profile/ProfileQQBotCard.vue",
+    "source_blob": "a9a8f2a91cd8dde02dd2c8062c9aa1f9752557b5",
+    "target_path": "frontend/src/components/user/profile/ProfileQQBotCard.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/user/profile/__tests__/ProfileQQBotCard.spec.ts",
+    "source_blob": "caf96309307f19b6b0440941335c5d20ccd8ee15",
+    "target_path": "frontend/src/components/user/profile/__tests__/ProfileQQBotCard.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/autonomousDefaults.ts",
+    "source_blob": "346dc0538c511c9f1285db50f419e3f4fd61f2cd",
+    "target_path": "frontend/src/components/admin/qqbot/autonomousDefaults.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotActivityTemplates.vue",
+    "source_blob": "2efec70ac11b2150da5113cdf1443e489c343306",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotActivityTemplates.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQActivityPreview.vue",
+    "source_blob": "f31313c40e4c980582c1863d47a725e2975318a5",
+    "target_path": "frontend/src/components/admin/qqbot/QQActivityPreview.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotTransferSettings.vue",
+    "source_blob": "2d1196b6f2af3a690e7105b3c4876e0f25affe49",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotTransferSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotModerationSettings.vue",
+    "source_blob": "b2af7f227803af33a23d5e69a33b0f5ca3cf81ea",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotModerationSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQCommandInventory.vue",
+    "source_blob": "5cfeae6d24b9d7ae84d97749fd3a8c1017274ca0",
+    "target_path": "frontend/src/components/admin/qqbot/QQCommandInventory.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotGroupAdminSettings.vue",
+    "source_blob": "95e335b52fc7fb5086c4f7f09c36407d54142e16",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotGroupAdminSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotChatPreview.vue",
+    "source_blob": "09faaeac75ede622c6d659306b4b37333a26097c",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotChatPreview.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/useQQDraft.ts",
+    "source_blob": "a58b8ee56b0621e9eefa9e9e81d71d31e260d860",
+    "target_path": "frontend/src/components/admin/qqbot/useQQDraft.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotLotterySettings.vue",
+    "source_blob": "4757bfddadcaaff758a2f03decbfb72763f8f115",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotLotterySettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQModerationRecords.vue",
+    "source_blob": "3d4d57fa657d70c5aadfbcd3bbecd9a8d40af64f",
+    "target_path": "frontend/src/components/admin/qqbot/QQModerationRecords.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotRewardCodes.vue",
+    "source_blob": "1c4796c9b7c4c31812cd141c29564a55c83393be",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotRewardCodes.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotLotteryPrize.vue",
+    "source_blob": "74083e161e417449910966034f0148c9cf3574aa",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotLotteryPrize.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotImageAISettings.vue",
+    "source_blob": "1a87ddc8b90ab5ddc7355195d3ad21ef808231e8",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotImageAISettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotAutonomousSettings.vue",
+    "source_blob": "7fd00f2706b41cad2001578f1b71ebc1e7ec2229",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotAutonomousSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotRewardItems.vue",
+    "source_blob": "7a67ed176cca4ac4b6c7a2542ed3ac858bac2ce0",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotRewardItems.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotRecordParticipant.vue",
+    "source_blob": "cefa27d95b6e04252ee2d2526f2481553e212024",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotRecordParticipant.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotSiteAISettings.vue",
+    "source_blob": "1b68b0d4d4206e1262fd96fa247d79b1dc870b58",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotSiteAISettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotRankingSettings.vue",
+    "source_blob": "f5434322967bf7faf12f612e206368dea497ebb9",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotRankingSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/growthReward.ts",
+    "source_blob": "c87b04edba2da5fbb39a09f496470113b743b1dd",
+    "target_path": "frontend/src/components/admin/qqbot/growthReward.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotAnnouncement.vue",
+    "source_blob": "b6e2676f3550fdc310da0fdb8eb6823ad01a13e3",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotAnnouncement.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotGrowthSettings.vue",
+    "source_blob": "d2d5667ae779cefa9452729761fb3694c2815901",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotGrowthSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQGroupPicker.vue",
+    "source_blob": "08f79ab5b4eb3d7e00097ed9b15b842ec54058c6",
+    "target_path": "frontend/src/components/admin/qqbot/QQGroupPicker.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotInviteSettings.vue",
+    "source_blob": "08e9c82cd34845324e095753cd51e8b381b54322",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotInviteSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQMemberPicker.vue",
+    "source_blob": "3f9201086e54ce40fd07a3e05d04104b7d87bdcb",
+    "target_path": "frontend/src/components/admin/qqbot/QQMemberPicker.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/rewardItems.ts",
+    "source_blob": "f54c31c5b212574e45a06f3665bac81da742fb6e",
+    "target_path": "frontend/src/components/admin/qqbot/rewardItems.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotDiagnostics.vue",
+    "source_blob": "c8a02d49bd8bffe980c83746e97fa34433bd2fb2",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotDiagnostics.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotCheckinSettings.vue",
+    "source_blob": "0ff142eb4763bdc858ba02da8e70c5e432c7c456",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotCheckinSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotKnowledgeSettings.vue",
+    "source_blob": "cc358473eb663e5db7ea8bea6b6e65edace9f69f",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotKnowledgeSettings.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/configSections.ts",
+    "source_blob": "3c9412bf0620b6eae70336d3293900cc15edb3a0",
+    "target_path": "frontend/src/components/admin/qqbot/configSections.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotGrowthRewardFields.vue",
+    "source_blob": "c9ee7235c8288024563c8485a50a44b01b28a1a8",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotGrowthRewardFields.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQBotConfigHistory.vue",
+    "source_blob": "4b0d18a0fe84f5c399da21399d992859204d7332",
+    "target_path": "frontend/src/components/admin/qqbot/QQBotConfigHistory.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQJobRecords.vue",
+    "source_blob": "2be4d21b38a2c6313f32e47fcc7561c81b2abe33",
+    "target_path": "frontend/src/components/admin/qqbot/QQJobRecords.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/CouponTemplateSelect.vue",
+    "source_blob": "d4d35df409f683847caf403ada35bee0236d4a4c",
+    "target_path": "frontend/src/components/admin/qqbot/CouponTemplateSelect.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/QQGroupPolicies.vue",
+    "source_blob": "eb2552a7f8c94e516853087058ad9db36e67b511",
+    "target_path": "frontend/src/components/admin/qqbot/QQGroupPolicies.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/checkinSettings.ts",
+    "source_blob": "2c3201ae6637ffa5f8c1dfac6c27e21ce238dff1",
+    "target_path": "frontend/src/components/admin/qqbot/checkinSettings.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/__tests__/QQBotBindings.spec.ts",
+    "source_blob": "79749ea2efef7b8cff80759491767e7a43a59b0a",
+    "target_path": "frontend/src/components/admin/__tests__/QQBotBindings.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQCommandInventory.spec.ts",
+    "source_blob": "6a355baae4ff08a738c4b40f8f89eaab3eb88c94",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQCommandInventory.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQDraft.spec.ts",
+    "source_blob": "4debdc3e1c91ec70e6fd6556d885c7d1975d3060",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQDraft.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQBotRankingSettings.spec.ts",
+    "source_blob": "0c183c3966fb2704cee222072be4f00e08da1b4f",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQBotRankingSettings.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQMemberPicker.spec.ts",
+    "source_blob": "cfd42bde2779d1fbb4c6ab52dd95158292911417",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQMemberPicker.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQBotImageAISettings.spec.ts",
+    "source_blob": "7f5864e82c02c22ca1e535a450fd4a1543dabc01",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQBotImageAISettings.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQBotGrowthDailyTasks.spec.ts",
+    "source_blob": "de7531361e91b84ce1395ac0037bf4f884b07b09",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQBotGrowthDailyTasks.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQBotKnowledgeSettings.spec.ts",
+    "source_blob": "f42c6f6dd734e7b602ddf817e25cb8fcb8394c29",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQBotKnowledgeSettings.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQBotAnnouncement.spec.ts",
+    "source_blob": "563d268fcf29acdf276f9aa3b11085990802991c",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQBotAnnouncement.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/checkinSettings.spec.ts",
+    "source_blob": "5a9886f1e3aec291661f4cf75ae76dd6ca823538",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/checkinSettings.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQJobRecords.spec.ts",
+    "source_blob": "a4afea02fa725a092dca5ad6d9f7f8f3678956ce",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQJobRecords.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQMemberEntryPoints.spec.ts",
+    "source_blob": "ae8e4a4b6141e29ea2cab9caae2032928a443804",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQMemberEntryPoints.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/autonomousDefaults.spec.ts",
+    "source_blob": "e057b11577ec25d894b8de2fe3b55a8d73a916c4",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/autonomousDefaults.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQBotSiteAISettings.spec.ts",
+    "source_blob": "decfe2f345f528871587c442e866e874358f8475",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQBotSiteAISettings.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQBotRewardCodes.spec.ts",
+    "source_blob": "55a55651eb8fb2c67f50571416c58987dca72646",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQBotRewardCodes.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/components/admin/qqbot/__tests__/QQBotChatPreview.spec.ts",
+    "source_blob": "5a8adb89b88771362c13c3687039c95b066e1a02",
+    "target_path": "frontend/src/components/admin/qqbot/__tests__/QQBotChatPreview.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/i18n/locales/zh/qqbot.ts",
+    "source_blob": "e83055bcfe6ee87cfad0cbba3159ec031a926c47",
+    "target_path": "frontend/src/i18n/locales/zh/qqbot.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/i18n/locales/en/qqbot.ts",
+    "source_blob": "f44a18502ff9b8826edcff8507d300d3378380f6",
+    "target_path": "frontend/src/i18n/locales/en/qqbot.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/api/__tests__/qqbot.spec.ts",
+    "source_blob": "87774c449831c1100dffc15e5dbc995807bb2042",
+    "target_path": "frontend/src/api/__tests__/qqbot.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/QQBotRecordsView.vue",
+    "source_blob": "43d5bdd4e86abdac237eaa52c5e313c5f1c996e7",
+    "target_path": "frontend/src/views/admin/QQBotRecordsView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/QQBotView.vue",
+    "source_blob": "b71f711fb184d0140bd2978848151faf6106c4b1",
+    "target_path": "frontend/src/views/admin/QQBotView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/QQBotBindingsView.vue",
+    "source_blob": "bf921ea78b93fbba85af65b76bb204f903e709fa",
+    "target_path": "frontend/src/views/admin/QQBotBindingsView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/QQBotActivitiesView.vue",
+    "source_blob": "438d5288a8c96dbf47bca83df65b9429ef085ab7",
+    "target_path": "frontend/src/views/admin/QQBotActivitiesView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/QQBotSetupView.vue",
+    "source_blob": "96c772639bd5facfeeb44701535b09d404d72281",
+    "target_path": "frontend/src/views/admin/QQBotSetupView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/QQBotOverviewView.vue",
+    "source_blob": "b544a5854bdf286a5c9cfa9ce5e1b2d6f5a1b248",
+    "target_path": "frontend/src/views/admin/QQBotOverviewView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/auth/QQBotTransferView.vue",
+    "source_blob": "f39f9f9fabd9818cba60c46061d65fa06e6a1a7b",
+    "target_path": "frontend/src/views/auth/QQBotTransferView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/auth/QQBotBindView.vue",
+    "source_blob": "228ebc6f984cb126ffc52ec100bcddbd1d689182",
+    "target_path": "frontend/src/views/auth/QQBotBindView.vue",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/auth/__tests__/QQBotTransferView.spec.ts",
+    "source_blob": "0b9cdbed26a776e5b2720cdb3f2cdb33f7c6f48a",
+    "target_path": "frontend/src/views/auth/__tests__/QQBotTransferView.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/auth/__tests__/QQBotBindView.spec.ts",
+    "source_blob": "b6a2ebe592d518bccc98cf05c36c4666d3808aa7",
+    "target_path": "frontend/src/views/auth/__tests__/QQBotBindView.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/__tests__/QQBotRecords.spec.ts",
+    "source_blob": "15e80a259481ddd923d01590dd656a7201a857e4",
+    "target_path": "frontend/src/views/admin/__tests__/QQBotRecords.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/__tests__/QQBotActivities.spec.ts",
+    "source_blob": "9956ec9c25432a1617893e6d993c5217d70f0ef9",
+    "target_path": "frontend/src/views/admin/__tests__/QQBotActivities.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/__tests__/QQBotSetup.spec.ts",
+    "source_blob": "1d1ce970870a7890e24dc4dad24f0249956df8db",
+    "target_path": "frontend/src/views/admin/__tests__/QQBotSetup.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/views/admin/__tests__/QQBotView.spec.ts",
+    "source_blob": "249b64c5ab643036f64276a778b7e9e97f07b0d4",
+    "target_path": "frontend/src/views/admin/__tests__/QQBotView.spec.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "navigation and fork API integration pending validation"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/api/coupons.ts",
+    "source_blob": "f22900637e15a7ce26155cebeb089865c0b8ab4b",
+    "target_path": "frontend/src/api/coupons.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "QQ frontend dependency; fork API integration pending"
+  },
+  {
+    "source_repository": "DeanZFC/sub2api-custom",
+    "source_commit": "5876d7d864dae405c2a3b65074fb556f6985adb8",
+    "source_path": "frontend/src/composables/useQQGroupNames.ts",
+    "source_blob": "3a6265279d502f37b69cc110bf90eef3145e5135",
+    "target_path": "frontend/src/composables/useQQGroupNames.ts",
+    "license": "LGPL-3.0",
+    "adaptation": "QQ frontend dependency; fork API integration pending"
   }
 ]

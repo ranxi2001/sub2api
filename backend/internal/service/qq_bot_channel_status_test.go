@@ -70,8 +70,7 @@ func (s *qqStatusRepoStub) GetMatrix(_ context.Context, filter ChannelMonitorV2F
 func qqStatusAdapterFixture() (*qqBotChannelStatus, *qqStatusRepoStub, *qqStatusGroupStub) {
 	updated := time.Date(2026, 10, 16, 6, 30, 0, 0, time.UTC)
 	ttft := int64(1280)
-	tps := 42.5
-	metric := ChannelMonitorV2Metric{OutputTPS: &tps, RequestCount: 100, SuccessRequests: 90, ErrorRequests: 10, SuccessRate: .9, ErrorRate: .0032, CacheRate: .7625, CacheRateDenominator: 1000, RPM: 12, TPM: 3600, TTFT: ChannelMonitorV2Latency{SampleCount: 90, P50Ms: &ttft}}
+	metric := ChannelMonitorV2Metric{RequestCount: 100, SuccessRequests: 90, ErrorRequests: 10, SuccessRate: .9, ErrorRate: .0032, CacheRate: .7625, CacheRateDenominator: 1000, RPM: 12, TPM: 3600, TTFT: ChannelMonitorV2Latency{SampleCount: 90, P50Ms: &ttft}}
 	id := int64(1)
 	repo := &qqStatusRepoStub{
 		config:   &ChannelMonitorV2Config{Enabled: true, GroupIDs: []int64{1, 5}, IgnoredErrorCategories: []string{"client_cancelled"}, Platforms: []ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true, Models: []string{"model"}}}},
@@ -115,8 +114,7 @@ func TestQQBotChannelStatusUsesMonitorAggregatesAndConfiguredGroups(t *testing.T
 	require.False(t, report.ShowThroughput)
 	require.Zero(t, report.Overall.RPM)
 	require.Zero(t, report.Overall.TokensPerSecond)
-	require.NotNil(t, report.Overall.OutputTPS)
-	require.Equal(t, 42.5, *report.Overall.OutputTPS)
+	require.Nil(t, report.Overall.OutputTPS, "fork has no observed output TPS; do not fabricate throughput")
 	require.Len(t, report.Groups, 1)
 	require.Equal(t, "公开分组", report.Groups[0].Name)
 	require.True(t, report.Groups[0].Metrics.InsufficientSamples)

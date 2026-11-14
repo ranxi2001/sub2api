@@ -81,7 +81,7 @@ func setupProvider(key *APIKey) *qqBotSiteAI {
 }
 func TestQQBotManagedKeyReuseNeverResetsSpending(t *testing.T) {
 	group := int64(2)
-	key := &APIKey{ID: 11, UserID: 7, GroupID: &group, Key: APIKeyStoredValue("raw-secret"), Status: StatusActive, Quota: 20, QuotaUsed: 5}
+	key := &APIKey{ID: 11, UserID: 7, GroupID: &group, Key: "raw-secret", Status: StatusActive, Quota: 20, QuotaUsed: 5}
 	p := setupProvider(key)
 	old := qqbot.Config{AIConnection: "site", SiteGroupID: 2, SiteAPIKeyID: 11, SiteOwnerID: 7, APIKey: "raw-secret"}
 	conn, err := p.Prepare(context.Background(), nil, 7, 2, 20, old)
@@ -97,7 +97,7 @@ func TestQQBotManagedKeyReuseNeverResetsSpending(t *testing.T) {
 	_, err = p.Prepare(context.Background(), nil, 7, 2, 20, old)
 	require.Error(t, err)
 	key.ExpiresAt = nil
-	key.Key = APIKeyStoredValue("rotated")
+	key.Key = "rotated"
 	_, err = p.Prepare(context.Background(), nil, 7, 2, 20, old)
 	require.Error(t, err)
 }
@@ -196,7 +196,7 @@ func TestQQBotManagedKeyCompatibleProtocolsReuseExistingKey(t *testing.T) {
 		for _, protocol := range protocols {
 			t.Run(platform+"/"+protocol, func(t *testing.T) {
 				groupID := int64(2)
-				key := &APIKey{ID: 11, UserID: 7, GroupID: &groupID, Key: APIKeyStoredValue("raw-secret"), Status: StatusActive, Quota: 20, QuotaUsed: 5}
+				key := &APIKey{ID: 11, UserID: 7, GroupID: &groupID, Key: "raw-secret", Status: StatusActive, Quota: 20, QuotaUsed: 5}
 				p := setupProvider(key)
 				groups, ok := p.groups.(qqSetupGroups)
 				require.True(t, ok)
@@ -217,7 +217,7 @@ func TestQQBotManagedKeyRejectsUnsupportedProtocolBeforeProvisioning(t *testing.
 	for _, reuse := range []bool{false, true} {
 		t.Run(fmt.Sprint("reuse=", reuse), func(t *testing.T) {
 			groupID := int64(2)
-			key := &APIKey{ID: 11, UserID: 7, GroupID: &groupID, Key: APIKeyStoredValue("raw-secret"), Status: StatusActive, Quota: 20, QuotaUsed: 5}
+			key := &APIKey{ID: 11, UserID: 7, GroupID: &groupID, Key: "raw-secret", Status: StatusActive, Quota: 20, QuotaUsed: 5}
 			p := setupProvider(key)
 			groups, ok := p.groups.(qqSetupGroups)
 			require.True(t, ok)
@@ -233,7 +233,7 @@ func TestQQBotManagedKeyRejectsUnsupportedProtocolBeforeProvisioning(t *testing.
 			require.Zero(t, conn.KeyID)
 			require.Equal(t, StatusActive, key.Status)
 			require.Equal(t, float64(5), key.QuotaUsed)
-			require.Equal(t, APIKeyStoredValue("raw-secret"), key.Key)
+			require.Equal(t, "raw-secret", key.Key)
 		})
 	}
 }

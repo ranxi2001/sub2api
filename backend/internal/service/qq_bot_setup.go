@@ -125,7 +125,7 @@ func (p *qqBotSiteAI) Options(ctx context.Context, owner int64, c qqbot.Config) 
 		if !g.IsActive() || len(protocols) == 0 {
 			continue
 		}
-		if _, e := p.keys.loadBindableAPIKeyGroup(ctx, user, g.ID); e != nil {
+		if _, e := p.bindableGroup(ctx, user, g.ID); e != nil {
 			continue
 		}
 		models := []string{}
@@ -196,7 +196,7 @@ func (p *qqBotSiteAI) prepare(ctx context.Context, tx *sql.Tx, owner, groupID in
 	if err != nil {
 		return out, err
 	}
-	group, err := p.keys.loadBindableAPIKeyGroup(ctx, user, groupID)
+	group, err := p.bindableGroup(ctx, user, groupID)
 	if err != nil {
 		return out, err
 	}
@@ -238,7 +238,7 @@ func (p *qqBotSiteAI) prepare(ctx context.Context, tx *sql.Tx, owner, groupID in
 		if e != nil {
 			return out, errors.New("机器人专用 Key 不存在，请重新配置本站 AI")
 		}
-		if key.UserID != previousOwner || key.Key != APIKeyStoredValue(previousKey) || key.GroupID == nil || *key.GroupID != groupID || previousKey == "" {
+		if key.UserID != previousOwner || key.Key != previousKey || key.GroupID == nil || *key.GroupID != groupID || previousKey == "" {
 			return out, errors.New("机器人专用 Key 身份不匹配")
 		}
 		if key.Status != StatusActive || key.IsExpired() || key.IsQuotaExhausted() {
@@ -273,9 +273,10 @@ func (p *qqBotSiteAI) prepare(ctx context.Context, tx *sql.Tx, owner, groupID in
 		return out, err
 	}
 	if err = tx.QueryRowContext(ctx, `INSERT INTO api_keys(user_id,key,name,group_id,status,quota) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
-		owner, APIKeyStoredValue(raw), html.EscapeString(keyName), groupID, StatusActive, quota).Scan(&out.KeyID); err != nil {
+		owner, raw, html.EscapeString(keyName), groupID, StatusActive, quota).Scan(&out.KeyID); err != nil {
 		return out, err
 	}
+
 	out.Key = raw
 	return out, nil
 }
@@ -283,3 +284,21 @@ func (p *qqBotSiteAI) Revoke(ctx context.Context, keyID, owner int64) error {
 	return p.keys.Delete(ctx, keyID, owner)
 }
 func qqBotInternalBaseURL(port int) string { return fmt.Sprintf("http://127.0.0.1:%d/v1", port) }
+
+// Preserve this fork's existing user/group permissions and active-group policy.
+func (p *qqBotSiteAI) bindableGroup(ctx context.Context, user *User, id int64) (*Group, error) {
+	if user == nil || !user.IsActive() {
+		return nil, ErrUserNotFound
+	}
+	if err := p.keys.validateAPIKeyGroups(ctx, user, []int64{id}); err != nil {
+		return nil, err
+	}
+	group, err := p.keys.groupRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !group.IsActive() {
+		return nil, ErrGroupNotAllowed
+	}
+	return group, nil
+}

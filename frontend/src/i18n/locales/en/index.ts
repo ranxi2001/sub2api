@@ -1,3 +1,4 @@
+import qqbot from './qqbot'
 import matureProviders from './matureProviders'
 import autoCredit from './autoCredit'
 import accountPerformance from './accountPerformance'
@@ -41,6 +42,7 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
+  ...qqbot,
   matureProviders,
   apiKeyModelPolicy,
   autoCredit,

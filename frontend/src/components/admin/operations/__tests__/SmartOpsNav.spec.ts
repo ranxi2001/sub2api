@@ -12,7 +12,7 @@ import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import type { User } from '@/types'
 
 const smartOpsPaths = ['/admin/lottery', '/admin/auto-config', '/admin/priority-scheduling',
-  '/admin/channel-operations', '/admin/profit-operations', '/admin/account-quality', '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
+  '/admin/qqbot/overview', '/admin/channel-operations', '/admin/profit-operations', '/admin/account-quality', '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
 
 async function mountAt(path: string) {
   const router = createRouter({

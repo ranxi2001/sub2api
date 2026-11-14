@@ -115,7 +115,8 @@ func qqBotChannelStatusMetric(metric ChannelMonitorV2Metric, throughput bool, mi
 		InsufficientSamples: metric.RequestCount > 0 && metric.RequestCount < minimumSample,
 		ErrorRate:           metric.ErrorRate,
 		TTFTP50Ms:           metric.TTFT.P50Ms,
-		OutputTPS:           metric.OutputTPS,
+		// This fork has no persisted output-token-rate measure. Keep unknown.
+		OutputTPS: nil,
 	}
 	if metric.CacheRateDenominator > 0 {
 		rate := metric.CacheRate
