@@ -3515,7 +3515,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					setCyberTurnBody(1, clean, firstIdentityDecision.effective)
 					ctx = service.ResetOpenAIWSReadableProviderSession(next, c)
 					c.Request = c.Request.WithContext(ctx)
-					firstMessage, wsAttemptMessage, previousResponseID, previousResponseCanMove = clean, clean, "", true
+					wsAttemptMessage, previousResponseID, previousResponseCanMove = clean, "", true
 					firstTurnQueuePermissions = permissions
 					switchCount++
 					continue
