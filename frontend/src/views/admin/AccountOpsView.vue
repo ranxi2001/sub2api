@@ -94,14 +94,18 @@
       </section>
       <section v-if="activeTab === 'settings' && remote" id="ops-panel-settings" role="tabpanel" aria-labelledby="ops-tab-settings"
         class="space-y-5">
-        <section class="rounded-xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900"
+        <AccountOpsRuleList ref="ruleList" :accounts="thresholdAccounts" :groups="accountGroups" :config="remote.config" :loading="thresholdLoading"
+          :ready="thresholdReady" :error="thresholdError" :busy="mutating"
+          @batch-edit="batchAccounts = $event" @edit-group="showGroupDialog = true" @toggle="toggleGroup" @refresh="loadAccounts">
+          <template #actions><button type="button" class="btn btn-secondary text-sm" :disabled="thresholdLoading || mutating" data-testid="edit-account-groups" @click="showGroupDialog = true">{{ t('accountOps.manageGroups') }}</button></template>
+          <template #global-settings>
+            <AccountOpsGlobalSettings :config="remote.config" :disabled="mutating" @saving="globalSaving = $event" @saved="acceptConfig"
+              @error="app.showError" />
+          </template>
+        </AccountOpsRuleList>
+        <details :open="!remote.config.recipient && !remote.config.webhooks?.length" class="rounded-xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900"
           data-testid="account-ops-channels">
-          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-700">
-            <div>
-              <h2 class="text-sm font-semibold">{{ t('accountOps.notificationChannels') }}</h2>
-              <p class="mt-1 text-xs text-gray-500">{{ t('accountOps.channelSummaryHint') }}</p>
-            </div>
-          </div>
+          <summary class="cursor-pointer px-5 py-4 text-sm font-semibold">{{ t('accountOps.notificationChannels') }}<span class="ml-3 text-xs font-normal text-gray-500">{{ remote.config.email_name || remote.config.recipient || t('accountOps.channelSummaryHint') }}</span></summary>
           <div class="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-3">
             <div v-if="remote.config.recipient" class="rounded-lg border border-gray-200 p-4 dark:border-dark-700"
               data-testid="account-ops-email-channel">
@@ -135,24 +139,8 @@
               :disabled="!canAddChannel" data-testid="account-ops-add-channel"
               @click="showAddChannel = true">{{ t('accountOps.addChannel') }}</button>
           </div>
-        </section>
-        <section class="rounded-xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900" data-testid="account-ops-groups">
-          <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-            <div>
-              <h2 class="text-sm font-semibold">{{ t('accountOps.accountGroups') }}</h2>
-              <p class="mt-1 text-xs text-gray-500">{{ t('accountOps.accountGroupsSummary', { count: accountGroups.length }) }}</p>
-            </div>
-            <button type="button" class="btn btn-secondary text-sm" :disabled="thresholdLoading || mutating" data-testid="edit-account-groups" @click="showGroupDialog = true">{{ t('common.edit') }}</button>
-          </div>
-        </section>
-        <AccountOpsRuleList ref="ruleList" :accounts="thresholdAccounts" :groups="accountGroups" :config="remote.config" :loading="thresholdLoading"
-          :ready="thresholdReady" :error="thresholdError" :busy="mutating"
-          @batch-edit="batchAccounts = $event" @edit-group="showGroupDialog = true" @toggle="toggleGroup">
-          <template #global-settings>
-            <AccountOpsGlobalSettings :config="remote.config" :disabled="mutating" @saving="globalSaving = $event" @saved="acceptConfig"
-              @error="app.showError" />
-          </template>
-        </AccountOpsRuleList>
+        </details>
+
       </section>
       <template v-if="remote && auth.user">
         <AccountOpsBatchRuleDialog :show="batchAccounts.length > 0" :accounts="batchAccounts" :config="remote.config" @close="batchAccounts = []"

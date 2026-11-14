@@ -46,6 +46,8 @@ export interface AccountOpsThresholdAccount {
   type: 'apikey' | 'oauth'
   balance: number | null
   unit: string
+  probe_enabled?: boolean
+  last_known_balance?: number
   balance_status: AccountOpsObservationStatus
   received_at: string | null
   usage_windows: Array<{
