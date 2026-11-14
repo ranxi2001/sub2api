@@ -39,7 +39,7 @@ export default {
   "optionalCredential": "Optional; configure later",
   "keepCredential": "Leave blank to keep credentials for the same site",
   "refreshToken": "Refresh token (optional)",
-  "credentialNote": "Saving encrypts credentials without contacting the upstream. Refresh explicitly reads dashboard metadata. Changing the site, account, or login method clears the previous credentials.",
+  "credentialNote": "Saving credentials makes no immediate upstream request. Refresh manually or explicitly enable scheduled refresh. Changing the site, account, or login method clears previous credentials.",
   "threshold": "Low balance threshold (source currency)",
   "costNote": "The catalog cost multiplier does not change existing accounts or financial pricing. Unknown amounts remain unknown; values retain their source currency.",
   "suppress": "Suppress low balance alerts for this provider",

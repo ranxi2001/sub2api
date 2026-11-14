@@ -91,9 +91,14 @@ func (r *channelRepository) UpdateMatureProvider(parent context.Context, id int6
 	}
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
 	// A single conditional update is the cross-instance compare-and-swap. An
 	// identity change invalidates observations; it never carries old metrics.
-	p, err := scanMatureProvider(r.db.QueryRowContext(ctx, `UPDATE mature_providers SET
+	p, err := scanMatureProvider(tx.QueryRowContext(ctx, `UPDATE mature_providers SET
  status=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN 'unknown' ELSE status END,
  metrics=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN '{"balance":null,"today_spend":null,"total_spend":null,"total_recharge":null,"currency":""}'::jsonb ELSE metrics END,
  observed_at=CASE WHEN base_url<>$5 OR site_type<>$4 OR auth_mode<>$10 OR account<>$11 OR user_id<>$12 OR $13::text IS NOT NULL THEN NULL ELSE observed_at END,
@@ -102,9 +107,31 @@ func (r *channelRepository) UpdateMatureProvider(parent context.Context, id int6
  refresh_interval_seconds=COALESCE($14,refresh_interval_seconds),auth_mode=$10,account=$11,user_id=$12,name=$3,site_type=$4,base_url=$5,notes=$6,cost_multiplier=$7,low_balance_threshold=$8,suppress_low_balance_alert=$9,revision=revision+1,updated_at=NOW()
  WHERE id=$1 AND revision=$2 RETURNING `+matureProviderColumns, id, *in.Revision, in.Name, in.SiteType, in.BaseURL, in.Notes, in.CostMultiplier, in.LowBalanceThreshold, in.SuppressLowBalanceAlert, in.AuthMode, in.Account, in.UserID, in.CredentialCipher, in.RefreshIntervalSeconds))
 	if errors.Is(err, service.ErrMatureProviderNotFound) {
-		return nil, r.matureProviderMissingRevision(ctx, id)
+		var exists bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM mature_providers WHERE id=$1)`, id).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, service.ErrMatureProviderNotFound
+		}
+		return nil, service.ErrMatureProviderConflict
 	}
-	return p, err
+	if err != nil {
+		return nil, err
+	}
+	// Identity/credential changes invalidate observations and their episode.
+	// Resolve old alerts in the same transaction as the configuration update.
+	if p.Status == "unknown" || p.LowBalanceThreshold == nil || p.SuppressLowBalanceAlert {
+		if _, err = tx.ExecContext(ctx, `UPDATE mature_provider_alerts SET resolved_at=clock_timestamp() WHERE provider_id=$1 AND resolved_at IS NULL`, id); err != nil {
+			return nil, err
+		}
+	} else if err = updateMatureProviderAlert(ctx, tx, p); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 func (r *channelRepository) matureProviderMissingRevision(ctx context.Context, id int64) error {

@@ -28,9 +28,9 @@ func updateMatureProviderAlert(ctx context.Context, tx *sql.Tx, p *service.Matur
 		return nil
 	}
 	if p.LowBalanceThreshold == nil || p.SuppressLowBalanceAlert || *p.Metrics.Balance >= *p.LowBalanceThreshold {
-		_, err := tx.ExecContext(ctx, `UPDATE mature_provider_alerts SET resolved_at=NOW() WHERE provider_id=$1 AND resolved_at IS NULL`, p.ID)
+		_, err := tx.ExecContext(ctx, `UPDATE mature_provider_alerts SET resolved_at=clock_timestamp() WHERE provider_id=$1 AND resolved_at IS NULL`, p.ID)
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO mature_provider_alerts(provider_id,balance,threshold,currency) VALUES($1,$2,$3,$4) ON CONFLICT(provider_id) WHERE resolved_at IS NULL DO UPDATE SET balance=EXCLUDED.balance,threshold=EXCLUDED.threshold,currency=EXCLUDED.currency,last_seen_at=NOW()`, p.ID, *p.Metrics.Balance, *p.LowBalanceThreshold, p.Metrics.Currency)
+	_, err := tx.ExecContext(ctx, `INSERT INTO mature_provider_alerts(provider_id,balance,threshold,currency,opened_at,last_seen_at) VALUES($1,$2,$3,$4,clock_timestamp(),COALESCE($5,clock_timestamp())) ON CONFLICT(provider_id) WHERE resolved_at IS NULL DO UPDATE SET balance=EXCLUDED.balance,threshold=EXCLUDED.threshold,currency=EXCLUDED.currency,last_seen_at=GREATEST(mature_provider_alerts.last_seen_at,EXCLUDED.last_seen_at)`, p.ID, *p.Metrics.Balance, *p.LowBalanceThreshold, p.Metrics.Currency, p.ObservedAt)
 	return err
 }

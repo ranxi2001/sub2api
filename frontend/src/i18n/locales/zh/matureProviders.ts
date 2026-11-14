@@ -39,7 +39,7 @@ export default {
   "optionalCredential": "可稍后配置",
   "keepCredential": "留空保留同一站点的已有凭据",
   "refreshToken": "Refresh Token（可选）",
-  "credentialNote": "保存仅加密存储凭据；点击刷新后才访问上游管理接口。更换站点、账号或登录方式会清除旧凭据。",
+  "credentialNote": "保存凭据不会立即访问上游；可手动刷新，或显式启用自动刷新。更换站点、账号或登录方式会清除旧凭据。",
   "threshold": "低余额阈值（来源币种）",
   "costNote": "采购倍率仅记录在服务商目录，不会自动修改已有账号或财务定价。未知金额保留未知，所有读数保持来源币种。",
   "suppress": "关闭此服务商的低余额提示",

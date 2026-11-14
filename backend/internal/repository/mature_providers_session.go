@@ -42,7 +42,7 @@ func (r *channelRepository) WithMatureProviderSession(parent context.Context, id
 		}
 		metrics = string(raw)
 	}
-	p, err = scanMatureProvider(tx.QueryRowContext(ctx, `UPDATE mature_providers SET credential_cipher=COALESCE($2,credential_cipher),metrics=COALESCE($3::jsonb,metrics),status=CASE WHEN $4='' THEN status ELSE $4 END,last_error=$5,observed_at=CASE WHEN $3::jsonb IS NULL THEN observed_at ELSE NOW() END,revision=revision+1,updated_at=NOW() WHERE id=$1 RETURNING `+matureProviderColumns, id, u.Cipher, metrics, u.Status, u.LastError))
+	p, err = scanMatureProvider(tx.QueryRowContext(ctx, `UPDATE mature_providers SET credential_cipher=COALESCE($2,credential_cipher),metrics=COALESCE($3::jsonb,metrics),status=CASE WHEN $4='' THEN status ELSE $4 END,last_error=$5,observed_at=CASE WHEN $3::jsonb IS NULL THEN observed_at ELSE clock_timestamp() END,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 RETURNING `+matureProviderColumns, id, u.Cipher, metrics, u.Status, u.LastError))
 	if err != nil {
 		return nil, err
 	}
