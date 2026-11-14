@@ -49,10 +49,14 @@ func (u *issue842Transport) DoWithTLS(req *http.Request, proxy string, account i
 // predating Beta can still compile these otherwise independent fixtures.
 type issue842Settings struct {
 	service.SettingRepository
-	beta bool
+	beta   bool
+	values map[string]string
 }
 
 func (s *issue842Settings) GetValue(_ context.Context, key string) (string, error) {
+	if value, ok := s.values[key]; ok {
+		return value, nil
+	}
 	if key == "openai_409_omit_encrypted_history_enabled" {
 		return fmt.Sprint(s.beta), nil
 	}
@@ -110,6 +114,7 @@ func TestIssue842HTTPReplayMetadata(t *testing.T) {
 						var bodies [][]byte
 						var identities []string
 						srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							require.Empty(t, r.Header.Get("Upgrade"), "count the actual HTTP adapter, including configured SSE acceleration")
 							body, err := io.ReadAll(r.Body)
 							if err != nil {
 								t.Error(err)
@@ -142,12 +147,18 @@ func TestIssue842HTTPReplayMetadata(t *testing.T) {
 							accounts[i].Credentials = map[string]any{"api_key": fmt.Sprintf("fixture842-%d", i+1), "access_token": fmt.Sprintf("fixture842-%d", i+1), "base_url": srv.URL}
 						}
 						newNode := func(disabled bool) *OpenAIGatewayHandler {
+							if disabled && kind == service.AccountTypeOAuth {
+								accounts[1].Extra = map[string]any{"openai_oauth_responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_mode": service.OpenAIWSIngressModeCtxPool, "openai_oauth_ws_sse_acceleration": true}
+							}
 							cfg := &config.Config{RunMode: config.RunModeSimple}
 							cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 							upstream := &issue842Transport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
 							settings := service.NewSettingService(&issue842Settings{}, cfg)
 							h := newOpenAIResponsesFailoverTestHandlerWithSettings(t, upstream, repository.NewGatewayCache(clients()), settings, accounts...)
 							h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+							h.cfg.Gateway.OpenAIWS.Enabled = disabled
+							h.cfg.Gateway.OpenAIWS.OAuthEnabled = disabled
+							h.cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = disabled
 							issue805Policy(t, h.cfg, disabled)
 							return h
 						}

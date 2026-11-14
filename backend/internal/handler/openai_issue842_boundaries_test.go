@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type issue842FaultCache struct {
@@ -26,6 +28,56 @@ type issue842FaultCache struct {
 	fault  string
 	reads  atomic.Int64
 	client *redis.Client
+}
+
+// Exercise actual account builders after the handler has frozen the complete
+// input. These rewrites have semantics and are outside the metadata allowlist.
+func TestIssue842HTTPBuilderChangesStopBeforeNetwork(t *testing.T) {
+	for _, kind := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, change := range []string{"namespace", "timezone", "system_promotion"} {
+			if kind == service.AccountTypeAPIKey && change == "system_promotion" {
+				continue
+			}
+			t.Run(kind+"/"+change, func(t *testing.T) {
+				clients := issue805Redis(t)
+				u := &issue805Oracle{}
+				srv := u.server(t)
+				target, err := url.Parse(srv.URL)
+				require.NoError(t, err)
+				accounts := issue715Accounts()
+				for i := range accounts {
+					accounts[i].Type = kind
+					accounts[i].Credentials = map[string]any{"api_key": "fixture842", "access_token": "fixture842", "base_url": srv.URL}
+				}
+				body, _ := issue842History(t, false, "reasoning_status")
+				settingsRepo := &issue842Settings{values: map[string]string{}}
+				switch change {
+				case "namespace":
+					body, err = sjson.Set(body, "input.1.namespace", "semantic-namespace842")
+				case "system_promotion":
+					body, err = sjson.Set(body, "input.1.role", "system")
+				case "timezone":
+					body, err = sjson.Set(body, "input.1.content", "<environment_context>\n<timezone>UTC</timezone>\n</environment_context>")
+					settingsRepo.values["openai_request_timezone_enabled"] = "true"
+					settingsRepo.values["openai_request_timezone_auto"] = "false"
+				}
+				require.NoError(t, err)
+				cfg := &config.Config{RunMode: config.RunModeSimple}
+				cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+				upstream := &issue842Transport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
+				h := newOpenAIResponsesFailoverTestHandlerWithSettings(t, upstream, repository.NewGatewayCache(clients()), service.NewSettingService(settingsRepo, cfg), accounts...)
+				h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+				issue805Policy(t, h.cfg, true)
+				answer := issue758Request(t, h, body)
+				require.Equal(t, http.StatusConflict, answer.Code, answer.Body.String())
+				require.Contains(t, answer.Body.String(), "encrypted_agent_recovery_wire_changed")
+				u.mu.Lock()
+				defer u.mu.Unlock()
+				require.Empty(t, u.frames, "a gateway builder cannot rebase trust onto its changed input")
+				require.Empty(t, issue805Owners(t, clients()))
+			})
+		}
+	}
 }
 
 func (c *issue842FaultCache) GetOpenAIAgentRecovery(ctx context.Context, key string) (string, error) {

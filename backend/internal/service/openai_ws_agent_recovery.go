@@ -130,7 +130,7 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 			r.protected = openAIAgentRecoveryFromContext(ctx)
 			r.protectedSource = openAIAgentRecoveryInputDigest(source)
 		}
-		return clean, nil
+		return append([]byte(nil), clean...), nil
 	}
 	ctx, clean := r.ctx, source
 	if openAIAgentRecoveryInputDigest(source) != initial.inputDigest || openAI409ControlsDigest(source) != initial.replayControlsDigest {

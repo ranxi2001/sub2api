@@ -100,9 +100,13 @@ jobs:
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go backend/internal/service/openai_ws_search_activation.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go)
           # The exact original gateway struct predates analysis admission state.
-          added+=(backend/internal/service/openai_ws_readable_continuation.go)
+          added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_replay_metadata.go)
           # Pin this unrelated leaf to its pre-admission version, preserving all
           # Issue715 business-chain blobs and the retained handler regressions.
+          # Issue842 compatibility-body callers depend on the later recovery
+          # helper. Keep its exact pre-Issue842 blob in this historical assembly.
+          metadata_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
+          metadata_leaf=backend/internal/service/openai_gateway_request_body.go
           analysis_compat=e395038e98fbc5a0c44944f0edcfbfe714570f71
           analysis_leaf=backend/internal/service/priority_analysis.go
           # The restored usage struct also predates the 30m/12h counters.
@@ -115,10 +119,14 @@ jobs:
           weekly_compat=f895ea743f34a4c4ab6c9d01c01e13c931625a6e
           weekly_leaves=(backend/internal/service/openai_disable_scheduling_429.go backend/internal/service/openai_gateway_passthrough.go backend/internal/service/openai_plugin_transport.go backend/internal/service/openai_quota_service.go backend/internal/service/openai_quota_usage_snapshot.go backend/internal/service/openai_ws_forwarder_support.go backend/internal/service/openai_ws_forwarder_v2.go)
           git fetch --no-tags --depth=1 origin "$original"
+          git fetch --no-tags --depth=1 origin "$metadata_compat"
           git fetch --no-tags --depth=1 origin "$analysis_compat"
           git fetch --no-tags --depth=1 origin "$billing_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "${weekly_leaves[@]}"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "$metadata_leaf" "${weekly_leaves[@]}"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
+          git restore --source="$metadata_compat" -- "$metadata_leaf"
+          test "$(git hash-object "$metadata_leaf")" = "$(git rev-parse "$metadata_compat:$metadata_leaf")"
+          echo "compatibility_leaf_baseline=$metadata_compat path=$metadata_leaf blob=$(git hash-object "$metadata_leaf")"
           git restore --source="$analysis_compat" -- "$analysis_leaf"
           git restore --source="$billing_compat" -- "$billing_leaf"
           git fetch --no-tags --depth=1 origin "$weekly_compat"
@@ -260,12 +268,19 @@ jobs:
           wait_added=backend/internal/service/openai_agent_message_recovery_wait.go
           # The Beta helper depends on fields absent in this historical recovery struct.
           omission_added=(backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go)
+          omission_added+=(backend/internal/service/openai_agent_replay_metadata.go)
+          metadata_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
+          metadata_leaf=backend/internal/service/openai_gateway_request_body.go
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$ws_original"
           git fetch --no-tags --depth=1 origin "$scheduler_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}"; git diff --exit-code' EXIT
+          git fetch --no-tags --depth=1 origin "$metadata_compat"
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "$metadata_leaf" "${omission_added[@]}"; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
+          git restore --source="$metadata_compat" -- "$metadata_leaf"
+          test "$(git hash-object "$metadata_leaf")" = "$(git rev-parse "$metadata_compat:$metadata_leaf")"
+          echo "compatibility_leaf_baseline=$metadata_compat path=$metadata_leaf blob=$(git hash-object "$metadata_leaf")"
           git restore --source="$scheduler_compat" -- "$scheduler_leaf"
           expected=$(git rev-parse "$scheduler_compat:$scheduler_leaf")
           actual=$(git hash-object "$scheduler_leaf")
