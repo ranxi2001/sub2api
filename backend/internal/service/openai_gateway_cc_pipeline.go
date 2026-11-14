@@ -329,8 +329,8 @@ func (s *OpenAIGatewayService) scanCCStream(
 			}
 			eventBytes += len(line) + 1
 			if payload, ok := extractOpenAISSEDataLine(line); ok {
-				pendingData.WriteString(payload)
-				pendingData.WriteByte('\n')
+				_, _ = pendingData.WriteString(payload)
+				_ = pendingData.WriteByte('\n')
 			}
 			if line != "" {
 				continue
