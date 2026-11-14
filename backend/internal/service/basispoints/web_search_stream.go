@@ -224,7 +224,7 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 			return err
 		}
 		searchCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		result, searchErr := waitForWebSearch(searchCtx, search, queries[0], state.emit)
+		result, searchErr := waitForWebSearch(searchCtx, search, queries[0])
 		cancel()
 		if searchErr != nil {
 			return searchErr
@@ -374,26 +374,20 @@ func annotateSearchCitations(output []any) {
 	}
 }
 
-// Heartbeats use the same writer goroutine as all response events.
-func waitForWebSearch(ctx context.Context, search WebSearchFunc, query string, emit func(string, object) error) (SearchResult, error) {
+// The gateway keeps sending SSE keepalives while this cancellable wait runs.
+func waitForWebSearch(ctx context.Context, search WebSearchFunc, query string) (SearchResult, error) {
 	type outcome struct {
 		result SearchResult
 		err    error
 	}
 	done := make(chan outcome, 1)
 	go func() { result, err := search(ctx, query); done <- outcome{result, err} }()
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
 	for {
 		select {
 		case value := <-done:
 			return value.result, value.err
 		case <-ctx.Done():
 			return SearchResult{}, ctx.Err()
-		case <-ticker.C:
-			if err := emit("response.in_progress", object{}); err != nil {
-				return SearchResult{}, err
-			}
 		}
 	}
 }
