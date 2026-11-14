@@ -104,7 +104,7 @@ jobs:
       CI: 'true'
       GOMAXPROCS: '2'
       GOFLAGS: '-p=2'
-      SUB2API_TEST_POSTGRES_DSN: 'host=127.0.0.1 port=5432 dbname=sub2api_test user=postgres password=postgres sslmode=disable TimeZone=UTC'
+      SUB2API_TEST_POSTGRES_DSN: 'postgres://postgres:postgres@127.0.0.1:5432/sub2api_test?sslmode=disable&TimeZone=UTC'
       SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:6379/0'
     steps:
       - uses: actions/checkout@v6
