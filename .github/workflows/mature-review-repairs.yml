@@ -1,0 +1,87 @@
+name: Mature operations independent review repairs
+on:
+  push:
+    branches: [feat/mature-channel-community-ops]
+permissions:
+  contents: read
+jobs:
+  f1:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [red, green]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Bind exact candidate tests and production blobs
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repair-f1"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/repair-f1/candidate.txt"
+          sha256sum backend/internal/qqbot/repair_f1_submission_test.go > "$RUNNER_TEMP/repair-f1/test-sha256.txt"
+          baseline=b98e6acb2dc772651b6a597d40cce311f96a2ba5
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for name in site_chat_retry.go site_chat.go client.go; do
+            path="backend/internal/qqbot/$name"
+            if [ "$PHASE" = red ]; then
+              git show "$baseline:$path" > "$path"
+              test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            fi
+            git hash-object "$path" >> "$RUNNER_TEMP/repair-f1/production-blobs.txt"
+          done
+      - name: Real generation POST submission oracle
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test ./internal/qqbot -run '^TestRepairF1' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/repair-f1/test.jsonl" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/repair-f1/exit-code.txt"
+          cat "$RUNNER_TEMP/repair-f1/test.jsonl"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'repair-f1'
+          raw = (p / 'test.jsonl').read_text()
+          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          outcomes = {e['Test']: e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass', 'fail', 'skip')}
+          cases = ['TestRepairF1SubmittedGenerationIsNotReplayed/' + protocol + '/' + failure for protocol in ('chat_completions', 'responses') for failure in ('headers_timeout', 'eof', 'truncated_body')]
+          assert not any(e['Action'] == 'skip' for e in events), 'No skipped evidence'
+          assert all(s not in raw.lower() for s in ('build failed', 'no tests to run', 'undefined:', 'panic:')), 'Invalid RED fixture/build'
+          assert outcomes.get('TestRepairF1DefinitelyUnsubmittedDialCanRetry') == 'pass', 'Safe unsubmitted control must pass'
+          if os.environ['PHASE'] == 'red':
+              assert int((p / 'exit-code.txt').read_text()) != 0
+              assert all(outcomes.get(case) == 'fail' for case in cases), outcomes
+              assert raw.count('F1 accepted generation POST must not be replayed after uncertain response') >= 6
+          else:
+              assert int((p / 'exit-code.txt').read_text()) == 0
+              assert all(outcomes.get(case) == 'pass' for case in cases), outcomes
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-f1-${{ matrix.phase }}-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-f1/
