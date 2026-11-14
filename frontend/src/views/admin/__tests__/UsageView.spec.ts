@@ -6,6 +6,7 @@ import UsageView from '../UsageView.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
+import { useAppStore } from '@/stores/app'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
 import { usagePerMinute } from '@/utils/usageRate'
 
@@ -100,15 +101,20 @@ vi.mock('@/api/admin/ops', () => ({
   listErrorLogs,
 }))
 
-vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({
-    cachedPublicSettings: own.settings,
-    showError: vi.fn(),
-    showWarning,
-    showSuccess: vi.fn(),
-    showInfo: vi.fn(),
-  }),
-}))
+vi.mock('@/stores/app', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  // Reactive like the real store, so settings that load later reach computed state.
+  const settings = reactive(own.settings) as Record<string, unknown>
+  return {
+    useAppStore: () => ({
+      cachedPublicSettings: settings,
+      showError: vi.fn(),
+      showWarning,
+      showSuccess: vi.fn(),
+      showInfo: vi.fn(),
+    }),
+  }
+})
 
 vi.mock('@/utils/format', () => ({
   formatReasoningEffort: (value: string | null | undefined) => value ?? '-',
@@ -289,8 +295,9 @@ describe('admin UsageView route filters', () => {
     wrapper.unmount()
   })
 
-  it('gives the trend tooltip the range, granularity and server zone its trend was loaded for', async () => {
-    Object.assign(own.settings, { server_timezone: 'Asia/Shanghai', server_utc_offset: '+08:00' })
+  it('gives the trend tooltip the range and granularity its trend was loaded for, and the server zone once settings load', async () => {
+    // Public settings arrive after the trend.
+    const settings = useAppStore().cachedPublicSettings as Record<string, unknown>
     try {
       const wrapper = mountRouteFilteredUsageView()
       vi.advanceTimersByTime(120)
@@ -300,13 +307,21 @@ describe('admin UsageView route filters', () => {
       expect(trend().props('showRate')).toBe(true)
       expect(trend().props('noticeUserId')).toBe(41)
       const firstRequest = getSnapshotV2.mock.lastCall![0]
-      expect(trend().props('rateContext')).toEqual({
+      const firstRequestContext = {
         window: { start: firstRequest.start_date, end: firstRequest.end_date, now: expect.any(Number) },
         granularity: firstRequest.granularity,
+      }
+      expect(trend().props('rateContext')).toEqual({ ...firstRequestContext, serverTimezone: null, serverUTCOffset: null })
+      expect(firstRequest.start_date).toBe(vm.filters.start_date)
+
+      Object.assign(settings, { server_timezone: 'Asia/Shanghai', server_utc_offset: '+08:00' })
+      await flushPromises()
+      expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+      expect(trend().props('rateContext')).toEqual({
+        ...firstRequestContext,
         serverTimezone: 'Asia/Shanghai',
         serverUTCOffset: '+08:00',
       })
-      expect(firstRequest.start_date).toBe(vm.filters.start_date)
 
       let resolveTrend!: (value: unknown) => void
       getSnapshotV2.mockReturnValueOnce(new Promise((resolve) => { resolveTrend = resolve }))
@@ -322,11 +337,12 @@ describe('admin UsageView route filters', () => {
       expect(trend().props('rateContext')).toMatchObject({
         window: { start: '2026-11-01', end: '2026-11-07' },
         granularity: newerRequest.granularity,
+        serverTimezone: 'Asia/Shanghai',
       })
       wrapper.unmount()
     } finally {
-      delete (own.settings as Record<string, unknown>).server_timezone
-      delete (own.settings as Record<string, unknown>).server_utc_offset
+      delete settings.server_timezone
+      delete settings.server_utc_offset
     }
   })
 

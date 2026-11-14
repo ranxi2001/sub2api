@@ -75,7 +75,9 @@ export const usagePerMinute = (total: number | null | undefined, window: UsageRa
 
 /**
  * What the Token usage trend needs to turn one bucket's totals into per-minute
- * rates. Like UsageRateWindow, it is captured when the trend is requested.
+ * rates. The window and granularity are captured when the trend is requested,
+ * like UsageRateWindow. The server zone is the current public setting: it may
+ * arrive after the trend, and without it the rates are unknown.
  */
 export interface UsageTrendRateContext {
   /** start_date/end_date sent with the trend request, and when it was sent. */
@@ -88,9 +90,18 @@ export interface UsageTrendRateContext {
   serverUTCOffset?: string | null
 }
 
+interface Interval {
+  start: number
+  end: number
+}
+
 const HOUR_BUCKET = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):00$/
 const UTC_OFFSET = /^([+-])(\d{2}):(\d{2})$/
-const DAY_MS = 86_400_000
+const HOUR_MS = 3_600_000
+// Every UTC offset in use lies within ±14 hours.
+const MAX_OFFSET_MS = 15 * HOUR_MS
+// Offset changes are found by sampling this often, then narrowed to the second.
+const OFFSET_SAMPLE_MS = 30 * 60_000
 const zoneFormatters = new Map<string, Intl.DateTimeFormat | null>()
 
 const zoneFormatter = (zone: string): Intl.DateTimeFormat | null => {
@@ -115,7 +126,7 @@ const zoneFormatter = (zone: string): Intl.DateTimeFormat | null => {
   return zoneFormatters.get(zone) ?? null
 }
 
-/** The zone's UTC offset in ms at an instant. */
+/** The zone's UTC offset in ms at an instant (whole seconds). */
 const zoneOffsetAt = (formatter: Intl.DateTimeFormat, instant: number): number => {
   const part: Record<string, number> = {}
   for (const { type, value } of formatter.formatToParts(instant)) part[type] = Number(value)
@@ -123,40 +134,69 @@ const zoneOffsetAt = (formatter: Intl.DateTimeFormat, instant: number): number =
   return wall - Math.floor(instant / 1000) * 1000
 }
 
-// The backend labels trend buckets with TO_CHAR in the server timezone.
-const serverWallTime = (ctx: UsageTrendRateContext, year: number, month: number, day: number, hour: number): number => {
-  const wall = Date.UTC(year, month - 1, day, hour)
-  const formatter = ctx.serverTimezone ? zoneFormatter(ctx.serverTimezone) : null
-  if (formatter) {
-    // A wall time repeated by a DST fold maps to two instants: the bucket
-    // starts at the first. One skipped by a DST gap maps to none: use the end
-    // of the gap, where the next bucket starts.
-    const before = wall - zoneOffsetAt(formatter, wall - DAY_MS)
-    const after = wall - zoneOffsetAt(formatter, wall + DAY_MS)
-    const valid = [before, after].filter((instant) => zoneOffsetAt(formatter, instant) === wall - instant)
-    return valid.length > 0 ? Math.min(...valid) : before
+/** Split [from, to) into spans that each keep one UTC offset. Bounds are whole seconds. */
+const offsetSpans = (formatter: Intl.DateTimeFormat, from: number, to: number): Array<Interval & { offset: number }> => {
+  const spans: Array<Interval & { offset: number }> = []
+  let spanStart = from
+  let offset = zoneOffsetAt(formatter, from)
+  for (let sampled = from; sampled < to;) {
+    const next = Math.min(sampled + OFFSET_SAMPLE_MS, to)
+    if (zoneOffsetAt(formatter, next) !== offset) {
+      let before = sampled
+      let after = next
+      while (after - before > 1000) {
+        const mid = before + Math.floor((after - before) / 2000) * 1000
+        if (zoneOffsetAt(formatter, mid) === offset) before = mid
+        else after = mid
+      }
+      spans.push({ start: spanStart, end: after, offset })
+      spanStart = after
+      offset = zoneOffsetAt(formatter, after)
+      sampled = after
+    } else {
+      sampled = next
+    }
   }
-  const offset = UTC_OFFSET.exec(ctx.serverUTCOffset ?? '')
-  if (offset) {
-    const offsetMs = (Number(offset[2]) * 60 + Number(offset[3])) * 60_000
-    return wall - (offset[1] === '-' ? -offsetMs : offsetMs)
-  }
-  // No server zone known: assume the browser's, as the API's calendar dates do.
-  return new Date(year, month - 1, day, hour).getTime()
+  spans.push({ start: spanStart, end: to, offset })
+  return spans
 }
 
-const trendBucketBounds = (label: string, ctx: UsageTrendRateContext): { start: number; end: number } | null => {
+/**
+ * The UTC intervals whose server wall-clock time lies in [wallStart, wallEnd),
+ * both given as Date.UTC of the wall time. The backend groups a trend bucket
+ * by its TO_CHAR label, so a DST fold puts two (or more) separate intervals in
+ * one bucket and a DST gap leaves out the skipped wall times. Null when the
+ * server zone is not known.
+ */
+const serverWallIntervals = (ctx: UsageTrendRateContext, wallStart: number, wallEnd: number): Interval[] | null => {
+  const formatter = ctx.serverTimezone ? zoneFormatter(ctx.serverTimezone) : null
+  if (!formatter) {
+    const offset = UTC_OFFSET.exec(ctx.serverUTCOffset ?? '')
+    if (!offset) return null
+    const offsetMs = (Number(offset[2]) * 60 + Number(offset[3])) * 60_000 * (offset[1] === '-' ? -1 : 1)
+    return [{ start: wallStart - offsetMs, end: wallEnd - offsetMs }]
+  }
+  const intervals: Interval[] = []
+  for (const span of offsetSpans(formatter, wallStart - MAX_OFFSET_MS, wallEnd + MAX_OFFSET_MS)) {
+    const start = Math.max(span.start, wallStart - span.offset)
+    const end = Math.min(span.end, wallEnd - span.offset)
+    if (end > start) intervals.push({ start, end })
+  }
+  return intervals
+}
+
+const trendBucketIntervals = (label: string, ctx: UsageTrendRateContext): Interval[] | null => {
   if (ctx.granularity === 'hour') {
     const hour = HOUR_BUCKET.exec(label)
     if (!hour) return null
     const [year, month, day, h] = hour.slice(1).map(Number)
-    return { start: serverWallTime(ctx, year, month, day, h), end: serverWallTime(ctx, year, month, day, h + 1) }
+    return serverWallIntervals(ctx, Date.UTC(year, month - 1, day, h), Date.UTC(year, month - 1, day, h + 1))
   }
   if (ctx.granularity === 'day') {
     const date = DATE_ONLY.exec(label)
     if (!date) return null
     const [year, month, day] = date.slice(1).map(Number)
-    return { start: serverWallTime(ctx, year, month, day, 0), end: serverWallTime(ctx, year, month, day + 1, 0) }
+    return serverWallIntervals(ctx, Date.UTC(year, month - 1, day), Date.UTC(year, month - 1, day + 1))
   }
   return null
 }
@@ -165,25 +205,30 @@ const trendBucketBounds = (label: string, ctx: UsageTrendRateContext): { start: 
  * Minutes a trend bucket covers within the requested range, up to when the
  * trend was requested: the first hour of a rolling range or the hour in
  * progress count only their own minutes. A range side that was not sent is
- * bounded by the bucket alone. Returns null when it cannot be worked out.
+ * bounded by the bucket alone. Returns null when it cannot be worked out,
+ * including while the server zone is unknown.
  */
 export const usageTrendBucketMinutes = (label: string, ctx: UsageTrendRateContext | null | undefined): number | null => {
   if (!ctx || !Number.isFinite(ctx.window.now)) return null
-  const bucket = trendBucketBounds(label, ctx)
-  if (!bucket) return null
-  let start = bucket.start
-  let end = Math.min(bucket.end, ctx.window.now)
+  let rangeStart = -Infinity
+  let rangeEnd = ctx.window.now
   if (ctx.window.start) {
-    const rangeStart = parseBoundary(ctx.window.start, false)
-    if (rangeStart == null) return null
-    start = Math.max(start, rangeStart)
+    const start = parseBoundary(ctx.window.start, false)
+    if (start == null) return null
+    rangeStart = start
   }
   if (ctx.window.end) {
-    const rangeEnd = parseBoundary(ctx.window.end, true)
-    if (rangeEnd == null) return null
-    end = Math.min(end, rangeEnd)
+    const end = parseBoundary(ctx.window.end, true)
+    if (end == null) return null
+    rangeEnd = Math.min(rangeEnd, end)
   }
-  const minutes = (end - start) / 60_000
+  const intervals = trendBucketIntervals(label, ctx)
+  if (!intervals) return null
+  let covered = 0
+  for (const interval of intervals) {
+    covered += Math.max(0, Math.min(interval.end, rangeEnd) - Math.max(interval.start, rangeStart))
+  }
+  const minutes = covered / 60_000
   return Number.isFinite(minutes) && minutes > 0 ? minutes : null
 }
 

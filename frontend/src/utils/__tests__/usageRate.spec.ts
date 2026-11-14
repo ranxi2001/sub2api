@@ -146,12 +146,58 @@ describe('usageRate', () => {
       expect(usageTrendBucketMinutes('2026-11-13 05:00', ctx)).toBe(45)
     })
 
-    it('reads labels in browser time when the server zone is unknown', () => {
-      const ctx = {
-        granularity: 'hour',
-        window: { start: new Date(localMs(2026, 11, 13, 17, 20)).toISOString(), end: '', now: localMs(2026, 11, 14) },
+    it('has no rate while the server zone is unknown instead of guessing the browser zone', () => {
+      for (const zone of [{}, { serverTimezone: null, serverUTCOffset: null }, { serverTimezone: 'Local' }]) {
+        expect(usageTrendBucketMinutes('2026-11-13 18:00', { ...rolling, serverTimezone: undefined, serverUTCOffset: undefined, ...zone }))
+          .toBeNull()
       }
-      expect(usageTrendBucketMinutes('2026-11-13 17:00', ctx)).toBe(40)
+    })
+
+    describe('a fold that repeats two hours (Antarctica/Troll, +02 → +00 at 2026-10-25 01:00Z)', () => {
+      const troll = (window: { start?: string; end?: string; now: number }, granularity = 'hour') => ({
+        serverTimezone: 'Antarctica/Troll',
+        granularity,
+        window: { start: '', end: '', ...window },
+      })
+      const later = Date.parse('2026-10-27T00:00:00Z')
+
+      it('sums the separate UTC hours behind one label', () => {
+        // 01:00 is 23:00–00:00Z and 01:00–02:00Z; 02:00 is 00:00–01:00Z and 02:00–03:00Z.
+        expect(usageTrendBucketMinutes('2026-10-25 00:00', troll({ now: later }))).toBe(60)
+        expect(usageTrendBucketMinutes('2026-10-25 01:00', troll({ now: later }))).toBe(120)
+        expect(usageTrendBucketMinutes('2026-10-25 02:00', troll({ now: later }))).toBe(120)
+        expect(usageTrendBucketMinutes('2026-10-25 03:00', troll({ now: later }))).toBe(60)
+        expect(usageTrendBucketMinutes('2026-10-25', troll({ now: later }, 'day'))).toBe(26 * 60)
+      })
+
+      it('clips each UTC hour separately', () => {
+        // Only the second 01:00 lies in the range.
+        expect(usageTrendBucketMinutes('2026-10-25 01:00', troll({ start: '2026-10-25T01:00:00Z', now: later }))).toBe(60)
+        // Half of the first 01:00 plus all of the second.
+        expect(usageTrendBucketMinutes('2026-10-25 01:00', troll({ start: '2026-10-24T23:30:00Z', now: later }))).toBe(90)
+        // The range ends between the two 01:00 hours: the gap (local 02:00) is not counted.
+        expect(usageTrendBucketMinutes('2026-10-25 01:00', troll({ end: '2026-10-25T01:30:00Z', now: later }))).toBe(90)
+        // Requested during the second 02:00: the first is complete, the second half done.
+        expect(usageTrendBucketMinutes('2026-10-25 02:00', troll({ now: Date.parse('2026-10-25T02:30:00Z') }))).toBe(90)
+      })
+
+      it('leaves out the two skipped hours of the spring gap', () => {
+        const spring = Date.parse('2026-03-31T00:00:00Z')
+        expect(usageTrendBucketMinutes('2026-03-29 00:00', troll({ now: spring }))).toBe(60)
+        expect(usageTrendBucketMinutes('2026-03-29 03:00', troll({ now: spring }))).toBe(60)
+        expect(usageTrendBucketMinutes('2026-03-29', troll({ now: spring }, 'day'))).toBe(22 * 60)
+      })
+    })
+
+    it('handles a half-hour fold (Australia/Lord_Howe, 02:00 +11 → 01:30 +10:30 on 2026-04-05)', () => {
+      const ctx = {
+        serverTimezone: 'Australia/Lord_Howe',
+        granularity: 'hour',
+        window: { start: '', end: '', now: Date.parse('2026-04-06T00:00:00Z') },
+      }
+      expect(usageTrendBucketMinutes('2026-04-05 01:00', ctx)).toBe(90)
+      expect(usageTrendBucketMinutes('2026-04-05 02:00', ctx)).toBe(60)
+      expect(usageTrendBucketMinutes('2026-04-05', { ...ctx, granularity: 'day' })).toBe(24.5 * 60)
     })
 
     it('bounds a bucket by itself on a range side that was not sent', () => {

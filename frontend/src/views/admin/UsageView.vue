@@ -265,7 +265,14 @@ type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageStatsWindow = ref<UsageRateWindow | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
-const trendData = ref<TrendDataPoint[]>([]); const trendRateContext = ref<UsageTrendRateContext | null>(null); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
+const trendData = ref<TrendDataPoint[]>([]); const trendRateRequest = ref<Pick<UsageTrendRateContext, 'window' | 'granularity'> | null>(null); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
+// Bucket labels are in the server zone. Public settings can load after the trend,
+// so read them live; until then the tooltip shows the rates as unknown.
+const trendRateContext = computed<UsageTrendRateContext | null>(() => trendRateRequest.value && {
+  ...trendRateRequest.value,
+  serverTimezone: appStore.cachedPublicSettings?.server_timezone ?? null,
+  serverUTCOffset: appStore.cachedPublicSettings?.server_utc_offset ?? null,
+})
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
 const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
@@ -583,12 +590,7 @@ const loadChartData = async () => {
     const trendStart = filters.value.start_date || startDate.value
     const trendEnd = filters.value.end_date || endDate.value
     // Pair the trend with the range, granularity and time it was requested for (tooltip RPM/TPM).
-    const rateContext: UsageTrendRateContext = {
-      window: { start: trendStart, end: trendEnd, now: Date.now() },
-      granularity: granularity.value,
-      serverTimezone: appStore.cachedPublicSettings?.server_timezone,
-      serverUTCOffset: appStore.cachedPublicSettings?.server_utc_offset,
-    }
+    const rateRequest = { window: { start: trendStart, end: trendEnd, now: Date.now() }, granularity: granularity.value }
     const snapshot = await (props.observerMode ? observerUsageAPI.getSnapshotV2 : adminAPI.dashboard.getSnapshotV2)({
       start_date: trendStart,
       end_date: trendEnd,
@@ -612,7 +614,7 @@ const loadChartData = async () => {
     })
     if (seq !== chartReqSeq) return
     trendData.value = snapshot.trend || []
-    trendRateContext.value = rateContext
+    trendRateRequest.value = rateRequest
     groupStats.value = snapshot.groups || []
   } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
 }
