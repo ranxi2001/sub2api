@@ -5,7 +5,7 @@
   >
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-700">
       <div>
-        <h3 class="text-sm font-semibold">{{ t('accountOps.accountRules') }} <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.accountOpsTeam" :user-id="userId" /></h3>
+        <h3 class="text-sm font-semibold">{{ t('accountOps.accountRules') }} <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.accountOpsProviderBalance" :user-id="userId" /></h3>
         <p class="mt-1 text-xs text-gray-500">{{ t('accountOps.rulesOnceSummary') }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
@@ -63,7 +63,7 @@
               <p class="mt-1 max-w-72 truncate text-xs text-gray-500" :title="row.memberNames">{{ row.memberNames || t('accountOps.noAccountGroups') }}</p>
               <a v-if="row.group.provider_id" href="/admin/channel-operations" class="mt-1 inline-block text-xs text-primary-600">{{ t('accountOps.providerBalanceSource') }} #{{ row.group.provider_id }}</a>
               <p v-if="row.balanceAccounts.length > 1" class="mt-1 text-xs text-gray-500">{{ t('accountOps.sharedBalanceHint') }}</p>
-              <AccountOpsLifecycleSelector v-for="account in row.quotaAccounts" :key="account.account_id" :account="account" :disabled="selectionUnavailable" @updated="emit('refresh')" />
+              <AccountOpsLifecycleSelector v-for="account in row.quotaAccounts" :key="account.account_id" :account="account" :user-id="userId" :disabled="selectionUnavailable" @updated="emit('refresh')" />
             </td>
             <td class="px-4 py-4 text-xs text-gray-500">
               <span v-if="row.balanceAccounts.length" class="block">{{ t('accountOps.balanceMetric') }}</span>

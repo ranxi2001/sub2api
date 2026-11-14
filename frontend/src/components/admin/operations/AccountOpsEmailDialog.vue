@@ -8,7 +8,7 @@
           <span class="block text-xs text-gray-500">{{ t('accountOps.channelNameHint') }}</span>
         </label>
         <label class="block space-y-2 text-sm" for="account-ops-email">
-          <span>{{ t('accountOps.recipient') }} <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.accountOpsTeam" :user-id="userId" /></span>
+          <span>{{ t('accountOps.recipient') }} <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.accountOpsMultipleEmails" :user-id="userId" /></span>
           <textarea id="account-ops-email" v-model.trim="recipient" rows="4" maxlength="5120" required autocomplete="off" spellcheck="false" placeholder="ops@example.com&#10;oncall@example.com" class="input w-full" />
         </label>
         <p class="text-xs leading-5 text-gray-500">{{ t('accountOps.recipientHint') }}</p>
