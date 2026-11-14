@@ -815,6 +815,7 @@ describe('TypeSafe optional category contract', () => {
 
 describe('RiskControlView upstream scope parent integration', () => {
   it('saves the full hidden selection, reloads persisted values, and discards cancelled edits', async () => {
+    getConfig.mockReset(); updateConfig.mockReset(); listAccounts.mockReset(); showError.mockReset()
     let stored = { ...baseConfig(), upstream_account_scope: 'selected' as const, upstream_account_ids: [999, 121] }
     getConfig.mockImplementation(async () => structuredClone(stored))
     getStatus.mockResolvedValue(runtimeStatus())
@@ -822,7 +823,7 @@ describe('RiskControlView upstream scope parent integration', () => {
     getProxies.mockResolvedValue([])
     listLogs.mockResolvedValue({ items: [], total: 0, page: 1, pages: 1 })
     listAccounts.mockResolvedValue({ items: [{ id: 1, name: 'One', platform: 'openai', type: 'oauth' }], page: 1, pages: 3, total: 125 })
-    updateConfig.mockImplementation(async payload => { stored = { ...stored, ...payload }; return structuredClone(stored) })
+    updateConfig.mockImplementation(async payload => { stored = { ...stored, ...JSON.parse(JSON.stringify(payload)) }; return structuredClone(stored) })
     const create = () => mount(RiskControlView, { global: { stubs: { AppLayout: AppLayoutStub, BaseDialog: BaseDialogStub, Icon: true, Select: true, Toggle: true, Pagination: true, ModelWhitelistSelector: ModelWhitelistSelectorStub, ProxySelector: true } } })
     let wrapper = create(); await flushPromises()
     await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
@@ -831,6 +832,8 @@ describe('RiskControlView upstream scope parent integration', () => {
     await wrapper.get('#moderation-upstream-search').setValue('#125'); await flushPromises()
     expect(listAccounts.mock.lastCall?.[2]).toMatchObject({ search: '#125' })
     await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click'); await flushPromises()
+    expect(showError).not.toHaveBeenCalled()
+    expect(stored.upstream_account_scope).toBe('selected')
     expect(stored.upstream_account_ids).toEqual([999, 121, 1])
     wrapper.unmount(); wrapper = create(); await flushPromises()
     await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')

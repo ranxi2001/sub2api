@@ -93,7 +93,7 @@ jobs:
           cd backend
           go test -race -tags=unit ./internal/handler ./internal/handler/admin ./internal/service ./internal/securityaudit -run 'TestModerationUpstream|TestOpenAIResponsesWebSocket_ContentModeration|Test.*SecurityAudit|Test.*Queue.*Auth|Test.*Turn.*Admission|TestAPIKeyAdmissionRealForwardingHandlersRejectBeforeUpstream|TestOpenAIWSRevalidationFollowup|TestOpenAIWSRevalidationNativeImagePermissionTiming' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/moderation-scope-green/green.log"
           if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|fatal error:|DATA RACE|signal:|segmentation fault' "$RUNNER_TEMP/moderation-scope-green/green.log"; then exit 1; fi
-          for name in TestModerationUpstreamScopeUnselectedDoesNotAudit TestModerationUpstreamHTTPSelectionAndFailover TestModerationUpstreamWebSocketModesAndTurns TestModerationUpstreamPersistenceAndValidation TestModerationUpstreamAdminSaveReloadAndAuthorization TestModerationUpstreamWebSocketTurnIdentityAfterFailover TestModerationUpstreamImagesJSONKeepaliveAndAsync TestModerationUpstreamSystemOneLocalDenial; do
+          for name in TestModerationUpstreamScopeUnselectedDoesNotAudit TestModerationUpstreamHTTPSelectionAndFailover TestModerationUpstreamWebSocketModesAndTurns TestModerationUpstreamPersistenceAndValidation TestModerationUpstreamAdminSaveReloadAndAuthorization TestModerationUpstreamWebSocketTurnIdentityAfterFailover TestModerationUpstreamImagesJSONKeepaliveAndAsync TestModerationUpstreamSystemOneLocalDenial TestModerationUpstreamHTTPDispatchFamilies; do
             grep -q -- "--- PASS: $name" "$RUNNER_TEMP/moderation-scope-green/green.log"
           done
       - uses: actions/upload-artifact@v7
@@ -101,3 +101,26 @@ jobs:
         with:
           name: moderation-scope-green-${{ github.sha }}
           path: ${{ runner.temp }}/moderation-scope-green
+  postgres-persistence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Authenticated handler and real PostgreSQL persistence
+        run: |
+          mkdir -p "$RUNNER_TEMP/moderation-scope-postgres"
+          git rev-parse HEAD > "$RUNNER_TEMP/moderation-scope-postgres/head.txt"
+          set -o pipefail
+          cd backend
+          go test -tags=integration ./internal/repository -run '^TestModerationUpstreamPostgresAdminRoundTrip$' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/moderation-scope-postgres/postgres.log"
+          if grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|panic:|fatal error:|DATA RACE|signal:|segmentation fault' "$RUNNER_TEMP/moderation-scope-postgres/postgres.log"; then exit 1; fi
+          grep -q -- '--- PASS: TestModerationUpstreamPostgresAdminRoundTrip' "$RUNNER_TEMP/moderation-scope-postgres/postgres.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: moderation-scope-postgres-${{ github.sha }}
+          path: ${{ runner.temp }}/moderation-scope-postgres

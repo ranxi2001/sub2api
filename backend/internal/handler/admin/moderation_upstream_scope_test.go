@@ -32,6 +32,10 @@ type moderationUpstreamUsers struct {
 	actor *service.User
 }
 
+func (r moderationUpstreamUsers) GetUserAvatar(context.Context, int64) (*service.UserAvatar, error) {
+	return nil, nil
+}
+
 func (r moderationUpstreamUsers) GetByID(context.Context, int64) (*service.User, error) {
 	return r.actor, nil
 }

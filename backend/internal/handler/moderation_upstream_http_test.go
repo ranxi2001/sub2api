@@ -100,7 +100,7 @@ func TestModerationUpstreamHTTPSelectionAndFailover(t *testing.T) {
 					c, rec := newOpenAIResponsesFailoverTestContext(t, context.Background())
 					c.Request.Body = io.NopCloser(strings.NewReader(fmt.Sprintf(`{"model":"gpt-5.1","stream":%t,"input":"frozen original input"}`, stream)))
 					h.Responses(c)
-					if scenario == "deny" {
+					if scenario == "deny" || scenario == "multi-group" {
 						require.Zero(t, h.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount, "local deny must not create an upstream health sample")
 						require.Equal(t, 1, strings.Count(rec.Body.String(), `"error":`), "local deny emits exactly one error")
 						require.True(t, json.Valid(rec.Body.Bytes()))
@@ -118,7 +118,7 @@ func TestModerationUpstreamHTTPSelectionAndFailover(t *testing.T) {
 						} else {
 							require.Zero(t, writesB.Load())
 							require.Contains(t, rec.Body.String(), "content_policy_violation")
-							if scenario == "deny" {
+							if scenario == "deny" || scenario == "multi-group" {
 								require.Zero(t, writesA.Load())
 							} else {
 								require.Positive(t, writesA.Load(), rec.Body.String())
