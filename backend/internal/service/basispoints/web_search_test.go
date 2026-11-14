@@ -348,3 +348,15 @@ func TestWebSearchRequiredAcceptsEitherDeclaredClientOrSearch(t *testing.T) {
 		})
 	}
 }
+
+func TestWebSearchHistorySurvivesAccountSearchSwitchOff(t *testing.T) {
+	source := testSource()
+	source["input"] = []any{object{"type": "web_search_call", "action": object{"query": "earlier", "sources": []any{}}}, message("user", "No more searches")}
+	raw, _ := json.Marshal(source)
+	body, plan, err := NormalizeWebSearchRequest(raw, false, false)
+	require.NoError(t, err)
+	require.Nil(t, plan)
+	_, _, err = Prepare(body, "scope", nil)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "result body unavailable")
+}

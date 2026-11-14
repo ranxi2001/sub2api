@@ -1,6 +1,7 @@
 package basispoints
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -41,7 +42,7 @@ func searchRequestError(reason string) error {
 // NormalizeWebSearchRequest removes hosted declarations before catalog caching.
 // Disabled accounts retain the existing native routing/omission behavior.
 func NormalizeWebSearchRequest(raw []byte, enabled, automatic bool) ([]byte, *SearchPlan, error) {
-	if !enabled {
+	if !enabled && !bytes.Contains(raw, []byte(`"web_search_call"`)) {
 		return raw, nil, nil
 	}
 	var source object
@@ -58,6 +59,10 @@ func NormalizeWebSearchRequest(raw []byte, enabled, automatic bool) ([]byte, *Se
 				items[i] = object{"type": "message", "role": "assistant", "content": []any{object{"type": "output_text", "text": "Historical web search metadata (result body unavailable): " + string(metadata)}}}
 			}
 		}
+	}
+	if !enabled {
+		encoded, err := json.Marshal(source)
+		return encoded, nil, err
 	}
 	tools, ok := source["tools"].([]any)
 	if source["tools"] != nil && !ok {
