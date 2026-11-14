@@ -313,6 +313,8 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
       - name: Frontend typecheck and critical vitest
+        env:
+          NODE_OPTIONS: ${{ (github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation') && '--max-old-space-size=4096' || '' }}
         run: make test-frontend
       - name: Issue854 transport failure presentation
         if: github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation'
