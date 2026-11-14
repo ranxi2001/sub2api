@@ -16,6 +16,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
+	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -191,25 +192,7 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	}
 	previousStatus := o.Status
 	now := time.Now()
-	grace := now.Add(-paymentGraceMinutes * time.Minute)
-	if pk == payment.TypeBEpusdt && psSnapshotStringValue(o.ProviderSnapshot["collection_mode"]) == "embedded" {
-		// Match the collection engine's three-hour historical scan window.
-		// Chain confirmations and callback retries can exceed the fiat grace.
-		grace = now.Add(-bepusdtOrderRecoveryWindow)
-	}
-	expired := paymentorder.And(paymentorder.StatusEQ(OrderStatusExpired), paymentorder.UpdatedAtGTE(grace))
-	if payment.GetBasePaymentType(pk) == payment.TypeEasyPay {
-		expired = paymentorder.And(paymentorder.StatusEQ(OrderStatusExpired), paymentorder.ExpiresAtGTE(now.Add(-easyPayOrderRecoveryWindow)))
-	}
-	eligible := paymentorder.Or(paymentorder.StatusEQ(OrderStatusPending), paymentorder.StatusEQ(OrderStatusCancelled), expired)
-	if payment.GetBasePaymentType(pk) == payment.TypeEasyPay {
-		eligible = paymentorder.And(eligible, paymentorder.ExpiresAtGTE(now.Add(-easyPayOrderRecoveryWindow)))
-		if background, _ := ctx.Value(easyPayBackgroundRecoveryKey{}).(bool); background {
-			// Recheck at the atomic update boundary: a manual cancellation or
-			// refund racing a scan must not be reversed by the worker.
-			eligible = paymentorder.And(eligible, paymentorder.StatusIn(OrderStatusPending, OrderStatusExpired))
-		}
-	}
+	eligible := paymentRecoveryEligibility(ctx, o, pk, now)
 	c, err := s.entClient.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),
 		eligible,
@@ -236,6 +219,31 @@ func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, trad
 	}
 	s.writeAuditLog(ctx, o.ID, "ORDER_PAID", pk, map[string]any{"tradeNo": tradeNo, "paidAmount": paid})
 	return s.executeFulfillment(ctx, o.ID)
+}
+
+// One policy for canonical and coupon confirmations. Coupon callers evaluate
+// this predicate while holding the order row lock in their financial transaction.
+func paymentRecoveryEligibility(ctx context.Context, o *dbent.PaymentOrder, pk string, now time.Time) predicate.PaymentOrder {
+	grace := now.Add(-paymentGraceMinutes * time.Minute)
+	if pk == payment.TypeBEpusdt && psSnapshotStringValue(o.ProviderSnapshot["collection_mode"]) == "embedded" {
+		// Match the collection engine's three-hour historical scan window.
+		// Chain confirmations and callback retries can exceed the fiat grace.
+		grace = now.Add(-bepusdtOrderRecoveryWindow)
+	}
+	expired := paymentorder.And(paymentorder.StatusEQ(OrderStatusExpired), paymentorder.UpdatedAtGTE(grace))
+	if payment.GetBasePaymentType(pk) == payment.TypeEasyPay {
+		expired = paymentorder.And(paymentorder.StatusEQ(OrderStatusExpired), paymentorder.ExpiresAtGTE(now.Add(-easyPayOrderRecoveryWindow)))
+	}
+	eligible := paymentorder.Or(paymentorder.StatusEQ(OrderStatusPending), paymentorder.StatusEQ(OrderStatusCancelled), expired)
+	if payment.GetBasePaymentType(pk) == payment.TypeEasyPay {
+		eligible = paymentorder.And(eligible, paymentorder.ExpiresAtGTE(now.Add(-easyPayOrderRecoveryWindow)))
+		if background, _ := ctx.Value(easyPayBackgroundRecoveryKey{}).(bool); background {
+			// Recheck at the atomic update boundary: a manual cancellation or
+			// refund racing a scan must not be reversed by the worker.
+			eligible = paymentorder.And(eligible, paymentorder.StatusIn(OrderStatusPending, OrderStatusExpired))
+		}
+	}
+	return eligible
 }
 
 func (s *PaymentService) alreadyProcessed(ctx context.Context, o *dbent.PaymentOrder) error {
@@ -1007,7 +1015,8 @@ func (s *PaymentService) RetryFulfillment(ctx context.Context, oid int64) error 
 	if o.Status == OrderStatusCompleted {
 		return infraerrors.BadRequest("INVALID_STATUS", "order already completed")
 	}
-	if o.Status != OrderStatusFailed && o.Status != OrderStatusPaid && o.Status != OrderStatusRecharging {
+	recoveryReview, _ := o.ProviderSnapshot["coupon_review_required"].(bool)
+	if o.Status != OrderStatusFailed && o.Status != OrderStatusPaid && o.Status != OrderStatusRecharging && !(recoveryReview && (o.Status == OrderStatusCancelled || o.Status == OrderStatusExpired)) {
 		return infraerrors.BadRequest("INVALID_STATUS", "only paid, failed, and recoverable recharging orders can retry")
 	}
 	if !isSupportedPaymentOrderType(o.OrderType) {
@@ -1020,7 +1029,7 @@ func (s *PaymentService) RetryFulfillment(ctx context.Context, oid int64) error 
 		}
 		defer func() { _ = tx.Rollback() }()
 		// An explicit admin retry honors the original promised benefit.
-		result, e := tx.ExecContext(ctx, `UPDATE payment_orders SET provider_snapshot=provider_snapshot-'coupon_review_required' WHERE id=$1 AND status='FAILED' AND paid_at IS NOT NULL AND provider_snapshot->>'coupon_review_required'='true'`, oid)
+		result, e := tx.ExecContext(ctx, `UPDATE payment_orders SET status='PAID',provider_snapshot=provider_snapshot-'coupon_review_required'-'coupon_recovery_reason' WHERE id=$1 AND status IN ('FAILED','CANCELLED','EXPIRED') AND paid_at IS NOT NULL AND provider_snapshot->>'coupon_review_required'='true'`, oid)
 		if e != nil {
 			return e
 		}
@@ -1032,7 +1041,14 @@ func (s *PaymentService) RetryFulfillment(ctx context.Context, oid int64) error 
 			return infraerrors.Conflict("INVALID_STATUS", "order status changed during coupon review")
 		}
 
-		if _, e = tx.ExecContext(ctx, `UPDATE recharge_coupon_orders SET status='honored',used_at=NOW() WHERE order_id=$1 AND status='conflict'`, oid); e != nil {
+		// If a recovery hold released an otherwise available coupon, consume it
+		// before honoring its benefit. A reused/revoked coupon retains the
+		// established explicit administrator conflict-honor policy.
+		if consumeErr := consumeOrderCoupon(ctx, tx.Client(), o); consumeErr != nil && !errors.Is(consumeErr, errCouponPaymentConflict) {
+			return consumeErr
+		}
+
+		if _, e = tx.ExecContext(ctx, `UPDATE recharge_coupon_orders SET status='honored',used_at=NOW() WHERE order_id=$1 AND status IN ('conflict','released')`, oid); e != nil {
 			return e
 		}
 		if _, e = tx.ExecContext(ctx, `INSERT INTO payment_audit_logs(order_id,action,operator,detail,created_at) VALUES($1,'COUPON_CONFLICT_HONORED','admin','{"reason":"manual retry approved original coupon benefit"}',NOW())`, fmt.Sprint(oid)); e != nil {

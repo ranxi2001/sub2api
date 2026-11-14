@@ -10,6 +10,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/internal/coupon"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -444,10 +445,38 @@ func (s *PaymentService) confirmCouponOrder(ctx context.Context, o *dbent.Paymen
 		}
 		return s.alreadyProcessed(ctx, current)
 	}
-	switch status {
-	case OrderStatusPending, OrderStatusExpired, OrderStatusCancelled, OrderStatusFailed:
-	default:
-		return infraerrors.Conflict("INVALID_STATUS", "order cannot confirm payment")
+	// Reload the full persisted snapshot under the same row lock; a stale
+	// caller must not carry pre-cancellation status or renew a recovery window.
+	current, err := tx.PaymentOrder.Get(ctx, o.ID)
+	if err != nil {
+		return err
+	}
+	o = current
+	now := time.Now()
+	eligible, err := tx.PaymentOrder.Query().Where(paymentorder.IDEQ(o.ID), paymentRecoveryEligibility(ctx, o, pk, now)).Exist(ctx)
+	if err != nil {
+		return err
+	}
+	if !eligible {
+		// A verified payment remains evidence, but never overrides a committed
+		// cancellation or an elapsed canonical recovery deadline automatically.
+		snapshot := make(map[string]any, len(o.ProviderSnapshot)+2)
+		for key, value := range o.ProviderSnapshot {
+			snapshot[key] = value
+		}
+		snapshot["coupon_review_required"] = true
+		snapshot["coupon_recovery_reason"] = "canonical_recovery_ineligible"
+		if _, err = tx.PaymentOrder.UpdateOneID(o.ID).SetPayAmount(paid).SetPaymentTradeNo(tradeNo).SetPaidAt(now).SetProviderSnapshot(snapshot).Save(ctx); err != nil {
+			return err
+		}
+		if err = releaseOrderCoupon(ctx, tx.Client(), o.ID); err != nil {
+			return err
+		}
+		detail, _ := json.Marshal(map[string]any{"tradeNo": tradeNo, "paidAmount": paid, "provider": pk, "previous_status": status, "expires_at": o.ExpiresAt, "reason": "canonical recovery policy requires manual reconciliation"})
+		if _, err = tx.ExecContext(ctx, `INSERT INTO payment_audit_logs(order_id,action,operator,detail,created_at) VALUES($1,'PAYMENT_RECOVERY_REVIEW_REQUIRED','system',$2,NOW())`, fmt.Sprint(o.ID), string(detail)); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	err = consumeOrderCoupon(ctx, tx.Client(), o)
 	conflict := errors.Is(err, errCouponPaymentConflict)
