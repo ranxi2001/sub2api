@@ -19,6 +19,7 @@ import {createApp,h} from 'vue';import {createPinia} from 'pinia';
 import Badge from '/src/components/common/NewFeatureBadge.vue';
 import {NEW_FEATURE_NOTICES as ids} from '/src/constants/newFeatureNotices.ts';
 import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';import '/src/style.css';
+async function mountNotices(){
 await loadLocaleMessages('en');i18n.global.locale.value='en';
 // Future C is deliberately a test-only registered ID, not a product announcement.
 const registry={A:ids.vipAutoCredit,B:ids.tempUnschedStreamCountWindow,C:'fixture-pr838-future-announcement-C'};
@@ -29,6 +30,8 @@ createApp({render:()=>h('main',{class:'p-6 space-y-4'},[
 h('h1',{},'CI fixture · actual badge/store · simulated announcement epochs'),
 ...entries.map((id,i)=>h('section',{'data-testid':'notice-'+id+'-'+i},[h('span',{},id),h(Badge,{noticeId:registry[id],userId:user})]))
 ])}).use(createPinia()).use(i18n).mount('#app');
+}
+void mountNotices();
 `, { flag: 'wx' })
     }
     process.chdir(root)
