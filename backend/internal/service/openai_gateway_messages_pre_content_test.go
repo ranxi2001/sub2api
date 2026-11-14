@@ -163,3 +163,26 @@ func TestWriteAnthropicErrorAfterCommittedSSE(t *testing.T) {
 		require.False(t, strings.HasPrefix(line, "{"), "bare JSON line in SSE body: %q", line)
 	}
 }
+
+func TestForwardAsAnthropic_OpenCodeUnsupportedModelAfterCommittedSSEIsSSEError(t *testing.T) {
+	rec, c, body := newPreContentContext()
+	body = []byte(`{"model":"gemini-3-pro","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	setSSEHeaders(c)
+	_, err := io.WriteString(c.Writer, "event: ping\ndata: {\"type\":\"ping\"}\n\n")
+	require.NoError(t, err)
+	account := &Account{
+		ID: 1, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "http://upstream.example"},
+	}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+
+	_, err = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+
+	require.Error(t, err)
+	out := rec.Body.String()
+	lastEvent := out[strings.LastIndex(strings.TrimRight(out, "\n"), "\n\n")+2:]
+	require.True(t, strings.HasPrefix(lastEvent, "event: error\ndata: {"), "last event: %q", lastEvent)
+	for _, line := range strings.Split(out, "\n") {
+		require.False(t, strings.HasPrefix(line, "{"), "bare JSON line in SSE body: %q", line)
+	}
+}
