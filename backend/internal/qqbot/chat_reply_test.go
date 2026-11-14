@@ -131,7 +131,7 @@ func TestChatReplyUnwrapsAcrossProtocols(t *testing.T) {
 						}
 					}))
 					defer server.Close()
-					s := New(nil, nil, false, nil)
+					s := newMatureFixtureService(nil, nil, false, nil)
 					c := DefaultConfig()
 					c.BaseURL, c.ChatProtocol = server.URL, protocol
 					got, in, out, err := s.chatReply(context.Background(), c, []Message{{Role: "user", Content: "你好"}})

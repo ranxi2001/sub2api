@@ -153,7 +153,7 @@ func TestLotteryChancePrizeConcurrentDuplicateMessagesGrantOnce(t *testing.T) {
 	s, db, c, uid, cfg := lotteryFixture(t, 10)
 	cfg.Prizes = []LotteryPrize{{Name: "再来一次", Chances: 1, ProbabilityBPS: 10000}}
 	require.NoError(t, s.SaveLotteryConfig(ctx, cfg))
-	s2 := New(db, testEncryptor{}, true, nil)
+	s2 := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	var wg sync.WaitGroup
 	errs := make(chan error, 16)
 	for i := range 16 {

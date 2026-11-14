@@ -180,7 +180,7 @@ func TestLotteryBatchFailureRollsBackEarlierDrawsAndGuaranteeProgress(t *testing
 func TestLotteryBatchConcurrentRequestsAndDuplicateMessagesCannotOverspend(t *testing.T) {
 	ctx := context.Background()
 	s, db, c, uid, _ := lotteryFixture(t, 70)
-	s2 := New(db, testEncryptor{}, true, nil)
+	s2 := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	type outcome struct {
 		text string
 		err  error

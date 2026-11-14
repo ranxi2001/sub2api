@@ -53,7 +53,7 @@ func TestAutomaticNotificationMentionAllDelivery(t *testing.T) {
 				_, _ = w.Write([]byte(`{"id":"notice"}`))
 			}))
 			defer server.Close()
-			s := New(nil, nil, false, nil)
+			s := newMatureFixtureService(nil, nil, false, nil)
 			s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 			j := Job{AppID: "app", GroupID: "group", MemberID: "winner", EventType: tc.event}
 			require.NoError(t, s.sendPriceNotification(context.Background(), c, j, "通知正文"))
@@ -84,7 +84,7 @@ func TestAutomaticNotificationMentionAllLengthBoundary(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"notice"}`))
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	j := Job{AppID: "app", GroupID: "group", EventType: priceNotificationEvent}
 	limit := 1800 - len([]rune("<qqbot-at-everyone />\n"))

@@ -56,7 +56,7 @@ func TestGrowthAutomaticGrantsRebindingAndProgress(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			bot := New(db, testEncryptor{}, true, nil)
+			bot := newMatureFixtureService(db, testEncryptor{}, true, nil)
 			_, grants, err := bot.processGrowthTasks(ctx, c, j, time.Now(), true)
 			if err != nil {
 				failed.Add(1)

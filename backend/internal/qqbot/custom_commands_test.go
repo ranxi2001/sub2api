@@ -73,7 +73,7 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 	}))
 	defer server.Close()
 	// A nil database proves fixed replies need neither binding nor AI usage checks.
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	c.CustomCommands = []CustomCommand{

@@ -30,7 +30,7 @@ func TestQQBotJobClaimsStayBoundedAcrossInstances(t *testing.T) {
 			enqueueSharedTestEvent(t, s, c, e, groupAtMessageCreate)
 		}
 	}
-	instances := []*Service{s, New(db, testEncryptor{}, true, nil)}
+	instances := []*Service{s, newMatureFixtureService(db, testEncryptor{}, true, nil)}
 	type result struct {
 		job Job
 		err error

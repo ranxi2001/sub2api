@@ -30,7 +30,7 @@ func helpTestSender(t *testing.T) (*Service, *[]qqTestReply) {
 		}
 	}))
 	t.Cleanup(server.Close)
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	return s, &replies
 }
@@ -186,7 +186,7 @@ func TestHelpStopsAfterSendFailure(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	for i := 0; i < 4; i++ {

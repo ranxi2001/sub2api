@@ -145,7 +145,7 @@ func TestGIFGenerateEditAndQQDeliveryPreserveBytes(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			s := New(nil, nil, false, nil)
+			s := newMatureFixtureService(nil, nil, false, nil)
 			s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 			c := DefaultConfig()
 			c.BaseURL, c.APIKey, c.ImageModel, c.ImageOutputFormat = server.URL+"/v1", "image-key", "gpt-image-2.6", "gif"

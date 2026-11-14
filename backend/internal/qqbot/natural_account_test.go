@@ -64,7 +64,7 @@ func TestNaturalBalanceRequestsReadSenderWithoutChatQuotaOrModels(t *testing.T) 
 					}
 				}))
 				t.Cleanup(server.Close)
-				s := New(db, nil, false, nil)
+				s := newMatureFixtureService(db, nil, false, nil)
 				s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 				c := DefaultConfig()
 				c.AppID, c.BaseURL, c.ChatDisabled = "app", server.URL+"/v1", true

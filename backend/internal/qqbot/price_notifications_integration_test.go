@@ -63,7 +63,7 @@ func TestPriceNotificationsDurableDedupAndAtomicQueue(t *testing.T) {
 	require.Zero(t, failures.Load())
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE event_type=$1`, priceNotificationEvent).Scan(&count))
 	require.Equal(t, 2, count)
-	restarted := New(db, testEncryptor{}, true, nil)
+	restarted := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	restarted.SetPriceSnapshotProvider(source)
 	_, err = restarted.checkPriceChanges(ctx, at.Add(40*time.Second))
 	require.NoError(t, err)

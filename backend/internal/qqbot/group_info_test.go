@@ -26,7 +26,7 @@ func groupInfoTestService(t *testing.T, handle http.HandlerFunc) (*Service, Conf
 		handle(w, r)
 	}))
 	t.Cleanup(server.Close)
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	return s, Config{AppID: "app", AppSecret: "secret"}
 }

@@ -47,7 +47,7 @@ func TestImageEditSendsOriginalMultipartAndDoesNotFallback(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]string{"b64_json": base64.StdEncoding.EncodeToString(original)}}})
 			}))
 			defer server.Close()
-			s := New(nil, nil, false, nil)
+			s := newMatureFixtureService(nil, nil, false, nil)
 			c := DefaultConfig()
 			c.BaseURL, c.APIKey = "https://chat.example.invalid", "must-not-use-chat-key"
 			c.ImageBaseURL, c.ImageAPIKey, c.ImageModel = server.URL+"/v1", "image-only-key", "image-model"
@@ -95,7 +95,7 @@ func TestChatEditToolSelectionAndImageBounds(t *testing.T) {
 		}))
 		c := DefaultConfig()
 		c.BaseURL, c.ImageEnabled, c.ChatProtocol = server.URL, true, protocol
-		s := New(nil, nil, false, nil)
+		s := newMatureFixtureService(nil, nil, false, nil)
 		_, err := s.chatTurn(context.Background(), c, []Message{{Role: "user", Content: "old", Images: []string{"old-image"}}, {Role: "user", Content: "edit"}})
 		require.ErrorContains(t, err, "未取得指定的编辑原图")
 		server.Close()

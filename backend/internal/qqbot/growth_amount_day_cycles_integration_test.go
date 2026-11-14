@@ -49,7 +49,7 @@ func TestGrowthAmountDayCyclesAllKindsGapsAndRebinding(t *testing.T) {
 	require.Equal(t, 4, count)
 	_, err = db.Exec(`UPDATE qq_bot_bindings SET member_id='rebound',group_id='other-group' WHERE user_id=$1`, uid)
 	require.NoError(t, err)
-	bot = New(db, testEncryptor{}, true, nil)
+	bot = newMatureFixtureService(db, testEncryptor{}, true, nil)
 	j = Job{GroupID: "other-group", MemberID: "rebound"}
 	_, n, err = bot.processGrowthTasks(ctx, c, j, base.AddDate(0, 0, 8), true)
 	require.NoError(t, err)

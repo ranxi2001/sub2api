@@ -115,7 +115,7 @@ func TestLotteryGuaranteeConcurrentDrawsAndMessageReplay(t *testing.T) {
 	cfg.GuaranteeEnabled, cfg.GuaranteeEvery = true, 3
 	cfg.GuaranteePrizes = []LotteryPrize{{Name: "guaranteed", Amount: 5, ProbabilityBPS: 10000}}
 	require.NoError(t, s.SaveLotteryConfig(ctx, cfg))
-	s2 := New(db, testEncryptor{}, true, nil)
+	s2 := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	var wg sync.WaitGroup
 	errors := make(chan error, 24)
 	for i := range 24 {

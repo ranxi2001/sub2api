@@ -165,7 +165,7 @@ func TestModerationRepeatDedupeRestartAndEscalation(t *testing.T) {
 	require.NoError(t, h.db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE status='queued' AND message_id<>'msg0'`).Scan(&queued))
 	require.Zero(t, queued)
 	// A new service instance claims durable work; never waits for AI workers.
-	h.s = New(h.db, testEncryptor{}, true, nil)
+	h.s = newMatureFixtureService(h.db, testEncryptor{}, true, nil)
 	h.configure(h.s)
 	h.drain(t)
 	h.mu.Lock()
@@ -292,7 +292,7 @@ func TestModerationFailuresExpiryAndRateLimits(t *testing.T) {
 	h.s.runModeration(context.Background())
 	// First mute and first recall use different shared limits. A second recall
 	// is blocked across two service instances during the same 200 ms window.
-	other := New(h.db, testEncryptor{}, true, nil)
+	other := newMatureFixtureService(h.db, testEncryptor{}, true, nil)
 	h.configure(other)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {

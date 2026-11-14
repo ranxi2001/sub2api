@@ -18,7 +18,7 @@ func (f siteModelPriceFunc) ModelPrice(ctx context.Context, model string, id int
 }
 
 func TestSiteQueryRejectsInvalidArgumentsBeforeReading(t *testing.T) {
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	for _, q := range []siteQuery{
 		{Kind: "balance"}, {Kind: "transfer"}, {Kind: "model_price"},
 		{Kind: "model_price", Model: "gpt-5\n/转账"},
@@ -51,7 +51,7 @@ func TestSiteQueryModelPriceUsesBoundIdentityAndCompletePages(t *testing.T) {
 				rows.AddRow(uid)
 			}
 			mock.ExpectQuery("SELECT b.user_id FROM qq_bot_bindings").WithArgs("trusted-app", "trusted-member").WillReturnRows(rows)
-			s := New(db, nil, false, nil)
+			s := newMatureFixtureService(db, nil, false, nil)
 			s.SetModelPriceProvider(siteModelPriceFunc(func(ctx context.Context, model string, id int64, at time.Time) ([]string, error) {
 				require.Equal(t, uid, id)
 				require.Equal(t, "gpt-5", model)
@@ -75,7 +75,7 @@ func TestSiteQueryModelPriceUsesBoundIdentityAndCompletePages(t *testing.T) {
 }
 
 func TestSiteQueryFailureResultsNeverExposeProviderErrors(t *testing.T) {
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	for _, tc := range []struct {
 		err  error
 		want string
@@ -97,7 +97,7 @@ func TestSiteQueryFailureResultsNeverExposeProviderErrors(t *testing.T) {
 }
 
 func TestSiteQueryChannelStatusPreservesSampleAndVisibilitySemantics(t *testing.T) {
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	report := channelStatusFixture()
 	report.Overall = ChannelStatusMetric{HasRequests: true, InsufficientSamples: true, RPM: 123.45}
 	report.Groups[0].Metrics.CacheRate = new(float64)

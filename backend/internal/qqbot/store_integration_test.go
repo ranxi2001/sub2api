@@ -8,10 +8,8 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"image"
 	"image/png"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -228,8 +226,7 @@ func testDB(t *testing.T) *sql.DB {
 }
 func savedBot(t *testing.T, db *sql.DB) *Service {
 	t.Helper()
-	s := New(db, testEncryptor{}, true, nil)
-	s.http = &http.Client{Timeout: 210 * time.Second, CheckRedirect: noRedirect, Transport: matureFixtureTransport{base: &http.Transport{Proxy: nil}}}
+	s := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	c := DefaultConfig()
 	c.Enabled = true
 	c.AppID = "app"
@@ -577,17 +574,3 @@ func TestQQBotWorkerChatAndImageDelivery(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT balance FROM users WHERE id=$1`, uid).Scan(&balance))
 	require.Zero(t, balance)
 }
-
-// Integration fixtures deliberately point QQ/model URLs at httptest listeners.
-// Keep that injection separate from the production transport and fail every
-// non-loopback request, including an accidentally retained real QQ endpoint.
-type matureFixtureTransport struct{ base *http.Transport }
-
-func (t matureFixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	ip := net.ParseIP(r.URL.Hostname())
-	if ip == nil || !ip.IsLoopback() {
-		return nil, errors.New("test fixture attempted a non-loopback request")
-	}
-	return t.base.RoundTrip(r)
-}
-func (t matureFixtureTransport) CloseIdleConnections() { t.base.CloseIdleConnections() }

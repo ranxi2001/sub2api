@@ -128,7 +128,7 @@ func TestLotteryConcurrentDrawsUseRedeemedChancesOnce(t *testing.T) {
 	require.NoError(t, err)
 	var wg sync.WaitGroup
 	var won, failed atomic.Int32
-	s2 := New(db, testEncryptor{}, true, nil)
+	s2 := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	for i := range 12 {
 		wg.Add(1)
 		go func(i int) {

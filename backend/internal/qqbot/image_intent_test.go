@@ -46,7 +46,7 @@ func TestImageIntentReviewIsolatedFromPersonaAndHistory(t *testing.T) {
 				_, _ = w.Write(imageReviewTestJSON(t, protocol, imageIntentReview{Disposition: "text", Basis: "none", Text: "下午好！"}))
 			}))
 			defer server.Close()
-			s := New(nil, nil, false, nil)
+			s := newMatureFixtureService(nil, nil, false, nil)
 			c := DefaultConfig()
 			c.BaseURL, c.ChatProtocol, c.SystemPrompt = server.URL, protocol, "PERSONA_SECRET"
 			c.SiteKnowledge = SiteKnowledgeConfig{Enabled: true, Content: "SITE_KNOWLEDGE_SHOULD_NOT_APPEAR"}

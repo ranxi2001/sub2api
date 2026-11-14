@@ -96,7 +96,7 @@ func TestChatTurnModelChoosesImageAcrossProtocols(t *testing.T) {
 					}
 				}))
 				defer server.Close()
-				s := New(nil, nil, false, nil)
+				s := newMatureFixtureService(nil, nil, false, nil)
 				c := DefaultConfig()
 				c.BaseURL, c.APIKey, c.ChatProtocol, c.ImageEnabled = server.URL, "chat-key", protocol, true
 				got, err := s.chatTurn(context.Background(), c, []Message{{Role: "assistant", Content: "赛博朋克猫咪海报"}, {Role: "user", Content: "就这个吧", Images: []string{"data:image/png;base64,dGVzdA=="}}})
@@ -162,7 +162,7 @@ func TestChatTurnDisabledAndAutonomousHaveNoTools(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"text only"}}]}`))
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	c := DefaultConfig()
 	c.BaseURL = server.URL
 	got, err := s.chatTurn(context.Background(), c, []Message{{Role: "user", Content: "来张图"}})
@@ -220,7 +220,7 @@ func TestChatTurnExplicitTextChoiceAndPersonaOrder(t *testing.T) {
 					_, _ = w.Write(textToolTestJSON(t, protocol, text))
 				}))
 				defer server.Close()
-				s := New(nil, nil, false, nil)
+				s := newMatureFixtureService(nil, nil, false, nil)
 				c := DefaultConfig()
 				c.BaseURL, c.ImageEnabled, c.ChatProtocol = server.URL, true, protocol
 				got, err := s.chatTurn(context.Background(), c, []Message{

@@ -47,7 +47,7 @@ func TestSiteChatSelectsReadOnlyQueryAcrossProtocols(t *testing.T) {
 						_, _ = w.Write(siteQueryTestResponse(t, protocol, `{"kind":"model_price","model":"model-test","activity":"","page":1}`, stream))
 					}))
 					defer server.Close()
-					s := New(nil, nil, false, nil)
+					s := newMatureFixtureService(nil, nil, false, nil)
 					c := DefaultConfig()
 					c.BaseURL, c.ChatProtocol, c.ImageEnabled = server.URL, protocol, images
 					turn, err := s.siteChatTurn(context.Background(), c, []Message{{Role: "user", Content: "model-test多少钱？"}})
@@ -84,7 +84,7 @@ func TestSiteChatPlainTextUsesSingleRequest(t *testing.T) {
 			defer server.Close()
 			c := DefaultConfig()
 			c.BaseURL, c.ChatProtocol = server.URL, protocol
-			s := New(nil, nil, false, nil)
+			s := newMatureFixtureService(nil, nil, false, nil)
 			turn, err := s.siteChatTurn(context.Background(), c, []Message{{Role: "user", Content: "你好"}})
 			require.NoError(t, err)
 			require.Equal(t, "你好！", turn.Text)
@@ -117,7 +117,7 @@ func TestSiteChatRejectsForgedIdentityPartialAndDisabledImageTools(t *testing.T)
 			defer server.Close()
 			c := DefaultConfig()
 			c.BaseURL = server.URL
-			turn, err := New(nil, nil, false, nil).siteChatTurn(context.Background(), c, []Message{{Role: "user", Content: "查站点"}})
+			turn, err := newMatureFixtureService(nil, nil, false, nil).siteChatTurn(context.Background(), c, []Message{{Role: "user", Content: "查站点"}})
 			require.Error(t, err)
 			require.Nil(t, turn.SiteQuery)
 			require.Empty(t, turn.ImagePrompt)
@@ -157,7 +157,7 @@ func TestSiteChatSelectsPersonalQueryAcrossProtocols(t *testing.T) {
 				defer server.Close()
 				c := DefaultConfig()
 				c.BaseURL, c.ChatProtocol = server.URL, protocol
-				turn, err := New(nil, nil, false, nil).siteChatTurn(context.Background(), c, []Message{{Role: "user", Content: tc.question}})
+				turn, err := newMatureFixtureService(nil, nil, false, nil).siteChatTurn(context.Background(), c, []Message{{Role: "user", Content: tc.question}})
 				require.NoError(t, err)
 				require.Equal(t, &siteQuery{Kind: tc.kind, Page: 1}, turn.SiteQuery)
 				require.Empty(t, turn.Text, "the backend returns personal data directly")

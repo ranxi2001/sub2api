@@ -60,7 +60,7 @@ func TestHealthNotificationsAtomicQueueRestartAndRecovery(t *testing.T) {
 	require.Zero(t, failures.Load())
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM qq_bot_jobs WHERE event_type=$1`, healthNotificationEvent).Scan(&count))
 	require.Equal(t, 2, count)
-	restarted := New(db, testEncryptor{}, true, nil)
+	restarted := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	restarted.SetHealthSnapshotProvider(source)
 	require.NoError(t, restarted.checkHealthChanges(ctx, at.Add(2*time.Minute)))
 	rate = 0

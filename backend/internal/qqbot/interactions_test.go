@@ -24,7 +24,7 @@ func TestQQTokenWaitHonorsInteractionDeadline(t *testing.T) {
 	}))
 	defer server.Close()
 	defer unblock()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.tokenURL = server.URL
 	done := make(chan error, 1)
 	go func() { _, err := s.token(context.Background(), DefaultConfig()); done <- err }()
@@ -105,7 +105,7 @@ func TestHelpInteractionRejectsUnsupportedOrUnauthorizedActions(t *testing.T) {
 				_, _ = w.Write([]byte(`{}`))
 			}))
 			defer server.Close()
-			s := New(nil, nil, false, nil) // Rejections must not touch storage or models.
+			s := newMatureFixtureService(nil, nil, false, nil) // Rejections must not touch storage or models.
 			s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 			c := DefaultConfig()
 			c.AppID, c.Enabled, c.AllowedGroups = "app", true, []string{"group"}

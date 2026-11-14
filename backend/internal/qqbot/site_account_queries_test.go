@@ -41,7 +41,7 @@ func TestSiteAccountBalanceUsesTrustedIdentityAndNeverWrites(t *testing.T) {
 			default:
 				query.WillReturnRows(sqlmock.NewRows([]string{"balance"}))
 			}
-			result, err := New(db, nil, false, nil).querySiteInfoDetailed(context.Background(), c, Job{AppID: c.AppID, GroupID: "group", MemberID: "trusted-member"}, siteQuery{Kind: "account_balance"})
+			result, err := newMatureFixtureService(db, nil, false, nil).querySiteInfoDetailed(context.Background(), c, Job{AppID: c.AppID, GroupID: "group", MemberID: "trusted-member"}, siteQuery{Kind: "account_balance"})
 			require.NoError(t, err)
 			require.Equal(t, "account_balance", result.Decision.Kind)
 			require.Equal(t, 1, result.Decision.Page)
@@ -72,7 +72,7 @@ func TestSiteAccountQueriesRequireTrustedMemberAndApp(t *testing.T) {
 		} {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			result, err := New(db, nil, false, nil).querySiteInfoDetailed(context.Background(), accountQueryConfig(), j, siteQuery{Kind: kind})
+			result, err := newMatureFixtureService(db, nil, false, nil).querySiteInfoDetailed(context.Background(), accountQueryConfig(), j, siteQuery{Kind: kind})
 			require.NoError(t, err)
 			require.Equal(t, "identity_unavailable", result.Decision.ErrorCode)
 			require.NoError(t, mock.ExpectationsWereMet())
@@ -108,7 +108,7 @@ func TestSiteAccountQueriesRecheckCurrentGroupAndBot(t *testing.T) {
 			} else {
 				expectAccountQueryConfig(t, mock, current)
 			}
-			result, err := New(db, nil, false, nil).querySiteInfoDetailed(context.Background(), c, Job{AppID: c.AppID, GroupID: "group", MemberID: "trusted-member"}, siteQuery{Kind: kind})
+			result, err := newMatureFixtureService(db, nil, false, nil).querySiteInfoDetailed(context.Background(), c, Job{AppID: c.AppID, GroupID: "group", MemberID: "trusted-member"}, siteQuery{Kind: kind})
 			require.NoError(t, err)
 			require.Equal(t, code, result.Decision.ErrorCode)
 			require.NotContains(t, result.Text, "private-error")
@@ -127,7 +127,7 @@ func TestSiteAccountTodayUsageNeverWrites(t *testing.T) {
 	mock.ExpectQuery("SELECT b.user_id FROM qq_bot_bindings").WithArgs(c.AppID, "trusted-member").WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(42))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*),COALESCE(SUM(input_tokens)")).WithArgs(42, sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"count", "input", "output", "write", "read", "cost", "wallet", "subscription"}).AddRow(0, 0, 0, 0, 0, 0, 0, 0))
 	mock.ExpectRollback()
-	result, err := New(db, nil, false, nil).querySiteInfoDetailed(context.Background(), c, Job{AppID: c.AppID, GroupID: "group", MemberID: "trusted-member"}, siteQuery{Kind: "today_usage"})
+	result, err := newMatureFixtureService(db, nil, false, nil).querySiteInfoDetailed(context.Background(), c, Job{AppID: c.AppID, GroupID: "group", MemberID: "trusted-member"}, siteQuery{Kind: "today_usage"})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", result.Decision.Status)
 	require.Contains(t, result.Text, "请求：0 次")
@@ -153,7 +153,7 @@ func TestSiteAccountLotteryChancesNeverSettlesEligibleRewards(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM qq_bot_lottery_draws")).WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(SUM(chances),0) FROM qq_bot_lottery_chance_grants")).WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"sum"}).AddRow(3))
 	mock.ExpectCommit()
-	result, err := New(db, nil, false, nil).querySiteInfoDetailed(context.Background(), c, Job{AppID: c.AppID, GroupID: "group", MemberID: "trusted-member"}, siteQuery{Kind: "lottery_chances"})
+	result, err := newMatureFixtureService(db, nil, false, nil).querySiteInfoDetailed(context.Background(), c, Job{AppID: c.AppID, GroupID: "group", MemberID: "trusted-member"}, siteQuery{Kind: "lottery_chances"})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", result.Decision.Status)
 	require.Contains(t, result.Text, "剩余抽奖次数：3 次")

@@ -79,7 +79,7 @@ func TestLotteryConcurrentSpendingReplayAndRebinding(t *testing.T) {
 	var wg sync.WaitGroup
 	var won, failed atomic.Int32
 	// Two service instances simulate independent workers/processes.
-	s2 := New(db, testEncryptor{}, true, nil)
+	s2 := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	for i := range 16 {
 		wg.Add(1)
 		go func(i int) {

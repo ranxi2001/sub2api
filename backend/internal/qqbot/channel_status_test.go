@@ -149,7 +149,7 @@ func channelStatusSender(t *testing.T, failAt int) (*Service, *[]channelStatusRe
 	t.Cleanup(server.Close)
 	// A nil database proves this command does not require binding, reserve
 	// model quota, or write model history. Only monitor and QQ calls are allowed.
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	return s, &replies
 }

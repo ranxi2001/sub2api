@@ -78,7 +78,7 @@ func TestCheckinDistributionPersistsAndLegacySavesPreserveIt(t *testing.T) {
 	custom := original
 	custom.RewardDistribution = &CheckinRewardDistribution{1234, 4321, 4445}
 	require.NoError(t, s.SaveCheckinConfig(WithCheckinSection(WithConfigVersion(ctx, CheckinSectionVersion(original, "checkin")), "checkin"), custom))
-	restarted := New(db, testEncryptor{}, true, nil)
+	restarted := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	saved, err := restarted.CheckinConfig(ctx)
 	require.NoError(t, err)
 	require.Equal(t, custom.RewardDistribution, saved.RewardDistribution)

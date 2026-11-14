@@ -155,7 +155,7 @@ func TestSiteChatPermanentAndIncompleteResults(t *testing.T) {
 			defer server.Close()
 			c := DefaultConfig()
 			c.BaseURL = server.URL
-			turn, err := New(nil, nil, false, nil).siteChatTurn(context.Background(), c, []Message{{Role: "user", Content: "你好"}})
+			turn, err := newMatureFixtureService(nil, nil, false, nil).siteChatTurn(context.Background(), c, []Message{{Role: "user", Content: "你好"}})
 			require.Error(t, err)
 			require.Equal(t, 1, calls)
 			require.Empty(t, turn.Text)

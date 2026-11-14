@@ -54,7 +54,7 @@ func TestCommandInventoryExcludesRetiredCustomCommands(t *testing.T) {
 		{Command: "/faq", Reply: "current", Enabled: true},
 	}
 	expectPreviewConfig(t, mock, c)
-	commands, err := New(db, previewEncryptor{}, true, nil).Commands(context.Background())
+	commands, err := newMatureFixtureService(db, previewEncryptor{}, true, nil).Commands(context.Background())
 	require.NoError(t, err)
 	byCommand := make(map[string]CommandInfo, len(commands))
 	for _, item := range commands {
@@ -68,7 +68,7 @@ func TestCommandInventoryExcludesRetiredCustomCommands(t *testing.T) {
 }
 
 func TestChatPreviewRequestValidationPrecedesAllIO(t *testing.T) {
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	for _, req := range []ChatPreviewRequest{
 		{}, {GroupID: "group", Question: " "}, {GroupID: "group", Question: strings.Repeat("中", 6001)},
 		{GroupID: "group other", Question: "你好"}, {GroupID: "group", MemberID: "member\n", Question: "你好"},
@@ -97,12 +97,12 @@ func TestChatPreviewConfigPolicyAndConcurrentTrials(t *testing.T) {
 				c.DailyChatLimit = 0
 			}
 			expectPreviewConfig(t, mock, c)
-			_, err = New(db, previewEncryptor{}, true, nil).PreviewChat(context.Background(), ChatPreviewRequest{GroupID: "group", Question: "你好"})
+			_, err = newMatureFixtureService(db, previewEncryptor{}, true, nil).PreviewChat(context.Background(), ChatPreviewRequest{GroupID: "group", Question: "你好"})
 			require.Error(t, err)
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	activeChatPreviews.Store(s, struct{}{})
 	defer activeChatPreviews.Delete(s)
 	_, err := s.PreviewChat(context.Background(), ChatPreviewRequest{GroupID: "group", Question: "你好"})
@@ -149,7 +149,7 @@ func TestChatPreviewMenuAndReadOnlyToolsAcrossProtocols(t *testing.T) {
 				c.BaseURL, c.ChatProtocol, c.ImageEnabled = server.URL, protocol, true
 				c.SiteKnowledge = SiteKnowledgeConfig{Enabled: true, Content: "试问站点资料"}
 				expectPreviewConfig(t, mock, c)
-				s := New(db, previewEncryptor{}, true, nil)
+				s := newMatureFixtureService(db, previewEncryptor{}, true, nil)
 				s.SetChannelStatusProvider(channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return channelStatusFixture(), nil }))
 				question := "请说明站点资料"
 				if scenario == "menu" {
@@ -204,7 +204,7 @@ func TestChatPreviewHelpRemainsAvailableWithChatDisabled(t *testing.T) {
 	c.ChatDisabled, c.TotalDailyChatLimit, c.DailyChatLimit = true, 0, 0
 	c.BaseURL, c.APIKey, c.ChatModel = "", "", ""
 	expectPreviewConfig(t, mock, c)
-	out, err := New(db, previewEncryptor{}, true, nil).PreviewChat(context.Background(), ChatPreviewRequest{GroupID: "group", Question: "/帮助"})
+	out, err := newMatureFixtureService(db, previewEncryptor{}, true, nil).PreviewChat(context.Background(), ChatPreviewRequest{GroupID: "group", Question: "/帮助"})
 	require.NoError(t, err)
 	require.Equal(t, "menu", out.Action)
 	require.Contains(t, out.Text, "签到")

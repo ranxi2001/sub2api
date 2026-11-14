@@ -24,7 +24,7 @@ func TestQQBotImageIntentSemanticEval(t *testing.T) {
 		c.ChatProtocol = protocol
 	}
 	require.Contains(t, []string{"chat_completions", "responses"}, c.ChatProtocol)
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	plan := &pendingImagePlan{Action: chatImageToolName, Prompt: "蓝紫色猫咪海报", RequestQuote: "设计一张猫咪海报"}
 	cases := []struct {
 		name, current, proposal, want, basis string

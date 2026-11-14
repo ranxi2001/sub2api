@@ -66,7 +66,7 @@ func TestAnnouncementsAtomicQueueAndConcurrentDedup(t *testing.T) {
 	for _, job := range first.Jobs {
 		bot.finish(Job{ID: job.ID}, "completed", "")
 	}
-	restarted := New(db, testEncryptor{}, true, nil)
+	restarted := newMatureFixtureService(db, testEncryptor{}, true, nil)
 	again, err := restarted.SendAnnouncement(ctx, req)
 	require.NoError(t, err)
 	require.True(t, again.Duplicate)

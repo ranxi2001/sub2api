@@ -184,7 +184,7 @@ func TestMemberDirectoryAppChangeRequiresExplicitWhitelistClear(t *testing.T) {
 	for _, oldApp := range []string{"app", ""} {
 		t.Run("old_app="+oldApp, func(t *testing.T) {
 			db := testDB(t)
-			s := New(db, testEncryptor{}, true, nil)
+			s := newMatureFixtureService(db, testEncryptor{}, true, nil)
 			ctx := context.Background()
 			if oldApp != "" {
 				s = savedBot(t, db)

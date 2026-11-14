@@ -24,7 +24,7 @@ func testInputPNG(t *testing.T) []byte {
 func TestChatImageWireProtocols(t *testing.T) {
 	for _, protocol := range []string{"chat_completions", "responses"} {
 		t.Run(protocol, func(t *testing.T) {
-			s := New(nil, nil, false, nil)
+			s := newMatureFixtureService(nil, nil, false, nil)
 			s.imageDownload = func(_ context.Context, url string) ([]byte, error) {
 				require.Equal(t, "https://image.example/picture", url)
 				return testInputPNG(t), nil
@@ -80,7 +80,7 @@ func TestChatImageWireProtocols(t *testing.T) {
 }
 
 func TestChatImageValidationAndNestedQuotes(t *testing.T) {
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	var downloads int
 	s.imageDownload = func(_ context.Context, url string) ([]byte, error) {
 		downloads++

@@ -20,7 +20,7 @@ func TestUnmentionedGroupMessagesDoNotAccessDataOrCallModels(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	c.Enabled, c.ImageEnabled = true, true
@@ -63,7 +63,7 @@ func TestFullGroupCommandsWithoutMention(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	commands := []string{"/帮助", "/绑定", "/生图", "/抽奖 错误", "/我的余额 多余参数", "/余额 多余参数", "帮助", "绑定", "生图", "抽奖 错误", "我的余额 多余参数", "余额 多余参数"}
@@ -110,7 +110,7 @@ func TestMentionWithoutContentRepliesWithHelp(t *testing.T) {
 	}))
 	defer server.Close()
 	// Help must work without bindings, model usage reservations or a database.
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	j := Job{EventType: groupAtMessageCreate, GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
@@ -152,7 +152,7 @@ func TestFullGroupMessagesRequireThisBotsIdentity(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	for _, content := range []string{"<@another-bot> 你好", "<@another-user> /签到"} {
@@ -202,7 +202,7 @@ func TestGroupIdentityFailureDoesNotCallModels(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	for range 2 {

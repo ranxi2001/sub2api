@@ -63,7 +63,7 @@ func TestChatProtocolsUseOnlyOperatorCredentials(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			s := New(nil, nil, false, nil)
+			s := newMatureFixtureService(nil, nil, false, nil)
 			c := DefaultConfig()
 			c.BaseURL = server.URL + "/v1"
 			c.APIKey = "operator-test-key"
@@ -123,7 +123,7 @@ func TestImagesGenerateThenReuseSavedBytesForDelivery(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL = server.URL
 	s.tokenURL = server.URL + "/token"
 	c := DefaultConfig()
@@ -160,7 +160,7 @@ func TestGroupTextRepliesUseMarkdownWithConsistentMentions(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	c.AppID, c.AppSecret = "app", "qq-secret"
@@ -206,7 +206,7 @@ func TestGroupMentionMarkdownRejectionDoesNotSendLiteralTagFallback(t *testing.T
 		_, _ = w.Write([]byte(`{"code":40034127}`))
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
 	c.AppID, c.AppSecret = "app", "qq-secret"
@@ -223,7 +223,7 @@ func TestUpstreamErrorsDoNotExposeCredentialsOrRetry(t *testing.T) {
 		_, _ = w.Write([]byte("secret-token upstream details"))
 	}))
 	defer server.Close()
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	c := DefaultConfig()
 	c.BaseURL = server.URL
 	c.APIKey = "operator-key"
@@ -325,7 +325,7 @@ func TestRemovedAndUnknownCommandsDoNotCallModelsOrAccessData(t *testing.T) {
 	defer server.Close()
 	// No database is provided: unsupported commands must not read saved results,
 	// delete conversations, reserve model usage, or invoke an upstream model.
-	s := New(nil, nil, false, nil)
+	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL = server.URL
 	s.tokenURL = server.URL + "/token"
 	c := DefaultConfig()
