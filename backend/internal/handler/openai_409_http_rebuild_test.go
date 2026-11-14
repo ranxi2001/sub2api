@@ -465,6 +465,10 @@ func httpRebuildOwnerKey(t *testing.T, h *OpenAIGatewayHandler, agent string) st
 
 func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointer, outcome, boundary, mutation string) {
 	t.Helper()
+	authenticated := boundary == "issue854_auth"
+	if authenticated {
+		boundary = ""
+	}
 	noOpaque := strings.HasSuffix(pointer, "_no_opaque")
 	pointer = strings.TrimSuffix(pointer, "_no_opaque")
 	mixed := strings.HasPrefix(boundary, "mixed/")
@@ -571,11 +575,21 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	pendingBeforeWrite := false
 	var observeErr error
 	router := gin.New()
+	if authenticated {
+		key := template.Keys[string(middleware.ContextKeyAPIKey)].(*service.APIKey)
+		key.Key, key.Status, key.UserID = "fixture-issue854-http", service.StatusActive, key.User.ID
+		key.User.Status = service.StatusActive
+		key.Group.Status, key.Group.Hydrated = service.StatusActive, true
+		h.apiKeyService = service.NewAPIKeyService(&wsRevalidationKeyRepoStub{current: key}, nil, nil, nil, nil, nil, cfg)
+		router.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(h.apiKeyService, nil, cfg)))
+	}
 	router.POST("/v1/responses", func(c *gin.Context) {
 		defer func() { done <- struct{}{} }()
 		sessions = append(sessions, c.GetHeader("session_id"))
-		for key, value := range template.Keys {
-			c.Set(key, value)
+		if !authenticated {
+			for key, value := range template.Keys {
+				c.Set(key, value)
+			}
 		}
 		if c.GetHeader("X-Fixture-Foreign-User") == "true" {
 			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
@@ -623,6 +637,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("session_id", httpRebuildSession)
+		if authenticated {
+			req.Header.Set("Authorization", "Bearer fixture-issue854-http")
+		}
 		if boundary == "foreign_user" && previous.Exists() {
 			req.Header.Set("X-Fixture-Foreign-User", "true")
 		}

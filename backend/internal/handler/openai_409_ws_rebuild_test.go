@@ -174,6 +174,17 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	headers := http.Header{"Session_id": {"fixture-readable-ws-session"}, "Thread-Id": {"fixture-readable-ws-thread"}}
 	settings := map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: fmt.Sprint(scenario != "off")}
 	issue854 := strings.HasPrefix(scenario, "issue854_")
+	issue854Failure := scenario == "issue854_guard_refusal"
+	var failureRepo *ingressRejectOpsRepo
+	var configureHandler func(*OpenAIGatewayHandler)
+	if issue854Failure {
+		setupOpsErrorLogTestQueue(t, 4)
+		failureRepo = &ingressRejectOpsRepo{}
+		settings[service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled] = "false"
+		configureHandler = func(h *OpenAIGatewayHandler) {
+			h.opsService = service.NewOpsService(failureRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		}
+	}
 	var authSetup func(*service.APIKey, *config.Config) *service.APIKeyService
 	if issue854 {
 		headers.Set("Authorization", "Bearer sk-handler-cyber-test")
@@ -204,7 +215,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	var accounts *readableWSAccounts
 	h := newOpenAIWSPassthroughHandlerHarnessWithAuth(t, provider.URL, headers,
 		settings,
-		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true }, nil, authSetup,
+		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true }, configureHandler, authSetup,
 		func(a *service.Account, cfg *config.Config, upstream *service.HTTPUpstream, repo *service.AccountRepository) {
 			a.ID, a.Priority = 1, 0
 			a.Credentials["api_key"] = "fixture-readable-ws-A"
@@ -328,7 +339,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	} else {
 		accounts.disable(1)
 	}
-	if scenario == "issue854_fresh" || scenario == "issue854_guard_live" {
+	if scenario == "issue854_fresh" || strings.HasPrefix(scenario, "issue854_guard_") {
 		issue600Finish(t, h, headers)
 		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		conn, _, err := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
@@ -336,7 +347,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		require.NoError(t, err)
 		h.clientConn = conn
 		t.Cleanup(func() { _ = conn.CloseNow() })
-		if scenario == "issue854_guard_live" {
+		if strings.HasPrefix(scenario, "issue854_guard_") {
 			issue715WSSend(t, conn, create([]string{httpRebuildMessage("user", "issue854-warm-B")}, ""))
 			warm := issue715WSRead(t, conn)
 			require.Contains(t, string(warm), "issue854-warm-B-complete")
@@ -378,6 +389,38 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
+	if issue854Failure {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for readErr == nil {
+			_, _, readErr = h.clientConn.Read(ctx)
+		}
+		require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(readErr))
+		select {
+		case <-h.handlerDone:
+		case <-ctx.Done():
+			t.Fatal("owner refusal did not finish")
+		}
+		finished = true
+		for len(opsErrorLogQueue) > 0 {
+			flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
+		}
+		require.Len(t, failureRepo.entries, 1, "ISSUE854_FAILURE_NOT_PERSISTED: WS101 must not hide the failed turn")
+		entry := failureRepo.entries[0]
+		require.Equal(t, 409, entry.StatusCode)
+		require.Equal(t, "internal", entry.ErrorPhase)
+		require.Equal(t, "platform", entry.ErrorOwner)
+		require.Equal(t, int16(service.RequestTypeWSV2), *entry.RequestType)
+		require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.Get(entry.ErrorBody, "error.code").String())
+		require.Equal(t, "websocket", gjson.Get(entry.ErrorBody, "error.protocol").String())
+		require.EqualValues(t, 2, gjson.Get(entry.ErrorBody, "error.turn").Int())
+		require.Equal(t, "before_upstream_write", gjson.Get(entry.ErrorBody, "error.phase").String())
+		require.Equal(t, gjson.False, gjson.Get(entry.ErrorBody, "error.request_written").Type)
+		require.NotContains(t, entry.ErrorBody, "fixture-opaque-A")
+		require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.GetBytes(secondRaw, "error.code").String())
+		require.Equal(t, 2, sends, "failed turn cannot reach either upstream")
+		return
+	}
 	if scenario != "completed" && !issue854 && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
 		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
 		closeCtx, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)

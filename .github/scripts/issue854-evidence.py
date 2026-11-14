@@ -11,10 +11,26 @@ spec.loader.exec_module(common)
 ROOT = "TestIssue854OwnerContinuation"
 MODES = ("http_bridge", "ctx_pool", "shared", "dedicated", "passthrough")
 LEAVES = {f"{ROOT}/{mode}/{case}" for mode in MODES for case in ("original", "fresh", "guard_live")}
-PARENTS = {ROOT} | {f"{ROOT}/{mode}" for mode in MODES}
+PARENTS = {ROOT}
 
 
-def validate(phase, status, raw):
+def inventory(suite):
+    if suite == "lifecycle":
+        return LEAVES, PARENTS, {n for n in LEAVES if n.endswith("/guard_live")}, ("WS_READABLE_B_DISPATCH_MISSING", "The proven encrypted agent owner is currently unavailable")
+    if suite == "persistence":
+        root = "TestIssue854OwnerFailurePersistence"
+        leaves = {f"{root}/{mode}" for mode in MODES}
+        return leaves, {root}, leaves, ("ISSUE854_FAILURE_NOT_PERSISTED",)
+    if suite == "upstream":
+        root = "TestIssue854UpstreamOwnerRateLimit"
+        parents = {root}
+        leaves = {f"{root}/stream={stream}/encrypted_agent_recovery_{code}" for stream in ("false", "true") for code in ("owner_rate_limited", "untrusted_fixture")}
+        return leaves, parents, {n for n in leaves if n.endswith("owner_rate_limited")}, ("ISSUE854_OWNER_LIMIT_CODE_LOST",)
+    raise ValueError("invalid suite")
+
+
+def validate(phase, status, raw, suite="lifecycle"):
+    leaves, parents, red_failures, markers = inventory(suite)
     if phase not in ("RED", "GREEN"):
         raise ValueError("invalid phase")
     common.check_clean(raw)
@@ -28,9 +44,9 @@ def validate(phase, status, raw):
             raise ValueError("invalid event")
         events.append(event)
     counts = Counter((e.get("Action"), e.get("Test")) for e in events if e.get("Package") == common.PACKAGE)
-    failures = {n for n in LEAVES if n.endswith("/guard_live")} if phase == "RED" else set()
-    failed_parents = PARENTS if failures else set()
-    expected = {n: "fail" if n in failures | failed_parents else "pass" for n in LEAVES | PARENTS}
+    failures = red_failures if phase == "RED" else set()
+    failed_parents = {p for p in parents if any(n.startswith(p + "/") for n in failures)}
+    expected = {n: "fail" if n in failures | failed_parents else "pass" for n in leaves | parents}
     expected[None] = "fail" if failures else "pass"
     if status != (1 if failures else 0):
         raise ValueError("wrong exit status")
@@ -44,12 +60,13 @@ def validate(phase, status, raw):
             raise ValueError("unrelated test")
     for name in failures:
         output = "".join(e.get("Output", "") for e in events if e.get("Test") == name)
-        for marker in ("WS_READABLE_B_DISPATCH_MISSING", "The proven encrypted agent owner is currently unavailable"):
+        for marker in markers:
             if marker not in output:
                 raise ValueError(f"missing business assertion: {name}: {marker}")
 
 
 if __name__ == "__main__":
-    phase, status, filename = sys.argv[1:]
-    validate(phase, int(status), Path(filename).read_text())
-    print(f"{phase}: all {len(LEAVES)} named lifecycle leaves verified")
+    phase, status, filename, *extra = sys.argv[1:]
+    suite = extra[0] if extra else "lifecycle"
+    validate(phase, int(status), Path(filename).read_text(), suite)
+    print(f"{phase}: all {len(inventory(suite)[0])} named {suite} leaves verified")

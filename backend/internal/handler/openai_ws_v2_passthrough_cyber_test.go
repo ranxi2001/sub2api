@@ -180,11 +180,15 @@ func newOpenAIWSPassthroughHandlerHarnessWithAuth(t *testing.T, upstreamURL stri
 		h.apiKeyService = authSetup(apiKey, cfg)
 		router.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(h.apiKeyService, nil, cfg)))
 	}
-	router.GET("/openai/v1/responses", func(c *gin.Context) {
-		h.ResponsesWebSocket(c)
+	router.Use(func(c *gin.Context) {
+		c.Next()
 		finalHeaders <- c.Request.Header.Clone()
 		handlerDone <- struct{}{}
 	})
+	if h.opsService != nil {
+		router.Use(OpsErrorLoggerMiddleware(h.opsService))
+	}
+	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
 	t.Cleanup(handlerServer.Close)
 

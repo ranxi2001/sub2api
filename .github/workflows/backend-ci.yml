@@ -38,12 +38,13 @@ jobs:
           set -euo pipefail
           baseline=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
           git worktree add --detach "$RUNNER_TEMP/issue854-red" "$EXPECTED_HEAD_SHA"
+          git rev-parse "$baseline" "$baseline^{tree}" > "$RUNNER_TEMP/issue854-evidence/baseline.txt"
           git diff --name-only "$baseline" "$EXPECTED_HEAD_SHA" -- backend | while IFS= read -r target; do
             case "$target" in
               *_test.go) continue ;;
               *.go)
                 if git cat-file -e "$baseline:$target" 2>/dev/null; then
-                  git rev-parse "$baseline:$target" >> "$RUNNER_TEMP/issue854-evidence/baseline-blobs.txt"
+                  printf '%s %s\n' "$(git rev-parse "$baseline:$target")" "$target" >> "$RUNNER_TEMP/issue854-evidence/baseline-blobs.txt"
                   git show "$baseline:$target" > "$RUNNER_TEMP/issue854-red/$target"
                 else
                   rm -- "$RUNNER_TEMP/issue854-red/$target"
@@ -52,24 +53,47 @@ jobs:
           done
           cd "$RUNNER_TEMP/issue854-red"
           git diff --stat > "$RUNNER_TEMP/issue854-evidence/red-diff.txt"
-          set +e
-          (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue854OwnerContinuation$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/red.jsonl" 2>&1
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/issue854-evidence/red.jsonl"
-          python3 .github/scripts/issue854-evidence.py RED "$status" "$RUNNER_TEMP/issue854-evidence/red.jsonl"
+          for suite in lifecycle persistence upstream; do
+            case "$suite" in
+              lifecycle) test_name=TestIssue854OwnerContinuation ;;
+              persistence) test_name=TestIssue854OwnerFailurePersistence ;;
+              upstream) test_name=TestIssue854UpstreamOwnerRateLimit ;;
+            esac
+            set +e
+            (cd backend && go test -tags=unit ./internal/handler -run "^${test_name}$" -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/red-$suite.jsonl" 2>&1
+            status=$?
+            set -e
+            cat "$RUNNER_TEMP/issue854-evidence/red-$suite.jsonl"
+            python3 .github/scripts/issue854-evidence.py RED "$status" "$RUNNER_TEMP/issue854-evidence/red-$suite.jsonl" "$suite"
+          done
       - name: GREEN clean candidate and lifecycle race checks
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
           git diff --exit-code
-          set +e
-          (cd backend && go test -race -tags=unit ./internal/handler -run '^TestIssue854OwnerContinuation$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/green.jsonl" 2>&1
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/issue854-evidence/green.jsonl"
-          python3 .github/scripts/issue854-evidence.py GREEN "$status" "$RUNNER_TEMP/issue854-evidence/green.jsonl"
+          for suite in lifecycle persistence upstream; do
+            case "$suite" in
+              lifecycle) test_name=TestIssue854OwnerContinuation ;;
+              persistence) test_name=TestIssue854OwnerFailurePersistence ;;
+              upstream) test_name=TestIssue854UpstreamOwnerRateLimit ;;
+            esac
+            set +e
+            (cd backend && go test -race -tags=unit ./internal/handler -run "^${test_name}$" -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/green-$suite.jsonl" 2>&1
+            status=$?
+            set -e
+            cat "$RUNNER_TEMP/issue854-evidence/green-$suite.jsonl"
+            python3 .github/scripts/issue854-evidence.py GREEN "$status" "$RUNNER_TEMP/issue854-evidence/green-$suite.jsonl" "$suite"
+          done
+      - name: Contract and safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -tags=unit ./internal/handler -run '^Test(OpenAI409(WSReadableBoundaries|WSReviewRepairs|WSResidualRepairs|WSNativeNamespaceRecovery|WSRecoveredAudit|WSRecoveredAuditNextTurn|WSAmbiguousOracleMutations|HTTPTaskRebuild|HTTPRebuildBoundaries|HTTPToolDefinitionOracle)|Issue854HTTPContinuation|Issue805|Issue758WS)' -count=1 -json -timeout=10m) > "$RUNNER_TEMP/issue854-evidence/contracts.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue854-evidence/contracts.jsonl"
+          python3 .github/scripts/assert-ws-readable.py GREEN 0 "$RUNNER_TEMP/issue854-evidence/contracts.jsonl" ws-boundaries
+          (cd backend && go test -race -tags=unit ./internal/service -run '^Test(OpenAI409WSUnsentTurnBoundary|Issue715WS|OpenAI409WS|OpenAIWS.*(Agent|Replay))' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/service-contracts.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue854-evidence/service-contracts.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
