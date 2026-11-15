@@ -21,20 +21,25 @@ export function createPageNavigation(page) {
   page.on('requestfinished', completed)
   page.on('requestfailed', completed)
   const settle = async () => {
-    await page.waitForLoadState('networkidle')
+    const deadline = Date.now() + 20_000
+    // A completed background fetch followed by a srcdoc preview lifecycle can
+    // remove networkidle without restarting its timer (Playwright 1.56.1).
+    // Document load + our real completion inventory does not depend on that
+    // stale frame flag. Keep one 20s deadline, including document readiness.
+    await page.waitForLoadState('load', { timeout: 20_000 })
     while (pending.size) await new Promise((resolve, reject) => {
       const done = () => { clearTimeout(timer); waiters.delete(done); resolve() }
       const timer = setTimeout(() => {
         waiters.delete(done)
         reject(new Error('browser requests did not finish before navigation'))
-      }, 20_000)
+      }, Math.max(0, deadline - Date.now()))
       waiters.add(done)
     })
   }
   return {
     settle,
-    async goto(url) { await settle(); await page.goto(url, { waitUntil: 'networkidle' }); await settle() },
-    async reload() { await settle(); await page.reload({ waitUntil: 'networkidle' }); await settle() },
+    async goto(url) { await settle(); await page.goto(url, { waitUntil: 'load' }); await settle() },
+    async reload() { await settle(); await page.reload({ waitUntil: 'load' }); await settle() },
   }
 }
 
@@ -376,7 +381,7 @@ export async function completeScheduledRounds(c) {
     const stored = await readGroupPlan()
     assert.deepEqual(stored.pelican_config, body.pelican_config)
     await form.waitFor({ state: 'hidden' })
-    await page.waitForLoadState('networkidle')
+    await navigation.settle()
     const listRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-tests'
       && response.request().method() === 'GET')
     await navigation.reload()

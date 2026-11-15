@@ -30,7 +30,7 @@ for (const action of ['goto', 'reload']) {
     page.emit('requestfinished', followup)
     await done
     assert.equal(page.calls.length, 1)
-    assert.equal(page.calls[0].options.waitUntil, 'networkidle')
+    assert.equal(page.calls[0].options.waitUntil, 'load')
   })
 }
 
@@ -60,4 +60,52 @@ test('navigation waits for destination requests before returning', async () => {
   page.emit('requestfinished', pending)
   await done
   assert.equal(returned, true)
+})
+
+test('srcdoc preview detachment cannot strand navigation on a stale networkidle lifecycle', async () => {
+  const page = new Page()
+  page.waitForLoadState = async state => {
+    assert.equal(state, 'load', 'use document readiness plus tracked request completion, not the stranded networkidle flag')
+  }
+  const navigation = createPageNavigation(page)
+  await navigation.goto('http://app:8080/admin/pelican-tests')
+  assert.equal(page.calls.length, 1)
+  assert.equal(page.calls[0].options.waitUntil, 'load')
+})
+
+test('an unfinished request still fails at the unchanged twenty-second deadline', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 })
+  const page = new Page()
+  const navigation = createPageNavigation(page)
+  page.emit('request', {})
+  let failed = false
+  const done = assert.rejects(navigation.settle(), /browser requests did not finish before navigation/)
+    .then(() => { failed = true })
+  await Promise.resolve()
+  t.mock.timers.tick(19_999)
+  await Promise.resolve()
+  assert.equal(failed, false)
+  t.mock.timers.tick(1)
+  await done
+  assert.equal(failed, true)
+  assert.equal(page.calls.length, 0)
+})
+
+test('document readiness consumes the same deadline rather than granting another twenty seconds', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 })
+  const page = new Page()
+  page.waitForLoadState = () => new Promise(resolve => setTimeout(resolve, 15_000))
+  const navigation = createPageNavigation(page)
+  page.emit('request', {})
+  let failed = false
+  const done = assert.rejects(navigation.settle(), /browser requests did not finish before navigation/)
+    .then(() => { failed = true })
+  t.mock.timers.tick(15_000)
+  await Promise.resolve()
+  t.mock.timers.tick(4_999)
+  await Promise.resolve()
+  assert.equal(failed, false)
+  t.mock.timers.tick(1)
+  await done
+  assert.equal(failed, true)
 })

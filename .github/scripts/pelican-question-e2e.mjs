@@ -250,7 +250,7 @@ async function browser() {
     // Requests made before first-install acknowledgement are gated by the real
     // middleware. Preserve their diagnostics, then reload the real page so its
     // initial account query runs after acknowledgement has persisted.
-    await page.waitForLoadState('networkidle')
+    await navigation.settle()
     state.bootstrap = { blocked: [...state.blocked], requestFailures: [...state.requestFailures],
       pageErrors: [...state.pageErrors], consoleErrors: [...state.consoleErrors] }
     assert.equal(state.blocked.length, 0, 'bootstrap must not request external resources')

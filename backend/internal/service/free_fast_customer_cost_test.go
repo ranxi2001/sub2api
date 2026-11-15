@@ -181,8 +181,10 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 				expectedPrices := map[string]float64{"write_30m": write * reasoning, "write_12h": write12h * reasoning, "read": read * reasoning}
 				expectedTokens := map[string]int{"write_30m": tc.write30m, "write_12h": tc.write12h, "read": tc.read}
 				for _, value := range lines {
-					line := value.(map[string]any)
-					kind := line["kind"].(string)
+					line, ok := value.(map[string]any)
+					require.True(t, ok, "cache price entry must be an object")
+					kind, ok := line["kind"].(string)
+					require.True(t, ok, "cache price kind must be a string")
 					require.Contains(t, expectedPrices, kind)
 					require.InDelta(t, expectedPrices[kind], line["unit_price"], 1e-16)
 					require.EqualValues(t, expectedTokens[kind], line["tokens"])
@@ -342,13 +344,19 @@ func TestFreeFastCustomerCostCachePrices(t *testing.T) {
 			}{"read": {17, read * factor}, kindShort: {11, short * factor}, kindLong: {13, long * factor}}
 			writeSum, readSum := 0.0, 0.0
 			for _, value := range lines {
-				line := value.(map[string]any)
-				kind := line["kind"].(string)
+				line, ok := value.(map[string]any)
+				require.True(t, ok, "cache price entry must be an object")
+				kind, ok := line["kind"].(string)
+				require.True(t, ok, "cache price kind must be a string")
 				want, exists := expected[kind]
 				require.True(t, exists, kind)
 				require.EqualValues(t, want.count, line["tokens"])
 				require.InDelta(t, want.price, line["unit_price"], 1e-16, kind)
-				cost := line["unit_price"].(float64) * line["tokens"].(float64)
+				unitPrice, ok := line["unit_price"].(float64)
+				require.True(t, ok, "cache unit price must be numeric")
+				count, ok := line["tokens"].(float64)
+				require.True(t, ok, "cache token count must be numeric")
+				cost := unitPrice * count
 				if kind == "read" {
 					readSum += cost
 				} else {
