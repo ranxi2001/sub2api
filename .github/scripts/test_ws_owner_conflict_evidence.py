@@ -10,7 +10,7 @@ SPEC.loader.exec_module(EVIDENCE)
 
 def fixture(suite):
     leaves = EVIDENCE.SUITES[suite]
-    tests = leaves | {"/".join(leaf.split("/")[:i]) for leaf in leaves for i in range(1, len(leaf.split("/")))}
+    tests = leaves | {leaf.split("/")[0] for leaf in leaves}
     outcome = "fail" if suite == "red" else "pass"
     rows = [{"Package": EVIDENCE.PACKAGE, "Test": name, "Action": action} for name in sorted(tests) for action in ("run", outcome)]
     rows.append({"Package": EVIDENCE.PACKAGE, "Action": outcome})

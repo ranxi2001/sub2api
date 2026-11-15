@@ -30,7 +30,7 @@ def validate(suite, status, raw):
     if status != (1 if suite == "red" else 0):
         raise ValueError("unexpected process exit")
     rows = [json.loads(line) for line in raw.splitlines() if line.startswith("{")]
-    ancestors = {"/".join(leaf.split("/")[:i]) for leaf in leaves for i in range(1, len(leaf.split("/")))}
+    ancestors = {leaf.split("/")[0] for leaf in leaves} # t.Run uses flattened mode/case names.
     tests = leaves | ancestors
     counts = Counter((r.get("Action"), r.get("Test")) for r in rows if r.get("Package") == PACKAGE)
     for name in tests:

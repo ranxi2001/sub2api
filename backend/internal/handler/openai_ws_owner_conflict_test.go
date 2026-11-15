@@ -280,7 +280,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		history = history[1:]
 	case "binding_changed":
 		accounts.mu.Lock()
-		accounts.accounts[1].Credentials["api_key"] = "fixture-mixed-B-rotated"
+		accounts.accounts[1].Credentials = map[string]any{"api_key": "fixture-mixed-B-rotated", "base_url": provider.URL}
 		accounts.mu.Unlock()
 	case "fresh":
 		issue600Finish(t, h, headers)

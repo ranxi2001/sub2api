@@ -102,6 +102,46 @@ func TestOpenAIWSMixedOwnerProofCannotComeFromDiagnostics(t *testing.T) {
 	}
 }
 
+func TestOpenAIWSMixedOwnerProofRecheckedAtRebuild(t *testing.T) {
+	for _, mutation := range []string{"none", "missing", "changed"} {
+		t.Run(mutation, func(t *testing.T) {
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+			a, b := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			other := strings.ReplaceAll(issue715OpaqueBody, "fixture-opaque-reference", "fixture-other-owner")
+			issue715LearnRoute(t, svc, a, issue715OpaqueBody)
+			issue715LearnRoute(t, svc, b, other)
+			body := []byte(`{"model":"gpt-6-astra","input":[{"role":"user","content":"continue this task"},` + gjson.Get(issue715OpaqueBody, "input.0").Raw + `,` + gjson.Get(other, "input.0").Raw + `]}`)
+			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+			ctx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", "gpt-6-astra")
+			proof := openAIAgentRecoveryFromContext(ctx)
+			require.True(t, proof.hasCompletedMixedOwners())
+			before := svc.checkOpenAIAgentRecoveryAccount(ctx, b)
+			err := openAIWSUnsentAgentTurn(&openAIWSOwnerRouteError{cause: before, completedMixedOwners: true, completedSource: proof}, body, "gpt-6-astra", 53)
+			_, _, _, unsent := OpenAIWSUnsentTurnPayload(err)
+			require.True(t, unsent)
+			key := proof.keys[0]
+			if mutation == "missing" {
+				delete(svc.agentMessageRecovery.bindings, key)
+			} else if mutation == "changed" {
+				binding := svc.agentMessageRecovery.bindings[key]
+				binding.accountID = 3 // Still mixed and completed, but different evidence.
+				svc.agentMessageRecovery.bindings[key] = binding
+			}
+			next, _, changed, rebuildErr := svc.RebuildOpenAIWSUnsentTurn(WithOpenAIWSUnsentOwnerProof(ctx, err), c, body, "fixture-session", "gpt-6-astra")
+			if mutation == "none" {
+				require.NoError(t, rebuildErr)
+				require.True(t, changed)
+			} else {
+				require.Error(t, rebuildErr)
+				require.False(t, changed)
+			}
+			remaining, _ := next.Value(openAIWSUnsentOwnerProofKey{}).(*openAIAgentRecoveryRequest)
+			require.Nil(t, remaining, "proof belongs only to the current turn")
+		})
+	}
+}
+
 func TestOpenAIRecoveryDiagnosticsAreAllowlisted(t *testing.T) {
 	core, logs := observer.New(zap.WarnLevel)
 	ctx := logger.IntoContext(context.Background(), zap.New(core))
