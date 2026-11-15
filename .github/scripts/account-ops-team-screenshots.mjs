@@ -20,7 +20,7 @@ import Rules from '/src/components/admin/operations/AccountOpsRuleList.vue';
 import Email from '/src/components/admin/operations/AccountOpsEmailDialog.vue';
 import Groups from '/src/components/admin/operations/AccountOpsGroupDialog.vue';
 import '/src/style.css';
-await loadLocaleMessages('zh');i18n.global.locale.value='zh';
+const language=new URLSearchParams(location.search).get('lang')||'zh';await loadLocaleMessages(language);i18n.global.locale.value=language;
 if(location.search.includes('dark'))document.documentElement.classList.add('dark');
 const before=location.search.includes('before');
 const accounts=[1,2].map(id=>({account_id:id,account_name:'示例供应商 Key '+id,platform:'openai',type:'apikey',provider_id:before?undefined:7,balance:35,unit:'USD',balance_status:'ok',probe_enabled:true,received_at:'2026-01-01T08:00:00Z',usage_windows:[]}));
@@ -49,17 +49,17 @@ createApp({setup(){return()=>h('main',{class:'p-6 space-y-4'},[
 
  await server.listen(); browser = await chromium.launch({ headless: true })
  const captures = []
- for (const phase of ['before', 'after']) {
+ for (const language of ['zh', 'en']) for (const phase of ['before', 'after']) {
   before = phase === 'before'; server.moduleGraph.invalidateAll()
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   await context.route('**/*', route => route.request().url().startsWith(origin) ? route.continue() : route.abort())
   const page = await context.newPage(), errors = []
   page.on('pageerror', e => { errors.push(e.message); console.error('preview page error:', e.message) })
-  await page.goto(`${origin}/preview?${phase}`, { waitUntil: 'networkidle' })
+  await page.goto(`${origin}/preview?${phase}&lang=${language}`, { waitUntil: 'networkidle' })
   await page.getByTestId('account-ops-rules').waitFor()
-  await page.screenshot({ path: join(out, `${phase}-rules.png`), fullPage: true })
+  await page.screenshot({ path: join(out, `${phase}-${language}-rules.png`), fullPage: true })
   await page.getByTestId('open-email').click(); await page.locator('#account-ops-email').waitFor()
-  await page.screenshot({ path: join(out, `${phase}-email.png`), fullPage: true })
+  await page.screenshot({ path: join(out, `${phase}-${language}-email.png`), fullPage: true })
   if (phase === 'after') {
    if (await page.locator('textarea#account-ops-email').count() !== 1) throw new Error('multiple-email editor missing')
    await page.reload({ waitUntil: 'networkidle' })
@@ -67,10 +67,10 @@ createApp({setup(){return()=>h('main',{class:'p-6 space-y-4'},[
    await page.getByTestId('ops-provider-select').first().evaluate(el => { el.closest('details').open = true })
    await page.getByTestId('ops-provider-select').first().focus()
    await page.getByTestId('ops-provider-select').first().locator('option').filter({ hasText: '示例供应商' }).waitFor({ state: 'attached' })
-   await page.screenshot({ path: join(out, 'after-provider-link.png'), fullPage: true })
+   await page.screenshot({ path: join(out, `after-${language}-provider-link.png`), fullPage: true })
   }
   if (errors.length) throw new Error(errors.join('\n'))
-  captures.push({ phase, source: before ? baseline : head }); await context.close()
+  captures.push({ phase, language, source: before ? baseline : head }); await context.close()
  }
  writeFileSync(join(out, 'source.json'), JSON.stringify({ head, baseline, captures, scope: 'Actual Vue components with synthetic data; all external requests blocked' }, null, 2))
 } finally { await browser?.close(); await server?.close(); rmSync(entry, { force: true }) }
