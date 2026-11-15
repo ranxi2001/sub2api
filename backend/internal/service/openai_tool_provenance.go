@@ -132,10 +132,12 @@ func (s *OpenAIGatewayService) toolProofReserve(ctx context.Context, key, token 
 			delete(state.toolProofs, k)
 		}
 	}
-	if len(state.toolProofs) >= 128 {
+	old := state.toolProofs[key]
+	if len(state.toolProofs) >= 128 && old.raw == "" {
 		return openAIAgentRecoveryError("store_unavailable")
 	}
-	old := state.toolProofs[key]
+	// Even at capacity, reissuing an existing identity must revoke its old
+	// proof. Rejecting before this update would leave the old grant usable.
 	if old.raw != "" && old.raw != token {
 		token = "conflict"
 	}

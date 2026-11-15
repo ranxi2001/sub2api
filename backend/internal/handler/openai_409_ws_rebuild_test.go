@@ -108,9 +108,12 @@ func TestOpenAI409WSReviewRepairs(t *testing.T) {
 	t.Run("bridge_inherited_model", func(t *testing.T) {
 		runReadableWSContinuation(t, service.OpenAIWSIngressModeHTTPBridge, "bridge_model")
 	})
-	t.Run("bridge_cross_model_proof_refused", func(t *testing.T) {
-		runReadableWSContinuation(t, service.OpenAIWSIngressModeHTTPBridge, "bridge_model_cross_scope")
-	})
+}
+
+// Keep this new proof boundary separate from the historical review RED suite:
+// that suite pins an older implementation without tool provenance.
+func TestOpenAI409WSCrossModelProofRefused(t *testing.T) {
+	runReadableWSContinuation(t, service.OpenAIWSIngressModeHTTPBridge, "bridge_model_cross_scope")
 }
 
 func TestOpenAI409WSResidualRepairs(t *testing.T) {
