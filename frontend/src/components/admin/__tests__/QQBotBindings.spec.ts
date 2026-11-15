@@ -1,0 +1,61 @@
+import { mount, flushPromises } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import QQBotBindings from '../QQBotBindings.vue'
+
+const api = vi.hoisted(() => ({ bindings: vi.fn(), unbind: vi.fn() }))
+vi.mock('@/api/qqbot', () => ({ qqbotAPI: api }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/components/common/BaseDialog.vue', () => ({ default: { props: ['show'], template: '<div v-if="show" role="dialog"><slot /><slot name="footer" /></div>' } }))
+const binding = { app_id: 'app', member_id: 'member', user_id: 7, nickname: 'Alice', group_id: 'group', email: 'alice@example.com', created_at: '2026-10-15T00:00:00.123456Z', user_status: 'active', user_deleted: false }
+const first = { items: [binding], total: 1, page: 1, page_size: 20 }
+
+describe('QQ administrator binding management', () => {
+  beforeEach(() => { vi.resetAllMocks(); api.bindings.mockResolvedValue(first) })
+  it('shows searchable bindings and only unlinks after explicit confirmation', async () => {
+    const wrapper = mount(QQBotBindings)
+    await flushPromises()
+    expect(wrapper.text()).toContain('alice@example.com')
+    expect(wrapper.text()).toContain('Alice')
+    await wrapper.get('input').setValue('alice@')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.bindings).toHaveBeenLastCalledWith('alice@', 1)
+    await wrapper.findAll('button').find(b => b.text() === 'qqbot.unbind')!.trigger('click')
+    expect(api.unbind).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('alice@example.com')
+    await wrapper.get('[role="dialog"]').findAll('button').find(b => b.text() === 'common.cancel')!.trigger('click')
+    expect(api.unbind).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(b => b.text() === 'qqbot.unbind')!.trigger('click')
+    api.unbind.mockResolvedValue({ unbound: true })
+    api.bindings.mockResolvedValue({ ...first, items: [], total: 0 })
+    await wrapper.findAll('button').find(b => b.text() === 'qqbot.confirmUnbind')!.trigger('click')
+    await flushPromises()
+    expect(api.unbind).toHaveBeenCalledWith(binding)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+    expect(wrapper.text()).toContain('qqbot.unbound')
+    expect(wrapper.text()).not.toContain('alice@example.com')
+  })
+  it('keeps the confirmation open when a stale binding cannot be unlinked', async () => {
+    const wrapper = mount(QQBotBindings)
+    await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'qqbot.unbind')!.trigger('click')
+    api.unbind.mockRejectedValue(new Error('Binding changed; refresh'))
+    await wrapper.findAll('button').find(b => b.text() === 'qqbot.confirmUnbind')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"] [role="alert"]').text()).toBe('Binding changed; refresh')
+    expect(wrapper.emitted('changed')).toBeUndefined()
+  })
+  it('keeps the search when moving between pages', async () => {
+    api.bindings.mockResolvedValue({ ...first, total: 21 })
+    const wrapper = mount(QQBotBindings)
+    await flushPromises()
+    await wrapper.get('input').setValue('group')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    api.bindings.mockResolvedValue({ ...first, total: 21, page: 2 })
+    await wrapper.findAll('button').find(b => b.text() === 'qqbot.nextPage')!.trigger('click')
+    await flushPromises()
+    expect(api.bindings).toHaveBeenLastCalledWith('group', 2)
+  })
+})

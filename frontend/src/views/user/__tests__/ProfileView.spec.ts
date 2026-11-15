@@ -15,6 +15,7 @@ const {
   }
 }))
 
+vi.mock('@/components/user/profile/ProfileQQBotCard.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => authState
 }))

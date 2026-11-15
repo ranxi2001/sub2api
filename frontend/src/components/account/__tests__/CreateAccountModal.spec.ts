@@ -1,3 +1,4 @@
+vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template: '<span />' } }))
 vi.mock('@/api/admin/upstreamChannels', () => ({ listUpstreamChannels: vi.fn(), readChannelBindings: vi.fn(), bindChannelAccounts: vi.fn() }))
 import { readChannelBindings, listUpstreamChannels } from '@/api/admin/upstreamChannels'
 import UpstreamChannelSelector from '../UpstreamChannelSelector.vue'
@@ -1797,4 +1798,13 @@ describe('explicit upstream channel on account creation', () => {
   await selector.get('[data-testid="upstream-channel-select"]').setValue('7')
   expect(w.find('[data-testid="confirm-create-channel"]').exists()).toBe(true)
  })
+})
+
+describe('mature provider import entry', () => {
+  it('offers provider selection for OpenAI API Key and Responses accounts', async () => {
+    const w = mountModal()
+    await selectButtonByText(w, 'OpenAI')
+    await selectButtonByText(w, 'API Key')
+    expect(w.find('[data-testid="provider-import-mode"]').exists(), 'API Key and Responses accounts must offer provider import').toBe(true)
+  })
 })

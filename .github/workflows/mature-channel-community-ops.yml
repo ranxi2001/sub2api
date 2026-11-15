@@ -1,0 +1,760 @@
+name: Mature channel and community operations
+on:
+  push:
+    branches: [feat/mature-channel-community-ops]
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mature
+          POSTGRES_PASSWORD: isolated-test-only
+          POSTGRES_DB: mature
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U mature"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      COUPON_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
+      QQBOT_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
+      MATURE_TEST_POSTGRES: host=127.0.0.1 port=5432 user=mature password=isolated-test-only dbname=mature sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Freeze candidate identity
+        run: |
+          mkdir -p "$RUNNER_TEMP/mature-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/mature-evidence/candidate.txt"
+      - name: RED frozen production with candidate HTTP assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=37dc4620a41a68abaeab329358c15821c41e3f7f
+          git fetch --no-tags --depth=1 origin "$base"
+          git worktree add --detach "$RUNNER_TEMP/mature-red" "$base"
+          cp backend/internal/server/routes/mature_*_test.go "$RUNNER_TEMP/mature-red/backend/internal/server/routes/"
+          cd "$RUNNER_TEMP/mature-red/backend"
+          set +e
+          go test -tags=integration ./internal/server/routes -run '^TestMature(Providers(HTTPContract|PostgresCRUD|KeyCreateConfirmation)|QQBotWebhookSafeDefault|CouponRoutesRequireAuthentication)$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-evidence/red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/red.log"
+          grep -q -- '--- FAIL: TestMatureProvidersHTTPContract/admin' "$RUNNER_TEMP/mature-evidence/red.log"
+          grep -q -- '--- FAIL: TestMatureQQBotWebhookSafeDefault' "$RUNNER_TEMP/mature-evidence/red.log"
+          grep -q -- '--- FAIL: TestMatureProvidersPostgresCRUD' "$RUNNER_TEMP/mature-evidence/red.log"
+          grep -q 'actual  : 404' "$RUNNER_TEMP/mature-evidence/red.log"
+      - name: RED credentials against first catalog increment
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=620d37ee42b0439a9ce1bd497064a990594ca192
+          git fetch --no-tags --depth=1 origin "$base"
+          git worktree add --detach "$RUNNER_TEMP/mature-credentials-red" "$base"
+          cp backend/internal/server/routes/mature_*_test.go "$RUNNER_TEMP/mature-credentials-red/backend/internal/server/routes/"
+          cd "$RUNNER_TEMP/mature-credentials-red/backend"
+          set +e
+          go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersCredentialsAndMetadata$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/credentials-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-evidence/credentials-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/credentials-red.log"
+          grep -q -- '--- FAIL: TestMatureProvidersCredentialsAndMetadata' "$RUNNER_TEMP/mature-evidence/credentials-red.log"
+          grep -q 'actual  : 400' "$RUNNER_TEMP/mature-evidence/credentials-red.log"
+      - name: RED account import conflict against frozen production
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp backend/internal/handler/admin/mature_provider_import_test.go "$RUNNER_TEMP/mature-red/backend/internal/handler/admin/"
+          cd "$RUNNER_TEMP/mature-red/backend"
+          set +e
+          go test ./internal/handler/admin -run '^TestMatureProviderImportRejectsMixedManualCredential$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/import-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-evidence/import-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/import-red.log"
+          grep -q 'actual  : 200' "$RUNNER_TEMP/mature-evidence/import-red.log"
+      - name: RED refresh policy against first catalog increment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp backend/internal/server/routes/mature_providers_refresh_postgres_test.go "$RUNNER_TEMP/mature-credentials-red/backend/internal/server/routes/"
+          cd "$RUNNER_TEMP/mature-credentials-red/backend"
+          set +e
+          go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersRefreshClaimAndLowBalance$' -count=1 -v > "$RUNNER_TEMP/mature-evidence/refresh-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-evidence/refresh-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-evidence/refresh-red.log"
+          grep -q 'actual  : 400' "$RUNNER_TEMP/mature-evidence/refresh-red.log"
+      - name: Candidate HTTP contract
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -tags=integration ./internal/server/routes -run '^TestMature' -count=1 -v 2>&1 | tee "$RUNNER_TEMP/mature-evidence/green.log"
+      - name: Candidate account import and QQ confirmation boundaries
+        if: always()
+        working-directory: backend
+        run: go test ./internal/handler/admin ./internal/handler -run '^TestMature' -count=1 -v
+      - name: QQ source business unit regressions
+        if: always()
+        working-directory: backend
+        run: go test ./internal/qqbot ./internal/coupon -count=1 -timeout=10m
+      - name: QQ isolated PostgreSQL and full fork migrations
+        if: always()
+        working-directory: backend
+        run: go test -tags=integration ./internal/qqbot -count=1 -timeout=15m
+      - name: Compile production server
+        if: always()
+        working-directory: backend
+        run: go build -o "$RUNNER_TEMP/mature-server" ./cmd/server
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-contract-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/mature-evidence/
+
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+
+  before-ui:
+    if: github.sha == '59d409b49df3dd90815a054cb6dffdd405c06c3e'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Freeze before source
+        run: |
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          git worktree add --detach "$RUNNER_TEMP/mature-before" 37dc4620a41a68abaeab329358c15821c41e3f7f
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir "$RUNNER_TEMP/mature-before/frontend" install --frozen-lockfile
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/mature-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/mature-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Real baseline components in both languages and viewport sizes
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/mature-browser/node_modules/playwright
+          MATURE_BASE_ROOT: ${{ runner.temp }}/mature-before
+          MATURE_SCREENSHOT_DIR: ${{ runner.temp }}/mature-before-evidence
+        run: node .github/scripts/mature-providers-before.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-before-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/mature-before-evidence/
+
+  provider-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: RED existing page lacks provider management
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mature-ui-evidence"
+          target=frontend/src/views/admin/UpstreamChannelOperationsView.vue
+          cp "$target" "$RUNNER_TEMP/provider-current.vue"
+          trap 'cp "$RUNNER_TEMP/provider-current.vue" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          git show 37dc4620a41a68abaeab329358c15821c41e3f7f:"$target" > "$target"
+          set +e
+          (cd frontend && pnpm exec vitest run src/views/admin/__tests__/MatureProviders.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism) > "$RUNNER_TEMP/mature-ui-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-ui-evidence/red.log"
+          test "$result" -ne 0
+          grep -q 'channel operations must expose provider CRUD' "$RUNNER_TEMP/mature-ui-evidence/red.log"
+          ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found' "$RUNNER_TEMP/mature-ui-evidence/red.log"
+      - name: RED community navigation on frozen baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=frontend/src/components/admin/operations/SmartOpsNav.vue
+          cp "$target" "$RUNNER_TEMP/community-current.vue"
+          trap 'cp "$RUNNER_TEMP/community-current.vue" "$target"' EXIT
+          git show 37dc4620a41a68abaeab329358c15821c41e3f7f:"$target" > "$target"
+          set +e
+          (cd frontend && pnpm exec vitest run src/views/admin/__tests__/MatureCommunityNav.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism) > "$RUNNER_TEMP/mature-ui-evidence/community-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-ui-evidence/community-red.log"
+          test "$result" -ne 0
+          grep -q 'community operations must be reachable' "$RUNNER_TEMP/mature-ui-evidence/community-red.log"
+          ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found' "$RUNNER_TEMP/mature-ui-evidence/community-red.log"
+      - name: RED account import entry before implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=frontend/src/components/account/CreateAccountModal.vue
+          cp "$target" "$RUNNER_TEMP/account-current.vue"
+          trap 'cp "$RUNNER_TEMP/account-current.vue" "$target"' EXIT
+          git show 37dc4620a41a68abaeab329358c15821c41e3f7f:"$target" > "$target"
+          set +e
+          (cd frontend && pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts -t 'mature provider import entry' --maxWorkers=1 --minWorkers=1 --no-file-parallelism) > "$RUNNER_TEMP/mature-ui-evidence/account-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-ui-evidence/account-red.log"
+          test "$result" -ne 0
+          grep -q 'API Key and Responses accounts must offer provider import' "$RUNNER_TEMP/mature-ui-evidence/account-red.log"
+          ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found' "$RUNNER_TEMP/mature-ui-evidence/account-red.log"
+      - name: GREEN provider interactions
+        working-directory: frontend
+        run: pnpm exec vitest run src/views/admin/__tests__/MatureCommunityNav.spec.ts src/views/admin/__tests__/MatureProviders.spec.ts src/views/admin/__tests__/UpstreamChannelOperationsView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: QQ frontend business regression
+        working-directory: frontend
+        run: pnpm exec vitest run src/components/admin/qqbot/__tests__ src/views/admin/__tests__/QQBotView.spec.ts src/views/admin/__tests__/QQBotSetup.spec.ts src/views/admin/__tests__/QQBotActivities.spec.ts src/views/admin/__tests__/QQBotRecords.spec.ts src/components/admin/__tests__/QQBotBindings.spec.ts src/components/user/profile/__tests__/ProfileQQBotCard.spec.ts src/views/auth/__tests__/QQBotBindView.spec.ts src/views/auth/__tests__/QQBotTransferView.spec.ts src/api/__tests__/qqbot.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: RED definite remote refusals must not be presented as unknown writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=frontend/src/components/account/MatureProviderImport.vue
+          cp "$target" "$RUNNER_TEMP/mature-import-current.vue"
+          trap 'cp "$RUNNER_TEMP/mature-import-current.vue" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin a72031bcda0102664f65d3889783d227fe6fa802
+          git show a72031bcda0102664f65d3889783d227fe6fa802:"$target" > "$target"
+          set +e
+          (cd frontend && pnpm exec vitest run src/components/account/__tests__/MatureProviderImport.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism) > "$RUNNER_TEMP/mature-ui-evidence/key-refusal-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-ui-evidence/key-refusal-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found|Unhandled Error' "$RUNNER_TEMP/mature-ui-evidence/key-refusal-red.log"
+          grep -q 'definite refusals must remain distinct from uncertain writes' "$RUNNER_TEMP/mature-ui-evidence/key-refusal-red.log"
+      - name: Account import regression
+        working-directory: frontend
+        run: pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/CreateAccountModal.autoBPS.spec.ts src/components/account/__tests__/MatureProviderImport.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: Coupon reward payment UI regressions
+        working-directory: frontend
+        run: pnpm exec vitest run src/components/payment/__tests__/RechargeCouponPicker.spec.ts src/views/admin/orders/__tests__/AdminCouponsView.spec.ts src/views/user/__tests__/UserCouponsView.spec.ts src/views/user/__tests__/PaymentView.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - name: Frontend production build
+        run: pnpm --dir frontend run build
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Embedded production server build
+        working-directory: backend
+        run: CGO_ENABLED=0 go build -tags embed -trimpath -ldflags "-X main.Commit=${{ github.sha }}" -o "$RUNNER_TEMP/mature-embedded-server" ./cmd/server
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-ui-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-ui-evidence/
+
+  qq-network:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: RED pinned imported QQ transport before hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mature-network-evidence"
+          base=1ba2716504e7462e948c715d7d8ffe03aa30b198
+          git fetch --no-tags --depth=1 origin "$base"
+          git worktree add --detach "$RUNNER_TEMP/mature-network-red" "$base"
+          cp backend/internal/qqbot/mature_network_test.go "$RUNNER_TEMP/mature-network-red/backend/internal/qqbot/"
+          cd "$RUNNER_TEMP/mature-network-red/backend"
+          set +e
+          go test ./internal/qqbot -run '^TestMatureQQ(DefaultTransport|RejectsTranslation)' -count=1 -v > "$RUNNER_TEMP/mature-network-evidence/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-network-evidence/red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-network-evidence/red.log"
+          grep -q -- '--- FAIL: TestMatureQQDefaultTransportRejectsPrivateDestination' "$RUNNER_TEMP/mature-network-evidence/red.log"
+          grep -q -- '--- FAIL: TestMatureQQRejectsTranslationAndSpecialPurposeIPs' "$RUNNER_TEMP/mature-network-evidence/red.log"
+      - name: Candidate network policy regressions
+        working-directory: backend
+        run: go test ./internal/qqbot -run '^TestMatureQQ(DefaultTransport|RejectsTranslation)' -count=1 -v
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-network-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-network-evidence/
+
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+
+  account-before:
+    if: github.sha == 'a51c3e8d8e61c897a3a2aad9dd1cdc7d9b114c56'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v6
+        with: { node-version: '22' }
+      - name: Frozen source and dependencies
+        run: |
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          git worktree add --detach "$RUNNER_TEMP/account-before" 37dc4620a41a68abaeab329358c15821c41e3f7f
+          pnpm --dir "$RUNNER_TEMP/account-before/frontend" install --frozen-lockfile
+          npm install --prefix "$RUNNER_TEMP/account-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/account-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Actual account import baseline
+        env:
+          MATURE_BASE_ROOT: ${{ runner.temp }}/account-before
+          EVIDENCE_DIR: ${{ runner.temp }}/account-before-evidence
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/account-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/mature-account-before.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-account-before-${{ github.sha }}
+          path: ${{ runner.temp }}/account-before-evidence/
+
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: mature, POSTGRES_PASSWORD: isolated-test-only, POSTGRES_DB: mature }
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U mature" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MATURE_TEST_POSTGRES: host=127.0.0.1 port=5432 user=mature password=isolated-test-only dbname=mature sslmode=disable
+      COUPON_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
+      QQBOT_TEST_DSN: postgres://mature:isolated-test-only@127.0.0.1:5432/mature?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: RED provider identity must resolve old balance alerts
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/repository/mature_providers.go
+          cp "$target" "$RUNNER_TEMP/mature-provider-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-provider-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 2e2e6def253c07eb1a48f2a9e58c137f87c2bdc9
+          git show 2e2e6def253c07eb1a48f2a9e58c137f87c2bdc9:"$target" > "$target"
+          set +e
+          (cd backend && go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersRefreshClaimAndLowBalance$' -count=1 -v) > "$RUNNER_TEMP/mature-provider-identity-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-provider-identity-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-provider-identity-red.log"
+          grep -q 'identity change must end the previous balance episode' "$RUNNER_TEMP/mature-provider-identity-red.log"
+      - name: RED uncertain local persistence after remote key creation
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=407eea6822cd27a1772f41ff75615bc50592d941
+          session_baseline=ae7598867c9a9138f5f36ed7a67bc2fa97e48bad
+          red_tree="$RUNNER_TEMP/mature-key-persistence-red"
+          evidence="$RUNNER_TEMP/mature-key-persistence-evidence"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$evidence/candidate.txt"
+          sha256sum backend/internal/server/routes/mature_providers_keys_postgres_test.go > "$evidence/test-sha256.txt"
+          git fetch --no-tags --depth=1 origin "$baseline" "$session_baseline"
+          git worktree add --detach "$red_tree" '${{ github.sha }}'
+          # Keep the target handler byte-identical to its defective source.
+          # Its pre-budget callback needs the matching interface, repository
+          # and refresh caller; ae759 retains the later pending-key contract.
+          for target in backend/internal/handler/admin/mature_provider_keys.go backend/internal/service/mature_providers.go backend/internal/repository/mature_providers_session.go backend/internal/handler/admin/mature_provider_connection.go; do
+            source="$session_baseline"
+            if [ "$target" = backend/internal/handler/admin/mature_provider_keys.go ]; then source="$baseline"; fi
+            git show "$source:$target" > "$red_tree/$target"
+            blob=$(git rev-parse "$source:$target")
+            test "$(git hash-object "$red_tree/$target")" = "$blob"
+            printf '%s %s %s\n' "$source" "$target" "$blob" >> "$evidence/production-blobs.txt"
+          done
+          cmp backend/internal/server/routes/mature_providers_keys_postgres_test.go "$red_tree/backend/internal/server/routes/mature_providers_keys_postgres_test.go"
+          set +e
+          (cd "$red_tree/backend" && go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersKeyCreationIdempotency/persistence_failure$' -count=1 -v) > "$RUNNER_TEMP/mature-key-persistence-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-key-persistence-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-key-persistence-red.log"
+          grep -q 'local persistence failure after upstream creation must be classified as uncertain' "$RUNNER_TEMP/mature-key-persistence-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-key-persistence-red-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/mature-key-persistence-red.log
+            ${{ runner.temp }}/mature-key-persistence-evidence/
+      - name: Candidate business HTTP assertions
+        working-directory: backend
+        run: |
+          set -o pipefail
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          go test -tags=integration ./internal/server/routes -run '^TestMature' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/mature-http.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-http-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-http.log
+      - name: RED unsafe provider errors and missing probe confirmation
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin 796a73f9e5b5c0a936ba5e074c3ab84506de1961
+          files=(backend/internal/handler/admin/mature_provider_key_types.go backend/internal/handler/admin/mature_provider_newapi_auth.go backend/internal/handler/qq_bot_handler.go backend/internal/handler/qq_bot_setup_handler.go)
+          mkdir -p "$RUNNER_TEMP/mature-handler-original"
+          for target in "${files[@]}"; do cp "$target" "$RUNNER_TEMP/mature-handler-original/$(basename "$target")"; git show 796a73f9e5b5c0a936ba5e074c3ab84506de1961:"$target" > "$target"; done
+          restore(){ for target in "${files[@]}"; do cp "$RUNNER_TEMP/mature-handler-original/$(basename "$target")" "$target"; done; }
+          trap restore EXIT
+          set +e
+          (cd backend && go test ./internal/handler/admin ./internal/handler -run '^TestMature(ProviderReflectedCredentialIsNotPublic|ProviderScopeCannotReflectCredential|QQProbeRequiresExplicitConfirmation)$' -count=1 -v) > "$RUNNER_TEMP/mature-handler-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-handler-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-handler-red.log"
+          grep -q -- '--- FAIL: TestMatureProviderReflectedCredentialIsNotPublic' "$RUNNER_TEMP/mature-handler-red.log"
+          grep -q -- '--- FAIL: TestMatureProviderScopeCannotReflectCredential' "$RUNNER_TEMP/mature-handler-red.log"
+          grep -q -- '--- FAIL: TestMatureQQProbeRequiresExplicitConfirmation' "$RUNNER_TEMP/mature-handler-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-handler-red-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-handler-red.log
+      - name: RED observed debt and unconverted quota currency
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/handler/admin/mature_provider_remote.go
+          cp "$target" "$RUNNER_TEMP/mature-protocol-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-protocol-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 5f96a6f0a94a88322dd5a97b3ee15e235007179b
+          git show 5f96a6f0a94a88322dd5a97b3ee15e235007179b:"$target" > "$target"
+          # The removed, unused convenience wrapper in that source still
+          # references this factory; preserve only that compile-time dependency.
+          printf '\nvar providerSessionHTTPClient = providerHTTPClient\n' >> "$target"
+          set +e
+          (cd backend && go test ./internal/handler/admin -run '^TestMatureProvider(NegativeBalanceRemainsObserved|CurrencyDoesNotRelabelQuota)$' -count=1 -v) > "$RUNNER_TEMP/mature-metrics-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-metrics-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-metrics-red.log"
+          grep -q -- '--- FAIL: TestMatureProviderNegativeBalanceRemainsObserved' "$RUNNER_TEMP/mature-metrics-red.log"
+          grep -q -- '--- FAIL: TestMatureProviderCurrencyDoesNotRelabelQuota' "$RUNNER_TEMP/mature-metrics-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-metrics-red-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-metrics-red.log
+      - name: Candidate handler assertions
+        if: always()
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test ./internal/handler/admin ./internal/handler -run '^Test(Mature|QQ)' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/mature-handlers.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-handlers-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-handlers.log
+      - name: RED transfer atomicity against imported implementation
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/qqbot/transfer.go
+          cp "$target" "$RUNNER_TEMP/mature-transfer-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-transfer-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 796a73f9e5b5c0a936ba5e074c3ab84506de1961
+          git show 796a73f9e5b5c0a936ba5e074c3ab84506de1961:"$target" > "$target"
+          set +e
+          (cd backend && go test -tags=integration ./internal/qqbot -run '^TestMatureTransferRollsBackWhenRecipientIsNotCredited$' -count=1 -v) > "$RUNNER_TEMP/mature-transfer-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-transfer-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:|file does not exist' "$RUNNER_TEMP/mature-transfer-red.log"
+          grep -q 'a transfer must roll back unless the recipient is credited' "$RUNNER_TEMP/mature-transfer-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-transfer-red-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-transfer-red.log
+      - name: QQ business isolated database
+        if: always()
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -tags=integration ./internal/qqbot -count=1 -timeout=10m 2>&1 | tee "$RUNNER_TEMP/mature-qqdb.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-qqdb-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-qqdb.log
+      - name: RED coupon preservation through signed resume
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=backend/internal/service/payment_resume_service.go
+          cp "$target" "$RUNNER_TEMP/mature-resume-current.go"
+          trap 'cp "$RUNNER_TEMP/mature-resume-current.go" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          git show 37dc4620a41a68abaeab329358c15821c41e3f7f:"$target" > "$target"
+          set +e
+          (cd backend && go test ./internal/service -run '^TestMatureCouponSurvivesSignedPaymentResume$' -count=1 -v) > "$RUNNER_TEMP/mature-coupon-resume-red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/mature-coupon-resume-red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/mature-coupon-resume-red.log"
+          grep -q 'signed payment resumption must preserve the selected coupon' "$RUNNER_TEMP/mature-coupon-resume-red.log"
+      - name: Coupon accounting and isolation regressions
+        if: always()
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -tags=unit ./internal/service -run '^Test(Coupon|QQBot|MatureCoupon)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/mature-coupon.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-coupon-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-coupon.log
+      - name: Canonical database compatibility and provider import
+        if: always()
+        working-directory: backend
+        run: go test -tags=integration ./internal/repository -run '^TestMatureProviderImportPreservesCanonicalData$' -count=1 -v -timeout=10m
+      - name: Server build
+        if: always()
+        working-directory: backend
+        run: go build -o "$RUNNER_TEMP/mature-server" ./cmd/server
+      - name: Startup and shutdown wiring regressions
+        if: always()
+        working-directory: backend
+        run: go test ./cmd/server -run '^TestProvide' -count=1 -timeout=5m
+      - name: Regenerate and verify dependency wiring remotely
+        if: always()
+        working-directory: backend
+        run: |
+          cp go.mod .mature-wire.mod
+          cp go.sum .mature-wire.sum
+          GOFLAGS="-mod=mod -modfile=$PWD/.mature-wire.mod" go generate ./cmd/server
+          cp cmd/server/wire_gen.go "$RUNNER_TEMP/mature-wire_gen.go"
+          git diff --exit-code -- cmd/server/wire_gen.go go.mod go.sum
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-wire-${{ github.sha }}
+          path: ${{ runner.temp }}/mature-wire_gen.go
+
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
+
+  after-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v6
+        with: { node-version: '22' }
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/after-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/after-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Provider actual components after
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/after-browser/node_modules/playwright
+          MATURE_SCREENSHOT_DIR: ${{ runner.temp }}/after-evidence/providers
+        run: node .github/scripts/mature-providers-after.mjs
+      - name: Provider account import and group creation after
+        if: always()
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/after-browser/node_modules/playwright/index.mjs
+          EVIDENCE_DIR: ${{ runner.temp }}/after-evidence/accounts
+        run: node .github/scripts/mature-account-after.mjs
+      - name: QQ actual overview, setup and group management
+        if: always()
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/after-browser/node_modules/playwright/index.mjs
+          EVIDENCE_DIR: ${{ runner.temp }}/after-evidence/community
+        run: node .github/scripts/mature-community-after.mjs
+      - name: Payment before and coupon reward checkout after
+        if: always()
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/after-browser/node_modules/playwright/index.mjs
+          EVIDENCE_DIR: ${{ runner.temp }}/after-evidence/payment
+        run: |
+          git fetch --no-tags --depth=1 origin 37dc4620a41a68abaeab329358c15821c41e3f7f
+          node .github/scripts/mature-payment-comparison.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-after-${{ github.sha }}
+          path: ${{ runner.temp }}/after-evidence/
+
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOMAXPROCS: '2'
+      GOGC: '50'
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-race-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-race-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+      - name: Race detector on QQ protocol, context, queue and coupon logic
+        working-directory: backend
+        run: go test -race ./internal/qqbot ./internal/coupon -count=1 -timeout=10m
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-race-${{ github.sha }}
+
+  wiring:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-wiring-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+      - name: Generate dependency graph from current source
+        working-directory: backend
+        run: |
+          cp go.mod .mature-wire.mod
+          cp go.sum .mature-wire.sum
+          GOFLAGS="-mod=mod -modfile=$PWD/.mature-wire.mod" go generate ./cmd/server
+          mkdir -p "$RUNNER_TEMP/wiring-evidence"
+          cp cmd/server/wire_gen.go "$RUNNER_TEMP/wiring-evidence/"
+          git diff -- cmd/server/wire_gen.go go.mod go.sum > "$RUNNER_TEMP/wiring-evidence/diff.patch"
+          git diff --exit-code -- cmd/server/wire_gen.go go.mod go.sum
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-wiring-${{ github.sha }}
+          path: ${{ runner.temp }}/wiring-evidence/

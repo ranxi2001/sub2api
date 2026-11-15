@@ -6,6 +6,9 @@ set -euo pipefail
 baseline="$1"
 tree="${2:-.}"
 candidate="${3:-$(git -C "$tree" rev-parse HEAD)}"
+# The same historical assembly must not retain tests for an absent QQ package.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bash "$script_dir/prepare-mature-red-fixtures.sh" "$baseline" "$tree" "$candidate"
 # Selective Issue715 overlays retain HTTP2 production/support, so keep its tests.
 if test -f "$tree/backend/internal/service/http2_gateway_test_support.go"; then
   exit 0

@@ -30,7 +30,7 @@
               <Icon name="x" size="sm" />
               {{ t('payment.orders.cancel') }}
             </button>
-            <button v-if="row.status === 'FAILED'" @click="handleRetryOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
+            <button v-if="row.status === 'FAILED' || (row.paid_at && row.coupon?.review_required && ['CANCELLED', 'EXPIRED'].includes(row.status))" @click="handleRetryOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
               <Icon name="refresh" size="sm" />
               {{ t('payment.admin.retry') }}
             </button>
@@ -61,6 +61,10 @@
 
     <!-- Order Detail Dialog -->
     <BaseDialog :show="showDetailDialog" :title="t('payment.admin.orderDetail')" width="wide" @close="showDetailDialog = false">
+      <div v-if="selectedOrder?.coupon" class="mb-4 rounded-lg bg-primary-50 p-3 text-sm dark:bg-dark-800">
+        {{ selectedOrder.coupon.name }} · {{ t('coupon.discount') }} {{ selectedOrder.currency }} {{ selectedOrder.coupon.discount_amount }} · {{ t('coupon.couponBonus') }} USD {{ selectedOrder.coupon.bonus_amount }}
+        <p v-if="selectedOrder.coupon.review_required" class="mt-2 text-amber-600">{{ t('coupon.honorConfirm') }}</p>
+      </div>
       <div v-if="selectedOrder" class="space-y-4">
         <div class="grid grid-cols-2 gap-4">
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</p><p class="font-mono text-sm font-medium text-gray-900 dark:text-white">#{{ selectedOrder.id }}</p></div>
@@ -235,7 +239,9 @@ async function handleCancelOrder(order: PaymentOrder) {
 }
 
 async function handleRetryOrder(order: PaymentOrder) {
-  try { await adminPaymentAPI.retryRecharge(order.id); appStore.showSuccess(t('payment.admin.retrySuccess')); loadOrders() }
+  const confirmedReview = Boolean(order.coupon?.review_required)
+  if (confirmedReview && !window.confirm(t('coupon.honorConfirm'))) return
+  try { await adminPaymentAPI.retryRecharge(order.id, confirmedReview); appStore.showSuccess(t('payment.admin.retrySuccess')); loadOrders() }
   catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
 }
 

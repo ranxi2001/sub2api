@@ -78,14 +78,15 @@
               />
               <StripeSubtypeSelector v-if="selectedMethod === 'stripe' && Object.keys(stripeSubMethods).length" v-model="selectedSubtype" :methods="stripeSubMethods" />
             </div>
-            <div v-if="validAmount > 0" class="card p-6">
+            <RechargeCouponPicker :amount="validAmount" :method="selectedMethod" :currency="selectedCurrency" :disabled="submitting" :initial-id="Number(route.query.coupon) || undefined" @change="onCouponChange" />
+            <div v-if="validAmount > 0 && (!selectedCouponId || couponQuote)" class="card p-6">
               <div class="space-y-2 text-sm">
                 <div class="flex justify-between">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('payment.paymentAmount') }}</span>
                   <span :class="discountAmount > 0 ? 'text-gray-400 line-through dark:text-gray-500' : 'text-gray-900 dark:text-white'">{{ formatSelectedPaymentAmount(validAmount) }}</span>
                 </div>
                 <div v-if="discountAmount > 0" class="flex justify-between" data-testid="recharge-discount-row">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.rechargeBonus.discountLabelWithPercent', { percent: formatRechargeBonusNumber(bonusQuote.percent) }) }}</span>
+                  <span class="text-gray-500 dark:text-gray-400">{{ selectedCouponId ? t('coupon.discount') : t('payment.rechargeBonus.discountLabelWithPercent', { percent: formatRechargeBonusNumber(bonusQuote.percent) }) }}</span>
                   <span class="font-medium text-red-600 dark:text-red-400">-{{ formatSelectedPaymentAmount(discountAmount) }}</span>
                 </div>
                 <div v-if="hasFee" class="flex justify-between">
@@ -348,6 +349,8 @@ import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderTy
 import { formatBalanceRechargeMultiplier, formatRechargeBonusNumber, normalizeRechargeBonusMode, normalizeRechargeBonusTiers, quoteRechargeBonus } from '@/utils/rechargeBonus'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LotteryRechargeNotice from '@/components/lottery/LotteryRechargeNotice.vue'
+import RechargeCouponPicker from '@/components/payment/RechargeCouponPicker.vue'
+import type { CouponQuote } from '@/api/coupons'
 import AmountInput from '@/components/payment/AmountInput.vue'
 import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
 import StripeSubtypeSelector from '@/components/payment/StripeSubtypeSelector.vue'
@@ -769,11 +772,13 @@ const bonusQuote = computed(() => quoteRechargeBonus(rechargeBonusTiers.value, v
   mode: rechargeBonusMode.value,
   currencyDigits: currencyFractionDigits(selectedCurrency.value),
 }))
-const payBaseAmount = computed(() => bonusQuote.value.payBase)
+const selectedCouponId = ref(0), couponPending = ref(false), couponQuote = ref<CouponQuote | null>(null)
+function onCouponChange(id: number, quote: CouponQuote | null, pending: boolean) { selectedCouponId.value=id;couponQuote.value=quote;couponPending.value=pending }
+const payBaseAmount = computed(() => couponQuote.value?.pay_base ?? bonusQuote.value.payBase)
 const discountAmount = computed(() => roundPaymentAmount(validAmount.value - payBaseAmount.value, selectedCurrency.value))
-const creditedAmount = computed(() => bonusQuote.value.credited)
-const showBonusRow = computed(() => bonusQuote.value.mode !== 'discount' && bonusQuote.value.bonus > 0)
-const showCreditedBalance = computed(() => balanceRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
+const creditedAmount = computed(() => couponQuote.value?.credited ?? bonusQuote.value.credited)
+const showBonusRow = computed(() => !selectedCouponId.value && bonusQuote.value.mode !== 'discount' && bonusQuote.value.bonus > 0)
+const showCreditedBalance = computed(() => !!selectedCouponId.value || balanceRechargeMultiplier.value !== 1 || bonusQuote.value.percent > 0)
 
 const methodOptions = computed<PaymentMethodOption[]>(() =>
   enabledMethods.value.map((type) => {
@@ -830,7 +835,7 @@ const stripeSubtypeReady = computed(() => selectedMethod.value !== 'stripe'
   || Object.prototype.hasOwnProperty.call(stripeSubMethods.value, selectedSubtype.value))
 
 const canSubmit = computed(() =>
-  validAmount.value > 0
+  (!selectedCouponId.value || (!couponPending.value && couponQuote.value !== null)) && validAmount.value > 0
 		&& hasPaymentAmountPrecision(validAmount.value, selectedCurrency.value)
     && stripeSubtypeReady.value
     && amountFitsMethod(payBaseAmount.value, selectedMethod.value)
@@ -962,6 +967,7 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       forceQRCode: !!(checkout.value.alipay_force_qrcode && normalizeVisibleMethod(requestType) === 'alipay'),
       mobilePrecreateDeepLink: checkout.value.alipay_mobile_precreate_deep_link === true,
     })
+    if (orderType === 'balance' && selectedCouponId.value) payload.coupon_id = selectedCouponId.value
     if (options.openid) {
       payload.openid = options.openid
     }

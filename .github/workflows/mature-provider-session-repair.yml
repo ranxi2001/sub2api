@@ -1,0 +1,90 @@
+name: Mature provider session budget repair
+on:
+  push:
+    branches: [feat/mature-channel-community-ops]
+permissions:
+  contents: read
+jobs:
+  session:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [red, green]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mature
+          POSTGRES_PASSWORD: isolated-test-only
+          POSTGRES_DB: mature
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U mature"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MATURE_TEST_POSTGRES: host=127.0.0.1 port=5432 user=mature password=isolated-test-only dbname=mature sslmode=disable
+      PHASE: ${{ matrix.phase }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Bind candidate assertions and exact defective production blobs
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/session-evidence"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/session-evidence/candidate.txt"
+          sha256sum backend/internal/server/routes/repair_provider_session_budget_test.go backend/internal/server/routes/mature_providers_refresh_postgres_test.go > "$RUNNER_TEMP/session-evidence/test-sha256.txt"
+          baseline=ae7598867c9a9138f5f36ed7a67bc2fa97e48bad
+          git fetch --no-tags --depth=1 origin "$baseline"
+          printf '%s\n' "$baseline" > "$RUNNER_TEMP/session-evidence/baseline.txt"
+          for path in backend/internal/service/mature_providers.go backend/internal/repository/mature_providers_session.go backend/internal/handler/admin/mature_provider_keys.go backend/internal/handler/admin/mature_provider_connection.go; do
+            if [ "$PHASE" = red ]; then
+              git show "$baseline:$path" > "$path"
+              test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            fi
+            printf '%s %s\n' "$(git hash-object "$path")" "$path" >> "$RUNNER_TEMP/session-evidence/production-blobs.txt"
+          done
+      - name: Real Create handler PostgreSQL rotation and signed balance oracle
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -tags=integration ./internal/server/routes -run '^TestMatureProvider(ImportRotationBudget|NegativeBalanceEpisodes)$' -parallel=12 -count=1 -json -timeout=4m) > "$RUNNER_TEMP/session-evidence/test.jsonl" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/session-evidence/exit-code.txt"
+          cat "$RUNNER_TEMP/session-evidence/test.jsonl"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'session-evidence'
+          raw = (p / 'test.jsonl').read_text()
+          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          outcomes = {e['Test']:e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass','fail','skip')}
+          assert not any(e['Action']=='skip' for e in events), 'No skipped evidence'
+          assert not any(s in raw.lower() for s in ('build failed','no tests to run','undefined:','panic:')), 'Invalid fixture/build evidence'
+          rejected = ['TestMatureProviderImportRotationBudget/'+auth+'/'+case for auth in ('refresh_only','401_renewal') for case in ('slow_pages','lock_wait','depleted_lock_budget')]
+          controls = ['TestMatureProviderImportRotationBudget/'+auth+'/'+case for auth in ('refresh_only','401_renewal') for case in ('cancel','failure')]
+          assert all(outcomes.get(c)=='pass' for c in controls), outcomes
+          assert outcomes.get('TestMatureProviderNegativeBalanceEpisodes')=='pass', outcomes
+          if os.environ['PHASE']=='red':
+              assert int((p/'exit-code.txt').read_text()) != 0
+              assert all(outcomes.get(c)=='fail' for c in rejected), outcomes
+              assert raw.count('rotation must survive slow pagination, lock wait, cancellation and remote failure in durable PG') >= 4
+              assert raw.count('budget guard must not consume a single-use credential after lock wait exhausted persistence reserve') >= 2
+          else:
+              assert int((p/'exit-code.txt').read_text()) == 0
+              assert all(outcomes.get(c)=='pass' for c in rejected), outcomes
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mature-provider-session-${{ matrix.phase }}-${{ github.sha }}
+          path: ${{ runner.temp }}/session-evidence/
