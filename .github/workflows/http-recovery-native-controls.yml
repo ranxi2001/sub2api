@@ -43,6 +43,7 @@ jobs:
               *_test.go) continue ;;
               *.go)
                 if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                  mkdir -p -- "$(dirname -- "$target")"
                   git show "$baseline:$target" > "$target"
                   test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
                 else

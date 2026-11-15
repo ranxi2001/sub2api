@@ -1,0 +1,184 @@
+name: WS plaintext response ownership
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_ws_http_bridge.go'
+      - 'backend/internal/service/openai_ws_plaintext_owner_test.go'
+      - 'backend/internal/service/openai_ws_plaintext_projection.go'
+      - 'backend/internal/handler/openai_ws_plaintext_owner_test.go'
+      - 'backend/internal/handler/openai_ws_recovery_capture_test.go'
+      - 'backend/internal/handler/openai_agent_message_recovery.go'
+      - '.github/workflows/ws-plaintext-owner.yml'
+permissions:
+  contents: read
+jobs:
+  continuation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Redis fixture dependency
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Pin baseline production implementation
+        if: matrix.phase == 'RED'
+        run: |
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_http_bridge.go backend/internal/handler/openai_agent_message_recovery.go; do
+            git show "b9feadf7dd6228a4117e360821d9994b7cc54897:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "b9feadf7dd6228a4117e360821d9994b7cc54897:$target")"
+          done
+      - name: Actual delta continuation and delivery boundaries
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/service ./internal/handler -run '^TestOpenAIWS(Plaintext(ResponseOwnershipDelivery|ToolContinuation(WithoutStorage)?|ToolAfterRebuild)|RecoveryRefusalCapture)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/plaintext-owner.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/plaintext-owner.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/plaintext-owner.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/plaintext-owner.jsonl" <<'PY'
+          import json,sys
+          phase,status,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
+          rows=[]
+          for line in open(path):
+              try: rows.append(json.loads(line))
+              except ValueError: pass
+          failures={r['Test'] for r in rows if r.get('Action')=='fail' and '/' in r.get('Test','')}
+          passes={r['Test'] for r in rows if r.get('Action')=='pass' and '/' in r.get('Test','')}
+          expected={f'TestOpenAIWSPlaintextResponseOwnershipDelivery/{x}' for x in ('completed','empty_output','done')}
+          expected.update('TestOpenAIWSPlaintextToolContinuation'+suffix+'/'+mode for mode in ('passthrough','http_bridge') for suffix in ('','WithoutStorage'))
+          expected.update('TestOpenAIWSPlaintextToolAfterRebuild/'+mode for mode in ('http_bridge','ctx_pool','shared','dedicated','passthrough'))
+          capture=[r for r in rows if r.get('Test')=='TestOpenAIWSRecoveryRefusalCapture']
+          if phase=='RED':
+              assert status!=0 and failures==expected,(status,failures)
+              for name in expected:
+                  text=''.join(r.get('Output','') for r in rows if r.get('Test')==name)
+                  assert 'PLAINTEXT_RESPONSE_OWNER_MISSING' in text or 'PLAINTEXT_TOOL_CONTINUATION_REFUSED' in text,(name,text)
+              assert len(passes)==11,passes
+              assert any(r.get('Action')=='fail' for r in capture),capture
+              assert 'RECOVERY_REFUSAL_CAPTURE_MISSING' in ''.join(r.get('Output','') for r in capture)
+          else:
+              assert status==0 and not failures,(status,failures)
+              assert len(passes)==23,passes
+              assert any(r.get('Action')=='pass' for r in capture),capture
+          PY
+      - name: GREEN stateless projection cannot bypass ownership or content checks
+        if: matrix.phase == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/service -run '^TestOpenAIWSPlaintextBridgeProjectionGuards$' -count=1 -timeout=2m) | tee "$RUNNER_TEMP/plaintext-guards.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plaintext-owner-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/plaintext-*.jsonl
+          if-no-files-found: error
+  repair870:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, PLAINTEXT_RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Redis fixture dependency
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Pin reviewed PR implementation for repair RED
+        if: matrix.phase != 'GREEN'
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          # Keep candidate type declarations and tests compatible. Only these
+          # two implementations execute the three reviewed faulty behaviors.
+          baseline=04ec5e737ecb925faa2e8f3b00efff816715c55c
+          if [ "$PHASE" = PLAINTEXT_RED ]; then
+            baseline=72c21bedea567d8032f736adba16edcf5645ca19
+          fi
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_http_bridge.go; do
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          done
+      - name: Exact later-turn HTTP wire behavior
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/handler -run '^TestOpenAIWSPlaintextRepair870$' -count=1 -timeout=3m) > "$RUNNER_TEMP/plaintext-repair870.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/plaintext-repair870.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/plaintext-repair870.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/plaintext-repair870.jsonl" <<'PY'
+          import json,sys
+          from collections import Counter
+          phase,status,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
+          rows=[]
+          for line in open(path):
+              try: rows.append(json.loads(line))
+              except ValueError: pass
+          package='github.com/Wei-Shaw/sub2api/internal/handler'
+          root='TestOpenAIWSPlaintextRepair870'
+          markers={root+'/assistant_history':'F1_ASSISTANT_HISTORY_LOST',root+'/wrong_response':'F2_WRONG_RESPONSE_SENT',root+'/terminal_excludes':'F3_EXCLUDED_TOOL_SENT'}
+          plaintext_markers={root+'/ordinary_tool':'F3_PLAINTEXT_TOOL_REFUSED',root+'/empty_terminal':'F3_EMPTY_TERMINAL_REFUSED',root+'/duplicate_call':'F3_DUPLICATE_WARMUP_REFUSED'}
+          leaves=set(markers)|set(plaintext_markers)|{root+'/'+s for s in ('stored_pointer','unknown_pointer')}
+          counts=Counter((r.get('Action'),r.get('Test')) for r in rows if r.get('Package')==package)
+          assert phase in ('RED','PLAINTEXT_RED','GREEN'),phase
+          expected_markers=markers if phase=='RED' else plaintext_markers if phase=='PLAINTEXT_RED' else {}
+          expected_fail=set(expected_markers)|{root,None} if phase!='GREEN' else set()
+          assert status==(0 if phase=='GREEN' else 1),status
+          assert {r.get('Test') for r in rows if r.get('Action')=='run'}==leaves|{root},rows
+          assert all(r.get('Package')==package for r in rows),rows
+          assert {r.get('Test') for r in rows if r.get('Action')=='fail'}==expected_fail,rows
+          for name in leaves|{root,None}:
+              assert name is None or counts['run',name]==1,(name,counts)
+              expected='fail' if name in expected_fail else 'pass'
+              assert counts[expected,name]==1 and counts['pass',name]+counts['fail',name]==1,(name,counts)
+          if phase!='GREEN':
+              for name,marker in expected_markers.items():
+                  output=''.join(r.get('Output','') for r in rows if r.get('Test')==name)
+                  assert marker in output,(name,output)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plaintext-repair870-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/plaintext-repair870.jsonl
+          if-no-files-found: error

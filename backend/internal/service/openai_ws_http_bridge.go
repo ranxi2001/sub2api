@@ -250,6 +250,30 @@ func prepareOpenAIWSHTTPBridgeBody(account *Account, payload []byte) ([]byte, er
 	return prepareOpenAIWSHTTPBridgeSessionBody(account, payload, false)
 }
 
+// Plaintext stored responses also retain their native delta representation,
+// but only for a response currently bound to this API-key account. begin still
+// rechecks the pointer at the actual write; this lookup cannot authorize a send.
+func (r *openAIWSAgentRecovery) plaintextStoredContinuation(account *Account, source []byte) bool {
+	if r == nil || r.service == nil || account == nil || account.ID <= 0 || !account.IsOpenAIApiKey() ||
+		gjson.GetBytes(source, "store").Type != gjson.True || len(openAIAgentRecoveryItemDigests(source)) != 0 {
+		return false
+	}
+	previous := gjson.GetBytes(source, "previous_response_id").String()
+	if previous == "" || r.service.settingService == nil || !r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(r.ctx) {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	scope := openAIAgentRecoveryFromContext(r.ctx)
+	if scope == nil {
+		return false
+	}
+	lookupCtx, cancel := context.WithTimeout(r.ctx, 3*time.Second)
+	defer cancel()
+	owner, err := r.service.getOpenAIWSStateStore().GetResponseAccount(lookupCtx, scope.groupID, previous)
+	return err == nil && owner == account.ID
+}
+
 func prepareOpenAIWSHTTPBridgeSessionBody(account *Account, payload []byte, preservePrevious bool) ([]byte, error) {
 	var body map[string]any
 	if err := decodeOpenAIJSONUseNumber(payload, &body); err != nil {
@@ -269,10 +293,11 @@ func prepareOpenAIWSHTTPBridgeSessionBody(account *Account, payload []byte, pres
 }
 
 type openAIWSToolCallReplayCollector struct {
-	items    []json.RawMessage
-	seen     map[string]struct{}
-	allItems []json.RawMessage
-	allSeen  map[string]struct{}
+	items      []json.RawMessage
+	seen       map[string]struct{}
+	allItems   []json.RawMessage
+	allSeen    map[string]struct{}
+	finalItems []json.RawMessage
 }
 
 func (c *openAIWSToolCallReplayCollector) AddEvent(eventType string, message []byte) {
@@ -285,6 +310,14 @@ func (c *openAIWSToolCallReplayCollector) AddEvent(eventType string, message []b
 		output := gjson.GetBytes(message, "response.output")
 		if !output.IsArray() {
 			return
+		}
+		if openAIAgentCompletedResponse(message, true) && len(output.Array()) > 0 {
+			// A nonempty terminal is authoritative, including updated message
+			// contents and exclusions from previously streamed done items.
+			c.finalItems = nil
+			for _, item := range output.Array() {
+				c.finalItems = append(c.finalItems, json.RawMessage(item.Raw))
+			}
 		}
 		for _, item := range output.Array() {
 			c.addAllItem(item)
@@ -479,7 +512,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	// below verifies its account binding and intact input before any HTTP write.
 	// Do not enable storage or change another adapter's continuation policy.
 	preserveAgentPrevious := openAIWSAgentRecoveryFromContext(ctx) != nil && account.IsOpenAI() && len(openAIAgentRecoveryItemDigests(payload)) > 0
-	body, err := prepareOpenAIWSHTTPBridgeSessionBody(account, payload, statefulSession || preserveAgentPrevious)
+	preserveStoredPrevious := openAIWSAgentRecoveryFromContext(ctx).plaintextStoredContinuation(account, payload)
+	body, err := prepareOpenAIWSHTTPBridgeSessionBody(account, payload, statefulSession || preserveAgentPrevious || preserveStoredPrevious)
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
@@ -535,6 +569,53 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		if liteChanged {
 			body = liteBody
+		}
+	}
+
+	// store=false cannot carry a provider-side response pointer over HTTP.
+	// The ingress has reconstructed this same bridge's history; retain an immutable
+	// proof before request construction, rather than trusting final wire bytes.
+	if account.IsOpenAIApiKey() && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+		source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
+		previous := gjson.GetBytes(source, "previous_response_id").String()
+		originalInput, historyInput := gjson.GetBytes(source, "input"), gjson.GetBytes(payload, "input")
+		if previous != "" && gjson.GetBytes(payload, "previous_response_id").String() == previous &&
+			gjson.GetBytes(source, "store").Type == gjson.False && !gjson.GetBytes(body, "previous_response_id").Exists() &&
+			len(openAIAgentRecoveryItemDigests(source)) == 0 && len(openAIAgentRecoveryItemDigests(payload)) == 0 &&
+			originalInput.IsArray() && historyInput.IsArray() && len(historyInput.Array()) >= len(originalInput.Array()) {
+			current := originalInput.Array()
+			history := historyInput.Array()
+			var tail []json.RawMessage
+			for _, item := range history[len(history)-len(current):] {
+				tail = append(tail, json.RawMessage(item.Raw))
+			}
+			if len(current) > 0 {
+				encoded, encodeErr := json.Marshal(tail)
+				if encodeErr == nil && openAIAgentRecoveryInputDigest(source) == openAIAgentRecoveryInputDigest(append(append([]byte(`{"input":`), encoded...), '}')) {
+					recovery := openAIWSAgentRecoveryFromContext(ctx)
+					if recovery == nil {
+						return nil, openAIAgentRecoveryError("wire_changed")
+					}
+					recovery.mu.Lock()
+					anchor := recovery.completedBridge
+					initial := openAIAgentRecoveryFromContext(recovery.ctx)
+					model := initial.model
+					if forward, ok := openAIForwardModelFromContext(c.Request.Context()); ok && forward.model != "" {
+						model = forward.model
+					}
+					scope := openAIAgentRecoveryFromContext(s.WithOpenAIAgentMessageRecovery(ctx, c, source, recovery.session, model))
+					valid := anchor.response != "" && anchor == openAIWSBridgeAnchor(scope, account, previous)
+					recovery.mu.Unlock()
+					if !valid {
+						return nil, openAIAgentRecoveryError("wire_changed")
+					}
+					ctx = context.WithValue(ctx, openAIWSPlaintextProjectionKey{}, &openAIWSPlaintextProjection{
+						anchor:    anchor,
+						accountID: account.ID, previous: previous, sourceInput: openAIAgentRecoveryInputDigest(source), sourceControls: openAI409ControlsDigest(source),
+						input: openAIAgentRecoveryInputDigest(body), controls: openAI409ControlsDigest(body), history: append([]byte(nil), payload...),
+					})
+				}
+			}
 		}
 	}
 
@@ -803,7 +884,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			UpstreamProtocol:              "http",
 		}
 		applyOpenAIQueueTiming(result, openAIWSQueueArrival(ctx), forwardStart, turnStart, "ws_frame_http_bridge", "first_forward_including_internal_retries")
-		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
+		replayInput := replayCollector.Items()
+		if account.IsOpenAIApiKey() && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+			// Same-response reconstruction needs assistant messages as well as
+			// calls. RawMessage storage preserves numbers and tool schemas.
+			replayInput = replayCollector.AllItems()
+			if replayCollector.finalItems != nil {
+				replayInput = slices.Clone(replayCollector.finalItems)
+			}
+		}
+		if len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
 			result.wsReplayInputExists = true
 		}
