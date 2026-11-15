@@ -166,6 +166,20 @@ func logReadableWSDispatchFailure(t *testing.T, h *openAIWSPassthroughHandlerHar
 	t.Logf("actual B dispatch error: %v; client close: %v", reported, clientErr)
 }
 
+func logReadableWSRecoveryDetails(t *testing.T, h *openAIWSPassthroughHandlerHarness) {
+	t.Helper()
+	for _, entry := range h.requestLogs.FilterMessage("openai.agent_recovery_refused").All() {
+		fields := entry.ContextMap()
+		details := make(map[string]any)
+		for _, key := range []string{"subreason", "phase", "turn", "request_written", "shadow_lookup", "shadow_epoch", "owner_observation", "owner_total", "owner_completed", "owner_pending", "owner_failed", "owner_conflicted", "owner_unknown", "tool_calls", "tool_results", "tool_pairs", "tool_unpaired", "tool_duplicate", "tool_incomplete"} {
+			if value, ok := fields[key]; ok {
+				details[key] = value
+			}
+		}
+		t.Logf("current-turn recovery metadata: %v", details)
+	}
+}
+
 func TestOpenAI409WSInitialWithoutPointer(t *testing.T) {
 	for _, mode := range readableWSModes {
 		for _, state := range []string{"paused", "rate_limited", "overloaded"} {
@@ -620,6 +634,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 	if scenario == "issue854_guard_live" && sends != 3 {
 		require.Equal(t, 2, sends)
 		logReadableWSDispatchFailure(t, h, readErr)
+	}
+	if sends != 2+extraSends {
+		logReadableWSRecoveryDetails(t, h)
 	}
 	require.Equal(t, 2+extraSends, sends, "WS_READABLE_B_DISPATCH_MISSING: same client must automatically replace disabled A before any next generation; close=%v terminal=%s", readErr, secondRaw)
 	if modelCase {

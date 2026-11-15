@@ -249,6 +249,9 @@ func runRecoveredWSAudit(t *testing.T, mode, policy string, allowRecovery bool) 
 	require.NotContains(t, opaque, recoveredWSAuditCanary)
 	issue715WSSend(t, h.clientConn, opaque)
 	terminal := issue715WSRead(t, h.clientConn)
+	if strings.HasPrefix(gjson.GetBytes(terminal, "error.code").String(), "encrypted_agent_recovery_") {
+		logReadableWSRecoveryDetails(t, h)
+	}
 	if allowRecovery {
 		require.Equal(t, "response.completed", gjson.GetBytes(terminal, "type").String(), string(terminal))
 		require.Equal(t, int32(1), writesB.Load())
