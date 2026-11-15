@@ -181,3 +181,57 @@ func TestTransformClaudeToGemini_IdentitySystemBlock(t *testing.T) {
 	}
 	require.Equal(t, userText, got.Request.Contents[0].Parts[0].Text)
 }
+
+// Keep client authorization and refusal constraints intact during protocol
+// conversion. A provider error is not permission to remove system instructions.
+func TestTransformClaudeToGemini_PreservesClaudeCodeSecurityPolicy(t *testing.T) {
+	const policy = "IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases."
+	body := " You are an agent working with the user toward their goals.\n" + policy + "\n# Harness\n - Keep this line."
+	system := []SystemBlock{
+		{Type: "text", Text: "x-anthropic-billing-header: cc_version=2.1.321.97f; cc_entrypoint=sdk-cli;"},
+		{Type: "text", Text: "You are a Claude agent, built on Anthropic's Claude Agent SDK."},
+		{Type: "text", Text: body},
+	}
+	systemJSON, err := json.Marshal(system)
+	require.NoError(t, err)
+	userJSON, err := json.Marshal("Explain this line: " + policy)
+	require.NoError(t, err)
+	input := &ClaudeRequest{
+		Model: "gemini-3.8-flash-high", System: systemJSON,
+		Messages: []ClaudeMessage{{Role: "user", Content: userJSON}},
+		Tools: []ClaudeTool{{Name: "example", Description: policy,
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}}},
+	}
+	out, err := TransformClaudeToGeminiWithOptions(input, "test-project", input.Model, TransformOptions{})
+	require.NoError(t, err)
+	var got V1InternalRequest
+	require.NoError(t, json.Unmarshal(out, &got))
+	var texts []string
+	for _, part := range got.Request.SystemInstruction.Parts {
+		if part.Text != "\n--- [SYSTEM_PROMPT_END] ---" {
+			texts = append(texts, part.Text)
+		}
+	}
+	require.Equal(t, []string{"You are an AI agent.", body}, texts)
+	require.Equal(t, "Explain this line: "+policy, got.Request.Contents[0].Parts[0].Text)
+	require.Equal(t, policy, got.Request.Tools[0].FunctionDeclarations[0].Description)
+}
+
+func TestTransformClaudeToGemini_PreservesCustomSecurityPolicyString(t *testing.T) {
+	const policy = "IMPORTANT: Assist with authorized security testing. Keep all custom approval requirements."
+	for _, system := range []string{policy, "A\n" + policy + "\nB", "A\r\n  " + policy + "\r\nB"} {
+		systemJSON, err := json.Marshal(system)
+		require.NoError(t, err)
+		input := &ClaudeRequest{Model: "gemini-3.8-flash-high", System: systemJSON,
+			Messages: []ClaudeMessage{{Role: "user", Content: json.RawMessage(`"Explain safe testing"`)}}}
+		body, err := TransformClaudeToGeminiWithOptions(input, "test-project", input.Model, TransformOptions{})
+		require.NoError(t, err)
+		var got V1InternalRequest
+		require.NoError(t, json.Unmarshal(body, &got))
+		var texts []string
+		for _, part := range got.Request.SystemInstruction.Parts {
+			texts = append(texts, part.Text)
+		}
+		require.Contains(t, texts, system, "system constraints must be preserved verbatim")
+	}
+}
