@@ -322,3 +322,15 @@ func TestOpenAIRecoveryShadowRefusalDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIRecoveryShadowRetainsTaskBeforeOpaqueEnvelope(t *testing.T) {
+	body := []byte(`{"input":[{"role":"user","content":"original readable task"},{"type":"agent_message","encrypted_content":"private-cipher"},{"type":"function_call","name":"inspect","call_id":"done","arguments":"{}"},{"type":"function_call_output","call_id":"done","output":"completed once"}]}`)
+	snapshot := openAIReadableShadowCandidate(body)
+	require.NotNil(t, snapshot)
+	restored := []byte(`{"input":` + string(snapshot.Input) + `}`)
+	require.True(t, openAI409HasReadableIntent(restored), "stored context must still identify the original readable task")
+	require.Contains(t, string(restored), "original readable task")
+	require.Contains(t, string(restored), "completed once")
+	require.NotContains(t, string(restored), "private-cipher")
+	require.True(t, openAIWSCompletedToolInputs(restored))
+}

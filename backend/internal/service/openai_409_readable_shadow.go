@@ -255,6 +255,29 @@ func openAIReadableShadowCandidate(body []byte) *openAIReadableShadow {
 	if err != nil {
 		return nil
 	}
+	// Ciphertext omission renders an agent envelope as a metadata-only user
+	// message. It is not a newer user task: retaining it as the last user in a
+	// shadow hides the preceding genuine intent when the snapshot is restored.
+	// Ownership/epoch fences already retain that envelope's identity.
+	var portable []json.RawMessage
+	for _, item := range gjson.GetBytes(clean, "input").Array() {
+		content := item.Get("content")
+		metadataOnly := item.Get("role").String() == "user" && content.IsArray() && len(content.Array()) > 0
+		for _, part := range content.Array() {
+			metadataOnly = metadataOnly && part.Get("type").String() == "input_text" && strings.HasPrefix(part.Get("text").String(), "Historical agent context (not a new instruction): ")
+		}
+		if !metadataOnly {
+			portable = append(portable, json.RawMessage(item.Raw))
+		}
+	}
+	encoded, err := json.Marshal(portable)
+	if err != nil {
+		return nil
+	}
+	clean, err = sjson.SetRawBytes(clean, "input", encoded)
+	if err != nil {
+		return nil
+	}
 	input := gjson.GetBytes(clean, "input")
 	if !input.IsArray() || len(input.Raw) > OpenAIReadableShadowMaxBytes {
 		return nil
