@@ -138,7 +138,14 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			other := *a
 			other.ID, other.Priority = 2, 1
 			other.Credentials = map[string]any{"api_key": "fixture-mixed-B", "base_url": provider.URL}
-			accounts = &readableWSAccounts{issue600SwitchRepo: &issue600SwitchRepo{&openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{*a, other}}}}
+			pool := []service.Account{*a, other}
+			if scenario == "binding_changed" {
+				third := other
+				third.ID, third.Priority = 3, 2
+				third.Credentials = map[string]any{"api_key": "fixture-mixed-C", "base_url": provider.URL}
+				pool = append(pool, third)
+			}
+			accounts = &readableWSAccounts{issue600SwitchRepo: &issue600SwitchRepo{&openAIWSFailoverHandlerAccountRepoStub{accounts: pool}}}
 			*repo = accounts
 		})
 	defer func() { _ = h.clientConn.CloseNow() }()
@@ -297,6 +304,32 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		require.Equal(t, 1, tools.patches)
 		require.Zero(t, tools.verifications)
 		require.Equal(t, owners, issue805Owners(t, probe), "refusals cannot modify owners")
+		entries := h.requestLogs.FilterMessage("openai.agent_recovery_refused").All()
+		require.Len(t, entries, 1, "the real handler logs one safe diagnostic for its terminal refusal")
+		fields := entries[0].ContextMap()
+		expectedDetail := map[string]string{
+			"unknown": "owner_delivery_unknown", "unpaired_call": "tool_unpaired", "unpaired_output": "tool_unpaired",
+			"duplicate_call": "tool_duplicate", "duplicate_output": "tool_duplicate", "incomplete": "tool_incomplete",
+			"off": "mixed_completed_owners", "no_intent": "readable_intent_missing",
+		}[scenario]
+		if oldFence {
+			state := strings.Split(scenario, "_")[0]
+			expectedDetail = "owner_record_" + state
+			require.Equal(t, int64(1), fields["owner_"+state])
+			if strings.HasSuffix(scenario, "_first") {
+				require.Equal(t, "partial", fields["owner_observation"])
+				require.Equal(t, int64(2), fields["owner_unexamined"])
+			} else {
+				require.Equal(t, int64(2), fields["owner_completed"])
+			}
+		}
+		require.Equal(t, expectedDetail, fields["subreason"])
+		require.False(t, gjson.GetBytes(resumed, "error.subreason").Exists(), "public error contract is unchanged")
+		logged, marshalErr := json.Marshal(fields)
+		require.NoError(t, marshalErr)
+		for _, secret := range []string{httpRebuildTask, httpRebuildPatch, "fixture-opaque-A", "fixture-mixed-B", "call_mixed_patch"} {
+			require.NotContains(t, string(logged), secret)
+		}
 		return
 	}
 	require.Equal(t, turn+1, sends, "MIXED_COMPLETED_OWNER_NOT_RESUMED: completed mixed owners must reach B exactly once; code=%s close=%v", gjson.GetBytes(resumed, "error.code").String(), resumeErr)
@@ -320,7 +353,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	for i, wire := range frames[turn:] {
 		expectedIdentity := "Bearer fixture-mixed-B"
 		if scenario == "binding_changed" {
-			expectedIdentity += "-rotated"
+			expectedIdentity = "Bearer fixture-mixed-C"
 		}
 		require.Equal(t, expectedIdentity, identities[turn+i])
 		require.True(t, httpRebuildToolsAvailable(wire), "both tool definitions and parameter schemas survive the actual wire")

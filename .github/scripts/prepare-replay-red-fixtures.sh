@@ -55,3 +55,7 @@ if ! git -C "$tree" grep -q 'func (a \*Account) IsExcelBPSSearchEnabled' "$basel
   fi
   exclude_absent_fixture backend/internal/service/openai_excel_bps_search_test.go "$contract"
 fi
+
+# Later mixed-owner proofs/diagnostics share the restored recovery struct.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bash "$script_dir/prepare-ws-owner-red-fixtures.sh" "$baseline" "$tree" "$candidate"

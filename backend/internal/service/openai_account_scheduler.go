@@ -427,7 +427,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		return nil, decision, recovery.lookupErr
 	}
 	if recovery != nil && recovery.conflict {
-		return nil, decision, openAIAgentRecoveryDetailedError("owner_conflict", "owner_record_conflicted")
+		return nil, decision, openAIRecoveryDiagnosticError("owner_conflict", recovery.diagnostics.subreason, recovery)
 	}
 	if recovery != nil && recovery.owner != nil {
 		if req.Platform != PlatformOpenAI || req.SessionHash != recovery.session ||

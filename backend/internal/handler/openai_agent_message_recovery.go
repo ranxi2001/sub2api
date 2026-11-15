@@ -86,10 +86,8 @@ func markOpenAIRecoveryFailure(c *gin.Context, recovery *service.OpenAIAgentReco
 	if written != nil {
 		writeState = strconv.FormatBool(*written)
 	}
-	logger.FromContext(c.Request.Context()).Warn("openai.agent_recovery_refused",
-		zap.String("request_id", requestID), zap.Int("turn", turn),
-		zap.String("protocol", protocol), zap.String("phase", phase),
-		zap.String("subreason", recovery.InternalSubreason()), zap.String("request_written", writeState))
+	logctx := logger.IntoContext(c.Request.Context(), logger.FromContext(c.Request.Context()).With(zap.String("request_id", requestID), zap.Int("turn", turn), zap.String("protocol", protocol), zap.String("phase", phase), zap.String("request_written", writeState)))
+	service.LogOpenAIAgentRecoveryRefusal(logctx, recovery)
 	service.MarkOpsStreamErrorValue(c, service.OpsStreamError{
 		ErrType: recovery.ClientType(), Code: recovery.ClientCode(), Message: recovery.ClientMessage(),
 		IntendedStatus: recovery.HTTPStatus(), CountTowardsSLA: true, NonStream: protocol == "http",

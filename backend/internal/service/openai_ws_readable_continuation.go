@@ -16,11 +16,12 @@ import (
 // Constructed only at transport boundaries before the CURRENT generation has
 // been written. Neither a transport failure nor lack of output proves this.
 type openAIWSUnsentTurnError struct {
-	cause       error
-	body        []byte
-	model       string
-	turn        int
-	keepAccount bool // an owner mismatch does not disqualify a healthy selected account
+	cause           error
+	body            []byte
+	model           string
+	turn            int
+	keepAccount     bool // an owner mismatch does not disqualify a healthy selected account
+	completedSource *openAIAgentRecoveryRequest
 }
 
 func (e *openAIWSUnsentTurnError) Error() string {
@@ -63,6 +64,7 @@ func (e *openAIWSLostOwnerEvidenceError) Unwrap() error { return e.cause }
 type openAIWSOwnerRouteError struct {
 	cause                error
 	completedMixedOwners bool
+	completedSource      *openAIAgentRecoveryRequest
 }
 
 func (e *openAIWSOwnerRouteError) Error() string { return e.cause.Error() }
@@ -93,21 +95,33 @@ func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) err
 	default:
 		return closed
 	}
-	return &openAIWSUnsentTurnError{cause: closed, body: append([]byte(nil), body...), model: model, turn: turn, keepAccount: true}
+	return &openAIWSUnsentTurnError{cause: closed, body: append([]byte(nil), body...), model: model, turn: turn, keepAccount: true, completedSource: route.completedSource}
+}
+
+type openAIWSUnsentOwnerProofKey struct{}
+
+// Carry the route check's observations through the handler's auth boundary.
+// Rebuild consumes this current-turn evidence once; it cannot leak to later turns.
+func WithOpenAIWSUnsentOwnerProof(ctx context.Context, err error) context.Context {
+	var unsent *openAIWSUnsentTurnError
+	if errors.As(err, &unsent) && unsent.completedSource != nil {
+		return context.WithValue(ctx, openAIWSUnsentOwnerProofKey{}, unsent.completedSource)
+	}
+	return ctx
 }
 
 // Keep completed results as data in a new provider conversation. Historical
 // callable records and arguments are unnecessary there; current declarations
 // remain available for genuinely new tool work. Pairing is checked before loss.
 func projectOpenAIWSCompletedTools(body []byte) ([]byte, error) {
-	if detail := openAIWSToolPairingRefusal(body); detail != "" {
-		return nil, openAIAgentRecoveryDetailedError("owner_conflict", detail)
+	if !openAIWSCompletedToolInputs(body) {
+		return nil, openAIAgentRecoveryError("owner_conflict")
 	}
 	calls := make(map[string]gjson.Result)
 	for _, item := range gjson.GetBytes(body, "input").Array() {
 		if kind := item.Get("type").String(); kind == "function_call" || kind == "custom_tool_call" {
 			if item.Get("name").Type != gjson.String || strings.TrimSpace(item.Get("name").String()) == "" {
-				return nil, openAIAgentRecoveryDetailedError("owner_conflict", "tool_missing_name")
+				return nil, openAIAgentRecoveryError("owner_conflict")
 			}
 			calls[item.Get("call_id").String()] = item
 		}
@@ -190,51 +204,15 @@ func openAIReadableRecoveryUser(c *gin.Context, keyID int64) int64 {
 // A new provider conversation may reuse completed results, never unfinished
 // tool work. Reject duplicate, orphan or unknown-status tool records.
 func openAIWSCompletedToolInputs(body []byte) bool {
-	return openAIWSToolPairingRefusal(body) == ""
-}
-
-func openAIWSToolPairingRefusal(body []byte) string {
-	calls, results := map[string]string{}, map[string]string{}
-	for _, item := range gjson.GetBytes(body, "input").Array() {
-		kind, id := item.Get("type").String(), item.Get("call_id").String()
-		switch kind {
-		case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output":
-			if id == "" {
-				return "tool_missing_id"
-			}
-			if item.Get("status").Exists() && item.Get("status").String() != "completed" {
-				return "tool_incomplete"
-			}
-			if strings.HasSuffix(kind, "_output") {
-				if results[id] != "" {
-					return "tool_duplicate_result"
-				}
-				if !item.Get("output").Exists() || item.Get("output").Type == gjson.Null {
-					return "tool_result_missing"
-				}
-				results[id] = kind
-			} else {
-				if calls[id] != "" {
-					return "tool_duplicate_call"
-				}
-				calls[id] = kind + "_output"
-			}
-		}
-	}
-	if len(calls) != len(results) {
-		return "tool_unpaired"
-	}
-	for id, kind := range calls {
-		if results[id] != kind {
-			return "tool_unpaired"
-		}
-	}
-	return ""
+	_, reason := inspectOpenAIWSCompletedTools(body)
+	return reason == ""
 }
 
 // Called before fresh admission/moderation of an unsent frame. Lookup is scoped
 // to this exact task; missing historical intent is never fabricated.
 func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c *gin.Context, body []byte, session, model string) (context.Context, []byte, bool, error) {
+	proof, _ := ctx.Value(openAIWSUnsentOwnerProofKey{}).(*openAIAgentRecoveryRequest)
+	ctx = context.WithValue(ctx, openAIWSUnsentOwnerProofKey{}, (*openAIAgentRecoveryRequest)(nil))
 	if s == nil || s.settingService == nil || !s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
 		return ctx, body, false, nil
 	}
@@ -256,10 +234,24 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 		}
 	}
 	next := s.WithOpenAIWSAgentRecovery(ctx, c, body, session, model)
-	if detail := openAIWSToolPairingRefusal(body); detail != "" {
-		return ctx, body, false, openAIAgentRecoveryDetailedError("owner_conflict", detail)
-	}
 	r := openAIAgentRecoveryFromContext(next)
+	if proof != nil {
+		if r.lookupErr != nil {
+			return ctx, body, false, r.lookupErr
+		}
+		if !r.hasCompletedMixedOwners() || len(r.keys) != len(proof.keys) {
+			return ctx, body, false, openAIRecoveryDiagnosticError("owner_conflict", "owner_record_changed", r)
+		}
+		for _, key := range proof.keys {
+			actual, found := r.completedOwners[key]
+			if !found || !sameOpenAIAgentRecoveryRoute(proof.completedOwners[key], actual) {
+				return ctx, body, false, openAIRecoveryDiagnosticError("owner_conflict", "owner_record_changed", r)
+			}
+		}
+	}
+	if _, reason := inspectOpenAIWSCompletedTools(body); reason != "" {
+		return ctx, body, false, openAIRecoveryDiagnosticError("owner_conflict", reason, r)
+	}
 	if len(r.items) == 0 && !openAI409HasProviderState(body) && !r.disallowLearning {
 		if !openAI409HasReadableIntent(body) {
 			return ctx, body, false, openAIAgentRecoveryError("readable_intent_missing")
