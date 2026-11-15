@@ -84,3 +84,21 @@ func TestOpenAIRecoveryShadowPreservesSummaryOnlyIntent(t *testing.T) {
 	require.JSONEq(t, `"fixture instructions task"`, string(snapshot.Instructions))
 	require.True(t, openAI409HasReadableIntent([]byte(`{"instructions":`+string(snapshot.Instructions)+`,"input":`+string(snapshot.Input)+`}`)))
 }
+
+func TestOpenAIRecoveryShadowSummaryIntentBoundaries(t *testing.T) {
+	for _, before := range []string{"", `{"role":"user","content":[{"type":"encrypted_content","encrypted_content":"fixture-new-opaque-task"}]},`} {
+		body := []byte(`{"input":[` + before + `{"type":"agent_message","summary":[{"type":"summary_text","text":"fixture current summary task"}],"encrypted_content":"fixture-private-cipher"},{"type":"agent_message","encrypted_content":"fixture-trailing-cipher"}]}`)
+		snapshot := openAIReadableShadowCandidate(body)
+		require.NotNil(t, snapshot)
+		require.Contains(t, string(snapshot.Input), "fixture current summary task")
+		require.NotContains(t, string(snapshot.Input), "cipher")
+		require.True(t, openAI409HasReadableIntent([]byte(`{"input":`+string(snapshot.Input)+`}`)))
+	}
+	// An earlier summary cannot authorize replacing a later opaque user task.
+	body := []byte(`{"input":[{"type":"agent_message","summary":"fixture earlier summary"},{"role":"user","content":[{"type":"encrypted_content","encrypted_content":"fixture-new-opaque-task"}]}]}`)
+	require.Nil(t, openAIReadableShadowCandidate(body))
+	// A simple string task stays a single genuine user message.
+	snapshot := openAIReadableShadowCandidate([]byte(`{"input":"fixture string task"}`))
+	require.NotNil(t, snapshot)
+	require.JSONEq(t, `[{"type":"message","role":"user","content":"fixture string task"}]`, string(snapshot.Input))
+}

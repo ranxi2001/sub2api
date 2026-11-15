@@ -74,3 +74,17 @@ generation was unsent; it says nothing about earlier turns' tools or charges.
 Real-provider acceptance is **NOT EXECUTED**. A passing local fake-provider
 oracle is not a production deployment or a guarantee that a provider will
 accept every reconstructed conversation.
+
+Shadow snapshots omit original typed agent envelopes with no readable content
+or summary. Retained agent metadata and readable text become assistant history
+when the original non-agent input/instructions independently supplies intent.
+A readable agent summary that supplies the only available intent keeps its
+portable user representation. Genuine user text is never reclassified based on
+a gateway-like prefix or marker. Ownership and epoch fences retain the original
+envelopes, and the latest-user intent rules are unchanged.
+
+Tool provenance uses the current resolved forward model. An active WebSocket
+may omit the optional model field after selecting it; that omission does not
+create a new proof scope. A different resolved model still cannot borrow the
+old proof. HTTP projection refusals retain their fixed stage in Ops metadata,
+with input/controls change booleans confined to the diagnostic journal.

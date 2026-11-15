@@ -14,7 +14,7 @@ const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_ROOT
 mkdirSync(output, { recursive: true })
 const manifest = {
   base_commit: base, head_commit: head,
-  boundary: 'Separate complete base/head frontend trees; original AppSidebar, SmartOpsSidebarSettings, adminSettings store, Toggle, FeatureSearch, locales and CSS. Synthetic admin/API and component harness with explicit fixture apply (not the real SettingsView save). No backend, login, production or paid calls. Counts cover the 14 configurable paths; the unrelated AI operations link remains visible.',
+  boundary: 'Separate complete base/head frontend trees; original AppSidebar, SmartOpsSidebarSettings, adminSettings store, Toggle, FeatureSearch, locales and CSS. Synthetic admin/API and component harness with explicit fixture apply (not the real SettingsView save). No backend, login, production or paid calls. Counts cover the configurable paths (14 before, 15 after); the unrelated AI operations link remains visible.',
   results: [], errors: [], screenshots: [],
 }
 const browser = await chromium.launch({ headless: true })
@@ -98,6 +98,7 @@ try {
         '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard', '/admin/group-cache-tests',
         '/admin/request-captures', '/admin/harvest-flow',
       ]
+      if (mode === 'after') paths.push('/admin/qqbot/overview')
       const sidebarPaths = () => page.locator('aside nav a').evaluateAll((links, candidates) => links.map(a => a.getAttribute('href')).filter(path => candidates.includes(path)), paths)
       const screenshot = async name => {
         await page.screenshot({ path: join(output, name), animations: 'disabled' })
@@ -106,13 +107,13 @@ try {
       for (const scenario of ['missing', 'empty', 'saved']) {
         await page.goto(`${url}?scenario=${scenario}`)
         await page.waitForFunction(() => window.__sidebarFixture?.ready)
-        const expected = scenario === 'missing' && mode === 'after' ? 6 : scenario === 'saved' ? 13 : 14
+        const expected = scenario === 'missing' ? 6 : scenario === 'saved' ? paths.length - 1 : paths.length
         assert.equal(await visibleCount(), expected, `${mode}/${scenario} selected entries`)
         const snapshot = await page.evaluate(() => window.__sidebarFixture.snapshot())
         assert.equal(snapshot.loaded, true)
         assert.deepEqual(snapshot.unexpected, [])
         assert.equal((await sidebarPaths()).length, expected, `${mode}/${scenario} actual sidebar links`)
-        if (mode === 'after' && scenario === 'missing') assert.deepEqual(await sidebarPaths(), paths.slice(0, 6))
+        if (scenario === 'missing') assert.deepEqual(await sidebarPaths(), paths.slice(0, 6))
         assert.equal(await page.locator('aside nav a[href="/admin/ai-ops"]').count(), 1)
         manifest.results.push({ mode, scenario, selected: expected, sidebar_paths: await sidebarPaths(), ...snapshot })
         await screenshot(`${mode}-${scenario}.png`)
@@ -127,26 +128,26 @@ try {
       if (mode === 'after') {
         await page.goto(`${url}?scenario=missing`)
         await page.waitForFunction(() => window.__sidebarFixture?.ready)
-        await page.locator('#smart-ops-sidebar-token-guard').click()
+        await page.locator('#smart-ops-sidebar-overview').click()
         assert.equal(await visibleCount(), 7)
         assert.equal((await sidebarPaths()).length, 6, 'unsaved draft does not change sidebar')
         await page.getByTestId('fixture-apply').click()
-        await page.waitForFunction(() => !window.__sidebarFixture.snapshot().hidden.includes('/admin/token-guard'))
-        assert.ok((await sidebarPaths()).includes('/admin/token-guard'))
+        await page.waitForFunction(() => !window.__sidebarFixture.snapshot().hidden.includes('/admin/qqbot/overview'))
+        assert.ok((await sidebarPaths()).includes('/admin/qqbot/overview'))
         await screenshot('after-enable-one.png')
         await panel().getByRole('button', { name: '全部隐藏', exact: true }).click()
         assert.equal(await visibleCount(), 0)
         await page.getByTestId('fixture-apply').click()
-        await page.waitForFunction(() => window.__sidebarFixture.snapshot().hidden.length === 14)
+        await page.waitForFunction(() => window.__sidebarFixture.snapshot().hidden.length === 15)
         assert.deepEqual(await sidebarPaths(), [])
         await screenshot('after-hide-all.png')
         await panel().getByRole('button', { name: '全部显示', exact: true }).click()
-        assert.equal(await visibleCount(), 14)
+        assert.equal(await visibleCount(), 15)
         await page.getByTestId('fixture-apply').click()
         await page.waitForFunction(() => window.__sidebarFixture.snapshot().hidden.length === 0)
-        assert.equal((await sidebarPaths()).length, 14)
+        assert.equal((await sidebarPaths()).length, 15)
         await screenshot('after-show-all.png')
-        manifest.results.push({ interaction: 'enable token-guard -> seven; hide all -> zero; show all -> fourteen', passed: true })
+        manifest.results.push({ interaction: 'enable QQ bot -> seven; hide all -> zero; show all -> fifteen', passed: true })
         await page.goto(`${url}?scenario=missing&lang=en`)
         await page.waitForFunction(() => window.__sidebarFixture?.ready)
         assert.equal(await visibleCount(), 6)

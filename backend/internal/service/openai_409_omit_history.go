@@ -542,8 +542,8 @@ func prepareOpenAI409APIKeyReplay(ctx context.Context, body []byte, responsesLit
 	if r == nil || !r.omittedHistory {
 		return body, nil
 	}
-	if openAIAgentRecoveryInputDigest(body) != r.inputDigest || openAI409ControlsDigest(body) != r.replayControlsDigest {
-		return nil, openAIRecoveryWireRefusal(ctx, "apikey_projection_source")
+	if err := checkOpenAIRecoveryProjectionSource(ctx, "apikey_projection_source", body, r); err != nil {
+		return nil, err
 	}
 	prepared, _, err := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite)
 	if err != nil {
@@ -569,8 +569,8 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 	if err != nil {
 		return err
 	}
-	if openAIAgentRecoveryInputDigest(before) != r.inputDigest || openAI409ControlsDigest(before) != r.replayControlsDigest {
-		return openAIRecoveryWireRefusal(ctx, "oauth_projection_source")
+	if err := checkOpenAIRecoveryProjectionSource(ctx, "oauth_projection_source", before, r); err != nil {
+		return err
 	}
 	// ChatGPT rejects this output-only metadata. Normalize before freezing the
 	// OAuth representation; the later ordinary transform must be idempotent.
@@ -609,9 +609,21 @@ func openAI409UsesNativeAPIKey(ctx context.Context, account *Account) bool {
 		(r.omittedHistory || (r.ownerBindingRequired() && r.owner.accountID == account.ID))
 }
 
-func openAIRecoveryWireRefusal(ctx context.Context, stage string) error {
-	logger.FromContext(ctx).Warn("openai.encrypted_history_409_refused", zap.String("stage", stage))
+func openAIRecoveryWireRefusal(ctx context.Context, stage string, details ...zap.Field) error {
+	fields := append([]zap.Field{zap.String("stage", stage)}, details...)
+	logger.FromContext(ctx).Warn("openai.encrypted_history_409_refused", fields...)
 	return openAIRecoveryDiagnosticError("wire_changed", stage, openAIAgentRecoveryFromContext(ctx))
+}
+
+func checkOpenAIRecoveryProjectionSource(ctx context.Context, stage string, body []byte, r *openAIAgentRecoveryRequest) error {
+	inputChanged := openAIAgentRecoveryInputDigest(body) != r.inputDigest
+	controlsChanged := openAI409ControlsDigest(body) != r.replayControlsDigest
+	if !inputChanged && !controlsChanged {
+		return nil
+	}
+	// Fixed metadata only. Do not log the input, tools, instructions or digests.
+	return openAIRecoveryWireRefusal(ctx, stage,
+		zap.Bool("input_changed", inputChanged), zap.Bool("controls_changed", controlsChanged))
 }
 
 // Derive the HTTP representation only from the verified readable snapshot,
@@ -623,11 +635,17 @@ func (s *OpenAIGatewayService) prepareOpenAI409HTTPProjection(ctx context.Contex
 	if r == nil || !r.omittedHistory {
 		return ctx, body, nil
 	}
-	if openAIAgentRecoveryInputDigest(body) != r.inputDigest || openAI409ControlsDigest(body) != r.replayControlsDigest {
-		return ctx, body, openAIRecoveryWireRefusal(ctx, "http_projection_source")
+	if err := checkOpenAIRecoveryProjectionSource(ctx, "http_projection_source", body, r); err != nil {
+		return ctx, body, err
 	}
 	clean := s.normalizeRequestTimezone(ctx, account, body, "http")
 	var err error
+	if account.IsOpenAIOAuthLike() {
+		clean, _, err = stripOpenAICodexUnsupportedWebSearchFields(clean)
+		if err != nil {
+			return ctx, body, err
+		}
+	}
 	clean, _, err = normalizeOpenAIResponsesLegacyIngressWithConfig(s.cfg, clean)
 	if err != nil {
 		return ctx, body, err
@@ -660,6 +678,10 @@ func (s *OpenAIGatewayService) prepareOpenAI409HTTPProjection(ctx context.Contex
 				return ctx, body, err
 			}
 		}
+	}
+	clean, err = s.projectOpenAI409ImageControls(ctx, c, account, clean)
+	if err != nil {
+		return ctx, body, err
 	}
 	snapshot := *r
 	snapshot.inputDigest = openAIAgentRecoveryInputDigest(clean)

@@ -254,8 +254,12 @@ func openAIReadableShadowCandidate(body []byte) *openAIReadableShadow {
 	// Never identify generated messages by text: clients can supply that text.
 	items := gjson.GetBytes(clean, "input").Array()
 	portable := make([]json.RawMessage, 0, len(items))
+	independent := make([]json.RawMessage, 0, len(items))
 	removed := false
 	for _, item := range items {
+		if item.Get("type").String() != "agent_message" {
+			independent = append(independent, json.RawMessage(item.Raw))
+		}
 		if item.Get("type").String() == "agent_message" &&
 			openAIReadableShadowAgentTextEmpty(item.Get("content")) &&
 			openAIReadableShadowAgentTextEmpty(item.Get("summary")) {
@@ -274,11 +278,69 @@ func openAIReadableShadowCandidate(body []byte) *openAIReadableShadow {
 			return nil
 		}
 	}
+	// A readable agent summary can itself be the authorized intent. Only
+	// classify retained envelopes as assistant history when the original
+	// non-agent input/instructions supplies intent independently. This uses
+	// the unchanged latest-user rules, including opaque-user boundaries.
+	encoded, err := json.Marshal(independent)
+	if err != nil {
+		return nil
+	}
+	independentBody, err := sjson.SetRawBytes(clean, "input", encoded)
+	if err != nil {
+		return nil
+	}
+	hasIndependentIntent := openAI409HasReadableIntent(independentBody)
+	originalItems := gjson.GetBytes(clean, "input").Array()
 	if omitted, changed := omitOpenAIHistoricalCiphertext(clean); changed {
 		clean = omitted
 	}
-	var err error
 	clean, err = prepareOpenAI409ReadableReplay(clean)
+	if err != nil {
+		return nil
+	}
+	// Ciphertext omission renders an agent envelope as a metadata-only user
+	// message. It is not a newer user task: retaining it as the last user in a
+	// shadow hides the preceding genuine intent when the snapshot is restored.
+	// Retain its readable metadata as assistant context; ownership/epoch fences
+	// retain the envelope's identity. Dropping it would lose summaries/content.
+	portable = portable[:0]
+	items = gjson.GetBytes(clean, "input").Array()
+	for i, item := range items {
+		raw := []byte(item.Raw)
+		// Provenance is the original typed envelope, not a text prefix that a
+		// caller could also use in a genuine new user message.
+		if hasIndependentIntent && i < len(originalItems) && originalItems[i].Get("type").String() == "agent_message" {
+			if len(items) != len(originalItems) || item.Get("type").String() != "message" ||
+				!strings.HasPrefix(item.Get("content.0.text").String(), "Historical agent context (not a new instruction): ") {
+				return nil
+			}
+			var message map[string]any
+			if decodeOpenAIJSONUseNumber(raw, &message) != nil {
+				return nil
+			}
+			message["role"] = "assistant"
+			parts, ok := message["content"].([]any)
+			if !ok {
+				return nil
+			}
+			for _, value := range parts {
+				if part, ok := value.(map[string]any); ok && part["type"] == "input_text" {
+					part["type"] = "output_text"
+				}
+			}
+			raw, err = json.Marshal(message)
+			if err != nil {
+				return nil
+			}
+		}
+		portable = append(portable, raw)
+	}
+	encoded, err = json.Marshal(portable)
+	if err != nil {
+		return nil
+	}
+	clean, err = sjson.SetRawBytes(clean, "input", encoded)
 	if err != nil {
 		return nil
 	}
