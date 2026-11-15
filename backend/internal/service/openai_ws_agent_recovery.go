@@ -216,30 +216,6 @@ func (r *openAIWSAgentRecovery) storedContinuation(source []byte) bool {
 	return true
 }
 
-// Plaintext stored responses also retain their native delta representation,
-// but only for a response currently bound to this API-key account. begin still
-// rechecks the pointer at the actual write; this lookup cannot authorize a send.
-func (r *openAIWSAgentRecovery) plaintextStoredContinuation(account *Account, source []byte) bool {
-	if r == nil || r.service == nil || account == nil || account.ID <= 0 || !account.IsOpenAIApiKey() ||
-		gjson.GetBytes(source, "store").Type != gjson.True || len(openAIAgentRecoveryItemDigests(source)) != 0 {
-		return false
-	}
-	previous := gjson.GetBytes(source, "previous_response_id").String()
-	if previous == "" || r.service.settingService == nil || !r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(r.ctx) {
-		return false
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	scope := openAIAgentRecoveryFromContext(r.ctx)
-	if scope == nil {
-		return false
-	}
-	lookupCtx, cancel := context.WithTimeout(r.ctx, 3*time.Second)
-	defer cancel()
-	owner, err := r.service.getOpenAIWSStateStore().GetResponseAccount(lookupCtx, scope.groupID, previous)
-	return err == nil && owner == account.ID
-}
-
 // req captures the actual URL, final authorization headers and outbound model.
 // A fragment namespaces the fingerprint by adapter; this copy is never sent.
 // Thus a WS grant cannot authorize an HTTP or different-adapter continuation.
