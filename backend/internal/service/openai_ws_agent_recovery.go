@@ -58,6 +58,8 @@ type openAIWSAgentRecovery struct {
 	completedResponse                string
 	completedAccount                 int64
 	completedModel                   string
+	deliveredTools                   map[string]openAIWSDeliveredTool
+	pendingTools                     map[string]openAIWSDeliveredTool
 }
 
 func newOpenAIWSAgentRecovery(s *OpenAIGatewayService, ctx context.Context, c *gin.Context) *openAIWSAgentRecovery {
@@ -248,6 +250,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		r.finish = nil
 	}
 	r.itemDone = nil
+	r.pendingTools = nil
 	if req.GetBody != nil {
 		// HTTP builders can still normalize the prepared body. Validate the
 		// built request's bytes, rather than replacing them with the earlier
@@ -350,8 +353,19 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		if err := r.service.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
 			return err
 		}
-		if err := r.service.verifyOpenAIToolInputs(ctx, r.request, proof.history); err != nil {
-			return err
+		if _, reason := inspectOpenAIWSCompletedTools(proof.history); reason != "" {
+			return openAIRecoveryDiagnosticError("owner_conflict", reason, r.request)
+		}
+		for _, item := range gjson.GetBytes(proof.history, "input").Array() {
+			kind := item.Get("type").String()
+			if kind != "function_call" && kind != "custom_tool_call" {
+				continue
+			}
+			fingerprint, valid := openAIToolFingerprint(item)
+			observed, found := r.deliveredTools[r.request.model+"\x00"+item.Get("call_id").String()]
+			if !valid || !found || observed.conflicted || observed.fingerprint != fingerprint || observed.accountID != account.ID || observed.config != openAIAgentRecoveryConfig(account, r.request.model) {
+				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r.request)
+			}
 		}
 		r.request.previousResponseID = ""
 		projected = true
@@ -442,6 +456,27 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		r.finish = nil
 		return err
 	}
+	toolItems := gjson.GetBytes(payload, "response.output").Array()
+	if event == "response.output_item.done" {
+		toolItems = append(toolItems, gjson.GetBytes(payload, "item"))
+	}
+	for _, item := range toolItems {
+		kind := item.Get("type").String()
+		if kind != "function_call" && kind != "custom_tool_call" {
+			continue
+		}
+		if r.pendingTools == nil {
+			r.pendingTools = make(map[string]openAIWSDeliveredTool)
+		}
+		key := request.model + "\x00" + item.Get("call_id").String()
+		fingerprint, valid := openAIToolFingerprint(item)
+		old, exists := r.pendingTools[key]
+		if !exists && len(r.pendingTools) >= 1024 {
+			continue
+		}
+		r.pendingTools[key] = openAIWSDeliveredTool{fingerprint: fingerprint, accountID: request.delivery.binding.accountID, config: request.delivery.binding.config,
+			conflicted: !valid || old.conflicted || (exists && old.fingerprint != fingerprint)}
+	}
 	if isOpenAIWSTerminalEvent(event) && r.finish != nil {
 		completed := (event == "response.completed" || event == "response.done") && openAIAgentCompletedResponse(payload, true)
 		if completed && len(gjson.GetBytes(payload, "response.output").Array()) == 0 {
@@ -464,6 +499,17 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		r.finish(completed)
 		if completed {
 			r.completedResponse, r.completedAccount, r.completedModel = responseID, request.delivery.binding.accountID, request.model
+			if r.deliveredTools == nil {
+				r.deliveredTools = make(map[string]openAIWSDeliveredTool)
+			}
+			for key, observed := range r.pendingTools {
+				old, exists := r.deliveredTools[key]
+				if !exists && len(r.deliveredTools) >= 1024 {
+					continue
+				}
+				observed.conflicted = observed.conflicted || old.conflicted || (exists && old.fingerprint != observed.fingerprint)
+				r.deliveredTools[key] = observed
+			}
 			for _, key := range request.keys {
 				// Opt-out consumption does not publish new input ownership. Only
 				// remember inputs that already had completed records; otherwise a

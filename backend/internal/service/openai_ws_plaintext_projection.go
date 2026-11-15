@@ -9,3 +9,11 @@ type openAIWSPlaintextProjection struct {
 	sourceInput, sourceControls, input, controls [32]byte
 	history                                      []byte
 }
+
+// This proof never leaves the active manager or authorizes another account.
+type openAIWSDeliveredTool struct {
+	fingerprint string
+	accountID   int64
+	config      [32]byte
+	conflicted  bool
+}

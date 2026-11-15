@@ -93,6 +93,9 @@ func runPlaintextToolContinuation(t *testing.T, stored bool, rebuilt ...bool) {
 			require.Equal(t, "call_plaintext_once", gjson.GetBytes(first, "response.output.0.call_id").String())
 			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"previous_response_id":"resp_plaintext_first","input":[{"type":"function_call_output","call_id":"call_plaintext_once","output":"fixture applied once"}]}`, stored))
 			second := issue715WSRead(t, h.clientConn)
+			if gjson.GetBytes(second, "type").String() != "response.completed" {
+				logReadableWSRecoveryDetails(t, h)
+			}
 			require.Equal(t, "response.completed", gjson.GetBytes(second, "type").String(), "PLAINTEXT_TOOL_CONTINUATION_REFUSED: %s", second)
 			require.Equal(t, "resp_plaintext_second", gjson.GetBytes(second, "response.id").String())
 			mu.Lock()
