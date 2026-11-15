@@ -136,7 +136,7 @@ func TestChannelMonitorV3StatusScopesOrdinaryUsersServerSide(t *testing.T) {
 	// Inspect field names, not decimal substrings that can occur in timestamps
 	// or public success rates. Check the wire JSON so even zero-valued private
 	// fields cannot silently become part of the ordinary-user response.
-	var wire any
+	var wire map[string]any
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &wire))
 	var checkPrivateFields func(any)
 	checkPrivateFields = func(value any) {
@@ -156,7 +156,9 @@ func TestChannelMonitorV3StatusScopesOrdinaryUsersServerSide(t *testing.T) {
 	}
 	checkPrivateFields(wire)
 	// The exact timestamp that caused the CI failure is legitimate public data.
-	wire.(map[string]any)["data"].(map[string]any)["generated_at"] = "2026-11-14T19:24:11.151432152Z"
+	data, ok := wire["data"].(map[string]any)
+	require.True(t, ok, "status envelope must contain an object")
+	data["generated_at"] = "2026-11-14T19:24:11.151432152Z"
 	checkPrivateFields(wire)
 }
 
