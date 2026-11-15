@@ -2,6 +2,7 @@ export const SMART_OPS_MENU_ITEMS = [
   { path: '/admin/lottery', label: 'lottery.adminTitle' },
   { path: '/admin/auto-config', label: 'autoConfig.title' },
   { path: '/admin/priority-scheduling', label: 'priorityScheduling.title' },
+  { path: '/admin/qqbot/overview', label: 'qqbot.title' },
   { path: '/admin/channel-operations', label: 'channelOps.title' },
   { path: '/admin/profit-operations', label: 'profitOps.title' },
   { path: '/admin/account-quality', label: 'qualityOps.title' },
@@ -18,6 +19,7 @@ export const SMART_OPS_MENU_ITEMS = [
 // Used only when no visibility preferences are saved; an explicit [] shows all entries.
 export const DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS: readonly string[] = [
   '/admin/lottery',
+  '/admin/qqbot/overview',
   '/admin/channel-operations',
   '/admin/controlled-experiments',
   '/admin/account-ops',

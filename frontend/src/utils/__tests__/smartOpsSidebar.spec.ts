@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { filterSmartOpsSidebar } from '../smartOpsSidebar'
 import { DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS, SMART_OPS_MENU_ITEMS } from '@/constants/smartOpsMenu'
 
-const smartOps = { path: '/admin/smart-ops', children: [{ path: '/admin/token-guard' }, { path: '/admin/harvest-flow' }] }
+const smartOps = { path: '/admin/smart-ops', children: [{ path: '/admin/token-guard' }, { path: '/admin/harvest-flow' }, { path: '/admin/qqbot/overview' }] }
 const settings = { path: '/admin/settings' }
 describe('smart operations sidebar visibility', () => {
   it('shows exactly the six default entries when preferences are absent', () => {
@@ -20,9 +20,9 @@ describe('smart operations sidebar visibility', () => {
   it('honors an explicit show-all preference and hides only the chosen children', () => {
     expect(filterSmartOpsSidebar([smartOps, settings], [])).toEqual([smartOps, settings])
     expect(filterSmartOpsSidebar([smartOps, settings], ['/admin/token-guard', '/admin/settings'])).toEqual([
-      { ...smartOps, children: [{ path: '/admin/harvest-flow' }] }, settings,
+      { ...smartOps, children: [{ path: '/admin/harvest-flow' }, { path: '/admin/qqbot/overview' }] }, settings,
     ])
-    expect(smartOps.children).toHaveLength(2)
+    expect(smartOps.children).toHaveLength(3)
   })
   it('removes an empty group and restores it when preferences are cleared', () => {
     expect(filterSmartOpsSidebar([smartOps, settings], smartOps.children.map(item => item.path))).toEqual([settings])
