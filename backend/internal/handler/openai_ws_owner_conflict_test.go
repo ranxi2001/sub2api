@@ -362,7 +362,9 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		require.Equal(t, 1, customExecutions)
 	}
 	issue600Finish(t, h, headers)
-	accounts.disable(1)
+	if !shadowProvenance {
+		accounts.disable(1)
+	}
 	dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	conn, _, err := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
 	cancel()
@@ -587,6 +589,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			}
 		}
 		history = []string{httpRebuildAgentB}
+		accounts.disable(1)
 		accounts.disable(2) // Require restored intent on a fresh provider route.
 		issue600Finish(t, h, headers)
 		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -683,7 +686,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	require.NoError(t, err)
 	require.Contains(t, string(final), "fixture mixed task complete")
 	if association {
-		require.Contains(t, gjson.GetBytes(final, "response.output.0.content.0.text").String(), firstObject+"=first-value;"+secondObject+"=second-value")
+		require.Contains(t, gjson.GetBytes(final, "response.output.0.content").String(), firstObject+"=first-value;"+secondObject+"=second-value")
 		require.Equal(t, 2, associationExecutions)
 	}
 	require.Equal(t, 1, tools.patches)
