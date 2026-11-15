@@ -316,7 +316,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		return openAIAgentRecoveryError("wire_changed")
 	}
 	if err := r.service.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
-		return &openAIWSOwnerRouteError{cause: err}
+		return &openAIWSOwnerRouteError{cause: err, completedMixedOwners: r.request.hasCompletedMixedOwners()}
 	}
 	if !r.request.omittedHistory && (r.request.owner != nil || r.request.disableOwnerBinding) && previous != "" {
 		owner, err := r.service.getOpenAIWSStateStore().GetResponseAccount(ctx, r.request.groupID, previous)

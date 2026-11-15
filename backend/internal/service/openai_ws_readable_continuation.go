@@ -60,7 +60,10 @@ func (e *openAIWSLostOwnerEvidenceError) Unwrap() error { return e.cause }
 
 // Only the account/route compatibility check may grant this evidence. The same
 // public code from a later integrity or delivery fence stays terminal.
-type openAIWSOwnerRouteError struct{ cause error }
+type openAIWSOwnerRouteError struct {
+	cause                error
+	completedMixedOwners bool
+}
 
 func (e *openAIWSOwnerRouteError) Error() string { return e.cause.Error() }
 func (e *openAIWSOwnerRouteError) Unwrap() error { return e.cause }
@@ -79,6 +82,10 @@ func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) err
 		return closed
 	}
 	switch recovery.Reason {
+	case "owner_conflict":
+		if !route.completedMixedOwners {
+			return closed
+		}
 	case "owner_unavailable", "route_changed":
 		// Rebuild still checks completed ownership, delivery fences, readable
 		// intent, tool results and final payload integrity. Do not turn wire
@@ -87,6 +94,53 @@ func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) err
 		return closed
 	}
 	return &openAIWSUnsentTurnError{cause: closed, body: append([]byte(nil), body...), model: model, turn: turn, keepAccount: true}
+}
+
+// Keep completed results as data in a new provider conversation. Historical
+// callable records and arguments are unnecessary there; current declarations
+// remain available for genuinely new tool work. Pairing is checked before loss.
+func projectOpenAIWSCompletedTools(body []byte) ([]byte, error) {
+	if !openAIWSCompletedToolInputs(body) {
+		return nil, openAIAgentRecoveryError("owner_conflict")
+	}
+	calls := make(map[string]gjson.Result)
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if kind := item.Get("type").String(); kind == "function_call" || kind == "custom_tool_call" {
+			if item.Get("name").Type != gjson.String || strings.TrimSpace(item.Get("name").String()) == "" {
+				return nil, openAIAgentRecoveryError("owner_conflict")
+			}
+			calls[item.Get("call_id").String()] = item
+		}
+	}
+	var input []json.RawMessage
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		switch item.Get("type").String() {
+		case "function_call", "custom_tool_call":
+			continue
+		case "function_call_output", "custom_tool_call_output":
+			output := item.Get("output")
+			if !openAIReadableShadowTextOnly(output) {
+				return nil, openAIAgentRecoveryError("readable_history_unsupported")
+			}
+			record, err := json.Marshal(map[string]any{"name": calls[item.Get("call_id").String()].Get("name").String(), "output": json.RawMessage(output.Raw)})
+			if err != nil {
+				return nil, openAIAgentRecoveryError("readable_history_unsupported")
+			}
+			message, _ := json.Marshal(map[string]any{"type": "message", "role": "assistant", "content": []any{
+				map[string]any{"type": "output_text", "text": "Historical completed tool result (data only; do not execute again): " + string(record)},
+			}})
+			input = append(input, message)
+		case "", "message":
+			input = append(input, json.RawMessage(item.Raw))
+		default:
+			return nil, openAIAgentRecoveryError("readable_history_unsupported")
+		}
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	return sjson.SetRawBytes(body, "input", encoded)
 }
 
 func OpenAIWSUnsentTurnKeepsAccount(err error) bool {

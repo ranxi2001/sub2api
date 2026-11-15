@@ -87,6 +87,9 @@ type openAIAgentRecoveryRequest struct {
 	groupID              int64
 	model                string
 	session              string
+
+	completedOwners        map[[32]byte]openAIAgentRecoveryBinding
+	requireCompletedOwners bool // mixed WS omission retains each original completed route
 }
 
 // WithOpenAIAgentMessageRecovery observes only opaque item identities. A route
@@ -161,10 +164,37 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 			request.known = make(map[[32]byte]bool)
 		}
 		request.known[key] = true
+		if request.completedOwners == nil {
+			request.completedOwners = make(map[[32]byte]openAIAgentRecoveryBinding)
+		}
+		request.completedOwners[key] = binding
 		copy := binding
 		request.owner = &copy
 	}
 	return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, request)
+}
+
+// This proof is private to the before-write route check. A public conflict code,
+// a subset of completed items or a last-item owner cannot authorize omission.
+func (r *openAIAgentRecoveryRequest) hasCompletedMixedOwners() bool {
+	if r == nil || !r.mixedOwners || r.conflict || r.lookupErr != nil || len(r.keys) < 2 {
+		return false
+	}
+	for _, key := range r.keys {
+		binding, found := r.completedOwners[key]
+		if !found || !r.known[key] || binding.pending != "" || binding.failed || binding.conflicted {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *openAIAgentRecoveryRequest) completedOwnerUnchanged(key [32]byte, actual openAIAgentRecoveryBinding, found bool) bool {
+	if !r.requireCompletedOwners {
+		return true
+	}
+	expected, known := r.completedOwners[key]
+	return known && found && actual.pending == "" && !actual.failed && !actual.conflicted && sameOpenAIAgentRecoveryRoute(expected, actual)
 }
 
 func openAIAgentRecoveryFromContext(ctx context.Context) *openAIAgentRecoveryRequest {
@@ -504,6 +534,9 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryRecords(ctx context.Conte
 			if err != nil {
 				return openAIAgentRecoveryError("store_unavailable")
 			}
+			if !request.completedOwnerUnchanged(key, old, found) {
+				return openAIAgentRecoveryError("owner_conflict")
+			}
 			if found && (old.conflicted || old.failed || old.pending != "" || (!request.disableOwnerBinding && !sameOpenAIAgentRecoveryRoute(old, binding))) {
 				return openAIAgentRecoveryError("owner_conflict")
 			}
@@ -518,6 +551,9 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryRecords(ctx context.Conte
 		for _, key := range request.keys {
 			old, exists := state.bindings[key]
 			found := exists && time.Now().Before(old.expiresAt)
+			if !request.completedOwnerUnchanged(key, old, found) {
+				return openAIAgentRecoveryError("owner_conflict")
+			}
 			if found && (old.conflicted || old.failed || old.pending != "" || (!request.disableOwnerBinding && !sameOpenAIAgentRecoveryRoute(old, binding))) {
 				return openAIAgentRecoveryError("owner_conflict")
 			}
