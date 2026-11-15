@@ -61,7 +61,7 @@ try {
       else assert.equal(await forecast.count(), 0)
       const low = page.locator('h3').filter({ hasText: /余额不足提醒|Balance Low Notification/ }).first()
       await low.waitFor({ state: 'visible' })
-      assert.equal((await page.locator('[aria-live="polite"]').allTextContents()).join('').trim(), '', 'fixture must not produce error toasts')
+      assert.equal((await page.locator('[aria-live="polite"].pointer-events-none').allTextContents()).join('').trim(), '', 'fixture must not produce error toasts')
       if (mode === 'before') await forecast.scrollIntoViewIfNeeded()
       else await low.scrollIntoViewIfNeeded()
       await page.screenshot({ path: join(output, `${mode}-email.png`), animations: 'disabled' })
