@@ -29,17 +29,22 @@ while IFS= read -r target; do
   test ! -e "$tree/$target"
 done < <(git -C "$tree" ls-files 'backend/internal/handler/moderation_upstream*_test.go' 'backend/internal/handler/admin/moderation_upstream_scope_test.go' 'backend/internal/service/content_moderation_upstream_scope_test.go' 'backend/internal/repository/moderation_upstream_scope*_test.go' 'backend/internal/handler/openai_409_ws_audit_test.go')
 
-# This pre-PR848 fixture retains PR834's actual error observer and all existing
-# recovery harness entry points, with the historical eight-argument constructor.
-fixture_base=afa7dbd6fccffef950febadc666b9243bba2454d
+# Preserve current harness entry points needed by independently compiled newer
+# tests. Only adapt the known constructor arity in this disposable RED tree.
+# Production stays byte-for-byte historical; selected behavior tests stay intact.
 target=backend/internal/handler/openai_ws_v2_passthrough_cyber_test.go
-if ! git -C "$tree" cat-file -e "$fixture_base^{commit}" 2>/dev/null; then
-  git -C "$tree" fetch --no-tags --depth=1 origin "$fixture_base"
-fi
 candidate_blob=$(git -C "$tree" rev-parse "$candidate:$target")
 test "$(git -C "$tree" hash-object "$target")" = "$candidate_blob"
-expected=$(git -C "$tree" rev-parse "$fixture_base:$target")
-git -C "$tree" show "$fixture_base:$target" > "$tree/$target"
+python3 - "$tree/$target" <<'PY_FIXTURE'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+new = "service.NewContentModerationService(settingRepo, moderationRepo, nil, nil, nil, nil, nil, nil, accountRepo)"
+old = "service.NewContentModerationService(settingRepo, moderationRepo, nil, nil, nil, nil, nil, nil)"
+if source.count(new) != 1:
+    raise SystemExit("unexpected moderation fixture constructor")
+path.write_text(source.replace(new, old, 1))
+PY_FIXTURE
 actual=$(git -C "$tree" hash-object "$target")
-test "$actual" = "$expected"
-printf 'compatible path=%s fixture_base=%s candidate=%s expected=%s actual=%s\n' "$target" "$fixture_base" "$candidate_blob" "$expected" "$actual"
+printf 'compatible test-only constructor path=%s candidate=%s adapted=%s\n' "$target" "$candidate_blob" "$actual"

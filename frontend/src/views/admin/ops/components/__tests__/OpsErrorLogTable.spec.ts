@@ -132,3 +132,14 @@ it('labels historical balance failures by source while preserving the raw messag
   expect(upstream.get('[data-testid="balance-source"]').text()).toBe('admin.ops.balanceError.upstream')
   upstream.unmount()
 })
+
+it('keeps HTTP 200 transport failures distinct from recovered upstream attempts', () => {
+  const failed = mountTable({ status_code: 200, type: 'transport_error', phase: 'network' })
+  expect(failed.text()).toContain('usage.errors.categories.transport_error')
+  expect(failed.text()).toContain('usage.errors.detail.streamFailedAfterHeaders')
+  expect(failed.text()).toContain('200')
+  failed.unmount()
+  const recovered = mountTable({ status_code: 200, type: 'upstream_error', phase: 'upstream' })
+  expect(recovered.text()).not.toContain('usage.errors.detail.streamFailedAfterHeaders')
+  recovered.unmount()
+})

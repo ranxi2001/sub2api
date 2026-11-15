@@ -613,6 +613,21 @@ func (s *OpenAIGatewayService) prepareOpenAI409HTTPProjection(ctx context.Contex
 	if err != nil {
 		return ctx, body, err
 	}
+	// Match the existing native builder's empty-image sanitation before
+	// freezing this projected representation. Keep readable text, completed
+	// tool results, order and exact JSON numbers; do not rebase at final send.
+	if openAIRequestBodyMayContainEmptyBase64InputImage(clean) {
+		var decoded map[string]any
+		if err := decodeOpenAIJSONUseNumber(clean, &decoded); err != nil {
+			return ctx, body, err
+		}
+		if sanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(decoded) {
+			clean, err = json.Marshal(decoded)
+			if err != nil {
+				return ctx, body, err
+			}
+		}
+	}
 	snapshot := *r
 	snapshot.inputDigest = openAIAgentRecoveryInputDigest(clean)
 	snapshot.replayControlsDigest = openAI409ControlsDigest(clean)

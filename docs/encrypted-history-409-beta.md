@@ -43,3 +43,12 @@ HTTP 重建请求会在原始可读快照验证通过后，按目标账号执行
 API Key 账号开启普通透传时，重建请求使用原生 Responses 构造与交付流程；普通请求仍使用透传。其他尚不支持重建的账号路线在选号时排除，避免先选中再本地拒绝。WS 新连接首帧没有会话指针、但已有可读任务和原 owner 时，初次选号发现 owner 不可用也会进入一次有界重建。
 
 重建或显式完整历史保护请求的正文在物理发送前不再按自动出口时区改写，以免验证后更改用户任务；HTTP 时区请求头仍可按出口更新，普通请求的自动时区行为不变。手动时区在 HTTP 重建投影中处理。缺少可读任务、未完成工具或交付不确定时继续停止，不以重新计算最终摘要掩盖变化。
+
+
+### Issue854 integrated continuation checks
+
+PR855 incorporates the fixed PR860 source (`591bb9b9b917c0df2ae8c59abed672c0cddf5c1c`) by an ordinary source merge. This does not imply a GitHub PR merge or a deployment. It retains the typed WS initial-owner availability check, fresh permission/billing/prompt checks, and terminal error persistence from PR855.
+
+Native HTTP projection also applies the existing empty-base64-image sanitizer before freezing the projected representation. Readable text, tool declarations, completed results, their order, and exact JSON numbers remain protected. Final dispatch does not overwrite the source snapshot or waive integrity checks.
+
+The synthetic acceptance matrix distinguishes configured manual timezone projection, automatic normalization on ordinary requests, and automatic egress headers with unchanged protected recovery bodies. API Key passthrough is a supported native recovery route; genuinely unsupported adapters are checked separately for refusal or selection of an eligible native account. The pre-coordination oracle and raw results are retained as historical evidence; they are not silently relabeled as current acceptance.

@@ -1884,11 +1884,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if err := s.priorityLatencyBeforeSend(priorityLatencyCtx, account); err != nil {
 				return nil, err
 			}
-			latencyGenerationStartedTurn = turn
 		}
 		if err := agentRecovery.beginSocket(latest, clientPayload, payload, wsURL, lease.conn.agentRecoveryHeaders, "ctx_pool"); err != nil {
+			if latencyGenerationStartedTurn != turn {
+				return nil, openAIWSUnsentAgentTurn(err, clientPayload, originalModel, turn)
+			}
 			return nil, openAIWSAgentRecoveryClose(err)
 		}
+		latencyGenerationStartedTurn = turn
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",

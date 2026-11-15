@@ -52,6 +52,13 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		u.validationFailures++
 		return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_native_namespace_changed"}}}`)
 	}
+	if strings.HasPrefix(u.scenario, "issue854_guard_") && n == 2 {
+		if r.Header.Get("Authorization") != "Bearer fixture-readable-ws-B" || !strings.Contains(string(body), "issue854-warm-B") {
+			u.validationFailures++
+			return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_bad_B_warmup"}}}`)
+		}
+		return []byte(`{"type":"response.completed","response":{"id":"resp_issue854_warm","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"issue854-warm-B-complete"}]}],"usage":{"input_tokens":2,"output_tokens":1}}}`)
+	}
 	if u.scenario == "bridge_model" && n == 2 {
 		if r.Header.Get("Authorization") != "Bearer fixture-readable-ws-A" || gjson.GetBytes(body, "model").String() != "gpt-5.4" || !strings.Contains(string(body), "model-switch-warmup") {
 			u.validationFailures++
@@ -60,7 +67,7 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		return []byte(`{"type":"response.completed","response":{"id":"resp_model_warmup","status":"completed","model":"gpt-5.4","error":null,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"model-switch-complete"}]}],"usage":{"input_tokens":5,"output_tokens":3}}}`)
 	}
 	logicalTurn := n
-	if u.scenario == "bridge_model" && n > 2 {
+	if (u.scenario == "bridge_model" || strings.HasPrefix(u.scenario, "issue854_guard_")) && n > 2 {
 		logicalTurn--
 	}
 	output := []json.RawMessage{json.RawMessage(httpRebuildAgentA), json.RawMessage(httpRebuildCall("apply_patch", "call_ws_patch", map[string]any{"path": "sum.go", "source": httpRebuildSource}))}

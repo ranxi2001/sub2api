@@ -103,6 +103,8 @@ jobs:
           added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go backend/internal/service/openai_ws_search_activation.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go)
           # The exact original gateway struct predates analysis admission state.
           added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_replay_metadata.go)
+          handler_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
+          handler_leaf=backend/internal/handler/openai_agent_message_recovery.go
           # Pin this unrelated leaf to its pre-admission version, preserving all
           # Issue715 business-chain blobs and the retained handler regressions.
           # Issue842 compatibility-body callers depend on the later recovery
@@ -124,7 +126,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$metadata_compat"
           git fetch --no-tags --depth=1 origin "$analysis_compat"
           git fetch --no-tags --depth=1 origin "$billing_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "$metadata_leaf" "${weekly_leaves[@]}" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "${weekly_leaves[@]}" "$handler_leaf" "$metadata_leaf" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$metadata_compat" -- "$metadata_leaf"
           test "$(git hash-object "$metadata_leaf")" = "$(git rev-parse "$metadata_compat:$metadata_leaf")"
@@ -147,6 +149,10 @@ jobs:
           actual=$(git hash-object "$analysis_leaf")
           echo "compatibility_leaf_baseline=$analysis_compat path=$analysis_leaf expected_blob=$expected tested_blob=$actual"
           test "$expected" = "$actual"
+          git fetch --no-tags --depth=1 origin "$handler_compat"
+          git restore --source="$handler_compat" -- "$handler_leaf"
+          test "$(git hash-object "$handler_leaf")" = "$(git rev-parse "$handler_compat:$handler_leaf")"
+          echo "handler_compatibility_baseline=$handler_compat path=$handler_leaf"
           rm -- "${added[@]}"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")
@@ -265,6 +271,8 @@ jobs:
           # Neither helper exists on the restored historical socket structure.
           ws_added=(backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_search_activation.go)
           ws_added+=(backend/internal/service/openai_ws_readable_continuation.go)
+          handler_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
+          handler_leaf=backend/internal/handler/openai_agent_message_recovery.go
           # The historical recovery request predates Issue758 cooldown state.
           # Keep the exact delivery-defect blobs above, and pin only this
           # scheduling compatibility leaf to the pre-Issue758 production base.
@@ -280,7 +288,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$ws_original"
           git fetch --no-tags --depth=1 origin "$scheduler_compat"
           git fetch --no-tags --depth=1 origin "$metadata_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "$metadata_leaf" "${omission_added[@]}" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}" "$handler_leaf" "$metadata_leaf" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
           git restore --source="$metadata_compat" -- "$metadata_leaf"
@@ -291,6 +299,10 @@ jobs:
           actual=$(git hash-object "$scheduler_leaf")
           echo "compatibility_leaf_baseline=$scheduler_compat path=$scheduler_leaf expected_blob=$expected tested_blob=$actual"
           test "$expected" = "$actual"
+          git fetch --no-tags --depth=1 origin "$handler_compat"
+          git restore --source="$handler_compat" -- "$handler_leaf"
+          test "$(git hash-object "$handler_leaf")" = "$(git rev-parse "$handler_compat:$handler_leaf")"
+          echo "handler_compatibility_baseline=$handler_compat path=$handler_leaf"
           rm -- "$added" "${ws_added[@]}" "$wait_added" "${omission_added[@]}"
           for target in "${omission_added[@]}"; do
             test ! -e "$target"
@@ -349,7 +361,13 @@ jobs:
           test "$result" -ne 0
           if grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|--- SKIP:' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715WSGeneratedTaskContinuation/http_bridge/cross-node=false' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
-          grep -q 'generated WS task must continue without rebuilding the session' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          # PR855 returns the safe structured refusal before the close. The
+          # unchanged oracle now reaches its content assertion (instead of the
+          # socket-read assertion). Require that exact business failure after
+          # the first continuation completed; do not accept arbitrary errors.
+          grep -q 'generated opaque WS task and tool result must return to producer' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          grep -q 'encrypted_agent_recovery_wire_changed' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          grep -q 'ingress_ws_http_bridge_turn_completed.*turn=2' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
 
   red-ws-wire:
     runs-on: ubuntu-latest

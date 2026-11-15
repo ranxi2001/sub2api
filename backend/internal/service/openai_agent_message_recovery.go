@@ -299,7 +299,10 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryAccount(ctx context.Conte
 	// even on a pointer-only request with no known opaque item owner.
 	if request.previousResponseID != "" {
 		owner, err := s.getOpenAIWSStateStore().GetResponseAccount(ctx, request.groupID, request.previousResponseID)
-		if err != nil || owner <= 0 || account == nil || owner != account.ID {
+		if err != nil {
+			return openAIAgentRecoveryError("store_unavailable")
+		}
+		if owner <= 0 || account == nil || owner != account.ID {
 			return openAIAgentRecoveryError("owner_unavailable")
 		}
 		if request.httpResponsePointer && !account.IsOpenAIApiKey() {

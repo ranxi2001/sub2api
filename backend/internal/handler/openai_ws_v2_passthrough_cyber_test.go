@@ -60,6 +60,10 @@ func newOpenAIWSPassthroughHandlerHarnessWithKey(t *testing.T, upstreamURL strin
 }
 
 func newOpenAIWSPassthroughHandlerHarnessWithAudit(t *testing.T, upstreamURL string, clientHeaders http.Header, extraSettings map[string]string, gatewayCache service.GatewayCache, configureKey func(*service.APIKey), configureHandler func(*OpenAIGatewayHandler), configure ...func(*service.Account, *config.Config, *service.HTTPUpstream, *service.AccountRepository)) *openAIWSPassthroughHandlerHarness {
+	return newOpenAIWSPassthroughHandlerHarnessWithAuth(t, upstreamURL, clientHeaders, extraSettings, gatewayCache, configureKey, configureHandler, nil, configure...)
+}
+
+func newOpenAIWSPassthroughHandlerHarnessWithAuth(t *testing.T, upstreamURL string, clientHeaders http.Header, extraSettings map[string]string, gatewayCache service.GatewayCache, configureKey func(*service.APIKey), configureHandler func(*OpenAIGatewayHandler), authSetup func(*service.APIKey, *config.Config) *service.APIKeyService, configure ...func(*service.Account, *config.Config, *service.HTTPUpstream, *service.AccountRepository)) *openAIWSPassthroughHandlerHarness {
 	t.Helper()
 	if gatewayCache == nil {
 		gatewayCache = testutil.NewRedisGatewayCache(t)
@@ -166,23 +170,34 @@ func newOpenAIWSPassthroughHandlerHarnessWithAudit(t *testing.T, upstreamURL str
 			return zapcore.NewTee(core, requestCore)
 		}))
 		c.Request = c.Request.WithContext(logger.IntoContext(c.Request.Context(), observed))
-		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
-		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+		if authSetup == nil {
+			c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+		}
 		c.Next()
 	})
-	router.GET("/openai/v1/responses", func(c *gin.Context) {
-		h.ResponsesWebSocket(c)
+	if authSetup != nil {
+		h.apiKeyService = authSetup(apiKey, cfg)
+		router.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(h.apiKeyService, nil, cfg)))
+	}
+	router.Use(func(c *gin.Context) {
+		c.Next()
 		finalHeaders <- c.Request.Header.Clone()
 		handlerDone <- struct{}{}
 	})
+	if h.opsService != nil {
+		router.Use(middleware.RequestLogger(), OpsErrorLoggerMiddleware(h.opsService))
+	}
+	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
 	t.Cleanup(handlerServer.Close)
 
 	wsURL := "ws" + strings.TrimPrefix(handlerServer.URL, "http") + "/openai/v1/responses"
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
-	clientConn, _, err := coderws.Dial(dialCtx, wsURL, &coderws.DialOptions{HTTPHeader: clientHeaders})
+	clientConn, response, err := coderws.Dial(dialCtx, wsURL, &coderws.DialOptions{HTTPHeader: clientHeaders})
 	cancelDial()
 	require.NoError(t, err)
+	require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
 	t.Cleanup(func() { _ = clientConn.CloseNow() })
 
 	return &openAIWSPassthroughHandlerHarness{

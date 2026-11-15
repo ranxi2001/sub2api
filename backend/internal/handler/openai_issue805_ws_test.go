@@ -387,6 +387,16 @@ func TestIssue805WSNewBOutputWaitsForCrossNodeCommit(t *testing.T) {
 			release := func() { releaseOnce.Do(func() { close(barrier.release) }) }
 			defer release()
 			producer := issue805WSNode(t, mode, srv.URL, barrier, true, true)
+			// Establish the consumer socket before holding the producer commit.
+			// TLS/dial setup under -race must not consume the production 3s
+			// persistence deadline while the fixture deliberately blocks it.
+			readerBase := newCache()
+			readerDelivery, ok := readerBase.(issue715WSDeliveryCache)
+			require.True(t, ok)
+			observed := make(chan struct{})
+			var observeOnce sync.Once
+			reader := &issue805ReadObserver{GatewayCache: readerBase, issue715WSDeliveryCache: readerDelivery, seen: observed, once: &observeOnce}
+			consumer := issue805WSNode(t, mode, srv.URL, reader, true, true)
 			issue715WSSend(t, producer.clientConn, issue715WSCreate("", true))
 			answer := issue715WSRead(t, producer.clientConn)
 			require.Contains(t, string(answer), "fixture-task-produced-by-B")
@@ -401,13 +411,6 @@ func TestIssue805WSNewBOutputWaitsForCrossNodeCommit(t *testing.T) {
 					require.Contains(t, raw, `[1,2,`)
 				}
 			}
-			readerBase := newCache()
-			readerDelivery, ok := readerBase.(issue715WSDeliveryCache)
-			require.True(t, ok)
-			observed := make(chan struct{})
-			var observeOnce sync.Once
-			reader := &issue805ReadObserver{GatewayCache: readerBase, issue715WSDeliveryCache: readerDelivery, seen: observed, once: &observeOnce}
-			consumer := issue805WSNode(t, mode, srv.URL, reader, true, true)
 			mixed := strings.Replace(issue715WSCreate("", true), issue715Agent, issue715Agent+","+issue805AgentB, 1)
 			issue715WSSend(t, consumer.clientConn, mixed)
 			issue715Await(t, observed)
@@ -416,7 +419,8 @@ func TestIssue805WSNewBOutputWaitsForCrossNodeCommit(t *testing.T) {
 			u.mu.Unlock()
 			require.Equal(t, 2, before, "client-visible B output cannot be consumed on another node before commit")
 			release()
-			require.Equal(t, "response.completed", gjson.GetBytes(issue715WSRead(t, consumer.clientConn), "type").String())
+			completed := issue715WSRead(t, consumer.clientConn)
+			require.Equal(t, "response.completed", gjson.GetBytes(completed, "type").String(), "continuation after committed B output: %s", completed)
 			for _, node := range []*openAIWSPassthroughHandlerHarness{consumer, producer, originalNode} {
 				issue600Finish(t, node, http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}})
 			}

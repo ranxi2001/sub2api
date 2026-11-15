@@ -478,8 +478,30 @@ func httpRebuildOwnerKey(t *testing.T, h *OpenAIGatewayHandler, agent string) st
 	return "openai_agent_owner:v1:" + hex.EncodeToString(key[:])
 }
 
-func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointer, outcome, boundary, mutation string) {
+type httpRebuildFixtureOptions struct {
+	extraAccounts  []service.Account
+	afterFirst     func([]service.Account)
+	refuseCode     string
+	physicalBody   func(*testing.T, []byte, int) []byte
+	headers        func(*http.Request)
+	toolsAvailable func([]byte) bool
+	request        func(map[string]any, bool)
+	provider       func(*testing.T, []byte, http.Header, int)
+	accounts       func([]service.Account)
+	gateway        func(*OpenAIGatewayHandler, []service.Account, service.HTTPUpstream, service.GatewayCache, *service.SettingService, service.UsageLogRepository)
+	settings       service.SettingRepository
+}
+
+func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointer, outcome, boundary, mutation string, options ...httpRebuildFixtureOptions) {
 	t.Helper()
+	var option httpRebuildFixtureOptions
+	if len(options) > 0 {
+		option = options[0]
+	}
+	authenticated := boundary == "issue854_auth"
+	if authenticated {
+		boundary = ""
+	}
 	noOpaque := strings.HasSuffix(pointer, "_no_opaque")
 	pointer = strings.TrimSuffix(pointer, "_no_opaque")
 	mixed := strings.HasPrefix(boundary, "mixed/")
@@ -503,8 +525,15 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		providerHeaders = append(providerHeaders, r.Header.Clone())
 		n := len(providerBodies)
 		mu.Unlock()
+		if option.provider != nil {
+			option.provider(t, body, r.Header, n)
+		}
 		noToolsFinal := pointer == "no_tools_parallel" && n == 3
-		if (!noToolsFinal && !httpRebuildToolsAvailable(body)) || (noToolsFinal && (gjson.GetBytes(body, "tools").Exists() || gjson.GetBytes(body, "parallel_tool_calls").Exists())) {
+		toolsAvailable := httpRebuildToolsAvailable
+		if option.toolsAvailable != nil {
+			toolsAvailable = option.toolsAvailable
+		}
+		if (!noToolsFinal && !toolsAvailable(body)) || (noToolsFinal && (gjson.GetBytes(body, "tools").Exists() || gjson.GetBytes(body, "parallel_tool_calls").Exists())) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = io.WriteString(w, `{"error":{"type":"invalid_request_error","message":"fixture rejected missing or changed tool declarations"}}`)
@@ -585,21 +614,42 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	if pointer == "passthrough" {
 		accounts[1].Extra = map[string]any{"openai_passthrough": true, "openai_responses_mode": "force_responses"}
 	}
-	settings := service.NewSettingService(&omit409SettingsRepo{enabled: boundary != "strict"}, cfg)
+	accounts = append(accounts, option.extraAccounts...)
+	if option.accounts != nil {
+		option.accounts(accounts)
+	}
+	var settingsRepo service.SettingRepository = &omit409SettingsRepo{enabled: boundary != "strict"}
+	if option.settings != nil {
+		settingsRepo = option.settings
+	}
+	settings := service.NewSettingService(settingsRepo, cfg)
 	usage := &readable409UsageRepo{}
 	h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, transport, repository.NewGatewayCache(clients()), settings, usage, accounts...)
 	h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	if option.gateway != nil {
+		option.gateway(h, accounts, transport, repository.NewGatewayCache(clients()), settings, usage)
+	}
 	template, _ := newIssue715Context(t, "{}")
 	done := make(chan struct{}, 1)
 	var sessions []string
 	pendingBeforeWrite := false
 	var observeErr error
 	router := gin.New()
+	if authenticated {
+		key := template.Keys[string(middleware.ContextKeyAPIKey)].(*service.APIKey)
+		key.Key, key.Status, key.UserID = "fixture-issue854-http", service.StatusActive, key.User.ID
+		key.User.Status = service.StatusActive
+		key.Group.Status, key.Group.Hydrated = service.StatusActive, true
+		h.apiKeyService = service.NewAPIKeyService(&wsRevalidationKeyRepoStub{current: key}, nil, nil, nil, nil, nil, cfg)
+		router.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(h.apiKeyService, nil, cfg)))
+	}
 	router.POST("/v1/responses", func(c *gin.Context) {
 		defer func() { done <- struct{}{} }()
 		sessions = append(sessions, c.GetHeader("session_id"))
-		for key, value := range template.Keys {
-			c.Set(key, value)
+		if !authenticated {
+			for key, value := range template.Keys {
+				c.Set(key, value)
+			}
 		}
 		if c.GetHeader("X-Fixture-Foreign-User") == "true" {
 			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 101})
@@ -672,10 +722,19 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		if previous.Exists() && pointer == "conversation" {
 			body["conversation"] = map[string]any{"id": previous.Get("conversation.id").String()}
 		}
+		if option.request != nil {
+			option.request(body, previous.Exists())
+		}
 		req, err := http.NewRequest(http.MethodPost, gateway.URL+"/v1/responses", strings.NewReader(httpRebuildJSON(body)))
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("session_id", httpRebuildSession)
+		if authenticated {
+			req.Header.Set("Authorization", "Bearer fixture-issue854-http")
+		}
+		if option.headers != nil {
+			option.headers(req)
+		}
 		if boundary == "foreign_user" && previous.Exists() {
 			req.Header.Set("X-Fixture-Foreign-User", "true")
 		}
@@ -726,6 +785,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		require.Len(t, ownersA, 1)
 	}
 	accounts[0].Schedulable = false
+	if option.afterFirst != nil {
+		option.afterFirst(accounts)
+	}
 	cooldownUntil := time.Now().Add(7 * 24 * time.Hour)
 	if ownerCooldown {
 		accounts[0].Schedulable = true
@@ -756,6 +818,15 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		accounts[1].Schedulable = false
 	}
 	status, answer = request(history, first)
+	if option.refuseCode != "" {
+		require.Contains(t, answer, option.refuseCode)
+		require.GreaterOrEqual(t, status, 400)
+		require.Len(t, transport.snapshot(), 1, "unsupported routes must not generate")
+		require.Equal(t, ownersA, issue805Owners(t, observer))
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		return
+	}
 	if boundary != "" && !mixed && !ownerCooldown {
 		if boundary == "strict" {
 			require.Len(t, transport.snapshot(), 1, "HTTP_POINTER_STRICT_A_STATE_LEAK: disabled A pointer must never reach B under default strict policy; response=%s", answer)
@@ -906,7 +977,11 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	defer mu.Unlock()
 	require.Len(t, providerBodies, 3)
 	for i, wire := range wires {
-		require.JSONEq(t, string(wire.body), string(providerBodies[i]), "provider must receive the final builder payload unchanged")
+		expected := wire.body
+		if option.physicalBody != nil {
+			expected = option.physicalBody(t, expected, i)
+		}
+		require.JSONEq(t, string(expected), string(providerBodies[i]), "provider must receive exactly the declared physical projection")
 		require.Equal(t, wire.header.Get("Authorization"), providerHeaders[i].Get("Authorization"))
 	}
 }

@@ -147,8 +147,10 @@ func logReadableWSDispatchFailure(t *testing.T, h *openAIWSPassthroughHandlerHar
 	var peerClose coderws.CloseError
 	require.ErrorAs(t, clientErr, &peerClose)
 	require.Equal(t, coderws.StatusPolicyViolation, peerClose.Code)
+	require.Eventually(t, func() bool {
+		return h.requestLogs.FilterMessage("openai.websocket_proxy_failed").Len() == 1
+	}, 3*time.Second, 5*time.Millisecond, "expected one actual failed B dispatch")
 	entries := h.requestLogs.FilterMessage("openai.websocket_proxy_failed").All()
-	require.Len(t, entries, 1, "expected one actual failed B dispatch")
 	require.Equal(t, int64(2), entries[0].ContextMap()["account_id"])
 	var reported error
 	for _, field := range entries[0].Context {
@@ -174,7 +176,7 @@ func TestOpenAI409WSInitialWithoutPointer(t *testing.T) {
 	}
 }
 
-func runReadableWSContinuation(t *testing.T, mode, scenario string) {
+func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent ...service.OpsRepository) {
 	t.Helper()
 	clients := issue805Redis(t)
 	probe := clients()
@@ -183,7 +185,47 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	defer provider.Close()
 	headers := http.Header{"Session_id": {"fixture-readable-ws-session"}, "Thread-Id": {"fixture-readable-ws-thread"}}
 	settings := map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: fmt.Sprint(scenario != "off")}
+	r1 := strings.HasPrefix(scenario, "issue854_r1_")
+	r1Case := strings.TrimPrefix(scenario, "issue854_r1_")
+	r1Reject := r1 && r1Case != "disabled" && r1Case != "cooldown"
+	issue854 := strings.HasPrefix(scenario, "issue854_")
+	if r1Case == "off" {
+		settings[service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled] = "false"
+	}
+	issue854Failure := scenario == "issue854_guard_refusal" || scenario == "issue854_fresh_refusal"
+	var failureRepo *ingressRejectOpsRepo
+	var configureHandler func(*OpenAIGatewayHandler)
+	if issue854Failure {
+		setupOpsErrorLogTestQueue(t, 4)
+		failureRepo = &ingressRejectOpsRepo{}
+		settings[service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled] = "false"
+		configureHandler = func(h *OpenAIGatewayHandler) {
+			var opsRepo service.OpsRepository = failureRepo
+			if len(persistent) > 0 {
+				opsRepo = persistent[0]
+			}
+			h.opsService = service.NewOpsService(opsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		}
+		if len(persistent) > 0 {
+			name := "ws_guard"
+			if scenario == "issue854_fresh_refusal" {
+				name = "ws_fresh"
+			}
+			headers.Set("X-Request-ID", "fixture-issue854-pg-"+name)
+		}
+	}
+	var authSetup func(*service.APIKey, *config.Config) *service.APIKeyService
+	if issue854 {
+		headers.Set("Authorization", "Bearer sk-handler-cyber-test")
+		authSetup = func(key *service.APIKey, cfg *config.Config) *service.APIKeyService {
+			key.Status = service.StatusActive
+			key.User.Concurrency = 1
+			key.Group = &service.Group{ID: *key.GroupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+			return service.NewAPIKeyService(&wsRevalidationKeyRepoStub{current: key}, nil, nil, nil, nil, nil, cfg)
+		}
+	}
 	initialNoPointer := strings.HasPrefix(scenario, "initial_no_pointer_")
+	var initialUnavailableUntil time.Time
 	identityCase, modelCase := scenario == "identity" || strings.HasPrefix(scenario, "header_"), scenario == "bridge_model"
 	customTools := strings.HasPrefix(scenario, "tools_")
 	nativeNamespace := scenario == "native_namespace"
@@ -202,9 +244,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		settings[service.SettingKeyCyberSessionIdentityStrictEnabled] = "true"
 	}
 	var accounts *readableWSAccounts
-	h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, provider.URL, headers,
+	h := newOpenAIWSPassthroughHandlerHarnessWithAuth(t, provider.URL, headers,
 		settings,
-		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true },
+		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true }, configureHandler, authSetup,
 		func(a *service.Account, cfg *config.Config, upstream *service.HTTPUpstream, repo *service.AccountRepository) {
 			a.ID, a.Priority = 1, 0
 			a.Credentials["api_key"] = "fixture-readable-ws-A"
@@ -296,19 +338,38 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		require.Equal(t, 1, customCalls, "A must actually deliver the completed custom tool")
 		omitTools = scenario == "tools_omitted"
 	}
-	require.Eventually(t, func() bool {
-		owners := issue805Owners(t, probe)
-		if len(owners) != 1 {
-			return false
+	// Poll in the test goroutine: testify.Eventually runs its predicate in a
+	// detached goroutine, so a slow Redis read can outlive the deadline and
+	// assert against a closed client after this test's cleanup. A race-enabled
+	// hosted runner may also finish A's delivery after the old one-second limit.
+	// Keep the same committed-owner predicate and bound all reads by one budget.
+	ownerCtx, cancelOwnerWait := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelOwnerWait()
+	ownerTick := time.NewTicker(5 * time.Millisecond)
+	defer ownerTick.Stop()
+	var owners map[string]string
+	for {
+		keys, err := probe.Keys(ownerCtx, "openai_agent_owner:*").Result()
+		require.NoError(t, err, "read A's committed owner before changing its availability")
+		owners = make(map[string]string, len(keys))
+		committed := len(keys) == 1
+		for _, key := range keys {
+			raw, err := probe.Get(ownerCtx, key).Result()
+			require.NoError(t, err, "read A's delivery record")
+			owners[key] = raw
+			committed = committed && json.Valid([]byte(raw)) && gjson.Parse(raw).IsArray() && gjson.Get(raw, "1").Int() == 1
 		}
-		for _, raw := range owners {
-			if !json.Valid([]byte(raw)) || !gjson.Parse(raw).IsArray() || gjson.Get(raw, "1").Int() != 1 {
-				return false
-			}
+		if committed {
+			break
 		}
-		return true
-	}, time.Second, 5*time.Millisecond)
-	owners := issue805Owners(t, probe)
+		select {
+		case <-ownerCtx.Done():
+			t.Fatal("A must commit exactly one delivered owner before this continuation scenario")
+		case <-ownerTick.C:
+		}
+	}
+	cancelOwnerWait()
+	ownerTick.Stop()
 	previous := first.Get("id").String()
 	extraSends := 0
 	if modelCase {
@@ -325,13 +386,26 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		accounts.mu.Lock()
 		accounts.disableAdmission = 2
 		accounts.mu.Unlock()
-	} else {
+	} else if scenario != "issue854_lost_owner" {
 		accounts.disable(1)
+	}
+	if scenario == "issue854_lost_owner" {
+		for key := range owners {
+			require.NoError(t, probe.Del(context.Background(), key).Err())
+		}
+	}
+	if r1 && r1Case == "cooldown" {
+		accounts.mu.Lock()
+		until := time.Now().Add(time.Hour)
+		accounts.accounts[0].Schedulable = true
+		accounts.accounts[0].RateLimitResetAt = &until
+		accounts.mu.Unlock()
 	}
 	if initialNoPointer {
 		if scenario != "initial_no_pointer_paused" {
 			accounts.mu.Lock()
 			reset := time.Now().Add(7 * 24 * time.Hour)
+			initialUnavailableUntil = reset
 			accounts.accounts[0].Schedulable = true
 			if scenario == "initial_no_pointer_rate_limited" {
 				accounts.accounts[0].RateLimitResetAt = &reset
@@ -340,6 +414,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 			}
 			accounts.mu.Unlock()
 		}
+		previous = ""
+	}
+	if initialNoPointer || r1 || strings.HasPrefix(scenario, "issue854_fresh") || strings.HasPrefix(scenario, "issue854_guard_") {
 		issue600Finish(t, h, headers)
 		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		conn, _, err := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
@@ -347,7 +424,44 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 		require.NoError(t, err)
 		h.clientConn = conn
 		t.Cleanup(func() { _ = conn.CloseNow() })
+		if strings.HasPrefix(scenario, "issue854_guard_") {
+			issue715WSSend(t, conn, create([]string{httpRebuildMessage("user", "issue854-warm-B")}, ""))
+			warm := issue715WSRead(t, conn)
+			require.Contains(t, string(warm), "issue854-warm-B-complete")
+			extraSends = 1
+		}
+	}
+	if r1 {
+		// Remove only this isolated fixture's readable shadow after A's actual
+		// delivery. Keep its proven owner; neither a pointer nor shadow can hide R1.
+		keys, err := probe.Keys(context.Background(), "openai_readable_shadow:*").Result()
+		require.NoError(t, err)
+		for _, key := range keys {
+			require.NoError(t, probe.Del(context.Background(), key).Err())
+		}
+		keys, err = probe.Keys(context.Background(), "openai_readable_shadow:*").Result()
+		require.NoError(t, err)
+		require.Empty(t, keys)
 		previous = ""
+		for key, raw := range owners {
+			switch r1Case {
+			case "pending":
+				raw = "pending:fixture-r1:" + raw
+			case "failed":
+				raw = "failed"
+			case "conflict":
+				raw = "conflict"
+			case "unknown":
+				require.NoError(t, probe.Del(context.Background(), key).Err())
+				continue
+			}
+			if r1Case == "pending" || r1Case == "failed" || r1Case == "conflict" {
+				require.NoError(t, probe.Set(context.Background(), key, raw, time.Minute).Err())
+			}
+		}
+		if r1Case == "unfinished" {
+			history = history[:len(history)-1]
+		}
 	}
 	if scenario == "b_disabled" {
 		accounts.disable(2)
@@ -384,7 +498,69 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
-	if scenario != "completed" && !initialNoPointer && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
+	if r1Reject {
+		require.NoError(t, readErr, "R1 refusal must be a structured business error")
+		require.Equal(t, "error", gjson.GetBytes(secondRaw, "type").String())
+		require.Equal(t, 1, sends, "R1 unsafe/disabled recovery must never generate on B")
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		return
+	}
+	if r1 {
+		require.Equal(t, 2, sends, "ISSUE854_R1_INITIAL_OWNER_REFUSED: valid no-pointer/no-shadow task must reach B; terminal=%s close=%v", secondRaw, readErr)
+	}
+	if scenario == "issue854_lost_owner" {
+		require.NoError(t, readErr)
+		require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.GetBytes(secondRaw, "error.code").String())
+		require.Equal(t, 1, sends, "loss of previously observed owner evidence must refuse before any generation")
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		a, err := accounts.GetByID(context.Background(), 1)
+		require.NoError(t, err)
+		require.True(t, a.Schedulable, "this refusal must come from owner evidence, not account admission")
+		return
+	}
+	if issue854Failure {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for readErr == nil {
+			_, _, readErr = h.clientConn.Read(ctx)
+		}
+		require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(readErr))
+		select {
+		case <-h.handlerDone:
+		case <-ctx.Done():
+			t.Fatal("owner refusal did not finish")
+		}
+		finished = true
+		for len(opsErrorLogQueue) > 0 {
+			flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
+		}
+		if len(persistent) > 0 {
+			require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.GetBytes(secondRaw, "error.code").String())
+			return // The PostgreSQL fixture queries committed rows with the real repository.
+		}
+		require.Len(t, failureRepo.entries, 1, "ISSUE854_FAILURE_NOT_PERSISTED: WS101 must not hide the failed turn")
+		entry := failureRepo.entries[0]
+		require.Equal(t, 409, entry.StatusCode)
+		require.Equal(t, "internal", entry.ErrorPhase)
+		require.Equal(t, "platform", entry.ErrorOwner)
+		require.Equal(t, int16(service.RequestTypeWSV2), *entry.RequestType)
+		require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.Get(entry.ErrorBody, "error.code").String())
+		require.Equal(t, "websocket", gjson.Get(entry.ErrorBody, "error.protocol").String())
+		wantTurn, wantSends, wantPhase := 2, 2, "before_upstream_write"
+		if scenario == "issue854_fresh_refusal" {
+			wantTurn, wantSends, wantPhase = 1, 1, "before_dispatch"
+		}
+		require.EqualValues(t, wantTurn, gjson.Get(entry.ErrorBody, "error.turn").Int())
+		require.Equal(t, wantPhase, gjson.Get(entry.ErrorBody, "error.phase").String())
+		require.Equal(t, gjson.False, gjson.Get(entry.ErrorBody, "error.request_written").Type)
+		require.NotContains(t, entry.ErrorBody, "fixture-opaque-A")
+		require.Equal(t, "encrypted_agent_recovery_owner_unavailable", gjson.GetBytes(secondRaw, "error.code").String())
+		require.Equal(t, wantSends, sends, "failed turn cannot reach either upstream")
+		return
+	}
+	if scenario != "completed" && !issue854 && !initialNoPointer && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
 		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
 		closeCtx, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelClose()
@@ -441,6 +617,10 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	} else if smartMode != "" {
 		require.Equal(t, 2, sends, "WS_REVIEW_SMART_SESSION_STALE: close=%v terminal=%s", readErr, secondRaw)
 	}
+	if scenario == "issue854_guard_live" && sends != 3 {
+		require.Equal(t, 2, sends)
+		logReadableWSDispatchFailure(t, h, readErr)
+	}
 	require.Equal(t, 2+extraSends, sends, "WS_READABLE_B_DISPATCH_MISSING: same client must automatically replace disabled A before any next generation; close=%v terminal=%s", readErr, secondRaw)
 	if modelCase {
 		accounts.mu.Lock()
@@ -487,10 +667,29 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	require.Equal(t, 1, tools.verifications)
 	a, err := accounts.GetByID(context.Background(), 1)
 	require.NoError(t, err)
+	if r1 && r1Case == "cooldown" {
+		require.True(t, a.Schedulable)
+		require.NotNil(t, a.RateLimitResetAt)
+		require.True(t, a.RateLimitResetAt.After(time.Now()))
+	} else if initialNoPointer && scenario != "initial_no_pointer_paused" {
+		require.True(t, a.Schedulable)
+		if scenario == "initial_no_pointer_rate_limited" {
+			require.NotNil(t, a.RateLimitResetAt)
+			require.Equal(t, initialUnavailableUntil, *a.RateLimitResetAt)
+		} else {
+			require.NotNil(t, a.OverloadUntil)
+			require.Equal(t, initialUnavailableUntil, *a.OverloadUntil)
+		}
+	} else {
+		require.False(t, a.Schedulable)
+	}
 	require.False(t, a.IsSchedulable())
 	oracle.mu.Lock()
 	defer oracle.mu.Unlock()
 	expectedIdentities := []string{"Bearer fixture-readable-ws-A", "Bearer fixture-readable-ws-B", "Bearer fixture-readable-ws-B"}
+	if scenario == "issue854_guard_live" {
+		expectedIdentities = append(expectedIdentities, "Bearer fixture-readable-ws-B")
+	}
 	if modelCase {
 		expectedIdentities = append([]string{"Bearer fixture-readable-ws-A"}, expectedIdentities...)
 		require.Equal(t, "gpt-5.4", gjson.GetBytes(oracle.frames[1], "model").String(), "A actually accepted M2 before the later omission")
