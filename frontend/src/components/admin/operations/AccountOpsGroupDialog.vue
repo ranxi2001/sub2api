@@ -22,6 +22,7 @@
         <button type="button" class="mt-3 text-sm text-primary-600" :aria-expanded="activeGroupID === group.id" :aria-controls="activeGroupID === group.id ? pickerID : undefined" :data-testid="`edit-account-group-${group.id}`" @click="editMembers(group.id)">
           {{ t('accountOps.editGroupMembers') }} · {{ t('accountOps.groupMemberCount', { count: group.account_ids.length }) }}
         </button>
+        <AccountOpsProviderSelector class="mt-3" :model-value="group.provider_id || 0" :disabled="busy" @update:model-value="group.provider_id = $event" />
         <QualityAccountSelector v-if="activeGroupID === group.id" :id="pickerID" v-model="selectedAccounts" v-model:search="search" v-model:group="accountGroup" v-model:type="accountType"
           v-model:statuses="statuses" v-model:scope="scope" class="mt-4" data-testid="account-ops-member-picker"
           :accounts="pageAccounts" :groups="filterGroups" :accounts-loading="false" :selecting-accounts="busy" accounts-error=""
@@ -49,6 +50,7 @@ import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import QualityAccountSelector from './QualityAccountSelector.vue'
+import AccountOpsProviderSelector from './AccountOpsProviderSelector.vue'
 import { saveAccountOpsGroups } from '@/api/admin/accountOps'
 import type { AccountOpsConfig, AccountOpsGroup, AccountOpsThresholdAccount } from '@/api/admin/accountOps'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -180,7 +182,7 @@ async function save() {
   busy.value = true
   error.value = ''
   try {
-    const config = await saveAccountOpsGroups(draftGroups.value.map(group => ({ id: group.id, name: group.name.trim(), provider: group.provider, site: group.site, account_ids: [...group.account_ids] })))
+    const config = await saveAccountOpsGroups(draftGroups.value.map(group => ({ id: group.id, name: group.name.trim(), ...(group.provider_id ? { provider_id: group.provider_id } : {}), provider: group.provider, site: group.site, account_ids: [...group.account_ids] })))
     if (current === sequence) emit('saved', config)
   } catch (cause) {
     if (current === sequence) {

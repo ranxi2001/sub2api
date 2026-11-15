@@ -133,7 +133,33 @@ func TestChannelMonitorV3StatusScopesOrdinaryUsersServerSide(t *testing.T) {
 	require.NotNil(t, last)
 	require.Equal(t, service.ChannelMonitorV3StatusDown, last.Status)
 	require.Zero(t, last.Requests)
-	require.NotContains(t, recorder.Body.String(), "4321", "request volume never reaches users")
+	// Inspect field names, not decimal substrings that can occur in timestamps
+	// or public success rates. Check the wire JSON so even zero-valued private
+	// fields cannot silently become part of the ordinary-user response.
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &wire))
+	var checkPrivateFields func(any)
+	checkPrivateFields = func(value any) {
+		switch value := value.(type) {
+		case map[string]any:
+			for _, field := range []string{"requests", "errors", "ignored_errors", "probes", "successes"} {
+				require.NotContains(t, value, field, "request volume never reaches users")
+			}
+			for _, child := range value {
+				checkPrivateFields(child)
+			}
+		case []any:
+			for _, child := range value {
+				checkPrivateFields(child)
+			}
+		}
+	}
+	checkPrivateFields(wire)
+	// The exact timestamp that caused the CI failure is legitimate public data.
+	data, ok := wire["data"].(map[string]any)
+	require.True(t, ok, "status envelope must contain an object")
+	data["generated_at"] = "2026-11-14T19:24:11.151432152Z"
+	checkPrivateFields(wire)
 }
 
 func TestChannelMonitorV3StatusShowsAdminsEverything(t *testing.T) {

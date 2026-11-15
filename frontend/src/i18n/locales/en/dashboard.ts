@@ -129,6 +129,15 @@ export default {
     copyToClipboard: 'Copy to clipboard',
     copied: 'Copied!',
     importToCcSwitch: 'Import to CCS',
+    importToMagpie: 'Import to Magpie',
+    magpieImport: {
+      preview: 'Preview the provider in Magpie before saving',
+      openHelp: 'If Magpie did not open, make sure the desktop app is installed and allow your browser to open it.',
+      settingsUnavailable: 'Could not load the API address settings. Refresh the page and try again.',
+      unsupportedGroup: 'This key’s group can’t be imported automatically. Select Use Key to see available configurations.',
+      invalidBase: 'Use an HTTPS API address without credentials, a query, or a fragment. Local addresses may use HTTP.',
+      invalidKey: 'This key is empty or invalid and can’t be imported into Magpie.'
+    },
     enable: 'Enable',
     disable: 'Disable',
     nameLabel: 'Name',

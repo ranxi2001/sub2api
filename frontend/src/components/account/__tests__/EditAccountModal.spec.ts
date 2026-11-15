@@ -7,7 +7,7 @@ import type { InternalAxiosRequestConfig } from 'axios'
 import { getAutoConfig } from '@/api/admin/autoConfig'
 import { defaultExcelBPSDefaults } from '@/utils/excelBPSDefaults'
 vi.mock('@/api/admin/autoConfig', () => ({ getAutoConfig: vi.fn() }))
-beforeEach(() => { vi.mocked(getAutoConfig).mockResolvedValue({ excel_bps: defaultExcelBPSDefaults() } as Awaited<ReturnType<typeof getAutoConfig>>) })
+beforeEach(() => { setActivePinia(createPinia()); vi.mocked(getAutoConfig).mockResolvedValue({ excel_bps: defaultExcelBPSDefaults() } as Awaited<ReturnType<typeof getAutoConfig>>) })
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
@@ -3006,7 +3006,7 @@ describe('Excel BPS default template integration', () => {
     account.extra = { unrelated: 'keep' }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
-    vi.mocked(getAutoConfig).mockResolvedValueOnce({ excel_bps: { ...defaultExcelBPSDefaults(), models: ['my-bps-model'] } } as Awaited<ReturnType<typeof getAutoConfig>>)
+    vi.mocked(getAutoConfig).mockResolvedValueOnce({ excel_bps: { ...defaultExcelBPSDefaults(), models: ['my-bps-model'], web_search: true, web_search_auto: true } } as Awaited<ReturnType<typeof getAutoConfig>>)
     const wrapper = mountModal(account)
     await wrapper.get('[data-testid="excel-bps-defaults-toggle"]').trigger('click')
     await flushPromises()
@@ -3016,6 +3016,7 @@ describe('Excel BPS default template integration', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent'); await flushPromises()
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
       unrelated: 'keep', openai_excel_bps: true, openai_excel_bps_config_mode: 'defaults', openai_excel_bps_models: ['my-bps-model'],
+      openai_excel_bps_web_search: true, openai_excel_bps_web_search_auto: true,
       openai_excel_bps_ignore_encrypted_content: true, openai_excel_bps_auto_disable_on_403: true,
       openai_excel_bps_cache_creation_as_input: true
     })

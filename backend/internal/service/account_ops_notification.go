@@ -43,7 +43,11 @@ func (s *AccountOpsService) notificationMessage(e *AccountOpsEvent) accountOpsMe
 	if e.GroupName != "" && !strings.HasPrefix(e.GroupID, "account:") {
 		accountLabel = e.GroupName
 	}
-	fields := [][2]string{{"账号", fmt.Sprintf("%s（#%d）", accountLabel, e.AccountID)}, {"提醒原因", reason}}
+	accountValue := fmt.Sprintf("%s（#%d）", accountLabel, e.AccountID)
+	if e.GroupName != "" && !strings.HasPrefix(e.GroupID, "account:") {
+		accountValue = accountLabel
+	}
+	fields := [][2]string{{"账号", accountValue}, {"提醒原因", reason}}
 	if e.Details != nil {
 		d := e.Details
 		if d.UsedPercent != nil {
@@ -112,7 +116,7 @@ func (s *AccountOpsService) compactRobotMessage(e *AccountOpsEvent, title string
 	if account == "" {
 		account = "未命名账号"
 	}
-	if e.AccountID > 0 {
+	if e.AccountID > 0 && (e.GroupName == "" || strings.HasPrefix(e.GroupID, "account:")) {
 		account = fmt.Sprintf("%s (#%d)", account, e.AccountID)
 	}
 	balance, threshold := "未获取", "未获取"
@@ -207,18 +211,28 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 			e.Deliveries = map[string]AccountOpsDelivery{}
 		}
 		destinations := []AccountOpsWebhook{}
-		if c.Recipient != "" {
-			destinations = append(destinations, AccountOpsWebhook{ID: opsEmailIdentity(c.Recipient), Provider: "email"})
+		for _, recipient := range c.emailRecipients() {
+			destinations = append(destinations, AccountOpsWebhook{ID: opsEmailIdentity(recipient), Provider: "email"})
 		}
 		for _, w := range c.Webhooks {
 			if w.Enabled {
 				destinations = append(destinations, w)
 			}
 		}
-		// Six channels at twelve seconds each, including rate waits, remain below the two minute lease.
+		// Share a bounded send budget across recipients and robots within the
+		// two-minute delivery lease. Persist each recipient receipt independently.
+		sendBudget := 15 * time.Second
+		if len(destinations) > 6 {
+			sendBudget = 90 * time.Second / time.Duration(len(destinations))
+		}
 		deliveryCtx, stop := context.WithTimeout(ctx, 100*time.Second)
 		defer stop()
 		for _, w := range destinations {
+			if deliveryCtx.Err() != nil {
+				state = "failed"
+				break
+			}
+			recipient := ""
 			query, cancel := context.WithTimeout(deliveryCtx, 5*time.Second)
 			s.settingsMu.Lock()
 			freshConfig, configErr := s.loadConfig(query)
@@ -235,10 +249,10 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 				return
 			}
 			if w.Provider == "email" {
-				if c.Recipient == "" {
+				recipient = c.emailRecipient(w.ID)
+				if recipient == "" {
 					continue
 				}
-				w.ID = opsEmailIdentity(c.Recipient)
 			} else {
 				found := false
 				for _, current := range c.Webhooks {
@@ -282,7 +296,7 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 				}
 				message = s.notificationMessage(e)
 			}
-			send, cancel := context.WithTimeout(deliveryCtx, 15*time.Second)
+			send, cancel := context.WithTimeout(deliveryCtx, sendBudget)
 			if w.Provider != "email" {
 				if reserve, ok := s.repo.(accountOpsRobotReservationRepository); ok {
 					identity, identityErr := s.robotIdentity(w)
@@ -316,7 +330,8 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 			}
 			unchanged := false
 			if w.Provider == "email" {
-				unchanged = opsEmailIdentity(latest.Recipient) == key && latest.Recipient != ""
+				recipient = latest.emailRecipient(key)
+				unchanged = recipient != ""
 			} else {
 				for _, current := range latest.Webhooks {
 					if current.ID == w.ID && current.Provider == w.Provider && current.revision == w.revision && current.Enabled {
@@ -351,7 +366,7 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 				if s.email == nil {
 					err = errors.New("email unavailable")
 				} else {
-					err = s.email.SendEmail(send, c.Recipient, message.title, message.html)
+					err = s.email.SendEmail(send, recipient, message.title, message.html)
 				}
 			} else {
 				err = s.sendRobot(send, w, message)
@@ -361,6 +376,12 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 			out.Name = ""
 			if w.Provider == "email" {
 				out.Name = c.EmailName
+				if len(c.emailRecipients()) > 1 {
+					out.Name = recipient
+					if c.EmailName != "" {
+						out.Name = c.EmailName + " · " + recipient
+					}
+				}
 			} else if w.Name != nil {
 				out.Name = *w.Name
 			}

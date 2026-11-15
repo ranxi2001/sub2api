@@ -227,12 +227,19 @@ func validateAccountOpsExtras(c AccountOpsConfig) error {
 
 func validateAccountOpsGroups(groups []AccountOpsGroup) error {
 	seenGroups := map[string]bool{}
+	seenProviders := map[int64]bool{}
 	seenAccounts := map[int64]bool{}
 	for _, group := range groups {
 		if !opsGroupID.MatchString(group.ID) || seenGroups[group.ID] {
 			return errors.New("invalid or duplicate account group ID")
 		}
 		seenGroups[group.ID] = true
+		if group.ProviderID < 0 || (group.ProviderID > 0 && seenProviders[group.ProviderID]) {
+			return errors.New("each provider must have a single balance group")
+		}
+		if group.ProviderID > 0 {
+			seenProviders[group.ProviderID] = true
+		}
 		name := strings.TrimSpace(group.Name)
 		if name != "" {
 			if err := validateAccountOpsChannelName(name); err != nil {
@@ -324,7 +331,11 @@ func (s *AccountOpsService) saveConfigWithRuleScope(ctx context.Context, c Accou
 	}
 	c.BalanceThresholds = append([]AccountOpsBalanceRule(nil), c.BalanceThresholds...)
 	c.QuotaThresholds = append([]AccountOpsQuotaRule(nil), c.QuotaThresholds...)
-	c.Recipient = strings.TrimSpace(c.Recipient)
+	recipients, err := parseAccountOpsRecipients(c.Recipient)
+	if err != nil {
+		return accountOpsConfigValidation(err.Error())
+	}
+	c.Recipient = strings.Join(recipients, ", ")
 	if len(c.Webhooks) > 5 || len(c.BalanceThresholds)+len(c.QuotaThresholds) > 1000 {
 		return accountOpsConfigValidation("too many robot destinations or threshold rules")
 	}

@@ -127,10 +127,10 @@ func TestAccountOpsMailFailureDoesNotBecomeSent(t *testing.T) {
 	svc.deliverNotification(context.Background(), e)
 	require.Equal(t, time.Hour, repo.delay)
 }
-func TestAccountOpsRejectsMultipleRecipients(t *testing.T) {
+func TestAccountOpsRejectsInvalidRecipients(t *testing.T) {
 	c := defaultAccountOpsConfig()
 	c.Enabled = true
-	for _, recipient := range []string{"", "one@example.com,two@example.com", "Name <one@example.com>", "one@example.com\r\nBcc: other@example.com"} {
+	for _, recipient := range []string{"", "Name <one@example.com>", "one@example.com\r\nBcc: other@example.com"} {
 		c.Recipient = recipient
 		require.Error(t, ValidateAccountOpsConfig(c))
 	}

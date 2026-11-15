@@ -17,7 +17,7 @@ const plan = (): ScheduledTestPlan => ({
 })
 const bps = (): QualityBPSPolicy => ({
   failure_threshold: 2, usage_percent: 0, require_all: false, all_models: false, models: ['gpt-6-astra'],
-  omit_unsupported_tools: true, ignore_encrypted_content: true, auto_disable_on_403: false,
+  omit_unsupported_tools: true, ignore_encrypted_content: true, web_search: false, web_search_auto: false, auto_disable_on_403: false,
   auto_move_on_403: false, target_group_id: -1, session_proxy: false, proxy_source: 'mihomo', cache_creation_as_input: false,
   pass_threshold: 2, hold_on_usage: true, recovery_interval_minutes: 60,
 })
@@ -369,5 +369,20 @@ describe('complete template selected fields', () => {
     const copied = copyQualityRuleConfig(source)
     expect(copied.quality.action).toBe('observe_only'); expect(copied.quality.remove_group_ids).toEqual([]); expect(copied.quality.auto_restore).toBe(false)
     expect(copied.quality.remove_models).toBeUndefined(); expect(copied.quality.bps).toBeUndefined()
+  })
+})
+
+
+describe('BPS search rule roundtrip', () => {
+  it('preserves search settings in copies and detects an action edit', () => {
+    const original = plan()
+    original.pelican_config!.quality!.action = 'enable_bps'
+    original.pelican_config!.quality!.bps = { ...bps(), web_search: true, web_search_auto: true }
+    const copied = copyQualityRuleConfig(original.pelican_config!)
+    expect(copied.quality.bps).toMatchObject({ web_search: true, web_search_auto: true })
+    const changed = { ...original, pelican_config: copied }
+    copied.quality.bps!.web_search_auto = false
+    expect(qualityRuleFieldValue(original, 'action')).not.toEqual(qualityRuleFieldValue(changed, 'action'))
+    expect(qualityBPSPayload({ ...bps(), web_search: false, web_search_auto: true })).toMatchObject({ web_search: false, web_search_auto: false })
   })
 })
