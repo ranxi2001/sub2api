@@ -1587,4 +1587,20 @@ describe('Free Fast screenshot arithmetic and history', () => {
     } finally { wrapper.unmount() }
   })
 
+  it.each([undefined, null, { version: 99 }, { ...freeFastCustomerCostFixture.customer_cost_details, input_cost: -1 }])('F1 fast alias with missing or invalid snapshot stays unknown: %j', async (snapshot) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, service_tier: 'fast', customer_cost_details: snapshot })
+    try {
+      const text = wrapper.get('[role="tooltip"]').text()
+      expect(text).toContain('Input price—')
+      expect(text).toContain('Input Cost—')
+      expect(text).toContain('$0.07134075')
+      expect(text).not.toContain('$20.0000')
+    } finally { wrapper.unmount() }
+  })
+  it.each(['fast', 'default', 'flex'])('F1 paid %s control retains recorded prices without snapshot', async (tier) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, service_tier: tier, customer_cost_details: null, actual_cost: 0.13520025 })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('$20.0000') }
+    finally { wrapper.unmount() }
+  })
+
 })

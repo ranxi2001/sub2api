@@ -60,8 +60,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler/dto ./internal/repository -run '^Test(FreeFastCustomerCost|OpenAIGatewayServiceRecordUsage_FreeOpenAIFast|GroupBillsOpenAIFast|UsageLogStaticInsertShape|PrepareUsageLogInsert|UsageLogRepositoryCreate|ScanUsageLogRequestTypeAndLegacyFallback)' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/green-unit.jsonl" 2>&1
-          python3 .github/scripts/free-fast-cost-evidence.py green "$RUNNER_TEMP/free-fast/green-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO TestUsageLogStaticInsertShape_PlaceholdersMatchArgTypes TestScanUsageLogRequestTypeAndLegacyFallback
+          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler/dto ./internal/handler/admin ./internal/repository -run '^Test(FreeFastCustomerCost|OpenAIGatewayServiceRecordUsage_FreeOpenAIFast|GroupBillsOpenAIFast|UsageLogStaticInsertShape|PrepareUsageLogInsert|UsageLogRepositoryCreate|ScanUsageLogRequestTypeAndLegacyFallback)' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/green-unit.jsonl" 2>&1
+          python3 .github/scripts/free-fast-cost-evidence.py green "$RUNNER_TEMP/free-fast/green-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO TestFreeFastCustomerCostScopedAdmin TestUsageLogStaticInsertShape_PlaceholdersMatchArgTypes TestScanUsageLogRequestTypeAndLegacyFallback
       - name: GREEN all insertion paths, immutable history and durable replay
         shell: bash
         run: |
@@ -74,21 +74,21 @@ jobs:
           set -euo pipefail
           baseline=0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6
           git fetch --no-tags --depth=1 origin "$baseline"
-          for file in backend/internal/service/openai_gateway_usage.go backend/internal/service/usage_log.go backend/internal/handler/dto/types.go backend/internal/handler/dto/mappers.go backend/internal/repository/usage_log_repo_insert.go backend/internal/repository/usage_log_repo_query.go; do
+          for file in backend/internal/service/openai_gateway_usage.go backend/internal/service/usage_log.go backend/internal/handler/dto/types.go backend/internal/handler/dto/mappers.go backend/internal/handler/admin/scoped_admin_usage_response.go backend/internal/repository/usage_log_repo_insert.go backend/internal/repository/usage_log_repo_query.go; do
             git show "$baseline:$file" > "$file"
             test "$(git hash-object "$file")" = "$(git rev-parse "$baseline:$file")"
           done
           # Tests stay byte-for-byte at candidate HEAD. Keep the new additive
           # DB column so a missing migration can never qualify as business RED.
           set +e
-          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler/dto -run '^TestFreeFastCustomerCost(Snapshot|Variants|DTO)$' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/red-unit.jsonl" 2>&1
+          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler/dto ./internal/handler/admin -run '^TestFreeFastCustomerCost(Snapshot|Variants|DTO|ScopedAdmin)$' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/red-unit.jsonl" 2>&1
           unit_exit=$?
           (cd backend && go test -json -tags=integration ./internal/repository -run '^TestFreeFastCustomerCostPersistence$' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/red-sql.jsonl" 2>&1
           sql_exit=$?
           set -e
           test "$unit_exit" -ne 0
           test "$sql_exit" -ne 0
-          python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO
+          python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO TestFreeFastCustomerCostScopedAdmin
           python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-sql.jsonl" TestFreeFastCustomerCostPersistence
       - name: Require committed generated code
         if: always()

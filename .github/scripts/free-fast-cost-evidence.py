@@ -19,7 +19,8 @@ for name in required:
     if mode == 'red':
         output = ''.join(e.get('Output', '') for e in events
                          if e.get('Test') == name or e.get('Test', '').startswith(name + '/'))
-        marker = ('user/admin DTO must expose the immutable customer Standard quote' if name.endswith('DTO')
+        marker = ('restricted admin must expose the immutable customer Standard quote' if name.endswith('ScopedAdmin')
+                  else 'user/admin DTO must expose the immutable customer Standard quote' if name.endswith('DTO')
                   else 'stored usage must retain the customer Standard quote' if name.endswith('Persistence')
                   else 'Free Fast must persist the Standard customer cost snapshot')
         assert marker in output, f'{name}: missing target business assertion'
@@ -27,6 +28,7 @@ if mode == 'red':
     assert any(marker in raw for marker in [
         'Free Fast must persist the Standard customer cost snapshot',
         'user/admin DTO must expose the immutable customer Standard quote',
+        'restricted admin must expose the immutable customer Standard quote',
         'stored usage must retain the customer Standard quote',
     ]), 'RED did not reach a target business assertion'
 else:

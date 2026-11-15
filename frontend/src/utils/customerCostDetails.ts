@@ -21,7 +21,7 @@ export function customerCostSnapshot(row: UsageLog | null): CustomerCostDetails 
 // Mixed modalities, per-request prices and additive fees can legitimately use
 // different rates: retain their recorded display when no snapshot exists.
 export function customerCostsUnknown(row: UsageLog | null): boolean {
-  if (!row || row.service_tier !== 'priority' || customerCostSnapshot(row)) return false
+  if (!row || !['priority', 'fast'].includes(row.service_tier ?? '') || customerCostSnapshot(row)) return false
   if (row.customer_cost_details) return true
   if (row.billing_mode && row.billing_mode !== 'token') return false
   if ([row.image_count, row.image_input_tokens, row.image_output_tokens, row.image_input_cost, row.image_output_cost].some(value => (value ?? 0) > 0)) return false

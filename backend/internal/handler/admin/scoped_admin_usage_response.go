@@ -43,6 +43,7 @@ func scopedAdminUsageLogResponse(record *service.UsageLog) gin.H {
 		"total_cost":                   usage.TotalCost,
 		"actual_cost":                  usage.ActualCost,
 		"rate_multiplier":              usage.RateMultiplier,
+		"customer_cost_details":        usage.CustomerCostDetails,
 		"long_context_billing_applied": usage.LongContextBillingApplied,
 		"billing_type":                 usage.BillingType,
 		"request_type":                 usage.RequestType,
