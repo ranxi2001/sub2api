@@ -1,0 +1,192 @@
+name: Free Fast customer cost details
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - 'frontend/src/components/admin/usage/**'
+      - 'frontend/src/utils/customerCostDetails.ts'
+      - 'frontend/src/types/index.ts'
+      - '.github/workflows/free-fast-customer-cost-details.yml'
+      - '.github/scripts/free-fast-*'
+      - '.github/scripts/test_free_fast_cost_evidence.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: free-fast-cost-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=1'
+      GOMEMLIMIT: 3500MiB
+      GOGC: '30'
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@localhost:15432/free_fast?sslmode=disable
+      SUB2API_TEST_REDIS_URL: redis://localhost:16379/0
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: free_fast
+        ports: ['15432:5432']
+        options: --health-cmd "pg_isready -U fixture -d free_fast" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['16379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify evidence rejection guards
+        run: python3 -m unittest discover -s .github/scripts -p 'test_free_fast_cost_evidence.py'
+      - name: Generate Ent and retain reproducibility patch
+        run: |
+          mkdir -p "$RUNNER_TEMP/free-fast"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/free-fast/head.txt"
+          (cd backend && go generate ./ent)
+          git diff -- backend/ent > "$RUNNER_TEMP/free-fast/ent-generated.patch"
+      - name: GREEN service and DTO business evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler/dto ./internal/handler/admin ./internal/repository -run '^Test(FreeFastCustomerCost|OpenAIGatewayServiceRecordUsage_FreeOpenAIFast|GroupBillsOpenAIFast|UsageLogStaticInsertShape|PrepareUsageLogInsert|UsageLogRepositoryCreate|ScanUsageLogRequestTypeAndLegacyFallback)' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/green-unit.jsonl" 2>&1
+          python3 .github/scripts/free-fast-cost-evidence.py green "$RUNNER_TEMP/free-fast/green-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO TestFreeFastCustomerCostScopedAdmin TestFreeFastCustomerCostCachePrices TestFreeFastCustomerCostCacheDTO TestUsageLogStaticInsertShape_PlaceholdersMatchArgTypes TestScanUsageLogRequestTypeAndLegacyFallback
+      - name: GREEN all insertion paths, immutable history and durable replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -json -tags=integration ./internal/repository -run '^TestFreeFastCustomerCost' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/green-sql.jsonl" 2>&1
+          python3 .github/scripts/free-fast-cost-evidence.py green "$RUNNER_TEMP/free-fast/green-sql.jsonl" TestFreeFastCustomerCostPersistence TestFreeFastCustomerCostDurableReplay TestFreeFastCustomerCostMigration TestFreeFastCustomerCostCachePersistence
+      - name: Same tests against pinned production code must reach business RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for file in backend/internal/service/openai_gateway_usage.go backend/internal/service/usage_log.go backend/internal/handler/dto/types.go backend/internal/handler/dto/mappers.go backend/internal/handler/admin/scoped_admin_usage_response.go backend/internal/repository/usage_log_repo_insert.go backend/internal/repository/usage_log_repo_query.go; do
+            git show "$baseline:$file" > "$file"
+            test "$(git hash-object "$file")" = "$(git rev-parse "$baseline:$file")"
+          done
+          # Tests stay byte-for-byte at candidate HEAD. Keep the new additive
+          # DB column so a missing migration can never qualify as business RED.
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler/dto ./internal/handler/admin -run '^TestFreeFastCustomerCost(Snapshot|Variants|DTO|ScopedAdmin)$' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/red-unit.jsonl" 2>&1
+          unit_exit=$?
+          (cd backend && go test -json -tags=integration ./internal/repository -run '^TestFreeFastCustomerCostPersistence$' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/red-sql.jsonl" 2>&1
+          sql_exit=$?
+          set -e
+          test "$unit_exit" -ne 0
+          test "$sql_exit" -ne 0
+          python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO TestFreeFastCustomerCostScopedAdmin
+          python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-sql.jsonl" TestFreeFastCustomerCostPersistence
+      - name: Cache-price snapshot business RED against pre-cache producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Restore candidate production paths after the original baseline RED.
+          git restore backend/internal/service/openai_gateway_usage.go backend/internal/service/usage_log.go backend/internal/handler/dto/types.go backend/internal/handler/dto/mappers.go backend/internal/handler/admin/scoped_admin_usage_response.go backend/internal/repository/usage_log_repo_insert.go backend/internal/repository/usage_log_repo_query.go
+          baseline=6826ea7c13459f0fb8080b0753da4b8ae73dd383
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git show "$baseline:backend/internal/service/customer_cost_details.go" > backend/internal/service/customer_cost_details.go
+          test "$(git hash-object backend/internal/service/customer_cost_details.go)" = "$(git rev-parse "$baseline:backend/internal/service/customer_cost_details.go")"
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/service -run '^TestFreeFastCustomerCostCachePrices$' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/red-cache.jsonl" 2>&1
+          code=$?
+          set -e
+          test "$code" -ne 0
+          python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-cache.jsonl" TestFreeFastCustomerCostCachePrices
+      - name: Require committed generated code
+        if: always()
+        run: test ! -s "$RUNNER_TEMP/free-fast/ent-generated.patch"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: free-fast-backend-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/free-fast
+          if-no-files-found: error
+  frontend:
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: GREEN complete affected suite, lint and typecheck
+        run: |
+          mkdir -p "$RUNNER_TEMP/free-fast-ui"
+          pnpm --dir frontend exec vitest run src/components/admin/usage/__tests__/UsageTable.spec.ts src/components/admin/usage/__tests__/UsageDetailPopover.spec.ts --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/free-fast-ui/green.json"
+          pnpm --dir frontend lint:check
+          pnpm --dir frontend typecheck
+          pnpm --dir frontend build
+      - name: RED same DOM assertions against original shared component
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin 0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6
+          cp frontend/src/components/admin/usage/UsageTable.vue "$RUNNER_TEMP/free-fast-ui/UsageTable.vue"
+          git show 0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6:frontend/src/components/admin/usage/UsageTable.vue > frontend/src/components/admin/usage/UsageTable.vue
+          set +e
+          pnpm --dir frontend exec vitest run src/components/admin/usage/__tests__/UsageTable.spec.ts --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/free-fast-ui/red.json"
+          code=$?
+          set -e
+          cp "$RUNNER_TEMP/free-fast-ui/UsageTable.vue" frontend/src/components/admin/usage/UsageTable.vue
+          test "$code" -ne 0
+          python3 - "$RUNNER_TEMP/free-fast-ui" <<'PY'
+          import json,sys,pathlib
+          p=pathlib.Path(sys.argv[1])
+          for mode in ('green','red'):
+              data=json.loads((p/(mode+'.json')).read_text())
+              assert data['numPendingTests']==0, data
+              assert data['numTotalTests']>=70, data
+              if mode=='green': assert data['numFailedTests']==0, data
+              else:
+                  assertions=[a for r in data['testResults'] for a in r['assertionResults']]
+                  target=[a for a in assertions if 'shows Standard unit prices' in a['fullName']]
+                  assert len(target)==2 and all(a['status']=='failed' for a in target),target
+                  assert all('$10.00' in '\n'.join(a['failureMessages']) for a in target),target
+                  aliases=[a for a in assertions if 'F1 fast alias with missing or invalid snapshot' in a['fullName']]
+                  assert len(aliases)==4 and all(a['status']=='failed' for a in aliases),aliases
+                  cache=[a for a in assertions if 'G1 displays saved Standard cache read and distinct TTL unit prices' in a['fullName']]
+                  assert len(cache)==2 and all(a['status']=='failed' for a in cache),cache
+                  assert all('cache-unit-read' in '\n'.join(a['failureMessages']) for a in cache),cache
+          PY
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/free-fast-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/free-fast-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Real Vue bilingual before/after screenshots
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/free-fast-browser/node_modules/playwright
+          FREE_FAST_SCREENSHOT_DIR: ${{ runner.temp }}/free-fast-ui/screenshots
+        run: node .github/scripts/free-fast-customer-cost-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: free-fast-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/free-fast-ui/*.json
+            ${{ runner.temp }}/free-fast-ui/screenshots/*.png
+            ${{ runner.temp }}/free-fast-ui/screenshots/manifest.json
+          if-no-files-found: error

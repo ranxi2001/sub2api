@@ -191,6 +191,8 @@ func (UsageLog) Fields() []ent.Field {
 		field.Bool("cache_ttl_overridden").
 			Default(false),
 
+		field.JSON("customer_cost_details", map[string]any{}).Optional().Immutable().Comment("Request-time Standard customer cost display snapshot; NULL is unknown history"),
+
 		field.JSON("queue_timing", map[string]any{}).Optional().Comment("Explicit measured server/forward boundaries; NULL means unknown"),
 
 		// 时间戳（只有 created_at，日志不可修改）

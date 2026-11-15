@@ -621,13 +621,14 @@ type BatchUpdateRedeemCodesRequest struct {
 
 // UsageLog 是普通用户接口使用的 usage log DTO（不包含管理员字段）。
 type UsageLog struct {
-	ContentTiming *requesttiming.ContentObservation `json:"content_timing,omitempty"`
-	ID            int64                             `json:"id"`
-	UserID        int64                             `json:"user_id"`
-	APIKeyID      int64                             `json:"api_key_id"`
-	AccountID     int64                             `json:"account_id"`
-	RequestID     string                            `json:"request_id"`
-	Model         string                            `json:"model"`
+	CustomerCostDetails *service.CustomerCostDetails      `json:"customer_cost_details,omitempty"`
+	ContentTiming       *requesttiming.ContentObservation `json:"content_timing,omitempty"`
+	ID                  int64                             `json:"id"`
+	UserID              int64                             `json:"user_id"`
+	APIKeyID            int64                             `json:"api_key_id"`
+	AccountID           int64                             `json:"account_id"`
+	RequestID           string                            `json:"request_id"`
+	Model               string                            `json:"model"`
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
 	ServiceTier *string `json:"service_tier,omitempty"`
 	// ReasoningEffort is the client-requested effort (mapping-hidden, like Model).
