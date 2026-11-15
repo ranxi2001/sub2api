@@ -332,12 +332,9 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string
 
 	// 余额不足提醒
-	BalanceForecastEnabled          bool
-	BalanceForecastThresholdHours   float64
-	BalanceForecastMaxNotifications int
-	BalanceLowNotifyEnabled         bool
-	BalanceLowNotifyThreshold       float64
-	BalanceLowNotifyRechargeURL     string
+	BalanceLowNotifyEnabled     bool
+	BalanceLowNotifyThreshold   float64
+	BalanceLowNotifyRechargeURL string
 
 	// 订阅到期提醒
 	SubscriptionExpiryNotifyEnabled bool

@@ -37,6 +37,15 @@ jobs:
         with:
           go-version-file: candidate/backend/go.mod
           cache-dependency-path: candidate/backend/go.sum
+      - name: Install Redis for shared HTTP and WS regression fixtures
+        shell: bash
+        run: |
+          bash candidate/.github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          redis-server --version
       - name: Baseline must fail unchanged admission assertions
         shell: bash
         run: |

@@ -843,24 +843,6 @@ describe("admin SettingsView payment visible method controls", () => {
     refreshed.unmount();
   });
 
-  it.each([0, 1])("dismisses the forecast notice from real entry %s and keeps it dismissed on remount", async (index) => {
-    const wrapper = mountView();
-    await flushPromises();
-    const badges = () => wrapper.findAllComponents(NewFeatureBadge)
-      .filter(b => b.props('noticeId') === NEW_FEATURE_NOTICES.balanceForecast)
-      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'));
-    expect(badges()).toHaveLength(2);
-    await badges()[index]!.trigger('click');
-    await flushPromises();
-    expect(badges()).toHaveLength(0);
-    wrapper.unmount();
-    const refreshed = mountView();
-    await flushPromises();
-    expect(refreshed.findAllComponents(NewFeatureBadge)
-      .filter(b => b.props('noticeId') === NEW_FEATURE_NOTICES.balanceForecast)
-      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(0);
-  });
-
   it.each([0, 1, 2])("dismisses the BEpusdt notice from real entry %s without changing payment settings", async (index) => {
     const oldNotice = NEW_FEATURE_NOTICES.protocolFeatureSwitches;
     localStorage.setItem("sub2api:new-feature-notices:v1:41", JSON.stringify([oldNotice]));
@@ -884,32 +866,26 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(refreshed.findAllComponents(NewFeatureBadge)
       .filter(b => b.props('noticeId') === oldNotice || b.props('noticeId') === NEW_FEATURE_NOTICES.bepusdtPayment)
       .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(0);
-    expect(refreshed.findAllComponents(NewFeatureBadge)
-      .filter(b => b.props('noticeId') === NEW_FEATURE_NOTICES.balanceForecast)
-      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(2);
     expect(JSON.parse(localStorage.getItem("sub2api:new-feature-notices:v1:41") ?? '[]'))
       .toEqual([oldNotice, NEW_FEATURE_NOTICES.bepusdtPayment]);
   });
 
-  it("loads, saves, and disables forecast independently of amount notifications", async () => {
-    getSettings.mockResolvedValue({ ...baseSettingsResponse, balance_forecast_enabled: true, balance_forecast_threshold_hours: 6.5, balance_forecast_max_notifications: 2, balance_low_notify_enabled: true });
+  it("ignores retired forecast settings while saving amount notifications", async () => {
+    getSettings.mockResolvedValue({ ...baseSettingsResponse,
+      balance_forecast_enabled: true, balance_forecast_threshold_hours: -1,
+      balance_forecast_max_notifications: 99, balance_low_notify_enabled: true });
     const wrapper = mountView();
     await flushPromises();
-    expect((wrapper.get('[data-testid="forecast-hours"]').element as HTMLInputElement).value).toBe('6.5');
-    await wrapper.get('[data-testid="forecast-enabled"]').setValue(false);
+    expect(wrapper.find('[data-testid="balance-forecast-settings"]').exists()).toBe(false);
+    expect(wrapper.findAllComponents(NewFeatureBadge)
+      .some(b => b.props('noticeId') === 'balance-exhaustion-forecast-initial-announcement')).toBe(false);
     await wrapper.get('form').trigger('submit');
     await flushPromises();
-    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ balance_forecast_enabled: false, balance_forecast_threshold_hours: 6.5, balance_forecast_max_notifications: 2, balance_low_notify_enabled: true }));
-  });
-
-  it("rejects an invalid forecast lead time before updating any settings", async () => {
-    const wrapper = mountView();
-    await flushPromises();
-    await wrapper.get('[data-testid="forecast-hours"]').setValue('169');
-    await wrapper.get('form').trigger('submit');
-    await flushPromises();
-    expect(updateSettings).not.toHaveBeenCalled();
-    expect(showError).toHaveBeenCalled();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ balance_low_notify_enabled: true }));
+    const payload = updateSettings.mock.calls[0]![0];
+    for (const field of ['balance_forecast_enabled', 'balance_forecast_threshold_hours', 'balance_forecast_max_notifications']) {
+      expect(payload).not.toHaveProperty(field);
+    }
   });
 
   it("shares one dismissible notice between the feature tab and its settings section", async () => {
@@ -937,7 +913,8 @@ describe("admin SettingsView payment visible method controls", () => {
     const tabBadge = (tab: string) => wrapper.find(`#settings-tab-${tab} + [data-testid="new-feature-badge"]`);
     const tabBar = wrapper.get(".settings-tabs").element;
 
-    expect(["features", "gateway", "payment", "email"].filter((tab) => tabBadge(tab).exists())).toHaveLength(4);
+    expect(["features", "gateway", "payment"].filter((tab) => tabBadge(tab).exists())).toHaveLength(3);
+    expect(tabBadge("email").exists()).toBe(false);
     expect(tabBar.querySelector("[style]")).toBeNull();
     expect(tabBar.querySelector(".absolute")).toBeNull();
 
@@ -953,7 +930,7 @@ describe("admin SettingsView payment visible method controls", () => {
     await tabBadge("gateway").trigger("click");
     await flushPromises();
     expect(tabBadge("gateway").exists()).toBe(false);
-    expect(tabBadge("email").exists()).toBe(true);
+    expect(tabBadge("payment").exists()).toBe(true);
     expect(tabBar.querySelector("[style]")).toBeNull();
   });
 

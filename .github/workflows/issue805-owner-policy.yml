@@ -58,6 +58,9 @@ jobs:
             if git cat-file -e "$baseline:$target" 2>/dev/null; then
               mkdir -p "$(dirname "$target")"
               git show "$baseline:$target" > "$target"
+              # A file removed by the candidate is untracked after restoration.
+              # Include it in the baseline diff without staging different content.
+              git add -N -- "$target"
               expected=$(git rev-parse "$baseline:$target")
               actual=$(git hash-object "$target")
               echo "$target baseline=present expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
