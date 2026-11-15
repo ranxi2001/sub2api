@@ -56,9 +56,10 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
+          bash .github/scripts/historical-recovery-timezone-callers.sh
           targets=(backend/internal/service/openai_codex_model_metadata.go backend/internal/service/openai_codex_models_service.go backend/internal/service/openai_excel_bps_models_manifest.go)
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "${targets[@]}"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")
@@ -97,6 +98,7 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
+          bash .github/scripts/historical-recovery-timezone-callers.sh
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go backend/internal/service/openai_ws_search_activation.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go)
           # The exact original gateway struct predates analysis admission state.
@@ -117,7 +119,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$analysis_compat"
           git fetch --no-tags --depth=1 origin "$billing_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "${weekly_leaves[@]}"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "${weekly_leaves[@]}" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$analysis_compat" -- "$analysis_leaf"
           git restore --source="$billing_compat" -- "$billing_leaf"
@@ -173,9 +175,10 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=18b7c0a4f5f4306a9c92f9715f08164f520df457
+          bash .github/scripts/historical-recovery-timezone-callers.sh
           target=backend/internal/service/openai_gateway_response_handling.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "$target"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "$target" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "$target"
           expected=$(git rev-parse "$original:$target")
           actual=$(git hash-object "$target")
@@ -209,9 +212,10 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=b6d780f1a4fee66c2930219dfe9e400b8f0279de
+          bash .github/scripts/historical-recovery-timezone-callers.sh
           target=backend/internal/service/openai_gateway_response_handling.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "$target"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "$target" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "$target"
           expected=$(git rev-parse "$original:$target")
           actual=$(git hash-object "$target")
@@ -245,6 +249,7 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=242f5b0892a59d95005099e6294262b066bd2f8b
+          bash .github/scripts/historical-recovery-timezone-callers.sh
           targets=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go)
           added=backend/internal/service/openai_agent_message_delivery.go
           ws_original=a575df898ccd0876c4c0eb1559da38cedfdfe99d
@@ -263,7 +268,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$ws_original"
           git fetch --no-tags --depth=1 origin "$scheduler_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
           git restore --source="$scheduler_compat" -- "$scheduler_leaf"
@@ -312,9 +317,10 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=d91d890049a9bd8bd0e414f30b0cb3b5bcc0f06e
+          bash .github/scripts/historical-recovery-timezone-callers.sh
           target=backend/internal/service/openai_ws_forwarder_ingress.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "$target"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "$target" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "$target"
           expected=$(git rev-parse "$original:$target")
           actual=$(git hash-object "$target")
@@ -347,6 +353,7 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=e7f54240d83765c90a98e961ad5e33b0fa35ab56
+          bash .github/scripts/historical-recovery-timezone-callers.sh
           target=backend/internal/service/openai_ws_agent_recovery.go
           caller=backend/internal/service/openai_ws_forwarder_ingress.go
           passthrough=backend/internal/service/openai_ws_v2_passthrough_adapter.go
@@ -354,7 +361,7 @@ jobs:
           # Manager fields and readable-payload methods live together. Restore
           # both transport callers with that manager; retain candidate tests and
           # standalone admission/principal helpers required by current HTTP.
-          trap 'git restore --source=HEAD -- "$target" "$caller" "$passthrough"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "$target" "$caller" "$passthrough" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "$target" "$caller" "$passthrough"
           expected=$(git rev-parse "$original:$target")
           actual=$(git hash-object "$target")
@@ -426,13 +433,14 @@ jobs:
           set -euo pipefail
           git rev-parse HEAD
           original=a575df898ccd0876c4c0eb1559da38cedfdfe99d
+          bash .github/scripts/historical-recovery-timezone-callers.sh
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           # Search activation references fields absent in this pool. Retain the
           # standalone recovery helpers needed by current HTTP code; the pinned
           # pre-WS handler/transports never call them or publish WS ownership.
           added=(backend/internal/service/openai_ws_search_activation.go)
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}"; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           rm -- "${added[@]}"
           for target in "${targets[@]}"; do
