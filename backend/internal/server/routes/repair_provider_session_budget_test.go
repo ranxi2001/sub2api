@@ -170,7 +170,7 @@ func TestMatureProviderImportRotationBudget(t *testing.T) {
 				require.Equal(t, 200, saved.Code, saved.Body.String())
 				var p struct{ Data struct{ ID int64 } }
 				require.NoError(t, json.Unmarshal(saved.Body.Bytes(), &p))
-				body := fmt.Sprintf(`{"name":"Import fixture","platform":"openai","type":"apikey","provider_id":%d,"provider_key_id":"4"}`, p.Data.ID)
+				body := fmt.Sprintf(`{"name":"Import fixture","platform":"openai","type":"apikey","provider_id":%d,"provider_key_id":"4","credentials":{"openai_api_mode":"responses"}}`, p.Data.ID)
 				var lock *sql.Tx
 				var blockerPID int
 				if scenario == "lock_wait" || scenario == "depleted_lock_budget" {
