@@ -96,6 +96,12 @@ createApp({render:()=>h('main',{class:'p-4 mx-auto max-w-4xl'},[h(UsageTable,{da
         await costButton.click()
         const panel = page.locator(size === 'mobile' ? '[role="dialog"]' : '[role="tooltip"]')
         await panel.waitFor({ state: 'visible' })
+        // Capture the settled dialog, not a partially transparent enter frame.
+        await panel.evaluate(async element => {
+          await Promise.all(element.getAnimations({ subtree: true })
+            .filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity)
+            .map(animation => animation.finished))
+        })
         const text = await panel.innerText()
         assert.ok(text.includes(revision === 'after' ? '$10.0000' : '$20.0000'), text)
         assert.ok(text.includes(revision === 'after' ? '$50.0000' : '$100.0000'), text)
@@ -127,7 +133,7 @@ createApp({render:()=>h('main',{class:'p-4 mx-auto max-w-4xl'},[h(UsageTable,{da
         assert.equal(computedStyle.padding, '12px')
         assert.equal(computedStyle.border, '1px')
         const name = `${fixtureName}-${revision}-${locale}-${role}-${size}.png`
-        await page.screenshot({ path: path.join(output, name), fullPage: true })
+        await page.screenshot({ path: path.join(output, name), fullPage: true, animations: 'disabled' })
         const digest = createHash('sha256').update(await fs.readFile(path.join(output, name))).digest('hex')
         manifest.screenshots.push({ file: name, sha256: digest, componentSha256: componentHash, fixtureName, revision, locale, role, viewport, bounds, contentBounds, computedStyle, text })
         await context.close()
