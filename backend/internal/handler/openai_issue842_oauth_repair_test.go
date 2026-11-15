@@ -279,4 +279,3 @@ func TestIssue842BPSSearchRefusesBeforeAnySend(t *testing.T) {
 		})
 	}
 }
-
