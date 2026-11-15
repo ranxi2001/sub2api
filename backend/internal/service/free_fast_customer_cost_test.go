@@ -174,6 +174,24 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 			}
 			require.Equal(t, "priority", *log.ServiceTier)
 			require.Equal(t, tc.long, log.LongContextBillingApplied)
+			require.EqualValues(t, 2, d["version"])
+			if tc.write30m+tc.write12h+tc.read > 0 {
+				lines, ok := d["cache_cost_details"].([]any)
+				require.True(t, ok, "recorded usage must carry the same resolved Standard cache prices")
+				expectedPrices := map[string]float64{"write_30m": write * reasoning, "write_12h": write12h * reasoning, "read": read * reasoning}
+				expectedTokens := map[string]int{"write_30m": tc.write30m, "write_12h": tc.write12h, "read": tc.read}
+				for _, value := range lines {
+					line := value.(map[string]any)
+					kind := line["kind"].(string)
+					require.Contains(t, expectedPrices, kind)
+					require.InDelta(t, expectedPrices[kind], line["unit_price"], 1e-16)
+					require.EqualValues(t, expectedTokens[kind], line["tokens"])
+					delete(expectedTokens, kind)
+				}
+				for _, count := range expectedTokens {
+					require.Zero(t, count)
+				}
+			}
 			if tc.name == "exact screenshot" {
 				require.InDelta(t, .1669, log.InputCost, 1e-10)
 				require.InDelta(t, .0136, log.OutputCost, 1e-10)
@@ -264,4 +282,89 @@ func TestFreeFastCustomerCostZeroQuoteKeepsEffectiveRate(t *testing.T) {
 	require.Equal(t, 1.8, detail.Multiplier, "a zero quote must retain the actual resolved rate, not infer 0/0")
 	require.Zero(t, detail.TotalCost)
 	require.Zero(t, detail.ActualCost)
+}
+
+// JSON assertions also compile before cache-price snapshots exist, so remote
+// source-overlay RED must fail on missing evidence, never on setup/compilation.
+func TestFreeFastCustomerCostCachePrices(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		long, zero, hour bool
+		reasoning        float64
+	}{
+		{name: "mixed 30m 12h read"}, {name: "whole context", long: true},
+		{name: "reasoning", reasoning: 1.7}, {name: "explicit zero prices", zero: true}, {name: "5m 1h", hour: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			read, short, long := 1e-6, 12.5e-6, 25e-6
+			if tc.zero {
+				read, short, long = 0, 0, 0
+			}
+			pricing := &ModelPricing{InputPricePerToken: 10e-6, OutputPricePerToken: 50e-6,
+				CacheReadPricePerToken: read, CacheCreationPricePerToken: short, CacheCreation12hPricePerToken: &long,
+				LongContextInputThreshold: 100, LongContextInputMultiplier: 2, LongContextOutputMultiplier: 1.5}
+			tokens := UsageTokens{InputTokens: 71, OutputTokens: 19, CacheReadTokens: 17, CacheCreationTokens: 24, CacheCreation30mTokens: 11, CacheCreation12hTokens: 13}
+			kindShort, kindLong := "write_30m", "write_12h"
+			if tc.hour {
+				pricing.SupportsCacheBreakdown = true
+				pricing.CacheCreation5mPrice = short
+				pricing.CacheCreation1hPrice = long
+				tokens.CacheCreation30mTokens = 0
+				tokens.CacheCreation12hTokens = 0
+				tokens.CacheCreation5mTokens = 11
+				tokens.CacheCreation1hTokens = 13
+				kindShort, kindLong = "write_5m", "write_1h"
+			}
+			quote := (&BillingService{}).computeTokenBreakdown(pricing, tokens, .3, "", tc.long)
+			reasoning := tc.reasoning
+			if reasoning == 0 {
+				reasoning = 1
+			}
+			applyCostBreakdownMultiplier(quote, reasoning)
+			// Customer model surcharge belongs in the effective multiplier, not prices.
+			quote.ActualCost *= 3
+			snapshot := newFreeFastCustomerCostDetails(quote, .3*3)
+			raw, err := json.Marshal(snapshot)
+			require.NoError(t, err)
+			var detail map[string]any
+			require.NoError(t, json.Unmarshal(raw, &detail))
+			require.EqualValues(t, 2, detail["version"], "Standard cache prices must be persisted from the resolved quote")
+			lines, ok := detail["cache_cost_details"].([]any)
+			require.True(t, ok, "Standard cache prices must be persisted from the resolved quote")
+			require.Len(t, lines, 3)
+			factor := reasoning
+			if tc.long {
+				factor *= 2
+			}
+			expected := map[string]struct {
+				count int
+				price float64
+			}{"read": {17, read * factor}, kindShort: {11, short * factor}, kindLong: {13, long * factor}}
+			writeSum, readSum := 0.0, 0.0
+			for _, value := range lines {
+				line := value.(map[string]any)
+				kind := line["kind"].(string)
+				want, exists := expected[kind]
+				require.True(t, exists, kind)
+				require.EqualValues(t, want.count, line["tokens"])
+				require.InDelta(t, want.price, line["unit_price"], 1e-16, kind)
+				cost := line["unit_price"].(float64) * line["tokens"].(float64)
+				if kind == "read" {
+					readSum += cost
+				} else {
+					writeSum += cost
+				}
+				delete(expected, kind)
+			}
+			require.Empty(t, expected)
+			require.InDelta(t, quote.CacheCreationCost, writeSum, 1e-12)
+			require.InDelta(t, quote.CacheReadCost, readSum, 1e-12)
+			// Later policy changes cannot mutate saved price evidence.
+			pricing.CacheReadPricePerToken = 999
+			long = 999
+			after, err := json.Marshal(snapshot)
+			require.NoError(t, err)
+			require.JSONEq(t, string(raw), string(after))
+		})
+	}
 }

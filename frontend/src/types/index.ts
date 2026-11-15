@@ -2018,7 +2018,15 @@ export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
 // Immutable display evidence from the Standard calculation that set actual_cost.
+export type CustomerCacheCostKind = 'read' | 'read_image' | 'write' | 'write_5m' | 'write_1h' | 'write_30m' | 'write_12h'
+export interface CustomerCacheCostDetail {
+  kind: CustomerCacheCostKind
+  tokens: number
+  unit_price: number
+}
+
 export interface CustomerCostDetails {
+  cache_cost_details?: CustomerCacheCostDetail[]
   version: number
   free_fast: boolean
   input_cost: number

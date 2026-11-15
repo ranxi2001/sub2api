@@ -1603,4 +1603,61 @@ describe('Free Fast screenshot arithmetic and history', () => {
     finally { wrapper.unmount() }
   })
 
+  it.each([true, false])('G1 displays saved Standard cache read and distinct TTL unit prices, admin=%s', async (admin) => {
+    const d = freeFastCustomerCostFixture.customer_cost_details
+    const row = { ...freeFastCustomerCostFixture, cache_creation_tokens: 24, cache_creation_30m_tokens: 11, cache_creation_12h_tokens: 13,
+      cache_read_tokens: 17, cache_creation_cost: 0.0006, cache_read_cost: 0.000034, actual_cost: 0.04536475,
+      customer_cost_details: { ...d, version: 2, cache_creation_cost: 0.0004625, cache_read_cost: 0.000017,
+        total_cost: 0.0907295, actual_cost: 0.04536475,
+        cache_cost_details: [{ kind: 'write_30m', tokens: 11, unit_price: 0.0000125 }, { kind: 'write_12h', tokens: 13, unit_price: 0.000025 }, { kind: 'read', tokens: 17, unit_price: 0.000001 }] } }
+    const wrapper = await openCost(row, admin)
+    try {
+      expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain('$1.0000')
+      expect(wrapper.get('[data-testid="cache-unit-write_30m"]').text()).toContain('$12.5000')
+      expect(wrapper.get('[data-testid="cache-unit-write_12h"]').text()).toContain('$25.0000')
+      expect(wrapper.get('[role="tooltip"]').text()).toContain('$0.00046250')
+    } finally { wrapper.unmount() }
+  })
+  it('G1 preserves v1 known amounts but does not invent missing cache unit prices', async () => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture })
+    try {
+      expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain('—')
+      expect(wrapper.get('[data-testid="cache-unit-write_30m"]').text()).toContain('—')
+      expect(wrapper.get('[role="tooltip"]').text()).toContain('$0.01496250')
+    } finally { wrapper.unmount() }
+  })
+
+  it.each(['en', 'zh'] as const)('G1 localized read and TTL labels render with real translations: %s', async (language) => {
+    locale = language
+    const messages = language === 'zh' ? zhDashboard.usage : enDashboard.usage
+    localizedMessages[language]['usage.cacheReadTokenPrice'] = messages.cacheReadTokenPrice
+    localizedMessages[language]['usage.cacheWriteTTLTokenPrice'] = messages.cacheWriteTTLTokenPrice
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture })
+    try {
+      expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain(messages.cacheReadTokenPrice)
+      expect(wrapper.get('[data-testid="cache-unit-write_30m"]').text()).toContain(messages.cacheWriteTTLTokenPrice.replace('{ttl}', '30m'))
+    } finally { wrapper.unmount(); locale = 'en' }
+  })
+  it('G1 zero-priced cache buckets retain explicit zero unit prices', async () => {
+    const d = freeFastCustomerCostFixture.customer_cost_details
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, actual_cost: 0.045125,
+      customer_cost_details: { ...d, version: 2, cache_creation_cost: 0, cache_read_cost: 0, total_cost: 0.09025, actual_cost: 0.045125,
+        cache_cost_details: [{ kind: 'write_30m', tokens: 1197, unit_price: 0 }, { kind: 'read', tokens: 37469, unit_price: 0 }] } })
+    try {
+      expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain('$0.0000')
+      expect(wrapper.get('[data-testid="cache-unit-write_30m"]').text()).toContain('$0.0000')
+    } finally { wrapper.unmount() }
+  })
+  it.each([
+    [{ kind: 'read', tokens: 37469, unit_price: -1 }],
+    [{ kind: 'read', tokens: 37469, unit_price: 0.000001 }],
+    [{ kind: 'read', tokens: 37469, unit_price: NaN }],
+    [{ kind: 'write_30m', tokens: 1197, unit_price: 0.0000125 }, { kind: 'read', tokens: 37468, unit_price: 0.000001 }],
+  ])('G1 rejects invalid or incomplete v2 cache prices %j', async (...lines) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture,
+      customer_cost_details: { ...freeFastCustomerCostFixture.customer_cost_details, version: 2, cache_cost_details: lines } })
+    try { expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain('—') }
+    finally { wrapper.unmount() }
+  })
+
 })

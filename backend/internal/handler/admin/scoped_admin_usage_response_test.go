@@ -96,7 +96,7 @@ func TestFreeFastCustomerCostScopedAdmin(t *testing.T) {
 	row := service.UsageLog{ID: 12, UserID: 7, APIKeyID: 8, AccountID: 11, RequestID: "synthetic-cost", Model: "synthetic-astra", TotalCost: .2704005, ActualCost: .07134075}
 	// JSON retains baseline compilability, and unknown/private metadata must not
 	// sneak through the typed numeric quote into the restricted response.
-	const quote = `{"version":1,"free_fast":true,"input_cost":0.08345,"output_cost":0.0068,"image_input_cost":0,"image_output_cost":0,"cache_creation_cost":0.0149625,"cache_read_cost":0.037469,"total_cost":0.1426815,"actual_cost":0.07134075,"multiplier":0.5}`
+	const quote = `{"version":2,"cache_cost_details":[{"kind":"write_30m","tokens":1197,"unit_price":0.0000125},{"kind":"read","tokens":37469,"unit_price":0.000001}],"free_fast":true,"input_cost":0.08345,"output_cost":0.0068,"image_input_cost":0,"image_output_cost":0,"cache_creation_cost":0.0149625,"cache_read_cost":0.037469,"total_cost":0.1426815,"actual_cost":0.07134075,"multiplier":0.5}`
 	require.NoError(t, json.Unmarshal([]byte(`{"CustomerCostDetails":`+quote+`}`), &row))
 	row.User = &service.User{ID: 7, Email: "private-customer@example.invalid", Notes: "private-notes"}
 	row.APIKey = &service.APIKey{ID: 8, Key: "private-key"}

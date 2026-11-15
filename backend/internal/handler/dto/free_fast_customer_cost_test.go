@@ -26,3 +26,17 @@ func TestFreeFastCustomerCostDTO(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(legacy), "customer_cost_details")
 }
+
+func TestFreeFastCustomerCostCacheDTO(t *testing.T) {
+	row := &service.UsageLog{}
+	require.NoError(t, json.Unmarshal([]byte(`{"CustomerCostDetails":{"version":2,"free_fast":true,"cache_cost_details":[{"kind":"write_12h","tokens":13,"unit_price":0.000025}]}}`), row))
+	for _, mapped := range []any{UsageLogFromService(row), UsageLogFromServiceForUser(row, false), UsageLogFromServiceAdmin(row)} {
+		raw, err := json.Marshal(mapped)
+		require.NoError(t, err)
+		var data map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &data))
+		var snapshot map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(data["customer_cost_details"], &snapshot))
+		require.JSONEq(t, `[{"kind":"write_12h","tokens":13,"unit_price":0.000025}]`, string(snapshot["cache_cost_details"]), "customer cache price DTO parity")
+	}
+}

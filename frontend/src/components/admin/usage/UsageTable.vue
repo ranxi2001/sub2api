@@ -509,6 +509,10 @@
               <span class="text-gray-400">{{ t('usage.unitPrice') }}</span>
               <span class="font-medium text-sky-300">${{ tooltipData?.total_cost?.toFixed(8) || '0.00000000' }}</span>
             </div>
+            <div v-for="price in cachePrices" :key="price.kind" :data-testid="'cache-unit-' + price.kind" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ cachePriceLabel(price.kind) }}</span>
+              <span class="font-medium text-sky-300">{{ price.unit_price === null ? '—' : formatTokenPricePerMillion(price.unit_price, 1) }} {{ t('usage.perMillionTokens') }}</span>
+            </div>
             <div v-if="tooltipData && tooltipData.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.cacheCreationCost') }}</span>
               <span class="font-medium text-white">{{ customerAmount('cache_creation_cost') }}</span>
@@ -622,8 +626,8 @@ import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
 import { userVisibleUpstreamResponseModel } from '@/utils/upstreamResponseModel'
-import type { AdminUsageLog } from '@/types'
-import { customerCostSnapshot, customerCostsUnknown, type CostComponent } from '@/utils/customerCostDetails'
+import type { AdminUsageLog, CustomerCacheCostKind } from '@/types'
+import { customerCostSnapshot, customerCostsUnknown, customerCachePrices, type CostComponent } from '@/utils/customerCostDetails'
 import type { Column } from '@/components/common/types'
 
 interface Props {
@@ -756,6 +760,13 @@ const tooltipAnchor = ref<DOMRect | null>(null)
 const tooltipData = ref<AdminUsageLog | null>(null)
 const customerSnapshot = computed(() => customerCostSnapshot(tooltipData.value))
 const customerCostsUnavailable = computed(() => customerCostsUnknown(tooltipData.value))
+const cachePrices = computed(() => customerCachePrices(tooltipData.value))
+function cachePriceLabel(kind: CustomerCacheCostKind): string {
+  if (kind === 'read') return t('usage.cacheReadTokenPrice')
+  if (kind === 'read_image') return t('usage.imageCacheReadTokenPrice')
+  if (kind === 'write') return t('usage.cacheWriteTokenPrice')
+  return t('usage.cacheWriteTTLTokenPrice', { ttl: kind.slice(6) })
+}
 function customerAmount(component: CostComponent): string {
   if (customerCostsUnavailable.value) return '—'
   const detail = customerSnapshot.value

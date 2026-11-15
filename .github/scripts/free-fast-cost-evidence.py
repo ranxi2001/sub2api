@@ -19,7 +19,8 @@ for name in required:
     if mode == 'red':
         output = ''.join(e.get('Output', '') for e in events
                          if e.get('Test') == name or e.get('Test', '').startswith(name + '/'))
-        marker = ('restricted admin must expose the immutable customer Standard quote' if name.endswith('ScopedAdmin')
+        marker = ('Standard cache prices must be persisted from the resolved quote' if name.endswith('CachePrices')
+                  else 'restricted admin must expose the immutable customer Standard quote' if name.endswith('ScopedAdmin')
                   else 'user/admin DTO must expose the immutable customer Standard quote' if name.endswith('DTO')
                   else 'stored usage must retain the customer Standard quote' if name.endswith('Persistence')
                   else 'Free Fast must persist the Standard customer cost snapshot')
@@ -29,6 +30,7 @@ if mode == 'red':
         'Free Fast must persist the Standard customer cost snapshot',
         'user/admin DTO must expose the immutable customer Standard quote',
         'restricted admin must expose the immutable customer Standard quote',
+        'Standard cache prices must be persisted from the resolved quote',
         'stored usage must retain the customer Standard quote',
     ]), 'RED did not reach a target business assertion'
 else:

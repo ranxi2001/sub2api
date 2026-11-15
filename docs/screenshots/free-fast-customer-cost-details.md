@@ -50,3 +50,20 @@ Download each uploaded attachment and compare its SHA256 with the manifest befor
 embedding it in the PR. The harness and CI workflow are reproducible evidence
 runners, not a claim that their checks have already passed: consult the PR's
 actual validation table and current-head CI results.
+
+
+Snapshot version 2 adds disjoint cache-price evidence (`kind`, `tokens`, per-token
+`unit_price`) from the same resolved Standard calculation. Reasoning/time/context
+adjustments follow the component prices; the customer multiplier remains separate.
+Version 1 keeps its known aggregates and shows unknown cache unit prices. No
+migration/backfill is needed for the additive JSON field. Invalid or inconsistent
+version 2 cache evidence is rejected rather than projected from current settings.
+Restricted administrators receive the typed numeric snapshot through the explicit
+allowlist, without nested user/key/account/group/subscription data.
+
+The extended harness captures 32 new images: exact and mixed 30m/12h fixtures ×
+before/after × English/Chinese × user/admin × desktop/mobile. Save them in a new
+artifact directory; the original 16 images at capture commit 50f906972 and their
+native attachments retain their original identity and hashes. The new matrix
+asserts read $1, short write $12.5, long write $25 per million tokens alongside
+component totals. Only the manifest's own head identifies a new capture.

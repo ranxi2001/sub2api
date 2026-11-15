@@ -41,10 +41,11 @@ try {
 import {createApp,h} from 'vue';import {createPinia} from 'pinia';
 import UsageTable from '/src/components/admin/usage/UsageTable.vue';
 import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';
-import {freeFastCustomerCostFixture as fixture} from 'fixture:cost';
+import {freeFastCachePriceFixture,freeFastMixedCachePriceFixture} from 'fixture:cost';
 import '/src/style.css';
 const params=new URLSearchParams(location.search),lang=params.get('lang'),admin=params.get('role')==='admin';
 await loadLocaleMessages(lang);i18n.global.locale.value=lang;
+const fixture=params.get('fixture')==='mixed'?freeFastMixedCachePriceFixture:freeFastCachePriceFixture;
 const data=[{...fixture,created_at:'2026-01-01T00:00:00Z',duration_ms:1000,first_token_ms:100,request_type:'stream',cache_ttl_overridden:false,long_context_billing_applied:false}];
 const columns=[{key:'model',label:i18n.global.t('usage.model')},{key:'cost',label:i18n.global.t('usage.costDetails')}];
 createApp({render:()=>h('main',{class:'p-4 mx-auto max-w-4xl'},[h(UsageTable,{data,columns,showAccountBilling:admin,cacheRateAudience:admin?'admin':'user',enableTimingDetails:false})])}).use(createPinia()).use(i18n).mount('#app');
@@ -74,7 +75,7 @@ createApp({render:()=>h('main',{class:'p-4 mx-auto max-w-4xl'},[h(UsageTable,{da
     })
     await server.listen()
     try {
-      for (const locale of ['en', 'zh']) for (const role of ['user', 'admin']) for (const size of ['desktop', 'mobile']) {
+      for (const fixtureName of ['exact', 'mixed']) for (const locale of ['en', 'zh']) for (const role of ['user', 'admin']) for (const size of ['desktop', 'mobile']) {
         const viewport = size === 'mobile' ? { width: 390, height: 844 } : { width: 1280, height: 900 }
         const context = await browser.newContext({ viewport, colorScheme: 'light', timezoneId: 'UTC', locale: locale === 'zh' ? 'zh-CN' : 'en-US' })
         await context.route('**/*', async route => {
@@ -88,7 +89,7 @@ createApp({render:()=>h('main',{class:'p-4 mx-auto max-w-4xl'},[h(UsageTable,{da
         })
         const page = await context.newPage()
         page.on('pageerror', error => manifest.errors.push(error.message))
-        await page.goto(`http://127.0.0.1:4189/?lang=${locale}&role=${role}`, { waitUntil: 'networkidle' })
+        await page.goto(`http://127.0.0.1:4189/?lang=${locale}&role=${role}&fixture=${fixtureName}`, { waitUntil: 'networkidle' })
         const button = page.getByRole('button', { name: locale === 'zh' ? '费用明细' : 'Cost Breakdown', exact: true })
         // Use the actual accessible label even when a locale changes its translation.
         const costButton = await button.count() ? button : page.locator('button[aria-expanded]').filter({ has: page.locator('.text-green-600') })
@@ -98,8 +99,18 @@ createApp({render:()=>h('main',{class:'p-4 mx-auto max-w-4xl'},[h(UsageTable,{da
         const text = await panel.innerText()
         assert.ok(text.includes(revision === 'after' ? '$10.0000' : '$20.0000'), text)
         assert.ok(text.includes(revision === 'after' ? '$50.0000' : '$100.0000'), text)
-        for (const value of (revision === 'after' ? ['0.08345000', '0.00680000', '0.01496250', '0.03746900', '0.14268150'] : ['0.16690000', '0.01360000', '0.01496250', '0.07493800', '0.27040050'])) assert.ok(text.includes('$' + value), text)
-        assert.ok(text.includes('$0.07134075'), text)
+        const amounts = fixtureName === 'exact'
+          ? (revision === 'after' ? ['0.08345000', '0.00680000', '0.01496250', '0.03746900', '0.14268150'] : ['0.16690000', '0.01360000', '0.01496250', '0.07493800', '0.27040050'])
+          : (revision === 'after' ? ['0.08345000', '0.00680000', '0.00046250', '0.00001700', '0.09072950'] : ['0.16690000', '0.01360000', '0.00046250', '0.00003400', '0.18099650'])
+        for (const value of amounts) assert.ok(text.includes('$' + value), text)
+        assert.ok(text.includes(fixtureName === 'exact' ? '$0.07134075' : '$0.04536475'), text)
+        if (revision === 'after') {
+          assert.ok((await panel.getByTestId('cache-unit-read').innerText()).includes('$1.0000'))
+          assert.ok((await panel.getByTestId('cache-unit-write_30m').innerText()).includes('$12.5000'))
+          if (fixtureName === 'mixed') assert.ok((await panel.getByTestId('cache-unit-write_12h').innerText()).includes('$25.0000'))
+          assert.ok(text.includes(locale === 'zh' ? '缓存读取单价' : 'Cache read price'), text)
+          assert.ok(text.includes(locale === 'zh' ? '缓存写入单价（30m）' : 'Cache write price (30m)'), text)
+        }
         assert.ok(text.includes('Fast'), text)
         assert.ok(!/Free Fast|Fast 加速免费|按 Standard 计费/.test(text), text)
         const bounds = await panel.boundingBox()
@@ -115,16 +126,16 @@ createApp({render:()=>h('main',{class:'p-4 mx-auto max-w-4xl'},[h(UsageTable,{da
         assert.equal(computedStyle.fontSize, '12px')
         assert.equal(computedStyle.padding, '12px')
         assert.equal(computedStyle.border, '1px')
-        const name = `${revision}-${locale}-${role}-${size}.png`
+        const name = `${fixtureName}-${revision}-${locale}-${role}-${size}.png`
         await page.screenshot({ path: path.join(output, name), fullPage: true })
         const digest = createHash('sha256').update(await fs.readFile(path.join(output, name))).digest('hex')
-        manifest.screenshots.push({ file: name, sha256: digest, componentSha256: componentHash, revision, locale, role, viewport, bounds, contentBounds, computedStyle, text })
+        manifest.screenshots.push({ file: name, sha256: digest, componentSha256: componentHash, fixtureName, revision, locale, role, viewport, bounds, contentBounds, computedStyle, text })
         await context.close()
       }
     } finally { await server.close(); process.chdir(root) }
   }
   assert.deepEqual(manifest.errors, [])
-  assert.equal(manifest.screenshots.length, 16)
+  assert.equal(manifest.screenshots.length, 32)
   manifest.complete = true
 } finally {
   await browser.close()

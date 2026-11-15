@@ -61,13 +61,13 @@ jobs:
         run: |
           set -euo pipefail
           (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler/dto ./internal/handler/admin ./internal/repository -run '^Test(FreeFastCustomerCost|OpenAIGatewayServiceRecordUsage_FreeOpenAIFast|GroupBillsOpenAIFast|UsageLogStaticInsertShape|PrepareUsageLogInsert|UsageLogRepositoryCreate|ScanUsageLogRequestTypeAndLegacyFallback)' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/green-unit.jsonl" 2>&1
-          python3 .github/scripts/free-fast-cost-evidence.py green "$RUNNER_TEMP/free-fast/green-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO TestFreeFastCustomerCostScopedAdmin TestUsageLogStaticInsertShape_PlaceholdersMatchArgTypes TestScanUsageLogRequestTypeAndLegacyFallback
+          python3 .github/scripts/free-fast-cost-evidence.py green "$RUNNER_TEMP/free-fast/green-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO TestFreeFastCustomerCostScopedAdmin TestFreeFastCustomerCostCachePrices TestFreeFastCustomerCostCacheDTO TestUsageLogStaticInsertShape_PlaceholdersMatchArgTypes TestScanUsageLogRequestTypeAndLegacyFallback
       - name: GREEN all insertion paths, immutable history and durable replay
         shell: bash
         run: |
           set -euo pipefail
           (cd backend && go test -json -tags=integration ./internal/repository -run '^TestFreeFastCustomerCost' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/green-sql.jsonl" 2>&1
-          python3 .github/scripts/free-fast-cost-evidence.py green "$RUNNER_TEMP/free-fast/green-sql.jsonl" TestFreeFastCustomerCostPersistence TestFreeFastCustomerCostDurableReplay TestFreeFastCustomerCostMigration
+          python3 .github/scripts/free-fast-cost-evidence.py green "$RUNNER_TEMP/free-fast/green-sql.jsonl" TestFreeFastCustomerCostPersistence TestFreeFastCustomerCostDurableReplay TestFreeFastCustomerCostMigration TestFreeFastCustomerCostCachePersistence
       - name: Same tests against pinned production code must reach business RED
         shell: bash
         run: |
@@ -90,6 +90,22 @@ jobs:
           test "$sql_exit" -ne 0
           python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-unit.jsonl" TestFreeFastCustomerCostSnapshot TestFreeFastCustomerCostVariants TestFreeFastCustomerCostDTO TestFreeFastCustomerCostScopedAdmin
           python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-sql.jsonl" TestFreeFastCustomerCostPersistence
+      - name: Cache-price snapshot business RED against pre-cache producer
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Restore candidate production paths after the original baseline RED.
+          git restore backend/internal/service/openai_gateway_usage.go backend/internal/service/usage_log.go backend/internal/handler/dto/types.go backend/internal/handler/dto/mappers.go backend/internal/handler/admin/scoped_admin_usage_response.go backend/internal/repository/usage_log_repo_insert.go backend/internal/repository/usage_log_repo_query.go
+          baseline=6826ea7c13459f0fb8080b0753da4b8ae73dd383
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git show "$baseline:backend/internal/service/customer_cost_details.go" > backend/internal/service/customer_cost_details.go
+          test "$(git hash-object backend/internal/service/customer_cost_details.go)" = "$(git rev-parse "$baseline:backend/internal/service/customer_cost_details.go")"
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/service -run '^TestFreeFastCustomerCostCachePrices$' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/red-cache.jsonl" 2>&1
+          code=$?
+          set -e
+          test "$code" -ne 0
+          python3 .github/scripts/free-fast-cost-evidence.py red "$RUNNER_TEMP/free-fast/red-cache.jsonl" TestFreeFastCustomerCostCachePrices
       - name: Require committed generated code
         if: always()
         run: test ! -s "$RUNNER_TEMP/free-fast/ent-generated.patch"
@@ -150,6 +166,11 @@ jobs:
                   target=[a for a in assertions if 'shows Standard unit prices' in a['fullName']]
                   assert len(target)==2 and all(a['status']=='failed' for a in target),target
                   assert all('$10.00' in '\n'.join(a['failureMessages']) for a in target),target
+                  aliases=[a for a in assertions if 'F1 fast alias with missing or invalid snapshot' in a['fullName']]
+                  assert len(aliases)==4 and all(a['status']=='failed' for a in aliases),aliases
+                  cache=[a for a in assertions if 'G1 displays saved Standard cache read and distinct TTL unit prices' in a['fullName']]
+                  assert len(cache)==2 and all(a['status']=='failed' for a in cache),cache
+                  assert all('cache-unit-read' in '\n'.join(a['failureMessages']) for a in cache),cache
           PY
       - name: Install isolated browser
         run: |

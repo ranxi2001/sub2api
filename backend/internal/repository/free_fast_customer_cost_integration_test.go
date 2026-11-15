@@ -130,3 +130,30 @@ func TestFreeFastCustomerCostMigration(t *testing.T) {
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT customer_cost_details IS NULL AND total_cost=0.00332 AND actual_cost=0.000996 FROM usage_logs WHERE id=1`).Scan(&unchanged))
 	require.True(t, unchanged, "migration must leave old charges intact with unknown display evidence")
 }
+
+func TestFreeFastCustomerCostCachePersistence(t *testing.T) {
+	ctx := context.Background()
+	repo, cmd, usage, _ := durableBillingFixture(t)
+	const snapshot = `{"version":2,"free_fast":true,"input_cost":0.08345,"output_cost":0.0068,"image_input_cost":0,"image_output_cost":0,"cache_creation_cost":0.0004625,"cache_read_cost":0.000017,"total_cost":0.0907295,"actual_cost":0.04536475,"multiplier":0.5,"cache_cost_details":[{"kind":"write_30m","tokens":11,"unit_price":0.0000125},{"kind":"write_12h","tokens":13,"unit_price":0.000025},{"kind":"read","tokens":17,"unit_price":0.000001}]}`
+	cmd.BalanceCost, cmd.APIKeyQuotaCost = .04536475, .04536475
+	usage.TotalCost, usage.ActualCost = .2704005, .04536475
+	require.NoError(t, json.Unmarshal([]byte(`{"CustomerCostDetails":`+snapshot+`}`), &usage))
+	require.NoError(t, repo.StageUsageBilling(ctx, &cmd, &usage))
+	key := service.UsageBillingEventKey{RequestID: cmd.RequestID, APIKeyID: cmd.APIKeyID}
+	for i := 0; i < 2; i++ {
+		_, err := repo.ApplyStagedUsageBilling(ctx, key)
+		require.NoError(t, err)
+	}
+	stored, err := scanUsageLog(repo.db.QueryRowContext(ctx, "SELECT "+usageLogSelectColumns+" FROM usage_logs WHERE request_id=$1 AND api_key_id=$2", cmd.RequestID, cmd.APIKeyID))
+	require.NoError(t, err)
+	raw, err := json.Marshal(stored)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	require.JSONEq(t, snapshot, string(fields["CustomerCostDetails"]), "cache prices must survive durable SQL storage and readback")
+	require.InDelta(t, .2704005, stored.TotalCost, 1e-10)
+	require.InDelta(t, .04536475, stored.ActualCost, 1e-10)
+	var quota string
+	require.NoError(t, repo.db.QueryRowContext(ctx, "SELECT quota_used::text FROM api_keys WHERE id=$1", cmd.APIKeyID).Scan(&quota))
+	require.Equal(t, "0.04536475", quota, "display cache prices cannot change or repeat the command")
+}
