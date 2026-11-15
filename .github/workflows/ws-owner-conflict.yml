@@ -56,6 +56,7 @@ jobs:
                 fi ;;
             esac
           done
+          bash .github/scripts/prepare-free-fast-red-fixtures.sh "$BASELINE" "$RUNNER_TEMP/ws-owner-red" "$CANDIDATE"
           set +e
           (cd "$RUNNER_TEMP/ws-owner-red/backend" && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerContinuation$/turn_2$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-owner-evidence/red.jsonl" 2>&1
           status=$?
