@@ -17,6 +17,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Real client and upstream sockets: the second frame carries only a completed
@@ -25,7 +26,8 @@ func TestOpenAIWSPlaintextToolContinuation(t *testing.T) { runPlaintextToolConti
 func TestOpenAIWSPlaintextToolContinuationWithoutStorage(t *testing.T) {
 	runPlaintextToolContinuation(t, false)
 }
-func runPlaintextToolContinuation(t *testing.T, stored bool) {
+func TestOpenAIWSPlaintextToolAfterRebuild(t *testing.T) { runPlaintextToolContinuation(t, true, true) }
+func runPlaintextToolContinuation(t *testing.T, stored bool, rebuilt ...bool) {
 	for _, mode := range readableWSModes {
 		t.Run(mode, func(t *testing.T) {
 			var mu sync.Mutex
@@ -79,7 +81,12 @@ func runPlaintextToolContinuation(t *testing.T, stored bool) {
 					cfg.Gateway.MaxAccountSwitches = 2
 				})
 			defer issue600Finish(t, h, headers)
-			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"Run the fixture once"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{}}}]}`, stored))
+			firstFrame := fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"Run the fixture once"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{}}}]}`, stored)
+			if len(rebuilt) > 0 && rebuilt[0] {
+				firstFrame, err = sjson.Set(firstFrame, "conversation", "conv_fixture_expired")
+				require.NoError(t, err)
+			}
+			issue715WSSend(t, h.clientConn, firstFrame)
 			first := issue715WSRead(t, h.clientConn)
 			require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
 			require.Equal(t, "call_plaintext_once", gjson.GetBytes(first, "response.output.0.call_id").String())
@@ -90,6 +97,9 @@ func runPlaintextToolContinuation(t *testing.T, stored bool) {
 			mu.Lock()
 			actual := append([][]byte(nil), frames...)
 			mu.Unlock()
+			if len(rebuilt) > 0 && rebuilt[0] {
+				require.False(t, gjson.GetBytes(actual[0], "conversation").Exists(), "first generation must actually use rebuilt history")
+			}
 			require.Len(t, actual, 2, "exactly one generation per client turn; never replay the executed tool")
 			require.Contains(t, string(actual[1]), "fixture applied once")
 			if mode == service.OpenAIWSIngressModePassthrough || (mode == service.OpenAIWSIngressModeHTTPBridge && stored) {

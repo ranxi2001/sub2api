@@ -55,6 +55,9 @@ type openAIWSAgentRecovery struct {
 	protected                        *openAIAgentRecoveryRequest
 	protectedSource                  [32]byte
 	protectedControls                [32]byte
+	completedResponse                string
+	completedAccount                 int64
+	completedModel                   string
 }
 
 func newOpenAIWSAgentRecovery(s *OpenAIGatewayService, ctx context.Context, c *gin.Context) *openAIWSAgentRecovery {
@@ -115,6 +118,21 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 	r.bridgeSource = nil
 	r.protected = nil
 	initial := openAIAgentRecoveryFromContext(r.ctx)
+	// Rebuilding one generation does not turn every later native delta into
+	// complete replay history. A response actually delivered by this manager
+	// can continue on that same account; begin still verifies its current
+	// authoritative pointer, account admission and actual outgoing bytes.
+	if initial != nil && initial.omittedHistory && account != nil && account.ID == r.completedAccount &&
+		r.completedResponse != "" && gjson.GetBytes(source, "previous_response_id").String() == r.completedResponse &&
+		!gjson.GetBytes(source, "conversation").Exists() && len(openAIAgentRecoveryItemDigests(source)) == 0 {
+		model := gjson.GetBytes(source, "model").String()
+		if model == "" {
+			model = initial.model
+		}
+		if model == r.completedModel {
+			return append([]byte(nil), source...), nil
+		}
+	}
 	if initial == nil || !initial.omittedHistory {
 		clean, err := r.service.PrepareOpenAIAgentReplayBody(source)
 		if err != nil {
@@ -445,6 +463,7 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		}
 		r.finish(completed)
 		if completed {
+			r.completedResponse, r.completedAccount, r.completedModel = responseID, request.delivery.binding.accountID, request.model
 			for _, key := range request.keys {
 				// Opt-out consumption does not publish new input ownership. Only
 				// remember inputs that already had completed records; otherwise a

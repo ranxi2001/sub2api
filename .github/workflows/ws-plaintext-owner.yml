@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/service ./internal/handler -run '^TestOpenAIWS(Plaintext(ResponseOwnershipDelivery|ToolContinuation(WithoutStorage)?)|RecoveryRefusalCapture)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/plaintext-owner.jsonl" 2>&1
+          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/service ./internal/handler -run '^TestOpenAIWS(Plaintext(ResponseOwnershipDelivery|ToolContinuation(WithoutStorage)?|ToolAfterRebuild)|RecoveryRefusalCapture)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/plaintext-owner.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/plaintext-owner.jsonl"
@@ -67,6 +67,7 @@ jobs:
           passes={r['Test'] for r in rows if r.get('Action')=='pass' and '/' in r.get('Test','')}
           expected={f'TestOpenAIWSPlaintextResponseOwnershipDelivery/{x}' for x in ('completed','empty_output','done')}
           expected.update('TestOpenAIWSPlaintextToolContinuation'+suffix+'/'+mode for mode in ('passthrough','http_bridge') for suffix in ('','WithoutStorage'))
+          expected.update('TestOpenAIWSPlaintextToolAfterRebuild/'+mode for mode in ('http_bridge','ctx_pool','shared','dedicated','passthrough'))
           capture=[r for r in rows if r.get('Test')=='TestOpenAIWSRecoveryRefusalCapture']
           if phase=='RED':
               assert status!=0 and failures==expected,(status,failures)
@@ -78,7 +79,7 @@ jobs:
               assert 'RECOVERY_REFUSAL_CAPTURE_MISSING' in ''.join(r.get('Output','') for r in capture)
           else:
               assert status==0 and not failures,(status,failures)
-              assert len(passes)==18,passes
+              assert len(passes)==23,passes
               assert any(r.get('Action')=='pass' for r in capture),capture
           PY
       - name: GREEN stateless projection cannot bypass ownership or content checks
