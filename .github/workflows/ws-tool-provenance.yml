@@ -1,0 +1,84 @@
+name: WS tool provenance F1
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - backend/internal/handler/openai*go
+      - backend/internal/service/openai*go
+      - .github/workflows/ws-tool-provenance.yml
+      - .github/scripts/ws-owner-conflict-evidence.py
+      - .github/scripts/ws-tool-provenance-evidence.py
+      - backend/internal/repository/gateway_cache_tool_provenance.go
+
+permissions:
+  contents: read
+
+jobs:
+  behavior:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      BASELINE: 18aef10f71a6a68372a124f2684ecb18024318bb
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          if ! command -v redis-server >/dev/null; then brew install redis; fi
+      - name: Real handler RED against exact production blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          mkdir -p "$RUNNER_TEMP/ws-provenance-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/ws-provenance-evidence/candidate.txt"
+          git worktree add --detach "$RUNNER_TEMP/ws-provenance-red" "$CANDIDATE"
+          git diff --name-only "$BASELINE" "$CANDIDATE" -- backend | while IFS= read -r target; do
+            case "$target" in
+              *_test.go) continue ;;
+              *.go)
+                if git cat-file -e "$BASELINE:$target" 2>/dev/null; then
+                  git show "$BASELINE:$target" > "$RUNNER_TEMP/ws-provenance-red/$target"
+                  test "$(git hash-object "$RUNNER_TEMP/ws-provenance-red/$target")" = "$(git rev-parse "$BASELINE:$target")"
+                  printf '%s %s\n' "$(git rev-parse "$BASELINE:$target")" "$target" >> "$RUNNER_TEMP/ws-provenance-evidence/baseline-blobs.txt"
+                else
+                  rm -- "$RUNNER_TEMP/ws-provenance-red/$target"
+                fi ;;
+            esac
+          done
+          set +e
+          (cd "$RUNNER_TEMP/ws-provenance-red/backend" && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenance$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-provenance-evidence/red.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-provenance-evidence/red.jsonl"
+          test "$status" -eq 1
+          python3 .github/scripts/ws-tool-provenance-evidence.py RED "$status" "$RUNNER_TEMP/ws-provenance-evidence/red.jsonl"
+      - name: Candidate provenance GREEN
+        if: hashFiles('backend/internal/service/openai_tool_provenance.go') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          set +e
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenance$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl"
+          python3 .github/scripts/ws-tool-provenance-evidence.py GREEN "$status" "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-tool-provenance-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/ws-provenance-evidence
