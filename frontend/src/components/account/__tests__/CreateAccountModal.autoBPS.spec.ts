@@ -82,6 +82,7 @@ function mountModal() {
     props: { show: true, proxies: [], groups: [] },
     global: {
       stubs: {
+        NewFeatureBadge: true,
         BaseDialog: BaseDialogStub,
         OAuthAuthorizationFlow: OAuthAuthorizationFlowStub,
         ConfirmDialog: true,

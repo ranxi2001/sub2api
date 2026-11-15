@@ -22,6 +22,24 @@ func RegisterAuthRoutes(
 	settingService *service.SettingService,
 	panelRateLimiter *servermiddleware.PanelRateLimiter,
 ) {
+	// Keep the callback boundary available and bounded even if bot startup is
+	// unavailable. The nil handler fails closed after enforcing the body limit.
+	bot := h.QQBot
+	if bot == nil {
+		bot = handler.NewQQBotHandler(nil)
+	}
+	v1.POST("/qqbot/webhook", bot.Webhook)
+	if h.QQBot != nil {
+		limits := middleware.NewRateLimiter(redisClient)
+		binding := v1.Group("/qqbot/email-binding")
+		binding.Use(limits.LimitWithOptions("qqbot-email-binding", 20, time.Minute, middleware.RateLimitOptions{FailureMode: middleware.RateLimitFailClose}))
+		binding.POST("/preview", h.QQBot.PreviewEmailBinding)
+		binding.POST("/confirm", h.QQBot.ConfirmEmailBinding)
+		transfer := v1.Group("/qqbot/transfer")
+		transfer.Use(limits.LimitWithOptions("qqbot-transfer", 10, time.Minute, middleware.RateLimitOptions{FailureMode: middleware.RateLimitFailClose}))
+		transfer.POST("/preview", h.QQBot.PreviewTransfer)
+		transfer.POST("/confirm", h.QQBot.ConfirmTransfer)
+	}
 	// 创建速率限制器
 	rateLimiter := middleware.NewRateLimiter(redisClient)
 	// Read once per login request so both layers use the same live DB setting,

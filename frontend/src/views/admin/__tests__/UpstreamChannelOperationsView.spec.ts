@@ -4,6 +4,7 @@ import { readOperations, type OperationsSnapshot } from '@/api/admin/upstreamOpe
 import UpstreamChannelOperationsView from '../UpstreamChannelOperationsView.vue'
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
+vi.mock('@/components/admin/operations/MatureProvidersPanel.vue', () => ({ default: { template: '<section />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/admin/upstreamOperations', () => ({ readOperations: vi.fn() }))
 describe('upstream channel definition', () => {

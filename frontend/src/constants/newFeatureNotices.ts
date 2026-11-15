@@ -4,6 +4,10 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  matureProviders: 'mature-provider-operations-initial-announcement',
+  matureProviderImport: 'mature-provider-account-import-initial-announcement',
+  qqCommunity: 'qq-community-operations-initial-announcement',
+  qqRewardCoupons: 'qq-reward-coupons-initial-announcement',
   moderationUpstreamAccountScope: 'moderation-upstream-account-scope',
   adminUsagePlatform: 'admin-usage-platform-filter-initial-announcement',
   usageTrendRate: 'usage-trend-tooltip-rpm-tpm-initial-announcement',

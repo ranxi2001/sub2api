@@ -39,6 +39,7 @@ func RegisterAdminRoutes(
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	// 受限密钥的账户操作走独立资源校验，普通管理员保持原处理器。
 	admin.Use(h.Admin.Account.ScopedAdminKeyAccounts)
+	registerQQBotAdminRoutes(admin, h)
 	if h.Lottery != nil {
 		lottery := admin.Group("/lottery")
 		lottery.GET("/settings", h.Lottery.Settings)
@@ -1078,8 +1079,19 @@ func registerPluginRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAut
 }
 
 func registerChannelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	admin.GET("/providers", h.Admin.Channel.ListMatureProviders)
+	admin.GET("/providers/options", h.Admin.Channel.MatureProviderOptions)
+	admin.POST("/providers", h.Admin.Channel.MutateMatureProvider)
+	admin.GET("/providers/:id", h.Admin.Channel.GetMatureProvider)
+	admin.PUT("/providers/:id", h.Admin.Channel.MutateMatureProvider)
+	admin.DELETE("/providers/:id", h.Admin.Channel.MutateMatureProvider)
+	admin.POST("/providers/:id/refresh", h.Admin.Channel.RefreshMatureProvider)
+	admin.GET("/providers/:id/keys", h.Admin.Channel.MatureProviderKeys)
+	admin.GET("/providers/:id/groups", h.Admin.Channel.MatureProviderGroups)
+	admin.POST("/providers/:id/keys", h.Admin.Channel.CreateMatureProviderKey)
 	if h.Admin.Account != nil && h.Admin.Channel != nil {
 		h.Admin.Account.SetUpstreamChannelService(h.Admin.Channel.UpstreamChannelService())
+		h.Admin.Account.SetMatureProviderCatalog(h.Admin.Channel)
 	}
 	admin.GET("/upstream-channels", h.Admin.Channel.ListUpstreamChannels)
 	admin.POST("/upstream-channels", h.Admin.Channel.MutateUpstreamChannel)

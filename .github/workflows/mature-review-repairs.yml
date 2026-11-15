@@ -1,0 +1,592 @@
+name: Mature operations independent review repairs
+on:
+  push:
+    branches: [feat/mature-channel-community-ops]
+permissions:
+  contents: read
+jobs:
+  f1:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [red, green]
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Bind exact candidate tests and production blobs
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repair-f1"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/repair-f1/candidate.txt"
+          sha256sum backend/internal/qqbot/repair_f1_submission_test.go > "$RUNNER_TEMP/repair-f1/test-sha256.txt"
+          baseline=b98e6acb2dc772651b6a597d40cce311f96a2ba5
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for name in site_chat_retry.go site_chat.go client.go config.go service.go types.go price_notifications.go; do
+            path="backend/internal/qqbot/$name"
+            if [ "$PHASE" = red ]; then
+              git show "$baseline:$path" > "$path"
+              test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            fi
+            git hash-object "$path" >> "$RUNNER_TEMP/repair-f1/production-blobs.txt"
+          done
+      - name: Real generation POST submission oracle
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test ./internal/qqbot -run '^TestRepairF1' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/repair-f1/test.jsonl" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/repair-f1/exit-code.txt"
+          cat "$RUNNER_TEMP/repair-f1/test.jsonl"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'repair-f1'
+          raw = (p / 'test.jsonl').read_text()
+          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          outcomes = {e['Test']: e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass', 'fail', 'skip')}
+          cases = ['TestRepairF1SubmittedGenerationIsNotReplayed/' + protocol + '/' + failure for protocol in ('chat_completions', 'responses') for failure in ('headers_timeout', 'attempt_deadline', 'eof', 'truncated_body')]
+          assert not any(e['Action'] == 'skip' for e in events), 'No skipped evidence'
+          assert all(s not in raw.lower() for s in ('build failed', 'no tests to run', 'undefined:', 'panic:')), 'Invalid RED fixture/build'
+          assert outcomes.get('TestRepairF1DefinitelyUnsubmittedDialCanRetry') == 'pass', 'Safe unsubmitted control must pass'
+          if os.environ['PHASE'] == 'red':
+              assert int((p / 'exit-code.txt').read_text()) != 0
+              assert all(outcomes.get(case) == 'fail' for case in cases), outcomes
+              assert raw.count('F1 accepted generation POST must not be replayed after uncertain response') >= 8
+          else:
+              assert int((p / 'exit-code.txt').read_text()) == 0
+              assert all(outcomes.get(case) == 'pass' for case in cases), outcomes
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-f1-${{ matrix.phase }}-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-f1/
+
+  f2:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [red, green]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: repair
+          POSTGRES_PASSWORD: synthetic-fixture-only
+          POSTGRES_DB: repair
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U repair"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      COUPON_TEST_DSN: postgres://repair:synthetic-fixture-only@127.0.0.1:5432/repair?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Bind F2 tests and pre-fix production blobs
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repair-f2"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/repair-f2/candidate.txt"
+          sha256sum backend/internal/service/repair_f2_coupon_recovery_test.go > "$RUNNER_TEMP/repair-f2/test-sha256.txt"
+          baseline=b98e6acb2dc772651b6a597d40cce311f96a2ba5
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for name in payment_fulfillment.go payment_coupons.go payment_easypay_recovery.go payment_order_lifecycle.go; do
+            path="backend/internal/service/$name"
+            if [ "$PHASE" = red ]; then
+              git show "$baseline:$path" > "$path"
+              test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            fi
+            git hash-object "$path" >> "$RUNNER_TEMP/repair-f2/production-blobs.txt"
+          done
+          if [ "$PHASE" = red ]; then
+            target=backend/internal/handler/admin/payment_handler.go
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+            git hash-object "$target" >> "$RUNNER_TEMP/repair-f2/production-blobs.txt"
+          fi
+      - name: PostgreSQL payment recovery oracle
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -tags=unit ./internal/service -run '^TestRepairF2' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/repair-f2/test.jsonl" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/repair-f2/exit-code.txt"
+          cat "$RUNNER_TEMP/repair-f2/test.jsonl"
+          python3 - <<'PYORACLE'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'repair-f2'
+          raw = (p / 'test.jsonl').read_text()
+          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          outcomes = {e['Test']: e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass', 'fail', 'skip')}
+          rejected = ['TestRepairF2BackgroundPaymentCannotReverseCancellation/' + actor + '/coupon_true' for actor in ('user', 'admin')]
+          controls = ['TestRepairF2BackgroundPaymentCannotReverseCancellation/' + actor + '/coupon_false' for actor in ('user', 'admin')]
+          for provider in ('alipay', 'bepusdt', 'easypay'):
+              root = 'TestRepairF2ProviderRecoveryWindowsApplyToCoupons/' + provider
+              rejected.append(root + '/outside_true/coupon_true')
+              controls.append(root + '/outside_true/coupon_false')
+              controls.extend(root + '/outside_false/coupon_' + value for value in ('false', 'true'))
+          assert not any(e['Action'] == 'skip' for e in events), 'No skipped database evidence'
+          assert all(s not in raw.lower() for s in ('build failed', 'no tests to run', 'undefined:', 'panic:')), 'Invalid RED fixture/build'
+          assert all(outcomes.get(case) == 'pass' for case in controls), outcomes
+          if os.environ['PHASE'] == 'red':
+              assert int((p / 'exit-code.txt').read_text()) != 0
+              assert all(outcomes.get(case) == 'fail' for case in rejected), outcomes
+              assert raw.count('F2 background paid response must not reverse committed cancellation') >= 2
+              assert raw.count('F2 coupon must preserve the canonical provider recovery deadline') >= 3
+          else:
+              assert int((p / 'exit-code.txt').read_text()) == 0
+              assert all(outcomes.get(case) == 'pass' for case in rejected), outcomes
+          PYORACLE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-f2-${{ matrix.phase }}-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-f2/
+  f3:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [red, green]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: repair
+          POSTGRES_PASSWORD: synthetic-fixture-only
+          POSTGRES_DB: repair
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U repair"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      QQBOT_TEST_DSN: postgres://repair:synthetic-fixture-only@127.0.0.1:5432/repair?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Bind F3 tests and pre-fix production blobs
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repair-f3"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/repair-f3/candidate.txt"
+          sha256sum backend/internal/qqbot/repair_f3_delivery_integration_test.go > "$RUNNER_TEMP/repair-f3/test-sha256.txt"
+          baseline=b98e6acb2dc772651b6a597d40cce311f96a2ba5
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for name in client.go config.go service.go types.go price_notifications.go site_chat_retry.go site_chat.go; do
+            path="backend/internal/qqbot/$name"
+            if [ "$PHASE" = red ]; then
+              git show "$baseline:$path" > "$path"
+              test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            fi
+            git hash-object "$path" >> "$RUNNER_TEMP/repair-f3/production-blobs.txt"
+          done
+      - name: Running model and final QQ send authorization oracle
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -tags=integration ./internal/qqbot -run '^TestRepairF3' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/repair-f3/test.jsonl" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/repair-f3/exit-code.txt"
+          cat "$RUNNER_TEMP/repair-f3/test.jsonl"
+          python3 - <<'PYORACLE'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'repair-f3'
+          raw = (p / 'test.jsonl').read_text()
+          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          outcomes = {e['Test']: e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass', 'fail', 'skip')}
+          cases = ['TestRepairF3RunningGenerationCannotSendAfterRevocation/' + kind + '/' + change for kind in ('text', 'image') for change in ('disabled', 'removed_group', 'appid', 'credential', 'model_credential')]
+          cases.append('TestRepairF3ConfigSaveOrdersWithFinalHTTPBoundary')
+          assert not any(e['Action'] == 'skip' for e in events), 'No skipped database evidence'
+          assert all(s not in raw.lower() for s in ('build failed', 'no tests to run', 'undefined:', 'panic:')), 'Invalid RED fixture/build'
+          if os.environ['PHASE'] == 'red':
+              assert int((p / 'exit-code.txt').read_text()) != 0
+              assert all(outcomes.get(case) == 'fail' for case in cases), outcomes
+              assert raw.count('F3 committed revocation must prevent a new QQ messages request') >= 10
+              assert 'F3 configuration committed while the final send authorization lock was absent' in raw
+          else:
+              assert int((p / 'exit-code.txt').read_text()) == 0
+              assert all(outcomes.get(case) == 'pass' for case in cases), outcomes
+              assert 'R2 observed config backend' in raw
+          PYORACLE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-f3-${{ matrix.phase }}-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-f3/
+
+  manual-review-ui:
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}' }
+      - uses: pnpm/action-setup@v6
+        with: { version: 9 }
+      - uses: actions/setup-node@v6
+        with: { node-version: '22' }
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Isolated browser and frozen page before evidence
+        run: |
+          git fetch --no-tags --depth=1 origin b98e6acb2dc772651b6a597d40cce311f96a2ba5
+          npm install --prefix "$RUNNER_TEMP/repair-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/repair-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          EVIDENCE_DIR="$RUNNER_TEMP/repair-ui/before" REPAIR_CAPTURE_MODE=before SUB2API_PLAYWRIGHT_MODULE="$RUNNER_TEMP/repair-browser/node_modules/playwright/index.mjs" node .github/scripts/mature-repair-order-review.mjs
+      - name: RED actual order page has no approval for paid recovery holds
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repair-ui"
+          target=frontend/src/views/admin/orders/AdminOrdersView.vue
+          cp "$target" "$RUNNER_TEMP/repair-ui-current.vue"
+          trap 'cp "$RUNNER_TEMP/repair-ui-current.vue" "$target"' EXIT
+          git fetch --no-tags --depth=1 origin b98e6acb2dc772651b6a597d40cce311f96a2ba5
+          git show b98e6acb2dc772651b6a597d40cce311f96a2ba5:"$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse b98e6acb2dc772651b6a597d40cce311f96a2ba5:"$target")"
+          set +e
+          (cd frontend && pnpm exec vitest run src/views/admin/orders/__tests__/AdminOrdersView.recoveryReview.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism) > "$RUNNER_TEMP/repair-ui/red.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/repair-ui/red.log"
+          test "$result" -ne 0
+          ! grep -Eiq 'Failed to resolve|Cannot find module|No test files found|Unhandled Error' "$RUNNER_TEMP/repair-ui/red.log"
+          grep -q 'F2 manual reconciliation must expose approval for a paid recovery hold' "$RUNNER_TEMP/repair-ui/red.log"
+      - name: GREEN explicit approval and decline behavior
+        run: |
+          set -o pipefail
+          test -z "$(git status --porcelain)"
+          (cd frontend && pnpm exec vitest run src/views/admin/orders/__tests__/AdminOrdersView.recoveryReview.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism) 2>&1 | tee "$RUNNER_TEMP/repair-ui/green.log"
+      - name: Actual repaired order review before and after
+        run: |
+          EVIDENCE_DIR="$RUNNER_TEMP/repair-ui/comparison" SUB2API_PLAYWRIGHT_MODULE="$RUNNER_TEMP/repair-browser/node_modules/playwright/index.mjs" node .github/scripts/mature-repair-order-review.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-manual-ui-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-ui/
+  upgrade:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: repair
+          POSTGRES_PASSWORD: synthetic-fixture-only
+          POSTGRES_DB: repair
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U repair"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MATURE_UPGRADE_DSN: postgres://repair:synthetic-fixture-only@127.0.0.1:5432/repair?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Pin merged production migrations and runner identity
+        run: |
+          set -euo pipefail
+          base=e90811e27bc442763a496027f935a7bb1fb4396b
+          git fetch --no-tags --depth=1 origin "$base"
+          git merge-base --is-ancestor "$base" HEAD
+          test "$(git rev-parse HEAD:backend/internal/repository/migrations_runner.go)" = "$(git rev-parse "$base:backend/internal/repository/migrations_runner.go")"
+          mkdir -p "$RUNNER_TEMP/repair-upgrade/source" "$RUNNER_TEMP/repair-upgrade/evidence"
+          git archive "$base" backend/migrations | tar -x -C "$RUNNER_TEMP/repair-upgrade/source"
+          git rev-parse HEAD "$base" > "$RUNNER_TEMP/repair-upgrade/evidence/identity.txt"
+      - name: Fresh upgrade mixed-version and application rollback compatibility
+        run: |
+          set -euo pipefail
+          export MATURE_PRODUCTION_MIGRATIONS="$RUNNER_TEMP/repair-upgrade/source/backend/migrations"
+          (cd backend && go test ./internal/repository -run '^TestRepairMatureProductionUpgradeAndRollbackBoundary$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/repair-upgrade/evidence/test.jsonl" 2>&1
+          cat "$RUNNER_TEMP/repair-upgrade/evidence/test.jsonl"
+          python3 - <<'PYORACLE'
+          import json, os
+          from pathlib import Path
+          rows=[json.loads(s) for s in (Path(os.environ['RUNNER_TEMP'])/'repair-upgrade/evidence/test.jsonl').read_text().splitlines() if s.startswith('{')]
+          outcomes={r['Test']:r['Action'] for r in rows if r.get('Test') and r['Action'] in ('pass','fail','skip')}
+          assert all(outcomes.get('TestRepairMatureProductionUpgradeAndRollbackBoundary/fresh_'+v)=='pass' for v in ('false','true')),outcomes
+          assert not any(r['Action']=='skip' for r in rows)
+          PYORACLE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-upgrade-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-upgrade/evidence/
+  r3:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [red, green]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: repair
+          POSTGRES_PASSWORD: synthetic-fixture-only
+          POSTGRES_DB: repair
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U repair"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      QQBOT_TEST_DSN: postgres://repair:synthetic-fixture-only@127.0.0.1:5432/repair?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Bind R3 moderation tests and pre-fix production blob
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repair-r3"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/repair-r3/candidate.txt"
+          sha256sum backend/internal/qqbot/repair_r3_moderation_integration_test.go backend/internal/qqbot/repair_f3_delivery_integration_test.go > "$RUNNER_TEMP/repair-r3/test-sha256.txt"
+          baseline=00b48f2757ffb684acdcc96b0cea16ea24a2a353
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for name in moderation.go; do
+            path="backend/internal/qqbot/$name"
+            if [ "$PHASE" = red ]; then
+              git show "$baseline:$path" > "$path"
+              test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            fi
+            git hash-object "$path" >> "$RUNNER_TEMP/repair-r3/production-blobs.txt"
+          done
+      - name: Running model and final QQ send authorization oracle
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -tags=integration ./internal/qqbot -run '^TestRepairR3' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/repair-r3/test.jsonl" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/repair-r3/exit-code.txt"
+          cat "$RUNNER_TEMP/repair-r3/test.jsonl"
+          python3 - <<'PYORACLE'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'repair-r3'
+          raw = (p / 'test.jsonl').read_text()
+          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          outcomes = {e['Test']: e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass', 'fail', 'skip')}
+          cases = ['TestRepairR3ModerationRevocationAfterTokenWait/' + kind + '/' + change for kind in ('mute', 'recall') for change in ('disabled', 'removed_group', 'appid', 'credential')]
+          ordering = ['TestRepairR3ModerationDispatchHoldsConfigFence/' + kind for kind in ('mute', 'recall')]
+          controls = ['TestRepairR3ModerationRevocationAfterTokenWait/' + kind + '/unchanged' for kind in ('mute', 'recall')]
+          assert not any(e['Action'] == 'skip' for e in events), 'No skipped database evidence'
+          assert all(s not in raw.lower() for s in ('build failed', 'no tests to run', 'undefined:', 'panic:')), 'Invalid RED fixture/build'
+          assert all(outcomes.get(case) == 'pass' for case in controls), outcomes
+          if os.environ['PHASE'] == 'red':
+              assert int((p / 'exit-code.txt').read_text()) != 0
+              assert all(outcomes.get(case) == 'fail' for case in cases+ordering), outcomes
+              assert raw.count('R3 committed revocation must prevent old moderation HTTP operation') >= 8
+              assert raw.count('F3 configuration committed while the final send authorization lock was absent') >= 2
+          else:
+              assert int((p / 'exit-code.txt').read_text()) == 0
+              assert all(outcomes.get(case) == 'pass' for case in cases+ordering), outcomes
+              assert raw.count('R2 observed config backend') >= 2
+          PYORACLE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-r3-${{ matrix.phase }}-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-r3/
+
+  r1-handler:
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [red, green]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: repair
+          POSTGRES_PASSWORD: synthetic-fixture-only
+          POSTGRES_DB: repair
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U repair"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      COUPON_TEST_DSN: postgres://repair:synthetic-fixture-only@127.0.0.1:5432/repair?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+          cache: false
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mature-repair-go-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-candidate-
+            mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+      - name: Bind R1 handler tests and pre-confirmation production blob
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/repair-r1-handler"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/repair-r1-handler/candidate.txt"
+          sha256sum backend/internal/server/routes/repair_r1_payment_review_test.go > "$RUNNER_TEMP/repair-r1-handler/test-sha256.txt"
+          baseline=00b48f2757ffb684acdcc96b0cea16ea24a2a353
+          git fetch --no-tags --depth=1 origin "$baseline"
+          for name in payment_handler.go; do
+            path="backend/internal/handler/admin/$name"
+            if [ "$PHASE" = red ]; then
+              git show "$baseline:$path" > "$path"
+              test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            fi
+            git hash-object "$path" >> "$RUNNER_TEMP/repair-r1-handler/production-blobs.txt"
+          done
+      - name: PostgreSQL payment recovery oracle
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -tags=integration ./internal/server/routes -run '^TestRepairR1' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/repair-r1-handler/test.jsonl" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$RUNNER_TEMP/repair-r1-handler/exit-code.txt"
+          cat "$RUNNER_TEMP/repair-r1-handler/test.jsonl"
+          python3 - <<'PYORACLE'
+          import json, os
+          from pathlib import Path
+          p = Path(os.environ['RUNNER_TEMP']) / 'repair-r1-handler'
+          raw = (p / 'test.jsonl').read_text()
+          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          outcomes = {e['Test']: e['Action'] for e in events if e.get('Test') and e['Action'] in ('pass', 'fail', 'skip')}
+          cases = ['TestRepairR1CouponHoldRequiresAuthorizedExplicitApproval/' + status for status in ('CANCELLED', 'EXPIRED')]
+          assert not any(e['Action'] == 'skip' for e in events), 'No skipped database evidence'
+          assert all(s not in raw.lower() for s in ('build failed', 'no tests to run', 'undefined:', 'panic:')), 'Invalid RED fixture/build'
+          if os.environ['PHASE'] == 'red':
+              assert int((p / 'exit-code.txt').read_text()) != 0
+              assert all(outcomes.get(case) == 'fail' for case in cases), outcomes
+              assert raw.count('R1 paid coupon hold must not fulfill without explicit handler confirmation') >= 2
+          else:
+              assert int((p / 'exit-code.txt').read_text()) == 0
+              assert all(outcomes.get(case) == 'pass' for case in cases), outcomes
+          PYORACLE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: repair-r1-handler-${{ matrix.phase }}-${{ github.sha }}
+          path: ${{ runner.temp }}/repair-r1-handler/
