@@ -28,7 +28,7 @@ try {
  server=await createServer({root,configFile:false,cacheDir,resolve:{alias:{'@':join(root,'src')}},plugins:[{name:'prmerge-preview',enforce:'pre',load(id){
   const clean=id.split('?')[0];
   if(mode==='sidebar' && (clean==='@/stores/auth' || clean===join(root,'src/stores/auth.ts')))return 'export const useAuthStore=()=>({user:{id:99999},isAdmin:true})';
-  if(before && !id.includes('?') && [join(root,'src/views/admin/AccountsView.vue'),join(root,'src/i18n/locales/zh/admin/accounts.ts')].includes(clean))return git('show',before+':'+clean.slice(repo.length+1));
+  if(before && !id.includes('?') && [join(root,'src/views/admin/AccountsView.vue'),join(root,'src/i18n/locales/zh/admin/accounts.ts'),join(root,'src/components/settings/SmartOpsSidebarSettings.vue'),join(root,'src/constants/smartOpsMenu.ts')].includes(clean))return git('show',before+':'+clean.slice(repo.length+1));
  },configureServer(s){s.middlewares.use((r,res,next)=>{if(r.url==='/'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/'+entryName+'"></script></html>')}else if(r.url==='/favicon.ico'){res.statusCode=204;res.end()}else next()})}},vue()],server:{host:'127.0.0.1',port:4298,strictPort:true,fs:{allow:[root,deps]}},optimizeDeps:{entries:[],include:['vue','pinia','vue-i18n','vue-router','axios','@vue/test-utils','marked','dompurify']}});
  await server.listen();
  browser=process.env.CDP_ENDPOINT ? await chromium.connectOverCDP(process.env.CDP_ENDPOINT) : await chromium.launch({headless:true});
