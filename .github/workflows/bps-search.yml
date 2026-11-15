@@ -1,0 +1,68 @@
+name: BPS search protocol and settings
+on:
+  pull_request:
+    paths:
+      - backend/internal/service/basispoints/web_search*
+      - backend/internal/service/openai_excel_bps_search*
+      - backend/internal/service/bps_search_settings_test.go
+      - frontend/src/components/account/ExcelBPSSearchOptions.vue
+      - frontend/src/components/account/__tests__/ExcelBPSSearchOptions.spec.ts
+      - frontend/src/utils/excelBPSDefaults.ts
+      - .github/scripts/bps-search-preview.mjs
+      - .github/workflows/bps-search.yml
+permissions:
+  contents: read
+jobs:
+  search-protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - working-directory: backend
+        run: go test -race ./internal/service/basispoints -run 'Test(WebSearch|AlphaSearch|ToolChoice|CurrentEncrypted|CompactionPolicy)' -count=1 -v
+      - working-directory: backend
+        run: go test -race -tags=unit ./internal/service -run 'Test(ExcelBPSAccountSearch|ExcelBPSSearch|BPSSearchDefaults)' -count=1 -v -timeout=10m
+      - working-directory: backend
+        run: go test -tags=integration ./internal/repository -run '^TestQuality(BPSSnapshotEqualDefaultsAndManualChanges|EnableBPSRestoreAfterAccountEditorSave|BPSSearchRestorePreservesManualChanges)$' -count=1 -v -timeout=10m
+  search-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vitest run src/components/account/__tests__/ExcelBPSSearchOptions.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/views/admin/__tests__/AutoConfigView.spec.ts src/composables/__tests__/useExcelBPSDefaults.spec.ts src/utils/__tests__/qualityRulePatch.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts
+      - run: pnpm --dir frontend typecheck
+      - name: Install isolated screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/bps-search-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/bps-search-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Fetch immutable before UI
+        run: git fetch --no-tags --depth=1 origin 713cb0f3efe3f838d159cd57998128c2cdaa84b1
+      - name: Render actual BPS search settings
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/bps-search-browser/node_modules/playwright/index.mjs
+        run: |
+          node .github/scripts/bps-search-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/bps-search-evidence/before" 713cb0f3efe3f838d159cd57998128c2cdaa84b1
+          node .github/scripts/bps-search-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/bps-search-evidence/after"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bps-search-evidence-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/bps-search-evidence
+          retention-days: 30

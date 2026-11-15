@@ -13,6 +13,8 @@ type ExcelBPSDefaults struct {
 	AllModels               bool     `json:"all_models"`
 	Models                  []string `json:"models"`
 	OmitUnsupportedTools    bool     `json:"omit_unsupported_tools"`
+	WebSearch               bool     `json:"web_search"`
+	WebSearchAuto           bool     `json:"web_search_auto"`
 	IgnoreEncryptedContent  bool     `json:"ignore_encrypted_content"`
 	AutoDisableOn403        bool     `json:"auto_disable_on_403"`
 	AutoRecoverOn403        bool     `json:"auto_recover_on_403"`
@@ -63,6 +65,8 @@ func validateExcelBPSDefaults(b ExcelBPSDefaults) error {
 
 func (b ExcelBPSDefaults) extra() map[string]any {
 	extra := map[string]any{
+		ExcelBPSWebSearchKey:                        b.WebSearch,
+		ExcelBPSWebSearchAutoKey:                    b.WebSearch && b.WebSearchAuto,
 		"openai_excel_bps":                          true,
 		"openai_excel_bps_omit_unsupported_tools":   b.OmitUnsupportedTools,
 		"openai_excel_bps_ignore_encrypted_content": b.IgnoreEncryptedContent,

@@ -2770,6 +2770,8 @@ export interface QualityBPSPolicy {
   models: string[]
   omit_unsupported_tools: boolean
   ignore_encrypted_content: boolean
+  web_search?: boolean
+  web_search_auto?: boolean
   auto_disable_on_403: boolean
   auto_recover_on_403?: boolean
   recovery_interval_minutes?: number

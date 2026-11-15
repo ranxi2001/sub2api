@@ -24,6 +24,7 @@
           </label>
         </div>
       </div>
+      <ExcelBPSSearchOptions v-model:enabled="draft.web_search" v-model:automatic="draft.web_search_auto" />
       <details class="group rounded-xl border border-gray-200 dark:border-dark-700" data-testid="bps-advanced">
         <summary class="cursor-pointer px-4 py-3 text-sm font-medium">{{ t('autoConfig.bps.advanced') }}<span class="ml-2 text-xs font-normal text-gray-500">{{ t('autoConfig.bps.advancedHint') }}</span></summary>
         <div class="grid gap-5 border-t border-gray-100 p-4 md:grid-cols-2 dark:border-dark-700">
@@ -49,6 +50,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ExcelBPSSearchOptions from '@/components/account/ExcelBPSSearchOptions.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import { defaultExcelBPSDefaults, type ExcelBPSDefaults } from '@/utils/excelBPSDefaults'
 import { MAX_BPS_RECOVERY_INTERVAL_MINUTES } from '@/utils/excelBPSRecovery'
