@@ -6,7 +6,7 @@ func OpenAIRecoverySubreason(value string) string { return safeOpenAIRecoverySub
 
 func safeOpenAIRecoverySubreason(value string) string {
 	switch value {
-	case "mixed_completed_owners", "owner_record_conflicted", "owner_record_pending", "owner_record_failed",
+	case "tool_provenance_unknown", "tool_provenance_unavailable", "tool_provenance_changed", "tool_provenance_task_changed", "mixed_completed_owners", "owner_record_conflicted", "owner_record_pending", "owner_record_failed",
 		"owner_delivery_unknown", "owner_route_changed", "owner_record_changed", "owner_lookup_unavailable",
 		"tool_invalid", "tool_incomplete", "tool_duplicate", "tool_unpaired", "tool_history_unsupported",
 		"shadow_record_changed", "shadow_epoch_changed", "shadow_fence_changed", "shadow_fence_invalid",

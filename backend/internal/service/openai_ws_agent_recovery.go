@@ -296,6 +296,12 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		// check refuses the send. The initial warmup context cannot replace it.
 		r.preventReplay()
 	}
+	if r.request.lookupErr != nil {
+		return r.request.lookupErr
+	}
+	if r.request.conflict {
+		return openAIRecoveryDiagnosticError("owner_conflict", r.request.diagnostics.subreason, r.request)
+	}
 	for _, key := range r.request.keys {
 		if r.known[key] && !r.request.known[key] {
 			return &openAIWSLostOwnerEvidenceError{cause: openAIAgentRecoveryError("owner_unavailable")}

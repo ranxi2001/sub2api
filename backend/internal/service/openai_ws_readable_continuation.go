@@ -269,6 +269,9 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 				return ctx, body, false, openAIAgentRecoveryError("readable_history_unsupported")
 			}
 		}
+		if err := s.verifyOpenAIToolInputs(next, r, body); err != nil {
+			return ctx, body, false, err
+		}
 		clean, err := prepareOpenAI409ReadableReplay(body)
 		if err != nil {
 			return ctx, body, false, openAIAgentRecoveryError("readable_history_unsupported")

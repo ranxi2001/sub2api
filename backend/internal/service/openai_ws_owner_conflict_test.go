@@ -20,14 +20,31 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
+// Calls are learned only from the real response observer and successful write
+// completion; the client input below cannot populate the proof store.
+func learnF1DeliveredCalls(t *testing.T, svc *OpenAIGatewayService, account *Account, opaque, call string) {
+	t.Helper()
+	manager, c, _ := issue715WSManager(t, svc, context.Background())
+	SetOpenAIWSRecoveryPrincipal(c, 715, 715)
+	defer manager.abort()
+	source := `{"model":"gpt-6-astra","input":[{"role":"user","content":"fixture trusted task"}]}`
+	require.NoError(t, issue715WSBegin(t, manager, account, source, "ctx_pool"))
+	terminal := `{"type":"response.completed","response":{"id":"resp_fixture_tool_` + gjson.Parse(call).Get("call_id").String() + `","status":"completed","output":[` + gjson.Get(opaque, "input.0").Raw + `,` + call + `]}}`
+	require.NoError(t, manager.write([]byte(terminal), func() error { return nil }))
+	key := manager.request.toolKey(gjson.Parse(call).Get("call_id").String())
+	raw, err := svc.toolProofGet(context.Background(), key)
+	require.NoError(t, err)
+	require.True(t, json.Valid([]byte(raw)), "only completed downstream delivery commits a call proof")
+}
+
 func TestOpenAIWSMixedOwnerFinalSendFences(t *testing.T) {
-	for _, mutation := range []string{"none", "pending", "failed", "conflicted", "missing", "changed", "input", "tools"} {
+	for _, mutation := range []string{"none", "pending", "failed", "conflicted", "missing", "changed", "input", "tools", "call_proof"} {
 		t.Run(mutation, func(t *testing.T) {
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
 			a, b := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 			other := strings.ReplaceAll(issue715OpaqueBody, "fixture-opaque-reference", "fixture-other-owner")
-			issue715LearnRoute(t, svc, a, issue715OpaqueBody)
-			issue715LearnRoute(t, svc, b, other)
+			learnF1DeliveredCalls(t, svc, a, issue715OpaqueBody, `{"type":"function_call","name":"apply_patch","call_id":"fixture-first","arguments":"{}"}`)
+			learnF1DeliveredCalls(t, svc, b, other, `{"type":"custom_tool_call","name":"exec","call_id":"fixture-second","input":"fixture command"}`)
 			body := []byte(`{"model":"gpt-6-astra","tools":[{"type":"function","name":"inspect","parameters":{"type":"object","properties":{}}}],"input":[{"role":"user","content":"continue the supplied task"},` + gjson.Get(issue715OpaqueBody, "input.0").Raw + `,` + gjson.Get(other, "input.0").Raw + `,
 			{"type":"function_call","name":"apply_patch","call_id":"fixture-first","arguments":"{}"},
 			{"type":"function_call_output","call_id":"fixture-first","output":"fixture patch completed once"},
@@ -35,6 +52,7 @@ func TestOpenAIWSMixedOwnerFinalSendFences(t *testing.T) {
 			{"type":"custom_tool_call_output","call_id":"fixture-second","output":"fixture command completed once"}]}`)
 			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
 			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+			SetOpenAIWSRecoveryPrincipal(c, 715, 715)
 			ctx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", "gpt-6-astra")
 			next, clean, changed, err := svc.RebuildOpenAIWSUnsentTurn(ctx, c, body, "fixture-session", "gpt-6-astra")
 			require.NoError(t, err)
@@ -63,6 +81,11 @@ func TestOpenAIWSMixedOwnerFinalSendFences(t *testing.T) {
 				clean, err = sjson.SetBytes(clean, "input.0.content", "fixture mutated input")
 			case "tools":
 				clean, err = sjson.SetBytes(clean, "tools.0.name", "fixture changed schema")
+			case "call_proof":
+				for proofKey, record := range svc.agentMessageRecovery.toolProofs {
+					record.raw = "conflict"
+					svc.agentMessageRecovery.toolProofs[proofKey] = record
+				}
 			}
 			require.NoError(t, err)
 			svc.agentMessageRecovery.bindings[key] = binding

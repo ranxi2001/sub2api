@@ -72,11 +72,33 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
           git diff --exit-code
           set +e
+          (cd backend && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenance$' -count=1 -json -timeout=3m) > "$RUNNER_TEMP/ws-provenance-evidence/first-green.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-provenance-evidence/first-green.jsonl"
+          python3 .github/scripts/ws-tool-provenance-evidence.py GREEN "$status" "$RUNNER_TEMP/ws-provenance-evidence/first-green.jsonl"
+          set +e
           (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenance$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl" 2>&1
           status=$?
           set -e
           cat "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl"
           python3 .github/scripts/ws-tool-provenance-evidence.py GREEN "$status" "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl"
+      - name: Genuine delivery, mutations and task association
+        if: hashFiles('backend/internal/service/openai_tool_provenance.go') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenanceCases$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/cases.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-provenance-evidence/cases.jsonl"
+          python3 - "$RUNNER_TEMP/ws-provenance-evidence/cases.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          for kind in ('function','custom'):
+              for case in ('valid','id','type','name','args','epoch','unrelated','undelivered'):
+                  name=f'TestOpenAIWSMixedOwnerToolProvenanceCases/{kind}/{case}'
+                  assert sum(r.get('Action')=='pass' and r.get('Test')==name for r in rows)==1,name
+          assert not any(r.get('Action') in ('fail','skip') for r in rows)
+          PY
       - uses: actions/upload-artifact@v7
         if: always()
         with:

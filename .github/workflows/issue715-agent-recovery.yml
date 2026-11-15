@@ -102,7 +102,7 @@ jobs:
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go backend/internal/service/openai_ws_search_activation.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go)
           # The exact original gateway struct predates analysis admission state.
-          added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_recovery_diagnostics.go)
+          added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_recovery_diagnostics.go backend/internal/service/openai_tool_provenance.go backend/internal/repository/gateway_cache_tool_provenance.go)
           handler_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
           handler_leaf=backend/internal/handler/openai_agent_message_recovery.go
           error_leaf=backend/internal/service/openai_agent_message_recovery_error.go
@@ -273,7 +273,7 @@ jobs:
           ws_targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           # Neither helper exists on the restored historical socket structure.
           ws_added=(backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_search_activation.go)
-          ws_added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_recovery_diagnostics.go)
+          ws_added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_recovery_diagnostics.go backend/internal/service/openai_tool_provenance.go backend/internal/repository/gateway_cache_tool_provenance.go)
           handler_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
           handler_leaf=backend/internal/handler/openai_agent_message_recovery.go
           error_leaf=backend/internal/service/openai_agent_message_recovery_error.go

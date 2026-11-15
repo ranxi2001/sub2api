@@ -12,6 +12,9 @@ fi
 
 for target in \
   backend/internal/service/openai_409_omit_history.go \
+  backend/internal/service/openai_tool_provenance.go \
+  backend/internal/repository/gateway_cache_tool_provenance.go \
+  backend/internal/service/openai_agent_message_delivery.go \
   backend/internal/service/openai_ws_readable_continuation.go \
   backend/internal/service/openai_409_readable_shadow.go \
   backend/internal/service/openai_agent_message_recovery_error.go \

@@ -65,11 +65,14 @@ func TestOpenAIWSMixedOwnerToolProvenance(t *testing.T) {
 
 func TestOpenAIWSMixedOwnerToolProvenanceCases(t *testing.T) {
 	for _, kind := range []string{"function", "custom"} {
-		for _, change := range []string{"valid", "id", "type", "name", "args", "epoch"} {
+		for _, change := range []string{"valid", "id", "type", "name", "args", "epoch", "unrelated", "undelivered"} {
 			t.Run(kind+"/"+change, func(t *testing.T) {
 				turn := 2
 				if change == "valid" {
 					turn = 53
+				}
+				if change == "unrelated" || change == "undelivered" {
+					turn = 3
 				}
 				runWSMixedOwnerContinuation(t, service.OpenAIWSIngressModeCtxPool, turn, "f1_"+kind+"_"+change)
 			})
@@ -86,6 +89,14 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	provenance := strings.HasPrefix(scenario, "f1_")
 	customProvenance := strings.HasPrefix(scenario, "f1_custom_")
 	provenancePositive := provenance && strings.HasSuffix(scenario, "_valid")
+	unrelatedCall := provenance && strings.HasSuffix(scenario, "_unrelated")
+	undeliveredCall := provenance && strings.HasSuffix(scenario, "_undelivered")
+	foreignCall := `{"type":"function_call","call_id":"fixture-other-task-call","name":"inspect","arguments":"{}"}`
+	foreignOutput := `{"type":"function_call_output","call_id":"fixture-other-task-call","output":"fixture other result"}`
+	if customProvenance {
+		foreignCall = `{"type":"custom_tool_call","call_id":"fixture-other-task-call","name":"inspect","input":"fixture other task"}`
+		foreignOutput = `{"type":"custom_tool_call_output","call_id":"fixture-other-task-call","output":"fixture other result"}`
+	}
 	negative := scenario != "live" && scenario != "fresh" && scenario != "binding_changed" && !provenancePositive
 	oldFence := strings.HasSuffix(scenario, "_first") || strings.HasSuffix(scenario, "_last")
 	thirdItem := strings.ReplaceAll(httpRebuildAgentB, "fixture-readable-B", "fixture-old-completed-C")
@@ -109,6 +120,11 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			}
 		case n == 2:
 			output = []json.RawMessage{json.RawMessage(httpRebuildAgentB)}
+		case n == 3 && (unrelatedCall || undeliveredCall):
+			output = []json.RawMessage{json.RawMessage(foreignCall)}
+			if unrelatedCall {
+				output = append(output, json.RawMessage(thirdItem))
+			}
 		case n == 3 && oldFence:
 			output = []json.RawMessage{json.RawMessage(thirdItem)}
 		case n == turn+1:
@@ -116,8 +132,12 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		case n == turn+2:
 			output = []json.RawMessage{json.RawMessage(httpRebuildMessage("assistant", "fixture mixed task complete"))}
 		}
-		return []byte(httpRebuildJSON(map[string]any{"type": "response.completed", "response": map[string]any{
-			"id": fmt.Sprintf("resp_mixed_%d", n), "status": "completed", "model": "gpt-5.1", "output": output,
+		event, status := "response.completed", "completed"
+		if n == 3 && undeliveredCall {
+			event, status = "response.failed", "failed"
+		}
+		return []byte(httpRebuildJSON(map[string]any{"type": event, "response": map[string]any{
+			"id": fmt.Sprintf("resp_mixed_%d", n), "status": status, "model": "gpt-5.1", "output": output,
 			"usage": map[string]int{"input_tokens": 5, "output_tokens": 3},
 		}}))
 	}
@@ -273,7 +293,11 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		raw, readErr := read()
 		require.NoError(t, readErr)
 		completed := gjson.GetBytes(raw, "response")
-		require.Equal(t, "completed", completed.Get("status").String())
+		if warm == 2 && undeliveredCall {
+			require.Equal(t, "failed", completed.Get("status").String())
+		} else {
+			require.Equal(t, "completed", completed.Get("status").String())
+		}
 		previous = completed.Get("id").String()
 		if warm == 1 {
 			history = append(history, completed.Get("output.0").Raw)
@@ -281,7 +305,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		}
 	}
 	expectedOwners := 2
-	if oldFence {
+	if oldFence || unrelatedCall {
 		expectedOwners++
 	}
 	owners := waitOwners(expectedOwners)
@@ -337,6 +361,9 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		cancel()
 		require.NoError(t, dialErr)
 		h.clientConn = conn
+	}
+	if unrelatedCall || undeliveredCall {
+		history = append(history, foreignCall, foreignOutput)
 	}
 	if provenance && !provenancePositive {
 		change := strings.TrimPrefix(scenario, "f1_function_")

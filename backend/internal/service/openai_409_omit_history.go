@@ -83,6 +83,11 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 	if !openAI409HasReadableIntent(body) {
 		return ctx, body, false, openAIRecoveryDiagnosticError("readable_intent_missing", "readable_intent_missing", r)
 	}
+	if websocket {
+		if err := s.verifyOpenAIToolInputs(ctx, r, body); err != nil {
+			return ctx, body, false, err
+		}
+	}
 	clean, changed := omitOpenAIHistoricalCiphertext(body)
 	if ctx.Err() != nil {
 		return ctx, body, false, openAIAgentRecoveryError("store_unavailable")
@@ -117,6 +122,7 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 	request.inputDigest = openAIAgentRecoveryInputDigest(clean)
 	request.replayControlsDigest = openAI409ControlsDigest(clean)
 	request.omittedSource = r
+	request.toolProofs = r.toolProofs
 	return next, clean, true, nil
 }
 

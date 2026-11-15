@@ -41,8 +41,10 @@ type openAIAgentRecoveryBinding struct {
 }
 
 type openAIAgentRecoveryState struct {
-	mu       sync.Mutex
-	bindings map[[32]byte]openAIAgentRecoveryBinding
+	mu         sync.Mutex
+	bindings   map[[32]byte]openAIAgentRecoveryBinding
+	toolProofs map[string]openAIToolLocalRecord
+	toolEpochs map[string]openAIToolLocalRecord
 }
 
 type openAIAgentRecoveryRequest struct {
@@ -89,6 +91,7 @@ type openAIAgentRecoveryRequest struct {
 	model                string
 	session              string
 
+	toolProofs             map[string]openAIToolProofSnapshot
 	diagnostics            openAIRecoveryDiagnostics
 	completedOwners        map[[32]byte]openAIAgentRecoveryBinding
 	requireCompletedOwners bool // mixed WS omission retains each original completed route
@@ -428,6 +431,9 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	if err := s.checkOpenAIReadableShadowObservation(ctx, request.shadowObservation); err != nil {
 		return noop, withOpenAIRecoveryDiagnostics(err, request, "")
 	}
+	if err := s.recheckOpenAIToolProofs(ctx, request); err != nil {
+		return noop, err
+	}
 	if request.omittedSource != nil {
 		// Re-read every original item at the actual send, even though opaque
 		// bytes were removed. Losing history must not lose a delivery fence.
@@ -665,9 +671,7 @@ func observeOpenAIAgentRecoveryOutput(c *gin.Context, body []byte, nested bool) 
 			request.shadowUnsafeOutput = request.shadowUnsafeOutput || (kind != "agent_message" && kind != "message" && kind != "reasoning")
 		}
 	}
-	if !bytes.Contains(body, []byte("agent_message")) && !bytes.Contains(body, []byte(`\u`)) {
-		return nil
-	}
+	request.delivery.observeTools(body, nested)
 	items := openAIAgentRecoveryDigests(body, path)
 	// Even an early item/response event can already contain the entire opaque
 	// item. Fence it before any bytes are released, without granting success.
