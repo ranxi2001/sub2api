@@ -65,4 +65,5 @@ export const NEW_FEATURE_NOTICES = {
   oauthInitialModelSelection: 'oauth-initial-model-selection-initial-announcement',
   usageRateCard: 'usage-rpm-tpm-card-initial-announcement',
   tempUnschedStreamCountWindow: 'temp-unsched-stream-timing-count-window',
+  bpsAccountSearch: 'bps-account-search-initial-announcement',
 } as const

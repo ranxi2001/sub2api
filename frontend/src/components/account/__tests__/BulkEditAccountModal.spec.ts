@@ -155,6 +155,8 @@ describe('BulkEditAccountModal', () => {
       openai_excel_bps_proxy_source: 'mihomo',
       openai_excel_bps_cache_creation_as_input: false,
       openai_excel_bps_ignore_encrypted_content: false,
+      openai_excel_bps_web_search: false,
+      openai_excel_bps_web_search_auto: false,
       openai_excel_bps_omit_unsupported_tools: false,
       openai_excel_bps_auto_disable_on_403: false,
       openai_excel_bps_auto_recover_on_403: false,
@@ -1409,13 +1411,14 @@ describe('BulkEditAccountModal', () => {
 
 describe('bulk BPS defaults integration', () => {
   it('applies saved default selections when enabling the bulk BPS edit', async () => {
-    vi.mocked(getAutoConfig).mockResolvedValueOnce({ excel_bps: defaultExcelBPSDefaults() } as Awaited<ReturnType<typeof getAutoConfig>>)
+    vi.mocked(getAutoConfig).mockResolvedValueOnce({ excel_bps: { ...defaultExcelBPSDefaults(), web_search: true, web_search_auto: true } } as Awaited<ReturnType<typeof getAutoConfig>>)
     const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
     await wrapper.get('#bulk-edit-excel-bps-enabled').setValue(true)
     await wrapper.get('[data-testid="bulk-excel-bps-defaults-toggle"]').trigger('click'); await flushPromises()
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent'); await flushPromises()
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], expect.objectContaining({ extra: expect.objectContaining({
       openai_excel_bps: true, openai_excel_bps_ignore_encrypted_content: true,
+      openai_excel_bps_web_search: true, openai_excel_bps_web_search_auto: true,
       openai_excel_bps_auto_disable_on_403: true, openai_excel_bps_cache_creation_as_input: true
     }) }))
     wrapper.unmount()
