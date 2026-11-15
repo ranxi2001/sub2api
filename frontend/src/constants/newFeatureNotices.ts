@@ -42,7 +42,6 @@ export const NEW_FEATURE_NOTICES = {
   channelPricingTransfer: 'channel-pricing-import-export-initial-announcement',
   channelPricingListActions: 'channel-pricing-list-actions-initial-announcement',
   smartOpsSidebar: 'smart-ops-sidebar-visibility-initial-announcement',
-  balanceForecast: 'balance-exhaustion-forecast-initial-announcement',
   serverlessIPRouting: 'serverless-ip-affinity-primary-fallback-initial-announcement',
   accountUpstreamHTTPErrorRate: 'account-upstream-http-error-rate-initial-announcement',
   accountUpstreamHTTPErrorThreshold: 'account-upstream-http-error-threshold-initial-announcement',

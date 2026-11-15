@@ -1,11 +1,7 @@
-# 余额预测面板截图
+# 余额耗尽预测移除的界面证据
 
-来源提交：`60daddaa90175b81fdd5aeff7089f3c5d84b976d`。
+`Balance forecast removal` CI 的 `balance-forecast-removal-ui-<head SHA>` artifact 提供 `before-email.png`、`after-email.png` 和记录 base/head SHA 的 `manifest.json`。脚本从独立完整源码树运行真实前端与 SettingsView，使用虚构管理员和本地 API fixture；生产登录、邮件发送和真实接口不在截图验收范围内。截图作为 CI 附件，不提交图片到源码仓库。
 
-[CI 运行](https://github.com/ranxi2001/sub2api/actions/runs/41826772544)，artifact `balance-forecast-ui-60daddaa90175b81fdd5aeff7089f3c5d84b976d`。`manifest.json` 保留原始来源和 `errors: []`。
+验收入口：管理员「系统设置 → 邮件」。修改前显示余额耗尽预测面板；修改后移除该面板，金额阈值的余额不足提醒仍可见。旧字段提交兼容和保存行为另由 SettingsView Vitest 与后端设置 API 回归覆盖。
 
-实际 `BalanceForecastSettings.vue`、`NewFeatureBadge.vue` 和项目 CSS，使用虚构数据的 CI 组件预览。8 张截图覆盖中英文默认/已配置/深色/390px移动状态；预览脚本还验证共享标签关闭和刷新持久化。不能据此声明完整设置页导航、真实管理员 API、真实邮件或生产业务通过。
-
-![默认关闭](zh-default.png)
-![已配置](zh-configured.png)
-![移动端](zh-mobile.png)
+历史新增功能截图保留在 [原 CI 运行](https://github.com/ranxi2001/sub2api/actions/runs/41826772544)，仅说明旧版本界面。
