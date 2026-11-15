@@ -5,7 +5,15 @@ WebSocket can rebuild a current, provably unsent turn containing opaque history
 from multiple completed producers. This closes the live-socket gap between the
 send-boundary owner check and the existing readable continuation handler.
 
-The gateway requires a completed ownership observation for **every** supplied
+The gateway requires server-observed, successfully delivered provenance for every
+function/custom tool call used by WS history recovery. A matching client pair
+alone is insufficient. A separate bounded record binds the authenticated user/key,
+group/session/model, exact call type/ID/name/arguments, producing delivery, and
+original owner/epoch/shadow associations. Pending, failed, conflicting, missing,
+reissued or unrelated-task calls are refused. The client result is its completion
+report, not proof that an external side effect executed.
+
+The gateway also requires a completed ownership observation for **every** supplied
 opaque item, readable current intent, and complete, unique tool call/result
 pairs. It discards provider pointers and historical ciphertext. In this mixed
 WS case, it carries completed tool names/results as inert assistant text and
@@ -13,6 +21,12 @@ removes historical callable records/arguments. Current tool definitions and
 schemas remain available for new tool work. The client keeps its existing
 session identity and socket; no client confirmation or new conversation is
 required for this supported branch.
+
+Call proofs are reserved before exposing provider output and committed only after
+the successful downstream terminal and original owner/epoch publication. Recovery
+and physical send recheck the same proof and associations. Records contain only
+internal fingerprints and route/delivery metadata (128 per principal, maximum
+32 KiB each, 30-minute TTL); eviction loses recoverability. They are not logged.
 
 The permit comes from a private before-write route check. The public
 `encrypted_agent_recovery_owner_conflict` code alone never permits retry.

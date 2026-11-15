@@ -37,6 +37,84 @@ func learnF1DeliveredCalls(t *testing.T, svc *OpenAIGatewayService, account *Acc
 	require.True(t, json.Valid([]byte(raw)), "only completed downstream delivery commits a call proof")
 }
 
+func TestOpenAIToolProvenanceDeliveryAndScope(t *testing.T) {
+	for _, outcome := range []string{"completed", "early_only", "write_failed", "terminal_excludes", "duplicate"} {
+		t.Run(outcome, func(t *testing.T) {
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+			manager, c, a := issue715WSManager(t, svc, context.Background())
+			SetOpenAIWSRecoveryPrincipal(c, 715, 715)
+			defer manager.abort()
+			source := `{"model":"gpt-6-astra","input":[]}`
+			require.NoError(t, issue715WSBegin(t, manager, a, source, "ctx_pool"))
+			call := `{"type":"function_call","name":"fixture-private-tool","call_id":"fixture-private-call","arguments":"{\"private\":\"fixture-private-argument\"}"}`
+			item := gjson.Get(issue715OpaqueBody, "input.0").Raw
+			require.NoError(t, manager.write([]byte(`{"type":"response.output_item.done","item":`+call+`}`), func() error { return nil }))
+			key := manager.request.toolKey("fixture-private-call")
+			pending, err := svc.toolProofGet(context.Background(), key)
+			require.NoError(t, err)
+			require.True(t, strings.HasPrefix(pending, "pending:"))
+			output := item + `,` + call
+			if outcome == "terminal_excludes" {
+				output = item
+			}
+			if outcome == "duplicate" {
+				output += `,` + call
+			}
+			if outcome != "early_only" {
+				err = manager.write([]byte(`{"type":"response.completed","response":{"id":"resp_delivery_fixture","status":"completed","output":[`+output+`]}}`), func() error {
+					if outcome == "write_failed" {
+						return errors.New("fixture downstream failure")
+					}
+					return nil
+				})
+				if outcome == "write_failed" {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+			}
+			manager.abort()
+			raw, err := svc.toolProofGet(context.Background(), key)
+			require.NoError(t, err)
+			if outcome != "completed" {
+				require.Equal(t, "failed", raw)
+				return
+			}
+			require.True(t, json.Valid([]byte(raw)))
+			for _, secret := range []string{"fixture-private-tool", "fixture-private-call", "fixture-private-argument"} {
+				require.NotContains(t, raw, secret)
+				require.NotContains(t, key, secret)
+			}
+			body := []byte(`{"model":"gpt-6-astra","input":[` + item + `,` + call + `,{"type":"function_call_output","call_id":"fixture-private-call","output":"client completion report"}]}`)
+			ctx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", "gpt-6-astra")
+			original := openAIAgentRecoveryFromContext(ctx)
+			require.NoError(t, svc.verifyOpenAIToolInputs(ctx, original, body))
+			for _, scope := range []string{"user", "key", "group", "session", "model"} {
+				other := *original
+				switch scope {
+				case "user":
+					other.userID++
+				case "key":
+					other.keyID++
+				case "group":
+					other.groupID++
+				case "session":
+					other.session += "-other"
+				case "model":
+					other.model += "-other"
+				}
+				require.Error(t, svc.verifyOpenAIToolInputs(ctx, &other, body), scope)
+			}
+			require.NoError(t, svc.toolProofReserve(context.Background(), key, "pending:another-delivery"))
+			svc.toolProofFinish(context.Background(), key, "pending:another-delivery", raw, true)
+			conflict, err := svc.toolProofGet(context.Background(), key)
+			require.NoError(t, err)
+			require.Equal(t, "conflict", conflict)
+			require.Error(t, svc.recheckOpenAIToolProofs(ctx, original))
+		})
+	}
+}
+
 func TestOpenAIWSMixedOwnerFinalSendFences(t *testing.T) {
 	for _, mutation := range []string{"none", "pending", "failed", "conflicted", "missing", "changed", "input", "tools", "call_proof"} {
 		t.Run(mutation, func(t *testing.T) {

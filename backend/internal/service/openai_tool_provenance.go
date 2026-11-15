@@ -314,7 +314,11 @@ func (d *openAIAgentRecoveryDelivery) observeTools(body []byte, nested bool) {
 	terminal := openAIAgentCompletedResponse(body, nested)
 	if terminal {
 		d.toolTerminal = true
+		if len(items) > 0 {
+			d.toolFinal = make(map[string]bool)
+		}
 	}
+	seen := make(map[string]bool)
 	for _, item := range items {
 		kind := item.Get("type").String()
 		if kind != "function_call" && kind != "custom_tool_call" {
@@ -326,6 +330,13 @@ func (d *openAIAgentRecoveryDelivery) observeTools(body []byte, nested bool) {
 			continue
 		}
 		key := r.toolKey(id.String())
+		if seen[key] {
+			d.toolInvalid = true
+		}
+		seen[key] = true
+		if terminal && d.toolFinal != nil {
+			d.toolFinal[key] = true
+		}
 		old, exists := d.tools[key]
 		if !exists {
 			if d.service.toolProofReserve(d.ctx, key, d.pending) != nil {
@@ -376,7 +387,7 @@ func (d *openAIAgentRecoveryDelivery) finishTools(ctx context.Context, completed
 			proof.ShadowDigest, proof.ShadowEpoch = openAIToolHash(shadow.raw), shadow.epoch
 		}
 		raw, _ := json.Marshal(proof)
-		d.service.toolProofFinish(ctx, key, d.pending, string(raw), valid && call.complete && len(raw) <= OpenAIToolProvenanceMaxBytes)
+		d.service.toolProofFinish(ctx, key, d.pending, string(raw), valid && call.complete && (d.toolFinal == nil || d.toolFinal[key]) && len(raw) <= OpenAIToolProvenanceMaxBytes)
 	}
 }
 
