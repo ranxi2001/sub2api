@@ -2685,6 +2685,16 @@ func CacheTTLOverriddenNEQ(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNEQ(FieldCacheTTLOverridden, v))
 }
 
+// CustomerCostDetailsIsNil applies the IsNil predicate on the "customer_cost_details" field.
+func CustomerCostDetailsIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldCustomerCostDetails))
+}
+
+// CustomerCostDetailsNotNil applies the NotNil predicate on the "customer_cost_details" field.
+func CustomerCostDetailsNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldCustomerCostDetails))
+}
+
 // QueueTimingIsNil applies the IsNil predicate on the "queue_timing" field.
 func QueueTimingIsNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldIsNull(FieldQueueTiming))

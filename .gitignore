@@ -239,3 +239,10 @@ issues/
 tools/local-worker/
 
 !docs/key-risk-patrol.md
+
+# Reproducible Free Fast customer-cost evidence runners.
+!/.github/scripts/
+!/.github/scripts/free-fast-customer-cost-browser.mjs
+!/.github/scripts/free-fast-cost-evidence.py
+!/.github/scripts/test_free_fast_cost_evidence.py
+/.github/scripts/__pycache__/

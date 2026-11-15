@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -129,7 +130,14 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	})
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 
-	idx := len(prepared.args) - 8
+	// The SELECT list starts with the generated id; all remaining columns
+	// share prepareUsageLogInsert's order. Appended fields must not move this
+	// assertion onto session_id (or another nullable text argument).
+	columns := strings.Split(usageLogSelectColumns, ", ")
+	require.Len(t, columns, len(prepared.args)+1)
+	idx := slices.Index(columns, "upstream_request_id") - 1
+	require.GreaterOrEqual(t, idx, 0)
+	require.Equal(t, "session_id", columns[idx+2])
 	arg, ok := prepared.args[idx].(sql.NullString)
 	require.True(t, ok, "upstream_request_id arg should be sql.NullString, got %T", prepared.args[idx])
 	require.True(t, arg.Valid)

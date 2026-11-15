@@ -90,3 +90,52 @@ func TestScopedAdminUsageListEmptyRemainsArray(t *testing.T) {
 	require.Equal(t, 200, w.Code)
 	require.Contains(t, w.Body.String(), `"items":[]`)
 }
+
+func TestFreeFastCustomerCostScopedAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	row := service.UsageLog{ID: 12, UserID: 7, APIKeyID: 8, AccountID: 11, RequestID: "synthetic-cost", Model: "synthetic-astra", TotalCost: .2704005, ActualCost: .07134075}
+	// JSON retains baseline compilability, and unknown/private metadata must not
+	// sneak through the typed numeric quote into the restricted response.
+	const quote = `{"version":2,"cache_cost_details":[{"kind":"write_30m","tokens":1197,"unit_price":0.0000125},{"kind":"read","tokens":37469,"unit_price":0.000001}],"free_fast":true,"input_cost":0.08345,"output_cost":0.0068,"image_input_cost":0,"image_output_cost":0,"cache_creation_cost":0.0149625,"cache_read_cost":0.037469,"total_cost":0.1426815,"actual_cost":0.07134075,"multiplier":0.5}`
+	require.NoError(t, json.Unmarshal([]byte(`{"CustomerCostDetails":`+quote+`}`), &row))
+	row.User = &service.User{ID: 7, Email: "private-customer@example.invalid", Notes: "private-notes"}
+	row.APIKey = &service.APIKey{ID: 8, Key: "private-key"}
+	row.Account = &service.Account{ID: 11, Credentials: map[string]any{"access_token": "private-credential"}}
+	row.Group = &service.Group{ID: 9, Name: "private-group"}
+	row.Subscription = &service.UserSubscription{ID: 10, User: row.User, Group: row.Group}
+	for _, scoped := range []bool{true, false} {
+		t.Run(map[bool]string{true: "restricted", false: "full"}[scoped], func(t *testing.T) {
+			repo := &scopedUsageResponseRepo{records: []service.UsageLog{row}}
+			h := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil, nil, nil)
+			r := gin.New()
+			r.Use(func(c *gin.Context) {
+				if scoped {
+					c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), &adminaccess.Principal{Policy: adminaccess.Policy{GlobalPermissions: []string{"usage.read"}}}))
+				}
+			})
+			r.GET("/api/v1/admin/usage", h.List)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/admin/usage", nil))
+			require.Equal(t, 200, w.Code)
+			var response struct {
+				Data struct {
+					Items []map[string]json.RawMessage `json:"items"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			require.Len(t, response.Data.Items, 1)
+			item := response.Data.Items[0]
+			require.Contains(t, item, "customer_cost_details", "restricted admin must expose the immutable customer Standard quote")
+			require.JSONEq(t, quote, string(item["customer_cost_details"]))
+			require.JSONEq(t, "0.2704005", string(item["total_cost"]))
+			require.JSONEq(t, "0.07134075", string(item["actual_cost"]))
+			if scoped {
+				for _, field := range []string{"user", "api_key", "account", "group", "subscription", "credentials", "balance"} {
+					require.NotContains(t, item, field)
+				}
+				require.NotContains(t, w.Body.String(), "private-")
+			}
+			require.Equal(t, "private-key", repo.records[0].APIKey.Key)
+		})
+	}
+}

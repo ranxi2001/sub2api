@@ -6,10 +6,47 @@ import { nextDifferentNominal, questionAt, bankVersion } from './pelican-nominal
 const unwrap = value => value?.data ?? value
 const pause = () => new Promise(resolve => setTimeout(resolve, 250))
 
+// Track real request completion across repeated document navigations. A
+// previously reached lifecycle state alone cannot prevent a later auth/settings
+// request from being aborted by the harness. Failures remain in the caller's
+// strict requestfailed inventory; this barrier never filters or retries them.
+export function createPageNavigation(page) {
+  const pending = new Set()
+  const waiters = new Set()
+  page.on('request', request => pending.add(request))
+  const completed = request => {
+    pending.delete(request)
+    if (!pending.size) for (const resolve of [...waiters]) resolve()
+  }
+  page.on('requestfinished', completed)
+  page.on('requestfailed', completed)
+  const settle = async () => {
+    const deadline = Date.now() + 20_000
+    // A completed background fetch followed by a srcdoc preview lifecycle can
+    // remove networkidle without restarting its timer (Playwright 1.56.1).
+    // Document load + our real completion inventory does not depend on that
+    // stale frame flag. Keep one 20s deadline, including document readiness.
+    await page.waitForLoadState('load', { timeout: 20_000 })
+    while (pending.size) await new Promise((resolve, reject) => {
+      const done = () => { clearTimeout(timer); waiters.delete(done); resolve() }
+      const timer = setTimeout(() => {
+        waiters.delete(done)
+        reject(new Error('browser requests did not finish before navigation'))
+      }, Math.max(0, deadline - Date.now()))
+      waiters.add(done)
+    })
+  }
+  return {
+    settle,
+    async goto(url) { await settle(); await page.goto(url, { waitUntil: 'load' }); await settle() },
+    async reload() { await settle(); await page.reload({ waitUntil: 'load' }); await settle() },
+  }
+}
+
 // Called only after the original real application scenarios have succeeded.
 // All writes except next_run_at go through existing authenticated UI controls.
 export async function completeScheduledRounds(c) {
-  const { db, page, origin, accounts, groups, plans, groupPlanId, groupId, model,
+  const { db, page, navigation, origin, accounts, groups, plans, groupPlanId, groupId, model,
     dialog, openAccount, checkSnapshot, readPlans, readResults, readGroupPlan, readGroupResults,
     fixtureControl, capturesNow, save, evidence, state } = c
   const initial = { account: await readResults(), group: await readGroupResults() }
@@ -19,9 +56,7 @@ export async function completeScheduledRounds(c) {
   const tables = { account: 'scheduled_test_plans', group: 'pelican_group_test_plans' }
 
   async function accountHistory(label, expected) {
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.goto(`${origin}/admin/accounts`)
+    await navigation.goto(`${origin}/admin/accounts`)
     const projections = []
     for (const account of accounts) {
       await openAccount(account)
@@ -96,9 +131,7 @@ export async function completeScheduledRounds(c) {
   async function groupHistory(label, expected) {
     const listed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-test-results'
       && response.request().method() === 'GET' && response.status() === 200)
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.goto(`${origin}/admin/pelican-tests`)
+    await navigation.goto(`${origin}/admin/pelican-tests`)
     const response = await listed
     const list = unwrap(await response.json())
     assert.equal(list.total, expected.length)
@@ -275,9 +308,7 @@ export async function completeScheduledRounds(c) {
 
   async function editAccount(mode) {
     state.active_gate = `ui-edit-account-${mode}`
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.goto(`${origin}/admin/accounts`)
+    await navigation.goto(`${origin}/admin/accounts`)
     await openAccount(accounts[0])
     await dialog().getByRole('button', { name: 'Scheduled tests', exact: true }).click()
     await dialog().getByRole('button', { name: 'Edit Plan', exact: true }).click()
@@ -303,9 +334,7 @@ export async function completeScheduledRounds(c) {
     assert.deepEqual(stored.pelican_config, body.pelican_config)
     await form.waitFor({ state: 'hidden' })
     await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.reload()
+    await navigation.reload()
     await openAccount(accounts[0])
     const listRead = page.waitForResponse(response => new URL(response.url()).pathname === `/api/v1/admin/accounts/${accounts[0].id}/scheduled-test-plans`
       && response.request().method() === 'GET')
@@ -330,9 +359,7 @@ export async function completeScheduledRounds(c) {
 
   async function editGroup(mode) {
     state.active_gate = `ui-edit-group-${mode}`
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.goto(`${origin}/admin/pelican-tests`)
+    await navigation.goto(`${origin}/admin/pelican-tests`)
     await page.getByTestId(`pelican-plan-edit-${groupPlanId}`).click()
     const form = page.getByTestId('pelican-test-editor')
     await form.getByTestId('pelican-mode-select').selectOption(mode)
@@ -354,12 +381,10 @@ export async function completeScheduledRounds(c) {
     const stored = await readGroupPlan()
     assert.deepEqual(stored.pelican_config, body.pelican_config)
     await form.waitFor({ state: 'hidden' })
-    await page.waitForLoadState('networkidle')
+    await navigation.settle()
     const listRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-tests'
       && response.request().method() === 'GET')
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.reload()
+    await navigation.reload()
     const listResponse = await listRead
     assert.equal(listResponse.status(), 200)
     const list = unwrap(await listResponse.json())

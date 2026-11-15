@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { bindDetailResponse } from './pelican-detail-identity.mjs'
-import { completeScheduledRounds } from './pelican-complete-rounds.mjs'
+import { completeScheduledRounds, createPageNavigation } from './pelican-complete-rounds.mjs'
 
 const evidence = process.env.EVIDENCE_DIR || '/evidence'
 const upstreamOrigin = 'https://fake-upstream:4199'
@@ -203,6 +203,7 @@ async function browser() {
       }
     })
     page = await context.newPage()
+    const navigation = createPageNavigation(page)
     page.setDefaultTimeout(20_000)
     page.on('requestfailed', request => {
       const url = new URL(request.url())
@@ -226,9 +227,7 @@ async function browser() {
           prompt_mode: input.prompt_mode, pelican_question: input.pelican_question })
       }
     })
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.goto(`${origin}/login?redirect=/admin/accounts`)
+    await navigation.goto(`${origin}/login?redirect=/admin/accounts`)
     await page.locator('#email').fill('reviewer@example.invalid')
     await page.locator('#password').fill('Fixture-Only-795-Password!')
     const login = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/auth/login' && response.request().method() === 'POST')
@@ -251,16 +250,14 @@ async function browser() {
     // Requests made before first-install acknowledgement are gated by the real
     // middleware. Preserve their diagnostics, then reload the real page so its
     // initial account query runs after acknowledgement has persisted.
-    await page.waitForLoadState('networkidle')
+    await navigation.settle()
     state.bootstrap = { blocked: [...state.blocked], requestFailures: [...state.requestFailures],
       pageErrors: [...state.pageErrors], consoleErrors: [...state.consoleErrors] }
     assert.equal(state.blocked.length, 0, 'bootstrap must not request external resources')
     assert.equal(state.requestFailures.length, 0, 'bootstrap transport must complete')
     state.pageErrors = []
     state.consoleErrors = []
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.reload()
+    await navigation.reload()
     await page.getByRole('row').filter({ hasText: accounts[0].name }).waitFor()
     assert.ok(await page.locator('link[rel=stylesheet]').count(), 'real application CSS loaded')
     state.scenarios.push({ name: stage, status: 'passed', entry: '/admin/accounts' })
@@ -378,9 +375,7 @@ async function browser() {
     state.scenarios.push({ name: stage, status: 'passed', question_repetition_permitted: true })
 
     stage = 'manual-localstorage-reload-history-dom'
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.reload()
+    await navigation.reload()
     assert.deepEqual((await readRecords(accounts[0]))[0], aRecord)
     assert.deepEqual((await readRecords(accounts[1]))[0], bRecord)
     await openAccount(accounts[1])
@@ -400,9 +395,7 @@ async function browser() {
     await detail.getByRole('button', { name: 'Close', exact: true }).click()
     await panel.getByRole('button', { name: 'Close', exact: true }).click()
     await dialog().getByRole('button', { name: 'Close modal', exact: true }).click()
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.goto(`${origin}/admin/pelican-tests`)
+    await navigation.goto(`${origin}/admin/pelican-tests`)
     await page.getByTestId('pelican-tests-create').click()
     const editor = page.getByTestId('pelican-test-editor')
     await editor.getByRole('button').first().click()
@@ -432,9 +425,7 @@ async function browser() {
       boundary: 'disabled creation only; no scheduled RunDue, /run or result acceptance claimed' })
 
     stage = 'account-scheduled-ui-create-a-b'
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.goto(`${origin}/admin/accounts`)
+    await navigation.goto(`${origin}/admin/accounts`)
     const plans = []
     const planProjection = plan => ({ id: String(plan.id), account_id: String(plan.account_id),
       model_id: plan.model_id, enabled: plan.enabled, cron_expression: plan.cron_expression,
@@ -712,9 +703,7 @@ async function browser() {
     }
 
     stage = 'group-scheduled-ui-enable'
-    // Finish background metrics before deliberate document navigation; keep request failures strict.
-    await page.waitForLoadState('networkidle')
-    await page.goto(`${origin}/admin/pelican-tests`)
+    await navigation.goto(`${origin}/admin/pelican-tests`)
     const groupPlanId = String(created.id)
     const groupId = groups[0].id
     const groupPlanPath = `/api/v1/admin/pelican-group-tests/${groupPlanId}`
@@ -951,13 +940,14 @@ async function browser() {
     }
 
     stage = 'complete-scheduled-rounds'
-    await completeScheduledRounds({ db, page, origin, accounts, groups, plans, groupPlanId, groupId, model,
+    await completeScheduledRounds({ db, page, navigation, origin, accounts, groups, plans, groupPlanId, groupId, model,
       dialog, openAccount, checkSnapshot, readPlans, readResults, readGroupPlan, readGroupResults,
       fixtureControl, capturesNow, save, evidence, state })
 
     assert.deepEqual(forbiddenRuns, [], 'all successor rounds must use real RunDue')
     assert.equal(manualRequests.length, 4, 'successor rounds cannot be manual submissions')
     stage = 'post-bootstrap-browser-and-provider-error-lists'
+    await navigation.settle()
     const finalCaptures = await (await fetch(`${upstreamOrigin}/__fixture/captures`)).json()
     assert.deepEqual(finalCaptures.rejected, [])
     assert.equal(state.blocked.length, 0, 'browser may contact only app origin')

@@ -679,6 +679,12 @@ func (_c *UsageLogCreate) SetNillableCacheTTLOverridden(v *bool) *UsageLogCreate
 	return _c
 }
 
+// SetCustomerCostDetails sets the "customer_cost_details" field.
+func (_c *UsageLogCreate) SetCustomerCostDetails(v map[string]interface{}) *UsageLogCreate {
+	_c.mutation.SetCustomerCostDetails(v)
+	return _c
+}
+
 // SetQueueTiming sets the "queue_timing" field.
 func (_c *UsageLogCreate) SetQueueTiming(v map[string]interface{}) *UsageLogCreate {
 	_c.mutation.SetQueueTiming(v)
@@ -1227,6 +1233,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
 		_node.CacheTTLOverridden = value
+	}
+	if value, ok := _c.mutation.CustomerCostDetails(); ok {
+		_spec.SetField(usagelog.FieldCustomerCostDetails, field.TypeJSON, value)
+		_node.CustomerCostDetails = value
 	}
 	if value, ok := _c.mutation.QueueTiming(); ok {
 		_spec.SetField(usagelog.FieldQueueTiming, field.TypeJSON, value)
@@ -2290,6 +2300,9 @@ func (u *UsageLogUpsert) ClearQueueTiming() *UsageLogUpsert {
 func (u *UsageLogUpsertOne) UpdateNewValues() *UsageLogUpsertOne {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWithNewValues())
 	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
+		if _, exists := u.create.mutation.CustomerCostDetails(); exists {
+			s.SetIgnore(usagelog.FieldCustomerCostDetails)
+		}
 		if _, exists := u.create.mutation.CreatedAt(); exists {
 			s.SetIgnore(usagelog.FieldCreatedAt)
 		}
@@ -3557,6 +3570,9 @@ func (u *UsageLogUpsertBulk) UpdateNewValues() *UsageLogUpsertBulk {
 	u.create.conflict = append(u.create.conflict, sql.ResolveWithNewValues())
 	u.create.conflict = append(u.create.conflict, sql.ResolveWith(func(s *sql.UpdateSet) {
 		for _, b := range u.create.builders {
+			if _, exists := b.mutation.CustomerCostDetails(); exists {
+				s.SetIgnore(usagelog.FieldCustomerCostDetails)
+			}
 			if _, exists := b.mutation.CreatedAt(); exists {
 				s.SetIgnore(usagelog.FieldCreatedAt)
 			}

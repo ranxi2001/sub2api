@@ -27,6 +27,7 @@ import { observerUsageContext } from '../observerUsageContext'
 import en from '@/i18n/locales/en/admin/resources'
 import zh from '@/i18n/locales/zh/admin/resources'
 import UsageTable from '../UsageTable.vue'
+import { freeFastCustomerCostFixture } from './fixtures/freeFastCustomerCost'
 import enDashboard from '@/i18n/locales/en/dashboard'
 import zhDashboard from '@/i18n/locales/zh/dashboard'
 import enTiming from '@/i18n/locales/en/requestTiming'
@@ -1441,4 +1442,222 @@ it('shares the timing notice between the usage table and details and preserves t
     for (const wrapper of [refreshed, old, next, observer]) wrapper.unmount()
     localStorage.clear()
   }
+})
+
+describe('Free Fast customer cost snapshot', () => {
+  it.each([true, false])('shows Standard unit prices and customer components, account column=%s', async (showAccountBilling) => {
+    const row = {
+      ...baseImageRow, request_id: 'synthetic-free-fast', billing_mode: 'token', image_count: 0,
+      input_tokens: 71, output_tokens: 19, input_cost: 0.00142, output_cost: 0.0019,
+      total_cost: 0.00332, actual_cost: 0.000996, rate_multiplier: 0.6,
+      account_rate_multiplier: 0.5, service_tier: 'priority',
+      customer_cost_details: {
+        version: 1, free_fast: true, input_cost: 0.00071, output_cost: 0.00095,
+        image_input_cost: 0, image_output_cost: 0, cache_creation_cost: 0, cache_read_cost: 0,
+        total_cost: 0.00166, actual_cost: 0.000996, multiplier: 0.6,
+      },
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [], showAccountBilling },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    try {
+      await wrapper.get('button[aria-label="Cost Breakdown"]').trigger('click')
+      await nextTick()
+      const text = wrapper.get('[role="tooltip"]').text()
+      expect(text).toContain('$10.00')
+      expect(text).toContain('$50.00')
+      expect(text).toContain('$0.00071000')
+      expect(text).toContain('$0.00095000')
+      expect(text).toContain('$0.00099600')
+      expect(text).toContain('Fast')
+      expect(text).not.toMatch(/Free Fast|Fast 加速免费|按 Standard 计费/)
+      expect(text).not.toContain('$20.00')
+      if (showAccountBilling) expect(text).toContain('$0.00166000')
+      expect(row.input_cost).toBe(0.00142)
+    } finally { wrapper.unmount() }
+  })
+})
+
+
+describe('Free Fast screenshot arithmetic and history', () => {
+  async function openCost(row: Record<string, unknown>, showAccountBilling = true) {
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [], showAccountBilling },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    await wrapper.get('button[aria-label="Cost Breakdown"]').trigger('click')
+    await nextTick()
+    return wrapper
+  }
+
+  it.each([true, false])('preserves the exact pre-rate cache components, admin=%s', async (admin) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture }, admin)
+    try {
+      const text = wrapper.get('[role="tooltip"]').text()
+      for (const amount of ['0.08345000', '0.00680000', '0.01496250', '0.03746900', '0.14268150', '0.07134075']) expect(text).toContain('$' + amount)
+      expect(text).toContain('$10.0000')
+      expect(text).toContain('$50.0000')
+      expect(text).toContain('0.50x')
+      expect(text).toContain('Fast')
+      expect(text.includes('$0.27040050')).toBe(admin)
+      expect(text).not.toMatch(/Free Fast|Fast 加速免费|按 Standard 计费/)
+    } finally { wrapper.unmount() }
+  })
+
+  it.each([true, false])('does not reinterpret a missing historical snapshot from current free flag=%s', async (free) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, customer_cost_details: null, group: { free_openai_fast: free } })
+    try {
+      const text = wrapper.get('[role="tooltip"]').text()
+      expect(text).toContain('Input price—')
+      expect(text).toContain('Input Cost—')
+      expect(text).toContain('$0.07134075')
+      expect(text).toContain('$0.27040050')
+      expect(text).not.toContain('$10.0000')
+      expect(text).not.toContain('$20.0000')
+    } finally { wrapper.unmount() }
+  })
+
+  it.each(['priority', 'default', 'flex'])('leaves a normal %s cost breakdown unchanged', async (tier) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, service_tier: tier, customer_cost_details: null, actual_cost: 0.2704005 * 0.5 })
+    try {
+      const text = wrapper.get('[role="tooltip"]').text()
+      expect(text).toContain('$20.0000')
+      expect(text).toContain('$100.0000')
+      expect(text).toContain('$0.16690000')
+      expect(text).toContain('$0.27040050')
+    } finally { wrapper.unmount() }
+  })
+
+  it('uses the saved effective model/personal multiplier after group settings change', async () => {
+    const d = freeFastCustomerCostFixture.customer_cost_details
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, actual_cost: d.total_cost * 1.8,
+      group: { free_openai_fast: false, rate_multiplier: 9 },
+      customer_cost_details: { ...d, multiplier: 1.8, actual_cost: d.total_cost * 1.8 } })
+    try {
+      const text = wrapper.get('[role="tooltip"]').text()
+      expect(text).toContain('1.80x')
+      expect(text).toContain('$0.08345000')
+      expect(text).toContain('$0.25682670')
+    } finally { wrapper.unmount() }
+  })
+
+  it.each([
+    { version: 2 }, { multiplier: -1 }, { input_cost: NaN },
+    { actual_cost: 0 }, { total_cost: 1 }, { free_fast: false },
+  ])('rejects incomplete, unsupported or inconsistent evidence %j', async (change) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture,
+      customer_cost_details: { ...freeFastCustomerCostFixture.customer_cost_details, ...change } })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('Input price—') }
+    finally { wrapper.unmount() }
+  })
+  it('accepts the canonical eight-decimal customer charge without losing Standard prices', async () => {
+    const d = freeFastCustomerCostFixture.customer_cost_details
+    const raw = d.total_cost * 0.333333
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, actual_cost: Number(raw.toFixed(8)),
+      customer_cost_details: { ...d, multiplier: 0.333333, actual_cost: raw } })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('$10.0000') }
+    finally { wrapper.unmount() }
+  })
+
+  it('preserves paid Priority prices when only canonical monetary rounding differs', async () => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, customer_cost_details: null,
+      rate_multiplier: 0.333333, actual_cost: Number((0.2704005 * 0.333333).toFixed(8)) })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('$20.0000') }
+    finally { wrapper.unmount() }
+  })
+
+  it('accepts a saved Free Fast quote with the actual fast tier alias', async () => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, service_tier: 'fast' })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('$10.0000') }
+    finally { wrapper.unmount() }
+  })
+
+  it.each([
+    { name: 'image tokens', fields: { image_input_tokens: 100, image_input_cost: 0.003, total_cost: 0.2734005, actual_cost: 0.13880025 } },
+    { name: 'per-request', fields: { billing_mode: 'per_request', actual_cost: 0.2 } },
+    { name: 'image count', fields: { billing_mode: 'image', image_count: 1, actual_cost: 0.2 } },
+    { name: 'additive tool fee', fields: { total_cost: 0.2804005, actual_cost: 0.16520025 } },
+  ])('preserves ordinary paid Priority $name without Free Fast evidence', async ({ fields }) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, customer_cost_details: null, ...fields })
+    try {
+      const text = wrapper.get('[role="tooltip"]').text()
+      expect(text).toContain('Input Cost$0.16690000')
+      expect(text).not.toContain('Input Cost—')
+    } finally { wrapper.unmount() }
+  })
+
+  it.each([undefined, null, { version: 99 }, { ...freeFastCustomerCostFixture.customer_cost_details, input_cost: -1 }])('F1 fast alias with missing or invalid snapshot stays unknown: %j', async (snapshot) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, service_tier: 'fast', customer_cost_details: snapshot })
+    try {
+      const text = wrapper.get('[role="tooltip"]').text()
+      expect(text).toContain('Input price—')
+      expect(text).toContain('Input Cost—')
+      expect(text).toContain('$0.07134075')
+      expect(text).not.toContain('$20.0000')
+    } finally { wrapper.unmount() }
+  })
+  it.each(['fast', 'default', 'flex'])('F1 paid %s control retains recorded prices without snapshot', async (tier) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, service_tier: tier, customer_cost_details: null, actual_cost: 0.13520025 })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('$20.0000') }
+    finally { wrapper.unmount() }
+  })
+
+  it.each([true, false])('G1 displays saved Standard cache read and distinct TTL unit prices, admin=%s', async (admin) => {
+    const d = freeFastCustomerCostFixture.customer_cost_details
+    const row = { ...freeFastCustomerCostFixture, cache_creation_tokens: 24, cache_creation_30m_tokens: 11, cache_creation_12h_tokens: 13,
+      cache_read_tokens: 17, cache_creation_cost: 0.0006, cache_read_cost: 0.000034, actual_cost: 0.04536475,
+      customer_cost_details: { ...d, version: 2, cache_creation_cost: 0.0004625, cache_read_cost: 0.000017,
+        total_cost: 0.0907295, actual_cost: 0.04536475,
+        cache_cost_details: [{ kind: 'write_30m', tokens: 11, unit_price: 0.0000125 }, { kind: 'write_12h', tokens: 13, unit_price: 0.000025 }, { kind: 'read', tokens: 17, unit_price: 0.000001 }] } }
+    const wrapper = await openCost(row, admin)
+    try {
+      expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain('$1.0000')
+      expect(wrapper.get('[data-testid="cache-unit-write_30m"]').text()).toContain('$12.5000')
+      expect(wrapper.get('[data-testid="cache-unit-write_12h"]').text()).toContain('$25.0000')
+      expect(wrapper.get('[role="tooltip"]').text()).toContain('$0.00046250')
+    } finally { wrapper.unmount() }
+  })
+  it('G1 preserves v1 known amounts but does not invent missing cache unit prices', async () => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture })
+    try {
+      expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain('—')
+      expect(wrapper.get('[data-testid="cache-unit-write_30m"]').text()).toContain('—')
+      expect(wrapper.get('[role="tooltip"]').text()).toContain('$0.01496250')
+    } finally { wrapper.unmount() }
+  })
+
+  it.each(['en', 'zh'] as const)('G1 localized read and TTL labels render with real translations: %s', async (language) => {
+    locale = language
+    const messages = language === 'zh' ? zhDashboard.usage : enDashboard.usage
+    localizedMessages[language]['usage.cacheReadTokenPrice'] = messages.cacheReadTokenPrice
+    localizedMessages[language]['usage.cacheWriteTTLTokenPrice'] = messages.cacheWriteTTLTokenPrice
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture })
+    try {
+      expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain(messages.cacheReadTokenPrice)
+      expect(wrapper.get('[data-testid="cache-unit-write_30m"]').text()).toContain(messages.cacheWriteTTLTokenPrice.replace('{ttl}', '30m'))
+    } finally { wrapper.unmount(); locale = 'en' }
+  })
+  it('G1 zero-priced cache buckets retain explicit zero unit prices', async () => {
+    const d = freeFastCustomerCostFixture.customer_cost_details
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, actual_cost: 0.045125,
+      customer_cost_details: { ...d, version: 2, cache_creation_cost: 0, cache_read_cost: 0, total_cost: 0.09025, actual_cost: 0.045125,
+        cache_cost_details: [{ kind: 'write_30m', tokens: 1197, unit_price: 0 }, { kind: 'read', tokens: 37469, unit_price: 0 }] } })
+    try {
+      expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain('$0.0000')
+      expect(wrapper.get('[data-testid="cache-unit-write_30m"]').text()).toContain('$0.0000')
+    } finally { wrapper.unmount() }
+  })
+  it.each([
+    [{ kind: 'read', tokens: 37469, unit_price: -1 }],
+    [{ kind: 'read', tokens: 37469, unit_price: 0.000001 }],
+    [{ kind: 'read', tokens: 37469, unit_price: NaN }],
+    [{ kind: 'write_30m', tokens: 1197, unit_price: 0.0000125 }, { kind: 'read', tokens: 37468, unit_price: 0.000001 }],
+  ])('G1 rejects invalid or incomplete v2 cache prices %j', async (...lines) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture,
+      customer_cost_details: { ...freeFastCustomerCostFixture.customer_cost_details, version: 2, cache_cost_details: lines } })
+    try { expect(wrapper.get('[data-testid="cache-unit-read"]').text()).toContain('—') }
+    finally { wrapper.unmount() }
+  })
+
 })
