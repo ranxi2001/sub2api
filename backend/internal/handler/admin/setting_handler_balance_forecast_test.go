@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +20,7 @@ func TestBalanceForecastRetiredSettings(t *testing.T) {
 		service.SettingKeyBalanceLowNotifyEnabled:   "true",
 		service.SettingKeyBalanceLowNotifyThreshold: "50",
 	}
-	h, repo := newStepUpSwitchTestHandler(t, legacy)
+	h, repo := newStepUpSwitchTestHandler(t, maps.Clone(legacy))
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)

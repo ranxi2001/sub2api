@@ -913,7 +913,8 @@ describe("admin SettingsView payment visible method controls", () => {
     const tabBadge = (tab: string) => wrapper.find(`#settings-tab-${tab} + [data-testid="new-feature-badge"]`);
     const tabBar = wrapper.get(".settings-tabs").element;
 
-    expect(["features", "gateway", "payment", "email"].filter((tab) => tabBadge(tab).exists())).toHaveLength(4);
+    expect(["features", "gateway", "payment"].filter((tab) => tabBadge(tab).exists())).toHaveLength(3);
+    expect(tabBadge("email").exists()).toBe(false);
     expect(tabBar.querySelector("[style]")).toBeNull();
     expect(tabBar.querySelector(".absolute")).toBeNull();
 
@@ -929,7 +930,7 @@ describe("admin SettingsView payment visible method controls", () => {
     await tabBadge("gateway").trigger("click");
     await flushPromises();
     expect(tabBadge("gateway").exists()).toBe(false);
-    expect(tabBadge("email").exists()).toBe(true);
+    expect(tabBadge("payment").exists()).toBe(true);
     expect(tabBar.querySelector("[style]")).toBeNull();
   });
 
