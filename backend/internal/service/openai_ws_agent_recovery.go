@@ -189,28 +189,20 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 	return clean, nil
 }
 
-// Stored native Responses has a same-account response anchor or the client
-// is resending known intact opaque items. Legacy bridge reconstruction
+// Stored native Responses already has a verified response anchor and the
+// client is resending known intact opaque items. Legacy bridge reconstruction
 // would append history again (including tasks/tool results) on every turn.
 // This only chooses representation; begin still rechecks authoritative owners,
 // the exact previous response, permissions and the final built HTTP request.
-func (r *openAIWSAgentRecovery) storedContinuation(account *Account, source []byte) bool {
-	if r == nil || r.service == nil || gjson.GetBytes(source, "store").Type != gjson.True || gjson.GetBytes(source, "previous_response_id").String() == "" {
+func (r *openAIWSAgentRecovery) storedContinuation(source []byte) bool {
+	if r == nil || gjson.GetBytes(source, "store").Type != gjson.True || gjson.GetBytes(source, "previous_response_id").String() == "" {
 		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	items := openAIAgentRecoveryItemDigests(source)
 	if len(items) == 0 {
-		if account == nil || account.ID <= 0 || !account.IsOpenAIApiKey() {
-			return false
-		}
-		scope := openAIAgentRecoveryFromContext(r.ctx)
-		if scope == nil {
-			return false
-		}
-		owner, err := r.service.getOpenAIWSStateStore().GetResponseAccount(r.ctx, scope.groupID, gjson.GetBytes(source, "previous_response_id").String())
-		return err == nil && owner == account.ID
+		return false
 	}
 	scope := *openAIAgentRecoveryFromContext(r.ctx)
 	if forward, ok := openAIForwardModelFromContext(r.c.Request.Context()); ok && forward.model != "" {
@@ -222,6 +214,30 @@ func (r *openAIWSAgentRecovery) storedContinuation(account *Account, source []by
 		}
 	}
 	return true
+}
+
+// Plaintext stored responses also retain their native delta representation,
+// but only for a response currently bound to this API-key account. begin still
+// rechecks the pointer at the actual write; this lookup cannot authorize a send.
+func (r *openAIWSAgentRecovery) plaintextStoredContinuation(account *Account, source []byte) bool {
+	if r == nil || r.service == nil || account == nil || account.ID <= 0 || !account.IsOpenAIApiKey() ||
+		gjson.GetBytes(source, "store").Type != gjson.True || len(openAIAgentRecoveryItemDigests(source)) != 0 {
+		return false
+	}
+	previous := gjson.GetBytes(source, "previous_response_id").String()
+	if previous == "" || r.service.settingService == nil || !r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(r.ctx) {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	scope := openAIAgentRecoveryFromContext(r.ctx)
+	if scope == nil {
+		return false
+	}
+	lookupCtx, cancel := context.WithTimeout(r.ctx, 3*time.Second)
+	defer cancel()
+	owner, err := r.service.getOpenAIWSStateStore().GetResponseAccount(lookupCtx, scope.groupID, previous)
+	return err == nil && owner == account.ID
 }
 
 // req captures the actual URL, final authorization headers and outbound model.
