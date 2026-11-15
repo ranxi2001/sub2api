@@ -51,6 +51,9 @@ type openAIAgentRecoveryRequest struct {
 	disableOwnerBinding  bool
 	previousResponseID   string
 	inputDigest          [32]byte
+	replaySource         []byte // immutable pre-builder source, never a retry's mutable wire
+	nativeOAuthInput     [32]byte
+	nativeOAuthPrepared  bool
 	replayControlsDigest [32]byte
 	apiControlsDigest    [32]byte
 	apiInputDigest       [32]byte
@@ -123,6 +126,7 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 	request.items = openAIAgentRecoveryItemDigests(body)
 	if request.preservesHistory() {
 		request.inputDigest = openAIAgentRecoveryInputDigest(body)
+		request.replaySource = append([]byte(nil), body...)
 	}
 	gjson.GetBytes(body, "input").ForEach(func(_, item gjson.Result) bool {
 		request.toolResult = request.toolResult || isCodexToolCallOutputItemType(item.Get("type").String())
@@ -384,7 +388,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	if !account.IsOpenAI() || account.HasManagedOpenAIConnections() || account.AuthConnectionID != "" ||
 		(account.IsOpenAIPassthroughEnabled() && !openAI409UsesNativeAPIKey(ctx, account)) || account.IsCopilotSDKEnabled() || account.IsSIWCEnabled() {
 		if request.owner != nil || request.preservesHistory() {
-			return noop, openAIAgentRecoveryError("wire_changed")
+			return noop, openAIAgentRecoveryRefusal(ctx, "unsupported_adapter")
 		}
 		return noop, nil
 	}
@@ -392,14 +396,14 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		if !request.preservesHistory() && len(request.items) == 0 && request.owner == nil && request.previousResponseID == "" {
 			return noop, nil
 		}
-		return noop, openAIAgentRecoveryError("wire_changed")
+		return noop, openAIAgentRecoveryRefusal(ctx, "body_unreadable")
 	}
 	reader, err := req.GetBody()
 	if err != nil {
 		if !request.preservesHistory() && len(request.items) == 0 && request.owner == nil && request.previousResponseID == "" {
 			return noop, nil
 		}
-		return noop, openAIAgentRecoveryError("wire_changed")
+		return noop, openAIAgentRecoveryRefusal(ctx, "body_unreadable")
 	}
 	body, err := io.ReadAll(reader)
 	_ = reader.Close()
@@ -407,15 +411,18 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		if !request.preservesHistory() && len(request.items) == 0 && request.owner == nil && request.previousResponseID == "" {
 			return noop, nil
 		}
-		return noop, openAIAgentRecoveryError("wire_changed")
+		return noop, openAIAgentRecoveryRefusal(ctx, "body_unreadable")
 	}
 	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
 		if !request.preservesHistory() && len(request.items) == 0 && request.owner == nil && request.previousResponseID == "" {
 			return noop, nil
 		}
-		return noop, openAIAgentRecoveryError("wire_changed")
+		return noop, openAIAgentRecoveryRefusal(ctx, "body_unreadable")
 	}
 	expectedInput, expectedControls := request.inputDigest, request.replayControlsDigest
+	if request.nativeOAuthPrepared && account.UsesOpenAICodexProtocol() && !request.omittedHistory {
+		expectedInput = request.nativeOAuthInput
+	}
 	if request.omittedHistory && account.IsOpenAIApiKey() && request.apiReplayPrepared {
 		expectedInput, expectedControls = request.apiInputDigest, request.apiControlsDigest
 	}
@@ -429,7 +436,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		if request.omittedHistory {
 			logger.FromContext(ctx).Warn("openai.encrypted_history_409_refused", zap.String("stage", "input_integrity"))
 		}
-		return noop, openAIAgentRecoveryError("wire_changed")
+		return noop, openAIAgentRecoveryRefusal(ctx, "input_integrity")
 	}
 	if request.omittedHistory && (gjson.GetBytes(body, "previous_response_id").Exists() || gjson.GetBytes(body, "conversation").Exists() ||
 		openAI409ControlsDigest(body) != expectedControls) {
@@ -459,7 +466,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		return noop, openAIAgentRecoveryError("wire_changed")
 	}
 	if request.ownerBindingRequired() && !sameOpenAIAgentRecoveryRoute(*request.owner, binding) {
-		return noop, openAIAgentRecoveryError("wire_changed")
+		return noop, openAIAgentRecoveryRefusal(ctx, "route_identity")
 	}
 	if err := s.checkOpenAIAgentRecoveryRecords(ctx, request, binding); err != nil {
 		return noop, err

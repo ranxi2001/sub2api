@@ -1,0 +1,162 @@
+name: Issue842 protected replay metadata
+
+on:
+  pull_request:
+    branches: [production]
+    paths: ['backend/**', '.github/workflows/issue842-replay-metadata.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue842-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: issue842
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d issue842"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Candidate GREEN at exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/issue842"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue842/candidate.txt"
+          # Formatting is verified remotely as well; no local toolchain runs.
+          gofmt -d backend/internal/handler/openai_issue842*_test.go backend/internal/service/openai_issue842_replay_test.go backend/internal/service/issue842_gateway_test_support.go backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_ws_agent_recovery.go > "$RUNNER_TEMP/issue842/format.patch"
+          cat "$RUNNER_TEMP/issue842/format.patch"
+          cd backend
+          go test -race -json -tags=unit ./internal/handler ./internal/service -run '^Test(Issue(842|805)|OpenAIAgentRecoveryCompaction|WithoutOpenAIRemoteCompaction)' -count=1 -timeout=10m 2>&1 | tee "$RUNNER_TEMP/issue842/green.jsonl"
+          if grep -Eiq '"Action":"skip"|no tests to run|panic:|WARNING: DATA RACE' "$RUNNER_TEMP/issue842/green.jsonl"; then exit 1; fi
+      - name: Isolated pinned defect RED with candidate fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git worktree add --detach "$RUNNER_TEMP/issue842-red" "$EXPECTED_HEAD_SHA"
+          cd "$RUNNER_TEMP/issue842-red"
+          # Only the production paths of this repair are restored. Candidate
+          # fixtures stay exact, and the original GREEN tree stays untouched.
+          for target in backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_gateway_request_body.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_agent_message_recovery.go; do
+            git show "$baseline:$target" > "$target"
+            expected=$(git rev-parse "$baseline:$target")
+            actual=$(git hash-object "$target")
+            echo "$target expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue842/red-blobs.txt"
+            test "$expected" = "$actual"
+          done
+          target=backend/internal/service/openai_agent_replay_metadata.go
+          if git cat-file -e "$baseline:$target" 2>/dev/null; then exit 1; fi
+          rm -- "$target"
+          test ! -e "$target"
+          echo "$target baseline=absent actual=absent" >> "$RUNNER_TEMP/issue842/red-blobs.txt"
+          target=backend/internal/handler/openai_issue842_replay_test.go
+          test "$(git hash-object "$target")" = "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")"
+          git diff --stat > "$RUNNER_TEMP/issue842/red-diff.txt"
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/handler -run '^TestIssue842(HTTP|WS)ReplayMetadata$' -count=1 -timeout=5m) > "$RUNNER_TEMP/issue842/red.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue842/red.jsonl"
+          test "$result" -ne 0
+          if grep -Eiq 'build failed|no tests to run|undefined:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|"Action":"skip"' "$RUNNER_TEMP/issue842/red.jsonl"; then exit 1; fi
+          python3 - "$RUNNER_TEMP/issue842/red.jsonl" <<'PY'
+          import itertools, json, sys
+          events = [json.loads(line) for line in open(sys.argv[1])]
+          failed = {e.get('Test') for e in events if e.get('Action') == 'fail'}
+          variants = ('reasoning_status', 'reasoning_content', 'plaintext_reasoning', 'reasoning_id', 'invalid_replay_id', 'message_call_id')
+          for kind, stream, variant, known in itertools.product(('apikey', 'oauth'), ('false', 'true'), variants, ('true', 'false')):
+              name = f'TestIssue842HTTPReplayMetadata/{kind}/stream={stream}/{variant}/known={known}'
+              assert name in failed, f'missing business RED: {name}'
+              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
+              assert 'Issue842 benign replay metadata must reach B once' in output, name
+              assert 'encrypted_agent_recovery_wire_changed' in output, name
+          for mode, variant, known in itertools.product(('ctx_pool', 'passthrough', 'http_bridge'), variants, ('true', 'false')):
+              name = f'TestIssue842WSReplayMetadata/{mode}/{variant}/known={known}'
+              assert name in failed, f'missing WS business RED: {name}'
+              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
+              assert 'Issue842 WS benign metadata must reach the actual adapter once' in output, name
+              assert 'encrypted_agent_recovery_wire_changed' in output or 'Issue842 metadata policy refusal before frame' in output, name
+          PY
+      - name: OAuth store and summary repair RED on pinned prior candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=af0328aec4a47c6c81a9b81d9a65c66ac660aea0
+          git fetch --no-tags --depth=1 origin "$baseline"
+          git worktree add --detach "$RUNNER_TEMP/issue842-oauth-red" "$EXPECTED_HEAD_SHA"
+          cd "$RUNNER_TEMP/issue842-oauth-red"
+          # Preserve the live production/BPS merge and the exact candidate
+          # fixture. Restore only the four production paths of this repair.
+          for target in backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_ws_agent_recovery.go; do
+            git show "$baseline:$target" > "$target"
+            expected=$(git rev-parse "$baseline:$target")
+            actual=$(git hash-object "$target")
+            echo "$target expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue842/oauth-red-blobs.txt"
+            test "$expected" = "$actual"
+          done
+          for target in backend/internal/handler/openai_issue842_oauth_repair_test.go backend/internal/service/issue842_gateway_test_support.go; do
+            test "$(git hash-object "$target")" = "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")"
+          done
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/handler -run '^TestIssue842OAuthStateless(HTTP|WS)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/issue842/oauth-red.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue842/oauth-red.jsonl"
+          test "$result" -ne 0
+          if grep -Eiq 'build failed|no tests to run|undefined:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|"Action":"skip"' "$RUNNER_TEMP/issue842/oauth-red.jsonl"; then exit 1; fi
+          python3 - "$RUNNER_TEMP/issue842/oauth-red.jsonl" <<'PY'
+          import itertools, json, sys
+          events = [json.loads(line) for line in open(sys.argv[1])]
+          failed = {e.get('Test') for e in events if e.get('Action') == 'fail'}
+          for stream, store, summary in itertools.product(('false', 'true'), ('omitted', 'true'), ('omitted', 'null', 'nonempty')):
+              name = f'TestIssue842OAuthStatelessHTTP/oauth/stream={stream}/store={store}/summary={summary}'
+              assert name in failed, f'missing OAuth HTTP business RED: {name}'
+              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
+              assert 'Issue842 OAuth stateless input must match immutable-source metadata projection' in output, name
+          for mode, store, summary in itertools.product(('ctx_pool', 'passthrough', 'http_bridge'), ('omitted', 'true'), ('omitted', 'null', 'nonempty')):
+              name = f'TestIssue842OAuthStatelessWS/{mode}/store={store}/summary={summary}'
+              assert name in failed, f'missing OAuth WS business RED: {name}'
+              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
+              assert 'Issue842 OAuth WS stateless input must match immutable-source metadata projection' in output, name
+          PY
+      - name: Remote formatting gate
+        run: test ! -s "$RUNNER_TEMP/issue842/format.patch"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue842-${{ env.EXPECTED_HEAD_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue842/
+          if-no-files-found: error

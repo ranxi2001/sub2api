@@ -52,6 +52,9 @@ type openAIWSAgentRecovery struct {
 	readable                         *openAIAgentRecoveryRequest
 	readableSource, readableControls [32]byte
 	bridgeSource                     []byte // verified pre-builder bytes, bounded by the current frame
+	protected                        *openAIAgentRecoveryRequest
+	protectedSource                  [32]byte
+	protectedControls                [32]byte
 }
 
 func newOpenAIWSAgentRecovery(s *OpenAIGatewayService, ctx context.Context, c *gin.Context) *openAIWSAgentRecovery {
@@ -110,9 +113,32 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 	defer r.mu.Unlock()
 	r.readable = nil
 	r.bridgeSource = nil
+	r.protected = nil
 	initial := openAIAgentRecoveryFromContext(r.ctx)
 	if initial == nil || !initial.omittedHistory {
-		return source, nil
+		clean, err := r.service.PrepareOpenAIAgentReplayBody(source)
+		if err != nil {
+			return nil, err
+		}
+		if r.service.preserveOpenAIAgentHistory(source) {
+			if account.UsesOpenAICodexProtocol() {
+				clean, err = projectOpenAIOAuthReasoningMetadata(clean)
+				if err != nil {
+					return nil, err
+				}
+			}
+			// Freeze before compatibility, timezone, OAuth or tool builders.
+			// begin may refresh owner records, but cannot trust a new input.
+			model := gjson.GetBytes(source, "model").String()
+			if initial != nil {
+				model = initial.model
+			}
+			ctx := r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, clean, r.session, model)
+			r.protected = openAIAgentRecoveryFromContext(ctx)
+			r.protectedSource = openAIAgentRecoveryInputDigest(source)
+			r.protectedControls = openAI409ControlsDigest(source)
+		}
+		return append([]byte(nil), clean...), nil
 	}
 	ctx, clean := r.ctx, source
 	if openAIAgentRecoveryInputDigest(source) != initial.inputDigest || openAI409ControlsDigest(source) != initial.replayControlsDigest {
@@ -228,6 +254,25 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		model = initial.model
 	}
 	ctx := r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, source, r.session, model)
+	if r.protected != nil {
+		if openAIAgentRecoveryInputDigest(source) != r.protectedSource || openAI409ControlsDigest(source) != r.protectedControls {
+			return openAIAgentRecoveryRefusal(ctx, "input_integrity")
+		}
+		// Keep fresh authoritative lookup/fences; the trusted input remains
+		// the immutable pre-builder snapshot, never the final source/payload.
+		fresh := openAIAgentRecoveryFromContext(ctx)
+		fresh.inputDigest = r.protected.inputDigest
+		if fresh.known == nil {
+			fresh.known = make(map[[32]byte]bool)
+		}
+		for key := range r.protected.known {
+			fresh.known[key] = true
+		}
+		if r.protected.lookupErr != nil {
+			fresh.lookupErr = r.protected.lookupErr
+		}
+		fresh.conflict = fresh.conflict || r.protected.conflict
+	}
 	if r.readable != nil {
 		if openAIAgentRecoveryInputDigest(source) != r.readableSource || openAI409ControlsDigest(source) != r.readableControls {
 			return openAIAgentRecoveryError("wire_changed")

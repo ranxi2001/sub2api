@@ -44,6 +44,25 @@ jobs:
           for target in backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go backend/internal/service/openai_responses_namespace.go; do
             git show "$baseline:$target" > "$target"
           done
+          # Keep unrelated replay callers compatible with the frozen recovery
+          # struct. These pinned blobs predate PR853's OAuth projection; none
+          # of the selected dispatch defect blobs above are replaced.
+          compatibility=00d2e9be01404c6e85c0560fa196e4650ef5d0fb
+          callers="$baseline"
+          # PR855 adds typed WS route refusals; preserve that pre-PR853 caller
+          # only when the candidate actually contains the corresponding types.
+          if git grep -q 'type openAIWSOwnerRouteError struct' HEAD -- backend/internal/service/openai_ws_readable_continuation.go; then
+            callers=d1bd861bcfa34443a629db98de9121a4e15d1d0b
+          fi
+          for source in "$compatibility" "$callers"; do git fetch --no-tags --depth=1 origin "$source"; done
+          for target in backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_gateway_request_body.go backend/internal/service/openai_ws_agent_recovery.go; do
+            source="$callers"
+            if [ "$target" = backend/internal/service/openai_agent_replay_metadata.go ]; then source="$compatibility"; fi
+            expected=$(git rev-parse "$source:$target")
+            git show "$source:$target" > "$target"
+            test "$(git hash-object "$target")" = "$expected"
+            echo "$target compatibility=$source blob=$expected" >> "$RUNNER_TEMP/dispatch-compatibility.txt"
+          done
       - name: Same network and tool-loop regressions
         env:
           PHASE: ${{ matrix.phase }}
