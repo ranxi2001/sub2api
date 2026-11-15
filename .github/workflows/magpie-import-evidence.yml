@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   rendered:
-    runs-on: ubuntu-latest
+    runs-on: macos-15-intel
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -24,7 +24,7 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: |
           npm install --prefix "$RUNNER_TEMP/magpie-browser" --no-save --ignore-scripts playwright@1.56.1
-          node "$RUNNER_TEMP/magpie-browser/node_modules/playwright/cli.js" install --with-deps chromium
+          node "$RUNNER_TEMP/magpie-browser/node_modules/playwright/cli.js" install chromium
       - name: Render actual keys view and verify selected-row import
         env:
           EVIDENCE_DIR: ${{ runner.temp }}/magpie-evidence
