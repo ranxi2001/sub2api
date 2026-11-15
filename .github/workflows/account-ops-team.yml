@@ -1,0 +1,66 @@
+name: Account operations team and provider balances
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/account_ops*'
+      - 'backend/internal/repository/account_ops*'
+      - 'backend/internal/handler/admin/account_ops*'
+      - 'frontend/src/components/admin/operations/AccountOps*'
+      - 'frontend/src/components/admin/operations/__tests__/AccountOps*'
+      - 'frontend/src/api/admin/accountOps.ts'
+      - 'frontend/src/views/admin/AccountOpsView.vue'
+      - 'frontend/src/components/admin/operations/MatureProvidersPanel.vue'
+      - '.github/workflows/account-ops-team.yml'
+      - '.github/scripts/account-ops-team-screenshots.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: go test -race -tags=unit ./internal/service ./internal/handler/admin -run '^TestAccountOps' -count=1 -timeout=10m
+        working-directory: backend
+      - run: go test -tags=integration ./internal/repository -run '^TestAccountOpsProviderSnapshot' -count=1 -v -timeout=10m
+        working-directory: backend
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/AccountOps src/components/common/__tests__/NewFeatureBadge.spec.ts src/views/admin/__tests__/AccountOpsView.spec.ts src/views/admin/__tests__/MatureProviders.spec.ts
+      - run: pnpm --dir frontend run build
+      - name: Install screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/ops-team-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/ops-team-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Render actual components with synthetic provider and account data
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/account-ops-team-ui
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/ops-team-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/account-ops-team-screenshots.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: account-ops-team-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/account-ops-team-ui

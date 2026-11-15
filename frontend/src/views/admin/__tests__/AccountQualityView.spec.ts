@@ -1929,7 +1929,7 @@ describe('quality operations', () => {
     expect(request.cron_expression).toBe('*/10 * * * *')
     expect(request.pelican_config.quality).toEqual({ trigger_on_upstream_5xx: false, oauth_401_max_rounds: 6, expected_answer: '', action: 'enable_bps', remove_group_ids: [], auto_restore: true, bps: {
       failure_threshold: 3, usage_percent: 80, require_all: true, all_models: false, models: ['gpt-6-astra'],
-      omit_unsupported_tools: false, ignore_encrypted_content: true, auto_disable_on_403: true,
+      omit_unsupported_tools: false, ignore_encrypted_content: true, web_search: false, web_search_auto: false, auto_disable_on_403: true,
       auto_recover_on_403: true, recovery_interval_minutes: 360,
       auto_move_on_403: true, target_group_id: 21, session_proxy: false, proxy_source: '', cache_creation_as_input: true,
       pass_threshold: 3, hold_on_usage: false } })

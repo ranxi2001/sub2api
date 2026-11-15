@@ -1,4 +1,18 @@
 export default {
+  "providerBalanceSource": "供应商平台余额",
+  "providerRefreshDisabled": "供应商定时刷新未开启，请在渠道运维中设置。",
+  "manageProviderBalance": "查看／刷新供应商余额",
+  "linkProvider": "关联供应商余额",
+  "providerBalanceHint": "选择渠道运维中的供应商后，整组共用该平台的余额；从供应商导入的 Key 自动归组。提醒阈值与收件人在账号运维中配置。",
+  "memberBalanceSource": "使用组内首个账号余额",
+  "loadProviders": "加载供应商",
+  "providersUnavailable": "供应商目录读取失败，请重试。",
+
+  "oauthLifecycle": "账号用途",
+  "oauthTemporary": "速抛／临时号",
+  "oauthLongTerm": "长期号",
+  "sharedBalanceHint": "共用渠道余额，以首个账号为采集来源；同一次事件只通知一次。",
+
   "directEditHint": "直接编辑每组规则；勾选多组可批量修改",
   "manageGroups": "管理分组",
   "failureSettingsSummary": "请求失败提醒与重复间隔",
@@ -21,7 +35,7 @@ export default {
   "enabledHint": "启用已选择的失败提醒和账号阈值规则。",
   "recipient": "收件邮箱",
   "emailRequired": "请输入收件邮箱。",
-  "recipientHint": "账号提醒会发送到此邮箱。",
+  "recipientHint": "最多 10 个邮箱，以换行、逗号或分号分隔。重复地址只发送一次；同一渠道的一次提醒会分别发送给各位收件人。",
   "alertTypes": "请求失败提醒",
   "balance_low": "余额不足",
   "balanceHint": "上游请求明确返回余额或信用余额不足。",

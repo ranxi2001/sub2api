@@ -17,6 +17,7 @@ const (
 
 // AccountOpsGroup is a persisted, manually managed account group.
 type AccountOpsGroup struct {
+	ProviderID int64   `json:"provider_id,omitempty"`
 	ID         string  `json:"id"`
 	Name       string  `json:"name"`
 	Provider   string  `json:"provider,omitempty"`
@@ -34,6 +35,7 @@ type AccountOpsGroupAssignment struct {
 }
 
 type AccountOpsGroupView struct {
+	ProviderID  int64   `json:"provider_id,omitempty"`
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	DefaultName string  `json:"default_name"`

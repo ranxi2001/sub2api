@@ -6,7 +6,7 @@ import { saveAccountOpsGroups } from '@/api/admin/accountOps'
 import type { AccountOpsGroup, AccountOpsThresholdAccount } from '@/api/admin/accountOps'
 
 vi.mock('@/api/admin/accountOps', () => ({ saveAccountOpsGroups: vi.fn() }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
 
 const groups: AccountOpsGroup[] = [
   { id: 'manual-alpha', name: 'Alpha site', default_name: 'Alpha site', provider: 'sub2api', site: 'https://alpha.example', mode: 'manual', account_ids: [121, 999] },

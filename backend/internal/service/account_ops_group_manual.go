@@ -183,6 +183,7 @@ func (s *AccountOpsService) reconcileAccountOpsGroups(ctx context.Context, c *Ac
 	for i := range accounts {
 		byID[accounts[i].ID] = &accounts[i]
 	}
+	providerChanged := reconcileAccountOpsProviderGroups(c, accounts)
 	original := cloneAccountOpsGroups(c.Groups)
 	wasInitialized := c.GroupsInitialized
 	bootstrap := !wasInitialized
@@ -222,7 +223,7 @@ func (s *AccountOpsService) reconcileAccountOpsGroups(ctx context.Context, c *Ac
 	for _, rule := range c.QuotaThresholds {
 		knownAccounts[rule.AccountID] = true
 	}
-	changed := !reflect.DeepEqual(original, groups)
+	changed := providerChanged || !reflect.DeepEqual(original, groups)
 
 	for i := range groups {
 		provider, site := accountOpsGroupSite(groups[i], byID)
@@ -314,7 +315,7 @@ func (s *AccountOpsService) reconcileAccountOpsGroups(ctx context.Context, c *Ac
 				site = assignment.Site
 			}
 			for groupIndex := range groups {
-				if canonicalAccountOpsSite(groups[groupIndex].Site) == canonicalAccountOpsSite(site) && site != "" {
+				if groups[groupIndex].ProviderID == 0 && canonicalAccountOpsSite(groups[groupIndex].Site) == canonicalAccountOpsSite(site) && site != "" {
 					if appendUniqueAccountOpsGroupMember(&groups[groupIndex], account.ID) {
 						changed = true
 					}

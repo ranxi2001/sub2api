@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/mail"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,12 +38,10 @@ func ValidateAccountOpsConfig(c AccountOpsConfig) (err error) {
 	if c.CooldownMinutes < 5 || c.CooldownMinutes > 1440 {
 		return errors.New("cooldown_minutes must be between 5 and 1440")
 	}
-	if c.Recipient != "" {
-		address, err := mail.ParseAddress(c.Recipient)
-		if err != nil || address.Address != c.Recipient || strings.ContainsAny(c.Recipient, "\r\n") || len(c.Recipient) > 254 {
-			return errors.New("recipient must be one email address")
-		}
+	if _, err := parseAccountOpsRecipients(c.Recipient); err != nil {
+		return err
 	}
+
 	if err := validateAccountOpsExtras(c); err != nil {
 		return err
 	}
@@ -186,6 +182,15 @@ func (s *AccountOpsService) Observe(account *Account, status int, headers http.H
 		name = name[:120]
 	}
 	group := accountOpsGroupAssignment(account, c)
+	// Linked wallets use one authoritative balance-threshold episode. Request
+	// failures from individual keys must not send a second low-balance alert.
+	if kind == "balance_low" && accountOpsProviderID(c, account.ID) > 0 {
+		for _, rule := range c.BalanceThresholds {
+			if rule.Enabled && thresholdAccountGroup(nil, rule.AccountID, c).ID == group.ID {
+				return
+			}
+		}
+	}
 	event := AccountOpsEvent{AccountID: account.ID, AccountName: string(name), GroupID: group.ID, GroupName: group.Name, Kind: kind, Signal: signal, HTTPStatus: status}
 	// The hot request path never waits for SMTP or the database. Raw errors and credentials do not enter the queue.
 	select {
