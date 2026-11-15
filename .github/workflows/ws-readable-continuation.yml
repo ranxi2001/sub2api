@@ -90,6 +90,7 @@ jobs:
               if git cat-file -e "$BASELINE_SHA:$target" 2>/dev/null; then
                 mkdir -p -- "$(dirname -- "$target")"
                 git show "$BASELINE_SHA:$target" > "$target"
+                git add -N -- "$target"
                 test "$(git hash-object "$target")" = "$(git rev-parse "$BASELINE_SHA:$target")"
               else
                 rm -- "$target"
@@ -158,6 +159,7 @@ jobs:
               if git cat-file -e "$baseline:$target" 2>/dev/null; then
                 mkdir -p -- "$(dirname -- "$tested_tree/$target")"
                 git show "$baseline:$target" > "$tested_tree/$target"
+                git -C "$tested_tree" add -N -- "$target"
                 test "$(git hash-object "$tested_tree/$target")" = "$(git rev-parse "$baseline:$target")"
               else
                 rm -- "$tested_tree/$target"
@@ -196,6 +198,7 @@ jobs:
               if git cat-file -e "$baseline:$target" 2>/dev/null; then
                 mkdir -p -- "$(dirname -- "$tested_tree/$target")"
                 git show "$baseline:$target" > "$tested_tree/$target"
+                git -C "$tested_tree" add -N -- "$target"
                 test "$(git hash-object "$tested_tree/$target")" = "$(git rev-parse "$baseline:$target")"
               else
                 rm -- "$tested_tree/$target"
@@ -266,6 +269,7 @@ jobs:
               if git cat-file -e "$baseline:$target" 2>/dev/null; then
                 mkdir -p -- "$(dirname -- "$tested_tree/$target")"
                 git show "$baseline:$target" > "$tested_tree/$target"
+                git -C "$tested_tree" add -N -- "$target"
                 test "$(git hash-object "$tested_tree/$target")" = "$(git rev-parse "$baseline:$target")"
               else
                 rm -- "$tested_tree/$target"
