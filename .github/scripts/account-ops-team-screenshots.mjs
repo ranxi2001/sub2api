@@ -39,6 +39,7 @@ createApp({setup(){return()=>h('main',{class:'p-6 space-y-4'},[
  h(Groups,{show:group.value,groups,accounts,onClose:()=>group.value=false})
 ])}}).use(createPinia()).use(i18n).mount('#app');
  `)
+ process.chdir(root) // Tailwind resolves the project theme relative to cwd.
  server = await createServer({ root, configFile: false, server: { host: '127.0.0.1', port: 4309, strictPort: true }, resolve: { alias: { '@': join(root, 'src') } }, plugins: [{ name: 'baseline-components', enforce: 'pre', load(id) { if (before && original.has(id)) return original.get(id) }, configureServer(vite) {
   vite.middlewares.use((req, res, next) => {
    if (req.url?.split('?')[0] !== '/preview') return next()
