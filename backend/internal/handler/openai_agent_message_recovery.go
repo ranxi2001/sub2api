@@ -64,7 +64,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIWSAgentRecoveryError(ctx context.Cont
 	})
 	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_ = conn.Write(writeCtx, coderws.MessageText, payload)
+	_ = service.WriteCapturedWSClient(writeCtx, conn, coderws.MessageText, payload)
 	status, reason := coderws.StatusPolicyViolation, recovery.ClientCode()
 	if !recovery.RetryAt.IsZero() {
 		status = coderws.StatusTryAgainLater
