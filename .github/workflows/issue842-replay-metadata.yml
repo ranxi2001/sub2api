@@ -70,7 +70,7 @@ jobs:
           cd "$RUNNER_TEMP/issue842-red"
           # Only the production paths of this repair are restored. Candidate
           # fixtures stay exact, and the original GREEN tree stays untouched.
-          for target in backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_gateway_request_body.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_agent_message_recovery.go; do
+          for target in backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_gateway_request_body.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_agent_message_recovery.go; do
             git show "$baseline:$target" > "$target"
             expected=$(git rev-parse "$baseline:$target")
             actual=$(git hash-object "$target")
