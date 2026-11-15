@@ -80,6 +80,16 @@ func TestOpenAIWSMixedOwnerToolProvenanceCases(t *testing.T) {
 	}
 }
 
+func TestOpenAIWSShadowToolProvenance(t *testing.T) {
+	for _, kind := range []string{"function", "custom"} {
+		for _, change := range []string{"valid", "phantom", "epoch"} {
+			t.Run(kind+"/"+change, func(t *testing.T) {
+				runWSMixedOwnerContinuation(t, service.OpenAIWSIngressModeCtxPool, 2, "f1_"+kind+"_shadow_"+change)
+			})
+		}
+	}
+}
+
 func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios ...string) {
 	t.Helper()
 	scenario := "live"
@@ -87,6 +97,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		scenario = scenarios[0]
 	}
 	provenance := strings.HasPrefix(scenario, "f1_")
+	shadowProvenance := provenance && strings.Contains(scenario, "_shadow_")
 	customProvenance := strings.HasPrefix(scenario, "f1_custom_")
 	provenancePositive := provenance && strings.HasSuffix(scenario, "_valid")
 	unrelatedCall := provenance && strings.HasSuffix(scenario, "_unrelated")
@@ -289,7 +300,11 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	var previous string
 	var firstTwoOwners map[string]string
 	for warm := 1; warm < turn; warm++ {
-		issue715WSSend(t, h.clientConn, create([]string{httpRebuildMessage("user", "fixture warm")}, ""))
+		warmHistory := []string{httpRebuildMessage("user", "fixture warm")}
+		if shadowProvenance && warm == 1 {
+			warmHistory = history
+		}
+		issue715WSSend(t, h.clientConn, create(warmHistory, ""))
 		raw, readErr := read()
 		require.NoError(t, readErr)
 		completed := gjson.GetBytes(raw, "response")
@@ -365,6 +380,15 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	if unrelatedCall || undeliveredCall {
 		history = append(history, foreignCall, foreignOutput)
 	}
+	if undeliveredCall {
+		issue600Finish(t, h, headers)
+		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		conn, _, dialErr := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
+		cancel()
+		require.NoError(t, dialErr)
+		h.clientConn = conn
+		previous = ""
+	}
 	if provenance && !provenancePositive {
 		change := strings.TrimPrefix(scenario, "f1_function_")
 		if customProvenance {
@@ -416,6 +440,44 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			}
 		}
 	}
+	if shadowProvenance {
+		shadowKeys, keyErr := probe.Keys(context.Background(), "openai_readable_shadow:v1:*").Result()
+		require.NoError(t, keyErr)
+		require.Eventually(t, func() bool {
+			shadowKeys, keyErr = probe.Keys(context.Background(), "openai_readable_shadow:v1:*").Result()
+			return keyErr == nil && len(shadowKeys) == 1
+		}, 3*time.Second, 5*time.Millisecond)
+		stored, readErr := probe.Get(context.Background(), shadowKeys[0]).Result()
+		require.NoError(t, readErr)
+		require.Contains(t, stored, httpRebuildPatch)
+		if strings.HasSuffix(scenario, "_phantom") {
+			input := gjson.Get(stored, "input").Array()
+			inputRaw := make([]json.RawMessage, 0, len(input)+2)
+			for _, item := range input {
+				inputRaw = append(inputRaw, json.RawMessage(item.Raw))
+			}
+			inputRaw = append(inputRaw, json.RawMessage(foreignCall), json.RawMessage(foreignOutput))
+			encoded, marshalErr := json.Marshal(inputRaw)
+			require.NoError(t, marshalErr)
+			stored, setErr := sjson.SetRaw(stored, "input", string(encoded))
+			require.NoError(t, setErr)
+			require.NoError(t, probe.Set(context.Background(), shadowKeys[0], stored, time.Minute).Err())
+		}
+		if strings.HasSuffix(scenario, "_epoch") {
+			keys, err := probe.Keys(context.Background(), "openai_agent_shadow_epoch:*").Result()
+			require.NoError(t, err)
+			for _, key := range keys {
+				require.NoError(t, probe.Set(context.Background(), key, "ready:pending:fixture-reassociated", time.Minute).Err())
+			}
+		}
+		history = []string{httpRebuildAgentB}
+		issue600Finish(t, h, headers)
+		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		conn, _, dialErr := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
+		cancel()
+		require.NoError(t, dialErr)
+		h.clientConn = conn
+	}
 	owners = issue805Owners(t, probe)
 	issue715WSSend(t, h.clientConn, create(history, previous))
 	resumed, resumeErr := read()
@@ -433,7 +495,11 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			t.Log("F1_PHANTOM_PAIR_REACHED_UPSTREAM: authenticated handler projected an unissued matching tool pair")
 		}
 		require.Equal(t, turn, sends, "F1_UNTRUSTED_MATCHED_PAIR_DISPATCHED: opaque completed owners must not authorize a separately fabricated tool call")
-		require.Equal(t, "encrypted_agent_recovery_owner_conflict", gjson.GetBytes(resumed, "error.code").String())
+		if shadowProvenance && strings.HasSuffix(scenario, "_epoch") {
+			require.Contains(t, []string{"encrypted_agent_recovery_owner_conflict", "encrypted_agent_recovery_readable_intent_missing", "encrypted_agent_recovery_owner_unavailable"}, gjson.GetBytes(resumed, "error.code").String())
+		} else {
+			require.Equal(t, "encrypted_agent_recovery_owner_conflict", gjson.GetBytes(resumed, "error.code").String())
+		}
 		require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(resumeErr))
 		require.Equal(t, owners, issue805Owners(t, probe))
 		require.Equal(t, 1, tools.patches)
@@ -480,6 +546,17 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	require.NoError(t, resumeErr)
 	require.Equal(t, "completed", gjson.GetBytes(resumed, "response.status").String())
 	second := gjson.GetBytes(resumed, "response")
+	if shadowProvenance {
+		history = []string{httpRebuildMessage("user", httpRebuildTask)}
+		for _, item := range first.Get("output").Array() {
+			history = append(history, item.Raw)
+		}
+		history = append(history, `{"type":"function_call_output","call_id":"call_mixed_patch","output":"`+httpRebuildPatch+`"}`)
+		if customProvenance {
+			history = append(history, `{"type":"custom_tool_call_output","call_id":"fixture-custom-delivered","output":"fixture custom completed once"}`)
+		}
+		history = append(history, httpRebuildAgentB)
+	}
 	for _, item := range second.Get("output").Array() {
 		history = append(history, item.Raw)
 	}
@@ -511,8 +588,12 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		require.NotContains(t, string(wire), "fixture-opaque-A")
 		require.NotContains(t, string(wire), "fixture-readable-B")
 		require.False(t, gjson.GetBytes(wire, "previous_response_id").Exists())
-		for _, item := range gjson.GetBytes(wire, "input").Array() {
-			require.NotContains(t, item.Get("type").String(), "call", "completed tools must be inert readable history")
+		if shadowProvenance && i == 0 {
+			require.True(t, httpRebuildToolPair(wire, "apply_patch", httpRebuildPatch), "restored single-owner history retains one proven pair")
+		} else {
+			for _, item := range gjson.GetBytes(wire, "input").Array() {
+				require.NotContains(t, item.Get("type").String(), "call", "completed tools must be inert readable history")
+			}
 		}
 	}
 	require.Equal(t, 1, strings.Count(string(frames[turn+1]), httpRebuildCheck))

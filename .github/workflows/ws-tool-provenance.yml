@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   behavior:
-    runs-on: macos-15-intel
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       CANDIDATE: ${{ github.event.pull_request.head.sha }}
@@ -31,11 +31,12 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
       - name: Install isolated Redis
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: '1'
-          HOMEBREW_NO_INSTALL_CLEANUP: '1'
         run: |
-          if ! command -v redis-server >/dev/null; then brew install redis; fi
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
       - name: Real handler RED against exact production blobs
         shell: bash
         run: |
@@ -98,6 +99,23 @@ jobs:
                   name=f'TestOpenAIWSMixedOwnerToolProvenanceCases/{kind}/{case}'
                   assert sum(r.get('Action')=='pass' and r.get('Test')==name for r in rows)==1,name
           assert not any(r.get('Action') in ('fail','skip') for r in rows)
+          PY
+      - name: Shadow provenance and delivery lifecycle
+        if: hashFiles('backend/internal/service/openai_tool_provenance.go') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSShadowToolProvenance$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/shadow.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-provenance-evidence/shadow.jsonl"
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/service -run '^Test(OpenAIToolProvenanceDeliveryAndScope|OpenAIWSMixedOwnerFinalSendFences)$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/delivery.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-provenance-evidence/delivery.jsonl"
+          python3 - "$RUNNER_TEMP/ws-provenance-evidence" <<'PY'
+          import json,sys,pathlib
+          root=pathlib.Path(sys.argv[1])
+          for filename,tests in [('shadow.jsonl',{f'TestOpenAIWSShadowToolProvenance/{kind}/{case}' for kind in ('function','custom') for case in ('valid','phantom','epoch')}),('delivery.jsonl',{'TestOpenAIToolProvenanceDeliveryAndScope','TestOpenAIWSMixedOwnerFinalSendFences'})]:
+              rows=[json.loads(line) for line in (root/filename).read_text().splitlines() if line.startswith('{')]
+              for name in tests: assert sum(r.get('Action')=='pass' and r.get('Test')==name for r in rows)==1,name
+              assert not any(r.get('Action') in ('fail','skip') for r in rows)
           PY
       - uses: actions/upload-artifact@v7
         if: always()
