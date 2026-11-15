@@ -30,11 +30,17 @@ func (b *Bridge) validateToolResponse(response object) error {
 		if err != nil {
 			return err
 		}
+		if err := b.validateSelectedTool(translated); err != nil {
+			return err
+		}
 		id, call := text(translated["id"]), text(translated["call_id"])
 		if ids[id] || calls[call] {
 			return fmt.Errorf("basispoints response contains duplicate tool identities")
 		}
 		ids[id], calls[call] = true, true
+	}
+	if b.toolChoice == "required" && len(calls) == 0 {
+		return toolChoiceViolation{reason: "missing_call"}
 	}
 	return nil
 }
@@ -76,7 +82,8 @@ func (b *Bridge) translateCompleted(ctx context.Context, response object, repair
 		return b.translateResponse(response)
 	}
 	var schemaError toolArgumentsSchemaError
-	if errors.As(validation, &schemaError) {
+	var choiceError toolChoiceViolation
+	if errors.As(validation, &schemaError) || errors.As(validation, &choiceError) {
 		return validation
 	}
 	original, eligible := repairableTools(response)

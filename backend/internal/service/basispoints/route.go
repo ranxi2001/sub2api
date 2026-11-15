@@ -10,6 +10,11 @@ import (
 // under the default fallback policy. This describes the bridge's capabilities,
 // not whether the BPS upstream could support them through another protocol.
 func NativeFallbackReason(body []byte) string {
+	return NativeFallbackReasonWithSearch(body, false)
+}
+
+// NativeFallbackReasonWithSearch leaves image routing unchanged.
+func NativeFallbackReasonWithSearch(body []byte, searchEnabled bool) string {
 	if !gjson.ValidBytes(body) {
 		return ""
 	}
@@ -18,7 +23,11 @@ func NativeFallbackReason(body []byte) string {
 		return ""
 	}
 	switch choice.Get("type").String() {
-	case "web_search", "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26", "image_generation":
+	case "web_search", "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26":
+		if !searchEnabled {
+			return "tool_choice"
+		}
+	case "image_generation":
 		return "tool_choice"
 	}
 	if tools := gjson.GetBytes(body, "tools"); tools.IsArray() {
@@ -30,7 +39,7 @@ func NativeFallbackReason(body []byte) string {
 				fallback = "image_generation"
 				return false
 			case "web_search", "web_search_preview", "web_search_preview_2025_03_11", "web_search_2025_08_26":
-				if tool.Get("external_web_access").Bool() || tool.Get("search_context_size").String() == "high" {
+				if !searchEnabled && (tool.Get("external_web_access").Bool() || tool.Get("search_context_size").String() == "high") {
 					fallback = "web_search"
 					return false
 				}

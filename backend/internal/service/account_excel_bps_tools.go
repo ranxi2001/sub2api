@@ -14,5 +14,16 @@ func (a *Account) excelBPSNativeFallbackReason(body []byte) string {
 	if a.IsExcelBPSOmitUnsupportedToolsEnabled() {
 		return ""
 	}
-	return basispoints.NativeFallbackReason(body)
+	return basispoints.NativeFallbackReasonWithSearch(body, a.IsExcelBPSSearchEnabled())
+}
+
+const ExcelBPSWebSearchKey = "openai_excel_bps_web_search"
+const ExcelBPSWebSearchAutoKey = "openai_excel_bps_web_search_auto"
+
+// Existing accounts opt in explicitly; enabling BPS alone never adds searches.
+func (a *Account) IsExcelBPSSearchEnabled() bool {
+	return a.IsExcelBPSEnabled() && a.Extra[ExcelBPSWebSearchKey] == true
+}
+func (a *Account) IsExcelBPSSearchAutoEnabled() bool {
+	return a.IsExcelBPSSearchEnabled() && a.Extra[ExcelBPSWebSearchAutoKey] == true
 }
