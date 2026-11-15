@@ -64,16 +64,29 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 			clients := issue805Redis(t)
 			cache := repository.NewGatewayCache(clients())
 			headers := http.Header{"Session_id": {"fixture-repair-session"}, "Thread-Id": {"fixture-repair-thread"}}
+			var accountID int64
 			h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, provider.URL, headers,
 				map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}, cache,
 				func(key *service.APIKey) { key.AllowLongContext = true },
 				func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, _ *service.AccountRepository) {
+					accountID = a.ID
 					a.Extra["openai_apikey_responses_websockets_v2_mode"] = service.OpenAIWSIngressModeHTTPBridge
 					a.Extra["codex_fingerprint_mode"] = "off"
 					cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 15
 					cfg.Gateway.MaxAccountSwitches = 2
 				})
+			// The harness sends one completion value. Consume it once and
+			// broadcast completion so refusal and deferred cleanup both retain
+			// their release/header checks without competing for that value.
+			completion := h.handlerDone
+			finished := make(chan struct{})
+			h.handlerDone = finished
+			go func() {
+				<-completion
+				close(finished)
+			}()
 			defer issue600Finish(t, h, headers)
+			require.Positive(t, accountID, "capture the configured upstream account")
 			stored := scenario == "stored_pointer"
 			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"fixture U"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{"n":{"type":"integer","maximum":9007199254740993}}}}]}`, stored))
 			first := issue715WSRead(t, h.clientConn)
@@ -87,7 +100,7 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 			previous := "resp_fixture_repair_1"
 			if scenario == "wrong_response" {
 				previous = "resp_fixture_other_same_account"
-				require.NoError(t, service.NewOpenAIWSStateStore(cache).BindResponseAccount(context.Background(), *h.apiKey.GroupID, previous, 1, time.Minute))
+				require.NoError(t, service.NewOpenAIWSStateStore(cache).BindResponseAccount(context.Background(), *h.apiKey.GroupID, previous, accountID, time.Minute))
 			}
 			if scenario == "unknown_pointer" {
 				previous = "resp_fixture_unknown"
