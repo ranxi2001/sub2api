@@ -10,6 +10,14 @@ const baseline = 'ce45c5a85f2a68544994ac146f3f809f31308e1a'
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 const origin = 'http://127.0.0.1:4309', entry = join(root, '.account-ops-team-preview.js')
 const original = new Map(['AccountOpsEmailDialog.vue', 'AccountOpsRuleList.vue'].map(name => [join(root, 'src/components/admin/operations', name), execFileSync('git', ['show', `${baseline}:frontend/src/components/admin/operations/${name}`], { encoding: 'utf8' })]))
+async function settleDialog(page) {
+ await page.waitForFunction(() => {
+  const panel=document.querySelector('.modal-content'), overlay=panel?.parentElement
+  if(!panel||!overlay||overlay.className.includes('modal-enter'))return false
+  const bounds=panel.getBoundingClientRect()
+  return Number(getComputedStyle(overlay).opacity)===1 && Number(getComputedStyle(panel).opacity)===1 && bounds.width>0 && bounds.height>0 && bounds.top>=0 && bounds.bottom<=innerHeight
+ })
+}
 let before = true, server, browser
 mkdirSync(out, { recursive: true })
 try {
@@ -57,9 +65,9 @@ createApp({setup(){return()=>h('main',{class:'p-6 space-y-4'},[
   page.on('pageerror', e => { errors.push(e.message); console.error('preview page error:', e.message) })
   await page.goto(`${origin}/preview?${phase}&lang=${language}`, { waitUntil: 'networkidle' })
   await page.getByTestId('account-ops-rules').waitFor()
-  await page.screenshot({ path: join(out, `${phase}-${language}-rules.png`), fullPage: true })
-  await page.getByTestId('open-email').click(); await page.locator('#account-ops-email').waitFor()
-  await page.screenshot({ path: join(out, `${phase}-${language}-email.png`), fullPage: true })
+  await page.screenshot({ path: join(out, `${phase}-${language}-rules.png`), fullPage: true, animations: 'disabled' })
+  await page.getByTestId('open-email').click(); await page.locator('#account-ops-email').waitFor(); await settleDialog(page)
+  await page.screenshot({ path: join(out, `${phase}-${language}-email.png`), fullPage: true, animations: 'disabled' })
   if (phase === 'after') {
    if (await page.locator('textarea#account-ops-email').count() !== 1) throw new Error('multiple-email editor missing')
    await page.reload({ waitUntil: 'networkidle' })
@@ -67,7 +75,8 @@ createApp({setup(){return()=>h('main',{class:'p-6 space-y-4'},[
    await page.getByTestId('ops-provider-select').first().evaluate(el => { el.closest('details').open = true })
    await page.getByTestId('ops-provider-select').first().focus()
    await page.getByTestId('ops-provider-select').first().locator('option').filter({ hasText: '示例供应商' }).waitFor({ state: 'attached' })
-   await page.screenshot({ path: join(out, `after-${language}-provider-link.png`), fullPage: true })
+   await settleDialog(page)
+   await page.screenshot({ path: join(out, `after-${language}-provider-link.png`), fullPage: true, animations: 'disabled' })
   }
   if (errors.length) throw new Error(errors.join('\n'))
   captures.push({ phase, language, source: before ? baseline : head }); await context.close()
