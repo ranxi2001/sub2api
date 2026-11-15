@@ -54,3 +54,11 @@ provide an established billable token contract here; no synthetic token charge
 is invented for it. Any provider-side search cost/entitlement needs separate
 operational verification before enabling accounts. No real paid call is part of
 CI or local validation.
+
+## Management entry points
+
+The account editor, bulk editor, OAuth BPS defaults card and quality-rule BPS
+settings share the same search controls. Automatic search is disabled and cleared
+when its parent search switch is off. Quality-rule snapshots manage both fields.
+The notice ID `bps-account-search-initial-announcement` is shared across these
+entry points and dismissed per administrator/browser using existing localStorage.

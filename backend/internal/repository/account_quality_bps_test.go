@@ -14,6 +14,9 @@ func TestQualityBPSSnapshotEqualDefaultsAndManualChanges(t *testing.T) {
 		equal         bool
 	}{
 		{"omitted false switches", map[string]any{"openai_excel_bps": true, "openai_excel_bps_cache_creation_as_input": false, "openai_excel_bps_mihomo": false}, map[string]any{"openai_excel_bps": true}, true},
+		{"omitted search switches", map[string]any{"openai_excel_bps_web_search": false, "openai_excel_bps_web_search_auto": false}, nil, true},
+		{"manual search disable", map[string]any{"openai_excel_bps_web_search": true}, nil, false},
+		{"manual automatic search disable", map[string]any{"openai_excel_bps_web_search_auto": true}, nil, false},
 		{"default recovery interval", map[string]any{"openai_excel_bps_403_recovery_interval_minutes": 60}, nil, true},
 		{"custom recovery interval", map[string]any{"openai_excel_bps_403_recovery_interval_minutes": 30}, nil, false},
 		{"default proxy", map[string]any{"openai_excel_bps_proxy_source": "mihomo"}, nil, true},
