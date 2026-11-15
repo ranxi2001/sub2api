@@ -1,4 +1,4 @@
-//go:build unit
+//go:build unit && ownerconflict
 
 package handler
 
@@ -26,13 +26,20 @@ import (
 // and account repository replaced. Both owners are earned by delivered output.
 func TestOpenAIWSMixedOwnerContinuation(t *testing.T) {
 	for _, turn := range []int{2, 53} {
-		t.Run(fmt.Sprintf("turn_%d", turn), func(t *testing.T) {
-			runWSMixedOwnerContinuation(t, service.OpenAIWSIngressModeCtxPool, turn)
-		})
+		for _, mode := range readableWSModes {
+			for _, scenario := range []string{"pointer", "no_pointer"} {
+				t.Run(fmt.Sprintf("turn_%d/%s/%s", turn, mode, scenario), func(t *testing.T) { runWSMixedOwnerContinuation(t, mode, turn, scenario) })
+			}
+		}
+	}
+}
+func TestOwnerConflictNegativeControls(t *testing.T) {
+	for _, scenario := range []string{"off", "pending_first", "pending_last", "failed_first", "failed_last", "conflict_first", "conflict_last", "orphan", "duplicate", "unfinished"} {
+		t.Run(scenario, func(t *testing.T) { runWSMixedOwnerContinuation(t, service.OpenAIWSIngressModeCtxPool, 53, scenario) })
 	}
 }
 
-func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int) {
+func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenario string) {
 	t.Helper()
 	clients := issue805Redis(t)
 	probe := clients()
@@ -87,9 +94,13 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int) {
 	}))
 	defer provider.Close()
 	headers := http.Header{"Authorization": {"Bearer sk-handler-cyber-test"}, "Session_id": {"fixture-mixed-session"}, "Thread-Id": {"fixture-mixed-thread"}}
+	enabled := "true"
+	if scenario == "off" {
+		enabled = "false"
+	}
 	var accounts *readableWSAccounts
 	h := newOpenAIWSPassthroughHandlerHarnessWithAuth(t, provider.URL, headers,
-		map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"},
+		map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: enabled},
 		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true }, nil,
 		func(key *service.APIKey, cfg *config.Config) *service.APIKeyService {
 			key.Status = service.StatusActive
@@ -181,11 +192,67 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int) {
 		return true
 	}, 3*time.Second, 5*time.Millisecond)
 	owners := issue805Owners(t, probe)
+	if scenario == "no_pointer" {
+		previous = ""
+	}
+	negative := scenario != "pointer" && scenario != "no_pointer"
+	for _, state := range []string{"pending", "failed", "conflict"} {
+		if strings.HasPrefix(scenario, state+"_") {
+			accountID := int64(1)
+			if strings.HasSuffix(scenario, "last") {
+				accountID = 2
+			}
+			for key, raw := range owners {
+				if gjson.Get(raw, "1").Int() == accountID {
+					value := state
+					if state == "pending" {
+						value = "pending:fixture-held:" + raw
+					}
+					require.NoError(t, probe.Set(context.Background(), key, value, time.Minute).Err())
+				}
+			}
+		}
+	}
+	if scenario == "orphan" {
+		filtered := []string{}
+		for _, raw := range history {
+			if gjson.Get(raw, "type").String() != "function_call" {
+				filtered = append(filtered, raw)
+			}
+		}
+		history = filtered
+	}
+	if scenario == "duplicate" {
+		for _, raw := range history {
+			if gjson.Get(raw, "type").String() == "function_call_output" {
+				history = append(history, raw)
+				break
+			}
+		}
+	}
+	if scenario == "unfinished" {
+		for i, raw := range history {
+			if gjson.Get(raw, "type").String() == "function_call" {
+				history[i] = strings.TrimSuffix(raw, "}") + `,"status":"in_progress"}`
+				break
+			}
+		}
+	}
+	owners = issue805Owners(t, probe)
 	issue715WSSend(t, h.clientConn, create(history, previous))
 	resumed, resumeErr := read()
 	mu.Lock()
 	sends := len(frames)
 	mu.Unlock()
+	if negative {
+		require.Equal(t, turn, sends, "unsafe continuation cannot generate")
+		require.Equal(t, "error", gjson.GetBytes(resumed, "type").String())
+		require.NotEmpty(t, gjson.GetBytes(resumed, "error.code").String())
+		require.Equal(t, owners, issue805Owners(t, probe), "refusal preserves all owner fences")
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		return
+	}
 	require.Equal(t, turn+1, sends, "MIXED_COMPLETED_OWNER_NOT_RESUMED: completed mixed owners must reach B exactly once; code=%s close=%v", gjson.GetBytes(resumed, "error.code").String(), resumeErr)
 	require.NoError(t, resumeErr)
 	require.Equal(t, "completed", gjson.GetBytes(resumed, "response.status").String())

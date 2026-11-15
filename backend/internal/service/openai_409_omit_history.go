@@ -57,8 +57,11 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 	if r.lookupErr != nil {
 		return ctx, body, false, r.lookupErr
 	}
-	if r.conflict || (r.owner != nil && (r.owner.pending != "" || r.owner.failed || r.owner.conflicted)) {
-		return ctx, body, false, openAIAgentRecoveryError("owner_conflict")
+	if r.conflict {
+		return ctx, body, false, openAIAgentRecoveryDetailedError("owner_conflict", "owner_record_conflicted")
+	}
+	if r.owner != nil && (r.owner.pending != "" || r.owner.failed || r.owner.conflicted) {
+		return ctx, body, false, openAIRecoveryRecordConflict(*r.owner)
 	}
 	if len(r.items) == 0 && !openAI409HasProviderState(body) {
 		return ctx, body, false, nil

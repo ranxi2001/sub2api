@@ -292,8 +292,11 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryAccount(ctx context.Conte
 	if request.lookupErr != nil {
 		return request.lookupErr
 	}
-	if request.conflict || request.mixedOwners {
-		return openAIAgentRecoveryError("owner_conflict")
+	if request.conflict {
+		return openAIAgentRecoveryDetailedError("owner_conflict", "owner_record_conflicted")
+	}
+	if request.mixedOwners {
+		return openAIAgentRecoveryDetailedError("owner_conflict", "mixed_completed_owners")
 	}
 	// Provider-side response state is never made portable by the agent policy,
 	// even on a pointer-only request with no known opaque item owner.
@@ -505,7 +508,7 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryRecords(ctx context.Conte
 				return openAIAgentRecoveryError("store_unavailable")
 			}
 			if found && (old.conflicted || old.failed || old.pending != "" || (!request.disableOwnerBinding && !sameOpenAIAgentRecoveryRoute(old, binding))) {
-				return openAIAgentRecoveryError("owner_conflict")
+				return openAIRecoveryRecordConflict(old)
 			}
 			if !found && request.known[key] {
 				return openAIAgentRecoveryError("owner_unavailable")
@@ -519,7 +522,7 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryRecords(ctx context.Conte
 			old, exists := state.bindings[key]
 			found := exists && time.Now().Before(old.expiresAt)
 			if found && (old.conflicted || old.failed || old.pending != "" || (!request.disableOwnerBinding && !sameOpenAIAgentRecoveryRoute(old, binding))) {
-				return openAIAgentRecoveryError("owner_conflict")
+				return openAIRecoveryRecordConflict(old)
 			}
 			if request.disableOwnerBinding && !found && request.known[key] {
 				return openAIAgentRecoveryError("owner_unavailable")

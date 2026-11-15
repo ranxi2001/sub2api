@@ -178,8 +178,11 @@ func (s *OpenAIGatewayService) checkOpenAIReadableShadowObservation(ctx context.
 	if err != nil {
 		return openAIAgentRecoveryError("store_unavailable")
 	}
-	if raw != observation.raw || epoch != observation.epoch {
-		return openAIAgentRecoveryError("owner_conflict")
+	if raw != observation.raw {
+		return openAIAgentRecoveryDetailedError("owner_conflict", "shadow_changed")
+	}
+	if epoch != observation.epoch {
+		return openAIAgentRecoveryDetailedError("owner_conflict", "shadow_epoch_changed")
 	}
 	return s.checkOpenAIReadableShadowFences(ctx, observation.fences)
 }
@@ -197,14 +200,14 @@ func (s *OpenAIGatewayService) checkOpenAIReadableShadowFences(ctx context.Conte
 	for key, expected := range fences {
 		binding, found, err := decodeOpenAIAgentRecoveryBinding(expected)
 		if err != nil || !found || binding.pending != "" || binding.failed || binding.conflicted {
-			return openAIAgentRecoveryError("owner_conflict")
+			return openAIAgentRecoveryDetailedError("owner_conflict", "shadow_fence_invalid")
 		}
 		actual, err := store.GetOpenAIAgentRecovery(ctx, key)
 		if err != nil {
 			return openAIAgentRecoveryError("store_unavailable")
 		}
 		if actual != expected {
-			return openAIAgentRecoveryError("owner_conflict")
+			return openAIAgentRecoveryDetailedError("owner_conflict", "shadow_fence_changed")
 		}
 	}
 	return nil

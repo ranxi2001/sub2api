@@ -65,7 +65,7 @@ func (s *OpenAIGatewayService) awaitOpenAIAgentRecovery(ctx context.Context, sha
 		}
 		if err != nil {
 			if observedPending && ctx.Err() != nil {
-				return b, false, openAIAgentRecoveryError("delivery_pending")
+				return b, false, openAIAgentRecoveryDetailedError("delivery_pending", "delivery_pending")
 			}
 			return b, false, openAIAgentRecoveryError("store_unavailable")
 		}
@@ -76,7 +76,7 @@ func (s *OpenAIGatewayService) awaitOpenAIAgentRecovery(ctx context.Context, sha
 			return b, found, nil
 		}
 		if b.failed || (!found && observedPending) {
-			return b, false, openAIAgentRecoveryError("owner_unavailable")
+			return b, false, openAIAgentRecoveryDetailedError("owner_unavailable", "owner_record_failed")
 		}
 		if b.pending == "" {
 			return b, found, nil
@@ -86,7 +86,7 @@ func (s *OpenAIGatewayService) awaitOpenAIAgentRecovery(ctx context.Context, sha
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return b, false, openAIAgentRecoveryError("delivery_pending")
+			return b, false, openAIAgentRecoveryDetailedError("delivery_pending", "delivery_pending")
 		case <-timer.C:
 		}
 	}

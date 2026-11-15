@@ -316,6 +316,9 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		return openAIAgentRecoveryError("wire_changed")
 	}
 	if err := r.service.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
+		if r.request.mixedOwners && !r.request.conflict && r.request.lookupErr == nil && !r.request.omittedHistory && r.request.delivery == nil {
+			return &openAIWSMixedCompletedOwnersError{cause: err}
+		}
 		return &openAIWSOwnerRouteError{cause: err}
 	}
 	if !r.request.omittedHistory && (r.request.owner != nil || r.request.disableOwnerBinding) && previous != "" {

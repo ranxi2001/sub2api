@@ -74,11 +74,16 @@ func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) err
 		return closed
 	}
 	var route *openAIWSOwnerRouteError
+	var mixed *openAIWSMixedCompletedOwnersError
 	var recovery *OpenAIAgentRecoveryError
-	if turn < 1 || !errors.As(err, &route) || !errors.As(err, &recovery) || !gjson.ValidBytes(body) {
+	if turn < 1 || (!errors.As(err, &route) && !errors.As(err, &mixed)) || !errors.As(err, &recovery) || !gjson.ValidBytes(body) {
 		return closed
 	}
 	switch recovery.Reason {
+	case "owner_conflict":
+		if mixed == nil {
+			return closed
+		}
 	case "owner_unavailable", "route_changed":
 		// Rebuild still checks completed ownership, delivery fences, readable
 		// intent, tool results and final payload integrity. Do not turn wire
@@ -136,36 +141,46 @@ func openAIReadableRecoveryUser(c *gin.Context, keyID int64) int64 {
 // A new provider conversation may reuse completed results, never unfinished
 // tool work. Reject duplicate, orphan or unknown-status tool records.
 func openAIWSCompletedToolInputs(body []byte) bool {
+	return openAIWSToolPairingRefusal(body) == ""
+}
+
+func openAIWSToolPairingRefusal(body []byte) string {
 	calls, results := map[string]string{}, map[string]string{}
 	for _, item := range gjson.GetBytes(body, "input").Array() {
 		kind, id := item.Get("type").String(), item.Get("call_id").String()
 		switch kind {
 		case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output":
-			if id == "" || (item.Get("status").Exists() && item.Get("status").String() != "completed") {
-				return false
+			if id == "" {
+				return "tool_missing_id"
+			}
+			if item.Get("status").Exists() && item.Get("status").String() != "completed" {
+				return "tool_incomplete"
 			}
 			if strings.HasSuffix(kind, "_output") {
-				if results[id] != "" || !item.Get("output").Exists() || item.Get("output").Type == gjson.Null {
-					return false
+				if results[id] != "" {
+					return "tool_duplicate_result"
+				}
+				if !item.Get("output").Exists() || item.Get("output").Type == gjson.Null {
+					return "tool_result_missing"
 				}
 				results[id] = kind
 			} else {
 				if calls[id] != "" {
-					return false
+					return "tool_duplicate_call"
 				}
 				calls[id] = kind + "_output"
 			}
 		}
 	}
 	if len(calls) != len(results) {
-		return false
+		return "tool_unpaired"
 	}
 	for id, kind := range calls {
 		if results[id] != kind {
-			return false
+			return "tool_unpaired"
 		}
 	}
-	return true
+	return ""
 }
 
 // Called before fresh admission/moderation of an unsent frame. Lookup is scoped
@@ -192,8 +207,8 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 		}
 	}
 	next := s.WithOpenAIWSAgentRecovery(ctx, c, body, session, model)
-	if !openAIWSCompletedToolInputs(body) {
-		return ctx, body, false, openAIAgentRecoveryError("owner_conflict")
+	if detail := openAIWSToolPairingRefusal(body); detail != "" {
+		return ctx, body, false, openAIAgentRecoveryDetailedError("owner_conflict", detail)
 	}
 	r := openAIAgentRecoveryFromContext(next)
 	if len(r.items) == 0 && !openAI409HasProviderState(body) && !r.disallowLearning {
