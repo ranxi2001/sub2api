@@ -81,14 +81,14 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		}
 		validTools := httpRebuildToolsAvailable(body)
 		if customTools {
-			validTools = readableWSCustomToolsAvailable(body, logicalTurn == 3)
+			validTools = readableWSCustomToolsAvailable(body, logicalTurn == 3 && u.scenario != "bridge_model")
 		}
 		if u.scenario == "native_namespace" {
 			validTools = true // exact native declarations/schema checked above, including A
 		}
 		valid := r.Header.Get("Authorization") == "Bearer fixture-readable-ws-B" &&
 			strings.Contains(string(body), httpRebuildTask) && validTools &&
-			readableWSCompletedResult(body, "apply_patch", httpRebuildPatch, logicalTurn == 3) &&
+			readableWSCompletedResult(body, "apply_patch", httpRebuildPatch, logicalTurn == 3 && u.scenario != "bridge_model") &&
 			!strings.Contains(string(body), "fixture-opaque-A") &&
 			!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
 		if u.scenario == "bridge_model" {
@@ -105,7 +105,7 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 			return nil
 		}
 		output = []json.RawMessage{json.RawMessage(httpRebuildAgentB), json.RawMessage(httpRebuildCall("run_tests", "call_ws_verify", map[string]any{"path": "sum.go"}))}
-		if logicalTurn == 3 && readableWSCompletedResult(body, "run_tests", httpRebuildCheck, true) {
+		if logicalTurn == 3 && readableWSCompletedResult(body, "run_tests", httpRebuildCheck, u.scenario != "bridge_model") {
 			output = []json.RawMessage{json.RawMessage(httpRebuildJSON(map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "ws-coding-task-complete"}}}))}
 		} else if logicalTurn > 2 {
 			return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_duplicate_or_missing_tool"}}}`)

@@ -74,6 +74,7 @@ func (h *OpenAIGatewayHandler) handleOpenAIWSAgentRecoveryError(ctx context.Cont
 func boolPointer(value bool) *bool { return &value }
 
 func markOpenAIRecoveryFailure(c *gin.Context, recovery *service.OpenAIAgentRecoveryError, protocol, phase string, written *bool) {
+	service.LogOpenAIAgentRecoveryRefusal(c.Request.Context(), recovery)
 	service.MarkOpsStreamErrorValue(c, service.OpsStreamError{
 		ErrType: recovery.ClientType(), Code: recovery.ClientCode(), Message: recovery.ClientMessage(),
 		IntendedStatus: recovery.HTTPStatus(), CountTowardsSLA: true, NonStream: protocol == "http",

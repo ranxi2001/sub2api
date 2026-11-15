@@ -103,7 +103,7 @@ func openAIAgentRecoveryRefusal(ctx context.Context, stage string) error {
 	if r := openAIAgentRecoveryFromContext(ctx); r != nil && r.disableOwnerBinding {
 		logger.FromContext(ctx).Warn("openai.encrypted_agent_recovery_refused", zap.String("stage", stage))
 	}
-	return openAIAgentRecoveryError("wire_changed")
+	return openAIRecoveryDiagnosticError("wire_changed", stage, openAIAgentRecoveryFromContext(ctx))
 }
 
 // Shared with readable Beta preparation. This deliberately excludes OAuth

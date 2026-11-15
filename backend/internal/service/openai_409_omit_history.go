@@ -58,19 +58,30 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 	if r.lookupErr != nil {
 		return ctx, body, false, r.lookupErr
 	}
-	if r.conflict || (r.owner != nil && (r.owner.pending != "" || r.owner.failed || r.owner.conflicted)) {
-		return ctx, body, false, openAIAgentRecoveryError("owner_conflict")
+	if r.conflict {
+		return ctx, body, false, openAIRecoveryDiagnosticError("owner_conflict", r.diagnostics.subreason, r)
+	}
+	if r.owner != nil && (r.owner.pending != "" || r.owner.failed || r.owner.conflicted) {
+		return ctx, body, false, openAIRecoveryDiagnosticError("owner_conflict", openAIRecoveryOwnerDetail(*r.owner, true), r)
 	}
 	_, websocket := ctx.Value(openAIWSAgentRecoveryRetryKey{}).(*atomic.Bool)
 	mixedWS := websocket && r.mixedOwners
 	if mixedWS && !r.hasCompletedMixedOwners() {
-		return ctx, body, false, openAIAgentRecoveryError("owner_conflict")
+		return ctx, body, false, openAIRecoveryDiagnosticError("owner_conflict", "owner_delivery_unknown", r)
+	}
+	if mixedWS {
+		for _, item := range gjson.GetBytes(body, "input").Array() {
+			kind := item.Get("type").String()
+			if (kind == "function_call_output" || kind == "custom_tool_call_output") && !openAIReadableShadowTextOnly(item.Get("output")) {
+				return ctx, body, false, openAIRecoveryDiagnosticError("readable_history_unsupported", "tool_history_unsupported", r)
+			}
+		}
 	}
 	if len(r.items) == 0 && !openAI409HasProviderState(body) {
 		return ctx, body, false, nil
 	}
 	if !openAI409HasReadableIntent(body) {
-		return ctx, body, false, openAIAgentRecoveryError("readable_intent_missing")
+		return ctx, body, false, openAIRecoveryDiagnosticError("readable_intent_missing", "readable_intent_missing", r)
 	}
 	clean, changed := omitOpenAIHistoricalCiphertext(body)
 	if ctx.Err() != nil {
@@ -88,9 +99,12 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 		return ctx, body, false, openAIAgentRecoveryError("readable_history_unsupported")
 	}
 	if mixedWS {
+		if _, detail := inspectOpenAIWSCompletedTools(body); detail != "" {
+			return ctx, body, false, openAIRecoveryDiagnosticError("owner_conflict", detail, r)
+		}
 		clean, err = projectOpenAIWSCompletedTools(clean)
 		if err != nil {
-			return ctx, body, false, err
+			return ctx, body, false, withOpenAIRecoveryDiagnostics(err, r, "tool_history_unsupported")
 		}
 		r.requireCompletedOwners = true
 	}
@@ -591,7 +605,7 @@ func openAI409UsesNativeAPIKey(ctx context.Context, account *Account) bool {
 
 func openAIRecoveryWireRefusal(ctx context.Context, stage string) error {
 	logger.FromContext(ctx).Warn("openai.encrypted_history_409_refused", zap.String("stage", stage))
-	return openAIAgentRecoveryError("wire_changed")
+	return openAIRecoveryDiagnosticError("wire_changed", stage, openAIAgentRecoveryFromContext(ctx))
 }
 
 // Derive the HTTP representation only from the verified readable snapshot,

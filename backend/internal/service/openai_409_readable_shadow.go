@@ -69,7 +69,9 @@ func (r *openAIAgentRecoveryRequest) shadowEpochKey(item [32]byte) string {
 // The first supported future case is one exact opaque agent task with no new
 // client intent or unpaired tool work. Existing readable requests never consult
 // shadow. A miss/error leaves ordinary routing/refusal intact, never invents text.
-func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, c *gin.Context, body []byte, session string) (context.Context, []byte) {
+func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, c *gin.Context, body []byte, session string) (restoredCtx context.Context, restoredBody []byte) {
+	state := openAIRecoveryShadowState{lookup: "not_consulted", epoch: "not_checked"}
+	defer func() { restoredCtx = context.WithValue(restoredCtx, openAIRecoveryShadowStateKey{}, state) }()
 	if s == nil || s.settingService == nil || openAI409HasReadableIntent(body) ||
 		isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c) ||
 		!utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
@@ -102,15 +104,18 @@ func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, 
 		return ctx, body
 	}
 	var epoch string
+	state.lookup, state.epoch = "miss", "unknown"
 	for {
 		var err error
 		epoch, err = epochs.GetOpenAIAgentRecoveryEpoch(storeCtx, r.shadowPrincipal()+":"+task)
 		if err != nil {
+			state.lookup = "unavailable"
 			return ctx, body
 		}
 		if !strings.HasPrefix(epoch, "pending:") {
 			break
 		}
+		state.epoch = "pending"
 		timer := time.NewTimer(5 * time.Millisecond)
 		select {
 		case <-storeCtx.Done():
@@ -120,12 +125,27 @@ func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, 
 		}
 	}
 	if !strings.HasPrefix(epoch, "ready:pending:") {
+		state.epoch = "not_ready"
+		if epoch == "" {
+			state.epoch = "missing"
+		}
+		if strings.HasPrefix(epoch, "pending:") {
+			state.epoch = "pending"
+		}
 		return ctx, body
 	}
+	state.epoch = "ready"
 	raw, err := store.GetOpenAIReadableShadow(storeCtx, r.shadowPrincipal(), task)
 	if err != nil || raw == "" || len(raw) > OpenAIReadableShadowMaxBytes {
+		if err != nil {
+			state.lookup = "unavailable"
+		}
+		if len(raw) > OpenAIReadableShadowMaxBytes {
+			state.lookup = "invalid"
+		}
 		return ctx, body
 	}
+	state.lookup = "invalid"
 	var record openAIReadableShadow
 	if json.Unmarshal([]byte(raw), &record) != nil || record.Version != 2 || record.Scope != task || epoch != "ready:"+record.Epoch ||
 		len(record.Fences) == 0 || len(record.Fences) > 64 || !gjson.ParseBytes(record.Input).IsArray() ||
@@ -154,8 +174,10 @@ func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, 
 	}
 	observation := &openAIReadableShadowObservation{principal: r.shadowPrincipal(), task: task, raw: raw, epoch: epoch, fences: record.Fences}
 	if s.checkOpenAIReadableShadowObservation(storeCtx, observation) != nil {
+		state.lookup, state.epoch = "changed", "unknown"
 		return ctx, body
 	}
+	state.lookup = "hit"
 	return context.WithValue(WithRecoveredContextPrivacy(ctx), openAIReadableShadowContextKey{}, observation), clean
 }
 
@@ -166,20 +188,23 @@ func (s *OpenAIGatewayService) checkOpenAIReadableShadowObservation(ctx context.
 	store, ok := s.cache.(OpenAIReadableShadowCache)
 	epochs, hasEpoch := s.cache.(OpenAIAgentRecoveryEpochCache)
 	if !ok || !hasEpoch {
-		return openAIAgentRecoveryError("store_unavailable")
+		return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	raw, err := store.GetOpenAIReadableShadow(ctx, observation.principal, observation.task)
 	if err != nil {
-		return openAIAgentRecoveryError("store_unavailable")
+		return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 	}
 	epoch, err := epochs.GetOpenAIAgentRecoveryEpoch(ctx, observation.principal+":"+observation.task)
 	if err != nil {
-		return openAIAgentRecoveryError("store_unavailable")
+		return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 	}
-	if raw != observation.raw || epoch != observation.epoch {
-		return openAIAgentRecoveryError("owner_conflict")
+	if epoch != observation.epoch {
+		return openAIRecoveryDiagnosticError("owner_conflict", "shadow_epoch_changed", &openAIAgentRecoveryRequest{diagnostics: openAIRecoveryDiagnostics{shadow: openAIRecoveryShadowState{lookup: "hit", epoch: "changed"}}})
+	}
+	if raw != observation.raw {
+		return openAIRecoveryDiagnosticError("owner_conflict", "shadow_record_changed", &openAIAgentRecoveryRequest{diagnostics: openAIRecoveryDiagnostics{shadow: openAIRecoveryShadowState{lookup: "changed", epoch: "ready"}}})
 	}
 	return s.checkOpenAIReadableShadowFences(ctx, observation.fences)
 }
@@ -190,21 +215,21 @@ func (s *OpenAIGatewayService) checkOpenAIReadableShadowFences(ctx context.Conte
 	}
 	store, ok := s.cache.(OpenAIAgentRecoveryCache)
 	if !ok {
-		return openAIAgentRecoveryError("store_unavailable")
+		return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	for key, expected := range fences {
 		binding, found, err := decodeOpenAIAgentRecoveryBinding(expected)
 		if err != nil || !found || binding.pending != "" || binding.failed || binding.conflicted {
-			return openAIAgentRecoveryError("owner_conflict")
+			return openAIRecoveryDiagnosticError("owner_conflict", "shadow_fence_invalid", nil)
 		}
 		actual, err := store.GetOpenAIAgentRecovery(ctx, key)
 		if err != nil {
-			return openAIAgentRecoveryError("store_unavailable")
+			return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 		}
 		if actual != expected {
-			return openAIAgentRecoveryError("owner_conflict")
+			return openAIRecoveryDiagnosticError("owner_conflict", "shadow_fence_changed", nil)
 		}
 	}
 	return nil
