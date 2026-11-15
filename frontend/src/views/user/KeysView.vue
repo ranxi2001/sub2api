@@ -487,6 +487,17 @@
                 <Icon name="upload" size="sm" />
                 <span class="text-xs">{{ t('keys.importToCcSwitch') }}</span>
               </button>
+              <button
+                type="button"
+                @click="importToMagpie(row)"
+                :disabled="publicSettingsLoading"
+                data-testid="magpie-import-button"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                :title="t('keys.magpieImport.preview')"
+              >
+                <Icon name="externalLink" size="sm" />
+                <span class="text-xs">{{ t('keys.importToMagpie') }}</span>
+              </button>
               <!-- Toggle Status Button -->
               <button
                 @click="toggleKeyStatus(row)"
@@ -1387,6 +1398,7 @@ import {
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
 import { isCodexQuickConfigPlatform } from '@/utils/codexQuickConfig'
+import { buildMagpieImportLink } from '@/utils/magpieImport'
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {
@@ -1677,6 +1689,7 @@ const selectedCodexQuickConfigPlatform = computed(() => {
 const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
+const publicSettingsLoading = ref(true)
 const dropdownRef = ref<HTMLElement | null>(null)
 const columnDropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
@@ -1983,6 +1996,8 @@ const loadPublicSettings = async () => {
     publicSettings.value = await authAPI.getPublicSettings()
   } catch (error) {
     console.error('Failed to load public settings:', error)
+  } finally {
+    publicSettingsLoading.value = false
   }
 }
 
@@ -2370,6 +2385,33 @@ const resetRateLimitUsage = async () => {
     const errorMsg = error.response?.data?.detail || t('keys.failedToResetRateLimit')
     appStore.showError(errorMsg)
   }
+}
+
+const importToMagpie = (row: ApiKey) => {
+  const settings = publicSettings.value
+  if (!settings) {
+    appStore.showError(t('keys.magpieImport.settingsUnavailable'))
+    return
+  }
+  const result = buildMagpieImportLink({
+    dashboardOrigin: window.location.origin,
+    baseUrl: settings.api_base_url,
+    siteName: settings.site_name,
+    row
+  })
+  if ('error' in result) {
+    appStore.showError(t(`keys.magpieImport.${result.error}`))
+    return
+  }
+
+  // Launch from the click itself. Browsers cannot confirm whether the app opened.
+  try {
+    window.open(result.url, '_self')
+  } catch {
+    appStore.showError(t('keys.magpieImport.openHelp'))
+    return
+  }
+  appStore.showInfo(t('keys.magpieImport.openHelp'), 6500)
 }
 
 const importToCcswitch = (row: ApiKey) => {
