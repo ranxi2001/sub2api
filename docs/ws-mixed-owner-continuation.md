@@ -16,8 +16,11 @@ report, not proof that an external side effect executed.
 The gateway also requires a completed ownership observation for **every** supplied
 opaque item, readable current intent, and complete, unique tool call/result
 pairs. It discards provider pointers and historical ciphertext. In this mixed
-WS case, it carries completed tool names/results as inert assistant text and
-removes historical callable records/arguments. Current tool definitions and
+WS case, it carries each complete original call and corresponding result as
+inert JSON text in an assistant message. Call ID, call type, name, arguments
+or custom input, result type and extensions stay associated even when same-name
+parallel tools return in reverse order. No top-level callable history remains.
+Current tool definitions and
 schemas remain available for new tool work. The client keeps its existing
 session identity and socket; no client confirmation or new conversation is
 required for this supported branch.
@@ -48,7 +51,9 @@ message, logical HTTP status and WebSocket error/close contract remain intact.
 Regression evidence uses authenticated ingress, production forwarding, isolated
 Redis and loopback fake providers. It includes turn 53, fresh/live sockets,
 account binding changes, exactly-once client tool effects, final wire schemas,
-and terminal negative controls. The CI restores exact production blobs in a
+same-name parallel calls with swapped arguments and out-of-order results,
+and terminal negative controls. The synthetic provider computes its answer
+from the actual received call/result association. The CI restores exact production blobs in a
 disposable checkout for behavioral RED, then runs the candidate with the race
 detector. Compile errors, skips and panics are not accepted as RED.
 
