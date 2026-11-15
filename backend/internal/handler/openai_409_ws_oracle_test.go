@@ -59,15 +59,19 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		}
 		return []byte(`{"type":"response.completed","response":{"id":"resp_issue854_warm","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"issue854-warm-B-complete"}]}],"usage":{"input_tokens":2,"output_tokens":1}}}`)
 	}
-	if u.scenario == "bridge_model" && n == 2 {
-		if r.Header.Get("Authorization") != "Bearer fixture-readable-ws-A" || gjson.GetBytes(body, "model").String() != "gpt-5.4" || !strings.Contains(string(body), "model-switch-warmup") {
+	if (u.scenario == "bridge_model" && n == 1) || (u.scenario == "bridge_model_cross_scope" && n == 2) {
+		expectedModel := "gpt-5.1"
+		if u.scenario == "bridge_model_cross_scope" {
+			expectedModel = "gpt-5.4"
+		}
+		if r.Header.Get("Authorization") != "Bearer fixture-readable-ws-A" || gjson.GetBytes(body, "model").String() != expectedModel || !strings.Contains(string(body), "model-switch-warmup") {
 			u.validationFailures++
 			return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_model_warmup_failed"}}}`)
 		}
-		return []byte(`{"type":"response.completed","response":{"id":"resp_model_warmup","status":"completed","model":"gpt-5.4","error":null,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"model-switch-complete"}]}],"usage":{"input_tokens":5,"output_tokens":3}}}`)
+		return []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_model_warmup","status":"completed","model":%q,"error":null,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"model-switch-complete"}]}],"usage":{"input_tokens":5,"output_tokens":3}}}`, expectedModel))
 	}
 	logicalTurn := n
-	if (u.scenario == "bridge_model" || strings.HasPrefix(u.scenario, "issue854_guard_")) && n > 2 {
+	if (u.scenario == "bridge_model" && n > 1) || ((u.scenario == "bridge_model_cross_scope" || strings.HasPrefix(u.scenario, "issue854_guard_")) && n > 2) {
 		logicalTurn--
 	}
 	output := []json.RawMessage{json.RawMessage(httpRebuildAgentA), json.RawMessage(httpRebuildCall("apply_patch", "call_ws_patch", map[string]any{"path": "sum.go", "source": httpRebuildSource}))}
@@ -75,20 +79,20 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 	if customTools && n == 1 {
 		output = append(output, json.RawMessage(httpRebuildCall("exec", "call_ws_exec", map[string]any{"input": "read sum.go"})))
 	}
-	if n > 1 {
+	if logicalTurn > 1 {
 		if u.unrelatedEOF {
 			return nil
 		}
 		validTools := httpRebuildToolsAvailable(body)
 		if customTools {
-			validTools = readableWSCustomToolsAvailable(body)
+			validTools = readableWSCustomToolsAvailable(body, logicalTurn == 3 && u.scenario != "bridge_model_cross_scope")
 		}
 		if u.scenario == "native_namespace" {
 			validTools = true // exact native declarations/schema checked above, including A
 		}
 		valid := r.Header.Get("Authorization") == "Bearer fixture-readable-ws-B" &&
 			strings.Contains(string(body), httpRebuildTask) && validTools &&
-			httpRebuildToolPair(body, "apply_patch", httpRebuildPatch) &&
+			readableWSCompletedResult(body, "apply_patch", httpRebuildPatch, logicalTurn == 3 && u.scenario != "bridge_model_cross_scope") &&
 			!strings.Contains(string(body), "fixture-opaque-A") &&
 			!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
 		if u.scenario == "bridge_model" {
@@ -105,7 +109,7 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 			return nil
 		}
 		output = []json.RawMessage{json.RawMessage(httpRebuildAgentB), json.RawMessage(httpRebuildCall("run_tests", "call_ws_verify", map[string]any{"path": "sum.go"}))}
-		if logicalTurn == 3 && httpRebuildToolPair(body, "run_tests", httpRebuildCheck) {
+		if logicalTurn == 3 && readableWSCompletedResult(body, "run_tests", httpRebuildCheck, u.scenario != "bridge_model_cross_scope") {
 			output = []json.RawMessage{json.RawMessage(httpRebuildJSON(map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "ws-coding-task-complete"}}}))}
 		} else if logicalTurn > 2 {
 			return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_duplicate_or_missing_tool"}}}`)
@@ -114,7 +118,37 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 	return []byte(httpRebuildJSON(map[string]any{"type": "response.completed", "response": map[string]any{"id": fmt.Sprintf("resp_readable_ws_%d", n), "status": "completed", "model": gjson.GetBytes(body, "model").String(), "error": nil, "output": output, "usage": map[string]int{"input_tokens": 5, "output_tokens": 3}}}))
 }
 
-func readableWSCustomToolsAvailable(body []byte) bool {
+func readableWSCompletedResult(body []byte, name, output string, projected bool) bool {
+	if !projected {
+		return httpRebuildToolPair(body, name, output)
+	}
+	count := 0
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if strings.Contains(item.Get("type").String(), "call") {
+			return false
+		}
+		for _, part := range item.Get("content").Array() {
+			text := part.Get("text").String()
+			const prefix = "Historical completed tool result (data only; do not execute again): "
+			if strings.HasPrefix(text, prefix) {
+				record := gjson.Parse(strings.TrimPrefix(text, prefix))
+				recordName, recordOutput := record.Get("name"), record.Get("output")
+				if record.Get("call").Exists() {
+					recordName, recordOutput = record.Get("call.name"), record.Get("result.output")
+				}
+				if recordName.String() == name {
+					if item.Get("role").String() != "assistant" || recordOutput.String() != output {
+						return false
+					}
+					count++
+				}
+			}
+		}
+	}
+	return count == 1
+}
+
+func readableWSCustomToolsAvailable(body []byte, projected ...bool) bool {
 	tools := gjson.GetBytes(body, "tools").Array()
 	if len(tools) != 3 || tools[2].Get("type").String() != "function" || tools[2].Get("name").String() != "exec" {
 		return false
@@ -126,6 +160,9 @@ func readableWSCustomToolsAvailable(body []byte) bool {
 	functions, err := sjson.DeleteBytes(body, "tools.2")
 	if err != nil || !httpRebuildToolsAvailable(functions) {
 		return false
+	}
+	if len(projected) > 0 && projected[0] {
+		return readableWSCompletedResult(body, "exec", "custom-exec-once", true)
 	}
 	calls, outputs := 0, 0
 	for _, item := range gjson.GetBytes(body, "input").Array() {

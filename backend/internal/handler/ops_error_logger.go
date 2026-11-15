@@ -1548,6 +1548,7 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 	if failure := streamErr.RecoveryFailure; failure != nil {
 		fields := gin.H{"type": normalizedType, "code": streamErr.Code, "message": streamErr.Message,
 			"protocol": failure.Protocol, "turn": streamErr.Turn, "phase": failure.Phase, "outcome": "failed",
+			"subreason":   service.OpenAIRecoverySubreason(failure.Subreason),
 			"wire_status": wireStatus, "status": streamErr.IntendedStatus}
 		if failure.RequestWritten != nil {
 			fields["request_written"] = *failure.RequestWritten

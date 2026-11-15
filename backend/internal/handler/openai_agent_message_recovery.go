@@ -7,9 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 func (h *OpenAIGatewayHandler) handleOpenAIAgentRecoveryError(c *gin.Context, err error, streamStarted bool) bool {
@@ -74,9 +77,20 @@ func (h *OpenAIGatewayHandler) handleOpenAIWSAgentRecoveryError(ctx context.Cont
 func boolPointer(value bool) *bool { return &value }
 
 func markOpenAIRecoveryFailure(c *gin.Context, recovery *service.OpenAIAgentRecoveryError, protocol, phase string, written *bool) {
+	turn := 0
+	if value, ok := c.Get(service.OpsStreamTurnKey); ok {
+		turn, _ = value.(int)
+	}
+	requestID, _ := c.Request.Context().Value(ctxkey.RequestID).(string)
+	writeState := "unknown"
+	if written != nil {
+		writeState = strconv.FormatBool(*written)
+	}
+	logctx := logger.IntoContext(c.Request.Context(), logger.FromContext(c.Request.Context()).With(zap.String("request_id", requestID), zap.Int("turn", turn), zap.String("protocol", protocol), zap.String("phase", phase), zap.String("request_written", writeState)))
+	service.LogOpenAIAgentRecoveryRefusal(logctx, recovery)
 	service.MarkOpsStreamErrorValue(c, service.OpsStreamError{
 		ErrType: recovery.ClientType(), Code: recovery.ClientCode(), Message: recovery.ClientMessage(),
 		IntendedStatus: recovery.HTTPStatus(), CountTowardsSLA: true, NonStream: protocol == "http",
-		RecoveryFailure: &service.OpsRecoveryFailure{Protocol: protocol, Phase: phase, RequestWritten: written},
+		RecoveryFailure: &service.OpsRecoveryFailure{Protocol: protocol, Phase: phase, RequestWritten: written, Subreason: recovery.InternalSubreason()},
 	})
 }
