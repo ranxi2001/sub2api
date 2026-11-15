@@ -33,7 +33,7 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - name: Preserve the complete pre-change frontend
         env:
-          SOURCE_BASE: 1c3882e935a01b376f9aefdf844863125fff7c2b
+          SOURCE_BASE: c115bef917eae22fc2f5a4d0ba6ac6cbe600e8e4
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/smart-ops-base"
@@ -47,7 +47,7 @@ jobs:
           "$RUNNER_TEMP/smart-ops-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Render originals and exercise defaults and explicit preferences
         env:
-          SOURCE_BASE: 1c3882e935a01b376f9aefdf844863125fff7c2b
+          SOURCE_BASE: c115bef917eae22fc2f5a4d0ba6ac6cbe600e8e4
           BASELINE_ROOT: ${{ runner.temp }}/smart-ops-base/frontend
           PLAYWRIGHT_ROOT: ${{ runner.temp }}/smart-ops-browser/node_modules/playwright
           SCREENSHOT_DIR: ${{ runner.temp }}/smart-ops-evidence

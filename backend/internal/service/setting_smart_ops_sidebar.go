@@ -10,6 +10,7 @@ const SettingKeySmartOpsHiddenMenuItems = "smart_ops_hidden_menu_items"
 func defaultSmartOpsHiddenMenuItems() []string {
 	return []string{
 		"/admin/lottery",
+		"/admin/qqbot/overview",
 		"/admin/channel-operations",
 		"/admin/controlled-experiments",
 		"/admin/account-ops",

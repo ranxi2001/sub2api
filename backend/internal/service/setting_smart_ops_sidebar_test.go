@@ -9,6 +9,7 @@ import (
 func TestParseSmartOpsHiddenMenuItems(t *testing.T) {
 	defaults := []string{
 		"/admin/lottery",
+		"/admin/qqbot/overview",
 		"/admin/channel-operations",
 		"/admin/controlled-experiments",
 		"/admin/account-ops",
