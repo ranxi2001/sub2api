@@ -25,7 +25,7 @@ import (
 // Every assertion observes a later real handler turn and the HTTP provider
 // wire, including refusal before a second generation can start.
 func TestOpenAIWSPlaintextRepair870(t *testing.T) {
-	for _, scenario := range []string{"assistant_history", "wrong_response", "terminal_excludes", "empty_terminal", "stored_pointer", "unknown_pointer"} {
+	for _, scenario := range []string{"assistant_history", "wrong_response", "terminal_excludes", "ordinary_tool", "empty_terminal", "duplicate_call", "stored_pointer", "unknown_pointer"} {
 		t.Run(scenario, func(t *testing.T) {
 			const message = `{"type":"message","id":"msg_fixture_exact","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Remember fixture M","annotations":[]}],"fixture_number":9007199254740993}`
 			const call = `{"type":"function_call","call_id":"call_fixture_repair","name":"fixture","arguments":"{}","status":"completed"}`
@@ -43,6 +43,12 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 				mu.Unlock()
 				w.Header().Set("Content-Type", "text/event-stream")
 				output := message
+				if n == 1 && scenario == "ordinary_tool" {
+					output = call
+				}
+				if n <= 2 && scenario == "duplicate_call" {
+					output = call
+				}
 				if n == 1 && scenario == "assistant_history" {
 					_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_item.done\",\"item\":%s}\n\n", strings.Replace(message, "Remember fixture M", "Earlier streamed text", 1))
 				}
@@ -72,6 +78,12 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"fixture U"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{"n":{"type":"integer","maximum":9007199254740993}}}}]}`, stored))
 			first := issue715WSRead(t, h.clientConn)
 			require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
+			if scenario == "ordinary_tool" || scenario == "empty_terminal" || scenario == "duplicate_call" {
+				// These positive fixtures contain no encrypted agent item or
+				// shared anchor. A local plaintext call must still continue.
+				require.NotContains(t, string(first), "encrypted_content")
+				require.False(t, stored)
+			}
 			previous := "resp_fixture_repair_1"
 			if scenario == "wrong_response" {
 				previous = "resp_fixture_other_same_account"
@@ -81,7 +93,7 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 				previous = "resp_fixture_unknown"
 			}
 			input := `{"role":"user","content":"fixture V"}`
-			if scenario == "terminal_excludes" || scenario == "empty_terminal" {
+			if scenario == "terminal_excludes" || scenario == "ordinary_tool" || scenario == "empty_terminal" || scenario == "duplicate_call" {
 				input = `{"type":"function_call_output","call_id":"call_fixture_repair","output":"fixture result"}`
 			}
 			if scenario == "terminal_excludes" {
@@ -101,7 +113,18 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 					break
 				}
 			}
-			refused := scenario == "wrong_response" || scenario == "terminal_excludes" || scenario == "unknown_pointer"
+			if scenario == "duplicate_call" {
+				require.NoError(t, readErr, "F3_DUPLICATE_WARMUP_REFUSED")
+				require.Equal(t, "response.completed", gjson.GetBytes(terminal, "type").String(), "F3_DUPLICATE_WARMUP_REFUSED")
+				issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":false,"previous_response_id":"resp_fixture_repair_2","input":[%s]}`, input))
+				for {
+					_, terminal, readErr = h.clientConn.Read(ctx)
+					if readErr != nil || gjson.GetBytes(terminal, "type").String() == "response.completed" || gjson.GetBytes(terminal, "type").String() == "response.failed" || gjson.GetBytes(terminal, "type").String() == "error" {
+						break
+					}
+				}
+			}
+			refused := scenario == "wrong_response" || scenario == "terminal_excludes" || scenario == "duplicate_call" || scenario == "unknown_pointer"
 			if refused && gjson.GetBytes(terminal, "type").String() != "response.completed" {
 				select {
 				case <-h.handlerDone:
@@ -114,21 +137,32 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 			mu.Unlock()
 			if refused {
 				marker := "UNKNOWN_POINTER_SENT"
+				generations := 1
 				if scenario == "wrong_response" {
 					marker = "F2_WRONG_RESPONSE_SENT"
 				}
 				if scenario == "terminal_excludes" {
 					marker = "F3_EXCLUDED_TOOL_SENT"
 				}
-				require.Len(t, actual, 1, marker+": refused turn must never start another upstream generation")
+				if scenario == "duplicate_call" {
+					marker = "F3_DUPLICATE_TOOL_SENT"
+					generations = 2
+				}
+				require.Len(t, actual, generations, marker+": refused turn must never start another upstream generation")
 				require.NotEqual(t, "response.completed", gjson.GetBytes(terminal, "type").String())
 				if readErr != nil {
 					require.NotEqual(t, context.DeadlineExceeded, ctx.Err(), "refusal must be explicit")
 				}
 				return
 			}
-			require.NoError(t, readErr)
-			require.Equal(t, "response.completed", gjson.GetBytes(terminal, "type").String())
+			marker := "plaintext continuation refused"
+			if scenario == "ordinary_tool" {
+				marker = "F3_PLAINTEXT_TOOL_REFUSED"
+			} else if scenario == "empty_terminal" {
+				marker = "F3_EMPTY_TERMINAL_REFUSED"
+			}
+			require.NoError(t, readErr, marker)
+			require.Equal(t, "response.completed", gjson.GetBytes(terminal, "type").String(), marker)
 			require.Len(t, actual, 2, "exactly one generation per client turn")
 			if stored {
 				require.Equal(t, previous, gjson.GetBytes(actual[1], "previous_response_id").String())
@@ -143,8 +177,11 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 				require.False(t, gjson.GetBytes(actual[1], "previous_response_id").Exists())
 				require.Equal(t, "9007199254740993", gjson.GetBytes(actual[1], "tools.0.parameters.properties.n.maximum").Raw)
 			} else {
+				require.Len(t, gjson.GetBytes(actual[1], "input").Array(), 3, "plaintext history must contain U, C and C's result")
+				require.JSONEq(t, call, gjson.GetBytes(actual[1], "input.1").Raw)
 				require.Equal(t, "call_fixture_repair", gjson.GetBytes(actual[1], "input.1.call_id").String())
 				require.Equal(t, "call_fixture_repair", gjson.GetBytes(actual[1], "input.2.call_id").String())
+				require.False(t, gjson.GetBytes(actual[1], "previous_response_id").Exists())
 			}
 		})
 	}

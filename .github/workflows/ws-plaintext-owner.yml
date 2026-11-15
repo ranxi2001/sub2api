@@ -101,7 +101,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        phase: [RED, GREEN]
+        phase: [RED, PLAINTEXT_RED, GREEN]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -120,13 +120,19 @@ jobs:
             sudo apt-get install -y --no-install-recommends redis-server
           fi
       - name: Pin reviewed PR implementation for repair RED
-        if: matrix.phase == 'RED'
+        if: matrix.phase != 'GREEN'
+        env:
+          PHASE: ${{ matrix.phase }}
         run: |
           # Keep candidate type declarations and tests compatible. Only these
           # two implementations execute the three reviewed faulty behaviors.
+          baseline=04ec5e737ecb925faa2e8f3b00efff816715c55c
+          if [ "$PHASE" = PLAINTEXT_RED ]; then
+            baseline=72c21bedea567d8032f736adba16edcf5645ca19
+          fi
           for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_http_bridge.go; do
-            git show "04ec5e737ecb925faa2e8f3b00efff816715c55c:$target" > "$target"
-            test "$(git hash-object "$target")" = "$(git rev-parse "04ec5e737ecb925faa2e8f3b00efff816715c55c:$target")"
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
           done
       - name: Exact later-turn HTTP wire behavior
         env:
@@ -151,11 +157,13 @@ jobs:
           package='github.com/Wei-Shaw/sub2api/internal/handler'
           root='TestOpenAIWSPlaintextRepair870'
           markers={root+'/assistant_history':'F1_ASSISTANT_HISTORY_LOST',root+'/wrong_response':'F2_WRONG_RESPONSE_SENT',root+'/terminal_excludes':'F3_EXCLUDED_TOOL_SENT'}
-          leaves=set(markers)|{root+'/'+s for s in ('empty_terminal','stored_pointer','unknown_pointer')}
+          plaintext_markers={root+'/ordinary_tool':'F3_PLAINTEXT_TOOL_REFUSED',root+'/empty_terminal':'F3_EMPTY_TERMINAL_REFUSED',root+'/duplicate_call':'F3_DUPLICATE_WARMUP_REFUSED'}
+          leaves=set(markers)|set(plaintext_markers)|{root+'/'+s for s in ('stored_pointer','unknown_pointer')}
           counts=Counter((r.get('Action'),r.get('Test')) for r in rows if r.get('Package')==package)
-          assert phase in ('RED','GREEN'),phase
-          expected_fail=set(markers)|{root,None} if phase=='RED' else set()
-          assert status==(1 if phase=='RED' else 0),status
+          assert phase in ('RED','PLAINTEXT_RED','GREEN'),phase
+          expected_markers=markers if phase=='RED' else plaintext_markers if phase=='PLAINTEXT_RED' else {}
+          expected_fail=set(expected_markers)|{root,None} if phase!='GREEN' else set()
+          assert status==(0 if phase=='GREEN' else 1),status
           assert {r.get('Test') for r in rows if r.get('Action')=='run'}==leaves|{root},rows
           assert all(r.get('Package')==package for r in rows),rows
           assert {r.get('Test') for r in rows if r.get('Action')=='fail'}==expected_fail,rows
@@ -163,8 +171,8 @@ jobs:
               assert name is None or counts['run',name]==1,(name,counts)
               expected='fail' if name in expected_fail else 'pass'
               assert counts[expected,name]==1 and counts['pass',name]+counts['fail',name]==1,(name,counts)
-          if phase=='RED':
-              for name,marker in markers.items():
+          if phase!='GREEN':
+              for name,marker in expected_markers.items():
                   output=''.join(r.get('Output','') for r in rows if r.get('Test')==name)
                   assert marker in output,(name,output)
           PY

@@ -507,21 +507,38 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 				r.deliveredTools = make(map[string]openAIWSDeliveredTool)
 			}
 			for key, observed := range r.pendingTools {
-				// Consume the shared finishTools verdict, including terminal
-				// exclusion, duplicates, uncertain writes and anchor fences.
+				// Reuse the delivery's terminal verdict for this manager-local
+				// proof. Shared persisted proofs additionally require encrypted
+				// anchors, which an ordinary plaintext call does not have.
 				callID := key[len(request.model)+1:]
-				raw, proofErr := r.service.toolProofGet(ctx, request.toolKey(callID))
-				var proof openAIToolProof
-				if proofErr != nil || json.Unmarshal([]byte(raw), &proof) != nil ||
-					proof.Call != observed.fingerprint || proof.Delivery != openAIToolHash(request.delivery.pending) ||
-					proof.Producer != encodeOpenAIAgentRecoveryBinding(request.delivery.binding) || r.service.checkToolProof(ctx, proof) != nil {
+				toolKey := request.toolKey(callID)
+				delivery := request.delivery
+				call, found := delivery.tools[toolKey]
+				if !delivery.toolEnabled || !delivery.toolTerminal || delivery.toolInvalid || !delivery.toolAnchorsValid ||
+					!found || !call.complete || call.fingerprint != observed.fingerprint ||
+					(delivery.toolFinal != nil && !delivery.toolFinal[toolKey]) {
 					observed.conflicted = true
+				}
+				// Where encrypted or shadow anchors apply, retain all existing
+				// shared proof checks. The anchorless exception never escapes
+				// this manager or relaxes shared/encrypted proof publication.
+				if len(delivery.toolAnchors) > 0 || len(request.outputs) > 0 || request.shadowObservation != nil {
+					raw, proofErr := r.service.toolProofGet(ctx, toolKey)
+					var proof openAIToolProof
+					if proofErr != nil || json.Unmarshal([]byte(raw), &proof) != nil ||
+						proof.Call != observed.fingerprint || proof.Delivery != openAIToolHash(delivery.pending) ||
+						proof.Producer != encodeOpenAIAgentRecoveryBinding(delivery.binding) || r.service.checkToolProof(ctx, proof) != nil {
+						observed.conflicted = true
+					}
 				}
 				old, exists := r.deliveredTools[key]
 				if !exists && len(r.deliveredTools) >= 1024 {
 					continue
 				}
-				observed.conflicted = observed.conflicted || old.conflicted || (exists && old.fingerprint != observed.fingerprint)
+				// pendingTools coalesces item.done and terminal observations
+				// within one generation. An existing delivered identity is a
+				// later generation reusing the call ID, even if bytes match.
+				observed.conflicted = observed.conflicted || old.conflicted || exists
 				r.deliveredTools[key] = observed
 			}
 			for _, key := range request.keys {
