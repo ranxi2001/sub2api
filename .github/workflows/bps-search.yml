@@ -52,10 +52,14 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/bps-search-browser" --no-save --ignore-scripts playwright@1.56.1
           node "$RUNNER_TEMP/bps-search-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Fetch immutable before UI
+        run: git fetch --no-tags --depth=1 origin 713cb0f3efe3f838d159cd57998128c2cdaa84b1
       - name: Render actual BPS search settings
         env:
           SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/bps-search-browser/node_modules/playwright/index.mjs
-        run: node .github/scripts/bps-search-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/bps-search-evidence"
+        run: |
+          node .github/scripts/bps-search-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/bps-search-evidence/before" 713cb0f3efe3f838d159cd57998128c2cdaa84b1
+          node .github/scripts/bps-search-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/bps-search-evidence/after"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
