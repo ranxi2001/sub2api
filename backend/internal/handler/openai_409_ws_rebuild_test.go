@@ -666,6 +666,23 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 		logReadableWSRecoveryDetails(t, h)
 	}
 	require.Equal(t, 2+extraSends, sends, "WS_READABLE_B_DISPATCH_MISSING: same client must automatically replace disabled A before any next generation; close=%v terminal=%s", readErr, secondRaw)
+	if strings.HasPrefix(scenario, "header_") {
+		// Assert the header defect on B's first actual send. A historical
+		// baseline must not reach a later, independent history representation
+		// check before the original header-leak oracle can observe its cause.
+		oracle.mu.Lock()
+		firstB := oracle.headers[1].Clone()
+		firstA := oracle.headers[0].Clone()
+		oracle.mu.Unlock()
+		require.NotEqual(t, headers.Get("conversation_id"), firstB.Get("conversation_id"), "WS_RESIDUAL_A_HEADER_LEAK: only outbound provider state is detached")
+		require.Empty(t, firstB.Get("x-codex-turn-state"), "WS_RESIDUAL_A_HEADER_LEAK: retained A state must not reach B")
+		if scenario == "header_oauth" {
+			require.NotEmpty(t, firstB.Get("session_id"))
+			require.NotEqual(t, headers.Get("session_id"), firstB.Get("session_id"))
+			require.Equal(t, firstB.Get("session_id"), firstB.Get("conversation_id"), "WS_RESIDUAL_A_HEADER_LEAK: B conversation must use B's isolated session")
+			require.NotEqual(t, firstA.Get("session_id"), firstB.Get("session_id"))
+		}
+	}
 	if modelCase {
 		accounts.mu.Lock()
 		observed := append([]bool(nil), accounts.admissionObserved...)
