@@ -2,6 +2,7 @@
 # Only historical full-production overlays without the provider/QQ/coupon
 # implementation omit its later independent test files. The newly merged BPS
 # account-search fixture also requires absent historical service symbols.
+# Independent BPS settings and provider-team tests also require later APIs.
 # GREEN keeps all tests.
 # Never remove the selected gateway/moderation/recovery oracle or its fixtures.
 set -euo pipefail
@@ -41,6 +42,9 @@ done < <(git -C "$tree" ls-files \
   'backend/internal/service/mature_*_test.go' \
   'backend/internal/service/repair_f2_coupon_recovery_test.go' \
   'backend/internal/service/openai_excel_bps_search_test.go' \
+  'backend/internal/service/bps_search_settings_test.go' \
+  'backend/internal/service/account_ops_providers_test.go' \
+  'backend/internal/service/account_ops_team_test.go' \
   'backend/internal/server/routes/mature_*_test.go' \
   'backend/internal/server/routes/repair_r1_payment_review_test.go' \
   'backend/internal/server/routes/repair_provider_session_budget_test.go' \
