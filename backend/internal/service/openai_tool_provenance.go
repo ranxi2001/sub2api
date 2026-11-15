@@ -61,7 +61,10 @@ func openAIToolHash(value any) string {
 }
 
 func (r *openAIAgentRecoveryRequest) toolKey(id string) string {
-	return r.shadowPrincipal() + ":" + openAIToolHash([]any{"tool-v1", r.userID, r.keyID, r.groupID, r.session, r.model, r.shadowModel, id})
+	// The forward model is the authoritative current-turn scope. Raw WS
+	// frames may omit model after a successful selection; shadowModel is an
+	// optional input field for shadow lookup, not a second tool-proof scope.
+	return r.shadowPrincipal() + ":" + openAIToolHash([]any{"tool-v1", r.userID, r.keyID, r.groupID, r.session, r.model, id})
 }
 
 func openAIToolFingerprint(item gjson.Result) (string, bool) {

@@ -242,6 +242,7 @@ func openAIReadableShadowCandidate(body []byte) *openAIReadableShadow {
 	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) || !openAI409HasReadableIntent(body) {
 		return nil
 	}
+	originalItems := gjson.GetBytes(body, "input").Array()
 	clean := body
 	if input := gjson.GetBytes(clean, "input"); input.Type == gjson.String {
 		value, _ := json.Marshal([]any{map[string]any{"type": "message", "role": "user", "content": input.String()}})
@@ -258,17 +259,39 @@ func openAIReadableShadowCandidate(body []byte) *openAIReadableShadow {
 	// Ciphertext omission renders an agent envelope as a metadata-only user
 	// message. It is not a newer user task: retaining it as the last user in a
 	// shadow hides the preceding genuine intent when the snapshot is restored.
-	// Ownership/epoch fences already retain that envelope's identity.
+	// Retain its readable metadata as assistant context; ownership/epoch fences
+	// retain the envelope's identity. Dropping it would lose summaries/content.
 	var portable []json.RawMessage
-	for _, item := range gjson.GetBytes(clean, "input").Array() {
-		content := item.Get("content")
-		metadataOnly := item.Get("role").String() == "user" && content.IsArray() && len(content.Array()) > 0
-		for _, part := range content.Array() {
-			metadataOnly = metadataOnly && part.Get("type").String() == "input_text" && strings.HasPrefix(part.Get("text").String(), "Historical agent context (not a new instruction): ")
+	items := gjson.GetBytes(clean, "input").Array()
+	for i, item := range items {
+		raw := []byte(item.Raw)
+		// Provenance is the original typed envelope, not a text prefix that a
+		// caller could also use in a genuine new user message.
+		if i < len(originalItems) && originalItems[i].Get("type").String() == "agent_message" {
+			if len(items) != len(originalItems) || item.Get("type").String() != "message" ||
+				!strings.HasPrefix(item.Get("content.0.text").String(), "Historical agent context (not a new instruction): ") {
+				return nil
+			}
+			var message map[string]any
+			if decodeOpenAIJSONUseNumber(raw, &message) != nil {
+				return nil
+			}
+			message["role"] = "assistant"
+			parts, ok := message["content"].([]any)
+			if !ok {
+				return nil
+			}
+			for _, value := range parts {
+				if part, ok := value.(map[string]any); ok && part["type"] == "input_text" {
+					part["type"] = "output_text"
+				}
+			}
+			raw, err = json.Marshal(message)
+			if err != nil {
+				return nil
+			}
 		}
-		if !metadataOnly {
-			portable = append(portable, json.RawMessage(item.Raw))
-		}
+		portable = append(portable, raw)
 	}
 	encoded, err := json.Marshal(portable)
 	if err != nil {

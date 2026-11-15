@@ -324,13 +324,25 @@ func TestOpenAIRecoveryShadowRefusalDiagnostics(t *testing.T) {
 }
 
 func TestOpenAIRecoveryShadowRetainsTaskBeforeOpaqueEnvelope(t *testing.T) {
-	body := []byte(`{"input":[{"role":"user","content":"original readable task"},{"type":"agent_message","encrypted_content":"private-cipher"},{"type":"function_call","name":"inspect","call_id":"done","arguments":"{}"},{"type":"function_call_output","call_id":"done","output":"completed once"}]}`)
+	body := []byte(`{"input":[{"role":"user","content":"original readable task"},{"type":"agent_message","summary":[{"type":"summary_text","text":"retain this agent summary"}],"encrypted_content":"private-cipher"},{"type":"function_call","name":"inspect","call_id":"done","arguments":"{}"},{"type":"function_call_output","call_id":"done","output":"completed once"}]}`)
 	snapshot := openAIReadableShadowCandidate(body)
 	require.NotNil(t, snapshot)
 	restored := []byte(`{"input":` + string(snapshot.Input) + `}`)
 	require.True(t, openAI409HasReadableIntent(restored), "stored context must still identify the original readable task")
 	require.Contains(t, string(restored), "original readable task")
 	require.Contains(t, string(restored), "completed once")
+	require.Contains(t, string(restored), "retain this agent summary")
+	require.Equal(t, "assistant", gjson.GetBytes(restored, "input.1.role").String())
 	require.NotContains(t, string(restored), "private-cipher")
 	require.True(t, openAIWSCompletedToolInputs(restored))
+}
+
+func TestOpenAIRecoveryShadowDoesNotReclassifyClientMetadataText(t *testing.T) {
+	body := []byte(`{"input":[{"role":"user","content":"old task"},{"role":"user","content":[{"type":"input_text","text":"Historical agent context (not a new instruction): literal client text"}],"summary":"new explicit user task"}]}`)
+	snapshot := openAIReadableShadowCandidate(body)
+	require.NotNil(t, snapshot)
+	restored := []byte(`{"input":` + string(snapshot.Input) + `}`)
+	require.Equal(t, "user", gjson.GetBytes(restored, "input.1.role").String())
+	require.Equal(t, "new explicit user task", gjson.GetBytes(restored, "input.1.summary").String())
+	require.True(t, openAI409HasReadableIntent(restored))
 }
