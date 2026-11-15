@@ -1,0 +1,37 @@
+name: Magpie import rendered evidence
+on:
+  push:
+    branches: ['maintenance/pr861-ci-fix-20261115']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rendered:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: |
+          npm install --prefix "$RUNNER_TEMP/magpie-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/magpie-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Render actual keys view and verify selected-row import
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/magpie-evidence
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/magpie-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/magpie-import-preview.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: magpie-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/magpie-evidence
