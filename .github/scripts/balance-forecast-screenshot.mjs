@@ -46,6 +46,7 @@ try {
       if (path === '/auth/me') data = user
       else if (path === '/admin/settings') data = { site_name: 'Sub2API', balance_low_notify_enabled: true, balance_low_notify_threshold: 25,
         ...(mode === 'before' ? { balance_forecast_enabled: true, balance_forecast_threshold_hours: 12, balance_forecast_max_notifications: 3 } : {}) }
+      else if (path === '/admin/backups/image-storage') data = { config: { enabled: false, prefix: 'images/', region: 'auto' }, secret_configured: false }
       else if (path === '/admin/settings/email-templates') data = { events: [], locales: ['zh', 'en'], templates: [], placeholders: [] }
       else if (path === '/admin/groups/all' || path === '/admin/payment/providers') data = []
       else if (path === '/keys' || path === '/admin/proxies') data = { items: [], total: 0, pages: 1 }
@@ -60,6 +61,7 @@ try {
       else assert.equal(await forecast.count(), 0)
       const low = page.locator('h3').filter({ hasText: /余额不足提醒|Balance Low Notification/ }).first()
       await low.waitFor({ state: 'visible' })
+      assert.equal((await page.locator('[aria-live="polite"]').allTextContents()).join('').trim(), '', 'fixture must not produce error toasts')
       if (mode === 'before') await forecast.scrollIntoViewIfNeeded()
       else await low.scrollIntoViewIfNeeded()
       await page.screenshot({ path: join(output, `${mode}-email.png`), animations: 'disabled' })
