@@ -20,6 +20,8 @@ for target in \
   backend/internal/service/openai_account_scheduler.go \
   backend/internal/service/openai_ws_agent_recovery.go \
   backend/internal/handler/openai_agent_message_recovery.go \
+  backend/internal/handler/ops_error_logger.go \
+  backend/internal/service/ops_upstream_context.go \
   backend/internal/handler/openai_gateway_handler.go; do
   test -f "$tree/$target" || continue
   # Do not replace a selected defect blob or an already verified compatibility

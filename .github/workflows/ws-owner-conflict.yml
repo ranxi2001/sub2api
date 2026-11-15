@@ -105,7 +105,7 @@ jobs:
           PY
       - name: Persist safe refusal subtype with logical turn
         working-directory: backend
-        run: go test -race -tags=unit,ownerconflict ./internal/handler -run '^TestOwnerConflictPersistence' -count=1 -v -timeout=5m
+        run: go test -race -tags=unit,ownerdiagnostics ./internal/handler -run '^TestOwnerConflictPersistence' -count=1 -v -timeout=5m
       - uses: actions/upload-artifact@v7
         if: always()
         with:
