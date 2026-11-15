@@ -61,6 +61,10 @@ jobs:
           result=$?
           set -e
           python3 .github/scripts/http-recovery-native-controls.py "$PHASE" "$result" "$RUNNER_TEMP/native-controls.jsonl"
+      - name: Trusted source and late mutation guards
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        run: go test -race -tags=unit,httpprojection ./internal/service -run '^TestOpenAI409NativeControlsIntegrity$' -count=1 -v -timeout=3m
       - uses: actions/upload-artifact@v7
         if: always()
         with:
