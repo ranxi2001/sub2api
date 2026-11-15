@@ -1,0 +1,98 @@
+name: WS owner conflict behavior
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - backend/internal/handler/openai_ws_owner_conflict_test.go
+      - backend/internal/service/openai_ws_readable_continuation.go
+      - backend/internal/service/openai_ws_agent_recovery.go
+      - .github/workflows/ws-owner-conflict.yml
+
+permissions:
+  contents: read
+
+jobs:
+  behavior:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      BASELINE: 0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          if ! command -v redis-server >/dev/null; then brew install redis; fi
+      - name: Real handler RED against exact production blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          mkdir -p "$RUNNER_TEMP/ws-owner-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/ws-owner-evidence/candidate.txt"
+          git worktree add --detach "$RUNNER_TEMP/ws-owner-red" "$CANDIDATE"
+          git diff --name-only "$BASELINE" "$CANDIDATE" -- backend | while IFS= read -r target; do
+            case "$target" in
+              *_test.go) continue ;;
+              *.go)
+                if git cat-file -e "$BASELINE:$target" 2>/dev/null; then
+                  git show "$BASELINE:$target" > "$RUNNER_TEMP/ws-owner-red/$target"
+                  test "$(git hash-object "$RUNNER_TEMP/ws-owner-red/$target")" = "$(git rev-parse "$BASELINE:$target")"
+                  printf '%s %s\n' "$(git rev-parse "$BASELINE:$target")" "$target" >> "$RUNNER_TEMP/ws-owner-evidence/baseline-blobs.txt"
+                else
+                  rm -- "$RUNNER_TEMP/ws-owner-red/$target"
+                fi ;;
+            esac
+          done
+          set +e
+          (cd "$RUNNER_TEMP/ws-owner-red/backend" && go test -p=2 -tags=unit ./internal/handler -run '^TestOpenAIWSMixedOwnerContinuation$/turn_2$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-owner-evidence/red.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-owner-evidence/red.jsonl"
+          test "$status" -eq 1
+          python3 - "$RUNNER_TEMP/ws-owner-evidence/red.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          leaf = 'TestOpenAIWSMixedOwnerContinuation/turn_2'
+          assert any(r.get('Action') == 'fail' and r.get('Test') == leaf for r in rows), 'missing actual handler failure'
+          outputs = ''.join(r.get('Output', '') for r in rows)
+          assert 'MIXED_COMPLETED_OWNER_NOT_RESUMED' in outputs, 'not the intended behavior RED'
+          assert 'encrypted_agent_recovery_owner_conflict' in outputs, 'missing actual refusal code'
+          assert not any(r.get('Action') == 'skip' for r in rows), 'skipped coverage'
+          assert 'panic:' not in outputs and '[build failed]' not in outputs, 'setup failure is not RED'
+          PY
+      - name: Candidate GREEN after production repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          if git diff --quiet "$BASELINE" "$CANDIDATE" -- backend/internal/service; then
+            echo 'Production repair not yet present; GREEN NOT EXECUTED (initial RED draft).'
+            exit 0
+          fi
+          (cd backend && go test -race -p=2 -tags=unit ./internal/handler -run '^TestOpenAIWSMixedOwnerContinuation$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-owner-evidence/green.jsonl" 2>&1
+          cat "$RUNNER_TEMP/ws-owner-evidence/green.jsonl"
+          python3 - "$RUNNER_TEMP/ws-owner-evidence/green.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          for turn in (2, 53):
+            assert any(r.get('Action') == 'pass' and r.get('Test') == f'TestOpenAIWSMixedOwnerContinuation/turn_{turn}' for r in rows)
+          assert not any(r.get('Action') in ('skip', 'fail') for r in rows)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-owner-conflict-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/ws-owner-evidence
