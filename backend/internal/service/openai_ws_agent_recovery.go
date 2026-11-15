@@ -189,20 +189,28 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 	return clean, nil
 }
 
-// Stored native Responses already has a verified response anchor and the
-// client is resending known intact opaque items. Legacy bridge reconstruction
+// Stored native Responses has a same-account response anchor or the client
+// is resending known intact opaque items. Legacy bridge reconstruction
 // would append history again (including tasks/tool results) on every turn.
 // This only chooses representation; begin still rechecks authoritative owners,
 // the exact previous response, permissions and the final built HTTP request.
-func (r *openAIWSAgentRecovery) storedContinuation(source []byte) bool {
-	if r == nil || gjson.GetBytes(source, "store").Type != gjson.True || gjson.GetBytes(source, "previous_response_id").String() == "" {
+func (r *openAIWSAgentRecovery) storedContinuation(account *Account, source []byte) bool {
+	if r == nil || r.service == nil || gjson.GetBytes(source, "store").Type != gjson.True || gjson.GetBytes(source, "previous_response_id").String() == "" {
 		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	items := openAIAgentRecoveryItemDigests(source)
 	if len(items) == 0 {
-		return false
+		if account == nil || account.ID <= 0 || !account.IsOpenAIApiKey() {
+			return false
+		}
+		scope := openAIAgentRecoveryFromContext(r.ctx)
+		if scope == nil {
+			return false
+		}
+		owner, err := r.service.getOpenAIWSStateStore().GetResponseAccount(r.ctx, scope.groupID, gjson.GetBytes(source, "previous_response_id").String())
+		return err == nil && owner == account.ID
 	}
 	scope := *openAIAgentRecoveryFromContext(r.ctx)
 	if forward, ok := openAIForwardModelFromContext(r.c.Request.Context()); ok && forward.model != "" {

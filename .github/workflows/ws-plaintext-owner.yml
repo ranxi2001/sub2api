@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_ws_http_bridge.go'
       - 'backend/internal/service/openai_ws_plaintext_owner_test.go'
       - 'backend/internal/handler/openai_ws_plaintext_owner_test.go'
       - '.github/workflows/ws-plaintext-owner.yml'
@@ -36,8 +38,10 @@ jobs:
       - name: Pin baseline production implementation
         if: matrix.phase == 'RED'
         run: |
-          git show b9feadf7dd6228a4117e360821d9994b7cc54897:backend/internal/service/openai_ws_agent_recovery.go > backend/internal/service/openai_ws_agent_recovery.go
-          test "$(git hash-object backend/internal/service/openai_ws_agent_recovery.go)" = "$(git rev-parse b9feadf7dd6228a4117e360821d9994b7cc54897:backend/internal/service/openai_ws_agent_recovery.go)"
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_http_bridge.go; do
+            git show "b9feadf7dd6228a4117e360821d9994b7cc54897:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "b9feadf7dd6228a4117e360821d9994b7cc54897:$target")"
+          done
       - name: Actual delta continuation and delivery boundaries
         env:
           PHASE: ${{ matrix.phase }}
@@ -59,13 +63,13 @@ jobs:
           failures={r['Test'] for r in rows if r.get('Action')=='fail' and '/' in r.get('Test','')}
           passes={r['Test'] for r in rows if r.get('Action')=='pass' and '/' in r.get('Test','')}
           expected={f'TestOpenAIWSPlaintextResponseOwnershipDelivery/{x}' for x in ('completed','empty_output','done')}
-          expected.add('TestOpenAIWSPlaintextToolContinuation/passthrough')
+          expected.update('TestOpenAIWSPlaintextToolContinuation/'+mode for mode in ('passthrough','http_bridge'))
           if phase=='RED':
               assert status!=0 and failures==expected,(status,failures)
               for name in expected:
                   text=''.join(r.get('Output','') for r in rows if r.get('Test')==name)
                   assert 'PLAINTEXT_RESPONSE_OWNER_MISSING' in text or 'PLAINTEXT_TOOL_CONTINUATION_REFUSED' in text,(name,text)
-              assert len(passes)==9,passes
+              assert len(passes)==8,passes
           else:
               assert status==0 and not failures,(status,failures)
               assert len(passes)==13,passes

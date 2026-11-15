@@ -72,6 +72,7 @@ func TestOpenAIWSPlaintextToolContinuation(t *testing.T) {
 					a.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
 					a.Extra["codex_fingerprint_mode"] = "off"
 					cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 15
+					cfg.Gateway.MaxAccountSwitches = 2
 				})
 			defer issue600Finish(t, h, headers)
 			issue715WSSend(t, h.clientConn, `{"type":"response.create","model":"gpt-5.1","store":true,"input":[{"role":"user","content":"Run the fixture once"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{}}}]}`)
@@ -87,7 +88,7 @@ func TestOpenAIWSPlaintextToolContinuation(t *testing.T) {
 			mu.Unlock()
 			require.Len(t, actual, 2, "exactly one generation per client turn; never replay the executed tool")
 			require.Contains(t, string(actual[1]), "fixture applied once")
-			if mode == service.OpenAIWSIngressModePassthrough {
+			if mode == service.OpenAIWSIngressModePassthrough || mode == service.OpenAIWSIngressModeHTTPBridge {
 				require.Equal(t, "resp_plaintext_first", gjson.GetBytes(actual[1], "previous_response_id").String())
 				require.Len(t, gjson.GetBytes(actual[1], "input").Array(), 1, "native delta must remain a delta")
 			}

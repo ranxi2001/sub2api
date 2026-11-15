@@ -479,7 +479,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	// below verifies its account binding and intact input before any HTTP write.
 	// Do not enable storage or change another adapter's continuation policy.
 	preserveAgentPrevious := openAIWSAgentRecoveryFromContext(ctx) != nil && account.IsOpenAI() && len(openAIAgentRecoveryItemDigests(payload)) > 0
-	body, err := prepareOpenAIWSHTTPBridgeSessionBody(account, payload, statefulSession || preserveAgentPrevious)
+	preserveStoredPrevious := openAIWSAgentRecoveryFromContext(ctx).storedContinuation(account, payload)
+	body, err := prepareOpenAIWSHTTPBridgeSessionBody(account, payload, statefulSession || preserveAgentPrevious || preserveStoredPrevious)
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
