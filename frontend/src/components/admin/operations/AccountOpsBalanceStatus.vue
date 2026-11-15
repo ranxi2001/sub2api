@@ -7,10 +7,12 @@
         <p class="text-amber-700 dark:text-amber-400">{{ t(`accountOps.observations.${account.balance_status}`) }}</p>
         <p v-if="account.last_known_balance != null" class="mt-1 text-gray-500">{{ t('accountOps.lastKnownBalance', { value: account.last_known_balance.toFixed(2), unit: account.unit }) }}</p>
       </template>
-      <p v-if="account.probe_enabled === false" class="mt-1 text-amber-700 dark:text-amber-400">{{ t('accountOps.collectionDisabled') }}</p>
+      <p v-if="account.provider_id" class="mt-1 text-gray-500">{{ t('accountOps.providerBalanceSource') }} #{{ account.provider_id }}</p>
+      <p v-if="account.probe_enabled === false" class="mt-1 text-amber-700 dark:text-amber-400">{{ t(account.provider_id ? 'accountOps.providerRefreshDisabled' : 'accountOps.collectionDisabled') }}</p>
       <p v-else-if="account.balance_status !== 'ok'" class="mt-1 text-gray-500">{{ t(account.balance_status === 'unsupported' ? 'accountOps.balanceUnsupportedHint' : 'accountOps.balancePendingHint') }}</p>
       <p v-if="account.received_at" class="mt-1 text-gray-500">{{ t('accountOps.sampleTime') }} {{ formatDateTime(account.received_at) }}</p>
-      <button type="button" class="mt-2 text-primary-600 hover:underline disabled:opacity-50" :disabled="disabled || busy !== null" :data-testid="`refresh-balance-${account.account_id}`" @click="refresh(account)">
+      <a v-if="account.provider_id" href="/admin/channel-operations" class="mt-2 inline-block text-primary-600">{{ t('accountOps.manageProviderBalance') }}</a>
+      <button v-else type="button" class="mt-2 text-primary-600 hover:underline disabled:opacity-50" :disabled="disabled || busy !== null" :data-testid="`refresh-balance-${account.account_id}`" @click="refresh(account)">
         {{ busy === account.account_id ? t('common.loading') : t(account.probe_enabled === false ? 'accountOps.enableCollection' : 'accountOps.refreshBalance') }}
       </button>
     </div>
@@ -32,7 +34,7 @@ const busy = ref<number | null>(null), feedback = ref('')
 let alive = true
 onBeforeUnmount(() => { alive = false })
 async function refresh(account: AccountOpsThresholdAccount) {
-  if (props.disabled || busy.value !== null) return
+  if (props.disabled || busy.value !== null || account.provider_id) return
   busy.value = account.account_id
   feedback.value = ''
   try {

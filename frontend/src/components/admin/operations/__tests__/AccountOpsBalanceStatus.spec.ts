@@ -58,3 +58,10 @@ describe('balance collection recovery', () => {
     expect(probeUpstreamBilling).not.toHaveBeenCalled()
   })
 })
+
+it('uses the provider balance source without probing an individual key', () => {
+  const wrapper = mount(Status, { props: { accounts: [{ ...account, provider_id: 7 }] } })
+  expect(wrapper.get('a[href="/admin/channel-operations"]').exists()).toBe(true)
+  expect(wrapper.find('button').exists()).toBe(false)
+  expect(probeUpstreamBilling).not.toHaveBeenCalled()
+})

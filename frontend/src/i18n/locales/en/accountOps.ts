@@ -1,4 +1,18 @@
 export default {
+  "providerBalanceSource": "Provider wallet balance",
+  "providerRefreshDisabled": "Scheduled provider refresh is off. Configure it in channel operations.",
+  "manageProviderBalance": "View / refresh provider balance",
+  "linkProvider": "Link provider wallet",
+  "providerBalanceHint": "Link a provider from channel operations to share its balance across the group. Imported keys are grouped automatically. Notification thresholds and recipients are managed here.",
+  "memberBalanceSource": "Use the first member’s balance",
+  "loadProviders": "Load providers",
+  "providersUnavailable": "Could not load the provider catalog. Try again.",
+
+  "oauthLifecycle": "Account lifecycle",
+  "oauthTemporary": "Disposable / temporary",
+  "oauthLongTerm": "Long term",
+  "sharedBalanceHint": "Shared channel balance, collected from the first account. One notification per event.",
+
   "directEditHint": "Edit a group directly, or select groups for bulk editing",
   "manageGroups": "Manage groups",
   "failureSettingsSummary": "Request failure alerts and repeat interval",
@@ -21,7 +35,7 @@ export default {
   "enabledHint": "Enable selected failure alerts and account threshold rules.",
   "recipient": "Recipient email",
   "emailRequired": "Enter a recipient email address.",
-  "recipientHint": "Account alerts are sent to this email address.",
+  "recipientHint": "Up to 10 addresses, separated by newlines, commas or semicolons. Duplicate addresses receive one copy. Each recipient receives one notification per channel event.",
   "alertTypes": "Request failure alerts",
   "balance_low": "Insufficient balance",
   "balanceHint": "An upstream request explicitly reports insufficient balance or credits.",
