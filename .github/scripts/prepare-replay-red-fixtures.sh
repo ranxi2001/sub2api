@@ -17,6 +17,14 @@ exclude_absent_fixture() {
   actual_contract=$(git -C "$tree" hash-object "$contract")
   test "$actual_contract" = "$expected_contract"
   expected=$(git -C "$tree" rev-parse "$candidate:$target")
+  # The mature full-source overlay also owns this independent BPS fixture.
+  # Both helpers retain their baseline/contract checks; accept only its exact
+  # already-recorded deletion, never a missing selected replay oracle.
+  if test "$target" = backend/internal/service/openai_excel_bps_search_test.go && ! test -e "$tree/$target"; then
+    test "$(git -C "$tree" diff --name-only --diff-filter=D "$candidate" -- "$target")" = "$target"
+    printf 'shared BPS fixture already excluded baseline=%s candidate=%s path=%s candidate_blob=%s contract_blob=%s\n' "$baseline" "$candidate" "$target" "$expected" "$actual_contract"
+    return
+  fi
   actual=$(git -C "$tree" hash-object "$target")
   test "$actual" = "$expected"
   printf 'unrelated replay fixture baseline=%s candidate=%s path=%s baseline_blob=absent expected=%s actual=%s contract=%s contract_blob=%s\n' "$baseline" "$candidate" "$target" "$expected" "$actual" "$contract" "$actual_contract"
