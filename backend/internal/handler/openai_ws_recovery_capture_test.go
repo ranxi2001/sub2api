@@ -170,14 +170,15 @@ func TestOpenAIWSRecoveryRefusalCapture(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("refusal handler did not finish")
 	}
-	manager.Close()
+	require.Eventually(t, func() bool { return manager.Stats().ActiveRequests == 0 }, 3*time.Second, 5*time.Millisecond,
+		"capture worker must finalize before shutdown stops its task")
 	records, err := manager.Records(context.Background(), task.ID, "", true, 10, 0)
 	require.NoError(t, err)
 	require.Len(t, records, 1, "RECOVERY_REFUSAL_CAPTURE_MISSING: a delivered WS error must survive errors-only retention")
 	record := records[0]
 	require.True(t, record.IsError)
 	require.NotNil(t, record.FinishedAt)
-	require.False(t, record.Partial)
+	require.False(t, record.Partial, "capture should be complete: %s", record.Reason)
 	require.Equal(t, "encrypted_agent_recovery_owner_conflict", record.ErrorCode)
 	require.Empty(t, record.Attempts, "pre-dispatch refusal must not invent an upstream request")
 	parts := map[string][]byte{}
