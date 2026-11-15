@@ -119,7 +119,7 @@ func (h *ChannelHandler) refreshMatureProvider(ctx context.Context, id, revision
 	if err != nil {
 		return nil, err
 	}
-	return r.WithMatureProviderSession(ctx, id, revision, func(p *service.MatureProvider, cipher string) (service.ProviderSessionUpdate, error) {
+	return r.WithMatureProviderSession(ctx, id, revision, func(operationCtx context.Context, p *service.MatureProvider, cipher string) (service.ProviderSessionUpdate, error) {
 		u := service.ProviderSessionUpdate{}
 		if h.providerEncryptor == nil || cipher == "" {
 			return u, service.ErrMatureProviderValidation
@@ -133,7 +133,7 @@ func (h *ChannelHandler) refreshMatureProvider(ctx context.Context, id, revision
 			return u, e
 		}
 		defer client.CloseIdleConnections()
-		probe, e := probeProviderAccount(ctx, providerProtocolRecord(p), secret, client)
+		probe, e := probeProviderAccount(operationCtx, providerProtocolRecord(p), secret, client)
 		if probe.secret != "" {
 			renewed, encryptErr := h.providerEncryptor.Encrypt(probe.secret)
 			if encryptErr != nil {

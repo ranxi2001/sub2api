@@ -128,3 +128,26 @@ R2：最终发送与配置保存的回归使用三个独立连接池，固定发
 R3：普通 moderation 的持久 `started` 只表示不重放的领取记录，不能代替最终授权。禁言和撤回先在锁外取得token，再在共享配置锁内读取当前配置与started操作，校验enabled/群/AppID/AppSecret/sandbox/策略/豁免/有效期，持锁完成实际POST restrict_chat_setting或DELETE messages。撤销时取消操作，结果未知时仍不自动重放。公告、回复、图片上传/消息、自动通知和举报专用执行路径各保留其最终共享锁，配置保存使用同一独占锁；不要求撤回已开始的请求。
 
 修复后候选继续普通整合已发布production：`96b4c2d99` 合并 `999d599f4`、`f0eca1267` 合并 `e90811e27`，新增生产路径逐blob保持一致，无迁移冲突或重编号。旧61原生图片保留，新人工审核before4图源码b98/captureb669已原生上传下载hash一致；新after图以实际生成head记录。父独审未整项clear，所有运行结论以PR精确head和artifact检查点为准。
+
+### Provider session deadline and rotated credentials
+
+Provider metadata and account imports share the same PostgreSQL row-locked
+session. Remote work receives the earliest of the caller deadline, 25 seconds
+from lock acquisition, and the 35-second transaction deadline minus an 8-second
+persistence reserve. Lock waiting consumes the transaction budget; less than one
+second of remaining remote budget rejects the operation before authentication.
+A timed-out or cancelled import does not create an account. Successfully received
+rotated credentials are encrypted and committed while retaining the row lock,
+using the transaction context that is detached from browser cancellation.
+Database or encryption failures remain errors; this reserve does not promise
+recovery from an unavailable database or an upstream rotation whose response was
+never received. No background credential replay or generation probe is added.
+
+The focused remote regression uses the real account Create handler, isolated
+PostgreSQL and a synthetic TLS provider, including refresh-only/401 renewal,
+slow pages, actual row-lock waiting, cancellation and failure. Separate database
+read/decrypt and a fresh service verify that the consumed token is not reused.
+Signed balance episode coverage includes debt, repeated lows, unknown/failure,
+observed recovery and another low episode. Episode deduplication does not claim
+external notification delivery verification. Current exact-head results and the
+independent review gate are recorded in the PR; prior-head CI is historical.
