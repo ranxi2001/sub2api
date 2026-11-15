@@ -99,7 +99,7 @@ func (e *OpenAIAgentRecoveryError) InternalSubreason() string {
 }
 func OpenAIRecoverySubreason(reason string) string {
 	switch reason {
-	case "mixed_completed_owners", "owner_record_conflicted", "owner_record_pending", "owner_record_failed", "owner_route_changed", "owner_record_lost", "delivery_pending", "tool_missing_id", "tool_incomplete", "tool_duplicate_call", "tool_duplicate_result", "tool_result_missing", "tool_unpaired", "shadow_changed", "shadow_epoch_changed", "shadow_fence_invalid", "shadow_fence_changed", "input_integrity", "body_unreadable", "unsupported_adapter", "route_identity":
+	case "mixed_completed_owners", "owner_record_conflicted", "owner_record_pending", "owner_record_failed", "owner_route_changed", "owner_record_lost", "delivery_pending", "tool_missing_id", "tool_missing_name", "tool_incomplete", "tool_duplicate_call", "tool_duplicate_result", "tool_result_missing", "tool_unpaired", "shadow_changed", "shadow_epoch_changed", "shadow_fence_invalid", "shadow_fence_changed", "input_integrity", "body_unreadable", "unsupported_adapter", "route_identity":
 		return reason
 	default:
 		return "unknown"
@@ -109,12 +109,6 @@ func openAIAgentRecoveryDetailedError(reason, detail string) error {
 	return &OpenAIAgentRecoveryError{Reason: reason, subreason: OpenAIRecoverySubreason(detail)}
 }
 
-// Only the observed completed-owner route mismatch creates this marker. Public
-// owner_conflict alone and post-admission state changes never grant a retry.
-type openAIWSMixedCompletedOwnersError struct{ cause error }
-
-func (e *openAIWSMixedCompletedOwnersError) Error() string { return e.cause.Error() }
-func (e *openAIWSMixedCompletedOwnersError) Unwrap() error { return e.cause }
 func openAIRecoveryRecordConflict(b openAIAgentRecoveryBinding) error {
 	detail := "owner_route_changed"
 	switch {

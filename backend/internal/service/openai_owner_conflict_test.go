@@ -21,10 +21,10 @@ func TestOwnerConflictTypedBeforeSendBoundary(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{"completed", &openAIWSMixedCompletedOwnersError{cause: openAIAgentRecoveryDetailedError("owner_conflict", "mixed_completed_owners")}, true},
+		{"completed", &openAIWSOwnerRouteError{completedMixedOwners: true, cause: openAIAgentRecoveryDetailedError("owner_conflict", "mixed_completed_owners")}, true},
 		{"plain conflict", openAIAgentRecoveryError("owner_conflict"), false},
 		{"route conflict", &openAIWSOwnerRouteError{cause: openAIAgentRecoveryError("owner_conflict")}, false},
-		{"lost owner", &openAIWSLostOwnerEvidenceError{cause: &openAIWSMixedCompletedOwnersError{cause: openAIAgentRecoveryError("owner_conflict")}}, false},
+		{"lost owner", &openAIWSLostOwnerEvidenceError{cause: &openAIWSOwnerRouteError{completedMixedOwners: true, cause: openAIAgentRecoveryError("owner_conflict")}}, false},
 		{"partial write", errors.New("synthetic partial write"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

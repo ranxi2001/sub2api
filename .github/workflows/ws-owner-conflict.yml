@@ -7,9 +7,9 @@ on:
       - backend/internal/handler/openai_ws_owner_conflict_test.go
       - backend/internal/service/openai_ws_readable_continuation.go
       - backend/internal/service/openai_ws_agent_recovery.go
-      - backend/internal/service/openai_agent_message_recovery_error.go
-      - backend/internal/service/openai_owner_conflict_test.go
       - .github/workflows/ws-owner-conflict.yml
+      - .github/scripts/ws-owner-conflict-evidence.py
+      - .github/scripts/test_ws_owner_conflict_evidence.py
 
 permissions:
   contents: read
@@ -58,40 +58,36 @@ jobs:
             esac
           done
           set +e
-          (cd "$RUNNER_TEMP/ws-owner-red/backend" && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerContinuation$/turn_2$/ctx_pool$/pointer$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-owner-evidence/red.jsonl" 2>&1
+          (cd "$RUNNER_TEMP/ws-owner-red/backend" && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerContinuation$/turn_2$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-owner-evidence/red.jsonl" 2>&1
           status=$?
           set -e
           cat "$RUNNER_TEMP/ws-owner-evidence/red.jsonl"
           test "$status" -eq 1
-          python3 - "$RUNNER_TEMP/ws-owner-evidence/red.jsonl" <<'PY'
-          import json, sys
-          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
-          leaf = 'TestOpenAIWSMixedOwnerContinuation/turn_2/ctx_pool/pointer'
-          assert any(r.get('Action') == 'fail' and r.get('Test') == leaf for r in rows), 'missing actual handler failure'
-          outputs = ''.join(r.get('Output', '') for r in rows)
-          assert 'MIXED_COMPLETED_OWNER_NOT_RESUMED' in outputs, 'not the intended behavior RED'
-          assert 'encrypted_agent_recovery_owner_conflict' in outputs, 'missing actual refusal code'
-          assert not any(r.get('Action') == 'skip' for r in rows), 'skipped coverage'
-          assert 'panic:' not in outputs and '[build failed]' not in outputs, 'setup failure is not RED'
-          PY
+          python3 .github/scripts/ws-owner-conflict-evidence.py red "$status" "$RUNNER_TEMP/ws-owner-evidence/red.jsonl"
       - name: Candidate GREEN after production repair
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
           git diff --exit-code
-          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^Test(OpenAIWSMixedOwnerContinuation|OwnerConflict)' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-owner-evidence/green.jsonl" 2>&1
-          cat "$RUNNER_TEMP/ws-owner-evidence/green.jsonl"
-          python3 - "$RUNNER_TEMP/ws-owner-evidence/green.jsonl" <<'PY'
-          import json, sys
-          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
-          for turn in (2, 53):
-            for mode in ('http_bridge','ctx_pool','shared','dedicated','passthrough'):
-              for scenario in ('pointer','no_pointer'):
-                assert any(r.get('Action') == 'pass' and r.get('Test') == f'TestOpenAIWSMixedOwnerContinuation/turn_{turn}/{mode}/{scenario}' for r in rows)
-          assert not any(r.get('Action') in ('skip', 'fail') for r in rows)
-          PY
-      - name: Service diagnostics and refusal boundaries
+          python3 -m unittest discover -s .github/scripts -p 'test_ws_owner_conflict_evidence.py'
+          for suite in continuation boundaries transports; do
+            case "$suite" in
+              continuation) test_name=TestOpenAIWSMixedOwnerContinuation ;;
+              boundaries) test_name=TestOpenAIWSMixedOwnerBoundaries ;;
+              transports) test_name=TestOpenAIWSMixedOwnerTransports ;;
+            esac
+            set +e
+            (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run "^${test_name}$" -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-owner-evidence/green-$suite.jsonl" 2>&1
+            status=$?
+            set -e
+            cat "$RUNNER_TEMP/ws-owner-evidence/green-$suite.jsonl"
+            python3 .github/scripts/ws-owner-conflict-evidence.py "$suite" "$status" "$RUNNER_TEMP/ws-owner-evidence/green-$suite.jsonl"
+          done
+      - name: Persist request turn and sanitized refusal subtype
+        working-directory: backend
+        run: go test -race -tags=unit,ownerconflict ./internal/handler -run '^TestOwnerConflictPersistence' -count=1 -v -timeout=5m
+      - name: Service diagnostic and send-boundary regression
         working-directory: backend
         run: go test -race -tags=unit,ownerconflict ./internal/service -run '^Test(OwnerConflict|Issue854BeforeSendRecoveryGuards|OpenAI409RebuildRechecksOriginalDeliveryBeforeSend)' -count=1 -v -timeout=5m
       - uses: actions/upload-artifact@v7

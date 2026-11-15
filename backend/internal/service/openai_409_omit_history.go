@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -63,6 +64,11 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 	if r.owner != nil && (r.owner.pending != "" || r.owner.failed || r.owner.conflicted) {
 		return ctx, body, false, openAIRecoveryRecordConflict(*r.owner)
 	}
+	_, websocket := ctx.Value(openAIWSAgentRecoveryRetryKey{}).(*atomic.Bool)
+	mixedWS := websocket && r.mixedOwners
+	if mixedWS && !r.hasCompletedMixedOwners() {
+		return ctx, body, false, openAIAgentRecoveryDetailedError("owner_conflict", "owner_record_lost")
+	}
 	if len(r.items) == 0 && !openAI409HasProviderState(body) {
 		return ctx, body, false, nil
 	}
@@ -83,6 +89,13 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 	clean, err := prepareOpenAI409ReadableReplay(clean)
 	if err != nil {
 		return ctx, body, false, openAIAgentRecoveryError("readable_history_unsupported")
+	}
+	if mixedWS {
+		clean, err = projectOpenAIWSCompletedTools(clean)
+		if err != nil {
+			return ctx, body, false, err
+		}
+		r.requireCompletedOwners = true
 	}
 	fresh := context.WithValue(ctx, openAIGuardianParentAffinityContextKey{}, openAIGuardianParentAffinity{})
 	next := s.WithOpenAIAgentMessageRecovery(WithOpenAIEncryptedReasoningAffinity(fresh, clean), c, clean, session, model)
