@@ -2017,7 +2017,23 @@ export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
+// Immutable display evidence from the Standard calculation that set actual_cost.
+export interface CustomerCostDetails {
+  version: number
+  free_fast: boolean
+  input_cost: number
+  output_cost: number
+  image_input_cost: number
+  image_output_cost: number
+  cache_creation_cost: number
+  cache_read_cost: number
+  total_cost: number
+  actual_cost: number
+  multiplier: number
+}
+
 export interface UsageLog {
+  customer_cost_details?: CustomerCostDetails | null
   id: number
   user_id: number
   api_key_id: number
