@@ -1,0 +1,221 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+)
+
+// JSON keeps this business regression compilable on the production baseline.
+func TestFreeFastCustomerCostSnapshot(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+	gid := int64(77)
+	tier := "priority"
+	inputPrice, outputPrice, cacheWrite, cacheRead := 10e-6, 50e-6, 12.5e-6, 1e-6
+	key := &APIKey{ID: 1020, GroupID: &gid, Group: &Group{
+		ID: gid, Platform: PlatformOpenAI, Hydrated: true, RateMultiplier: 0.6, FreeOpenAIFast: true,
+		ModelPricing: []ChannelModelPricing{{Models: []string{"gpt-5.4"}, BillingMode: BillingModeToken,
+			InputPrice: &inputPrice, OutputPrice: &outputPrice, CacheWritePrice: &cacheWrite, CacheReadPrice: &cacheRead}},
+	}}
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{RequestID: "synthetic-customer-cost", Model: "gpt-5.4", ServiceTier: &tier,
+			Usage: OpenAIUsage{InputTokens: 71, OutputTokens: 19}, Duration: time.Second},
+		APIKey: key, User: &User{ID: 2020}, Account: &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.InDelta(t, 0.00332, usageRepo.lastLog.TotalCost, 1e-10)
+	require.InDelta(t, 0.000996, usageRepo.lastLog.ActualCost, 1e-10)
+	raw, err := json.Marshal(usageRepo.lastLog)
+	require.NoError(t, err)
+	var saved map[string]any
+	require.NoError(t, json.Unmarshal(raw, &saved))
+	detail, ok := saved["CustomerCostDetails"].(map[string]any)
+	require.True(t, ok, "Free Fast must persist the Standard customer cost snapshot")
+	require.Equal(t, true, detail["free_fast"])
+	require.InDelta(t, 0.00071, detail["input_cost"], 1e-12)
+	require.InDelta(t, 0.00095, detail["output_cost"], 1e-12)
+	require.InDelta(t, 0.00166, detail["total_cost"], 1e-12)
+	require.InDelta(t, 0.6, detail["multiplier"], 1e-12)
+}
+
+func TestFreeFastCustomerCostVariants(t *testing.T) {
+	for _, tc := range []struct {
+		name                                    string
+		input, output, write30m, write12h, read int
+		personal, model, reasoning              float64
+		long                                    bool
+	}{
+		{name: "exact screenshot", input: 8345, output: 136, write30m: 1197, read: 37469},
+		{name: "mixed cache TTL", input: 71, output: 19, write30m: 11, write12h: 13, read: 17},
+		{name: "personal model reasoning", input: 71, output: 19, write30m: 11, write12h: 13, read: 17, personal: .3, model: 3, reasoning: 1.7},
+		{name: "whole request threshold", input: 272000, output: 19},
+		{name: "whole request above threshold", input: 272001, output: 19, long: true},
+		{name: "cache crosses context tier", input: 271990, output: 19, write30m: 5, write12h: 6, read: 7, long: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &openAIRecordUsageLogRepoStub{inserted: true}
+			rates := &openAIUserGroupRateRepoStub{}
+			rate := .5
+			if tc.personal > 0 {
+				rates.rate = &tc.personal
+				rate = tc.personal
+			}
+			svc := newOpenAIRecordUsageServiceForTest(repo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, rates)
+			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+			if tc.model > 0 {
+				svc.settingService = modelBillingSettings(t, ModelBillingConfig{Enabled: true, Rules: []ModelBillingRule{{Model: "gpt-6.2-astra", Multiplier: tc.model}}})
+				rate *= tc.model
+			}
+			gid := int64(77)
+			tier, effort := "priority", "high"
+			in, out, write, write12h, read := 10e-6, 50e-6, 12.5e-6, 25e-6, 1e-6
+			hiIn, hiOut, hiWrite, hiWrite12h, hiRead := 20e-6, 75e-6, 25e-6, 50e-6, 2e-6
+			maxTokens := 272000
+			pricing := ChannelModelPricing{Models: []string{"gpt-6.2-astra"}, BillingMode: BillingModeToken,
+				InputPrice: &in, OutputPrice: &out, CacheWritePrice: &write, CacheWrite12hPrice: &write12h, CacheReadPrice: &read,
+				Intervals: []PricingInterval{
+					{MinTokens: 0, MaxTokens: &maxTokens, InputPrice: &in, OutputPrice: &out, CacheWritePrice: &write, CacheWrite12hPrice: &write12h, CacheReadPrice: &read},
+					{MinTokens: 272001, InputPrice: &hiIn, OutputPrice: &hiOut, CacheWritePrice: &hiWrite, CacheWrite12hPrice: &hiWrite12h, CacheReadPrice: &hiRead},
+				},
+			}
+			if tc.reasoning > 0 {
+				pricing.ReasoningEffortMultipliers = map[string]float64{"high": tc.reasoning}
+			}
+			group := &Group{ID: gid, Platform: PlatformOpenAI, Hydrated: true, FreeOpenAIFast: true, RateMultiplier: .5,
+				LongContextPricingEnabled: true, ModelPricing: []ChannelModelPricing{pricing}}
+			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{RequestID: "synthetic-" + tc.name, Model: "gpt-6.2-astra", ServiceTier: &tier, ReasoningEffort: &effort,
+					Duration: time.Second, Usage: OpenAIUsage{InputTokens: tc.input + tc.write30m + tc.write12h + tc.read,
+						OutputTokens: tc.output, CacheCreationInputTokens: tc.write30m + tc.write12h,
+						CacheCreation30mInputTokens: tc.write30m, CacheCreation12hInputTokens: tc.write12h, CacheReadInputTokens: tc.read}},
+				APIKey: &APIKey{ID: 1020, GroupID: &gid, Group: group}, User: &User{ID: 2020},
+				Account: &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+			})
+			require.NoError(t, err)
+			log := repo.lastLog
+			require.NotNil(t, log)
+			raw, err := json.Marshal(log)
+			require.NoError(t, err)
+			var saved map[string]any
+			require.NoError(t, json.Unmarshal(raw, &saved))
+			d, ok := saved["CustomerCostDetails"].(map[string]any)
+			require.True(t, ok, "Free Fast must persist the Standard customer cost snapshot")
+			if tc.long {
+				in, out, write, write12h, read = hiIn, hiOut, hiWrite, hiWrite12h, hiRead
+			}
+			reasoning := tc.reasoning
+			if reasoning == 0 {
+				reasoning = 1
+			}
+			expected := map[string]float64{
+				"input_cost": float64(tc.input) * in * reasoning, "output_cost": float64(tc.output) * out * reasoning,
+				"cache_creation_cost": (float64(tc.write30m)*write + float64(tc.write12h)*write12h) * reasoning,
+				"cache_read_cost":     float64(tc.read) * read * reasoning,
+			}
+			total := 0.0
+			for field, amount := range expected {
+				require.InDelta(t, amount, d[field], 1e-10, field)
+				total += amount
+			}
+			require.InDelta(t, total, d["total_cost"], 1e-10)
+			require.InDelta(t, rate, d["multiplier"], 1e-10)
+			require.InDelta(t, QuantizeUsageBillingAmount(total*rate), log.ActualCost, 1e-10)
+			require.Equal(t, "priority", *log.ServiceTier)
+			if tc.name == "exact screenshot" {
+				require.InDelta(t, .1669, log.InputCost, 1e-10)
+				require.InDelta(t, .0136, log.OutputCost, 1e-10)
+				require.InDelta(t, .0149625, log.CacheCreationCost, 1e-10)
+				require.InDelta(t, .074938, log.CacheReadCost, 1e-10)
+				require.InDelta(t, .2704005, log.TotalCost, 1e-10)
+				require.InDelta(t, .07134075, log.ActualCost, 1e-10)
+			}
+			// The persisted evidence must not change when today's group configuration changes.
+			group.FreeOpenAIFast = false
+			group.RateMultiplier = 9
+			*group.ModelPricing[0].InputPrice = 999
+			after, err := json.Marshal(log)
+			require.NoError(t, err)
+			require.JSONEq(t, string(raw), string(after))
+		})
+	}
+}
+
+func TestFreeFastCustomerCostCache1h(t *testing.T) {
+	// The shared quote calculation also supports 5m/1h buckets. Snapshot their
+	// actual Standard sum; never halve the aggregate Priority cache-write cost.
+	billing := &BillingService{}
+	price := &ModelPricing{InputPricePerToken: 10e-6, OutputPricePerToken: 50e-6,
+		CacheCreationPricePerToken: 12.5e-6, CacheReadPricePerToken: 1e-6,
+		SupportsCacheBreakdown: true, CacheCreation5mPrice: 12.5e-6, CacheCreation1hPrice: 20e-6}
+	tokens := UsageTokens{InputTokens: 71, OutputTokens: 19, CacheCreationTokens: 24, CacheCreation5mTokens: 11, CacheCreation1hTokens: 13, CacheReadTokens: 17}
+	quote := billing.computeTokenBreakdown(price, tokens, .6, "", false)
+	detail := newFreeFastCustomerCostDetails(quote, .6)
+	require.NotNil(t, detail)
+	require.InDelta(t, 11*12.5e-6+13*20e-6, detail.CacheCreationCost, 1e-12)
+	require.InDelta(t, 17e-6, detail.CacheReadCost, 1e-12)
+	require.InDelta(t, detail.TotalCost*.6, detail.ActualCost, 1e-12)
+}
+
+func TestFreeFastCustomerCostControls(t *testing.T) {
+	for _, tc := range []struct {
+		tier     string
+		free     bool
+		platform string
+	}{
+		{"priority", false, PlatformOpenAI}, {"default", true, PlatformOpenAI}, {"flex", true, PlatformOpenAI}, {"priority", true, PlatformAnthropic},
+	} {
+		t.Run(tc.tier+"/"+tc.platform+"/"+fmt.Sprint(tc.free), func(t *testing.T) {
+			repo := &openAIRecordUsageLogRepoStub{inserted: true}
+			svc := newOpenAIRecordUsageServiceForTest(repo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+			gid := int64(77)
+			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{RequestID: "synthetic-control", Model: "gpt-5.4", ServiceTier: &tc.tier, Duration: time.Second, Usage: OpenAIUsage{InputTokens: 71, OutputTokens: 19}},
+				APIKey: &APIKey{ID: 1020, GroupID: &gid, Group: &Group{ID: gid, Platform: PlatformOpenAI, Hydrated: true, RateMultiplier: .6, FreeOpenAIFast: tc.free}},
+				User:   &User{ID: 2020}, Account: &Account{ID: 3020, Platform: tc.platform, Type: AccountTypeOAuth},
+			})
+			require.NoError(t, err)
+			raw, err := json.Marshal(repo.lastLog)
+			require.NoError(t, err)
+			var saved map[string]any
+			require.NoError(t, json.Unmarshal(raw, &saved))
+			require.Nil(t, saved["CustomerCostDetails"], "controls must not claim a Free Fast quote")
+		})
+	}
+}
+
+func TestFreeFastCustomerCostCatalogueLongContext(t *testing.T) {
+	billing := &BillingService{}
+	price := &ModelPricing{InputPricePerToken: 10e-6, OutputPricePerToken: 50e-6,
+		CacheCreationPricePerToken: 12.5e-6, CacheReadPricePerToken: 1e-6,
+		LongContextInputThreshold: 272000, LongContextInputMultiplier: 2, LongContextOutputMultiplier: 1.5}
+	for _, input := range []int{271980, 271981} {
+		tokens := UsageTokens{InputTokens: input, OutputTokens: 19, CacheCreationTokens: 11, CacheCreation30mTokens: 11, CacheReadTokens: 9}
+		quote := billing.computeTokenBreakdown(price, tokens, .6, "", true)
+		detail := newFreeFastCustomerCostDetails(quote, .6)
+		require.NotNil(t, detail)
+		inputFactor, outputFactor := 1.0, 1.0
+		if input > 271980 {
+			inputFactor, outputFactor = 2, 1.5
+		}
+		require.InDelta(t, float64(input)*10e-6*inputFactor, detail.InputCost, 1e-10)
+		require.InDelta(t, 19*50e-6*outputFactor, detail.OutputCost, 1e-10)
+		require.InDelta(t, 11*12.5e-6*inputFactor, detail.CacheCreationCost, 1e-10)
+		require.InDelta(t, 9*1e-6*inputFactor, detail.CacheReadCost, 1e-10)
+		require.InDelta(t, detail.TotalCost*.6, detail.ActualCost, 1e-10)
+	}
+}
+
+func TestFreeFastCustomerCostZeroQuoteKeepsEffectiveRate(t *testing.T) {
+	detail := newFreeFastCustomerCostDetails(&CostBreakdown{BillingMode: string(BillingModeToken)}, 1.8)
+	require.NotNil(t, detail)
+	require.Equal(t, 1.8, detail.Multiplier, "a zero quote must retain the actual resolved rate, not infer 0/0")
+	require.Zero(t, detail.TotalCost)
+	require.Zero(t, detail.ActualCost)
+}

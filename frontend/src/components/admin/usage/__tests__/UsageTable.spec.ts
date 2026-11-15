@@ -1551,4 +1551,40 @@ describe('Free Fast screenshot arithmetic and history', () => {
     try { expect(wrapper.get('[role="tooltip"]').text()).toContain('Input price—') }
     finally { wrapper.unmount() }
   })
+  it('accepts the canonical eight-decimal customer charge without losing Standard prices', async () => {
+    const d = freeFastCustomerCostFixture.customer_cost_details
+    const raw = d.total_cost * 0.333333
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, actual_cost: Number(raw.toFixed(8)),
+      customer_cost_details: { ...d, multiplier: 0.333333, actual_cost: raw } })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('$10.0000') }
+    finally { wrapper.unmount() }
+  })
+
+  it('preserves paid Priority prices when only canonical monetary rounding differs', async () => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, customer_cost_details: null,
+      rate_multiplier: 0.333333, actual_cost: Number((0.2704005 * 0.333333).toFixed(8)) })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('$20.0000') }
+    finally { wrapper.unmount() }
+  })
+
+  it('accepts a saved Free Fast quote with the actual fast tier alias', async () => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, service_tier: 'fast' })
+    try { expect(wrapper.get('[role="tooltip"]').text()).toContain('$10.0000') }
+    finally { wrapper.unmount() }
+  })
+
+  it.each([
+    { name: 'image tokens', fields: { image_input_tokens: 100, image_input_cost: 0.003, total_cost: 0.2734005, actual_cost: 0.13880025 } },
+    { name: 'per-request', fields: { billing_mode: 'per_request', actual_cost: 0.2 } },
+    { name: 'image count', fields: { billing_mode: 'image', image_count: 1, actual_cost: 0.2 } },
+    { name: 'additive tool fee', fields: { total_cost: 0.2804005, actual_cost: 0.16520025 } },
+  ])('preserves ordinary paid Priority $name without Free Fast evidence', async ({ fields }) => {
+    const wrapper = await openCost({ ...freeFastCustomerCostFixture, customer_cost_details: null, ...fields })
+    try {
+      const text = wrapper.get('[role="tooltip"]').text()
+      expect(text).toContain('Input Cost$0.16690000')
+      expect(text).not.toContain('Input Cost—')
+    } finally { wrapper.unmount() }
+  })
+
 })

@@ -1514,6 +1514,9 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
 	}
+	if _u.mutation.CustomerCostDetailsCleared() {
+		_spec.ClearField(usagelog.FieldCustomerCostDetails, field.TypeJSON)
+	}
 	if value, ok := _u.mutation.QueueTiming(); ok {
 		_spec.SetField(usagelog.FieldQueueTiming, field.TypeJSON, value)
 	}
@@ -3196,6 +3199,9 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.CacheTTLOverridden(); ok {
 		_spec.SetField(usagelog.FieldCacheTTLOverridden, field.TypeBool, value)
+	}
+	if _u.mutation.CustomerCostDetailsCleared() {
+		_spec.ClearField(usagelog.FieldCustomerCostDetails, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.QueueTiming(); ok {
 		_spec.SetField(usagelog.FieldQueueTiming, field.TypeJSON, value)

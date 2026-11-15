@@ -123,6 +123,8 @@ type UsageLog struct {
 	VideoDurationSeconds *int `json:"video_duration_seconds,omitempty"`
 	// CacheTTLOverridden holds the value of the "cache_ttl_overridden" field.
 	CacheTTLOverridden bool `json:"cache_ttl_overridden,omitempty"`
+	// Request-time Standard customer cost display snapshot; NULL is unknown history
+	CustomerCostDetails map[string]interface{} `json:"customer_cost_details,omitempty"`
 	// Explicit measured server/forward boundaries; NULL means unknown
 	QueueTiming map[string]interface{} `json:"queue_timing,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
@@ -210,7 +212,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case usagelog.FieldImageSizeBreakdown, usagelog.FieldQueueTiming:
+		case usagelog.FieldImageSizeBreakdown, usagelog.FieldCustomerCostDetails, usagelog.FieldQueueTiming:
 			values[i] = new([]byte)
 		case usagelog.FieldUpstreamModelMismatch, usagelog.FieldLongContextBillingApplied, usagelog.FieldStream, usagelog.FieldCacheTTLOverridden:
 			values[i] = new(sql.NullBool)
@@ -568,6 +570,14 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.CacheTTLOverridden = value.Bool
 			}
+		case usagelog.FieldCustomerCostDetails:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field customer_cost_details", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.CustomerCostDetails); err != nil {
+					return fmt.Errorf("unmarshal field customer_cost_details: %w", err)
+				}
+			}
 		case usagelog.FieldQueueTiming:
 			if value, ok := values[i].(*[]byte); !ok {
 				return fmt.Errorf("unexpected type %T for field queue_timing", values[i])
@@ -838,6 +848,9 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("cache_ttl_overridden=")
 	builder.WriteString(fmt.Sprintf("%v", _m.CacheTTLOverridden))
+	builder.WriteString(", ")
+	builder.WriteString("customer_cost_details=")
+	builder.WriteString(fmt.Sprintf("%v", _m.CustomerCostDetails))
 	builder.WriteString(", ")
 	builder.WriteString("queue_timing=")
 	builder.WriteString(fmt.Sprintf("%v", _m.QueueTiming))
