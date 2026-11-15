@@ -338,19 +338,38 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 		require.Equal(t, 1, customCalls, "A must actually deliver the completed custom tool")
 		omitTools = scenario == "tools_omitted"
 	}
-	require.Eventually(t, func() bool {
-		owners := issue805Owners(t, probe)
-		if len(owners) != 1 {
-			return false
+	// Poll in the test goroutine: testify.Eventually runs its predicate in a
+	// detached goroutine, so a slow Redis read can outlive the deadline and
+	// assert against a closed client after this test's cleanup. A race-enabled
+	// hosted runner may also finish A's delivery after the old one-second limit.
+	// Keep the same committed-owner predicate and bound all reads by one budget.
+	ownerCtx, cancelOwnerWait := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelOwnerWait()
+	ownerTick := time.NewTicker(5 * time.Millisecond)
+	defer ownerTick.Stop()
+	var owners map[string]string
+	for {
+		keys, err := probe.Keys(ownerCtx, "openai_agent_owner:*").Result()
+		require.NoError(t, err, "read A's committed owner before changing its availability")
+		owners = make(map[string]string, len(keys))
+		committed := len(keys) == 1
+		for _, key := range keys {
+			raw, err := probe.Get(ownerCtx, key).Result()
+			require.NoError(t, err, "read A's delivery record")
+			owners[key] = raw
+			committed = committed && json.Valid([]byte(raw)) && gjson.Parse(raw).IsArray() && gjson.Get(raw, "1").Int() == 1
 		}
-		for _, raw := range owners {
-			if !json.Valid([]byte(raw)) || !gjson.Parse(raw).IsArray() || gjson.Get(raw, "1").Int() != 1 {
-				return false
-			}
+		if committed {
+			break
 		}
-		return true
-	}, time.Second, 5*time.Millisecond)
-	owners := issue805Owners(t, probe)
+		select {
+		case <-ownerCtx.Done():
+			t.Fatal("A must commit exactly one delivered owner before this continuation scenario")
+		case <-ownerTick.C:
+		}
+	}
+	cancelOwnerWait()
+	ownerTick.Stop()
 	previous := first.Get("id").String()
 	extraSends := 0
 	if modelCase {
