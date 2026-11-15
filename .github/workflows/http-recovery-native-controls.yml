@@ -1,0 +1,72 @@
+name: HTTP recovery native controls
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai*'
+      - 'backend/internal/handler/openai_409*'
+      - '.github/workflows/http-recovery-native-controls.yml'
+      - '.github/scripts/http-recovery-native-controls.py'
+permissions:
+  contents: read
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Restore exact pre-fix production implementation for RED
+        if: matrix.phase == 'RED'
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=c115bef917eae22fc2f5a4d0ba6ac6cbe600e8e4
+          git diff --name-only "$baseline" HEAD -- backend | while IFS= read -r target; do
+            case "$target" in
+              *_test.go) continue ;;
+              *.go)
+                if git cat-file -e "$baseline:$target" 2>/dev/null; then
+                  git show "$baseline:$target" > "$target"
+                  test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+                else
+                  rm -- "$target"
+                fi ;;
+            esac
+          done
+      - name: Authenticated HTTP task continuation
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,httpprojection ./internal/handler -run '^TestOpenAI409NativeControlsContinuation$' -count=1 -timeout=8m) > "$RUNNER_TEMP/native-controls.jsonl" 2>&1
+          result=$?
+          set -e
+          python3 .github/scripts/http-recovery-native-controls.py "$PHASE" "$result" "$RUNNER_TEMP/native-controls.jsonl"
+      - name: Trusted source and late mutation guards
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        run: go test -race -tags=unit,httpprojection ./internal/service -run '^TestOpenAI409NativeControlsIntegrity$' -count=1 -v -timeout=3m
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: http-native-controls-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/native-controls.jsonl

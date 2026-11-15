@@ -490,6 +490,7 @@ type httpRebuildFixtureOptions struct {
 	accounts       func([]service.Account)
 	gateway        func(*OpenAIGatewayHandler, []service.Account, service.HTTPUpstream, service.GatewayCache, *service.SettingService, service.UsageLogRepository)
 	settings       service.SettingRepository
+	apiKey         func(*service.APIKey)
 }
 
 func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointer, outcome, boundary, mutation string, options ...httpRebuildFixtureOptions) {
@@ -630,6 +631,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		option.gateway(h, accounts, transport, repository.NewGatewayCache(clients()), settings, usage)
 	}
 	template, _ := newIssue715Context(t, "{}")
+	if option.apiKey != nil {
+		option.apiKey(template.Keys[string(middleware.ContextKeyAPIKey)].(*service.APIKey))
+	}
 	done := make(chan struct{}, 1)
 	var sessions []string
 	pendingBeforeWrite := false
