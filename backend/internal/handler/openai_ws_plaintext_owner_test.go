@@ -29,6 +29,7 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			const message = `{"type":"message","id":"msg_fixture_exact","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Remember fixture M","annotations":[]}],"fixture_number":9007199254740993}`
 			const call = `{"type":"function_call","call_id":"call_fixture_repair","name":"fixture","arguments":"{}","status":"completed"}`
+			const tools = `[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{"n":{"type":"integer","maximum":9007199254740993}}}}]`
 			var mu sync.Mutex
 			var frames [][]byte
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +89,7 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 			defer issue600Finish(t, h, headers)
 			require.Positive(t, accountID, "capture the configured upstream account")
 			stored := scenario == "stored_pointer"
-			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"fixture U"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{"n":{"type":"integer","maximum":9007199254740993}}}}]}`, stored))
+			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"fixture U"}],"tools":%s}`, stored, tools))
 			first := issue715WSRead(t, h.clientConn)
 			require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
 			if scenario == "ordinary_tool" || scenario == "empty_terminal" || scenario == "duplicate_call" {
@@ -115,7 +116,17 @@ func TestOpenAIWSPlaintextRepair870(t *testing.T) {
 				// reject C rather than accepting this complete client pair.
 				input = `{"role":"user","content":"fixture U"},` + call + "," + input
 			}
-			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"previous_response_id":%q,"input":[%s]}`, stored, previous, input))
+			toolsField := ""
+			if scenario == "assistant_history" {
+				// Plain function declarations are supplied per turn; exercise
+				// precision of the current schema, not implicit inheritance.
+				toolsField = `,"tools":` + tools
+			}
+			secondFrame := fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"previous_response_id":%q,"input":[%s]%s}`, stored, previous, input, toolsField)
+			if scenario == "assistant_history" {
+				require.Equal(t, "9007199254740993", gjson.Get(secondFrame, "tools.0.parameters.properties.n.maximum").Raw)
+			}
+			issue715WSSend(t, h.clientConn, secondFrame)
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
 			var terminal []byte
