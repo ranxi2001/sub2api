@@ -91,3 +91,12 @@ type openAINonStreamingDeliveryError struct{ err error }
 
 func (e *openAINonStreamingDeliveryError) Error() string { return e.err.Error() }
 func (e *openAINonStreamingDeliveryError) Unwrap() error { return e.err }
+
+// InternalSubreason exposes only a fixed diagnostic category for persistence.
+func (e *OpenAIAgentRecoveryError) InternalSubreason() string {
+	if e == nil || e.diagnostic == nil {
+		return "unknown"
+	}
+	return safeOpenAIRecoverySubreason(e.diagnostic.subreason)
+}
+func OpenAIRecoverySubreason(value string) string { return safeOpenAIRecoverySubreason(value) }
