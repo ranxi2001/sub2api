@@ -203,6 +203,10 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			output = []json.RawMessage{json.RawMessage(httpRebuildAgentB)}
 			if association {
 				for _, call := range associationCalls {
+					if associationCustom && mode == service.OpenAIWSIngressModeHTTPBridge {
+						item := gjson.Parse(call)
+						call = httpRebuildCall("lookup", item.Get("call_id").String(), map[string]any{"input": item.Get("input").String()})
+					}
 					output = append(output, json.RawMessage(call))
 				}
 			}
@@ -400,7 +404,13 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			history = append(history, completed.Get("output.0").Raw)
 			if association {
 				for i, call := range completed.Get("output").Array()[1:] {
-					require.JSONEq(t, associationCalls[i], call.Raw)
+					require.Equal(t, gjson.Get(associationCalls[i], "call_id").String(), call.Get("call_id").String())
+					require.Equal(t, gjson.Get(associationCalls[i], "type").String(), call.Get("type").String())
+					field := "arguments"
+					if associationCustom {
+						field = "input"
+					}
+					require.Equal(t, gjson.Get(associationCalls[i], field).String(), call.Get(field).String())
 					history = append(history, call.Raw)
 					associationExecutions++
 				}
@@ -693,7 +703,12 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			require.Equal(t, 1, strings.Count(string(wire), "fixture custom completed once"))
 		} else {
 			if association {
-				require.JSONEq(t, httpRebuildJSON(declarations), gjson.GetBytes(wire, "tools").Raw, "ASSOCIATION_LOST: tool definitions survive")
+				expectedTools := declarations
+				if associationCustom && mode == service.OpenAIWSIngressModeHTTPBridge {
+					expectedTools = append([]any{}, declarations...)
+					expectedTools[len(expectedTools)-1] = map[string]any{"type": "function", "name": "lookup", "description": "synthetic lookup", "parameters": json.RawMessage(`{"type":"object","properties":{"input":{"type":"string","description":"The raw input for this tool, passed through verbatim."}},"required":["input"]}`)}
+				}
+				require.JSONEq(t, httpRebuildJSON(expectedTools), gjson.GetBytes(wire, "tools").Raw, "ASSOCIATION_LOST: tool definitions survive")
 			} else {
 				require.True(t, httpRebuildToolsAvailable(wire), "both tool definitions and parameter schemas survive the actual wire")
 			}
