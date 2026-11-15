@@ -409,7 +409,7 @@ func openAI409ReadableMetadata(value any) any {
 }
 
 func prepareOpenAI409KnownReadableReplay(raw []byte) ([]byte, error) {
-	clean, _, err := sanitizeOpenAIResponsesInputItemIDs(raw)
+	clean, err := normalizeOpenAIReplayMetadata(raw)
 	if err != nil {
 		return nil, err
 	}

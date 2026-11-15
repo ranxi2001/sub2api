@@ -96,13 +96,27 @@ jobs:
             git show "$baseline:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
           done
-          ! git cat-file -e "$baseline:backend/internal/service/openai_ws_readable_continuation.go" 2>/dev/null
+          if git cat-file -e "$baseline:backend/internal/service/openai_ws_readable_continuation.go" 2>/dev/null; then exit 1; fi
           rm -- backend/internal/service/openai_ws_readable_continuation.go
           # Keep the selected HTTP tests intact and remove only new production.
           for target in backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go; do
-            ! git cat-file -e "$baseline:$target" 2>/dev/null
+            if git cat-file -e "$baseline:$target" 2>/dev/null; then exit 1; fi
             rm -- "$target"
           done
+          # This later helper is not part of the pinned recovery defect. Its
+          # pre-OAuth-projection API is compatible with the restored struct;
+          # preserve every selected defect/caller blob and behavioral assertion.
+          compatibility=00d2e9be01404c6e85c0560fa196e4650ef5d0fb
+          target=backend/internal/service/openai_agent_replay_metadata.go
+          if git cat-file -e "$baseline:$target" 2>/dev/null; then exit 1; fi
+          git fetch --no-tags --depth=1 origin "$compatibility"
+          candidate_blob=$(git rev-parse "HEAD:$target")
+          test "$(git hash-object "$target")" = "$candidate_blob"
+          expected=$(git rev-parse "$compatibility:$target")
+          git show "$compatibility:$target" > "$target"
+          actual=$(git hash-object "$target")
+          test "$actual" = "$expected"
+          echo "$target defect_source=$baseline defect_blob=absent compatibility=$compatibility candidate=$candidate_blob expected=$expected actual=$actual" >> "$RUNNER_TEMP/readable-RED-provenance.txt"
       - name: Same HTTP JSON and SSE behavior in both checkouts
         env:
           PHASE: ${{ matrix.phase }}

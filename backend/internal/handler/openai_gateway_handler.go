@@ -894,6 +894,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 	}
 
+	// Normalize the finite replay metadata before either immutable body copy or
+	// the recovery digest is frozen. Each attempt derives from these same bytes.
+	if prepared, err := h.gatewayService.PrepareOpenAIAgentReplayBody(body); err != nil {
+		h.handleOpenAIAgentRecoveryError(c, err, streamStarted)
+		return
+	} else {
+		body = prepared
+	}
+
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
@@ -1208,6 +1217,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
+		if h.cfg != nil && h.cfg.Gateway.DisableEncryptedAgentOwnerBinding {
+			// Account-specific builders/retries never own the frozen source slice.
+			attemptBody = append([]byte(nil), attemptBody...)
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
