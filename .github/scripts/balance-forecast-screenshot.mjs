@@ -33,7 +33,8 @@ try {
     await page.addInitScript(user => {
       localStorage.setItem('auth_token', 'synthetic-fixture')
       localStorage.setItem('auth_user', JSON.stringify(user))
-      localStorage.setItem('locale', 'zh')
+      localStorage.setItem('sub2api_locale', 'zh')
+      localStorage.setItem('admin_guide_41_admin_v4_interactive', 'true')
     }, user)
     await page.route('**/*', async route => {
       const url = new URL(route.request().url())
@@ -57,7 +58,7 @@ try {
       const forecast = page.locator('[data-testid="balance-forecast-settings"]')
       if (mode === 'before') await forecast.waitFor({ state: 'visible' })
       else assert.equal(await forecast.count(), 0)
-      const low = page.locator('h3').filter({ hasText: /余额不足提醒|Low Balance/ }).first()
+      const low = page.locator('h3').filter({ hasText: /余额不足提醒|Balance Low Notification/ }).first()
       await low.waitFor({ state: 'visible' })
       if (mode === 'before') await forecast.scrollIntoViewIfNeeded()
       else await low.scrollIntoViewIfNeeded()
