@@ -697,7 +697,12 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	require.Len(t, frames, turn+2, "no extra generation or retry")
 	for i, wire := range frames[turn:] {
 		expectedIdentity := "Bearer fixture-mixed-B"
-		if scenario == "binding_changed" || shadowProvenance {
+		if scenario == "binding_changed" {
+			// A fresh native conversation may use the still-eligible B with
+			// its current credential. Never reuse the old connection/token.
+			expectedIdentity = "Bearer fixture-mixed-B-rotated"
+		}
+		if shadowProvenance {
 			expectedIdentity = "Bearer fixture-mixed-C"
 		}
 		require.Equal(t, expectedIdentity, identities[turn+i])
@@ -721,8 +726,26 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		require.NotContains(t, string(wire), "fixture-opaque-A")
 		require.NotContains(t, string(wire), "fixture-readable-B")
 		require.False(t, gjson.GetBytes(wire, "previous_response_id").Exists())
-		if shadowProvenance && i == 0 {
+		if shadowProvenance {
 			require.True(t, httpRebuildToolPair(wire, "apply_patch", httpRebuildPatch), "restored single-owner history retains one proven pair")
+			if i > 0 {
+				require.True(t, httpRebuildToolPair(wire, "run_tests", httpRebuildCheck), "next single-owner turn retains the newly delivered verification pair")
+			}
+			expectedCalls := 1 + i
+			if customProvenance {
+				expectedCalls++
+			}
+			calls, results := 0, 0
+			for _, item := range gjson.GetBytes(wire, "input").Array() {
+				switch item.Get("type").String() {
+				case "function_call", "custom_tool_call":
+					calls++
+				case "function_call_output", "custom_tool_call_output":
+					results++
+				}
+			}
+			require.Equal(t, expectedCalls, calls)
+			require.Equal(t, expectedCalls, results)
 		} else {
 			for _, item := range gjson.GetBytes(wire, "input").Array() {
 				require.NotContains(t, item.Get("type").String(), "call", "completed tools must be inert readable history")
