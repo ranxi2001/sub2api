@@ -105,6 +105,12 @@ func TestOpenAIToolProvenanceDeliveryAndScope(t *testing.T) {
 				}
 				require.Error(t, svc.verifyOpenAIToolInputs(ctx, &other, body), scope)
 			}
+			// Exhaust the no-shared-cache budget before a provider reissues the
+			// proven call. Capacity must block new grants, not old revocations.
+			for i := 0; i < 127; i++ {
+				require.NoError(t, svc.toolProofReserve(context.Background(), openAIToolHash(i), "pending:fixture-budget"))
+			}
+			require.Error(t, svc.toolProofReserve(context.Background(), "fixture-over-capacity", "pending:fixture-budget"))
 			require.NoError(t, svc.toolProofReserve(context.Background(), key, "pending:another-delivery"))
 			svc.toolProofFinish(context.Background(), key, "pending:another-delivery", raw, true)
 			conflict, err := svc.toolProofGet(context.Background(), key)
