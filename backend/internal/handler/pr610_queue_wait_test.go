@@ -408,7 +408,7 @@ func TestPR610RealWaitNativeIngress(t *testing.T) {
 				observed := s.providerWait[int32(i+1)]
 				s.mu.Unlock()
 				require.Positive(t, observed, "fixture must observe the actual provider receive")
-				require.LessOrEqual(t, *row.QueueWaitMs, observed.Milliseconds()+2, "queue cannot exceed this turn's real client-to-provider interval or include the previous turn")
+				require.LessOrEqual(t, int64(*row.QueueWaitMs), observed.Milliseconds()+2, "queue cannot exceed this turn's real client-to-provider interval or include the previous turn")
 				require.NotNil(t, row.QueueTiming, "measured source must survive authenticated production usage path")
 				require.InDelta(t, 20, *row.QueueTiming.ForwardFirstTokenMs, 100)
 				require.GreaterOrEqual(t, *row.QueueTiming.ServerFirstTokenMs, int64(want+10))
