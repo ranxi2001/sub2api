@@ -43,6 +43,9 @@ func RegisterPaymentRoutes(
 	// 面板全局按用户限流
 	authenticated.Use(panelRateLimiter.Global())
 	{
+		authenticated.GET("/coupons", paymentHandler.ListMyCoupons)
+		authenticated.GET("/coupons/usage", paymentHandler.ListMyCouponUsage)
+		authenticated.POST("/coupons/:id/quote", paymentHandler.QuoteCoupon)
 		authenticated.GET("/config", paymentHandler.GetPaymentConfig)
 		authenticated.GET("/checkout-info", paymentHandler.GetCheckoutInfo)
 		authenticated.GET("/plans", paymentHandler.GetPlans)
@@ -96,6 +99,14 @@ func RegisterPaymentRoutes(
 	adminGroup.Use(panelRateLimiter.Global())
 	adminGroup.Use(gin.HandlerFunc(auditLog))
 	adminGroup.Use(middleware.AdminComplianceGuard(settingService))
+	coupons := adminGroup.Group("/coupons")
+	coupons.GET("/templates", adminPaymentHandler.ListCouponTemplates)
+	coupons.POST("/templates", adminPaymentHandler.SaveCouponTemplate)
+	coupons.PUT("/templates/:id", adminPaymentHandler.SaveCouponTemplate)
+	coupons.POST("/issue", adminPaymentHandler.IssueCoupons)
+	coupons.GET("", adminPaymentHandler.ListCoupons)
+	coupons.GET("/usage", adminPaymentHandler.ListCouponUsage)
+	coupons.POST("/:id/revoke", adminPaymentHandler.RevokeCoupon)
 	{
 		// Dashboard
 		adminGroup.GET("/dashboard", adminPaymentHandler.GetDashboard)

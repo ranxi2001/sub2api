@@ -109,6 +109,7 @@ func TestSecurityPenaltyAsyncFindingCommitsWithLeaseFencedEvent(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimed)
 	job.Snapshot.FullPrompt = "SYNTHETIC_ASYNC_PROMPT"
+	// Preserve production's normalized classification and the non-null array contract.
 	result := &NormalizedResult{
 		Action: ActionBlock, Decision: EventCritical, RiskLevel: RiskCritical, Safety: "Unsafe",
 		Categories: []string{"jailbreak"}, MatchedScanners: []string{"jailbreak"},

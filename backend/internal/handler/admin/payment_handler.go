@@ -1,6 +1,9 @@
 package admin
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -109,7 +112,18 @@ func (h *PaymentHandler) RetryFulfillment(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.paymentService.RetryFulfillment(c.Request.Context(), orderID); err != nil {
+	var input struct {
+		Confirm bool `json:"confirm"`
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&input)
+	if (err != nil && err != io.EOF) || (err == nil && decoder.Decode(new(any)) != io.EOF) {
+		response.Error(c, http.StatusBadRequest, "Invalid approval request")
+		return
+	}
+	if err := h.paymentService.RetryFulfillmentWithApproval(c.Request.Context(), orderID, input.Confirm); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -117,48 +131,49 @@ func (h *PaymentHandler) RetryFulfillment(c *gin.Context) {
 }
 
 type AdminPaymentOrderResult struct {
-	ID                  int64      `json:"id"`
-	UserID              int64      `json:"user_id"`
-	UserEmail           string     `json:"user_email,omitempty"`
-	UserName            string     `json:"user_name,omitempty"`
-	UserNotes           *string    `json:"user_notes,omitempty"`
-	Amount              float64    `json:"amount"`
-	PayAmount           float64    `json:"pay_amount"`
-	FeeRate             float64    `json:"fee_rate"`
-	BonusAmount         float64    `json:"bonus_amount"`
-	Currency            string     `json:"currency"`
-	RechargeCode        string     `json:"recharge_code,omitempty"`
-	OutTradeNo          string     `json:"out_trade_no"`
-	PaymentType         string     `json:"payment_type"`
-	PaymentTradeNo      string     `json:"payment_trade_no,omitempty"`
-	PayURL              *string    `json:"pay_url,omitempty"`
-	QRCode              *string    `json:"qr_code,omitempty"`
-	QRCodeImg           *string    `json:"qr_code_img,omitempty"`
-	OrderType           string     `json:"order_type"`
-	PlanID              *int64     `json:"plan_id,omitempty"`
-	SubscriptionGroupID *int64     `json:"subscription_group_id,omitempty"`
-	SubscriptionDays    *int       `json:"subscription_days,omitempty"`
-	RenewalMode         string     `json:"renewal_mode,omitempty"`
-	ProviderInstanceID  *string    `json:"provider_instance_id,omitempty"`
-	ProviderKey         *string    `json:"provider_key,omitempty"`
-	Status              string     `json:"status"`
-	RefundAmount        float64    `json:"refund_amount"`
-	RefundReason        *string    `json:"refund_reason,omitempty"`
-	RefundAt            *time.Time `json:"refund_at,omitempty"`
-	ForceRefund         bool       `json:"force_refund,omitempty"`
-	RefundRequestedAt   *time.Time `json:"refund_requested_at,omitempty"`
-	RefundRequestReason *string    `json:"refund_request_reason,omitempty"`
-	RefundRequestedBy   *string    `json:"refund_requested_by,omitempty"`
-	ExpiresAt           time.Time  `json:"expires_at"`
-	PaidAt              *time.Time `json:"paid_at,omitempty"`
-	CompletedAt         *time.Time `json:"completed_at,omitempty"`
-	FailedAt            *time.Time `json:"failed_at,omitempty"`
-	FailedReason        *string    `json:"failed_reason,omitempty"`
-	ClientIP            string     `json:"client_ip,omitempty"`
-	SrcHost             string     `json:"src_host,omitempty"`
-	SrcURL              *string    `json:"src_url,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	Coupon              *service.PaymentCouponSummary `json:"coupon,omitempty"`
+	ID                  int64                         `json:"id"`
+	UserID              int64                         `json:"user_id"`
+	UserEmail           string                        `json:"user_email,omitempty"`
+	UserName            string                        `json:"user_name,omitempty"`
+	UserNotes           *string                       `json:"user_notes,omitempty"`
+	Amount              float64                       `json:"amount"`
+	PayAmount           float64                       `json:"pay_amount"`
+	FeeRate             float64                       `json:"fee_rate"`
+	BonusAmount         float64                       `json:"bonus_amount"`
+	Currency            string                        `json:"currency"`
+	RechargeCode        string                        `json:"recharge_code,omitempty"`
+	OutTradeNo          string                        `json:"out_trade_no"`
+	PaymentType         string                        `json:"payment_type"`
+	PaymentTradeNo      string                        `json:"payment_trade_no,omitempty"`
+	PayURL              *string                       `json:"pay_url,omitempty"`
+	QRCode              *string                       `json:"qr_code,omitempty"`
+	QRCodeImg           *string                       `json:"qr_code_img,omitempty"`
+	OrderType           string                        `json:"order_type"`
+	PlanID              *int64                        `json:"plan_id,omitempty"`
+	SubscriptionGroupID *int64                        `json:"subscription_group_id,omitempty"`
+	SubscriptionDays    *int                          `json:"subscription_days,omitempty"`
+	RenewalMode         string                        `json:"renewal_mode,omitempty"`
+	ProviderInstanceID  *string                       `json:"provider_instance_id,omitempty"`
+	ProviderKey         *string                       `json:"provider_key,omitempty"`
+	Status              string                        `json:"status"`
+	RefundAmount        float64                       `json:"refund_amount"`
+	RefundReason        *string                       `json:"refund_reason,omitempty"`
+	RefundAt            *time.Time                    `json:"refund_at,omitempty"`
+	ForceRefund         bool                          `json:"force_refund,omitempty"`
+	RefundRequestedAt   *time.Time                    `json:"refund_requested_at,omitempty"`
+	RefundRequestReason *string                       `json:"refund_request_reason,omitempty"`
+	RefundRequestedBy   *string                       `json:"refund_requested_by,omitempty"`
+	ExpiresAt           time.Time                     `json:"expires_at"`
+	PaidAt              *time.Time                    `json:"paid_at,omitempty"`
+	CompletedAt         *time.Time                    `json:"completed_at,omitempty"`
+	FailedAt            *time.Time                    `json:"failed_at,omitempty"`
+	FailedReason        *string                       `json:"failed_reason,omitempty"`
+	ClientIP            string                        `json:"client_ip,omitempty"`
+	SrcHost             string                        `json:"src_host,omitempty"`
+	SrcURL              *string                       `json:"src_url,omitempty"`
+	CreatedAt           time.Time                     `json:"created_at"`
+	UpdatedAt           time.Time                     `json:"updated_at"`
 }
 
 func sanitizeAdminPaymentOrdersForResponse(orders []*dbent.PaymentOrder) []*AdminPaymentOrderResult {
@@ -176,6 +191,7 @@ func sanitizeAdminPaymentOrderForResponse(order *dbent.PaymentOrder) *AdminPayme
 		return nil
 	}
 	return &AdminPaymentOrderResult{
+		Coupon:              service.PaymentOrderCoupon(order),
 		ID:                  order.ID,
 		UserID:              order.UserID,
 		UserEmail:           order.UserEmail,

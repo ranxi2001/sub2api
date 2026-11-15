@@ -1,3 +1,6 @@
+import coupon from './coupon'
+import qqbot from './qqbot'
+import matureProviders from './matureProviders'
 import autoCredit from './autoCredit'
 import accountPerformance from './accountPerformance'
 import apiKeyModelPolicy from './apiKeyModelPolicy'
@@ -40,6 +43,9 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
+  coupon,
+  ...qqbot,
+  matureProviders,
   apiKeyModelPolicy,
   autoCredit,
  accountPerformance,

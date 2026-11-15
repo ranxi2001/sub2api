@@ -1780,6 +1780,8 @@ export interface OpenAIResponsesState {
 }
 
 export interface CreateAccountRequest {
+  provider_id?: number
+  provider_key_id?: string
   upstream_channel_id?: number
   confirm_upstream_channel_binding?: boolean
   name: string
