@@ -414,8 +414,8 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		// contains only ordinary messages or tool calls. Publish after the
 		// successful terminal write, before a pipelined next frame can check
 		// that pointer. Passthrough has no separate response-account publisher.
-		if completed {
-			responseID := gjson.GetBytes(payload, "response.id").String()
+		responseID := gjson.GetBytes(payload, "response.id").String()
+		if completed && (responseID != "" || len(request.outputs) > 0 || len(request.keys) > 0) {
 			storeCtx, cancel := context.WithTimeout(r.ctx, 3*time.Second)
 			if responseID == "" || r.service.getOpenAIWSStateStore().BindResponseAccount(storeCtx, request.groupID, responseID, request.delivery.binding.accountID, r.service.openAIWSResponseStickyTTL()) != nil {
 				completed = false
