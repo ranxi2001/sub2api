@@ -51,6 +51,7 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 		input, output, write30m, write12h, read int
 		personal, model, reasoning              float64
 		long                                    bool
+		contextDisabled                         bool
 	}{
 		{name: "exact screenshot", input: 8345, output: 136, write30m: 1197, read: 37469},
 		{name: "mixed cache TTL", input: 71, output: 19, write30m: 11, write12h: 13, read: 17},
@@ -58,6 +59,7 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 		{name: "whole request threshold", input: 272000, output: 19},
 		{name: "whole request above threshold", input: 272001, output: 19, long: true},
 		{name: "cache crosses context tier", input: 271990, output: 19, write30m: 5, write12h: 6, read: 7, long: true},
+		{name: "context gate disabled above threshold", input: 272001, output: 19, contextDisabled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &openAIRecordUsageLogRepoStub{inserted: true}
@@ -68,6 +70,19 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 				rate = tc.personal
 			}
 			svc := newOpenAIRecordUsageServiceForTest(repo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, rates)
+			// Pin synthetic catalogue evidence: Priority doubles input/output/read,
+			// but NOT writes. The unrelated built-in fallback has different
+			// cache ratios and is not an oracle for the screenshot contract.
+			svc.billingService = NewBillingService(svc.cfg, &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+				"gpt-6.2-astra": {
+					InputCostPerToken: 10e-6, InputCostPerTokenPriority: 20e-6,
+					OutputCostPerToken: 50e-6, OutputCostPerTokenPriority: 100e-6,
+					CacheCreationInputTokenCost: 12.5e-6, CacheCreationInputTokenCostPriority: 12.5e-6,
+					CacheReadInputTokenCost: 1e-6, CacheReadInputTokenCostPriority: 2e-6,
+					LongContextInputTokenThreshold: 272000,
+					LongContextInputCostMultiplier: 2, LongContextOutputCostMultiplier: 1.5,
+				},
+			}})
 			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
 			if tc.model > 0 {
 				svc.settingService = modelBillingSettings(t, ModelBillingConfig{Enabled: true, Rules: []ModelBillingRule{{Model: "gpt-6.2-astra", Multiplier: tc.model}}})
@@ -89,7 +104,14 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 				pricing.ReasoningEffortMultipliers = map[string]float64{"high": tc.reasoning}
 			}
 			group := &Group{ID: gid, Platform: PlatformOpenAI, Hydrated: true, FreeOpenAIFast: true, RateMultiplier: .5,
-				LongContextPricingEnabled: true, ModelPricing: []ChannelModelPricing{pricing}}
+				LongContextPricingEnabled: !tc.contextDisabled, ModelPricing: []ChannelModelPricing{pricing}}
+			// Group token cards deliberately ignore custom intervals. Exercise
+			// the real catalogue whole-request tier and its group gate instead;
+			// the disabled case must stay at base rates despite these intervals.
+			resolved := svc.resolver.Resolve(context.Background(), PricingInput{Model: "gpt-6.2-astra", GroupID: &gid, Group: group})
+			require.Equal(t, PricingSourceGroup, resolved.Source)
+			require.Empty(t, resolved.Intervals)
+			require.Equal(t, 272000, resolved.BasePricing.LongContextInputThreshold)
 			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 				Result: &OpenAIForwardResult{RequestID: "synthetic-" + tc.name, Model: "gpt-6.2-astra", ServiceTier: &tier, ReasoningEffort: &effort,
 					Duration: time.Second, Usage: OpenAIUsage{InputTokens: tc.input + tc.write30m + tc.write12h + tc.read,
@@ -128,6 +150,7 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 			require.InDelta(t, rate, d["multiplier"], 1e-10)
 			require.InDelta(t, QuantizeUsageBillingAmount(total*rate), log.ActualCost, 1e-10)
 			require.Equal(t, "priority", *log.ServiceTier)
+			require.Equal(t, tc.long, log.LongContextBillingApplied)
 			if tc.name == "exact screenshot" {
 				require.InDelta(t, .1669, log.InputCost, 1e-10)
 				require.InDelta(t, .0136, log.OutputCost, 1e-10)
