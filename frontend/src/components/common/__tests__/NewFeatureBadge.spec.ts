@@ -23,6 +23,10 @@ describe('NewFeatureBadge', () => {
 
 
   it.each([
+    ['mature providers', NEW_FEATURE_NOTICES.matureProviders],
+    ['provider key import', NEW_FEATURE_NOTICES.matureProviderImport],
+    ['QQ community', NEW_FEATURE_NOTICES.qqCommunity],
+    ['QQ reward coupons', NEW_FEATURE_NOTICES.qqRewardCoupons],
     ['moderation upstream scope', NEW_FEATURE_NOTICES.moderationUpstreamAccountScope],
     ['admin usage platform', NEW_FEATURE_NOTICES.adminUsagePlatform],
     ['user ID copy', NEW_FEATURE_NOTICES.userIdCopy],

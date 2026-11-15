@@ -271,6 +271,7 @@ jobs:
           if [ "$PHASE" = RED ]; then
             bash .github/scripts/exclude-later-400-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/namespace-400-exclusions.txt"
             bash .github/scripts/prepare-replay-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/namespace-replay-fixtures.txt"
+            bash .github/scripts/prepare-mature-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/namespace-mature-fixtures.txt"
             bash .github/scripts/prepare-moderation-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/ws-evidence/namespace-moderation-fixtures.txt"
           fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_ws_agent_recovery.go; do
