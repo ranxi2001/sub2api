@@ -21,7 +21,11 @@ import (
 
 // Real client and upstream sockets: the second frame carries only a completed
 // tool result and the response pointer, never a fabricated full-history pair.
-func TestOpenAIWSPlaintextToolContinuation(t *testing.T) {
+func TestOpenAIWSPlaintextToolContinuation(t *testing.T) { runPlaintextToolContinuation(t, true) }
+func TestOpenAIWSPlaintextToolContinuationWithoutStorage(t *testing.T) {
+	runPlaintextToolContinuation(t, false)
+}
+func runPlaintextToolContinuation(t *testing.T, stored bool) {
 	for _, mode := range readableWSModes {
 		t.Run(mode, func(t *testing.T) {
 			var mu sync.Mutex
@@ -75,11 +79,11 @@ func TestOpenAIWSPlaintextToolContinuation(t *testing.T) {
 					cfg.Gateway.MaxAccountSwitches = 2
 				})
 			defer issue600Finish(t, h, headers)
-			issue715WSSend(t, h.clientConn, `{"type":"response.create","model":"gpt-5.1","store":true,"input":[{"role":"user","content":"Run the fixture once"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{}}}]}`)
+			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"Run the fixture once"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{}}}]}`, stored))
 			first := issue715WSRead(t, h.clientConn)
 			require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
 			require.Equal(t, "call_plaintext_once", gjson.GetBytes(first, "response.output.0.call_id").String())
-			issue715WSSend(t, h.clientConn, `{"type":"response.create","model":"gpt-5.1","store":true,"previous_response_id":"resp_plaintext_first","input":[{"type":"function_call_output","call_id":"call_plaintext_once","output":"fixture applied once"}]}`)
+			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"previous_response_id":"resp_plaintext_first","input":[{"type":"function_call_output","call_id":"call_plaintext_once","output":"fixture applied once"}]}`, stored))
 			second := issue715WSRead(t, h.clientConn)
 			require.Equal(t, "response.completed", gjson.GetBytes(second, "type").String(), "PLAINTEXT_TOOL_CONTINUATION_REFUSED: %s", second)
 			require.Equal(t, "resp_plaintext_second", gjson.GetBytes(second, "response.id").String())
@@ -88,7 +92,7 @@ func TestOpenAIWSPlaintextToolContinuation(t *testing.T) {
 			mu.Unlock()
 			require.Len(t, actual, 2, "exactly one generation per client turn; never replay the executed tool")
 			require.Contains(t, string(actual[1]), "fixture applied once")
-			if mode == service.OpenAIWSIngressModePassthrough || mode == service.OpenAIWSIngressModeHTTPBridge {
+			if mode == service.OpenAIWSIngressModePassthrough || (mode == service.OpenAIWSIngressModeHTTPBridge && stored) {
 				require.Equal(t, "resp_plaintext_first", gjson.GetBytes(actual[1], "previous_response_id").String())
 				require.Len(t, gjson.GetBytes(actual[1], "input").Array(), 1, "native delta must remain a delta")
 			}

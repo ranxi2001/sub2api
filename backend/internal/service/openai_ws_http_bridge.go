@@ -563,6 +563,35 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 	}
 
+	// store=false cannot carry a provider-side response pointer over HTTP.
+	// The ingress has rebuilt this same bridge's history; retain an immutable
+	// proof before request construction, rather than trusting final wire bytes.
+	if account.IsOpenAIApiKey() && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+		source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
+		previous := gjson.GetBytes(source, "previous_response_id").String()
+		originalInput, historyInput := gjson.GetBytes(source, "input"), gjson.GetBytes(payload, "input")
+		if previous != "" && gjson.GetBytes(payload, "previous_response_id").String() == previous &&
+			gjson.GetBytes(source, "store").Type == gjson.False && !gjson.GetBytes(body, "previous_response_id").Exists() &&
+			len(openAIAgentRecoveryItemDigests(source)) == 0 && len(openAIAgentRecoveryItemDigests(payload)) == 0 &&
+			originalInput.IsArray() && historyInput.IsArray() && len(historyInput.Array()) >= len(originalInput.Array()) {
+			current := originalInput.Array()
+			history := historyInput.Array()
+			var tail []json.RawMessage
+			for _, item := range history[len(history)-len(current):] {
+				tail = append(tail, json.RawMessage(item.Raw))
+			}
+			if len(current) > 0 {
+				encoded, encodeErr := json.Marshal(tail)
+				if encodeErr == nil && openAIAgentRecoveryInputDigest(source) == openAIAgentRecoveryInputDigest(append(append([]byte(`{"input":`), encoded...), '}')) {
+					ctx = context.WithValue(ctx, openAIWSPlaintextProjectionKey{}, &openAIWSPlaintextProjection{
+						accountID: account.ID, previous: previous, sourceInput: openAIAgentRecoveryInputDigest(source), sourceControls: openAI409ControlsDigest(source),
+						input: openAIAgentRecoveryInputDigest(body), controls: openAI409ControlsDigest(body), history: append([]byte(nil), payload...),
+					})
+				}
+			}
+		}
+	}
+
 	upstreamCtx, startDrain, releaseUpstreamCtx := openAIWSDrainContext(ctx)
 	defer releaseUpstreamCtx()
 	buildUpstreamRequest := func(requestBody []byte) (*http.Request, error) {

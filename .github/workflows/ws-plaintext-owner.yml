@@ -6,6 +6,7 @@ on:
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_ws_http_bridge.go'
       - 'backend/internal/service/openai_ws_plaintext_owner_test.go'
+      - 'backend/internal/service/openai_ws_plaintext_projection.go'
       - 'backend/internal/handler/openai_ws_plaintext_owner_test.go'
       - 'backend/internal/handler/openai_ws_recovery_capture_test.go'
       - 'backend/internal/handler/openai_agent_message_recovery.go'
@@ -51,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/service ./internal/handler -run '^TestOpenAIWS(Plaintext(ResponseOwnershipDelivery|ToolContinuation)|RecoveryRefusalCapture)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/plaintext-owner.jsonl" 2>&1
+          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/service ./internal/handler -run '^TestOpenAIWS(Plaintext(ResponseOwnershipDelivery|ToolContinuation(WithoutStorage)?)|RecoveryRefusalCapture)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/plaintext-owner.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/plaintext-owner.jsonl"
@@ -65,24 +66,30 @@ jobs:
           failures={r['Test'] for r in rows if r.get('Action')=='fail' and '/' in r.get('Test','')}
           passes={r['Test'] for r in rows if r.get('Action')=='pass' and '/' in r.get('Test','')}
           expected={f'TestOpenAIWSPlaintextResponseOwnershipDelivery/{x}' for x in ('completed','empty_output','done')}
-          expected.update('TestOpenAIWSPlaintextToolContinuation/'+mode for mode in ('passthrough','http_bridge'))
+          expected.update('TestOpenAIWSPlaintextToolContinuation'+suffix+'/'+mode for mode in ('passthrough','http_bridge') for suffix in ('','WithoutStorage'))
           capture=[r for r in rows if r.get('Test')=='TestOpenAIWSRecoveryRefusalCapture']
           if phase=='RED':
               assert status!=0 and failures==expected,(status,failures)
               for name in expected:
                   text=''.join(r.get('Output','') for r in rows if r.get('Test')==name)
                   assert 'PLAINTEXT_RESPONSE_OWNER_MISSING' in text or 'PLAINTEXT_TOOL_CONTINUATION_REFUSED' in text,(name,text)
-              assert len(passes)==8,passes
+              assert len(passes)==11,passes
               assert any(r.get('Action')=='fail' for r in capture),capture
               assert 'RECOVERY_REFUSAL_CAPTURE_MISSING' in ''.join(r.get('Output','') for r in capture)
           else:
               assert status==0 and not failures,(status,failures)
-              assert len(passes)==13,passes
+              assert len(passes)==18,passes
               assert any(r.get('Action')=='pass' for r in capture),capture
           PY
+      - name: GREEN stateless projection cannot bypass ownership or content checks
+        if: matrix.phase == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/service -run '^TestOpenAIWSPlaintextBridgeProjectionGuards$' -count=1 -timeout=2m) | tee "$RUNNER_TEMP/plaintext-guards.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: plaintext-owner-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/plaintext-owner.jsonl
+          path: ${{ runner.temp }}/plaintext-*.jsonl
           if-no-files-found: error

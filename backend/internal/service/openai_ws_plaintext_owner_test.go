@@ -5,8 +5,10 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -58,6 +60,51 @@ func TestOpenAIWSPlaintextResponseOwnershipDelivery(t *testing.T) {
 				require.Zero(t, owner, "unconfirmed delivery must not authorize continuation")
 			}
 			require.Empty(t, manager.request.outputs, "plaintext response must not create encrypted-item ownership")
+		})
+	}
+}
+
+func TestOpenAIWSPlaintextBridgeProjectionGuards(t *testing.T) {
+	for _, change := range []string{"valid", "input", "controls", "source", "pointer", "owner", "account", "store"} {
+		t.Run(change, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+			svc := &OpenAIGatewayService{cfg: cfg}
+			manager, _, account := issue715WSManager(t, svc, context.Background())
+			defer manager.abort()
+			source := `{"type":"response.create","model":"gpt-6-astra","store":false,"previous_response_id":"resp_fixture_projection","input":[{"role":"user","content":"fixture next"}]}`
+			body := `{"model":"gpt-6-astra","store":false,"input":[{"role":"user","content":"fixture original"},{"role":"user","content":"fixture next"}]}`
+			proof := &openAIWSPlaintextProjection{accountID: account.ID, previous: "resp_fixture_projection", sourceInput: openAIAgentRecoveryInputDigest([]byte(source)), sourceControls: openAI409ControlsDigest([]byte(source)), input: openAIAgentRecoveryInputDigest([]byte(body)), controls: openAI409ControlsDigest([]byte(body)), history: []byte(body)}
+			require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(context.Background(), 715, proof.previous, account.ID, time.Hour))
+			switch change {
+			case "input":
+				body = strings.Replace(body, "fixture original", "changed history", 1)
+			case "controls":
+				body = strings.Replace(body, `"store":false`, `"store":false,"instructions":"changed control"`, 1)
+			case "source":
+				source = strings.Replace(source, "fixture next", "changed current task", 1)
+			case "pointer":
+				source = strings.Replace(source, proof.previous, "resp_foreign", 1)
+			case "owner":
+				require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(context.Background(), 715, proof.previous, 2, time.Hour))
+			case "account":
+				copy := *account
+				copy.ID = 2
+				account = &copy
+			case "store":
+				source = strings.Replace(source, `"store":false`, `"store":true`, 1)
+			}
+			ctx := context.WithValue(context.Background(), openAIWSPlaintextProjectionKey{}, proof)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://native.example/v1/responses", strings.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Authorization", "Bearer fixture")
+			err = manager.begin(account, []byte(source), []byte(body), req, "http_bridge")
+			if change == "valid" {
+				require.NoError(t, err)
+				require.Empty(t, manager.request.previousResponseID)
+			} else {
+				require.Error(t, err, "changed projection must never authorize an upstream write")
+			}
 		})
 	}
 }

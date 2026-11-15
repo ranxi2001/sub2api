@@ -317,7 +317,28 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		return openAIAgentRecoveryError("route_changed")
 	}
 	previous := gjson.GetBytes(source, "previous_response_id").String()
-	if !r.request.omittedHistory && previous != "" && (r.request.owner != nil || r.request.disableOwnerBinding || r.request.previousResponseID != "") &&
+	projected := false
+	if proof, ok := req.Context().Value(openAIWSPlaintextProjectionKey{}).(*openAIWSPlaintextProjection); ok {
+		if proof == nil || mode != "http_bridge" || !account.IsOpenAIApiKey() || proof.accountID != account.ID ||
+			r.request.owner != nil || len(r.request.items) != 0 || r.request.preservesHistory() ||
+			proof.previous != previous || r.request.previousResponseID != previous ||
+			gjson.GetBytes(source, "store").Type != gjson.False || gjson.GetBytes(payload, "previous_response_id").Exists() ||
+			proof.sourceInput != openAIAgentRecoveryInputDigest(source) || proof.sourceControls != openAI409ControlsDigest(source) || proof.input != openAIAgentRecoveryInputDigest(payload) ||
+			proof.controls != openAI409ControlsDigest(payload) {
+			return openAIAgentRecoveryError("wire_changed")
+		}
+		// Recheck the original pointer on the actual selected account before
+		// allowing its HTTP representation to omit that pointer.
+		if err := r.service.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
+			return err
+		}
+		if err := r.service.verifyOpenAIToolInputs(ctx, r.request, proof.history); err != nil {
+			return err
+		}
+		r.request.previousResponseID = ""
+		projected = true
+	}
+	if !projected && !r.request.omittedHistory && previous != "" && (r.request.owner != nil || r.request.disableOwnerBinding || r.request.previousResponseID != "") &&
 		gjson.GetBytes(payload, "previous_response_id").String() != previous {
 		return openAIAgentRecoveryError("wire_changed")
 	}
