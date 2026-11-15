@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler -run '^TestOpenAIWSPlaintext(ResponseOwnershipDelivery|ToolContinuation)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/plaintext-owner.jsonl" 2>&1
+          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/service ./internal/handler -run '^TestOpenAIWSPlaintext(ResponseOwnershipDelivery|ToolContinuation)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/plaintext-owner.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/plaintext-owner.jsonl"

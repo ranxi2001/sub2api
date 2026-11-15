@@ -48,6 +48,7 @@ jobs:
               *_test.go) continue ;;
               *.go)
                 if git cat-file -e "$BASELINE:$target" 2>/dev/null; then
+                  mkdir -p -- "$(dirname -- "$RUNNER_TEMP/ws-owner-red/$target")"
                   git show "$BASELINE:$target" > "$RUNNER_TEMP/ws-owner-red/$target"
                   test "$(git hash-object "$RUNNER_TEMP/ws-owner-red/$target")" = "$(git rev-parse "$BASELINE:$target")"
                   printf '%s %s\n' "$(git rev-parse "$BASELINE:$target")" "$target" >> "$RUNNER_TEMP/ws-owner-evidence/baseline-blobs.txt"

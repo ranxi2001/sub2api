@@ -1,3 +1,5 @@
+//go:build plaintextowner
+
 package service
 
 import (
