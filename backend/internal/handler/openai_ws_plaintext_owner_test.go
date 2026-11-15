@@ -83,6 +83,7 @@ func runPlaintextToolContinuation(t *testing.T, stored bool, rebuilt ...bool) {
 			defer issue600Finish(t, h, headers)
 			firstFrame := fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"Run the fixture once"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{}}}]}`, stored)
 			if len(rebuilt) > 0 && rebuilt[0] {
+				var err error
 				firstFrame, err = sjson.Set(firstFrame, "conversation", "conv_fixture_expired")
 				require.NoError(t, err)
 			}
