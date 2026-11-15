@@ -293,10 +293,11 @@ func prepareOpenAIWSHTTPBridgeSessionBody(account *Account, payload []byte, pres
 }
 
 type openAIWSToolCallReplayCollector struct {
-	items    []json.RawMessage
-	seen     map[string]struct{}
-	allItems []json.RawMessage
-	allSeen  map[string]struct{}
+	items      []json.RawMessage
+	seen       map[string]struct{}
+	allItems   []json.RawMessage
+	allSeen    map[string]struct{}
+	finalItems []json.RawMessage
 }
 
 func (c *openAIWSToolCallReplayCollector) AddEvent(eventType string, message []byte) {
@@ -309,6 +310,14 @@ func (c *openAIWSToolCallReplayCollector) AddEvent(eventType string, message []b
 		output := gjson.GetBytes(message, "response.output")
 		if !output.IsArray() {
 			return
+		}
+		if openAIAgentCompletedResponse(message, true) && len(output.Array()) > 0 {
+			// A nonempty terminal is authoritative, including updated message
+			// contents and exclusions from previously streamed done items.
+			c.finalItems = nil
+			for _, item := range output.Array() {
+				c.finalItems = append(c.finalItems, json.RawMessage(item.Raw))
+			}
 		}
 		for _, item := range output.Array() {
 			c.addAllItem(item)
@@ -564,7 +573,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 
 	// store=false cannot carry a provider-side response pointer over HTTP.
-	// The ingress has rebuilt this same bridge's history; retain an immutable
+	// The ingress has reconstructed this same bridge's history; retain an immutable
 	// proof before request construction, rather than trusting final wire bytes.
 	if account.IsOpenAIApiKey() && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
 		source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
@@ -583,7 +592,25 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if len(current) > 0 {
 				encoded, encodeErr := json.Marshal(tail)
 				if encodeErr == nil && openAIAgentRecoveryInputDigest(source) == openAIAgentRecoveryInputDigest(append(append([]byte(`{"input":`), encoded...), '}')) {
+					recovery := openAIWSAgentRecoveryFromContext(ctx)
+					if recovery == nil {
+						return nil, openAIAgentRecoveryError("wire_changed")
+					}
+					recovery.mu.Lock()
+					anchor := recovery.completedBridge
+					initial := openAIAgentRecoveryFromContext(recovery.ctx)
+					model := initial.model
+					if forward, ok := openAIForwardModelFromContext(c.Request.Context()); ok && forward.model != "" {
+						model = forward.model
+					}
+					scope := openAIAgentRecoveryFromContext(s.WithOpenAIAgentMessageRecovery(ctx, c, source, recovery.session, model))
+					valid := anchor.response != "" && anchor == openAIWSBridgeAnchor(scope, account, previous)
+					recovery.mu.Unlock()
+					if !valid {
+						return nil, openAIAgentRecoveryError("wire_changed")
+					}
 					ctx = context.WithValue(ctx, openAIWSPlaintextProjectionKey{}, &openAIWSPlaintextProjection{
+						anchor:    anchor,
 						accountID: account.ID, previous: previous, sourceInput: openAIAgentRecoveryInputDigest(source), sourceControls: openAI409ControlsDigest(source),
 						input: openAIAgentRecoveryInputDigest(body), controls: openAI409ControlsDigest(body), history: append([]byte(nil), payload...),
 					})
@@ -857,7 +884,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			UpstreamProtocol:              "http",
 		}
 		applyOpenAIQueueTiming(result, openAIWSQueueArrival(ctx), forwardStart, turnStart, "ws_frame_http_bridge", "first_forward_including_internal_retries")
-		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
+		replayInput := replayCollector.Items()
+		if account.IsOpenAIApiKey() && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+			// Same-response reconstruction needs assistant messages as well as
+			// calls. RawMessage storage preserves numbers and tool schemas.
+			replayInput = replayCollector.AllItems()
+			if replayCollector.finalItems != nil {
+				replayInput = slices.Clone(replayCollector.finalItems)
+			}
+		}
+		if len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
 			result.wsReplayInputExists = true
 		}

@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
@@ -19,6 +21,134 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// Every assertion observes a later real handler turn and the HTTP provider
+// wire, including refusal before a second generation can start.
+func TestOpenAIWSPlaintextRepair870(t *testing.T) {
+	for _, scenario := range []string{"assistant_history", "wrong_response", "terminal_excludes", "empty_terminal", "stored_pointer", "unknown_pointer"} {
+		t.Run(scenario, func(t *testing.T) {
+			const message = `{"type":"message","id":"msg_fixture_exact","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Remember fixture M","annotations":[]}],"fixture_number":9007199254740993}`
+			const call = `{"type":"function_call","call_id":"call_fixture_repair","name":"fixture","arguments":"{}","status":"completed"}`
+			var mu sync.Mutex
+			var frames [][]byte
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				mu.Lock()
+				frames = append(frames, append([]byte(nil), body...))
+				n := len(frames)
+				mu.Unlock()
+				w.Header().Set("Content-Type", "text/event-stream")
+				output := message
+				if n == 1 && scenario == "assistant_history" {
+					_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_item.done\",\"item\":%s}\n\n", strings.Replace(message, "Remember fixture M", "Earlier streamed text", 1))
+				}
+				if n == 1 && (scenario == "terminal_excludes" || scenario == "empty_terminal") {
+					_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_item.done\",\"item\":%s}\n\n", call)
+					if scenario == "empty_terminal" {
+						output = ""
+					}
+				}
+				_, _ = fmt.Fprintf(w, `data: {"type":"response.completed","response":{"id":"resp_fixture_repair_%d","model":"gpt-5.1","status":"completed","output":[%s],"usage":{"input_tokens":5,"output_tokens":3}}}`+"\n\n", n, output)
+			}))
+			defer provider.Close()
+			clients := issue805Redis(t)
+			cache := repository.NewGatewayCache(clients())
+			headers := http.Header{"Session_id": {"fixture-repair-session"}, "Thread-Id": {"fixture-repair-thread"}}
+			h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, provider.URL, headers,
+				map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}, cache,
+				func(key *service.APIKey) { key.AllowLongContext = true },
+				func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, _ *service.AccountRepository) {
+					a.Extra["openai_apikey_responses_websockets_v2_mode"] = service.OpenAIWSIngressModeHTTPBridge
+					a.Extra["codex_fingerprint_mode"] = "off"
+					cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 15
+					cfg.Gateway.MaxAccountSwitches = 2
+				})
+			defer issue600Finish(t, h, headers)
+			stored := scenario == "stored_pointer"
+			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"input":[{"role":"user","content":"fixture U"}],"tools":[{"type":"function","name":"fixture","parameters":{"type":"object","properties":{"n":{"type":"integer","maximum":9007199254740993}}}}]}`, stored))
+			first := issue715WSRead(t, h.clientConn)
+			require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
+			previous := "resp_fixture_repair_1"
+			if scenario == "wrong_response" {
+				previous = "resp_fixture_other_same_account"
+				require.NoError(t, service.NewOpenAIWSStateStore(cache).BindResponseAccount(context.Background(), *h.apiKey.GroupID, previous, 1, time.Minute))
+			}
+			if scenario == "unknown_pointer" {
+				previous = "resp_fixture_unknown"
+			}
+			input := `{"role":"user","content":"fixture V"}`
+			if scenario == "terminal_excludes" || scenario == "empty_terminal" {
+				input = `{"type":"function_call_output","call_id":"call_fixture_repair","output":"fixture result"}`
+			}
+			if scenario == "terminal_excludes" {
+				// Resend the actually delivered call with its result. Even when
+				// terminal history excludes C, the local proof consumer must
+				// reject C rather than accepting this complete client pair.
+				input = `{"role":"user","content":"fixture U"},` + call + "," + input
+			}
+			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"previous_response_id":%q,"input":[%s]}`, stored, previous, input))
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			var terminal []byte
+			var readErr error
+			for {
+				_, terminal, readErr = h.clientConn.Read(ctx)
+				if readErr != nil || gjson.GetBytes(terminal, "type").String() == "response.completed" || gjson.GetBytes(terminal, "type").String() == "response.failed" || gjson.GetBytes(terminal, "type").String() == "error" {
+					break
+				}
+			}
+			refused := scenario == "wrong_response" || scenario == "terminal_excludes" || scenario == "unknown_pointer"
+			if refused && gjson.GetBytes(terminal, "type").String() != "response.completed" {
+				select {
+				case <-h.handlerDone:
+				case <-ctx.Done():
+					t.Fatal("refusal did not finish the handler")
+				}
+			}
+			mu.Lock()
+			actual := append([][]byte(nil), frames...)
+			mu.Unlock()
+			if refused {
+				marker := "UNKNOWN_POINTER_SENT"
+				if scenario == "wrong_response" {
+					marker = "F2_WRONG_RESPONSE_SENT"
+				}
+				if scenario == "terminal_excludes" {
+					marker = "F3_EXCLUDED_TOOL_SENT"
+				}
+				require.Len(t, actual, 1, marker+": refused turn must never start another upstream generation")
+				require.NotEqual(t, "response.completed", gjson.GetBytes(terminal, "type").String())
+				if readErr != nil {
+					require.NotEqual(t, context.DeadlineExceeded, ctx.Err(), "refusal must be explicit")
+				}
+				return
+			}
+			require.NoError(t, readErr)
+			require.Equal(t, "response.completed", gjson.GetBytes(terminal, "type").String())
+			require.Len(t, actual, 2, "exactly one generation per client turn")
+			if stored {
+				require.Equal(t, previous, gjson.GetBytes(actual[1], "previous_response_id").String())
+				require.Len(t, gjson.GetBytes(actual[1], "input").Array(), 1)
+			} else if scenario == "assistant_history" {
+				items := gjson.GetBytes(actual[1], "input").Array()
+				require.Len(t, items, 3, "F1_ASSISTANT_HISTORY_LOST: final wire must contain U, M, V")
+				require.JSONEq(t, message, items[1].Raw, "F1_ASSISTANT_HISTORY_LOST")
+				require.Equal(t, "9007199254740993", items[1].Get("fixture_number").Raw)
+				require.Equal(t, "fixture U", items[0].Get("content").String())
+				require.Equal(t, "fixture V", items[2].Get("content").String())
+				require.False(t, gjson.GetBytes(actual[1], "previous_response_id").Exists())
+				require.Equal(t, "9007199254740993", gjson.GetBytes(actual[1], "tools.0.parameters.properties.n.maximum").Raw)
+			} else {
+				require.Equal(t, "call_fixture_repair", gjson.GetBytes(actual[1], "input.1.call_id").String())
+				require.Equal(t, "call_fixture_repair", gjson.GetBytes(actual[1], "input.2.call_id").String())
+			}
+		})
+	}
+}
 
 // Real client and upstream sockets: the second frame carries only a completed
 // tool result and the response pointer, never a fabricated full-history pair.

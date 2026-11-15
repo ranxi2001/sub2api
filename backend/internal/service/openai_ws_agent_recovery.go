@@ -58,6 +58,7 @@ type openAIWSAgentRecovery struct {
 	completedResponse                string
 	completedAccount                 int64
 	completedModel                   string
+	completedBridge                  openAIWSBridgeResponseAnchor
 	deliveredTools                   map[string]openAIWSDeliveredTool
 	pendingTools                     map[string]openAIWSDeliveredTool
 }
@@ -341,6 +342,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	projected := false
 	if proof, ok := req.Context().Value(openAIWSPlaintextProjectionKey{}).(*openAIWSPlaintextProjection); ok {
 		if proof == nil || mode != "http_bridge" || !account.IsOpenAIApiKey() || proof.accountID != account.ID ||
+			proof.anchor.response == "" || proof.anchor != r.completedBridge || proof.anchor != openAIWSBridgeAnchor(r.request, account, previous) ||
 			r.request.owner != nil || len(r.request.items) != 0 || r.request.preservesHistory() ||
 			proof.previous != previous || r.request.previousResponseID != previous ||
 			gjson.GetBytes(source, "store").Type != gjson.False || gjson.GetBytes(payload, "previous_response_id").Exists() ||
@@ -499,10 +501,22 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		r.finish(completed)
 		if completed {
 			r.completedResponse, r.completedAccount, r.completedModel = responseID, request.delivery.binding.accountID, request.model
+			r.completedBridge = openAIWSBridgeResponseAnchor{response: responseID, model: request.model, session: request.session,
+				account: request.delivery.binding.accountID, key: request.keyID, user: request.userID, group: request.groupID, config: request.delivery.binding.config}
 			if r.deliveredTools == nil {
 				r.deliveredTools = make(map[string]openAIWSDeliveredTool)
 			}
 			for key, observed := range r.pendingTools {
+				// Consume the shared finishTools verdict, including terminal
+				// exclusion, duplicates, uncertain writes and anchor fences.
+				callID := key[len(request.model)+1:]
+				raw, proofErr := r.service.toolProofGet(ctx, request.toolKey(callID))
+				var proof openAIToolProof
+				if proofErr != nil || json.Unmarshal([]byte(raw), &proof) != nil ||
+					proof.Call != observed.fingerprint || proof.Delivery != openAIToolHash(request.delivery.pending) ||
+					proof.Producer != encodeOpenAIAgentRecoveryBinding(request.delivery.binding) || r.service.checkToolProof(ctx, proof) != nil {
+					observed.conflicted = true
+				}
 				old, exists := r.deliveredTools[key]
 				if !exists && len(r.deliveredTools) >= 1024 {
 					continue

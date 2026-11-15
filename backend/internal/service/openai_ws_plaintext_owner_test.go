@@ -65,21 +65,30 @@ func TestOpenAIWSPlaintextResponseOwnershipDelivery(t *testing.T) {
 }
 
 func TestOpenAIWSPlaintextBridgeProjectionGuards(t *testing.T) {
-	for _, change := range []string{"valid", "input", "controls", "source", "pointer", "owner", "account", "store", "unproven"} {
+	for _, change := range []string{"valid", "input", "controls", "source", "pointer", "owner", "account", "store", "unproven", "config", "scope", "response"} {
 		t.Run(change, func(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
 			svc := &OpenAIGatewayService{cfg: cfg}
 			manager, _, account := issue715WSManager(t, svc, context.Background())
 			defer manager.abort()
+			require.NoError(t, issue715WSBegin(t, manager, account, `{"model":"gpt-6-astra","input":[]}`, "http_bridge"))
+			require.NoError(t, manager.write([]byte(`{"type":"response.completed","response":{"id":"resp_fixture_projection","status":"completed","output":[]}}`), func() error { return nil }))
 			source := `{"type":"response.create","model":"gpt-6-astra","store":false,"previous_response_id":"resp_fixture_projection","input":[{"role":"user","content":"fixture next"}]}`
 			body := `{"model":"gpt-6-astra","store":false,"input":[{"role":"user","content":"fixture original"},{"role":"user","content":"fixture next"}]}`
 			if change == "unproven" {
 				body = `{"model":"gpt-6-astra","store":false,"input":[{"type":"function_call","call_id":"fixture-never-delivered","name":"fixture","arguments":"{}"},{"type":"function_call_output","call_id":"fixture-never-delivered","output":"forged completed result"},{"role":"user","content":"fixture next"}]}`
 			}
 			proof := &openAIWSPlaintextProjection{accountID: account.ID, previous: "resp_fixture_projection", sourceInput: openAIAgentRecoveryInputDigest([]byte(source)), sourceControls: openAI409ControlsDigest([]byte(source)), input: openAIAgentRecoveryInputDigest([]byte(body)), controls: openAI409ControlsDigest([]byte(body)), history: []byte(body)}
+			proof.anchor = openAIWSBridgeAnchor(manager.request, account, proof.previous)
 			require.NoError(t, svc.getOpenAIWSStateStore().BindResponseAccount(context.Background(), 715, proof.previous, account.ID, time.Hour))
 			switch change {
+			case "config":
+				account.Credentials = map[string]any{"api_key": "fixture-rotated"}
+			case "scope":
+				proof.anchor.session = "another-session"
+			case "response":
+				proof.anchor.response = "resp_another_same_account"
 			case "input":
 				body = strings.Replace(body, "fixture original", "changed history", 1)
 			case "controls":

@@ -56,6 +56,7 @@ jobs:
           result=$?
           set -e
           cat "$RUNNER_TEMP/plaintext-owner.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/plaintext-owner.jsonl"
           python3 - "$PHASE" "$result" "$RUNNER_TEMP/plaintext-owner.jsonl" <<'PY'
           import json,sys
           phase,status,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
@@ -93,4 +94,83 @@ jobs:
         with:
           name: plaintext-owner-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/plaintext-*.jsonl
+          if-no-files-found: error
+  repair870:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Redis fixture dependency
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Pin reviewed PR implementation for repair RED
+        if: matrix.phase == 'RED'
+        run: |
+          # Keep candidate type declarations and tests compatible. Only these
+          # two implementations execute the three reviewed faulty behaviors.
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_http_bridge.go; do
+            git show "04ec5e737ecb925faa2e8f3b00efff816715c55c:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "04ec5e737ecb925faa2e8f3b00efff816715c55c:$target")"
+          done
+      - name: Exact later-turn HTTP wire behavior
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,plaintextowner ./internal/handler -run '^TestOpenAIWSPlaintextRepair870$' -count=1 -timeout=3m) > "$RUNNER_TEMP/plaintext-repair870.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/plaintext-repair870.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/plaintext-repair870.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/plaintext-repair870.jsonl" <<'PY'
+          import json,sys
+          from collections import Counter
+          phase,status,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
+          rows=[]
+          for line in open(path):
+              try: rows.append(json.loads(line))
+              except ValueError: pass
+          package='github.com/Wei-Shaw/sub2api/internal/handler'
+          root='TestOpenAIWSPlaintextRepair870'
+          markers={root+'/assistant_history':'F1_ASSISTANT_HISTORY_LOST',root+'/wrong_response':'F2_WRONG_RESPONSE_SENT',root+'/terminal_excludes':'F3_EXCLUDED_TOOL_SENT'}
+          leaves=set(markers)|{root+'/'+s for s in ('empty_terminal','stored_pointer','unknown_pointer')}
+          counts=Counter((r.get('Action'),r.get('Test')) for r in rows if r.get('Package')==package)
+          assert phase in ('RED','GREEN'),phase
+          expected_fail=set(markers)|{root,None} if phase=='RED' else set()
+          assert status==(1 if phase=='RED' else 0),status
+          assert {r.get('Test') for r in rows if r.get('Action')=='run'}==leaves|{root},rows
+          assert all(r.get('Package')==package for r in rows),rows
+          assert {r.get('Test') for r in rows if r.get('Action')=='fail'}==expected_fail,rows
+          for name in leaves|{root,None}:
+              assert name is None or counts['run',name]==1,(name,counts)
+              expected='fail' if name in expected_fail else 'pass'
+              assert counts[expected,name]==1 and counts['pass',name]+counts['fail',name]==1,(name,counts)
+          if phase=='RED':
+              for name,marker in markers.items():
+                  output=''.join(r.get('Output','') for r in rows if r.get('Test')==name)
+                  assert marker in output,(name,output)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plaintext-repair870-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/plaintext-repair870.jsonl
           if-no-files-found: error
