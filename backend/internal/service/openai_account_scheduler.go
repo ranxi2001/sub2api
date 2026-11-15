@@ -2348,6 +2348,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if account == nil {
 		return false, "account_nil"
 	}
+	if s != nil && s.service != nil && !s.service.openAI409AccountRouteSupported(ctx, account, req.RequestedModel) {
+		return false, "readable_rebuild_route_unsupported"
+	}
 	if account.IsExcelOAuth() && s != nil && s.service != nil && !s.service.excelBPSGloballyEnabled(ctx) {
 		return false, "excel_bps_disabled"
 	}
