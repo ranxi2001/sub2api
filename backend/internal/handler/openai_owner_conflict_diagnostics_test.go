@@ -1,4 +1,4 @@
-//go:build unit && ownerconflict
+//go:build unit && ownerdiagnostics
 
 package handler
 
