@@ -414,12 +414,35 @@ jobs:
           actual_passthrough=$(git hash-object "$passthrough")
           echo "baseline=$original path=$passthrough expected_blob=$expected_passthrough tested_blob=$actual_passthrough"
           test "$expected_passthrough" = "$actual_passthrough"
+          # Compile-only compatibility with the retained candidate bridge.
+          # The old manager never assigns this zero-valued anchor; no old
+          # executable statement or built-payload regression is replaced.
+          python3 - "$target" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          original = path.read_bytes()
+          declaration = b'type openAIWSAgentRecovery struct {\n'
+          assert original.count(declaration) == 1
+          path.write_bytes(original.replace(declaration, declaration + b'\tcompletedBridge openAIWSBridgeResponseAnchor\n', 1))
+          PY
+          expected_overlay=41fc424e64fdf029addeaeff9213f55e150a7a21
+          actual_overlay=$(git hash-object "$target")
+          echo "baseline=$original path=$target original_blob=$expected expected_overlay=$expected_overlay tested_overlay=$actual_overlay"
+          test "$expected_overlay" = "$actual_overlay"
+          for retained in backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_plaintext_projection.go; do
+            expected_retained=$(git rev-parse "HEAD:$retained")
+            actual_retained=$(git hash-object "$retained")
+            echo "retained_candidate path=$retained expected_blob=$expected_retained tested_blob=$actual_retained"
+            test "$expected_retained" = "$actual_retained"
+          done
           git diff --exit-code HEAD -- backend/internal/service/openai_ws_agent_recovery_test.go
           set +e
           (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715WSBridgeValidatesBuiltPayload$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-ws-wire-red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue715-ws-wire-red.log"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue715-ws-wire-red.log"
           test "$result" -ne 0
           if grep -Eq 'build failed|no tests to run|undefined:|panic:|--- SKIP:' "$RUNNER_TEMP/issue715-ws-wire-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715WSBridgeValidatesBuiltPayload' "$RUNNER_TEMP/issue715-ws-wire-red.log"
