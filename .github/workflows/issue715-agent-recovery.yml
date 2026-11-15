@@ -72,7 +72,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/issue715-red.log"
           test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-red.log"
+          if grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715BridgeDoesNotAdvertiseEncryptedAgent' "$RUNNER_TEMP/issue715-red.log"
           grep -q 'bridge must not create unreadable encrypted tasks' "$RUNNER_TEMP/issue715-red.log"
           grep -q -- '--- FAIL: TestIssue715FetchedAndPinnedBridgeCapabilities' "$RUNNER_TEMP/issue715-red.log"
@@ -159,7 +159,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/issue715-recovery-red.log"
           test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-recovery-red.log"
+          if grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-recovery-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715HTTPResumesSameTaskAcrossTwoTurns/false' "$RUNNER_TEMP/issue715-recovery-red.log"
           grep -q -- '--- FAIL: TestIssue715HTTPResumesSameTaskAcrossTwoTurns/true' "$RUNNER_TEMP/issue715-recovery-red.log"
           grep -q 'same task and tool context must survive route drift' "$RUNNER_TEMP/issue715-recovery-red.log"
@@ -195,7 +195,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/issue715-delivery-red.log"
           test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-delivery-red.log"
+          if grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-delivery-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715HTTPFailedDeliveryNeverGrantsOwner/json/error' "$RUNNER_TEMP/issue715-delivery-red.log"
           grep -q -- '--- FAIL: TestIssue715HTTPFailedDeliveryNeverGrantsOwner/aggregate/error' "$RUNNER_TEMP/issue715-delivery-red.log"
           grep -q 'failed downstream delivery must not grant a successful owner' "$RUNNER_TEMP/issue715-delivery-red.log"
@@ -231,7 +231,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/issue715-generated-red.log"
           test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-generated-red.log"
+          if grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-generated-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715HTTPGeneratedTaskReturnsToItsProducer/generated-json' "$RUNNER_TEMP/issue715-generated-red.log"
           grep -q -- '--- FAIL: TestIssue715HTTPGeneratedTaskReturnsToItsProducer/generated-stream-items' "$RUNNER_TEMP/issue715-generated-red.log"
           grep -q 'newly generated task must return to its producer before any prior successful input' "$RUNNER_TEMP/issue715-generated-red.log"
@@ -304,7 +304,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/issue715-first-delivery-red.log"
           test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|fixture barrier not reached' "$RUNNER_TEMP/issue715-first-delivery-red.log"
+          if grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|fixture barrier not reached' "$RUNNER_TEMP/issue715-first-delivery-red.log"; then exit 1; fi
           for format in generated-json generated-stream generated-stream-items; do
             grep -q -- "--- FAIL: TestIssue715HTTPFirstDeliveryCrossNodeBarrier/$format" "$RUNNER_TEMP/issue715-first-delivery-red.log"
           done
@@ -341,7 +341,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
           test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|--- SKIP:' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
+          if grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|--- SKIP:' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715WSGeneratedTaskContinuation/http_bridge/cross-node=false' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
           grep -q 'generated WS task must continue without rebuilding the session' "$RUNNER_TEMP/issue715-ws-bridge-sequence-red.log"
 
@@ -390,7 +390,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/issue715-ws-wire-red.log"
           test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:|panic:|--- SKIP:' "$RUNNER_TEMP/issue715-ws-wire-red.log"
+          if grep -Eq 'build failed|no tests to run|undefined:|panic:|--- SKIP:' "$RUNNER_TEMP/issue715-ws-wire-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715WSBridgeValidatesBuiltPayload' "$RUNNER_TEMP/issue715-ws-wire-red.log"
           grep -q 'bridge must validate actual built HTTP body before granting opaque task admission' "$RUNNER_TEMP/issue715-ws-wire-red.log"
 
@@ -466,7 +466,7 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/issue715-ws-red.log"
           test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|--- SKIP:' "$RUNNER_TEMP/issue715-ws-red.log"
+          if grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|--- SKIP:' "$RUNNER_TEMP/issue715-ws-red.log"; then exit 1; fi
           for mode in ctx_pool passthrough http_bridge; do
             grep -q -- "--- FAIL: TestIssue715WSGeneratedTaskContinuation/$mode/cross-node=true" "$RUNNER_TEMP/issue715-ws-red.log"
           done
@@ -532,7 +532,7 @@ jobs:
           test "$issue715_diag_samples" -gt 0
           test "$(grep -c '^=== RUN   TestOpsOutputTPSQueryDeadline$' "$issue715_diag_dir/test.log")" -eq 20
           test "$(grep -c '^--- PASS: TestOpsOutputTPSQueryDeadline ' "$issue715_diag_dir/test.log")" -eq 20
-          ! grep -En '^--- (FAIL|SKIP):|panic:|\[build failed\]|\[no tests to run\]|skipping integration tests' "$issue715_diag_dir/test.log"
+          if grep -En '^--- (FAIL|SKIP):|panic:|\[build failed\]|\[no tests to run\]|skipping integration tests' "$issue715_diag_dir/test.log"; then exit 1; fi
       - uses: actions/upload-artifact@v6
         if: always()
         with:

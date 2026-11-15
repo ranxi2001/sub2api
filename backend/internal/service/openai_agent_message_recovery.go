@@ -51,6 +51,9 @@ type openAIAgentRecoveryRequest struct {
 	disableOwnerBinding  bool
 	previousResponseID   string
 	inputDigest          [32]byte
+	replaySource         []byte // immutable pre-builder source, never a retry's mutable wire
+	nativeOAuthInput     [32]byte
+	nativeOAuthPrepared  bool
 	replayControlsDigest [32]byte
 	apiControlsDigest    [32]byte
 	apiInputDigest       [32]byte
@@ -123,6 +126,7 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 	request.items = openAIAgentRecoveryItemDigests(body)
 	if request.preservesHistory() {
 		request.inputDigest = openAIAgentRecoveryInputDigest(body)
+		request.replaySource = append([]byte(nil), body...)
 	}
 	gjson.GetBytes(body, "input").ForEach(func(_, item gjson.Result) bool {
 		request.toolResult = request.toolResult || isCodexToolCallOutputItemType(item.Get("type").String())
@@ -416,6 +420,9 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 		return noop, openAIAgentRecoveryRefusal(ctx, "body_unreadable")
 	}
 	expectedInput, expectedControls := request.inputDigest, request.replayControlsDigest
+	if request.nativeOAuthPrepared && account.UsesOpenAICodexProtocol() && !request.omittedHistory {
+		expectedInput = request.nativeOAuthInput
+	}
 	if request.omittedHistory && account.IsOpenAIApiKey() && request.apiReplayPrepared {
 		expectedInput, expectedControls = request.apiInputDigest, request.apiControlsDigest
 	}

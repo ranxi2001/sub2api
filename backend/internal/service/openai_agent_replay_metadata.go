@@ -26,6 +26,58 @@ func (s *OpenAIGatewayService) PrepareOpenAIAgentReplayBody(body []byte) ([]byte
 	return normalizeOpenAIReplayMetadata(body)
 }
 
+// OAuth forces stateless reasoning even when the client omits store or sends
+// true. Derive only that account's finite metadata projection from the frozen
+// source, before timezone/namespace/OAuth builders. API-key store:true is intact.
+func (s *OpenAIGatewayService) prepareOpenAIAgentOAuthReplay(ctx context.Context, account *Account, body []byte) (context.Context, []byte, error) {
+	r := openAIAgentRecoveryFromContext(ctx)
+	if r == nil || !r.disableOwnerBinding || !r.preservesHistory() || r.omittedHistory || account == nil || !account.UsesOpenAICodexProtocol() {
+		return ctx, body, nil
+	}
+	if len(r.replaySource) == 0 || openAIAgentRecoveryInputDigest(body) != r.inputDigest ||
+		openAI409ControlsDigest(body) != openAI409ControlsDigest(r.replaySource) {
+		return ctx, nil, openAIAgentRecoveryRefusal(ctx, "input_integrity")
+	}
+	projected, err := projectOpenAIOAuthReasoningMetadata(r.replaySource)
+	if err != nil {
+		return ctx, nil, err
+	}
+	next, err := sjson.SetRawBytes(body, "input", []byte(gjson.GetBytes(projected, "input").Raw))
+	if err != nil {
+		return ctx, nil, err
+	}
+	private := *r
+	private.nativeOAuthInput = openAIAgentRecoveryInputDigest(projected)
+	private.nativeOAuthPrepared = true
+	return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, &private), next, nil
+}
+
+// Match the existing OAuth stateless reasoning contract without its general
+// input filter: no readable content, ciphertext, item or tool relationship is
+// removed. Missing/null summary becomes []; a nonempty summary stays exact.
+func projectOpenAIOAuthReasoningMetadata(body []byte) ([]byte, error) {
+	var source map[string]any
+	if err := decodeOpenAIJSONUseNumber(body, &source); err != nil {
+		return nil, err
+	}
+	input, _ := source["input"].([]any)
+	for _, value := range input {
+		item, ok := value.(map[string]any)
+		if !ok || strings.TrimSpace(firstNonEmptyString(item["type"])) != "reasoning" {
+			continue
+		}
+		delete(item, "id")
+		if item["summary"] == nil {
+			item["summary"] = []any{}
+		}
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	return sjson.SetRawBytes(body, "input", encoded)
+}
+
 func normalizeOpenAIResponsesReasoningContentReplayProtected(body []byte, protected bool) ([]byte, bool, error) {
 	if protected {
 		return body, false, nil

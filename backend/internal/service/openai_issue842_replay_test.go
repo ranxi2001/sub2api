@@ -111,3 +111,52 @@ func TestIssue842FrozenHTTPInputRejectsSemanticMutation(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue842OAuthProjectionRejectsChangedSourceOrWire(t *testing.T) {
+	for _, mutation := range []string{"intact", "source_input", "source_controls", "final_input"} {
+		t.Run(mutation, func(t *testing.T) {
+			svc := &OpenAIGatewayService{cfg: &config.Config{}}
+			svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+			body := []byte(strings.ReplaceAll(strings.ReplaceAll(issue842Source, `,"status":"completed"`, ""), `"store":false,`, ""))
+			ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, body, "fixture-session", "gpt-6-astra")
+			if mutation == "source_input" {
+				body = bytes.Replace(body, []byte("keep task842"), []byte("changed task842"), 1)
+			} else if mutation == "source_controls" {
+				var err error
+				body, err = sjson.SetBytes(body, "instructions", "unapproved instruction842")
+				require.NoError(t, err)
+			}
+			// Historical overlay compiles against its old service; this method is
+			// required only when this exact candidate regression actually runs.
+			preparer, ok := any(svc).(interface {
+				prepareOpenAIAgentOAuthReplay(context.Context, *Account, []byte) (context.Context, []byte, error)
+			})
+			require.True(t, ok)
+			account := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			preparedCtx, prepared, err := preparer.prepareOpenAIAgentOAuthReplay(ctx, account, body)
+			if strings.HasPrefix(mutation, "source_") {
+				var refusal *OpenAIAgentRecoveryError
+				require.ErrorAs(t, err, &refusal)
+				require.Equal(t, "wire_changed", refusal.Reason)
+				return
+			}
+			require.NoError(t, err)
+			if mutation == "final_input" {
+				prepared = bytes.Replace(prepared, []byte("readable reasoning842"), []byte("changed reasoning842"), 1)
+			}
+			req, err := http.NewRequest(http.MethodPost, "https://fixture.example/v1/responses", bytes.NewReader(prepared))
+			require.NoError(t, err)
+			finish, err := svc.prepareOpenAIAgentRecoveryAttempt(preparedCtx, account, req)
+			if mutation == "intact" {
+				require.NoError(t, err)
+				finish(true)
+			} else {
+				var refusal *OpenAIAgentRecoveryError
+				require.ErrorAs(t, err, &refusal)
+				require.Equal(t, "wire_changed", refusal.Reason)
+			}
+		})
+	}
+}
