@@ -17,7 +17,7 @@ func (r *accountRepository) ReadAccountOpsProviders(ctx context.Context, ids []i
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	providers := []service.MatureProvider{}
 	for rows.Next() {
 		var p service.MatureProvider

@@ -74,7 +74,7 @@ func TestAccountOpsInvalidConfigurationReturnsSafe400WithoutWrites(t *testing.T)
 	}{
 		{"amount rule on OAuth", `,"balance_thresholds":[{"account_id":41,"enabled":true,"threshold":5,"unit":"USD"}]`, service.AccountTypeOAuth},
 		{"quota rule on API key", `,"quota_thresholds":[{"account_id":41,"enabled":true,"threshold_percent":80,"window":"any"}]`, service.AccountTypeAPIKey},
-		{"invalid recipient", `,"recipient":"canary-secret@example.test,another@example.test"`, service.AccountTypeAPIKey},
+		{"invalid recipient", `,"recipient":"canary-secret@example.test,not-an-email"`, service.AccountTypeAPIKey},
 		{"invalid official URL", `,"webhooks":[{"id":"robot","provider":"wecom","url":"https://bad.example/canary-secret?key=private-canary"}]`, service.AccountTypeAPIKey},
 		{"negative threshold", `,"balance_thresholds":[{"account_id":41,"enabled":true,"threshold":-1,"unit":"USD"}]`, service.AccountTypeAPIKey},
 	} {

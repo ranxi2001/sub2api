@@ -39,11 +39,13 @@ createApp({setup(){return()=>h('main',{class:'p-6 space-y-4'},[
  h(Groups,{show:group.value,groups,accounts,onClose:()=>group.value=false})
 ])}}).use(createPinia()).use(i18n).mount('#app');
  `)
- server = await createServer({ root, configFile: false, server: { host: '127.0.0.1', port: 4309, strictPort: true }, resolve: { alias: { '@': join(root, 'src') } }, plugins: [{ name: 'baseline-components', enforce: 'pre', load(id) { if (before && original.has(id)) return original.get(id) } }, vue()] })
- server.middlewares.use((req, res, next) => {
-  if (req.url?.split('?')[0] !== '/preview') return next()
-  res.setHeader('Content-Type', 'text/html'); res.end('<div id="app"></div><script type="module" src="/.account-ops-team-preview.js"></script>')
- })
+ server = await createServer({ root, configFile: false, server: { host: '127.0.0.1', port: 4309, strictPort: true }, resolve: { alias: { '@': join(root, 'src') } }, plugins: [{ name: 'baseline-components', enforce: 'pre', load(id) { if (before && original.has(id)) return original.get(id) }, configureServer(vite) {
+  vite.middlewares.use((req, res, next) => {
+   if (req.url?.split('?')[0] !== '/preview') return next()
+   res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/.account-ops-team-preview.js"></script></html>')
+  })
+ } }, vue()] })
+
  await server.listen(); browser = await chromium.launch({ headless: true })
  const captures = []
  for (const phase of ['before', 'after']) {
@@ -51,7 +53,7 @@ createApp({setup(){return()=>h('main',{class:'p-6 space-y-4'},[
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   await context.route('**/*', route => route.request().url().startsWith(origin) ? route.continue() : route.abort())
   const page = await context.newPage(), errors = []
-  page.on('pageerror', e => errors.push(e.message))
+  page.on('pageerror', e => { errors.push(e.message); console.error('preview page error:', e.message) })
   await page.goto(`${origin}/preview?${phase}`, { waitUntil: 'networkidle' })
   await page.getByTestId('account-ops-rules').waitFor()
   await page.screenshot({ path: join(out, `${phase}-rules.png`), fullPage: true })
