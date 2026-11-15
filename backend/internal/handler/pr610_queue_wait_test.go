@@ -181,6 +181,13 @@ func (s *pr610TimingScenario) prepareTurn() {
 				if phase == "switch_account" {
 					d = 5 * time.Second
 				}
+				if s.realtime && s.retry {
+					// This real retry fixture needs separation from the 380ms
+					// queue ceiling even when the runner overschedules a sleep.
+					// Keep both actual acquisitions, at 10ms each; the rejected
+					// network attempt below alone lasts longer than the ceiling.
+					d = time.Second
+				}
 				s.advance(d)
 				close(b.release)
 			case <-time.After(3 * time.Second):
@@ -249,7 +256,11 @@ func (s *pr610TimingScenario) serveHTTP(w http.ResponseWriter, r *http.Request, 
 		return true
 	}
 	if s.retry && s.attempts.Add(1) == 1 {
-		s.advance(7 * time.Second)
+		delay := 7 * time.Second
+		if s.realtime {
+			delay = 40 * time.Second // advance scales to 400ms of real network wait
+		}
+		s.advance(delay)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"error":{"type":"invalid_request_error","code":"invalid_parameter","param":"truncation","message":"Unsupported parameter: truncation"}}`)
@@ -429,6 +440,8 @@ func TestPR610RealBridgeRetryDenominator(t *testing.T) {
 	row := got.log
 	require.GreaterOrEqual(t, *row.DurationMs, 85, "rejected-field network time must stay in legacy TPS denominator")
 	require.Less(t, *row.QueueWaitMs, 380, "rejected-field network time must not move into queue")
+	require.GreaterOrEqual(t, *row.QueueWaitMs, 20, "both real acquisition barriers must still count")
+	require.GreaterOrEqual(t, *row.DurationMs, 415, "400ms rejection plus 20ms successful response must stay in legacy duration")
 }
 
 func (s *pr610TimingScenario) startHolder(serverURL, key string, gateway *service.OpenAIGatewayService) {

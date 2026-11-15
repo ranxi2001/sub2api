@@ -118,7 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test harness/.github/fixtures/pelican-question-e2e/detail-identity.test.mjs harness/.github/fixtures/pelican-question-e2e/nominal-round.test.mjs \
+          node --test harness/.github/fixtures/pelican-question-e2e/detail-identity.test.mjs harness/.github/fixtures/pelican-question-e2e/nominal-round.test.mjs harness/.github/fixtures/pelican-question-e2e/navigation.test.mjs \
             | tee "$EVIDENCE_DIR/detail-identity-synthetic.tap"
       - name: Build and prefetch before runtime isolation (CI only)
         shell: bash

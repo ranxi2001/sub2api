@@ -136,19 +136,42 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 			if reasoning == 0 {
 				reasoning = 1
 			}
-			expected := map[string]float64{
-				"input_cost": float64(tc.input) * in * reasoning, "output_cost": float64(tc.output) * out * reasoning,
-				"cache_creation_cost": (float64(tc.write30m)*write + float64(tc.write12h)*write12h) * reasoning,
-				"cache_read_cost":     float64(tc.read) * read * reasoning,
+			// Preserve the quotation's operation order: computeTokenBreakdown
+			// sums input/output/write/read before reasoning; customer rate is
+			// applied before reasoning, then the model surcharge. Random map
+			// iteration can straddle the eight-decimal half boundary by 1 ULP.
+			expected := []struct {
+				field  string
+				amount float64
+			}{
+				{"input_cost", float64(tc.input) * in},
+				{"output_cost", float64(tc.output) * out},
+				{"cache_creation_cost", float64(tc.write30m)*write + float64(tc.write12h)*write12h},
+				{"cache_read_cost", float64(tc.read) * read},
 			}
 			total := 0.0
-			for field, amount := range expected {
-				require.InDelta(t, amount, d[field], 1e-10, field)
-				total += amount
+			for _, component := range expected {
+				require.InDelta(t, component.amount*reasoning, d[component.field], 1e-10, component.field)
+				total += component.amount
 			}
-			require.InDelta(t, total, d["total_cost"], 1e-10)
+			customerRate, modelRate := .5, 1.0
+			if tc.personal > 0 {
+				customerRate = tc.personal
+			}
+			if tc.model > 0 {
+				modelRate = tc.model
+			}
+			actual := total * customerRate
+			actual *= reasoning
+			actual *= modelRate
+			require.InDelta(t, total*reasoning, d["total_cost"], 1e-10)
 			require.InDelta(t, rate, d["multiplier"], 1e-10)
-			require.InDelta(t, QuantizeUsageBillingAmount(total*rate), log.ActualCost, 1e-10)
+			require.InDelta(t, QuantizeUsageBillingAmount(actual), log.ActualCost, 1e-10)
+			if tc.name == "personal model reasoning" {
+				// Exact decimal fixture: .0021395 × .3 × 1.7 × 3 =
+				// .003273435, rounded half-away-from-zero at eight places.
+				require.Equal(t, .00327344, log.ActualCost)
+			}
 			require.Equal(t, "priority", *log.ServiceTier)
 			require.Equal(t, tc.long, log.LongContextBillingApplied)
 			if tc.name == "exact screenshot" {
