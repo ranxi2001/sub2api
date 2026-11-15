@@ -123,11 +123,12 @@ jobs:
           # exact Issue715 recovery blobs and all retained handler assertions.
           weekly_compat=f895ea743f34a4c4ab6c9d01c01e13c931625a6e
           weekly_leaves=(backend/internal/service/openai_disable_scheduling_429.go backend/internal/service/openai_gateway_passthrough.go backend/internal/service/openai_plugin_transport.go backend/internal/service/openai_quota_service.go backend/internal/service/openai_quota_usage_snapshot.go backend/internal/service/openai_ws_forwarder_support.go backend/internal/service/openai_ws_forwarder_v2.go)
+          projection_types=backend/internal/service/openai_ws_plaintext_projection.go
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$metadata_compat"
           git fetch --no-tags --depth=1 origin "$analysis_compat"
           git fetch --no-tags --depth=1 origin "$billing_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "${weekly_leaves[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "${weekly_leaves[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" "$projection_types" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$metadata_compat" -- "$metadata_leaf"
           test "$(git hash-object "$metadata_leaf")" = "$(git rev-parse "$metadata_compat:$metadata_leaf")"
@@ -164,11 +165,13 @@ jobs:
             test "$expected" = "$actual"
           done
           for path in "${added[@]}"; do test ! -e "$path"; done
+          bash .github/scripts/historical-ws-projection-types.sh "$original"
           set +e
           (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue715HTTPResumesSameTaskAcrossTwoTurns$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-recovery-red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue715-recovery-red.log"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue715-recovery-red.log"
           test "$result" -ne 0
           if grep -Eq 'build failed|no tests to run|undefined:|panic:' "$RUNNER_TEMP/issue715-recovery-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715HTTPResumesSameTaskAcrossTwoTurns/false' "$RUNNER_TEMP/issue715-recovery-red.log"
@@ -286,13 +289,14 @@ jobs:
           # The Beta helper depends on fields absent in this historical recovery struct.
           omission_added=(backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go)
           omission_added+=(backend/internal/service/openai_agent_replay_metadata.go)
+          projection_types=backend/internal/service/openai_ws_plaintext_projection.go
           metadata_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
           metadata_leaf=backend/internal/service/openai_gateway_request_body.go
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$ws_original"
           git fetch --no-tags --depth=1 origin "$scheduler_compat"
           git fetch --no-tags --depth=1 origin "$metadata_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" "$projection_types" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
           git restore --source="$metadata_compat" -- "$metadata_leaf"
@@ -321,11 +325,13 @@ jobs:
             echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
             test "$expected" = "$actual"
           done
+          bash .github/scripts/historical-ws-projection-types.sh "$original" "$ws_original"
           set +e
           (cd backend && go test -race -tags=unit ./internal/handler -run '^TestIssue715HTTPFirstDeliveryCrossNodeBarrier$/(generated-json|generated-stream|generated-stream-items)$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-first-delivery-red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue715-first-delivery-red.log"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue715-first-delivery-red.log"
           test "$result" -ne 0
           if grep -Eq 'build failed|no tests to run|undefined:|panic:|DATA RACE|fixture barrier not reached' "$RUNNER_TEMP/issue715-first-delivery-red.log"; then exit 1; fi
           for format in generated-json generated-stream generated-stream-items; do
