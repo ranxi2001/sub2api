@@ -62,6 +62,8 @@ jobs:
             esac
           done
           cd "$RUNNER_TEMP/issue854-red"
+          bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue854-evidence/independent-fixtures.txt"
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-replay-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue854-evidence/replay-fixtures.txt"
           git diff --stat > "$RUNNER_TEMP/issue854-evidence/red-diff.txt"
           for suite in lifecycle persistence upstream ws-upstream r1 http-empty-image; do
             case "$suite" in
