@@ -1408,8 +1408,20 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			bridgePayloadRaw := currentBridgePayload.payloadRaw
 			bridgePayloadBytes := currentBridgePayload.payloadBytes
 			toolOutputCoverage := AnalyzeToolCallOutputContextCoverageBytes(currentBridgePayload.payloadRaw)
+			// Preserve a plaintext stored delta only on its verified producer.
+			// The HTTP builder and final recovery gate independently recheck it.
+			plaintextStored := false
+			if agentRecovery != nil && account.IsOpenAIApiKey() && currentBridgePayload.previousResponseID != "" &&
+				gjson.GetBytes(currentBridgePayload.clientPayloadRaw, "store").Type == gjson.True &&
+				len(openAIAgentRecoveryItemDigests(currentBridgePayload.clientPayloadRaw)) == 0 &&
+				s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+				lookupCtx, cancelLookup := context.WithTimeout(ctx, 3*time.Second)
+				owner, lookupErr := stateStore.GetResponseAccount(lookupCtx, groupID, currentBridgePayload.previousResponseID)
+				cancelLookup()
+				plaintextStored = lookupErr == nil && owner == account.ID
+			}
 			needsBridgeReplay := !smartStateful && !agentRecovery.storedContinuation(currentBridgePayload.clientPayloadRaw) &&
-				!agentRecovery.plaintextStoredContinuation(account, currentBridgePayload.clientPayloadRaw) && (currentBridgePayload.previousResponseID != "" ||
+				!plaintextStored && (currentBridgePayload.previousResponseID != "" ||
 				(toolOutputCoverage.HasFunctionCallOutput && !toolOutputCoverage.ContextCoversAllCallIDs))
 			// 一次解析当前 input，正常 replay 与 account-failover 两份序列共享同一批正文。
 			bridgeCurrentItems, bridgeCurrentItemsExist, extractErr := openAIWSExtractNormalizedInputSequence(
