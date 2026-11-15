@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -272,4 +274,81 @@ func TestRequestTimezoneEgressWebSocketFrames(t *testing.T) {
 		}
 	}
 	require.Len(t, probe.calls, 1)
+}
+
+// Observe actual HTTP/WS bytes, rather than only the service's pre-send digest.
+func TestOpenAI409PhysicalTimezonePreservesReadableTask(t *testing.T) {
+	original := localeTestBody([]string{"<environment_context><timezone>Asia/Shanghai</timezone></environment_context>", "keep the already completed tool result"}, nil)
+	probe := &egressTimezoneProber{probe: func(context.Context, string) (*ProxyExitInfo, int64, error) {
+		return &ProxyExitInfo{IP: "203.0.113.10", Timezone: "Asia/Tokyo"}, 0, nil
+	}}
+	svc := timezoneAutoService(true, true, probe)
+	account := &Account{ID: 1, Platform: PlatformOpenAI}
+	for _, transport := range []string{"http", "ws"} {
+		for _, preserved := range []bool{false, true} {
+			t.Run(transport+"/preserved="+fmt.Sprint(preserved), func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				ctx = svc.withRequestTimezoneEgress(ctx, account)
+				if preserved {
+					ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, &openAIAgentRecoveryRequest{omittedHistory: true})
+				}
+				received := make(chan []byte, 1)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if transport == "http" {
+						body, err := io.ReadAll(r.Body)
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						received <- body
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					conn, err := coderws.Accept(w, r, nil)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer func() { _ = conn.CloseNow() }()
+					_, body, err := conn.Read(ctx)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					received <- body
+					<-ctx.Done()
+				}))
+				defer server.Close()
+				if transport == "http" {
+					req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, bytes.NewReader(original))
+					require.NoError(t, err)
+					req.Header.Set("X-Timezone", "Asia/Shanghai")
+					bound, err := BindOpenAIRequestTimezone(req, "")
+					require.NoError(t, err)
+					require.Equal(t, "Asia/Tokyo", bound.Header.Get("X-Timezone"))
+					response, err := server.Client().Do(bound)
+					require.NoError(t, err)
+					require.NoError(t, response.Body.Close())
+				} else {
+					conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+					require.NoError(t, err)
+					defer func() { _ = conn.CloseNow() }()
+					wrapped := &coderOpenAIWSClientConn{conn: conn, timezoneBinding: &requestTimezoneBinding{svc, account}, requestTimezone: "Asia/Tokyo"}
+					require.NoError(t, wrapped.WriteFrame(ctx, coderws.MessageText, original))
+				}
+				select {
+				case body := <-received:
+					if preserved {
+						require.JSONEq(t, string(original), string(body), "physical send must preserve the rebuilt task")
+					} else {
+						require.Contains(t, string(body), "Asia/Tokyo", "ordinary egress normalization remains active")
+					}
+				case <-ctx.Done():
+					t.Fatal("provider did not receive a frame")
+				}
+				cancel()
+			})
+		}
+	}
 }

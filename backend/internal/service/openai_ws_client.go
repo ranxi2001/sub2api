@@ -448,7 +448,8 @@ func (c *coderOpenAIWSClientConn) WriteFrame(ctx context.Context, msgType coderw
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if msgType == coderws.MessageText && c.timezoneBinding.enabled(ctx) {
+	preserveBody := openAIAgentRecoveryPreservesHistory(ctx)
+	if msgType == coderws.MessageText && !preserveBody && c.timezoneBinding.enabled(ctx) {
 		c.timezoneMu.Lock()
 		if c.requestTimezone == "" {
 			c.requestTimezone = c.timezoneBinding.service.egressRequestTimezone(ctx, c.timezoneProxy)
