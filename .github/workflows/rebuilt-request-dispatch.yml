@@ -1,0 +1,89 @@
+name: Rebuilt request dispatch
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_409_omit_history*'
+      - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_gateway_forward.go'
+      - 'backend/internal/service/openai_account_scheduler.go'
+      - 'backend/internal/service/openai_request_timezone_egress*'
+      - 'backend/internal/service/openai_ws_client.go'
+      - 'backend/internal/service/openai_responses_namespace.go'
+      - 'backend/internal/handler/openai_409_*'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - '.github/workflows/rebuilt-request-dispatch.yml'
+permissions:
+  contents: read
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends redis-server
+      - name: Restore release implementation for RED
+        if: matrix.phase == 'RED'
+        run: |
+          set -euo pipefail
+          baseline=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
+          for target in backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go backend/internal/service/openai_responses_namespace.go; do
+            git show "$baseline:$target" > "$target"
+          done
+      - name: Same network and tool-loop regressions
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler -run '^TestOpenAI409(HTTPProjectionAndPassthrough|WSInitialWithoutPointer|PhysicalTimezonePreservesReadableTask|NamespaceProjectionPreservesNumbers)$' -count=1 -timeout=10m) > "$RUNNER_TEMP/dispatch.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/dispatch.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/dispatch.jsonl" <<'PY'
+          import json,sys
+          phase,result,path=sys.argv[1:]
+          raw=open(path).read()
+          for invalid in ('[build failed]', 'undefined:', 'panic:', 'WARNING: DATA RACE', 'no tests to run'):
+              assert invalid not in raw, invalid
+          events=[]
+          for line in raw.splitlines():
+              try: events.append(json.loads(line))
+              except ValueError: pass
+          terminals={e['Test']:e['Action'] for e in events if 'Test' in e and e.get('Action') in ('pass','fail','skip')}
+          assert terminals and 'skip' not in terminals.values(), terminals
+          expected=[
+              'TestOpenAI409HTTPProjectionAndPassthrough/oauth/stream=false/internal_metadata',
+              'TestOpenAI409HTTPProjectionAndPassthrough/oauth/stream=true/message_namespace',
+              'TestOpenAI409HTTPProjectionAndPassthrough/apikey/stream=true/passthrough',
+              'TestOpenAI409PhysicalTimezonePreservesReadableTask/http/preserved=true',
+              'TestOpenAI409PhysicalTimezonePreservesReadableTask/ws/preserved=true',
+          ]
+          if phase=='GREEN':
+              assert int(result)==0 and set(terminals.values())=={'pass'}, terminals
+              assert all(terminals.get(t)=='pass' for t in expected)
+              assert len([t for t,v in terminals.items() if t.startswith('TestOpenAI409WSInitialWithoutPointer/') and t.count('/')==2 and v=='pass'])==15
+          else:
+              assert int(result)!=0
+              assert all(terminals.get(t)=='fail' for t in expected), terminals
+              assert any(t.startswith('TestOpenAI409WSInitialWithoutPointer/') and t.count('/')==2 and v=='fail' for t,v in terminals.items()), terminals
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: rebuilt-dispatch-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/dispatch.jsonl

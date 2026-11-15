@@ -271,6 +271,21 @@ func TestOpenAI409HTTPRebuildOwnerCooldown(t *testing.T) {
 	}
 }
 
+func TestOpenAI409HTTPProjectionAndPassthrough(t *testing.T) {
+	for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, stream := range []bool{false, true} {
+			for _, shape := range []string{"message_namespace", "internal_metadata", "tool_schema_null", "passthrough"} {
+				if shape == "passthrough" && accountType != service.AccountTypeAPIKey {
+					continue
+				}
+				t.Run(fmt.Sprintf("%s/stream=%t/%s", accountType, stream, shape), func(t *testing.T) {
+					runHTTPRebuildFixture(t, accountType, stream, shape, "completed", "", "")
+				})
+			}
+		}
+	}
+}
+
 func TestOpenAI409HTTPControlNormalization(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		for _, accountType := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
@@ -522,6 +537,12 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 					gjson.GetBytes(body, "stream").Bool() && gjson.GetBytes(body, "store").Type == gjson.False &&
 					gjson.GetBytes(body, `input.#(role==system)`).Type == gjson.Null
 			}
+			if pointer == "message_namespace" {
+				valid = valid && !gjson.GetBytes(body, "input.0.namespace").Exists()
+			}
+			if pointer == "internal_metadata" && accountType == service.AccountTypeOAuth {
+				valid = valid && !gjson.GetBytes(body, "input.0.internal_chat_message_metadata_passthrough").Exists()
+			}
 			if n == 3 {
 				valid = valid && httpRebuildToolPair(body, "run_tests", httpRebuildCheck)
 			}
@@ -560,6 +581,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	accounts := issue715AccountsOfType(accountType)
 	for i, label := range []string{"A", "B"} {
 		accounts[i].Credentials = map[string]any{"base_url": provider.URL, "api_key": "fixture-rebuild-" + label, "access_token": "fixture-rebuild-" + label, "chatgpt_account_id": "fixture-chatgpt-" + label}
+	}
+	if pointer == "passthrough" {
+		accounts[1].Extra = map[string]any{"openai_passthrough": true, "openai_responses_mode": "force_responses"}
 	}
 	settings := service.NewSettingService(&omit409SettingsRepo{enabled: boundary != "strict"}, cfg)
 	usage := &readable409UsageRepo{}
@@ -611,6 +635,35 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		if pointer == "no_tools_parallel" && previous.Get("id").String() == "resp_rebuild_B" {
 			delete(body, "tools")
 			body["parallel_tool_calls"] = true
+		}
+		if previous.Exists() {
+			history = append([]string(nil), history...)
+			if pointer == "passthrough" && previous.Get("id").String() == "resp_rebuild_B" {
+				filtered := history[:0]
+				for _, item := range history {
+					if item != httpRebuildAgentA {
+						filtered = append(filtered, item)
+					}
+				}
+				history = filtered // only B's established opaque owner remains
+			}
+			var field string
+			switch pointer {
+			case "message_namespace":
+				field = "namespace"
+			case "internal_metadata":
+				field = "internal_chat_message_metadata_passthrough"
+			}
+			if field != "" {
+				updated, err := sjson.Set(history[0], field, "fixture-output-metadata")
+				require.NoError(t, err)
+				history[0] = updated
+			}
+			if pointer == "tool_schema_null" {
+				declarations := httpRebuildToolDefinitions()
+				declarations[0].(map[string]any)["parameters"].(map[string]any)["type"] = nil
+				body["tools"] = declarations
+			}
 		}
 		body["input"] = json.RawMessage("[" + strings.Join(history, ",") + "]")
 		if previous.Exists() && (pointer == "previous" || boundary == "pointer_only") {

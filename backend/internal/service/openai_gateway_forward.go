@@ -127,7 +127,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	defer func() { resultErr = regionalMeterFinishForward(ctx, result, resultErr, finishMeter) }()
 	ctx = s.withRequestTimezoneEgress(ctx, account)
-	body = s.normalizeRequestTimezone(ctx, account, body, "http")
+	if r := openAIAgentRecoveryFromContext(ctx); r == nil || !r.omittedHistory {
+		body = s.normalizeRequestTimezone(ctx, account, body, "http")
+	}
 	if astraSchedulingAppliesToRequest(s.cfg.AstraRouting(ctx), account, gjson.GetBytes(body, "model").String(), getOpenAIGroupIDFromContext(c)) {
 		if err := s.checkAstraSchedulingRoute(ctx, account); err != nil {
 			return nil, err
@@ -177,6 +179,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	clearOpenAIResponsesClientToolMapping(c)
 	clearOpenAIResponsesNamespaceNames(c)
 	setCodexToolNameReverse(c, nil)
+	var projectionErr error
+	ctx, body, projectionErr = s.prepareOpenAI409HTTPProjection(ctx, c, account, body)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+	if projected := openAIAgentRecoveryFromContext(ctx); projected != openAIAgentRecoveryFromContext(c.Request.Context()) {
+		// Response observers use gin's context, while final send checks use ctx.
+		// Both must see the same delivery fence for this attempt. Restore only
+		// the recovery value afterwards, keeping unrelated context additions.
+		originalRecovery := openAIAgentRecoveryFromContext(c.Request.Context())
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAIAgentRecoveryContextKey{}, projected))
+		defer func() {
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), openAIAgentRecoveryContextKey{}, originalRecovery))
+		}()
+	}
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return nil, err
 	}
@@ -332,7 +349,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	passthroughEnabled := account.IsOpenAIPassthroughEnabled()
+	passthroughEnabled := account.IsOpenAIPassthroughEnabled() && !openAI409UsesNativeAPIKey(ctx, account)
 	compactPath := isOpenAIResponsesCompactPath(c)
 	body, err = normalizeOpenAIResponsesNamespaces(c, account, body, wsDecision.Transport, passthroughEnabled, compactPath)
 	if err != nil {

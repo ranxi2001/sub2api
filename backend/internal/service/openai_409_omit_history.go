@@ -10,9 +10,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 )
 
 const openAIHistoricalCiphertextOmitted = "[Historical encrypted content omitted by the gateway. Its contents are unavailable; do not infer missing instructions or results.]"
@@ -508,7 +510,7 @@ func prepareOpenAI409APIKeyReplay(ctx context.Context, body []byte, responsesLit
 		return body, nil
 	}
 	if openAIAgentRecoveryInputDigest(body) != r.inputDigest || openAI409ControlsDigest(body) != r.replayControlsDigest {
-		return nil, openAIAgentRecoveryError("wire_changed")
+		return nil, openAIRecoveryWireRefusal(ctx, "apikey_projection_source")
 	}
 	prepared, _, err := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite)
 	if err != nil {
@@ -535,8 +537,11 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 		return err
 	}
 	if openAIAgentRecoveryInputDigest(before) != r.inputDigest || openAI409ControlsDigest(before) != r.replayControlsDigest {
-		return openAIAgentRecoveryError("wire_changed")
+		return openAIRecoveryWireRefusal(ctx, "oauth_projection_source")
 	}
+	// ChatGPT rejects this output-only metadata. Normalize before freezing the
+	// OAuth representation; the later ordinary transform must be idempotent.
+	normalizeOpenAIOAuthResponsesCompatibilityFields(body)
 	if isInstructionsEmpty(body) {
 		body["instructions"] = defaultCodexSynthInstructions(firstNonEmptyString(body["model"]))
 	}
@@ -558,4 +563,73 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 	r.oauthControlsDigest = openAI409ControlsDigest(prepared)
 	r.oauthReplayPrepared = true
 	return nil
+}
+
+// A rebuilt request is a new native Responses conversation. An API-key
+// account's ordinary passthrough preference must not route this prepared
+// request around the native input and delivery checks. Subsequent single-owner
+// turns must keep the learned native route too; exact route/credentials/wire
+// validation still runs before sending.
+func openAI409UsesNativeAPIKey(ctx context.Context, account *Account) bool {
+	r := openAIAgentRecoveryFromContext(ctx)
+	return r != nil && account != nil && account.IsOpenAIApiKey() &&
+		(r.omittedHistory || (r.ownerBindingRequired() && r.owner.accountID == account.ID))
+}
+
+func openAIRecoveryWireRefusal(ctx context.Context, stage string) error {
+	logger.FromContext(ctx).Warn("openai.encrypted_history_409_refused", zap.String("stage", stage))
+	return openAIAgentRecoveryError("wire_changed")
+}
+
+// Derive the HTTP representation only from the verified readable snapshot,
+// before Forward's compatibility pipeline touches it. Keep the original
+// context immutable so a later account admission starts from the same input.
+// This is not a digest update at the final send boundary.
+func (s *OpenAIGatewayService) prepareOpenAI409HTTPProjection(ctx context.Context, c *gin.Context, account *Account, body []byte) (context.Context, []byte, error) {
+	r := openAIAgentRecoveryFromContext(ctx)
+	if r == nil || !r.omittedHistory {
+		return ctx, body, nil
+	}
+	if openAIAgentRecoveryInputDigest(body) != r.inputDigest || openAI409ControlsDigest(body) != r.replayControlsDigest {
+		return ctx, body, openAIRecoveryWireRefusal(ctx, "http_projection_source")
+	}
+	clean := s.normalizeRequestTimezone(ctx, account, body, "http")
+	var err error
+	clean, _, err = normalizeOpenAIResponsesLegacyIngressWithConfig(s.cfg, clean)
+	if err != nil {
+		return ctx, body, err
+	}
+	clean, _, err = sanitizeOpenAIResponsesToolSchemasForPlatform(clean, account.Platform)
+	if err != nil {
+		return ctx, body, err
+	}
+	if isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+		clean, _, err = normalizeOpenAIResponsesLitePayloadForAccount(clean, account)
+		if err != nil {
+			return ctx, body, err
+		}
+	}
+	clean, err = normalizeOpenAIResponsesNamespaces(c, account, clean, OpenAIUpstreamTransportHTTPSSE, false, false)
+	if err != nil {
+		return ctx, body, err
+	}
+	snapshot := *r
+	snapshot.inputDigest = openAIAgentRecoveryInputDigest(clean)
+	snapshot.replayControlsDigest = openAI409ControlsDigest(clean)
+	snapshot.apiReplayPrepared, snapshot.oauthReplayPrepared = false, false
+	return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, &snapshot), clean, nil
+}
+
+// Account-scoped routing exclusions are applied before acquiring a candidate.
+// The same boundary remains enforced by the dispatch guard after revalidation.
+func (s *OpenAIGatewayService) openAI409AccountRouteSupported(ctx context.Context, account *Account, model string) bool {
+	r := openAIAgentRecoveryFromContext(ctx)
+	if r == nil || !r.omittedHistory {
+		return true
+	}
+	return account != nil && account.IsOpenAI() && !account.HasManagedOpenAIConnections() && account.AuthConnectionID == "" &&
+		!account.IsCopilotSDKEnabled() && !account.IsSIWCEnabled() &&
+		!account.IsExcelBPSEnabledForModel(model) && !account.IsPrismBrowserEnabledForModel(model) &&
+		s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, account.GetMappedModel(model)) == APIProtocolResponses &&
+		(!account.IsOpenAIPassthroughEnabled() || account.IsOpenAIApiKey())
 }
