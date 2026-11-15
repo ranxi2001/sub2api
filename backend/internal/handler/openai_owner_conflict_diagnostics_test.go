@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,7 +23,13 @@ func TestOwnerConflictPersistenceKeepsTurnAndSafeSubreason(t *testing.T) {
 			service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
 			service.BeginOpsStreamTurn(c, 53)
 			written := false
-			service.MarkOpsStreamErrorValue(c, service.OpsStreamError{ErrType: "invalid_request_error", Code: "encrypted_agent_recovery_owner_conflict", Message: "synthetic refusal", IntendedStatus: 409, CountTowardsSLA: true, RecoveryFailure: &service.OpsRecoveryFailure{Protocol: "websocket", Phase: "before_dispatch", RequestWritten: &written, Subreason: tc.detail}})
+			failure := &service.OpsRecoveryFailure{Protocol: "websocket", Phase: "before_dispatch", RequestWritten: &written}
+			// Baseline RED compiles this independent fixture but does not run it;
+			// old production ignores the new diagnostic field during decoding.
+			encoded, err := json.Marshal(map[string]string{"Subreason": tc.detail})
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(encoded, failure))
+			service.MarkOpsStreamErrorValue(c, service.OpsStreamError{ErrType: "invalid_request_error", Code: "encrypted_agent_recovery_owner_conflict", Message: "synthetic refusal", IntendedStatus: 409, CountTowardsSLA: true, RecoveryFailure: failure})
 			repo := &ingressRejectOpsRepo{}
 			ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			logOpsStreamError(c, ops, http.StatusSwitchingProtocols)

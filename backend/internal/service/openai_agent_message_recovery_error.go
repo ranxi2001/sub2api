@@ -99,4 +99,3 @@ func (e *OpenAIAgentRecoveryError) InternalSubreason() string {
 	}
 	return safeOpenAIRecoverySubreason(e.diagnostic.subreason)
 }
-func OpenAIRecoverySubreason(value string) string { return safeOpenAIRecoverySubreason(value) }
