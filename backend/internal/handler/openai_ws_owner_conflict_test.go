@@ -65,7 +65,7 @@ func TestOpenAIWSMixedOwnerToolProvenance(t *testing.T) {
 
 func TestOpenAIWSMixedOwnerToolProvenanceCases(t *testing.T) {
 	for _, kind := range []string{"function", "custom"} {
-		for _, change := range []string{"valid", "id", "type", "name", "args", "epoch", "unrelated", "undelivered"} {
+		for _, change := range []string{"valid", "id", "type", "name", "args", "epoch", "unrelated", "undelivered", "proof_pending", "proof_failed", "proof_conflict", "proof_missing"} {
 			t.Run(kind+"/"+change, func(t *testing.T) {
 				turn := 2
 				if change == "valid" {
@@ -199,7 +199,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			other.ID, other.Priority = 2, 1
 			other.Credentials = map[string]any{"api_key": "fixture-mixed-B", "base_url": provider.URL}
 			pool := []service.Account{*a, other}
-			if scenario == "binding_changed" {
+			if scenario == "binding_changed" || shadowProvenance {
 				third := other
 				third.ID, third.Priority = 3, 2
 				third.Credentials = map[string]any{"api_key": "fixture-mixed-C", "base_url": provider.URL}
@@ -431,6 +431,22 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			}
 			require.NoError(t, err)
 		}
+		if strings.HasPrefix(change, "proof_") {
+			keys, keyErr := probe.Keys(context.Background(), "openai_tool_provenance:v1:*").Result()
+			require.NoError(t, keyErr)
+			require.NotEmpty(t, keys)
+			for _, key := range keys {
+				if change == "proof_missing" {
+					require.NoError(t, probe.Del(context.Background(), key).Err())
+					continue
+				}
+				state := strings.TrimPrefix(change, "proof_")
+				if state == "pending" {
+					state = "pending:fixture-unconfirmed"
+				}
+				require.NoError(t, probe.Set(context.Background(), key, state, time.Minute).Err())
+			}
+		}
 		if change == "epoch" {
 			keys, keyErr := probe.Keys(context.Background(), "openai_agent_shadow_epoch:*").Result()
 			require.NoError(t, keyErr)
@@ -471,6 +487,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			}
 		}
 		history = []string{httpRebuildAgentB}
+		accounts.disable(2) // Require restored intent on a fresh provider route.
 		issue600Finish(t, h, headers)
 		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		conn, _, dialErr := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
@@ -573,7 +590,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	require.Len(t, frames, turn+2, "no extra generation or retry")
 	for i, wire := range frames[turn:] {
 		expectedIdentity := "Bearer fixture-mixed-B"
-		if scenario == "binding_changed" {
+		if scenario == "binding_changed" || shadowProvenance {
 			expectedIdentity = "Bearer fixture-mixed-C"
 		}
 		require.Equal(t, expectedIdentity, identities[turn+i])
