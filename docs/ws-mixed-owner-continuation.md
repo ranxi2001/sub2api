@@ -13,6 +13,16 @@ original owner/epoch/shadow associations. Pending, failed, conflicting, missing,
 reissued or unrelated-task calls are refused. The client result is its completion
 report, not proof that an external side effect executed.
 
+Proof scope is deliberately model-specific: a call delivered under M1 cannot
+be replayed under M2 merely because the socket later selected M2. The inherited
+model regression earns its real call on M2 before omitting the model; a separate
+negative regression retains the M1-to-M2 case and requires zero B dispatches.
+Calls delivered before this change, expired/evicted proofs, and calls without a
+completed owner/shadow anchor cannot use this automatic WS recovery. Normal
+forwarding and the existing Beta-off behavior do not acquire a replay permit.
+No database migration is required. Rolling back ignores the separate proof
+namespace; it does not restore proofs that have expired.
+
 The gateway also requires a completed ownership observation for **every** supplied
 opaque item, readable current intent, and complete, unique tool call/result
 pairs. It discards provider pointers and historical ciphertext. In this mixed
