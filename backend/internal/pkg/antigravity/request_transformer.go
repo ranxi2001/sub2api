@@ -322,24 +322,6 @@ func neutralizeClaudeIdentity(text string) string {
 	return text
 }
 
-// claudeCodeSecurityPolicyLineRe matches the fixed security-policy line that
-// Claude Code puts in its default system prompt ("IMPORTANT: Assist with
-// authorized security testing, ..."). Since 2026-11-15 the Google upstream
-// answers 429 RESOURCE_EXHAUSTED to any Antigravity request whose system
-// instruction carries it, while the same request without the line succeeds.
-// The match is line-anchored and only applied to system text, so the same words
-// in user content or tool descriptions are left alone.
-var claudeCodeSecurityPolicyLineRe = regexp.MustCompile(`(?im)^[ \t]*IMPORTANT:[ \t]*Assist with authorized security testing\b[^\r\n]*(?:\r?\n)?`)
-
-// stripClaudeCodeSecurityPolicy removes the Claude Code security-policy line
-// from Antigravity system text.
-func stripClaudeCodeSecurityPolicy(text string) string {
-	if !strings.Contains(text, "uthorized security testing") {
-		return text
-	}
-	return claudeCodeSecurityPolicyLineRe.ReplaceAllString(text, "")
-}
-
 func stripClaudeAttribution(text string) string {
 	trimmed := strings.TrimLeft(text, " \t\r\n")
 	if !strings.HasPrefix(trimmed, "x-anthropic-billing-header:") {
@@ -368,7 +350,7 @@ func buildSystemInstruction(system json.RawMessage, modelName string, opts Trans
 		// 尝试解析为字符串
 		var sysStr string
 		if err := json.Unmarshal(system, &sysStr); err == nil {
-			sysStr = stripClaudeCodeSecurityPolicy(neutralizeClaudeIdentity(stripClaudeAttribution(sysStr)))
+			sysStr = neutralizeClaudeIdentity(stripClaudeAttribution(sysStr))
 			if strings.TrimSpace(sysStr) != "" {
 				if strings.Contains(sysStr, "You are Antigravity") {
 					userHasAntigravityIdentity = true
@@ -384,7 +366,7 @@ func buildSystemInstruction(system json.RawMessage, modelName string, opts Trans
 			var sysBlocks []SystemBlock
 			if err := json.Unmarshal(system, &sysBlocks); err == nil {
 				for _, block := range sysBlocks {
-					block.Text = stripClaudeCodeSecurityPolicy(neutralizeClaudeIdentity(stripClaudeAttribution(block.Text)))
+					block.Text = neutralizeClaudeIdentity(stripClaudeAttribution(block.Text))
 					if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
 						if strings.Contains(block.Text, "You are Antigravity") {
 							userHasAntigravityIdentity = true
