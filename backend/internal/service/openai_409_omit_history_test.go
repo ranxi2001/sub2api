@@ -320,3 +320,11 @@ func TestOpenAI409OAuthReplayKeepsOriginalSnapshotAndFinalControls(t *testing.T)
 		})
 	}
 }
+
+func TestOpenAI409NamespaceProjectionPreservesNumbers(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"namespace","name":"math","tools":[{"type":"function","name":"sum","parameters":{"type":"object","properties":{"count":{"type":"integer","enum":[9007199254740993]}}}}]}],"input":[{"role":"user","content":"continue with the recorded value","sequence":9007199254740993}]}`)
+	projected, err := flattenOpenAIResponsesNamespaces(nil, body)
+	require.NoError(t, err)
+	require.Equal(t, "9007199254740993", gjson.GetBytes(projected, "input.0.sequence").Raw)
+	require.Equal(t, "9007199254740993", gjson.GetBytes(projected, "tools.0.parameters.properties.count.enum.0").Raw)
+}

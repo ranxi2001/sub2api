@@ -327,7 +327,7 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryDispatch(ctx context.Cont
 	// /responses/compact bridge rewrites the body and endpoint, so it remains
 	// outside this contract.
 	if !account.IsOpenAI() || account.HasManagedOpenAIConnections() || account.AuthConnectionID != "" ||
-		account.IsOpenAIPassthroughEnabled() || account.IsCopilotSDKEnabled() || account.IsSIWCEnabled() ||
+		(account.IsOpenAIPassthroughEnabled() && !openAI409UsesNativeAPIKey(ctx, account)) || account.IsCopilotSDKEnabled() || account.IsSIWCEnabled() ||
 		account.IsExcelBPSEnabledForModel(model) || account.IsPrismBrowserEnabledForModel(model) ||
 		isOpenAIResponsesCompactPath(c) ||
 		(isOpenAINativeCompactionV2(c) && shouldForwardDeepSeekResponsesCompactViaChatCompletions(account, body)) ||
@@ -382,7 +382,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	}
 	// Managed credentials and adapters need their own route ownership contract.
 	if !account.IsOpenAI() || account.HasManagedOpenAIConnections() || account.AuthConnectionID != "" ||
-		account.IsOpenAIPassthroughEnabled() || account.IsCopilotSDKEnabled() || account.IsSIWCEnabled() {
+		(account.IsOpenAIPassthroughEnabled() && !openAI409UsesNativeAPIKey(ctx, account)) || account.IsCopilotSDKEnabled() || account.IsSIWCEnabled() {
 		if request.owner != nil || request.preservesHistory() {
 			return noop, openAIAgentRecoveryError("wire_changed")
 		}
@@ -433,7 +433,7 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	}
 	if request.omittedHistory && (gjson.GetBytes(body, "previous_response_id").Exists() || gjson.GetBytes(body, "conversation").Exists() ||
 		openAI409ControlsDigest(body) != expectedControls) {
-		return noop, openAIAgentRecoveryError("wire_changed")
+		return noop, openAIRecoveryWireRefusal(ctx, "controls_integrity")
 	}
 	if request.previousResponseID != "" && gjson.GetBytes(body, "previous_response_id").String() != request.previousResponseID {
 		return noop, openAIAgentRecoveryError("owner_unavailable")

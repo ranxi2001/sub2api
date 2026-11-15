@@ -24,6 +24,12 @@ func RegisterUserRoutes(
 	authenticated.Use(panelRateLimiter.Global())
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
+	if h.QQBot != nil {
+		bot := authenticated.Group("/user/qqbot")
+		bot.GET("/binding", h.QQBot.Binding)
+		bot.POST("/binding-code", panelRateLimiter.Heavy(), h.QQBot.CreateBindingCode)
+		bot.POST("/binding-confirm", h.QQBot.ConfirmBinding)
+	}
 	if h.Lottery != nil {
 		lottery := authenticated.Group("/lottery")
 		lottery.Use(handler.LotteryVisitorContext)

@@ -164,6 +164,16 @@ func logReadableWSDispatchFailure(t *testing.T, h *openAIWSPassthroughHandlerHar
 	t.Logf("actual B dispatch error: %v; client close: %v", reported, clientErr)
 }
 
+func TestOpenAI409WSInitialWithoutPointer(t *testing.T) {
+	for _, mode := range readableWSModes {
+		for _, state := range []string{"paused", "rate_limited", "overloaded"} {
+			t.Run(mode+"/"+state, func(t *testing.T) {
+				runReadableWSContinuation(t, mode, "initial_no_pointer_"+state)
+			})
+		}
+	}
+}
+
 func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	t.Helper()
 	clients := issue805Redis(t)
@@ -173,6 +183,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	defer provider.Close()
 	headers := http.Header{"Session_id": {"fixture-readable-ws-session"}, "Thread-Id": {"fixture-readable-ws-thread"}}
 	settings := map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: fmt.Sprint(scenario != "off")}
+	initialNoPointer := strings.HasPrefix(scenario, "initial_no_pointer_")
 	identityCase, modelCase := scenario == "identity" || strings.HasPrefix(scenario, "header_"), scenario == "bridge_model"
 	customTools := strings.HasPrefix(scenario, "tools_")
 	nativeNamespace := scenario == "native_namespace"
@@ -317,6 +328,27 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	} else {
 		accounts.disable(1)
 	}
+	if initialNoPointer {
+		if scenario != "initial_no_pointer_paused" {
+			accounts.mu.Lock()
+			reset := time.Now().Add(7 * 24 * time.Hour)
+			accounts.accounts[0].Schedulable = true
+			if scenario == "initial_no_pointer_rate_limited" {
+				accounts.accounts[0].RateLimitResetAt = &reset
+			} else {
+				accounts.accounts[0].OverloadUntil = &reset
+			}
+			accounts.mu.Unlock()
+		}
+		issue600Finish(t, h, headers)
+		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		conn, _, err := coderws.Dial(dialCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
+		cancel()
+		require.NoError(t, err)
+		h.clientConn = conn
+		t.Cleanup(func() { _ = conn.CloseNow() })
+		previous = ""
+	}
 	if scenario == "b_disabled" {
 		accounts.disable(2)
 	}
@@ -352,7 +384,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
-	if scenario != "completed" && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
+	if scenario != "completed" && !initialNoPointer && !identityCase && !modelCase && !nativeNamespace && smartMode == "" {
 		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
 		closeCtx, cancelClose := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelClose()
@@ -455,7 +487,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string) {
 	require.Equal(t, 1, tools.verifications)
 	a, err := accounts.GetByID(context.Background(), 1)
 	require.NoError(t, err)
-	require.False(t, a.Schedulable)
+	require.False(t, a.IsSchedulable())
 	oracle.mu.Lock()
 	defer oracle.mu.Unlock()
 	expectedIdentities := []string{"Bearer fixture-readable-ws-A", "Bearer fixture-readable-ws-B", "Bearer fixture-readable-ws-B"}

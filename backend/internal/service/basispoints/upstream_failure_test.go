@@ -18,6 +18,7 @@ func TestUpstreamFailureClassificationBoundaries(t *testing.T) {
 		status int
 		code   string
 	}{
+		{"search failure", object{"type": "response.failed", "response": object{"error": object{"code": "basispoints_search_failed", "message": "PRIVATE"}}}, 502, "basispoints_search_failed"},
 		{"flat error", object{"type": "error", "code": "rate_limit_exceeded", "message": "PRIVATE"}, 429, "rate_limit_exceeded"},
 		{"nested status", object{"type": "error", "error": object{"status": 401, "code": "PRIVATE", "type": "invalid_request_error"}}, 401, "basispoints_upstream_error"},
 		{"explicit first", object{"type": "error", "status": 429, "error": object{"status": 400, "code": "invalid_value"}}, 429, "invalid_value"},

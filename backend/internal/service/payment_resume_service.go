@@ -55,6 +55,7 @@ type ResumeTokenClaims struct {
 }
 
 type WeChatPaymentResumeClaims struct {
+	CouponID    int64  `json:"coupon_id,omitempty"`
 	TokenType   string `json:"tk,omitempty"`
 	OpenID      string `json:"openid"`
 	PaymentType string `json:"pt,omitempty"`
@@ -421,7 +422,15 @@ func (s *PaymentResumeService) CreateWeChatPaymentResumeToken(claims WeChatPayme
 	if claims.OrderType == "" {
 		claims.OrderType = payment.OrderTypeBalance
 	}
+	if claims.CouponID < 0 {
+		return "", fmt.Errorf("invalid coupon identity")
+	}
 	claims.TokenType = wechatPaymentResumeTokenType
+	// Older binaries reject this type instead of silently charging without
+	// the selected benefit when a pending flow spans an application rollback.
+	if claims.CouponID > 0 {
+		claims.TokenType = wechatPaymentResumeTokenType + "_coupon"
+	}
 	return s.createSignedToken(claims)
 }
 
@@ -433,7 +442,11 @@ func (s *PaymentResumeService) ParseWeChatPaymentResumeToken(token string) (*WeC
 	if err := s.parseSignedToken(token, &claims); err != nil {
 		return nil, infraerrors.BadRequest("INVALID_WECHAT_PAYMENT_RESUME_TOKEN", "wechat payment resume token payload is invalid")
 	}
-	if claims.TokenType != wechatPaymentResumeTokenType {
+	expectedType := wechatPaymentResumeTokenType
+	if claims.CouponID > 0 {
+		expectedType += "_coupon"
+	}
+	if claims.CouponID < 0 || claims.TokenType != expectedType {
 		return nil, infraerrors.BadRequest("INVALID_WECHAT_PAYMENT_RESUME_TOKEN", "wechat payment resume token type mismatch")
 	}
 	claims.OpenID = strings.TrimSpace(claims.OpenID)
