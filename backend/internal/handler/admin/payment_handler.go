@@ -1,6 +1,9 @@
 package admin
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -109,7 +112,18 @@ func (h *PaymentHandler) RetryFulfillment(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.paymentService.RetryFulfillment(c.Request.Context(), orderID); err != nil {
+	var input struct {
+		Confirm bool `json:"confirm"`
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&input)
+	if (err != nil && err != io.EOF) || (err == nil && decoder.Decode(new(any)) != io.EOF) {
+		response.Error(c, http.StatusBadRequest, "Invalid approval request")
+		return
+	}
+	if err := h.paymentService.RetryFulfillmentWithApproval(c.Request.Context(), orderID, input.Confirm); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}

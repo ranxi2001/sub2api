@@ -147,8 +147,8 @@ func channelStatusSender(t *testing.T, failAt int) (*Service, *[]channelStatusRe
 		}
 	}))
 	t.Cleanup(server.Close)
-	// A nil database proves this command does not require binding, reserve
-	// model quota, or write model history. Only monitor and QQ calls are allowed.
+	// Only the final authorization snapshot/lock is supplied below; no binding,
+	// model quota or model history queries are expected.
 	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	return s, &replies
@@ -167,16 +167,16 @@ func TestChannelStatusCommandMentionModesAndHelp(t *testing.T) {
 	for _, eventType := range []string{groupMessageCreate, groupAtMessageCreate} {
 		e := Event{Content: "/渠道状态"}
 		require.True(t, shouldQueueGroupMessage(eventType, e))
-		j := Job{EventType: eventType, GroupID: "group", MemberID: "member", MessageID: eventType, CreatedAt: time.Now()}
-		require.NoError(t, s.message(context.Background(), DefaultConfig(), &j, e))
+		j := Job{TransientReply: true, EventType: eventType, GroupID: "group", MemberID: "member", MessageID: eventType, CreatedAt: time.Now()}
+		require.NoError(t, s.message(context.Background(), expectRepairDelivery(t, s, DefaultConfig(), 1), &j, e))
 	}
 	require.Equal(t, 2, calls)
 	require.Len(t, *replies, 2)
 	require.True(t, strings.HasPrefix((*replies)[0].Content, `<qqbot-at-user id="member" />`))
 	require.NotContains(t, (*replies)[1].Content, "qqbot-at-user")
 	require.False(t, unmentionedGroupCommand(Event{Content: "<@other> /渠道状态"}))
-	j := Job{GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
-	require.NoError(t, s.message(context.Background(), DefaultConfig(), &j, Event{Content: "/帮助"}))
+	j := Job{TransientReply: true, GroupID: "group", MessageID: "help", CreatedAt: time.Now()}
+	require.NoError(t, s.message(context.Background(), expectRepairDelivery(t, s, DefaultConfig(), 1), &j, Event{Content: "/帮助"}))
 	require.Contains(t, (*replies)[2].Content, "渠道状态")
 }
 
@@ -200,8 +200,8 @@ func TestChannelStatusCommandFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s, replies := channelStatusSender(t, 0)
 			s.SetChannelStatusProvider(tt.provider)
-			j := Job{GroupID: "group", MessageID: "query", CreatedAt: time.Now()}
-			require.NoError(t, s.sendChannelStatus(context.Background(), DefaultConfig(), j, tt.arg))
+			j := Job{TransientReply: true, GroupID: "group", MessageID: "query", CreatedAt: time.Now()}
+			require.NoError(t, s.sendChannelStatus(context.Background(), expectRepairDelivery(t, s, DefaultConfig(), 1), j, tt.arg))
 			require.Len(t, *replies, 1)
 			require.Contains(t, (*replies)[0].Content, tt.want)
 			require.NotContains(t, (*replies)[0].Content, "internal database detail")
@@ -220,11 +220,11 @@ func TestChannelStatusCommandPaginationAndDeliveryFailure(t *testing.T) {
 	provider := channelStatusProviderFunc(func(context.Context) (*ChannelStatusReport, error) { return report, nil })
 	s, replies := channelStatusSender(t, 0)
 	s.SetChannelStatusProvider(provider)
-	j := Job{EventType: groupMessageCreate, GroupID: "group", MemberID: strings.Repeat("m", 128), MessageID: "query", CreatedAt: time.Now()}
+	j := Job{TransientReply: true, EventType: groupMessageCreate, GroupID: "group", MemberID: strings.Repeat("m", 128), MessageID: "query", CreatedAt: time.Now()}
 	pages := (len(chunks) + 4) / 5
 	for page := 1; page <= pages; page++ {
 		before := len(*replies)
-		require.NoError(t, s.sendChannelStatus(context.Background(), DefaultConfig(), j, strconv.Itoa(page)))
+		require.NoError(t, s.sendChannelStatus(context.Background(), expectRepairDelivery(t, s, DefaultConfig(), min(5, len(chunks)-(page-1)*5)), j, strconv.Itoa(page)))
 		batch := (*replies)[before:]
 		require.Len(t, batch, min(5, len(chunks)-(page-1)*5))
 		for i, reply := range batch {
@@ -239,6 +239,6 @@ func TestChannelStatusCommandPaginationAndDeliveryFailure(t *testing.T) {
 	require.Len(t, *replies, len(chunks))
 	s, replies = channelStatusSender(t, 2)
 	s.SetChannelStatusProvider(provider)
-	require.Error(t, s.sendChannelStatus(context.Background(), DefaultConfig(), j, ""))
+	require.Error(t, s.sendChannelStatus(context.Background(), expectRepairDelivery(t, s, DefaultConfig(), 2), j, ""))
 	require.Len(t, *replies, 2)
 }

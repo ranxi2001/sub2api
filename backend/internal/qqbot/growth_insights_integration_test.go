@@ -200,8 +200,10 @@ func TestModelPriceCommandPaginationAndBoundIdentity(t *testing.T) {
 	s.db = db
 	uid := user(t, db)
 	bind(t, db, uid, "member")
-	c := DefaultConfig()
-	c.AppID = "app"
+	savedBot(t, db) // Persist the same enabled authorization used by workers.
+	s.encryptor = testEncryptor{}
+	c, err := s.Config(context.Background())
+	require.NoError(t, err)
 	var received int64
 	s.SetModelPriceProvider(modelPriceFunc(func(_ context.Context, model string, id int64, _ time.Time) ([]string, error) {
 		require.Equal(t, "gpt-5", model)

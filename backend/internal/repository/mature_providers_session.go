@@ -11,7 +11,7 @@ import (
 // Serialize dashboard sessions and credential rotation across instances. The
 // row lock also prevents a concurrent edit from changing the destination while
 // a credential is in flight. Never use a process mutex for single-use tokens.
-func (r *channelRepository) WithMatureProviderSession(parent context.Context, id, revision int64, run func(*service.MatureProvider, string) (service.ProviderSessionUpdate, error)) (*service.MatureProvider, error) {
+func (r *channelRepository) WithMatureProviderSession(parent context.Context, id, revision int64, run func(context.Context, *service.MatureProvider, string) (service.ProviderSessionUpdate, error)) (*service.MatureProvider, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 35*time.Second)
 	defer cancel()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -30,7 +30,31 @@ func (r *channelRepository) WithMatureProviderSession(parent context.Context, id
 	if err = parent.Err(); err != nil {
 		return nil, err
 	}
-	u, operationErr := run(p, cipher)
+	// Lock acquisition consumes this transaction's lifetime too. Never start
+	// authentication with a fresh independent timeout after a long row wait:
+	// single-use refresh tokens must still have time to reach durable storage.
+	const persistenceReserve = 8 * time.Second
+	const minimumRemoteBudget = time.Second
+	txDeadline, _ := ctx.Deadline()
+	remoteDeadline := txDeadline.Add(-persistenceReserve)
+	if limit := time.Now().Add(25 * time.Second); limit.Before(remoteDeadline) {
+		remoteDeadline = limit
+	}
+	if deadline, ok := parent.Deadline(); ok && deadline.Before(remoteDeadline) {
+		remoteDeadline = deadline
+	}
+	if time.Until(remoteDeadline) < minimumRemoteBudget {
+		return nil, context.DeadlineExceeded
+	}
+	operationCtx, stop := context.WithDeadline(parent, remoteDeadline)
+	defer stop()
+	u, operationErr := run(operationCtx, p, cipher)
+	// Finish remote work before using the reserved, cancellation-independent
+	// transaction budget. A cancelled caller must not strand a rotated token.
+	if operationErr == nil {
+		operationErr = operationCtx.Err()
+	}
+	stop()
 	if u.Cipher == nil && u.Metrics == nil && u.Status == "" {
 		return p, operationErr
 	}

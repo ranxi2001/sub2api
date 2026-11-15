@@ -72,7 +72,7 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	// A nil database proves fixed replies need neither binding nor AI usage checks.
+	// Only final delivery authorization is permitted; no binding or AI usage checks.
 	s := newMatureFixtureService(nil, nil, false, nil)
 	s.qqURL, s.tokenURL = server.URL, server.URL+"/token"
 	c := DefaultConfig()
@@ -105,8 +105,11 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := Event{Content: tt.content, GroupID: "group", Mentions: tt.mentions}
 			e.Author.MemberID = "member"
-			j := Job{EventType: tt.eventType, GroupID: "group", MemberID: "member", MessageID: tt.name, CreatedAt: time.Now()}
+			j := Job{TransientReply: true, EventType: tt.eventType, GroupID: "group", MemberID: "member", MessageID: tt.name, CreatedAt: time.Now()}
 			before := len(replies)
+			if tt.wantReply != "" {
+				c = expectRepairDelivery(t, s, c, 1)
+			}
 			require.NoError(t, s.message(context.Background(), c, &j, e))
 			if tt.wantReply == "" {
 				require.Len(t, replies, before)
@@ -125,7 +128,8 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 		require.False(t, shouldQueueGroupMessage(eventType, e, c.CustomCommands...))
 	}
 	before := len(replies)
-	j := Job{EventType: groupAtMessageCreate, GroupID: "group", MessageID: "long", CreatedAt: time.Now()}
+	j := Job{TransientReply: true, EventType: groupAtMessageCreate, GroupID: "group", MessageID: "long", CreatedAt: time.Now()}
+	c = expectRepairDelivery(t, s, c, 2)
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/长回复"}))
 	require.Equal(t, c.CustomCommands[2].Reply, strings.Join(replies[before:], ""))
 	require.Len(t, replies[before:], 2)
@@ -134,11 +138,13 @@ func TestCustomCommandRepliesAndMessageFiltering(t *testing.T) {
 	// in a previous QQ message. Only the final prose break is normalized.
 	before = len(replies)
 	j.MessageID = "code"
+	c = expectRepairDelivery(t, s, c, len(splitReply(normalizeReplyLineBreaks(c.CustomCommands[3].Reply), 5)))
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/代码"}))
 	require.Equal(t, strings.ReplaceAll(c.CustomCommands[3].Reply, "正文<br>下一行", "正文\n下一行"), strings.Join(replies[before:], ""))
 
 	j.MessageID = "help"
 	before = len(replies)
+	c = expectRepairDelivery(t, s, c, 1)
 	require.NoError(t, s.message(context.Background(), c, &j, Event{Content: "/帮助"}))
 	help := strings.Join(replies[before:], "")
 	require.Contains(t, help, "- **a**：自定义回复")

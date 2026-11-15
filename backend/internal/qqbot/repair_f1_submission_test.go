@@ -46,7 +46,12 @@ func TestRepairF1SubmittedGenerationIsNotReplayed(t *testing.T) {
 						<-release // The full POST was accepted before headers time out.
 						return
 					}
-					conn, _, err := w.(http.Hijacker).Hijack()
+					hijacker, ok := w.(http.Hijacker)
+					if !ok {
+						t.Error("F1 fixture does not support hijacking")
+						return
+					}
+					conn, _, err := hijacker.Hijack()
 					if err != nil {
 						t.Errorf("F1 fixture hijack: %v", err)
 						return

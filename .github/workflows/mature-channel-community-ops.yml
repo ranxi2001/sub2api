@@ -434,13 +434,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          target=backend/internal/handler/admin/mature_provider_keys.go
-          cp "$target" "$RUNNER_TEMP/mature-keys-current.go"
-          trap 'cp "$RUNNER_TEMP/mature-keys-current.go" "$target"' EXIT
-          git fetch --no-tags --depth=1 origin 407eea6822cd27a1772f41ff75615bc50592d941
-          git show 407eea6822cd27a1772f41ff75615bc50592d941:"$target" > "$target"
+          baseline=407eea6822cd27a1772f41ff75615bc50592d941
+          session_baseline=ae7598867c9a9138f5f36ed7a67bc2fa97e48bad
+          red_tree="$RUNNER_TEMP/mature-key-persistence-red"
+          evidence="$RUNNER_TEMP/mature-key-persistence-evidence"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$evidence/candidate.txt"
+          sha256sum backend/internal/server/routes/mature_providers_keys_postgres_test.go > "$evidence/test-sha256.txt"
+          git fetch --no-tags --depth=1 origin "$baseline" "$session_baseline"
+          git worktree add --detach "$red_tree" '${{ github.sha }}'
+          # Keep the target handler byte-identical to its defective source.
+          # Its pre-budget callback needs the matching interface, repository
+          # and refresh caller; ae759 retains the later pending-key contract.
+          for target in backend/internal/handler/admin/mature_provider_keys.go backend/internal/service/mature_providers.go backend/internal/repository/mature_providers_session.go backend/internal/handler/admin/mature_provider_connection.go; do
+            source="$session_baseline"
+            if [ "$target" = backend/internal/handler/admin/mature_provider_keys.go ]; then source="$baseline"; fi
+            git show "$source:$target" > "$red_tree/$target"
+            blob=$(git rev-parse "$source:$target")
+            test "$(git hash-object "$red_tree/$target")" = "$blob"
+            printf '%s %s %s\n' "$source" "$target" "$blob" >> "$evidence/production-blobs.txt"
+          done
+          cmp backend/internal/server/routes/mature_providers_keys_postgres_test.go "$red_tree/backend/internal/server/routes/mature_providers_keys_postgres_test.go"
           set +e
-          (cd backend && go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersKeyCreationIdempotency/persistence_failure$' -count=1 -v) > "$RUNNER_TEMP/mature-key-persistence-red.log" 2>&1
+          (cd "$red_tree/backend" && go test -tags=integration ./internal/server/routes -run '^TestMatureProvidersKeyCreationIdempotency/persistence_failure$' -count=1 -v) > "$RUNNER_TEMP/mature-key-persistence-red.log" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/mature-key-persistence-red.log"
@@ -451,11 +469,15 @@ jobs:
         if: always()
         with:
           name: mature-key-persistence-red-${{ github.sha }}
-          path: ${{ runner.temp }}/mature-key-persistence-red.log
+          path: |
+            ${{ runner.temp }}/mature-key-persistence-red.log
+            ${{ runner.temp }}/mature-key-persistence-evidence/
       - name: Candidate business HTTP assertions
         working-directory: backend
         run: |
           set -o pipefail
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          test -z "$(git status --porcelain)"
           go test -tags=integration ./internal/server/routes -run '^TestMature' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/mature-http.log"
       - uses: actions/upload-artifact@v7
         if: always()

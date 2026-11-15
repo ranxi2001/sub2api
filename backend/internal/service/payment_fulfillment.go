@@ -1001,7 +1001,14 @@ func (s *PaymentService) markFailed(ctx context.Context, oid int64, lease *payme
 	}
 }
 
+// RetryFulfillment is the explicit internal administrator approval entry.
 func (s *PaymentService) RetryFulfillment(ctx context.Context, oid int64) error {
+	return s.RetryFulfillmentWithApproval(ctx, oid, true)
+}
+
+// HTTP callers must supply the user's explicit consent. Evaluate the marker
+// from the freshly loaded order, not a potentially stale handler-side lookup.
+func (s *PaymentService) RetryFulfillmentWithApproval(ctx context.Context, oid int64, confirmed bool) error {
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return infraerrors.NotFound("NOT_FOUND", "order not found")
@@ -1016,13 +1023,17 @@ func (s *PaymentService) RetryFulfillment(ctx context.Context, oid int64) error 
 		return infraerrors.BadRequest("INVALID_STATUS", "order already completed")
 	}
 	recoveryReview, _ := o.ProviderSnapshot["coupon_review_required"].(bool)
-	if o.Status != OrderStatusFailed && o.Status != OrderStatusPaid && o.Status != OrderStatusRecharging && !(recoveryReview && (o.Status == OrderStatusCancelled || o.Status == OrderStatusExpired)) {
+	reviewableHold := recoveryReview && (o.Status == OrderStatusCancelled || o.Status == OrderStatusExpired)
+	if o.Status != OrderStatusFailed && o.Status != OrderStatusPaid && o.Status != OrderStatusRecharging && !reviewableHold {
 		return infraerrors.BadRequest("INVALID_STATUS", "only paid, failed, and recoverable recharging orders can retry")
 	}
 	if !isSupportedPaymentOrderType(o.OrderType) {
 		return infraerrors.BadRequest("INVALID_ORDER_TYPE", "unsupported order type")
 	}
 	if review, _ := o.ProviderSnapshot["coupon_review_required"].(bool); review {
+		if !confirmed {
+			return infraerrors.BadRequest("COUPON_REVIEW_CONFIRMATION_REQUIRED", "Explicit administrator confirmation is required for this paid coupon hold")
+		}
 		tx, e := s.entClient.Tx(ctx)
 		if e != nil {
 			return e

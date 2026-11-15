@@ -22,12 +22,12 @@ func (h *AccountHandler) SetMatureProviderCatalog(catalog *ChannelHandler) {
 	h.providerCatalog = catalog
 }
 
-func (h *ChannelHandler) withMatureProviderSession(ctx context.Context, id, revision int64, run func(*providerSession) error) error {
+func (h *ChannelHandler) withMatureProviderSession(ctx context.Context, id, revision int64, run func(context.Context, *providerSession) error) error {
 	r, err := h.channelService.MatureProviderRepository()
 	if err != nil {
 		return err
 	}
-	_, err = r.WithMatureProviderSession(ctx, id, revision, func(p *service.MatureProvider, cipher string) (service.ProviderSessionUpdate, error) {
+	_, err = r.WithMatureProviderSession(ctx, id, revision, func(operationCtx context.Context, p *service.MatureProvider, cipher string) (service.ProviderSessionUpdate, error) {
 		u := service.ProviderSessionUpdate{}
 		if h.providerEncryptor == nil || cipher == "" {
 			return u, errProviderStoredLogin
@@ -42,9 +42,9 @@ func (h *ChannelHandler) withMatureProviderSession(ctx context.Context, id, revi
 		}
 		defer client.CloseIdleConnections()
 		session := &providerSession{record: providerProtocolRecord(p), secret: secret, remote: providerRemote{client: client, base: p.BaseURL}}
-		e = session.authenticate(ctx)
+		e = session.authenticate(operationCtx)
 		if e == nil {
-			e = run(session)
+			e = run(operationCtx, session)
 		}
 		if session.rotated != "" {
 			rotated, encryptErr := h.providerEncryptor.Encrypt(session.rotated)
@@ -70,7 +70,7 @@ func (h *ChannelHandler) MatureProviderKeys(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 25*time.Second)
 	defer cancel()
 	keys := []providerKeyView{}
-	err = h.withMatureProviderSession(ctx, id, 0, func(s *providerSession) error { var e error; keys, e = s.listKeys(ctx); return e })
+	err = h.withMatureProviderSession(ctx, id, 0, func(ctx context.Context, s *providerSession) error { var e error; keys, e = s.listKeys(ctx); return e })
 	if err != nil {
 		response.ErrorFrom(c, providerKeyError(err))
 		return
@@ -88,7 +88,11 @@ func (h *ChannelHandler) MatureProviderGroups(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 25*time.Second)
 	defer cancel()
 	groups := []providerGroupView{}
-	err = h.withMatureProviderSession(ctx, id, 0, func(s *providerSession) error { var e error; groups, e = s.listGroups(ctx); return e })
+	err = h.withMatureProviderSession(ctx, id, 0, func(ctx context.Context, s *providerSession) error {
+		var e error
+		groups, e = s.listGroups(ctx)
+		return e
+	})
 	if err != nil {
 		response.ErrorFrom(c, providerKeyError(err))
 		return
@@ -139,7 +143,7 @@ func (h *ChannelHandler) CreateMatureProviderKey(c *gin.Context) {
 	defer cancel()
 	var created providerCreatedKey
 	attempted := false
-	err = h.withMatureProviderSession(ctx, id, in.Revision, func(s *providerSession) error {
+	err = h.withMatureProviderSession(ctx, id, in.Revision, func(ctx context.Context, s *providerSession) error {
 		groups, e := s.listGroups(ctx)
 		if e != nil {
 			return e
@@ -183,7 +187,7 @@ func (h *ChannelHandler) resolveMatureProviderKey(ctx context.Context, id int64,
 		return nil, nil, service.ErrMatureProviderValidation
 	}
 	var credentials, provenance map[string]any
-	err := h.withMatureProviderSession(ctx, id, 0, func(s *providerSession) error {
+	err := h.withMatureProviderSession(ctx, id, 0, func(ctx context.Context, s *providerSession) error {
 		key, e := s.resolveKey(ctx, keyID)
 		if e != nil {
 			return e
