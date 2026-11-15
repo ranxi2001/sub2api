@@ -43,5 +43,6 @@ done < <(git -C "$tree" ls-files \
   'backend/internal/service/openai_excel_bps_search_test.go' \
   'backend/internal/server/routes/mature_*_test.go' \
   'backend/internal/server/routes/repair_r1_payment_review_test.go' \
+  'backend/internal/server/routes/repair_provider_session_budget_test.go' \
   'backend/internal/repository/mature_provider_import_integration_test.go' \
   'backend/internal/repository/repair_mature_upgrade_test.go')
