@@ -110,6 +110,12 @@ func TestOpenAI409WSReviewRepairs(t *testing.T) {
 	})
 }
 
+// Keep this new proof boundary separate from the historical review RED suite:
+// that suite pins an older implementation without tool provenance.
+func TestOpenAI409WSCrossModelProofRefused(t *testing.T) {
+	runReadableWSContinuation(t, service.OpenAIWSIngressModeHTTPBridge, "bridge_model_cross_scope")
+}
+
 func TestOpenAI409WSResidualRepairs(t *testing.T) {
 	for _, scenario := range []string{"header_apikey", "header_oauth", "tools_omitted", "tools_explicit"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -164,6 +170,20 @@ func logReadableWSDispatchFailure(t *testing.T, h *openAIWSPassthroughHandlerHar
 	require.Equal(t, peerClose.Reason, serverClose.Reason())
 	require.NotNil(t, errors.Unwrap(serverClose), "dispatch refusal must retain its underlying cause")
 	t.Logf("actual B dispatch error: %v; client close: %v", reported, clientErr)
+}
+
+func logReadableWSRecoveryDetails(t *testing.T, h *openAIWSPassthroughHandlerHarness) {
+	t.Helper()
+	for _, entry := range h.requestLogs.FilterMessage("openai.agent_recovery_refused").All() {
+		fields := entry.ContextMap()
+		details := make(map[string]any)
+		for _, key := range []string{"subreason", "phase", "turn", "request_written", "shadow_lookup", "shadow_epoch", "owner_observation", "owner_total", "owner_completed", "owner_pending", "owner_failed", "owner_conflicted", "owner_unknown", "tool_calls", "tool_results", "tool_pairs", "tool_unpaired", "tool_duplicate", "tool_incomplete"} {
+			if value, ok := fields[key]; ok {
+				details[key] = value
+			}
+		}
+		t.Logf("current-turn recovery metadata: %v", details)
+	}
 }
 
 func TestOpenAI409WSInitialWithoutPointer(t *testing.T) {
@@ -226,7 +246,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 	}
 	initialNoPointer := strings.HasPrefix(scenario, "initial_no_pointer_")
 	var initialUnavailableUntil time.Time
-	identityCase, modelCase := scenario == "identity" || strings.HasPrefix(scenario, "header_"), scenario == "bridge_model"
+	identityCase, modelCase := scenario == "identity" || strings.HasPrefix(scenario, "header_"), strings.HasPrefix(scenario, "bridge_model")
 	customTools := strings.HasPrefix(scenario, "tools_")
 	nativeNamespace := scenario == "native_namespace"
 	smartMode := ""
@@ -313,6 +333,14 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 		}
 		return httpRebuildJSON(body)
 	}
+	if scenario == "bridge_model" {
+		// Select M1, then earn the actual task/tool provenance on M2. The
+		// later omitted model must inherit M2, never the socket's initial M1.
+		issue715WSSend(t, h.clientConn, create([]string{httpRebuildMessage("user", "model-switch-warmup")}, ""))
+		warmup := issue715WSRead(t, h.clientConn)
+		require.Contains(t, string(warmup), "model-switch-complete")
+		requestModel = "gpt-5.4"
+	}
 	history := []string{httpRebuildMessage("user", httpRebuildTask)}
 	if scenario == "no_intent" {
 		history = nil
@@ -373,15 +401,16 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 	previous := first.Get("id").String()
 	extraSends := 0
 	if modelCase {
-		// Establish M2 through the real transport, then omit model. In this
-		// bridge, BeforeTurn and final HTTP send are the two authoritative
-		// admission reads. Only the second read observes administrative disable.
-		requestModel = "gpt-5.4"
-		issue715WSSend(t, h.clientConn, create([]string{httpRebuildMessage("user", "model-switch-warmup")}, ""))
-		warmup := gjson.GetBytes(issue715WSRead(t, h.clientConn), "response")
-		require.Equal(t, "completed", warmup.Get("status").String())
-		require.Contains(t, warmup.Raw, "model-switch-complete")
-		previous = warmup.Get("id").String()
+		if scenario == "bridge_model_cross_scope" {
+			// A genuine M1 call still cannot authorize an M2 replay. Preserve
+			// this former positive scenario as an explicit safety boundary.
+			requestModel = "gpt-5.4"
+			issue715WSSend(t, h.clientConn, create([]string{httpRebuildMessage("user", "model-switch-warmup")}, ""))
+			warmup := gjson.GetBytes(issue715WSRead(t, h.clientConn), "response")
+			require.Equal(t, "completed", warmup.Get("status").String())
+			require.Contains(t, warmup.Raw, "model-switch-complete")
+			previous = warmup.Get("id").String()
+		}
 		requestModel, extraSends = "", 1
 		accounts.mu.Lock()
 		accounts.disableAdmission = 2
@@ -498,6 +527,18 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
+	if scenario == "bridge_model_cross_scope" {
+		require.NoError(t, readErr)
+		require.Equal(t, "error", gjson.GetBytes(secondRaw, "type").String())
+		require.Equal(t, "encrypted_agent_recovery_owner_conflict", gjson.GetBytes(secondRaw, "error.code").String())
+		require.Equal(t, 2, sends, "cross-model proof must fail before B dispatch")
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		for key, raw := range owners {
+			require.Equal(t, raw, issue805Owners(t, probe)[key])
+		}
+		return
+	}
 	if r1Reject {
 		require.NoError(t, readErr, "R1 refusal must be a structured business error")
 		require.Equal(t, "error", gjson.GetBytes(secondRaw, "type").String())
@@ -621,7 +662,27 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 		require.Equal(t, 2, sends)
 		logReadableWSDispatchFailure(t, h, readErr)
 	}
+	if sends != 2+extraSends {
+		logReadableWSRecoveryDetails(t, h)
+	}
 	require.Equal(t, 2+extraSends, sends, "WS_READABLE_B_DISPATCH_MISSING: same client must automatically replace disabled A before any next generation; close=%v terminal=%s", readErr, secondRaw)
+	if strings.HasPrefix(scenario, "header_") {
+		// Assert the header defect on B's first actual send. A historical
+		// baseline must not reach a later, independent history representation
+		// check before the original header-leak oracle can observe its cause.
+		oracle.mu.Lock()
+		firstB := oracle.headers[1].Clone()
+		firstA := oracle.headers[0].Clone()
+		oracle.mu.Unlock()
+		require.NotEqual(t, headers.Get("conversation_id"), firstB.Get("conversation_id"), "WS_RESIDUAL_A_HEADER_LEAK: only outbound provider state is detached")
+		require.Empty(t, firstB.Get("x-codex-turn-state"), "WS_RESIDUAL_A_HEADER_LEAK: retained A state must not reach B")
+		if scenario == "header_oauth" {
+			require.NotEmpty(t, firstB.Get("session_id"))
+			require.NotEqual(t, headers.Get("session_id"), firstB.Get("session_id"))
+			require.Equal(t, firstB.Get("session_id"), firstB.Get("conversation_id"), "WS_RESIDUAL_A_HEADER_LEAK: B conversation must use B's isolated session")
+			require.NotEqual(t, firstA.Get("session_id"), firstB.Get("session_id"))
+		}
+	}
 	if modelCase {
 		accounts.mu.Lock()
 		observed := append([]bool(nil), accounts.admissionObserved...)

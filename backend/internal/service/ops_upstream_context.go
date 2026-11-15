@@ -183,6 +183,7 @@ func IsOpsRequestScopedError(c *gin.Context) bool {
 // OpsRecoveryFailure is trusted local compatibility evidence, never populated
 // from an upstream error envelope or client metadata.
 type OpsRecoveryFailure struct {
+	Subreason      string // fixed internal allowlist; not supplied by the client
 	Protocol       string
 	Phase          string
 	RequestWritten *bool // nil means no proof of whether the generation was sent

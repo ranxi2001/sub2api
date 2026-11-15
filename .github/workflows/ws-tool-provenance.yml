@@ -1,0 +1,125 @@
+name: WS tool provenance F1
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - backend/internal/handler/openai*go
+      - backend/internal/service/openai*go
+      - .github/workflows/ws-tool-provenance.yml
+      - .github/scripts/ws-owner-conflict-evidence.py
+      - .github/scripts/ws-tool-provenance-evidence.py
+      - backend/internal/repository/gateway_cache_tool_provenance.go
+
+permissions:
+  contents: read
+
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      BASELINE: 18aef10f71a6a68372a124f2684ecb18024318bb
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Real handler RED against exact production blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          mkdir -p "$RUNNER_TEMP/ws-provenance-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/ws-provenance-evidence/candidate.txt"
+          git worktree add --detach "$RUNNER_TEMP/ws-provenance-red" "$CANDIDATE"
+          git diff --name-only "$BASELINE" "$CANDIDATE" -- backend | while IFS= read -r target; do
+            case "$target" in
+              *_test.go) continue ;;
+              *.go)
+                if git cat-file -e "$BASELINE:$target" 2>/dev/null; then
+                  git show "$BASELINE:$target" > "$RUNNER_TEMP/ws-provenance-red/$target"
+                  test "$(git hash-object "$RUNNER_TEMP/ws-provenance-red/$target")" = "$(git rev-parse "$BASELINE:$target")"
+                  printf '%s %s\n' "$(git rev-parse "$BASELINE:$target")" "$target" >> "$RUNNER_TEMP/ws-provenance-evidence/baseline-blobs.txt"
+                else
+                  rm -- "$RUNNER_TEMP/ws-provenance-red/$target"
+                fi ;;
+            esac
+          done
+          bash .github/scripts/prepare-free-fast-red-fixtures.sh "$BASELINE" "$RUNNER_TEMP/ws-provenance-red" "$CANDIDATE"
+          set +e
+          (cd "$RUNNER_TEMP/ws-provenance-red/backend" && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenance$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-provenance-evidence/red.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-provenance-evidence/red.jsonl"
+          test "$status" -eq 1
+          python3 .github/scripts/ws-tool-provenance-evidence.py RED "$status" "$RUNNER_TEMP/ws-provenance-evidence/red.jsonl"
+      - name: Candidate provenance GREEN
+        if: hashFiles('backend/internal/service/openai_tool_provenance.go') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          set +e
+          (cd backend && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenance$' -count=1 -json -timeout=3m) > "$RUNNER_TEMP/ws-provenance-evidence/first-green.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-provenance-evidence/first-green.jsonl"
+          python3 .github/scripts/ws-tool-provenance-evidence.py GREEN "$status" "$RUNNER_TEMP/ws-provenance-evidence/first-green.jsonl"
+          set +e
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenance$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl"
+          python3 .github/scripts/ws-tool-provenance-evidence.py GREEN "$status" "$RUNNER_TEMP/ws-provenance-evidence/green.jsonl"
+      - name: Genuine delivery, mutations and task association
+        if: hashFiles('backend/internal/service/openai_tool_provenance.go') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenanceCases$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/cases.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-provenance-evidence/cases.jsonl"
+          python3 - "$RUNNER_TEMP/ws-provenance-evidence/cases.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          for kind in ('function','custom'):
+              for case in ('valid','id','type','name','args','epoch','unrelated','undelivered','proof_pending','proof_failed','proof_conflict','proof_missing'):
+                  name=f'TestOpenAIWSMixedOwnerToolProvenanceCases/{kind}/{case}'
+                  assert sum(r.get('Action')=='pass' and r.get('Test')==name for r in rows)==1,name
+          assert not any(r.get('Action') in ('fail','skip') for r in rows)
+          PY
+      - name: Shadow provenance and delivery lifecycle
+        if: hashFiles('backend/internal/service/openai_tool_provenance.go') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSShadowToolProvenance$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/shadow.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-provenance-evidence/shadow.jsonl"
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/service -run '^Test(OpenAIToolProvenanceDeliveryAndScope|OpenAIWSMixedOwnerFinalSendFences)$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-provenance-evidence/delivery.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-provenance-evidence/delivery.jsonl"
+          python3 - "$RUNNER_TEMP/ws-provenance-evidence" <<'PY'
+          import json,sys,pathlib
+          root=pathlib.Path(sys.argv[1])
+          for filename,tests in [('shadow.jsonl',{f'TestOpenAIWSShadowToolProvenance/{kind}/{case}' for kind in ('function','custom') for case in ('valid','phantom','epoch')}),('delivery.jsonl',{'TestOpenAIToolProvenanceDeliveryAndScope','TestOpenAIWSMixedOwnerFinalSendFences'})]:
+              rows=[json.loads(line) for line in (root/filename).read_text().splitlines() if line.startswith('{')]
+              for name in tests: assert sum(r.get('Action')=='pass' and r.get('Test')==name for r in rows)==1,name
+              assert not any(r.get('Action') in ('fail','skip') for r in rows)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-tool-provenance-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/ws-provenance-evidence

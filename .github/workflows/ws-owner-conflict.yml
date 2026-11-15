@@ -1,0 +1,114 @@
+name: WS owner conflict behavior
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - backend/internal/handler/openai*go
+      - backend/internal/service/openai*go
+      - .github/workflows/ws-owner-conflict.yml
+      - .github/scripts/ws-owner-conflict-evidence.py
+      - .github/scripts/test_ws_owner_conflict_evidence.py
+
+permissions:
+  contents: read
+
+jobs:
+  behavior:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      BASELINE: 0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          if ! command -v redis-server >/dev/null; then brew install redis; fi
+      - name: Real handler RED against exact production blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          mkdir -p "$RUNNER_TEMP/ws-owner-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/ws-owner-evidence/candidate.txt"
+          git worktree add --detach "$RUNNER_TEMP/ws-owner-red" "$CANDIDATE"
+          git diff --name-only "$BASELINE" "$CANDIDATE" -- backend | while IFS= read -r target; do
+            case "$target" in
+              *_test.go) continue ;;
+              *.go)
+                if git cat-file -e "$BASELINE:$target" 2>/dev/null; then
+                  git show "$BASELINE:$target" > "$RUNNER_TEMP/ws-owner-red/$target"
+                  test "$(git hash-object "$RUNNER_TEMP/ws-owner-red/$target")" = "$(git rev-parse "$BASELINE:$target")"
+                  printf '%s %s\n' "$(git rev-parse "$BASELINE:$target")" "$target" >> "$RUNNER_TEMP/ws-owner-evidence/baseline-blobs.txt"
+                else
+                  rm -- "$RUNNER_TEMP/ws-owner-red/$target"
+                fi ;;
+            esac
+          done
+          bash .github/scripts/prepare-free-fast-red-fixtures.sh "$BASELINE" "$RUNNER_TEMP/ws-owner-red" "$CANDIDATE"
+          set +e
+          (cd "$RUNNER_TEMP/ws-owner-red/backend" && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerContinuation$/turn_2$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-owner-evidence/red.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-owner-evidence/red.jsonl"
+          test "$status" -eq 1
+          python3 .github/scripts/ws-owner-conflict-evidence.py red "$status" "$RUNNER_TEMP/ws-owner-evidence/red.jsonl"
+      - name: Candidate GREEN after production repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          python3 -m unittest discover -s .github/scripts -p 'test_ws_owner_conflict_evidence.py'
+          set +e
+          (cd backend && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerContinuation$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-owner-evidence/first-green.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-owner-evidence/first-green.jsonl"
+          python3 .github/scripts/ws-owner-conflict-evidence.py continuation "$status" "$RUNNER_TEMP/ws-owner-evidence/first-green.jsonl"
+          for suite in continuation boundaries transports; do
+            case "$suite" in
+              continuation) test_name=TestOpenAIWSMixedOwnerContinuation ;;
+              boundaries) test_name=TestOpenAIWSMixedOwnerBoundaries ;;
+              transports) test_name=TestOpenAIWSMixedOwnerTransports ;;
+            esac
+            set +e
+            (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run "^${test_name}$" -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-owner-evidence/green-$suite.jsonl" 2>&1
+            status=$?
+            set -e
+            cat "$RUNNER_TEMP/ws-owner-evidence/green-$suite.jsonl"
+            python3 .github/scripts/ws-owner-conflict-evidence.py "$suite" "$status" "$RUNNER_TEMP/ws-owner-evidence/green-$suite.jsonl"
+          done
+      - name: Existing policy, shadow and actual-wire contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^Test(OpenAI409(WSReadableContinuation|WSReadableBoundaries|WSCrossModelProofRefused|WSReviewRepairs|WSResidualRepairs|WSNativeNamespaceRecovery|WSRecoveredAudit|WSRecoveredAuditNextTurn|WSAmbiguousOracleMutations|FutureShadowPublicationFences|FutureShadowBoundaries|FutureShadowTaskAssociation|FutureShadowAuditProvenance)|OpenAIWSRevalidation|OpenAIResponsesWebSocketRevalidatesKeyWithoutCache|OpenAIWSKeyQueueAdmissionUsesCurrentTurnPermissions|OpenAIWSTurnPricing|Issue600ClientIdentityNetwork)' -count=1 -json -timeout=10m) > "$RUNNER_TEMP/ws-owner-evidence/contracts.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-owner-evidence/contracts.jsonl"
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/service -run '^Test(OpenAIWSMixedOwner|OpenAIRecovery(Diagnostics|ShadowRefusalDiagnostics|ShadowRetainsTaskBeforeOpaqueEnvelope|ShadowDoesNotReclassifyClientMetadataText)|OpenAI409(RebuildRechecksOriginalDeliveryBeforeSend|WSUnsentTurnBoundary|WSTicket|ReplayInputTamperingStillFails|OAuthReplayKeepsOriginalSnapshotAndFinalControls)|Issue854BeforeSendRecoveryGuards|Issue715WS)' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/ws-owner-evidence/service-contracts.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-owner-evidence/service-contracts.jsonl"
+          python3 - "$RUNNER_TEMP/ws-owner-evidence/service-contracts.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          for test in ('TestOpenAIWSMixedOwnerFinalSendFences', 'TestOpenAIWSMixedOwnerProofCannotComeFromDiagnostics', 'TestOpenAIRecoveryDiagnosticsAreAllowlisted', 'TestOpenAIRecoveryShadowRefusalDiagnostics', 'TestOpenAIRecoveryShadowRetainsTaskBeforeOpaqueEnvelope', 'TestOpenAIRecoveryShadowDoesNotReclassifyClientMetadataText'):
+              assert sum(r.get('Action') == 'pass' and r.get('Test') == test for r in rows) == 1, test
+          PY
+      - name: Persist safe refusal subtype with logical turn
+        working-directory: backend
+        run: go test -race -tags=unit,ownerdiagnostics ./internal/handler -run '^TestOwnerConflictPersistence' -count=1 -v -timeout=5m
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-owner-conflict-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/ws-owner-evidence

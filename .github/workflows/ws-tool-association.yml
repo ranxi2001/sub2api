@@ -1,0 +1,64 @@
+name: WS completed tool association
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - backend/internal/handler/openai_ws_owner_conflict_test.go
+      - backend/internal/service/openai_ws_readable_continuation.go
+      - .github/workflows/ws-tool-association.yml
+      - .github/scripts/ws-tool-association-evidence.py
+permissions:
+  contents: read
+jobs:
+  association:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis
+        run: |
+          if ! command -v redis-server >/dev/null; then sudo apt-get update && sudo apt-get install -y redis-server; fi
+      - name: Freeze candidate and exact pre-repair projection
+        env:
+          CANDIDATE: ${{ github.event.pull_request.head.sha }}
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          mkdir -p "$RUNNER_TEMP/association"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/association/candidate.txt"
+          if [ "$PHASE" = RED ]; then
+            baseline=cc1a9e80223695684ad54ab0e9cf4f27c7991bf2
+            path=backend/internal/service/openai_ws_readable_continuation.go
+            git show "$baseline:$path" > "$path"
+            test "$(git hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+            git rev-parse "$baseline:$path" > "$RUNNER_TEMP/association/baseline-blob.txt"
+          fi
+      - name: Verify actual transmitted call/result association
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolAssociation$' -count=1 -json -timeout=10m) > "$RUNNER_TEMP/association/result.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/association/result.jsonl"
+          python3 .github/scripts/ws-tool-association-evidence.py "$PHASE" "$status" "$RUNNER_TEMP/association/result.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-tool-association-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/association

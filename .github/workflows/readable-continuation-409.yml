@@ -117,6 +117,7 @@ jobs:
           actual=$(git hash-object "$target")
           test "$actual" = "$expected"
           echo "$target defect_source=$baseline defect_blob=absent compatibility=$compatibility candidate=$candidate_blob expected=$expected actual=$actual" >> "$RUNNER_TEMP/readable-RED-provenance.txt"
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-ws-owner-red-fixtures.sh" "$baseline" . HEAD | tee "$RUNNER_TEMP/readable-ws-owner-red-blobs.txt"
       - name: Same HTTP JSON and SSE behavior in both checkouts
         env:
           PHASE: ${{ matrix.phase }}

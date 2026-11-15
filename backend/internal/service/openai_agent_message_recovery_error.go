@@ -11,8 +11,9 @@ var errOpenAIAgentRecoveryUnavailable = errors.New("encrypted agent continuation
 // OpenAIAgentRecoveryError is a local compatibility refusal, not a failure of
 // the entire account pool. Reasons contain no route IDs, credentials or input.
 type OpenAIAgentRecoveryError struct {
-	Reason  string
-	RetryAt time.Time
+	diagnostic *openAIRecoveryDiagnostics
+	Reason     string
+	RetryAt    time.Time
 }
 
 func (e *OpenAIAgentRecoveryError) Error() string { return e.ClientMessage() }
@@ -90,3 +91,11 @@ type openAINonStreamingDeliveryError struct{ err error }
 
 func (e *openAINonStreamingDeliveryError) Error() string { return e.err.Error() }
 func (e *openAINonStreamingDeliveryError) Unwrap() error { return e.err }
+
+// InternalSubreason exposes only a fixed diagnostic category for persistence.
+func (e *OpenAIAgentRecoveryError) InternalSubreason() string {
+	if e == nil || e.diagnostic == nil {
+		return "unknown"
+	}
+	return safeOpenAIRecoverySubreason(e.diagnostic.subreason)
+}

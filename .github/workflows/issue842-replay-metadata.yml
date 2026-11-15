@@ -84,6 +84,7 @@ jobs:
           echo "$target baseline=absent actual=absent" >> "$RUNNER_TEMP/issue842/red-blobs.txt"
           target=backend/internal/handler/openai_issue842_replay_test.go
           test "$(git hash-object "$target")" = "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")"
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-ws-owner-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue842/ws-owner-red-blobs.txt"
           git diff --stat > "$RUNNER_TEMP/issue842/red-diff.txt"
           set +e
           (cd backend && go test -json -tags=unit ./internal/handler -run '^TestIssue842(HTTP|WS)ReplayMetadata$' -count=1 -timeout=5m) > "$RUNNER_TEMP/issue842/red.jsonl" 2>&1
@@ -127,6 +128,7 @@ jobs:
             echo "$target expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue842/oauth-red-blobs.txt"
             test "$expected" = "$actual"
           done
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-ws-owner-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue842/ws-owner-oauth-red-blobs.txt"
           for target in backend/internal/handler/openai_issue842_oauth_repair_test.go backend/internal/service/issue842_gateway_test_support.go; do
             test "$(git hash-object "$target")" = "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")"
           done

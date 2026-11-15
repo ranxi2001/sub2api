@@ -55,7 +55,7 @@ jobs:
             callers=d1bd861bcfa34443a629db98de9121a4e15d1d0b
           fi
           for source in "$compatibility" "$callers"; do git fetch --no-tags --depth=1 origin "$source"; done
-          for target in backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_gateway_request_body.go backend/internal/service/openai_ws_agent_recovery.go; do
+          for target in backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_gateway_request_body.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_readable_continuation.go; do
             source="$callers"
             if [ "$target" = backend/internal/service/openai_agent_replay_metadata.go ]; then source="$compatibility"; fi
             expected=$(git rev-parse "$source:$target")
@@ -63,6 +63,7 @@ jobs:
             test "$(git hash-object "$target")" = "$expected"
             echo "$target compatibility=$source blob=$expected" >> "$RUNNER_TEMP/dispatch-compatibility.txt"
           done
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-ws-owner-red-fixtures.sh" "$baseline" . HEAD | tee "$RUNNER_TEMP/dispatch-ws-owner-red-blobs.txt"
       - name: Same network and tool-loop regressions
         env:
           PHASE: ${{ matrix.phase }}

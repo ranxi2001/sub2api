@@ -79,6 +79,7 @@ jobs:
           actual=$(git hash-object "$target")
           test "$actual" = "$expected"
           echo "$target defect_source=$callers defect_blob=absent compatibility=$compatibility candidate=$candidate_blob expected=$expected actual=$actual" >> "$RUNNER_TEMP/omit-history-red-compat.txt"
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-ws-owner-red-fixtures.sh" "$callers" . HEAD | tee "$RUNNER_TEMP/omit-history-ws-owner-red-blobs.txt"
           target=backend/internal/service/openai_409_omit_history.go
           git show "$baseline:$target" > "$target"
           test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"

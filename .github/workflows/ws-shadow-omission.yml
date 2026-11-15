@@ -1,0 +1,95 @@
+name: WS shadow omission intent
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - backend/internal/service/openai_409_readable_shadow.go
+      - backend/internal/service/openai_409_shadow_candidate_test.go
+      - backend/internal/handler/openai_409_ws_audit_test.go
+      - .github/workflows/ws-shadow-omission.yml
+      - .github/scripts/shadow-omission-evidence.py
+      - .github/scripts/test_shadow_omission_evidence.py
+
+permissions:
+  contents: read
+
+jobs:
+  shadow-intent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOMAXPROCS: '2'
+      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      BASELINE: bd82493722f2f5c52659e73cb4fc11dc65bc51ba
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Isolated Redis and evidence parser
+        run: |
+          set -euo pipefail
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          python3 -m unittest discover -s .github/scripts -p 'test_shadow_omission_evidence.py'
+      - name: Original handler assertions RED on exact bd824 shadow production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          mkdir -p "$RUNNER_TEMP/shadow-omission-evidence"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/shadow-omission-evidence/candidate.txt"
+          # The actual audit and NextTurn fixture/expectations are unchanged.
+          fixture=backend/internal/handler/openai_409_ws_audit_test.go
+          test "$(git hash-object "$fixture")" = "$(git rev-parse "$BASELINE:$fixture")"
+          git rev-parse "$CANDIDATE:$fixture" > "$RUNNER_TEMP/shadow-omission-evidence/unchanged-handler-test.txt"
+          git worktree add --detach "$RUNNER_TEMP/shadow-omission-red" "$CANDIDATE"
+          target=backend/internal/service/openai_409_readable_shadow.go
+          git show "$BASELINE:$target" > "$RUNNER_TEMP/shadow-omission-red/$target"
+          test "$(git hash-object "$RUNNER_TEMP/shadow-omission-red/$target")" = "$(git rev-parse "$BASELINE:$target")"
+          git rev-parse "$BASELINE" "$BASELINE:$target" > "$RUNNER_TEMP/shadow-omission-evidence/baseline.txt"
+          set +e
+          (cd "$RUNNER_TEMP/shadow-omission-red/backend" && go test -p=1 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAI409WSRecoveredAudit(NextTurn)?$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/shadow-omission-evidence/red.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/shadow-omission-evidence/red.jsonl"
+          python3 .github/scripts/shadow-omission-evidence.py RED "$status" "$RUNNER_TEMP/shadow-omission-evidence/red.jsonl"
+      - name: Same original handler assertions GREEN on clean candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          set +e
+          (cd backend && go test -race -p=1 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAI409WSRecoveredAudit(NextTurn)?$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/shadow-omission-evidence/green.jsonl" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/shadow-omission-evidence/green.jsonl"
+          python3 .github/scripts/shadow-omission-evidence.py GREEN "$status" "$RUNNER_TEMP/shadow-omission-evidence/green.jsonl"
+      - name: Typed source and supplied-text boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -p=1 -tags=unit,ownerconflict ./internal/service -run '^TestOpenAIRecoveryShadow(RetainsTaskBeforeOpaqueEnvelope|RetainsTaskBeforeOpaqueEnvelopeAndSummary|DoesNotReclassifyClientMetadataText|TypedEnvelopeOmission|PreservesSuppliedText|PreservesSummaryOnlyIntent|SummaryIntentBoundaries)$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/shadow-omission-evidence/source-boundaries.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/shadow-omission-evidence/source-boundaries.jsonl"
+          python3 - "$RUNNER_TEMP/shadow-omission-evidence/source-boundaries.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          for name in ('RetainsTaskBeforeOpaqueEnvelope','RetainsTaskBeforeOpaqueEnvelopeAndSummary','DoesNotReclassifyClientMetadataText','TypedEnvelopeOmission','PreservesSuppliedText','PreservesSummaryOnlyIntent','SummaryIntentBoundaries'):
+              assert sum(row.get('Action')=='pass' and row.get('Test')=='TestOpenAIRecoveryShadow'+name for row in rows)==1,name
+          assert not any(row.get('Action') in ('skip','fail') for row in rows)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-shadow-omission-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/shadow-omission-evidence

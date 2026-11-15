@@ -120,7 +120,10 @@ func runRecoveredWSAudit(t *testing.T, mode, policy string, allowRecovery bool) 
 		output := recoveredWSAuditAgent
 		id := "resp_audit_A"
 		if r.Header.Get("Authorization") == "Bearer fixture-audit-A" {
-			writesA.Add(1)
+			if writesA.Add(1) == 1 {
+				output = strings.ReplaceAll(recoveredWSAuditAgent, "exact-task", "call-source") + `,{"type":"function_call","name":"inspect","call_id":"call_audit_done","arguments":"{}"}`
+				id = "resp_audit_call_source"
+			}
 		} else {
 			writesB.Add(1)
 			bBodyMu.Lock()
@@ -212,7 +215,17 @@ func runRecoveredWSAudit(t *testing.T, mode, policy string, allowRecovery bool) 
 	create := func(input string) string {
 		return fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","client_metadata":{"thread_id":"fixture-audit-thread"},"tools":[{"type":"function","name":"inspect","parameters":{"type":"object","properties":{}}}],"input":%s}`, input)
 	}
-	initial := fmt.Sprintf(`[{"role":"user","content":%q},{"type":"function_call","name":"inspect","call_id":"call_audit_done","arguments":"{}"},{"type":"function_call_output","call_id":"call_audit_done","output":"completed-audit-result"}]`, recoveredWSAuditCanary)
+	// Establish the actual provider call and successful downstream delivery
+	// before the client reports its completed result; opaque ownership alone
+	// cannot authenticate a hand-built pair.
+	issue715WSSend(t, h.clientConn, create(fmt.Sprintf(`[{"role":"user","content":%q}]`, recoveredWSAuditCanary)))
+	issued := issue715WSRead(t, h.clientConn)
+	require.Equal(t, "response.completed", gjson.GetBytes(issued, "type").String())
+	call := gjson.GetBytes(issued, "response.output.1")
+	require.Equal(t, "function_call", call.Get("type").String())
+	require.Equal(t, "inspect", call.Get("name").String())
+	require.Equal(t, "{}", call.Get("arguments").String())
+	initial := fmt.Sprintf(`[{"role":"user","content":%q},%s,%s,{"type":"function_call_output","call_id":"call_audit_done","output":"completed-audit-result"}]`, recoveredWSAuditCanary, gjson.GetBytes(issued, "response.output.0").Raw, call.Raw)
 	issue715WSSend(t, h.clientConn, create(initial))
 	first := issue715WSRead(t, h.clientConn)
 	require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
@@ -226,7 +239,7 @@ func runRecoveredWSAudit(t *testing.T, mode, policy string, allowRecovery bool) 
 		return err == nil && strings.Contains(raw, recoveredWSAuditCanary) && strings.Contains(raw, "completed-audit-result")
 	}, 3*time.Second, 5*time.Millisecond, "A must really deliver and commit the exact readable task before disable")
 	owners := issue805Owners(t, probe)
-	require.Len(t, owners, 1)
+	require.Len(t, owners, 2)
 	store.mu.Lock()
 	store.records = nil
 	store.mu.Unlock()
@@ -236,6 +249,9 @@ func runRecoveredWSAudit(t *testing.T, mode, policy string, allowRecovery bool) 
 	require.NotContains(t, opaque, recoveredWSAuditCanary)
 	issue715WSSend(t, h.clientConn, opaque)
 	terminal := issue715WSRead(t, h.clientConn)
+	if strings.HasPrefix(gjson.GetBytes(terminal, "error.code").String(), "encrypted_agent_recovery_") {
+		logReadableWSRecoveryDetails(t, h)
+	}
 	if allowRecovery {
 		require.Equal(t, "response.completed", gjson.GetBytes(terminal, "type").String(), string(terminal))
 		require.Equal(t, int32(1), writesB.Load())
@@ -270,7 +286,7 @@ func runRecoveredWSAudit(t *testing.T, mode, policy string, allowRecovery bool) 
 	case <-ctx.Done():
 		t.Fatal("missing final identity")
 	}
-	require.Equal(t, int32(1), writesA.Load())
+	require.Equal(t, int32(2), writesA.Load())
 	expectedB := int32(0)
 	if allowRecovery {
 		expectedB = 1

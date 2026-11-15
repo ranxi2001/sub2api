@@ -69,7 +69,9 @@ func (r *openAIAgentRecoveryRequest) shadowEpochKey(item [32]byte) string {
 // The first supported future case is one exact opaque agent task with no new
 // client intent or unpaired tool work. Existing readable requests never consult
 // shadow. A miss/error leaves ordinary routing/refusal intact, never invents text.
-func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, c *gin.Context, body []byte, session string) (context.Context, []byte) {
+func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, c *gin.Context, body []byte, session string) (restoredCtx context.Context, restoredBody []byte) {
+	state := openAIRecoveryShadowState{lookup: "not_consulted", epoch: "not_checked"}
+	defer func() { restoredCtx = context.WithValue(restoredCtx, openAIRecoveryShadowStateKey{}, state) }()
 	if s == nil || s.settingService == nil || openAI409HasReadableIntent(body) ||
 		isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c) ||
 		!utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
@@ -102,15 +104,18 @@ func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, 
 		return ctx, body
 	}
 	var epoch string
+	state.lookup, state.epoch = "miss", "unknown"
 	for {
 		var err error
 		epoch, err = epochs.GetOpenAIAgentRecoveryEpoch(storeCtx, r.shadowPrincipal()+":"+task)
 		if err != nil {
+			state.lookup = "unavailable"
 			return ctx, body
 		}
 		if !strings.HasPrefix(epoch, "pending:") {
 			break
 		}
+		state.epoch = "pending"
 		timer := time.NewTimer(5 * time.Millisecond)
 		select {
 		case <-storeCtx.Done():
@@ -120,12 +125,27 @@ func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, 
 		}
 	}
 	if !strings.HasPrefix(epoch, "ready:pending:") {
+		state.epoch = "not_ready"
+		if epoch == "" {
+			state.epoch = "missing"
+		}
+		if strings.HasPrefix(epoch, "pending:") {
+			state.epoch = "pending"
+		}
 		return ctx, body
 	}
+	state.epoch = "ready"
 	raw, err := store.GetOpenAIReadableShadow(storeCtx, r.shadowPrincipal(), task)
 	if err != nil || raw == "" || len(raw) > OpenAIReadableShadowMaxBytes {
+		if err != nil {
+			state.lookup = "unavailable"
+		}
+		if len(raw) > OpenAIReadableShadowMaxBytes {
+			state.lookup = "invalid"
+		}
 		return ctx, body
 	}
+	state.lookup = "invalid"
 	var record openAIReadableShadow
 	if json.Unmarshal([]byte(raw), &record) != nil || record.Version != 2 || record.Scope != task || epoch != "ready:"+record.Epoch ||
 		len(record.Fences) == 0 || len(record.Fences) > 64 || !gjson.ParseBytes(record.Input).IsArray() ||
@@ -154,8 +174,10 @@ func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, 
 	}
 	observation := &openAIReadableShadowObservation{principal: r.shadowPrincipal(), task: task, raw: raw, epoch: epoch, fences: record.Fences}
 	if s.checkOpenAIReadableShadowObservation(storeCtx, observation) != nil {
+		state.lookup, state.epoch = "changed", "unknown"
 		return ctx, body
 	}
+	state.lookup = "hit"
 	return context.WithValue(WithRecoveredContextPrivacy(ctx), openAIReadableShadowContextKey{}, observation), clean
 }
 
@@ -166,20 +188,23 @@ func (s *OpenAIGatewayService) checkOpenAIReadableShadowObservation(ctx context.
 	store, ok := s.cache.(OpenAIReadableShadowCache)
 	epochs, hasEpoch := s.cache.(OpenAIAgentRecoveryEpochCache)
 	if !ok || !hasEpoch {
-		return openAIAgentRecoveryError("store_unavailable")
+		return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	raw, err := store.GetOpenAIReadableShadow(ctx, observation.principal, observation.task)
 	if err != nil {
-		return openAIAgentRecoveryError("store_unavailable")
+		return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 	}
 	epoch, err := epochs.GetOpenAIAgentRecoveryEpoch(ctx, observation.principal+":"+observation.task)
 	if err != nil {
-		return openAIAgentRecoveryError("store_unavailable")
+		return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 	}
-	if raw != observation.raw || epoch != observation.epoch {
-		return openAIAgentRecoveryError("owner_conflict")
+	if epoch != observation.epoch {
+		return openAIRecoveryDiagnosticError("owner_conflict", "shadow_epoch_changed", &openAIAgentRecoveryRequest{diagnostics: openAIRecoveryDiagnostics{shadow: openAIRecoveryShadowState{lookup: "hit", epoch: "changed"}}})
+	}
+	if raw != observation.raw {
+		return openAIRecoveryDiagnosticError("owner_conflict", "shadow_record_changed", &openAIAgentRecoveryRequest{diagnostics: openAIRecoveryDiagnostics{shadow: openAIRecoveryShadowState{lookup: "changed", epoch: "ready"}}})
 	}
 	return s.checkOpenAIReadableShadowFences(ctx, observation.fences)
 }
@@ -190,21 +215,21 @@ func (s *OpenAIGatewayService) checkOpenAIReadableShadowFences(ctx context.Conte
 	}
 	store, ok := s.cache.(OpenAIAgentRecoveryCache)
 	if !ok {
-		return openAIAgentRecoveryError("store_unavailable")
+		return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	for key, expected := range fences {
 		binding, found, err := decodeOpenAIAgentRecoveryBinding(expected)
 		if err != nil || !found || binding.pending != "" || binding.failed || binding.conflicted {
-			return openAIAgentRecoveryError("owner_conflict")
+			return openAIRecoveryDiagnosticError("owner_conflict", "shadow_fence_invalid", nil)
 		}
 		actual, err := store.GetOpenAIAgentRecovery(ctx, key)
 		if err != nil {
-			return openAIAgentRecoveryError("store_unavailable")
+			return openAIRecoveryDiagnosticError("store_unavailable", "shadow_store_unavailable", nil)
 		}
 		if actual != expected {
-			return openAIAgentRecoveryError("owner_conflict")
+			return openAIRecoveryDiagnosticError("owner_conflict", "shadow_fence_changed", nil)
 		}
 	}
 	return nil
@@ -222,11 +247,100 @@ func openAIReadableShadowCandidate(body []byte) *openAIReadableShadow {
 		value, _ := json.Marshal([]any{map[string]any{"type": "message", "role": "user", "content": input.String()}})
 		clean, _ = sjson.SetRawBytes(clean, "input", value)
 	}
+	// Inspect the original typed envelopes before omission turns them into
+	// ordinary user messages. An envelope with no supplied readable content
+	// contributes only gateway attribution/omission notices, not a newer task.
+	// Its identity still belongs to the original request's owner/epoch fences.
+	// Never identify generated messages by text: clients can supply that text.
+	items := gjson.GetBytes(clean, "input").Array()
+	portable := make([]json.RawMessage, 0, len(items))
+	independent := make([]json.RawMessage, 0, len(items))
+	removed := false
+	for _, item := range items {
+		if item.Get("type").String() != "agent_message" {
+			independent = append(independent, json.RawMessage(item.Raw))
+		}
+		if item.Get("type").String() == "agent_message" &&
+			openAIReadableShadowAgentTextEmpty(item.Get("content")) &&
+			openAIReadableShadowAgentTextEmpty(item.Get("summary")) {
+			removed = true
+			continue
+		}
+		portable = append(portable, json.RawMessage(item.Raw))
+	}
+	if removed {
+		encoded, err := json.Marshal(portable)
+		if err != nil {
+			return nil
+		}
+		clean, err = sjson.SetRawBytes(clean, "input", encoded)
+		if err != nil {
+			return nil
+		}
+	}
+	// A readable agent summary can itself be the authorized intent. Only
+	// classify retained envelopes as assistant history when the original
+	// non-agent input/instructions supplies intent independently. This uses
+	// the unchanged latest-user rules, including opaque-user boundaries.
+	encoded, err := json.Marshal(independent)
+	if err != nil {
+		return nil
+	}
+	independentBody, err := sjson.SetRawBytes(clean, "input", encoded)
+	if err != nil {
+		return nil
+	}
+	hasIndependentIntent := openAI409HasReadableIntent(independentBody)
+	originalItems := gjson.GetBytes(clean, "input").Array()
 	if omitted, changed := omitOpenAIHistoricalCiphertext(clean); changed {
 		clean = omitted
 	}
-	var err error
 	clean, err = prepareOpenAI409ReadableReplay(clean)
+	if err != nil {
+		return nil
+	}
+	// Ciphertext omission renders an agent envelope as a metadata-only user
+	// message. It is not a newer user task: retaining it as the last user in a
+	// shadow hides the preceding genuine intent when the snapshot is restored.
+	// Retain its readable metadata as assistant context; ownership/epoch fences
+	// retain the envelope's identity. Dropping it would lose summaries/content.
+	portable = portable[:0]
+	items = gjson.GetBytes(clean, "input").Array()
+	for i, item := range items {
+		raw := []byte(item.Raw)
+		// Provenance is the original typed envelope, not a text prefix that a
+		// caller could also use in a genuine new user message.
+		if hasIndependentIntent && i < len(originalItems) && originalItems[i].Get("type").String() == "agent_message" {
+			if len(items) != len(originalItems) || item.Get("type").String() != "message" ||
+				!strings.HasPrefix(item.Get("content.0.text").String(), "Historical agent context (not a new instruction): ") {
+				return nil
+			}
+			var message map[string]any
+			if decodeOpenAIJSONUseNumber(raw, &message) != nil {
+				return nil
+			}
+			message["role"] = "assistant"
+			parts, ok := message["content"].([]any)
+			if !ok {
+				return nil
+			}
+			for _, value := range parts {
+				if part, ok := value.(map[string]any); ok && part["type"] == "input_text" {
+					part["type"] = "output_text"
+				}
+			}
+			raw, err = json.Marshal(message)
+			if err != nil {
+				return nil
+			}
+		}
+		portable = append(portable, raw)
+	}
+	encoded, err = json.Marshal(portable)
+	if err != nil {
+		return nil
+	}
+	clean, err = sjson.SetRawBytes(clean, "input", encoded)
 	if err != nil {
 		return nil
 	}
@@ -281,6 +395,34 @@ func openAIReadableShadowCandidate(body []byte) *openAIReadableShadow {
 		record.Instructions = json.RawMessage(instructions.Raw)
 	}
 	return record
+}
+
+// Only absence, blank text, and typed encrypted parts establish that an agent
+// envelope has no readable contribution. Retain unknown representations and
+// literal prefix/marker lookalikes for the existing projection/validation path.
+func openAIReadableShadowAgentTextEmpty(value gjson.Result) bool {
+	if !value.Exists() || value.Type == gjson.Null {
+		return true
+	}
+	if value.Type == gjson.String {
+		return strings.TrimSpace(value.String()) == ""
+	}
+	if !value.IsArray() {
+		return false
+	}
+	for _, part := range value.Array() {
+		if part.Get("type").String() == "encrypted_content" {
+			continue
+		}
+		switch part.Get("type").String() {
+		case "input_text", "output_text", "text", "summary_text":
+			if part.Get("text").Type == gjson.String && strings.TrimSpace(part.Get("text").String()) == "" {
+				continue
+			}
+		}
+		return false
+	}
+	return true
 }
 
 func openAIReadableShadowTextOnly(content gjson.Result) bool {
