@@ -181,3 +181,56 @@ func TestTransformClaudeToGemini_IdentitySystemBlock(t *testing.T) {
 	}
 	require.Equal(t, userText, got.Request.Contents[0].Parts[0].Text)
 }
+
+// Claude Code's default system prompt carries a fixed security-policy line. The
+// Google upstream answers 429 RESOURCE_EXHAUSTED when it reaches the system
+// instruction, so it is removed from system text only.
+func TestTransformClaudeToGemini_StripsClaudeCodeSecurityPolicy(t *testing.T) {
+	const policy = "IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases."
+	body := " You are an agent working with the user toward their goals.\n" + policy + "\n# Harness\n - Keep this line."
+	system := []SystemBlock{
+		{Type: "text", Text: "x-anthropic-billing-header: cc_version=2.1.321.97f; cc_entrypoint=sdk-cli;"},
+		{Type: "text", Text: "You are a Claude agent, built on Anthropic's Claude Agent SDK."},
+		{Type: "text", Text: body},
+	}
+	systemJSON, err := json.Marshal(system)
+	require.NoError(t, err)
+	userJSON, err := json.Marshal("Explain this line: " + policy)
+	require.NoError(t, err)
+	input := &ClaudeRequest{
+		Model: "gemini-3.8-flash-high", System: systemJSON,
+		Messages: []ClaudeMessage{{Role: "user", Content: userJSON}},
+		Tools: []ClaudeTool{{Name: "example", Description: policy,
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}}}},
+	}
+	out, err := TransformClaudeToGeminiWithOptions(input, "test-project", input.Model, TransformOptions{})
+	require.NoError(t, err)
+	var got V1InternalRequest
+	require.NoError(t, json.Unmarshal(out, &got))
+	var texts []string
+	for _, part := range got.Request.SystemInstruction.Parts {
+		if part.Text != "\n--- [SYSTEM_PROMPT_END] ---" {
+			texts = append(texts, part.Text)
+		}
+	}
+	require.Equal(t, []string{"You are an AI agent.", " You are an agent working with the user toward their goals.\n# Harness\n - Keep this line."}, texts)
+	require.Equal(t, "Explain this line: "+policy, got.Request.Contents[0].Parts[0].Text)
+	require.Equal(t, policy, got.Request.Tools[0].FunctionDeclarations[0].Description)
+}
+
+func TestStripClaudeCodeSecurityPolicy(t *testing.T) {
+	const policy = "IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges."
+	tests := []struct{ name, text, want string }{
+		{"string form", policy, ""},
+		{"middle line", "A\n" + policy + "\nB", "A\nB"},
+		{"CRLF", "A\r\n" + policy + "\r\nB", "A\r\nB"},
+		{"indented", "A\n  " + policy + "\nB", "A\nB"},
+		{"mentioned mid-line", "Quote: " + policy, "Quote: " + policy},
+		{"ordinary text", "Keep these instructions.", "Keep these instructions."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, stripClaudeCodeSecurityPolicy(tt.text))
+		})
+	}
+}
