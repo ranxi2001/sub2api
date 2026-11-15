@@ -95,7 +95,7 @@ jobs:
           import json,sys
           rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
           for kind in ('function','custom'):
-              for case in ('valid','id','type','name','args','epoch','unrelated','undelivered'):
+              for case in ('valid','id','type','name','args','epoch','unrelated','undelivered','proof_pending','proof_failed','proof_conflict','proof_missing'):
                   name=f'TestOpenAIWSMixedOwnerToolProvenanceCases/{kind}/{case}'
                   assert sum(r.get('Action')=='pass' and r.get('Test')==name for r in rows)==1,name
           assert not any(r.get('Action') in ('fail','skip') for r in rows)

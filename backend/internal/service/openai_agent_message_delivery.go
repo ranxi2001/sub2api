@@ -50,7 +50,9 @@ func newOpenAIAgentRecoveryDelivery(s *OpenAIGatewayService, ctx context.Context
 	var anchors map[string]openAIToolAnchor
 	valid := false
 	if enabled {
-		anchors, valid = s.toolInputAnchors(ctx, r)
+		storeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		anchors, valid = s.toolInputAnchors(storeCtx, r)
+		cancel()
 	}
 	return &openAIAgentRecoveryDelivery{toolEnabled: enabled, toolAnchors: anchors, toolAnchorsValid: valid, service: s, ctx: ctx, request: r, binding: b, pending: "pending:" + uuid.NewString() + ":" + encodeOpenAIAgentRecoveryBinding(b), keys: make(map[[32]byte]bool), epochs: make(map[string]bool)}
 }

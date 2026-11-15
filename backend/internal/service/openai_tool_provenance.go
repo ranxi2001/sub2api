@@ -225,6 +225,9 @@ func (s *OpenAIGatewayService) toolInputAnchors(ctx context.Context, r *openAIAg
 			anchor := openAIToolAnchor{Owner: encodeOpenAIAgentRecoveryBinding(binding)}
 			for i, k := range source.keys {
 				if k == key {
+					if i >= len(source.items) {
+						return nil, false
+					}
 					anchor.EpochKey = source.shadowEpochKey(source.items[i])
 					break
 				}
@@ -303,6 +306,8 @@ func (d *openAIAgentRecoveryDelivery) observeTools(body []byte, nested bool) {
 	if d.tools == nil {
 		d.tools = make(map[string]openAIToolObservation)
 	}
+	storeCtx, cancel := context.WithTimeout(d.ctx, 3*time.Second)
+	defer cancel()
 	path := "output"
 	if nested {
 		path = "response.output"
@@ -339,7 +344,7 @@ func (d *openAIAgentRecoveryDelivery) observeTools(body []byte, nested bool) {
 		}
 		old, exists := d.tools[key]
 		if !exists {
-			if d.service.toolProofReserve(d.ctx, key, d.pending) != nil {
+			if d.service.toolProofReserve(storeCtx, key, d.pending) != nil {
 				d.toolInvalid = true
 			}
 		}
