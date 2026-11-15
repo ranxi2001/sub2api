@@ -121,9 +121,10 @@ func TestIssue842OAuthProjectionRejectsChangedSourceOrWire(t *testing.T) {
 			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
 			body := []byte(strings.ReplaceAll(strings.ReplaceAll(issue842Source, `,"status":"completed"`, ""), `"store":false,`, ""))
 			ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, body, "fixture-session", "gpt-6-astra")
-			if mutation == "source_input" {
+			switch mutation {
+			case "source_input":
 				body = bytes.Replace(body, []byte("keep task842"), []byte("changed task842"), 1)
-			} else if mutation == "source_controls" {
+			case "source_controls":
 				var err error
 				body, err = sjson.SetBytes(body, "instructions", "unapproved instruction842")
 				require.NoError(t, err)

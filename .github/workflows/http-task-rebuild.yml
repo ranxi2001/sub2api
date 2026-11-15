@@ -24,6 +24,7 @@ on:
       - '.github/scripts/mutate-http-rebuild-owner-scan.py'
       - '.github/scripts/assert-readable-continuation.py'
       - '.github/scripts/prepare-moderation-red-fixtures.sh'
+      - '.github/scripts/prepare-replay-red-fixtures.sh'
       - '.github/workflows/http-task-rebuild.yml'
 
 permissions:
@@ -117,6 +118,7 @@ jobs:
           if [ "$PHASE" = RED ]; then
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$BASELINE_SHA"
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
+            bash "$GITHUB_WORKSPACE/.github/scripts/prepare-replay-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/http-task-evidence/replay-fixtures.txt"
             bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/http-task-evidence/moderation-fixtures.txt"
           fi
           for target in backend/internal/handler/openai_409_http_rebuild_test.go backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do
@@ -218,6 +220,7 @@ jobs:
           git diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-400-red-fixtures.sh" "$REVIEW_BASELINE"
           bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$REVIEW_BASELINE"
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-replay-red-fixtures.sh" "$REVIEW_BASELINE" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/http-review-red-evidence/replay-fixtures.txt"
           bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$REVIEW_BASELINE" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/http-review-red-evidence/moderation-fixtures.txt"
           for suite in pointer-waiver normalization; do
             test_name=TestOpenAI409HTTPUnownedPointerMustDetach

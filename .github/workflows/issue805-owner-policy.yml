@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/**'
       - '.github/scripts/prepare-moderation-red-fixtures.sh'
+      - '.github/scripts/prepare-replay-red-fixtures.sh'
       - '.github/workflows/issue805-owner-policy.yml'
   workflow_dispatch:
 
@@ -95,6 +96,7 @@ jobs:
           done
           # The pinned HTTP2 exclusion helper above already handles the handler
           # fixture absent from this baseline; do not remove it a second time.
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-replay-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/replay-fixtures.txt"
           bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/moderation-fixtures.txt"
           # The selected regression and its shared harness must remain exact
           # candidate blobs. The clean GREEN checkout retains all new tests.
