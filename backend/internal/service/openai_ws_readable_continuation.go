@@ -111,8 +111,8 @@ func WithOpenAIWSUnsentOwnerProof(ctx context.Context, err error) context.Contex
 }
 
 // Keep completed results as data in a new provider conversation. Historical
-// callable records and arguments are unnecessary there; current declarations
-// remain available for genuinely new tool work. Pairing is checked before loss.
+// call type, identity and original arguments stay paired with each result as
+// inert JSON text. Current declarations remain available for new tool work.
 func projectOpenAIWSCompletedTools(body []byte) ([]byte, error) {
 	if !openAIWSCompletedToolInputs(body) {
 		return nil, openAIAgentRecoveryError("owner_conflict")
@@ -136,7 +136,7 @@ func projectOpenAIWSCompletedTools(body []byte) ([]byte, error) {
 			if !openAIReadableShadowTextOnly(output) {
 				return nil, openAIAgentRecoveryError("readable_history_unsupported")
 			}
-			record, err := json.Marshal(map[string]any{"name": calls[item.Get("call_id").String()].Get("name").String(), "output": json.RawMessage(output.Raw)})
+			record, err := json.Marshal(map[string]json.RawMessage{"call": json.RawMessage(calls[item.Get("call_id").String()].Raw), "result": json.RawMessage(item.Raw)})
 			if err != nil {
 				return nil, openAIAgentRecoveryError("readable_history_unsupported")
 			}

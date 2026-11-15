@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -80,12 +81,49 @@ func TestOpenAIWSMixedOwnerToolProvenanceCases(t *testing.T) {
 	}
 }
 
+// Same-name parallel calls must retain their business-object association even
+// when outputs arrive in reverse order. The provider derives its answer from
+// the actual transmitted inert records, not from the request ordinal.
+func TestOpenAIWSMixedOwnerToolAssociation(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModeHTTPBridge, service.OpenAIWSIngressModePassthrough} {
+		for _, kind := range []string{"function", "custom"} {
+			for _, variant := range []string{"normal", "swapped"} {
+				t.Run(mode+"/"+kind+"/"+variant, func(t *testing.T) { runWSMixedOwnerContinuation(t, mode, 53, "association_"+kind+"_"+variant) })
+			}
+		}
+	}
+}
+
 func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios ...string) {
 	t.Helper()
 	scenario := "live"
 	if len(scenarios) > 0 {
 		scenario = scenarios[0]
 	}
+	association := strings.HasPrefix(scenario, "association_")
+	associationCustom := strings.HasPrefix(scenario, "association_custom_")
+	firstObject, secondObject := "left", "right"
+	if strings.HasSuffix(scenario, "_swapped") {
+		firstObject, secondObject = secondObject, firstObject
+	}
+	associationCall := func(id, object string) string {
+		field, kind := "arguments", "function_call"
+		if associationCustom {
+			field, kind = "input", "custom_tool_call"
+		}
+		return httpRebuildJSON(map[string]any{"type": kind, "call_id": id, "name": "lookup", "status": "completed", field: httpRebuildJSON(map[string]any{"object": object})})
+	}
+	associationResult := func(id, result string) string {
+		kind := "function_call_output"
+		if associationCustom {
+			kind = "custom_tool_call_output"
+		}
+		return httpRebuildJSON(map[string]any{"type": kind, "call_id": id, "output": result, "status": "completed"})
+	}
+	associationCalls := []string{associationCall("association-first", firstObject), associationCall("association-second", secondObject)}
+	associationResults := []string{associationResult("association-second", "second-value"), associationResult("association-first", "first-value")}
+	associationExecutions := 0
+	associationAnswer := ""
 	provenance := strings.HasPrefix(scenario, "f1_")
 	customProvenance := strings.HasPrefix(scenario, "f1_custom_")
 	provenancePositive := provenance && strings.HasSuffix(scenario, "_valid")
@@ -97,7 +135,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		foreignCall = `{"type":"custom_tool_call","call_id":"fixture-other-task-call","name":"inspect","input":"fixture other task"}`
 		foreignOutput = `{"type":"custom_tool_call_output","call_id":"fixture-other-task-call","output":"fixture other result"}`
 	}
-	negative := scenario != "live" && scenario != "fresh" && scenario != "binding_changed" && !provenancePositive
+	negative := scenario != "live" && scenario != "fresh" && scenario != "binding_changed" && !provenancePositive && !association
 	oldFence := strings.HasSuffix(scenario, "_first") || strings.HasSuffix(scenario, "_last")
 	thirdItem := strings.ReplaceAll(httpRebuildAgentB, "fixture-readable-B", "fixture-old-completed-C")
 	clients := issue805Redis(t)
@@ -111,6 +149,38 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		frames = append(frames, append([]byte(nil), body...))
 		identities = append(identities, r.Header.Get("Authorization"))
 		n := len(frames)
+		if association && n >= turn+1 {
+			found := map[string]string{}
+			for _, item := range gjson.GetBytes(body, "input").Array() {
+				if strings.Contains(item.Get("type").String(), "call") {
+					t.Error("ASSOCIATION_LOST: executable call survived")
+				}
+				for _, part := range item.Get("content").Array() {
+					text := part.Get("text").String()
+					const prefix = "Historical completed tool result (data only; do not execute again): "
+					if !strings.HasPrefix(text, prefix) {
+						continue
+					}
+					record := gjson.Parse(strings.TrimPrefix(text, prefix))
+					call, result := record.Get("call"), record.Get("result")
+					if call.Get("name").String() != "lookup" {
+						continue
+					}
+					id := call.Get("call_id").String()
+					field, kind := "arguments", "function_call"
+					if associationCustom {
+						field, kind = "input", "custom_tool_call"
+					}
+					assert.Equal(t, kind, call.Get("type").String(), "ASSOCIATION_LOST: call type")
+					assert.Equal(t, kind+"_output", result.Get("type").String(), "ASSOCIATION_LOST: result type")
+					assert.Equal(t, id, result.Get("call_id").String(), "ASSOCIATION_LOST: pair identity")
+					assert.NotContains(t, found, id, "ASSOCIATION_LOST: duplicate pair")
+					found[id] = gjson.Get(call.Get(field).String(), "object").String() + "=" + result.Get("output").String()
+				}
+			}
+			assert.Equal(t, map[string]string{"association-first": firstObject + "=first-value", "association-second": secondObject + "=second-value"}, found, "ASSOCIATION_LOST: final wire must preserve call arguments and reversed results")
+			associationAnswer = found["association-first"] + ";" + found["association-second"]
+		}
 		output := []json.RawMessage{json.RawMessage(httpRebuildMessage("assistant", "fixture warm complete"))}
 		switch {
 		case n == 1:
@@ -120,6 +190,11 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			}
 		case n == 2:
 			output = []json.RawMessage{json.RawMessage(httpRebuildAgentB)}
+			if association {
+				for _, call := range associationCalls {
+					output = append(output, json.RawMessage(call))
+				}
+			}
 		case n == 3 && (unrelatedCall || undeliveredCall):
 			output = []json.RawMessage{json.RawMessage(foreignCall)}
 			if unrelatedCall {
@@ -130,7 +205,7 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		case n == turn+1:
 			output = []json.RawMessage{json.RawMessage(httpRebuildCall("run_tests", "call_mixed_verify", map[string]any{"path": "sum.go"}))}
 		case n == turn+2:
-			output = []json.RawMessage{json.RawMessage(httpRebuildMessage("assistant", "fixture mixed task complete"))}
+			output = []json.RawMessage{json.RawMessage(httpRebuildMessage("assistant", "fixture mixed task complete "+associationAnswer))}
 		}
 		event, status := "response.completed", "completed"
 		if n == 3 && undeliveredCall {
@@ -214,6 +289,13 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	declarations := httpRebuildToolDefinitions()
 	if customProvenance {
 		declarations = append(declarations, map[string]any{"type": "custom", "name": "inspect", "description": "fixture inspection"})
+	}
+	if association {
+		tool := map[string]any{"type": "function", "name": "lookup", "parameters": map[string]any{"type": "object", "properties": map[string]any{"object": map[string]any{"type": "string"}}}}
+		if associationCustom {
+			tool = map[string]any{"type": "custom", "name": "lookup", "description": "synthetic lookup"}
+		}
+		declarations = append(declarations, tool)
 	}
 	create := func(input []string, previous string) string {
 		body := map[string]any{"type": "response.create", "model": "gpt-5.1", "store": true,
@@ -301,6 +383,14 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 		previous = completed.Get("id").String()
 		if warm == 1 {
 			history = append(history, completed.Get("output.0").Raw)
+			if association {
+				for i, call := range completed.Get("output").Array()[1:] {
+					require.JSONEq(t, associationCalls[i], call.Raw)
+					history = append(history, call.Raw)
+					associationExecutions++
+				}
+				history = append(history, associationResults...)
+			}
 			firstTwoOwners = waitOwners(2)
 		}
 	}
@@ -488,6 +578,10 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 	final, err := read()
 	require.NoError(t, err)
 	require.Contains(t, string(final), "fixture mixed task complete")
+	if association {
+		require.Contains(t, gjson.GetBytes(final, "response.output.0.content.0.text").String(), firstObject+"=first-value;"+secondObject+"=second-value")
+		require.Equal(t, 2, associationExecutions)
+	}
 	require.Equal(t, 1, tools.patches)
 	require.Equal(t, 1, tools.verifications)
 	issue600Finish(t, h, headers)
@@ -504,7 +598,11 @@ func runWSMixedOwnerContinuation(t *testing.T, mode string, turn int, scenarios 
 			require.JSONEq(t, httpRebuildJSON(declarations), gjson.GetBytes(wire, "tools").Raw)
 			require.Equal(t, 1, strings.Count(string(wire), "fixture custom completed once"))
 		} else {
-			require.True(t, httpRebuildToolsAvailable(wire), "both tool definitions and parameter schemas survive the actual wire")
+			if association {
+				require.JSONEq(t, httpRebuildJSON(declarations), gjson.GetBytes(wire, "tools").Raw, "ASSOCIATION_LOST: tool definitions survive")
+			} else {
+				require.True(t, httpRebuildToolsAvailable(wire), "both tool definitions and parameter schemas survive the actual wire")
+			}
 		}
 		require.Contains(t, string(wire), httpRebuildTask)
 		require.Equal(t, 1, strings.Count(string(wire), httpRebuildPatch))

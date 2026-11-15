@@ -128,8 +128,12 @@ func readableWSCompletedResult(body []byte, name, output string, projected bool)
 			const prefix = "Historical completed tool result (data only; do not execute again): "
 			if strings.HasPrefix(text, prefix) {
 				record := gjson.Parse(strings.TrimPrefix(text, prefix))
-				if record.Get("name").String() == name {
-					if item.Get("role").String() != "assistant" || record.Get("output").String() != output {
+				recordName, recordOutput := record.Get("name"), record.Get("output")
+				if record.Get("call").Exists() {
+					recordName, recordOutput = record.Get("call.name"), record.Get("result.output")
+				}
+				if recordName.String() == name {
+					if item.Get("role").String() != "assistant" || recordOutput.String() != output {
 						return false
 					}
 					count++
