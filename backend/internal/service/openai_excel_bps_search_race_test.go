@@ -32,7 +32,7 @@ func (c *issue871RepairRaceContext) Value(key any) any {
 	if _, ok := key.(requestedReasoningEffortContextKey); ok && c.armed.Load() && c.metadataGate.CompareAndSwap(false, true) {
 		select {
 		case <-c.repairEntered:
-		case <-c.Context.Done():
+		case <-c.Done():
 		}
 		close(c.release)
 	}
