@@ -43,7 +43,8 @@ jobs:
           git rev-parse HEAD
           go test -race -json -p 2 -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run '^Test(OpenAI400|OpenAI409|OmitOpenAIHistorical|ForwardEncryptedContentSSERetry|UpdateSettingsOpenAI400|UpdateSettingsOpenAI409)' -count=1 -timeout=5m
   settings:
-    runs-on: ubuntu-latest
+    # The pinned Playwright 1.56.1 browser packages support Ubuntu 24.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
