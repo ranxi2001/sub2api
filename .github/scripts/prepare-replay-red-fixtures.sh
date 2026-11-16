@@ -54,8 +54,40 @@ if ! git -C "$tree" grep -q 'func (a \*Account) IsExcelBPSSearchEnabled' "$basel
     exit 1
   fi
   exclude_absent_fixture backend/internal/service/openai_excel_bps_search_test.go "$contract"
+  # PR872 added independent search diagnostics/race fixtures which also use
+  # that absent API and the excluded search fixture helper. Keep them in every
+  # candidate GREEN; only isolate proven post-baseline files in this old RED.
+  for target in backend/internal/service/openai_excel_bps_search_diagnostics_test.go backend/internal/service/openai_excel_bps_search_race_test.go; do
+    if git -C "$tree" cat-file -e "$candidate:$target" 2>/dev/null; then
+      exclude_absent_fixture "$target" "$contract"
+    fi
+  done
 fi
 
 # Later mixed-owner proofs/diagnostics share the restored recovery struct.
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "$script_dir/prepare-ws-owner-red-fixtures.sh" "$baseline" "$tree" "$candidate"
+
+# PR874 creation-only OAuth policy is absent in historical recovery sources.
+# Keep the selected recovery tests untouched and all candidate GREEN fixtures;
+# adapt only these unrelated service fixtures to the exact old Account API.
+contract=backend/internal/service/account.go
+if ! git -C "$tree" grep -q 'InitialAPIKeyDisposition' "$baseline" -- "$contract"; then
+  target=backend/internal/service/oauth_apikey_disposition_test.go
+  if git -C "$tree" cat-file -e "$candidate:$target" 2>/dev/null; then
+    exclude_absent_fixture "$target" "$contract"
+  fi
+  target=backend/internal/service/openai_plugin_account_directory_test.go
+  expected_contract=$(git -C "$tree" rev-parse "$baseline:$contract")
+  test "$(git -C "$tree" hash-object "$contract")" = "$expected_contract"
+  candidate_blob=$(git -C "$tree" rev-parse "$candidate:$target")
+  test "$(git -C "$tree" hash-object "$target")" = "$candidate_blob"
+  if git -C "$tree" cat-file -e "$baseline:$target" 2>/dev/null; then
+    expected=$(git -C "$tree" rev-parse "$baseline:$target")
+    git -C "$tree" show "$baseline:$target" > "$tree/$target"
+    test "$(git -C "$tree" hash-object "$target")" = "$expected"
+    printf 'historical plugin fixture path=%s candidate_blob=%s baseline_blob=%s contract_blob=%s\n' "$target" "$candidate_blob" "$expected" "$expected_contract"
+  else
+    exclude_absent_fixture "$target" "$contract"
+  fi
+fi

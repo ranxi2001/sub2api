@@ -11,9 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 type openAIWSAgentRecoveryKey struct{}
@@ -258,12 +260,12 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		// bridge payload and accidentally granting a transformed opaque item.
 		reader, err := req.GetBody()
 		if err != nil {
-			return openAIAgentRecoveryError("wire_changed")
+			return openAIWSWireRefusal(r.ctx, "ws_body_unreadable", source, payload)
 		}
 		actual, err := io.ReadAll(reader)
 		_ = reader.Close()
 		if err != nil {
-			return openAIAgentRecoveryError("wire_changed")
+			return openAIWSWireRefusal(r.ctx, "ws_body_unreadable", source, payload)
 		}
 		payload = actual
 	}
@@ -297,7 +299,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	if r.readable != nil {
 		if openAIAgentRecoveryInputDigest(source) != r.readableSource || openAI409ControlsDigest(source) != r.readableControls {
-			return openAIAgentRecoveryError("wire_changed")
+			return openAIWSWireRefusal(ctx, "ws_readable_source", source, payload)
 		}
 		ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, r.readable)
 		if mode == "http_bridge" && account.IsOpenAIApiKey() {
@@ -348,7 +350,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			gjson.GetBytes(source, "store").Type != gjson.False || gjson.GetBytes(payload, "previous_response_id").Exists() ||
 			proof.sourceInput != openAIAgentRecoveryInputDigest(source) || proof.sourceControls != openAI409ControlsDigest(source) || proof.input != openAIAgentRecoveryInputDigest(payload) ||
 			proof.controls != openAI409ControlsDigest(payload) {
-			return openAIAgentRecoveryError("wire_changed")
+			return openAIWSWireRefusal(ctx, "ws_projection_integrity", source, payload)
 		}
 		// Recheck the original pointer on the actual selected account before
 		// allowing its HTTP representation to omit that pointer.
@@ -374,7 +376,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	if !projected && !r.request.omittedHistory && previous != "" && (r.request.owner != nil || r.request.disableOwnerBinding || r.request.previousResponseID != "") &&
 		gjson.GetBytes(payload, "previous_response_id").String() != previous {
-		return openAIAgentRecoveryError("wire_changed")
+		return openAIWSWireRefusal(ctx, "ws_previous_removed", source, payload)
 	}
 	if err := r.service.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
 		if r.request.hasCompletedMixedOwners() {
@@ -560,4 +562,39 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 
 func openAIWSAgentRecoveryClose(err error) error {
 	return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "agent task continuation is unavailable; original task was preserved", err)
+}
+
+// Fixed field-presence/count metadata only. Never log response IDs, hashes,
+// input text, tool content, headers, credentials or arbitrary JSON keys.
+func openAIWSWireRefusal(ctx context.Context, stage string, source, payload []byte) error {
+	sourceInput, wireInput := gjson.GetBytes(source, "input"), gjson.GetBytes(payload, "input")
+	inputKind := "absent"
+	switch {
+	case sourceInput.IsArray():
+		inputKind = "array"
+	case sourceInput.Type == gjson.String:
+		inputKind = "string"
+	case sourceInput.Exists():
+		inputKind = "other"
+	}
+	storeKind := "absent"
+	switch gjson.GetBytes(source, "store").Type {
+	case gjson.True:
+		storeKind = "true"
+	case gjson.False:
+		storeKind = "false"
+	default:
+		if gjson.GetBytes(source, "store").Exists() {
+			storeKind = "other"
+		}
+	}
+	logger.FromContext(ctx).Warn("openai.encrypted_history_409_refused", zap.String("stage", stage),
+		zap.String("source_input_kind", inputKind), zap.String("source_store", storeKind),
+		zap.Int("source_input_items", len(sourceInput.Array())), zap.Int("wire_input_items", len(wireInput.Array())),
+		zap.Bool("source_previous_present", gjson.GetBytes(source, "previous_response_id").String() != ""),
+		zap.Bool("wire_previous_present", gjson.GetBytes(payload, "previous_response_id").String() != ""),
+		zap.Bool("source_model_present", gjson.GetBytes(source, "model").String() != ""),
+		zap.Bool("input_changed", openAIAgentRecoveryInputDigest(source) != openAIAgentRecoveryInputDigest(payload)),
+		zap.Bool("controls_changed", openAI409ControlsDigest(source) != openAI409ControlsDigest(payload)))
+	return openAIRecoveryDiagnosticError("wire_changed", stage, openAIAgentRecoveryFromContext(ctx))
 }

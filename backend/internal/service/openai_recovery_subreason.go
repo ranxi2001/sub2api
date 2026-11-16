@@ -11,7 +11,8 @@ func safeOpenAIRecoverySubreason(value string) string {
 		"tool_invalid", "tool_incomplete", "tool_duplicate", "tool_unpaired", "tool_history_unsupported",
 		"shadow_record_changed", "shadow_epoch_changed", "shadow_fence_changed", "shadow_fence_invalid",
 		"shadow_store_unavailable", "input_invalid", "input_integrity", "controls_integrity", "readable_intent_missing",
-		"http_projection_source", "apikey_projection_source", "oauth_projection_source":
+		"http_projection_source", "apikey_projection_source", "oauth_projection_source",
+		"ws_body_unreadable", "ws_readable_source", "ws_projection_integrity", "ws_previous_removed":
 		return value
 	default:
 		return "unknown"
