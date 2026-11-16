@@ -323,7 +323,7 @@ jobs:
         run: make test-integration
 
   frontend:
-    runs-on: ${{ (github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation') && 'macos-15-intel' || vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation') && 'macos-15-intel' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -345,7 +345,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Frontend typecheck and critical vitest
         env:
-          NODE_OPTIONS: ${{ (github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation') && '--max-old-space-size=4096' || '' }}
+          NODE_OPTIONS: '--max-old-space-size=4096'
         run: make test-frontend
       - name: Issue854 transport failure presentation
         if: github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation'
