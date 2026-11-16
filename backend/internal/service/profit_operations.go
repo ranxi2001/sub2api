@@ -22,7 +22,7 @@ type ProfitOperationsRepository interface {
 }
 
 func ValidateProfitOperationsFilter(f UpstreamOperationsFilter) error {
-	if !slices.Contains([]string{"requests", "standard_charge", "request_income", "estimated_cost", "estimated_profit", "margin", "name"}, f.Sort) {
+	if !slices.Contains([]string{"requests", "standard_charge", "request_income", "estimated_cost", "estimated_profit", "margin", "upstream_cost", "gross_profit", "gross_margin", "name"}, f.Sort) {
 		return ErrUpstreamOperationsValidation
 	}
 	if strings.HasPrefix(f.Upstream, "channel:") {

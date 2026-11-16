@@ -18,6 +18,7 @@ export default {
   "unbound": "未绑定：自动 URL / 未知",
   "explicit": "显式渠道",
   "provider": "供应商关联渠道",
+  "provider_url": "按网址归入供应商",
   "provider_import": "供应商导入渠道",
   "manual_unlinked": "已手动解除关联",
   "unbound_url": "未绑定 · URL 自动归类",

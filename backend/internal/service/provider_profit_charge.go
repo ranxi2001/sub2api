@@ -41,16 +41,19 @@ func (w ProviderProfitWindow) Contains(at time.Time) bool {
 // not confirmation of a wallet debit. Only explicit settlement can fill
 // SettledAmount. Neither is a local billing command.
 type ProviderProfitRemoteCharge struct {
-	UsageID       int64
-	KeyID         int64
-	UserID        int64
-	RequestID     string
+	UsageID   int64
+	KeyID     int64
+	UserID    int64
+	RequestID string
+	// UniqueAtSite is positive evidence from all authenticated pages, before
+	// filtering out unpriced and outside-window rows. Required for an unknown key.
+	UniqueAtSite  bool
 	CreatedAt     time.Time
 	Amount        string
 	SettledAmount *string
 }
 
-// Counts are LOCAL imported usage rows in [from,until), including identical
+// Counts are LOCAL candidate usage rows in [from,until), including identical
 // matches from earlier syncs. Unrelated rows on a shared wallet are not part
 // of either count. Missing or ambiguous evidence counts as unmatched.
 type ProviderProfitSyncResult struct {

@@ -24,6 +24,8 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 		CostBasis       string   `json:"cost_basis"`
 		URLKey          string   `json:"url_key"`
 		URLAttribution  string   `json:"url_attribution"`
+		URLChannelID    *int64   `json:"url_channel_id"`
+		URLOriginHash   string   `json:"url_origin_hash"`
 		ChannelID       int64    `json:"channel_id"`
 		ChannelName     string   `json:"channel_name"`
 		ChannelCode     string   `json:"channel_code"`
@@ -67,9 +69,14 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 	if err = rows.Close(); err != nil {
 		return nil, err
 	}
-	bindings, err := tx.QueryContext(ctx, `SELECT a.id,b.assignment,COALESCE(c.id,0),COALESCE(c.name,''),COALESCE(c.code,''),COALESCE(c.remark,''),COALESCE(c.revision,0)
+	directory, err := profitURLDirectory(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := tx.QueryContext(ctx, `SELECT a.id,COALESCE(b.assignment,''),COALESCE(c.id,0),COALESCE(c.name,''),COALESCE(c.code,''),COALESCE(c.remark,''),COALESCE(c.revision,0),COALESCE(src.origin_hash,'')
 	 FROM jsonb_to_recordset($1::jsonb) a(id bigint)
-	 CROSS JOIN LATERAL provider_profit_account_at(a.id,statement_timestamp()) b
+	 LEFT JOIN LATERAL provider_profit_account_at(a.id,statement_timestamp()) b ON true
+	 LEFT JOIN provider_profit_account_source_history src ON src.account_id=a.id AND src.effective_until IS NULL
 	 LEFT JOIN upstream_channels c ON c.id=b.channel_id`, string(raw))
 	if err != nil {
 		return nil, err
@@ -77,14 +84,18 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 	defer func() { _ = bindings.Close() }()
 	channels := map[int64]service.UpstreamChannel{}
 	assignments := map[int64]string{}
+	origins := map[int64]string{}
 	for bindings.Next() {
 		var id int64
 		var c service.UpstreamChannel
-		var assignment string
-		if err = bindings.Scan(&id, &assignment, &c.ID, &c.Name, &c.Code, &c.Remark, &c.Revision); err != nil {
+		var assignment, origin string
+		if err = bindings.Scan(&id, &assignment, &c.ID, &c.Name, &c.Code, &c.Remark, &c.Revision, &origin); err != nil {
 			return nil, err
 		}
-		assignments[id] = assignment
+		if assignment != "" {
+			assignments[id] = assignment
+		}
+		origins[id] = origin
 		if c.ID != 0 {
 			channels[id] = c
 		}
@@ -99,6 +110,15 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 		a.Assignment = "unbound_url"
 		if strings.HasPrefix(a.Key, "unknown:") {
 			a.Assignment = "unbound_unknown"
+		}
+		// Keep URL eligibility separate from today's membership. A later manual
+		// edit must not assign earlier events to the new manual channel.
+		if p, ok := directory[service.ProviderProfitSiteKey(a.URLKey)]; ok {
+			a.URLChannelID, a.URLOriginHash = &p.ChannelID, p.OriginHash
+			if assignments[a.ID] == "" && (origins[a.ID] == "" || origins[a.ID] == p.OriginHash) {
+				assignments[a.ID] = "provider_url"
+				channels[a.ID] = service.UpstreamChannel{ID: p.ChannelID, Name: p.Name, Code: p.Code, Remark: p.Remark, Revision: p.Revision}
+			}
 		}
 		if assignment, ok := assignments[a.ID]; ok {
 			a.Assignment = assignment
@@ -117,7 +137,7 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 }
 
 const profitOperationsCohort = `accounts_config AS (
- SELECT * FROM jsonb_to_recordset($3::jsonb) AS c(id bigint,name text,key text,attribution text,updated_at timestamptz,deleted boolean,multiplier numeric,cost_basis text,schedulable boolean,concurrency integer,status text,url_key text,url_attribution text,channel_id bigint,channel_name text,channel_code text,channel_remark text,channel_revision bigint,assignment text)
+ SELECT * FROM jsonb_to_recordset($3::jsonb) AS c(id bigint,name text,key text,attribution text,updated_at timestamptz,deleted boolean,multiplier numeric,cost_basis text,schedulable boolean,concurrency integer,status text,url_key text,url_attribution text,url_channel_id bigint,url_origin_hash text,channel_id bigint,channel_name text,channel_code text,channel_remark text,channel_revision bigint,assignment text)
 ), cohort AS (
  SELECT * FROM accounts_config WHERE ($4='' OR key=$4) AND ($5::bigint=0 OR id=$5) AND ($11::bigint=0 OR channel_id=$11)
 )`
@@ -128,9 +148,9 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
  SELECT u.account_id,u.requested_model,u.model,u.upstream_model,u.total_cost,u.actual_cost,u.stream,u.first_token_ms,
  u.account_stats_cost,u.input_tokens,u.output_tokens,u.cache_read_tokens,u.cache_creation_tokens,u.duration_ms,u.billing_type,u.created_at,u.queue_timing,u.queue_wait_ms,
  COALESCE('channel:'||owner.channel_id::text,c.url_key,'unknown:account_missing') AS upstream_key,
- CASE WHEN e.channel_id IS NOT NULL OR h.channel_id IS NOT NULL THEN 'historical_channel' WHEN legacy.channel_id IS NOT NULL THEN 'legacy_channel_estimate' ELSE COALESCE(c.url_attribution,'account_missing') END AS attribution,
- c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,c.multiplier,owner.channel_id AS explicit_channel_id,ch.name AS channel_name,ch.code AS channel_code,ch.remark AS channel_remark,ch.revision AS channel_revision,
- COALESCE(h.assignment,CASE WHEN e.channel_id IS NOT NULL THEN 'provider_import' WHEN legacy.channel_id IS NOT NULL THEN 'explicit' WHEN c.url_key IS NULL OR c.url_key LIKE 'unknown:%' THEN 'unbound_unknown' ELSE 'unbound_url' END) AS assignment,
+ CASE WHEN e.channel_id IS NOT NULL OR h.channel_id IS NOT NULL THEN 'historical_channel' WHEN legacy.channel_id IS NOT NULL THEN 'legacy_channel_estimate' WHEN owner.channel_id IS NOT NULL THEN 'provider_url' ELSE COALESCE(c.url_attribution,'account_missing') END AS attribution,
+ c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,c.multiplier,owner.channel_id AS explicit_channel_id,ch.name AS channel_name,ch.code AS channel_code,ch.remark AS channel_remark,ch.revision AS channel_revision,pl.provider_id,p.site_type AS provider_site_type,
+ COALESCE(h.assignment,CASE WHEN legacy.channel_id IS NOT NULL THEN 'explicit' WHEN owner.channel_id IS NOT NULL THEN 'provider_url' WHEN c.url_key IS NULL OR c.url_key LIKE 'unknown:%' THEN 'unbound_unknown' ELSE 'unbound_url' END) AS assignment,
  e.amount AS upstream_reported,e.settled_amount AS upstream_debit,COALESCE(c.cost_basis,'account_missing') AS cost_basis,
  COALESCE(NULLIF(u.requested_model,''),u.model) AS public_model,
  u.total_cost AS cost_base
@@ -138,19 +158,27 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
  LEFT JOIN provider_profit_charges e ON e.usage_log_id=u.id AND e.account_id=u.account_id AND e.local_created_at=u.created_at
  LEFT JOIN LATERAL provider_profit_account_at(u.account_id,u.created_at) h ON true
  LEFT JOIN provider_profit_manual_history legacy ON legacy.account_id=u.account_id AND legacy.legacy_at_migration AND u.created_at<legacy.effective_from
- CROSS JOIN LATERAL (SELECT COALESCE(e.channel_id,h.channel_id,legacy.channel_id) AS channel_id) owner
+ LEFT JOIN provider_profit_account_source_history src ON c.url_channel_id IS NOT NULL AND src.account_id=u.account_id AND src.effective_from<=u.created_at AND (src.effective_until IS NULL OR src.effective_until>u.created_at)
+ CROSS JOIN LATERAL (SELECT COALESCE(e.channel_id,h.channel_id,legacy.channel_id,
+   CASE WHEN h.assignment IS NULL AND (src.origin_hash IS NULL OR src.origin_hash=c.url_origin_hash) THEN c.url_channel_id END) AS channel_id) owner
  LEFT JOIN upstream_channels ch ON ch.id=owner.channel_id
+ LEFT JOIN provider_profit_links pl ON pl.channel_id=owner.channel_id
+ LEFT JOIN mature_providers p ON p.id=pl.provider_id
  WHERE u.created_at >= $1 AND u.created_at < $2 AND ($5::bigint=0 OR u.account_id=$5) AND ($6::bigint=0 OR u.group_id=$6)
  AND ($7='' OR CASE $8 WHEN 'public' THEN COALESCE(NULLIF(u.requested_model,''),u.model) WHEN 'recorded' THEN u.model WHEN 'upstream' THEN u.upstream_model END=$7)
 ), scoped AS (
  SELECT * FROM event_rows WHERE ($11::bigint=0 OR explicit_channel_id=$11) AND ($4='' OR upstream_key=$4)
-), priced AS (
+), bases AS (
  SELECT *,CASE WHEN cost_base>=0 AND cost_base<'Infinity'::numeric AND multiplier>=0 AND multiplier<'Infinity'::numeric THEN cost_base*multiplier END AS estimated,
  CASE WHEN total_cost>=0 AND total_cost<'Infinity'::numeric THEN total_cost END AS standard,
  CASE WHEN actual_cost>=0 AND actual_cost<'Infinity'::numeric THEN actual_cost END AS income,
  CASE WHEN stream AND first_token_ms>0 AND (actual_cost>0 OR total_cost>0 OR account_stats_cost>0 OR input_tokens>0 OR output_tokens>0 OR cache_read_tokens>0 OR cache_creation_tokens>0) THEN first_token_ms END AS ttft,
  CASE WHEN duration_ms>0 AND (actual_cost>0 OR total_cost>0 OR account_stats_cost>0 OR input_tokens>0 OR output_tokens>0 OR cache_read_tokens>0 OR cache_creation_tokens>0) THEN duration_ms END AS measured_duration
  FROM scoped
+), priced AS (
+ -- Choose the accounting method by channel, never by receipt availability.
+ -- A supplier's missing bill is NULL, even if this account has a multiplier.
+ SELECT *,CASE WHEN provider_id IS NOT NULL THEN upstream_reported ELSE estimated END AS effective_cost FROM bases
 )`
 
 var profitOperationsAggregate = `count(*) AS requests,
@@ -164,12 +192,18 @@ var profitOperationsAggregate = `count(*) AS requests,
  sum(estimated) AS covered_estimated_cost,
  sum(income) FILTER(WHERE estimated IS NOT NULL) AS covered_income,
  count(estimated) AS cost_covered_requests,count(*) FILTER(WHERE estimated IS NULL) AS unknown_cost_requests,
+ count(provider_id) AS supplier_requests,
+ count(upstream_reported) FILTER (WHERE provider_id IS NOT NULL) AS bill_requests,
+ count(estimated) FILTER (WHERE provider_id IS NULL) AS estimated_requests,
+ CASE WHEN count(*)=0 THEN 0 WHEN count(effective_cost)=count(*) THEN sum(effective_cost) END AS upstream_cost,
+ CASE WHEN count(*)=0 THEN 0 WHEN count(effective_cost)=count(*) AND count(income)=count(*) THEN sum(income)-sum(effective_cost) END AS gross_profit,
+ CASE WHEN count(effective_cost)=count(*) AND count(income)=count(*) AND sum(income)>0 THEN (sum(income)-sum(effective_cost))/sum(income) END AS gross_margin,
  count(upstream_reported) AS reported_usage_requests,sum(upstream_reported) AS reported_usage_cost,
  count(upstream_debit) AS reconciled_requests,sum(upstream_debit) AS covered_reconciled_cost,
  CASE WHEN count(upstream_debit)=count(*) THEN sum(upstream_debit) END AS reconciled_cost,
  CASE WHEN count(upstream_debit)=count(*) AND count(income)=count(*) THEN sum(income)-sum(upstream_debit) END AS reconciled_profit,
- count(*) FILTER(WHERE attribution IN ('current_config','historical_channel','legacy_channel_estimate')) AS attributed_requests,
- count(*) FILTER(WHERE attribution NOT IN ('current_config','historical_channel','legacy_channel_estimate')) AS unknown_upstream_requests,
+ count(*) FILTER(WHERE attribution IN ('current_config','historical_channel','legacy_channel_estimate','provider_url')) AS attributed_requests,
+ count(*) FILTER(WHERE attribution NOT IN ('current_config','historical_channel','legacy_channel_estimate','provider_url')) AS unknown_upstream_requests,
  count(*) FILTER(WHERE cost_basis='current_saved_multiplier') AS saved_multiplier_requests,
  count(*) FILTER(WHERE cost_basis='current_default_0.1') AS default_multiplier_requests,
  count(*) FILTER(WHERE account_stats_cost IS NOT NULL) AS saved_stats_base_requests,
@@ -201,7 +235,7 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
 	}
 	args := []any{f.From, f.Until, string(raw), f.Upstream, f.AccountID, f.GroupID, f.Model, f.ModelScope, f.PageSize, (f.Page - 1) * f.PageSize, f.ChannelID}
 	dimension, name := `upstream_key`, `COALESCE(NULLIF(max(channel_name),''),upstream_key)`
-	channelFields := `,COALESCE(max(explicit_channel_id),0) AS channel_id,max(channel_code) AS channel_code,max(channel_remark) AS channel_remark,max(channel_revision) AS channel_revision,COALESCE(max(assignment),'unbound_unknown') AS assignment`
+	channelFields := `,COALESCE(max(explicit_channel_id),0) AS channel_id,max(provider_id) AS provider_id,max(provider_site_type) AS provider_site_type,max(channel_code) AS channel_code,max(channel_remark) AS channel_remark,max(channel_revision) AS channel_revision,COALESCE(max(assignment),'unbound_unknown') AS assignment`
 	switch f.Dimension {
 	case "account":
 		channelFields = ""
@@ -224,11 +258,11 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
  'capacity',(SELECT jsonb_build_object('accounts',count(*),'schedulable',count(*) FILTER(WHERE schedulable AND status='active'),'configured_concurrency',COALESCE(sum(concurrency),0)) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'catalog_total',(SELECT count(DISTINCT key) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'account_details_limit',100,'historical_upstream_snapshot_requests',(SELECT count(*) FROM scoped WHERE attribution='historical_channel'),'historical_cost_multiplier_snapshot_requests',0,
- 'cost_formula','usage_logs.total_cost * current extra.cost_multiplier; missing multiplier uses scheduling default 0.1',
+ 'cost_formula','supplier channel: matched upstream usage bill; unbound channel: usage_logs.total_cost * current extra.cost_multiplier (default 0.1)',
  'income_source','persisted usage_logs.actual_cost; subscription usage valuation, not cash receipts; no guarantee of debit in simple mode',
  'standard_source','persisted usage_logs.total_cost; historical model/cache/per-request pricing is not recalculated',
  'account_rate_multiplier_used',false,'error_rate',NULL)`
-	out := &service.ProfitOperationsSnapshot{UpstreamOperationsSnapshot: service.UpstreamOperationsSnapshot{Scope: f, QueriedAt: time.Now().UTC(), Attribution: "event_time_channel_or_current_url_estimate; reconciled_cost_requires_matched_wallet_debit"}, Currency: "USD billing units (no per-row currency snapshot)"}
+	out := &service.ProfitOperationsSnapshot{UpstreamOperationsSnapshot: service.UpstreamOperationsSnapshot{Scope: f, QueriedAt: time.Now().UTC(), Attribution: "historical_channel_then_current_provider_url; supplier_uses_request_bills_only; unbound_uses_estimates"}, Currency: "USD billing units (no per-row currency snapshot)"}
 	if err = tx.QueryRowContext(ctx, query, args...).Scan(&out.Usage); err != nil {
 		return nil, fmt.Errorf("read upstream usage: %w", err)
 	}

@@ -18,6 +18,7 @@ export default {
   "unbound": "Unbound: automatic URL / unknown",
   "explicit": "Explicit channel",
   "provider": "Linked provider channel",
+  "provider_url": "Provider matched by URL",
   "provider_import": "Channel from provider import",
   "manual_unlinked": "Manually unlinked",
   "unbound_url": "Unbound · automatic URL",

@@ -8,6 +8,8 @@ export interface OperationsQuery {
 }
 export interface ProfitMetrics {
  requests: number; standard_charge: number | null; request_income: number | null
+ upstream_cost: number | null; gross_profit: number | null; gross_margin: number | null
+ supplier_requests: number; bill_requests: number; estimated_requests: number
  estimated_cost: number | null; estimated_profit: number | null; margin: number | null
  reported_usage_cost: number | null; reported_usage_requests: number | null
  reconciled_cost: number | null; reconciled_profit: number | null; reconciled_requests: number | null; covered_reconciled_cost: number | null
@@ -18,7 +20,7 @@ export interface ProfitMetrics {
  p50_ms: number | null; p90_ms: number | null; p95_ms: number | null; duration_p90_ms: number | null
  latest_config_updated_at: string | null; oldest_config_updated_at: string | null
 }
-export interface OperationsRow extends ProfitMetrics { key: string; name: string; assignment?: string; channel_id?: number; channel_code?: string; channel_remark?: string; channel_revision?: number }
+export interface OperationsRow extends ProfitMetrics { key: string; name: string; provider_id?: number; provider_site_type?: MatureProvider['site_type']; assignment?: string; channel_id?: number; channel_code?: string; channel_remark?: string; channel_revision?: number }
 export interface AccountBasis { id: number; name: string; key: string; attribution: string; updated_at: string; deleted: boolean; multiplier: number | null; cost_basis: string }
 export interface OperationsSnapshot {
  scope: OperationsQuery; queried_at: string; attribution: string; currency: string

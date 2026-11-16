@@ -83,6 +83,22 @@ func TestImportedSub2APIUsageReadsOnlyDirectReceiptID(t *testing.T) {
 	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
 }
 
+func TestHandEnteredAPIKeyReadsDirectUsageIdentifier(t *testing.T) {
+	a := &Account{Type: AccountTypeAPIKey}
+	h := http.Header{}
+	h.Set("X-Request-Id", "trace-not-a-bill")
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	h.Set(ProviderUsageIDHeader, "client:manual-fixture")
+	require.Equal(t, "client:manual-fixture", *usageUpstreamRequestIDPtr(a, h, false))
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, true))
+	for _, values := range [][]string{{"one", "two"}, {"one,two"}, {" leading-space"}, {strings.Repeat("x", 125)}} {
+		h[http.CanonicalHeaderKey(ProviderUsageIDHeader)] = values
+		require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	}
+	a.Extra = map[string]any{AccountExtraUpstreamRequestIDHeader: "X-Request-Id"}
+	require.Equal(t, "trace-not-a-bill", *usageUpstreamRequestIDPtr(a, h, false))
+}
+
 func TestValidateUpstreamRequestIDHeaderExtra(t *testing.T) {
 	require.NoError(t, ValidateUpstreamRequestIDHeaderExtra(nil))
 	require.NoError(t, ValidateUpstreamRequestIDHeaderExtra(map[string]any{}))

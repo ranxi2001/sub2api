@@ -35,8 +35,8 @@ apiClient.defaults.adapter=async config=>{
  else if(url.includes('upstream-billing-rates'))data={items:[],total:0,page:1,page_size:20};
  else if(url==='/admin/profit-operations/providers')data={items:[{provider_id:1,provider_name:'合成服务商',site_type:'sub2api',status:'connected',observed_at:now,revision:1,channel_id:channel.id,channel_name:channel.name,metrics:{today_spend:60,total_spend:600,currency:'USD'}}],total:1,page:1,page_size:20};
  else if(url==='/admin/profit-operations/snapshot'){
-  const metrics={requests:2,standard_charge:20,request_income:8,estimated_cost:5,estimated_profit:3,margin:.375,cost_covered_requests:2,unknown_cost_requests:0,unknown_upstream_requests:0};
-  data={scope:config.params,queried_at:now,currency:'USD',usage:{summary:metrics,rows:[{...metrics,key:'channel:7',name:channel.name,channel_id:7,channel_code:channel.code,channel_remark:channel.remark,assignment:'explicit'}],total:1,catalog:[{key:'channel:7',name:channel.name,accounts:2,channel_id:7,channel_code:channel.code,channel_remark:channel.remark,assignment:'explicit'}],catalog_total:1,members:[],member_total:0,accounts:[],capacity:{accounts:2,schedulable:2,configured_concurrency:6}},quality:{status:'ready',data:{summary:{},rows:[]}},errors:{status:'ready',data:{rows:[]}}};
+  const metrics={requests:2,standard_charge:20,request_income:8,supplier_requests:2,bill_requests:2,estimated_requests:0,upstream_cost:5,gross_profit:3,gross_margin:.375,cost_covered_requests:2,unknown_cost_requests:0,unknown_upstream_requests:0};
+  data={scope:config.params,queried_at:now,currency:'USD',usage:{summary:metrics,rows:[{...metrics,key:'channel:7',name:channel.name,provider_id:1,provider_site_type:'sub2api',channel_id:7,channel_code:channel.code,channel_remark:channel.remark,assignment:'explicit'}],total:1,catalog:[{key:'channel:7',name:channel.name,accounts:2,channel_id:7,channel_code:channel.code,channel_remark:channel.remark,assignment:'explicit'}],catalog_total:1,members:[],member_total:0,accounts:[],capacity:{accounts:2,schedulable:2,configured_concurrency:6}},quality:{status:'ready',data:{summary:{},rows:[]}},errors:{status:'ready',data:{rows:[]}}};
  }else if(url.includes('management-capabilities'))data={web_search_enabled:false,account_quota_notify_enabled:false};
  else if(url.includes('credential-encryption'))data={configured:true,source:'server_config'};
  else if(url.includes('check-mixed-channel'))data={has_risk:false};
@@ -63,7 +63,10 @@ page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',r=>{const
 try{
  await page.goto('http://127.0.0.1:4185/admin/profit-operations',{waitUntil:'networkidle'})
  await page.getByTestId('profit-summary').waitFor();await page.getByText('显式渠道',{exact:false}).first().waitFor()
- await page.getByTestId('wallet-1').getByText('60 USD',{exact:true}).waitFor()
+ const row = page.getByTestId('profit-drilldown').locator('tbody tr').first()
+ await row.getByTestId('cost-source').filter({hasText:'上游账单 2/2 笔'}).waitFor()
+ await row.locator('[data-field="gross_margin"]').filter({hasText:'37.50%'}).waitFor()
+ await row.getByRole('button',{name:'同步上游账单'}).waitFor()
  await page.getByTestId('open-channel-manager').click();await page.getByTestId('edit-upstream-channel').click();await page.getByTestId('channel-remark').fill('实体备注保存后真实 GET 读回（合成）');await page.getByTestId('confirm-channel-edit').check();await page.getByTestId('save-upstream-channel').click();await page.getByTestId('channel-entity-draft').waitFor({state:'detached'})
  await page.getByTestId('refresh-operations').click();await page.getByText('实体备注保存后真实 GET 读回（合成）',{exact:false}).first().waitFor();await page.screenshot({path:path.join(output,'entity-profit-desktop.png'),fullPage:true})
  await page.goto('http://127.0.0.1:4185/admin/upstream-channels',{waitUntil:'networkidle'});await page.getByTestId('edit-upstream-channel').waitFor();await page.screenshot({path:path.join(output,'entity-management-desktop.png'),fullPage:true})

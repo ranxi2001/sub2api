@@ -54,8 +54,9 @@ func usageUpstreamRequestIDPtr(account *Account, h http.Header, wsMode bool) *st
 	}
 	id := UpstreamRequestIDFromHeaders(account, h)
 	if account != nil && account.Type == AccountTypeAPIKey {
-		binding, _ := account.Extra["provider_binding"].(map[string]any)
-		if binding["site_type"] == "sub2api" {
+		rawBinding, bound := account.Extra["provider_binding"]
+		binding, _ := rawBinding.(map[string]any)
+		if binding["site_type"] == "sub2api" || !bound {
 			// A configured header remains authoritative. Otherwise accept ONLY a
 			// direct Sub2API's dedicated identifier, never a vendor's trace ID.
 			name := UpstreamRequestIDHeaderName(account)
@@ -66,7 +67,7 @@ func usageUpstreamRequestIDPtr(account *Account, h http.Header, wsMode bool) *st
 			if len(values) != 1 {
 				return nil
 			}
-			id = strings.TrimSpace(values[0])
+			id = values[0]
 			// A proxy may fold two field lines into a comma-separated value.
 			if !ProviderProfitRequestIDUsable(id) {
 				return nil

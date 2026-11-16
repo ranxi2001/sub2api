@@ -40,7 +40,7 @@ func profitDecimal(v any) (string, bool) {
 		return "", false
 	}
 	d, err := decimal.NewFromString(text)
-	if err != nil || d.Sign() <= 0 || d.Exponent() < -64 || d.Exponent() > 32 {
+	if err != nil || d.Sign() < 0 || d.Exponent() < -64 || d.Exponent() > 32 {
 		return "", false
 	}
 	return d.String(), true
@@ -81,6 +81,7 @@ func readProviderProfitUsage(ctx context.Context, s *providerSession, w service.
 		request string
 	}
 	seen := make(map[identity]int)
+	siteUses := make(map[string]int)
 	var candidates []service.ProviderProfitRemoteCharge
 	var previousID int64
 	total := -1
@@ -132,17 +133,19 @@ func readProviderProfitUsage(ctx context.Context, s *providerSession, w service.
 			if !service.ProviderProfitRequestIDUsable(req) {
 				continue
 			}
-			// Include non-billed and calendar over-read rows in ambiguity detection.
-			// A request ID on a different key is NOT the same identity.
+			// Imported accounts know the key; hand-entered accounts don't. Count
+			// both kinds of ties before discarding any covering-day observation.
 			k := identity{key, req}
 			seen[k]++
+			siteUses[req]++
 			// PostgreSQL evidence is microsecond-precise. Do not round an
 			// upstream instant across a provenance or window boundary.
 			if seen[k] != 1 || !w.Contains(at) || at.Nanosecond()%1000 != 0 {
 				continue
 			}
 			billing, ok := profitInt(row["billing_type"])
-			if !ok || billing != int64(service.BillingTypeBalance) || row["subscription_id"] != nil {
+			sub, subOK := profitInt(row["subscription_id"])
+			if !ok || !(billing == int64(service.BillingTypeBalance) && row["subscription_id"] == nil || billing == int64(service.BillingTypeSubscription) && subOK && sub > 0) {
 				continue
 			}
 			amount, ok := profitDecimal(row["actual_cost"])
@@ -158,11 +161,11 @@ func readProviderProfitUsage(ctx context.Context, s *providerSession, w service.
 	unique := candidates[:0]
 	for _, r := range candidates {
 		if seen[identity{r.KeyID, r.RequestID}] == 1 {
+			r.UniqueAtSite = siteUses[r.RequestID] == 1
 			unique = append(unique, r)
 		}
 	}
-	if err := readProviderProfitProofs(ctx, s, unique); err != nil {
-		return nil, err
-	}
+	// These are billed usage amounts, not wallet debits. Do not contact the
+	// optional debit service: its availability must not hold up a complete bill.
 	return unique, nil
 }

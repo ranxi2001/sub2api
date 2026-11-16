@@ -8,9 +8,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-// Old sites expose reported cost only. Only a missing endpoint (404/405)
-// permits that downgrade. The endpoint is a read-only, authenticated lookup;
-// a timeout, failed auth, malformed or unsolicited proof aborts the whole sync.
+// Separate from usage-bill synchronization. If settlement evidence is requested,
+// only a first-batch 404/405 denotes an unsupported endpoint; a partial or
+// invalid lookup cannot prove settlement.
 func readProviderProfitProofs(ctx context.Context, s *providerSession, rows []service.ProviderProfitRemoteCharge) error {
 	for start := 0; start < len(rows); start += 100 {
 		batch := rows[start:min(start+100, len(rows))]
@@ -48,7 +48,7 @@ func readProviderProfitProofs(ctx context.Context, s *providerSession, rows []se
 			r := requested[id]
 			text, stringOK := proof["amount"].(string)
 			amount, amountOK := profitDecimal(text)
-			if !idOK || !keyOK || !userOK || r == nil || r.KeyID != key || r.UserID != user || r.RequestID != proof["request_id"] || proof["currency"] != "USD" || !stringOK || !amountOK {
+			if !idOK || !keyOK || !userOK || r == nil || r.KeyID != key || r.UserID != user || r.RequestID != proof["request_id"] || proof["currency"] != "USD" || !stringOK || !amountOK || amount == "0" {
 				return errProviderResponse
 			}
 			r.SettledAmount = &amount

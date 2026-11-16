@@ -21,8 +21,11 @@ func TestProfitOperationsCostMultiplierSourcesAndIndependentValidation(t *testin
 	}
 	now := time.Now()
 	f := UpstreamOperationsFilter{From: now.Add(-time.Hour), Until: now, Dimension: "upstream", ModelScope: "public", Sort: "estimated_profit", Direction: "desc", Page: 1, PageSize: 20}
-	require.NoError(t, ValidateProfitOperationsFilter(f))
-	require.Error(t, ValidateUpstreamOperationsFilter(f), "financial sorting is confined to profit API")
+	for _, sort := range []string{"estimated_profit", "upstream_cost", "gross_profit", "gross_margin"} {
+		f.Sort = sort
+		require.NoError(t, ValidateProfitOperationsFilter(f), sort)
+		require.Error(t, ValidateUpstreamOperationsFilter(f), "financial sorting is confined to profit API")
+	}
 	f.Sort = "name;DROP TABLE usage_logs"
 	require.Error(t, ValidateProfitOperationsFilter(f))
 }

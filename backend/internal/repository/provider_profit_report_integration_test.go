@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func (f *profitChargeFixture) report(channel int64, w service.ProviderProfitWind
 		require.Empty(f.t, report.Rows)
 	} else {
 		require.Len(f.t, report.Rows, 1, "the selected channel must have exactly one bucket")
-		for _, field := range []string{"request_income", "reported_usage_cost", "reconciled_requests", "covered_reconciled_cost", "reconciled_cost", "reconciled_profit"} {
+		for _, field := range []string{"request_income", "supplier_requests", "bill_requests", "estimated_requests", "upstream_cost", "gross_profit", "gross_margin", "reported_usage_cost", "reconciled_requests", "covered_reconciled_cost", "reconciled_cost", "reconciled_profit"} {
 			require.Contains(f.t, report.Rows[0], field)
 			require.Equal(f.t, report.Summary[field], report.Rows[0][field])
 		}
@@ -64,17 +65,111 @@ func TestProviderProfitReportPartialThenSettledWithSharedWallet(t *testing.T) {
 		require.NotNil(t, wallet.Items[0].Metrics.TodaySpend)
 		require.Equal(t, 60.0, *wallet.Items[0].Metrics.TodaySpend)
 	}
+	mainMetrics := func(bills, subtotal, cost, profit, margin string) {
+		t.Helper()
+		s := f.report(f.channel, w)
+		for k, v := range map[string]string{"supplier_requests": "2", "bill_requests": bills, "estimated_requests": "0", "reported_usage_cost": subtotal, "upstream_cost": cost, "gross_profit": profit, "gross_margin": margin} {
+			require.JSONEq(t, v, string(s[k]), k)
+		}
+	}
+	mainMetrics("0", "null", "null", "null", "null")
+	f.counts(w, 1, 1, a, external)
+	mainMetrics("1", "32", "null", "null", "null")
 	f.counts(w, 2, 0, a, b, external)
+	mainMetrics("2", "45", "45", "55", "0.55")
 	check("30", "null", "null", 1)
 	b.SettledAmount = &ten
 	f.counts(w, 2, 0, a, b, external)
 	check("40", "40", "60", 2)
+	mainMetrics("2", "45", "45", "55", "0.55")
 	newChannel := f.id(`INSERT INTO upstream_channels(name,code) VALUES('New location','new-location') RETURNING id`)
 	_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: 1, ChannelID: newChannel, Confirm: true})
 	require.NoError(t, err)
 	f.counts(w, 2, 0, a, b, external)
 	check("40", "40", "60", 2)
 	require.JSONEq(t, "0", string(f.report(newChannel, w)["requests"]))
+}
+
+func TestProviderProfitReportZeroBillAndZeroIncome(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	at := f.now()
+	w := service.ProviderProfitWindow{From: at, Until: at.Add(time.Microsecond)}
+	f.usageWithIncome(f.account, "free", at, 0)
+	bill := profitRemote(410, 11, "free", at)
+	bill.Amount = "0"
+	f.counts(w, 1, 0, bill)
+	s := f.report(f.channel, w)
+	for k, v := range map[string]string{"bill_requests": "1", "upstream_cost": "0", "gross_profit": "0", "gross_margin": "null"} {
+		require.JSONEq(t, v, string(s[k]), k)
+	}
+}
+
+// Registration should move the old URL bucket exactly once, without requiring
+// a re-import or even a request after registration. An explicit manual channel
+// on the very same URL keeps its own estimate, including in the combined total.
+func TestProviderProfitReportRegisterSiteAfterUsage(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	const site = "https://later-supplier.invalid"
+	const api = site + "/v1"
+	account := func() int64 {
+		return f.id(`INSERT INTO accounts(name,type,platform,credentials,extra) VALUES('manual key','apikey','openai',jsonb_build_object('base_url',$1::text,'api_key','fixture-only'),'{"cost_multiplier":0.5}') RETURNING id`, api)
+	}
+	matched, manual := account(), account()
+	other := f.id(`INSERT INTO upstream_channels(name,code) VALUES('Independent manual channel','manual-only') RETURNING id`)
+	f.exec(`INSERT INTO upstream_channel_bindings(account_id,channel_id,revision) VALUES($1,$2,1)`, manual, other)
+	at := f.now()
+	w := service.ProviderProfitWindow{From: at, Until: at.Add(time.Microsecond)}
+	f.usageWithIncome(matched, "historical-bill", at, 80)
+	f.usageWithIncome(manual, nil, at, 20)
+	q := service.UpstreamOperationsFilter{From: w.From, Until: w.Until, Dimension: "upstream", ModelScope: "public", Sort: "upstream_cost", Direction: "desc", Page: 1, PageSize: 20}
+	read := func() (map[string]json.RawMessage, map[string]map[string]json.RawMessage) {
+		t.Helper()
+		s, err := f.r.ReadProfitOperations(context.Background(), q)
+		require.NoError(t, err)
+		var result struct {
+			Summary map[string]json.RawMessage
+			Rows    []map[string]json.RawMessage
+		}
+		require.NoError(t, json.Unmarshal(s.Usage, &result))
+		rows := make(map[string]map[string]json.RawMessage)
+		for _, r := range result.Rows {
+			var k string
+			require.NoError(t, json.Unmarshal(r["key"], &k))
+			require.NotContains(t, rows, k)
+			rows[k] = r
+		}
+		return result.Summary, rows
+	}
+	check := func(data map[string]json.RawMessage, want map[string]string) {
+		t.Helper()
+		for k, v := range want {
+			require.JSONEq(t, v, string(data[k]), k)
+		}
+	}
+	s, rows := read()
+	require.Len(t, rows, 2)
+	check(rows[api], map[string]string{"requests": "1", "upstream_cost": "6", "supplier_requests": "0"})
+	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "12"})
+	pid := f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('Later supplier','sub2api',$1) RETURNING id`, site)
+	channel := f.id(`SELECT channel_id FROM provider_profit_links WHERE provider_id=$1`, pid)
+	key := fmt.Sprintf("channel:%d", channel)
+	s, rows = read()
+	require.Len(t, rows, 2)
+	require.NotContains(t, rows, api)
+	check(rows[key], map[string]string{"assignment": `"provider_url"`, "provider_id": fmt.Sprint(pid), "requests": "1", "bill_requests": "0", "upstream_cost": "null"})
+	check(s, map[string]string{"requests": "2", "request_income": "100", "supplier_requests": "1", "estimated_requests": "1", "upstream_cost": "null", "gross_profit": "null"})
+	bill := profitRemote(501, 99, "historical-bill", at)
+	bill.Amount, bill.UniqueAtSite = "34", true
+	epoch, err := f.r.ProviderProfitIdentityFrom(context.Background(), pid)
+	require.NoError(t, err)
+	out, err := f.r.ReconcileProviderProfitCharges(context.Background(), pid, epoch, site, w, []service.ProviderProfitRemoteCharge{bill})
+	require.NoError(t, err)
+	require.Equal(t, 1, out.Matched)
+	s, rows = read()
+	require.Len(t, rows, 2)
+	check(rows[key], map[string]string{"assignment": `"provider_url"`, "supplier_requests": "1", "bill_requests": "1", "upstream_cost": "34", "gross_profit": "46", "gross_margin": "0.575"})
+	check(rows[fmt.Sprintf("channel:%d", other)], map[string]string{"supplier_requests": "0", "estimated_requests": "1", "upstream_cost": "6", "gross_profit": "14", "gross_margin": "0.7"})
+	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "40", "gross_profit": "60", "gross_margin": "0.6"})
 }
 
 func TestProviderProfitIndependentOriginAndHistoricalAliases(t *testing.T) {

@@ -59,23 +59,24 @@ func (r *channelRepository) ReconcileProviderProfitCharges(parent context.Contex
 	}
 	// Carry no request text or raw DTO into even the database parameter log.
 	type row struct {
-		UsageID int64     `json:"usage_id"`
-		KeyID   int64     `json:"key_id"`
-		UserID  int64     `json:"user_id"`
-		Hash    string    `json:"hash"`
-		At      time.Time `json:"at"`
-		Amount  string    `json:"amount"`
-		Settled *string   `json:"settled"`
+		UsageID      int64     `json:"usage_id"`
+		KeyID        int64     `json:"key_id"`
+		UserID       int64     `json:"user_id"`
+		Hash         string    `json:"hash"`
+		At           time.Time `json:"at"`
+		Amount       string    `json:"amount"`
+		Settled      *string   `json:"settled"`
+		UniqueAtSite bool      `json:"unique_at_site"`
 	}
 	rows := make([]row, 0, len(remote))
 	for _, v := range remote {
-		if !w.Contains(v.CreatedAt) || v.CreatedAt.Before(epoch) {
+		if !w.Contains(v.CreatedAt) {
 			continue
 		}
 		if v.KeyID <= 0 || v.UsageID <= 0 || v.UserID <= 0 || !service.ProviderProfitRequestIDUsable(v.RequestID) || v.CreatedAt.Nanosecond()%1000 != 0 {
 			return out, service.ErrMatureProviderValidation
 		}
-		rows = append(rows, row{v.UsageID, v.KeyID, v.UserID, providerProfitDigest(v.RequestID), v.CreatedAt, v.Amount, v.SettledAmount})
+		rows = append(rows, row{v.UsageID, v.KeyID, v.UserID, providerProfitDigest(v.RequestID), v.CreatedAt, v.Amount, v.SettledAmount, v.UniqueAtSite})
 	}
 	raw, err := json.Marshal(rows)
 	if err != nil {
@@ -83,7 +84,7 @@ func (r *channelRepository) ReconcileProviderProfitCharges(parent context.Contex
 	}
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return out, err
 	}
@@ -98,8 +99,39 @@ func (r *channelRepository) ReconcileProviderProfitCharges(parent context.Contex
 	if err != nil {
 		return out, err
 	}
+	from, until := profitSQLBoundary(w.From), profitSQLBoundary(w.Until)
+	directory, err := profitURLDirectory(ctx, tx)
+	if err != nil {
+		return out, err
+	}
+	site := service.ProviderProfitSiteKey(base)
+	provider := directory[site]
+	var urlChannel int64
+	if provider.ProviderID == id && provider.OriginHash == origin {
+		urlChannel = provider.ChannelID
+	}
+	// Include possible competing local rows even for a catalog alias. Only
+	// the unique live directory entry, however, may claim a hand-entered row.
+	projection, err := operationsAccounts(ctx, tx, service.UpstreamOperationsFilter{From: from.Add(-service.ProviderProfitClockSkew), Until: until.Add(service.ProviderProfitClockSkew)})
+	if err != nil {
+		return out, err
+	}
+	var accounts []operationsAccount
+	if err = json.Unmarshal(projection, &accounts); err != nil {
+		return out, err
+	}
+	ids := []int64{}
+	for _, a := range accounts {
+		if site != "" && a.Attribution == "current_config" && service.ProviderProfitSiteKey(a.Key) == site {
+			ids = append(ids, a.ID)
+		}
+	}
+	siteAccounts, err := json.Marshal(ids)
+	if err != nil {
+		return out, err
+	}
 	var n, conflicts int
-	err = tx.QueryRowContext(ctx, providerProfitChargeSQL, id, profitSQLBoundary(w.From), profitSQLBoundary(w.Until), epoch, origin, string(raw), service.ProviderProfitMaxRows+1, int(service.ProviderProfitClockSkew.Seconds())).Scan(&n, &out.Matched, &out.Unmatched, &conflicts)
+	err = tx.QueryRowContext(ctx, providerProfitChargeSQL, id, from, until, epoch, origin, string(raw), service.ProviderProfitMaxRows+1, int(service.ProviderProfitClockSkew.Seconds()), string(siteAccounts), urlChannel).Scan(&n, &out.Matched, &out.Unmatched, &conflicts)
 	if err != nil {
 		return out, err
 	}

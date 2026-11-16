@@ -3,7 +3,7 @@
     <div class="min-w-0 space-y-5">
       <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load">{{ t('profitOps.refresh') }}</button></header>
       <SmartOpsNav />
-      <UpstreamChannelManager @changed="load" />
+      <UpstreamChannelManager @changed="load"><ProfitProviders v-if="auth.isAdmin" @changed="load" /></UpstreamChannelManager>
       <p class="rounded-xl bg-primary-50 p-4 text-sm leading-6 dark:bg-dark-800">{{ t('profitOps.attribution') }}</p>
       <details class="card p-4" open><summary class="font-semibold">{{ t('profitOps.method') }}</summary><p class="mt-3 text-sm leading-6">{{ t('profitOps.formula') }}</p><p class="mt-2 text-sm leading-6">{{ t('profitOps.incomeNote') }}</p><p class="mt-2 text-sm leading-6">{{ t('profitOps.unknownNote') }}</p></details>
       <form data-testid="profit-filters" class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="apply">
@@ -26,7 +26,8 @@
           <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.profitOperationsTimeRanges" :user-id="auth.user?.id" />
         </div>
       </form>
-      <ProfitProviders :from="applied.from" :until="applied.until" @changed="load" @filter="selectUpstream('', $event)" />
+      <p v-if="syncMessage" role="status" class="text-sm">{{ syncMessage }}</p>
+      <p v-if="syncError" role="alert" class="text-sm text-red-600">{{ syncError }}</p>
       <p v-if="error" role="alert" class="text-red-600">{{ error }}</p><p v-if="loading" role="status">{{ t('profitOps.loading') }}</p>
       <template v-if="snapshot && !error">
         <p class="break-words text-xs text-gray-500" data-testid="applied-scope">{{ snapshot.scope.from }} ≤ t &lt; {{ snapshot.scope.until }} · <span v-if="applied.channel_id" data-testid="profit-current-channel">{{ t('profitOps.entityScope') }} #{{ applied.channel_id }} · </span>{{ snapshot.currency }} · {{ t('profitOps.queried') }} {{ snapshot.queried_at }}</p>
@@ -34,20 +35,31 @@
         <section v-if="applied.channel_id || applied.upstream || applied.account_id" class="card space-y-3 p-4"><h2 class="font-semibold">{{ t('profitOps.currentMembers') }}</h2><p class="text-xs text-gray-500">{{ t('profitOps.memberNote') }}</p><div class="flex flex-wrap gap-2"><button v-for="a in snapshot.usage.members" :key="a.id" class="btn btn-secondary" data-testid="member-drill" @click="selectAccount(a.id)">{{ a.name }} #{{ a.id }} · {{ a.cost_basis }} × {{ number(a.multiplier,4) }}</button></div><p class="text-xs">{{ applied.page }} · {{ snapshot.usage.member_total }}</p></section>
         <section class="card space-y-4 p-4" data-testid="profit-summary">
           <h2 class="font-semibold">{{ t('profitOps.summary') }}</h2>
-          <dl class="grid gap-4 sm:grid-cols-3 lg:grid-cols-6"><div v-for="key in amountKeys" :key="key"><dt class="text-sm text-gray-500">{{ t(`profitOps.${key}`) }}</dt><dd class="mt-1 break-words text-lg font-semibold">{{ key === 'requests' ? snapshot.usage.summary.requests : formatMetric(snapshot.usage.summary, key) }}</dd></div></dl>
-          <div class="max-w-2xl space-y-2">
-            <h3 class="font-medium">{{ t('profitOps.evidence') }}</h3>
-            <p class="text-xs text-gray-500">{{ t('profitOps.evidenceNote') }}</p>
-            <ProfitEvidence :metrics="snapshot.usage.summary" />
-          </div>
-          <p class="text-sm">{{ t('profitOps.coverage') }} {{ snapshot.usage.summary.cost_covered_requests }} / {{ snapshot.usage.summary.requests }} · {{ t('profitOps.unknownCost') }} {{ snapshot.usage.summary.unknown_cost_requests }} · {{ t('profitOps.unknownUpstream') }} {{ snapshot.usage.summary.unknown_upstream_requests }}</p>
-          <p class="text-xs leading-6 text-gray-500">{{ t('profitOps.savedMultiplier') }} {{ snapshot.usage.summary.saved_multiplier_requests }} · {{ t('profitOps.defaultMultiplier') }} {{ snapshot.usage.summary.default_multiplier_requests }} · {{ t('profitOps.savedBase') }} {{ snapshot.usage.summary.saved_stats_base_requests }} · {{ t('profitOps.fallbackBase') }} {{ snapshot.usage.summary.standard_base_fallback_requests }} · {{ t('profitOps.subscription') }} {{ snapshot.usage.summary.subscription_requests }} · {{ t('profitOps.deleted') }} {{ snapshot.usage.summary.deleted_account_requests }}</p>
+          <dl class="grid gap-4 sm:grid-cols-3 lg:grid-cols-6"><div v-for="key in amountKeys" :key="key"><dt class="text-sm text-gray-500">{{ metricLabel(key, snapshot.usage.summary) }}</dt><dd :data-field="key" class="mt-1 break-words text-lg font-semibold tabular-nums">{{ formatMetric(snapshot.usage.summary, key) }}</dd></div></dl>
+          <p class="text-sm" data-testid="cost-source">{{ t('profitOps.costSource') }} · {{ sourceLabel(snapshot.usage.summary) }}</p>
+          <p class="text-xs leading-6 text-gray-500">{{ t('profitOps.subscription') }} {{ snapshot.usage.summary.subscription_requests }} · {{ t('profitOps.deleted') }} {{ snapshot.usage.summary.deleted_account_requests }} · {{ t('profitOps.unknownUpstream') }} {{ snapshot.usage.summary.unknown_upstream_requests }}</p>
           <p class="text-xs text-gray-500">{{ t('profitOps.unknownIncome') }} {{ snapshot.usage.summary.unknown_income_requests }} · {{ t('profitOps.unknownStandard') }} {{ snapshot.usage.summary.unknown_standard_requests }} · {{ t('profitOps.unmeteredZero') }} {{ snapshot.usage.summary.unmetered_zero_records }}<br />{{ t('profitOps.configUpdated') }} {{ snapshot.usage.summary.oldest_config_updated_at || '—' }} → {{ snapshot.usage.summary.latest_config_updated_at || '—' }}</p>
         </section>
         <section class="card space-y-4 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t('profitOps.compare') }} · {{ t(`profitOps.${applied.dimension}`) }}</h2><button class="btn btn-secondary" @click="overview">{{ t('profitOps.overview') }}</button></div>
           <p v-if="!snapshot.usage.rows.length">{{ t('profitOps.empty') }}</p>
-          <div v-else class="overflow-x-auto"><table class="w-full min-w-[1000px] text-left text-sm"><thead><tr><th class="p-2">{{ t(`profitOps.${applied.dimension}`) }}</th><th v-for="key in amountKeys" :key="key" class="p-2">{{ t(`profitOps.${key}`) }}</th><th scope="col" class="p-2">{{ t('profitOps.evidence') }}</th><th>{{ t('profitOps.coverage') }}</th><th>P50 / P90 / P95 (ms)</th><th>{{ t('profitOps.duration') }}</th></tr></thead><tbody><tr v-for="row in snapshot.usage.rows" :key="row.key" class="border-t dark:border-dark-700"><td class="max-w-80 break-all p-2"><button v-if="applied.dimension !== 'model'" class="text-primary-600 underline" data-testid="drill-row" @click="drill(row)">{{ row.name }}</button><span v-else>{{ row.name }}</span><span v-if="applied.dimension === 'upstream'" class="block text-xs text-gray-500">{{ t(`upstreamEntities.${row.assignment || (row.key.startsWith('unknown:') ? 'unbound_unknown' : 'unbound_url')}`) }}<span v-if="row.channel_id"> #{{ row.channel_id }} · {{ row.channel_code }} · {{ row.channel_remark }}</span></span></td><td v-for="key in amountKeys" :key="key" class="p-2">{{ key === 'requests' ? row.requests : formatMetric(row,key) }}</td><td class="p-2"><details><summary class="cursor-pointer whitespace-nowrap">{{ t('profitOps.reconciled_requests') }}: {{ row.reconciled_requests ?? t('profitOps.unknown') }} / {{ row.requests }}</summary><ProfitEvidence :metrics="row" /></details></td><td>{{ row.cost_covered_requests }} / {{ row.requests }}</td><td>{{ number(row.p50_ms, 0) }} / {{ number(row.p90_ms, 0) }} / {{ number(row.p95_ms, 0) }}<span class="block text-xs">{{ t('profitOps.samples') }} {{ row.samples }} / {{ t('profitOps.unknown') }} {{ row.unknown_samples }}</span></td><td>{{ number(row.duration_p90_ms,0) }}</td></tr></tbody></table></div>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full min-w-[1000px] text-left text-sm" data-testid="profit-drilldown">
+              <thead><tr><th scope="col" class="p-2">{{ t(`profitOps.${applied.dimension}`) }}</th><th v-for="key in amountKeys" :key="key" scope="col" class="p-2">{{ metricLabel(key, snapshot.usage.summary) }}</th><th scope="col" class="p-2">{{ t('profitOps.costSource') }}</th><th scope="col">P50 / P90 / P95 (ms)</th><th scope="col">{{ t('profitOps.duration') }}</th></tr></thead>
+              <tbody><tr v-for="row in snapshot.usage.rows" :key="row.key" class="border-t dark:border-dark-700">
+                <th scope="row" class="max-w-80 break-all p-2 font-normal">
+                  <button v-if="applied.dimension !== 'model'" class="text-primary-600 underline" data-testid="drill-row" @click="drill(row)">{{ row.name }}</button><span v-else>{{ row.name }}</span>
+                  <span v-if="applied.dimension === 'upstream'" class="block text-xs text-gray-500">{{ t(`upstreamEntities.${row.assignment || (row.key.startsWith('unknown:') ? 'unbound_unknown' : 'unbound_url')}`) }}<span v-if="row.channel_id"> #{{ row.channel_id }} · {{ row.channel_code }} · {{ row.channel_remark }}</span></span>
+                </th>
+                <td v-for="key in amountKeys" :key="key" class="whitespace-nowrap p-2 tabular-nums"><span v-if="metricLabel(key, row) !== metricLabel(key, snapshot.usage.summary)" class="block text-xs text-gray-500">{{ metricLabel(key, row) }}</span><span :data-field="key">{{ formatMetric(row, key) }}</span></td>
+                <td class="p-2"><span data-testid="cost-source">{{ sourceLabel(row) }}</span>
+                  <button v-if="canSync(row)" type="button" class="block text-primary-600 underline" data-testid="sync-bill" :title="t('profitOps.syncWindow')" :disabled="syncing" @click="sync(row)">{{ t('profitOps.syncCharges') }}</button>
+                  <span v-else-if="row.provider_site_type === 'newapi' && row.bill_requests < row.supplier_requests" class="block text-xs text-gray-500">{{ t('profitOps.syncUnsupported') }}</span>
+                </td>
+                <td>{{ number(row.p50_ms, 0) }} / {{ number(row.p90_ms, 0) }} / {{ number(row.p95_ms, 0) }}<span class="block text-xs">{{ t('profitOps.samples') }} {{ row.samples }} / {{ t('profitOps.unknown') }} {{ row.unknown_samples }}</span></td><td>{{ number(row.duration_p90_ms,0) }}</td>
+              </tr></tbody>
+            </table>
+          </div>
           <p class="text-xs text-gray-500">{{ t('profitOps.latencyNote') }}</p>
           <div class="flex flex-wrap items-center gap-3"><button class="btn btn-secondary" :disabled="loading || applied.page <= 1" @click="page(-1)">{{ t('profitOps.previous') }}</button><span>{{ applied.page }} · {{ snapshot.usage.total }}</span><button class="btn btn-secondary" data-testid="operations-next" :disabled="loading || applied.page * applied.page_size >= Math.max(snapshot.usage.total, snapshot.usage.catalog_total || 0, snapshot.quality.data?.total || 0, applied.channel_id || applied.upstream || applied.account_id ? snapshot.usage.member_total || 0 : 0)" @click="page(1)">{{ t('profitOps.next') }}</button></div>
         </section>
@@ -69,11 +81,13 @@ import { useAuthStore } from '@/stores/auth'
 import SmartOpsNav from './SmartOpsNav.vue'
 import UpstreamChannelManager from './UpstreamChannelManager.vue'
 import ProfitProviders from './ProfitProviders.vue'
-import ProfitEvidence from './ProfitEvidence.vue'
-import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
+import { readProfitOperations, syncProfitCharges, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
 const { t } = useI18n()
 const auth = useAuthStore()
-const amountKeys = ['requests','standard_charge','request_income','estimated_cost','estimated_profit','margin'] as const
+const amountKeys = ['requests','standard_charge','request_income','upstream_cost','gross_profit','gross_margin'] as const
+type Metric = typeof amountKeys[number]
+const estimateLabels = { upstream_cost: 'estimated_cost', gross_profit: 'estimated_profit', gross_margin: 'margin' } as const
+function isCostMetric(key: Metric): key is keyof typeof estimateLabels { return key in estimateLabels }
 const sortKeys = [...amountKeys, 'name']
 const timePresets = ['today', 'yesterday', 'thisWeek', 'lastWeek', 'last24h', 'last48h', 'thisMonth', 'lastMonth'] as const
 const at = new Date(), start = new Date(at)
@@ -85,7 +99,40 @@ const draft=ref<OperationsQuery>({...initial}), applied=ref<OperationsQuery>({..
 const snapshot=ref<OperationsSnapshot|null>(null), loading=ref(false), error=ref('')
 let request=0, alive=true, controller: AbortController|undefined
 function number(v: number|null|undefined, decimals=6) { return v==null || !Number.isFinite(v) ? t('profitOps.unknown') : v.toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals}) }
-function formatMetric(m:ProfitMetrics,key:typeof amountKeys[number]) { return key==='margin' ? (m.margin==null || !Number.isFinite(m.margin) ? t('profitOps.unknown') : `${(m.margin*100).toFixed(2)}%`) : number(m[key]) }
+function metricLabel(key: Metric, m: ProfitMetrics) {
+ return t(`profitOps.${m.requests > 0 && m.supplier_requests === 0 && isCostMetric(key) ? estimateLabels[key] : key}`)
+}
+function sourceLabel(m: ProfitMetrics) {
+ if (m.requests === 0) return '—'
+ const { requests, supplier_requests: supplier, bill_requests: bills, estimated_requests: estimates } = m
+ if (![requests, supplier, bills, estimates].every(n => Number.isSafeInteger(n) && n >= 0) || bills > supplier || supplier > requests || estimates > requests - supplier) return t('profitOps.unknown')
+ const parts: string[] = []
+ if (supplier) parts.push(t(`profitOps.${bills === supplier ? 'billed' : bills === 0 ? 'awaitingBills' : 'partialBills'}`, { bills, supplier }))
+ if (supplier < requests) parts.push(t('profitOps.estimateCoverage', { estimates, unbound: requests - supplier }))
+ return parts.join(' · ')
+}
+function formatMetric(m: ProfitMetrics, key: Metric) {
+ if (isCostMetric(key) && m.bill_requests < m.supplier_requests) return t(`profitOps.${m.bill_requests === 0 ? 'pending' : 'incomplete'}`)
+ if (key === 'gross_margin') return m.gross_margin == null || !Number.isFinite(m.gross_margin) ? t('profitOps.unknown') : `${(m.gross_margin * 100).toFixed(2)}%`
+ return number(m[key], key === 'requests' ? 0 : 6)
+}
+const syncing = ref(false), syncMessage = ref(''), syncError = ref('')
+function canSync(row: OperationsRow) {
+ return auth.isAdmin && applied.value.dimension === 'upstream' && Number.isSafeInteger(row.provider_id) && Number(row.provider_id) > 0 && row.provider_site_type === 'sub2api'
+}
+async function sync(row: OperationsRow) {
+ if (!canSync(row) || !row.provider_id || syncing.value) return
+ const { from, until } = applied.value
+ syncing.value = true; syncError.value = ''; syncMessage.value = t('profitOps.syncing', { provider: row.name })
+ try {
+  const counts = await syncProfitCharges(row.provider_id, { from, until })
+  if (!alive) return
+  if (![counts?.matched, counts?.unmatched].every(n => Number.isSafeInteger(n) && n >= 0)) throw new Error('Missing sync counts')
+  syncMessage.value = t('profitOps.syncResult', { provider: row.name, ...counts, from, until })
+  await load()
+ } catch { if (alive) { syncMessage.value = ''; syncError.value = t('profitOps.syncFailed', { provider: row.name }) } }
+ finally { syncing.value = false }
+}
 async function load() {
  const id=++request; controller?.abort(); controller=new AbortController(); loading.value=true; error.value=''; snapshot.value=null
  try { const next=await readProfitOperations({...applied.value},controller.signal); if(alive && request===id) snapshot.value=next }
