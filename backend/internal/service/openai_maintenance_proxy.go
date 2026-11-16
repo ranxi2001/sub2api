@@ -13,7 +13,13 @@ import (
 // Maintenance uses a saved member without changing the account's single proxy.
 // Inference owns its independent least-in-flight lease for the logical request.
 func resolveOpenAIMaintenanceProxy(ctx context.Context, account *Account, repo ProxyRepository, expectedURL ...string) (string, error) {
-	if account == nil || !account.OpenAIRequestProxyEnabled() {
+	if account == nil {
+		return "", nil
+	}
+	if !account.OpenAIRequestProxyEnabled() {
+		if _, scoped := openAIRequestProxyFromContext(ctx, account.ID); scoped {
+			return "", infraerrors.New(http.StatusServiceUnavailable, "OPENAI_PROXY_MODE_CHANGED", "Account proxy mode changed during the request; refresh was not sent")
+		}
 		return "", nil
 	}
 	if account.AuthConnectionID != "" || account.HasManagedOpenAIConnections() {

@@ -61,6 +61,7 @@ jobs:
               "TestBPSRequestProxyAdmissionRetainsAccountConcurrency/production_cache_with_real_redis",
               "TestBPSRequestPoolDistributesConcurrentRequestsThroughSelectedProxies",
               "TestIndependent885BPSRefreshAndInferenceSameExit",
+              "TestOpenAIRequestProxyModeSwitchRejectsRefreshBeforeSend",
               "TestOpenAIRequestProxyFailureAttributesSelectedExit",
               "TestExcelBPSImagesRequestRefreshAndFallbackShareExit",
           }

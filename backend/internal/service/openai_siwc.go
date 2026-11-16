@@ -365,7 +365,8 @@ func (s *OpenAIOAuthReauthService) SIWCAccessToken(ctx context.Context, account 
 		return "", errors.New("SIWC token client is unavailable")
 	}
 	var proxy string
-	if fresh.OpenAIRequestProxyEnabled() {
+	_, scoped := openAIRequestProxyFromContext(refreshCtx, fresh.ID)
+	if fresh.OpenAIRequestProxyEnabled() || scoped {
 		proxy, err = resolveOpenAIMaintenanceProxy(refreshCtx, fresh, s.oauth.proxyRepo)
 	} else {
 		proxy, err = s.reauthProxyURL(refreshCtx, fresh.ProxyID)

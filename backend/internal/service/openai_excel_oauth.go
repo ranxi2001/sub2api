@@ -253,7 +253,8 @@ func (s *OpenAIOAuthReauthService) ExcelAccessToken(ctx context.Context, account
 			return "", errors.New("saved Excel identity does not match the account")
 		}
 		var proxyURL string
-		if fresh.OpenAIRequestProxyEnabled() {
+		_, scoped := openAIRequestProxyFromContext(ctx, fresh.ID)
+		if fresh.OpenAIRequestProxyEnabled() || scoped {
 			proxyURL, err = resolveOpenAIMaintenanceProxy(ctx, fresh, s.oauth.proxyRepo)
 		} else {
 			proxyURL, err = s.reauthProxyURL(ctx, fresh.ProxyID)
