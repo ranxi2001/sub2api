@@ -32,7 +32,7 @@ jobs:
         run: go test -race ./internal/serverless -count=1 -timeout=5m
 
   settings:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6

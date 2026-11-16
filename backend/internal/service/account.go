@@ -23,9 +23,10 @@ import (
 )
 
 type Account struct {
-	AuthConnectionID       string
-	AuthConnectionRevision int64
-	InitialAdmissionPlan   *ScheduledTestPlan `json:"-"`
+	InitialAPIKeyDisposition *OAuthAPIKeyDispositionConfig `json:"-"`
+	AuthConnectionID         string
+	AuthConnectionRevision   int64
+	InitialAdmissionPlan     *ScheduledTestPlan `json:"-"`
 	// InitialQualityPlan is internal create-only state, never imported or exported.
 	InitialQualityPlan      *ScheduledTestPlan `json:"-"`
 	ID                      int64
