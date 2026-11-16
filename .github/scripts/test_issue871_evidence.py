@@ -1,0 +1,54 @@
+import importlib.util
+import json
+import unittest
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("gate", Path(__file__).with_name("issue871-evidence.py"))
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+
+
+def transcript(phase):
+    terminal = "fail" if phase == "RED" else "pass"
+    events = [dict(Action="start", Package=gate.PACKAGE)]
+    for name in (gate.ROOT, gate.LEAF):
+        events.append(dict(Action="run", Package=gate.PACKAGE, Test=name))
+    if phase == "RED":
+        events.append(dict(Action="output", Package=gate.PACKAGE, Test=gate.LEAF,
+                           Output=gate.MARKER + "\n" + gate.ASSERTION + "\n"))
+    for name in (gate.LEAF, gate.ROOT):
+        events.append(dict(Action=terminal, Package=gate.PACKAGE, Test=name))
+    events.append(dict(Action=terminal, Package=gate.PACKAGE))
+    return "\n".join(json.dumps(event) for event in events)
+
+
+class Issue871EvidenceTest(unittest.TestCase):
+    def test_named_red_and_green(self):
+        for phase, code in (("RED", 1), ("GREEN", 0)):
+            gate.validate(phase, code, transcript(phase))
+
+    def test_rejects_nonbehavioral_failure_and_missing_test(self):
+        red = transcript("RED")
+        for invalid in (
+            "", red.replace(gate.MARKER, "unrelated_assertion"),
+            red.replace("phase=search_http; reason=http_rejected", "different assertion"),
+            red.replace('"Action": "run"', '"Action": "skip"', 1),
+            red.replace(gate.LEAF, gate.ROOT + "/wrong_case"), red + "\n" + red,
+            red + "\nnot JSON", red.replace(gate.PACKAGE, "other/package"),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                gate.validate("RED", 1, invalid)
+
+    def test_rejects_exit_mismatch_and_runtime_pollution(self):
+        for phase, code in (("RED", 1), ("GREEN", 0)):
+            raw = transcript(phase)
+            with self.assertRaises(ValueError):
+                gate.validate(phase, 2, raw)
+            for noise in ("panic: fixture", "build failed", "setup failed", "no tests to run",
+                          "DATA RACE", "--- SKIP: fixture", "test timed out", "fatal error"):
+                with self.subTest(phase=phase, noise=noise), self.assertRaises(ValueError):
+                    gate.validate(phase, code, raw, noise)
+
+
+if __name__ == "__main__":
+    unittest.main()
