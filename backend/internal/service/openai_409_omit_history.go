@@ -129,7 +129,25 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 // Provider state and mixed completed producers cannot be forwarded as one new
 // account's conversation. Rebuild before selection, after all item fences were
 // read. A healthy single producer without pointers retains ordinary routing.
-func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.Context, c *gin.Context, body []byte, session, model string) (context.Context, []byte, bool, error) {
+func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.Context, c *gin.Context, body []byte, session, model string) (nextCtx context.Context, nextBody []byte, changed bool, resultErr error) {
+	if next, clean, changed := s.PrepareOpenAILossyHistoryRestart(ctx, c, body, session, model); changed {
+		return next, clean, true, nil
+	}
+	defer func() {
+		if _, ws := ctx.Value(openAIWSAgentRecoveryRetryKey{}).(*atomic.Bool); ws && resultErr != nil {
+			// Some protocol counterexamples restore the pre-policy WS file.
+			// Keep that historical implementation buildable without injecting
+			// the candidate recovery algorithm into its RED baseline.
+			if restarter, available := any(s).(interface {
+				restartOpenAIWSClientReadableHistory(context.Context, *gin.Context, []byte, string, string, error) (context.Context, []byte, bool)
+			}); available {
+				if next, clean, ok := restarter.restartOpenAIWSClientReadableHistory(ctx, c, body, session, model, resultErr); ok {
+					nextCtx, nextBody, changed, resultErr = next, clean, true, nil
+				}
+			}
+		}
+	}()
+
 	r := openAIAgentRecoveryFromContext(ctx)
 	if r == nil {
 		return ctx, body, false, nil
@@ -151,6 +169,17 @@ func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.
 // It may only be discarded, under the explicit Beta policy, in favor of the
 // caller's own readable task. Existing foreign ownership/store failures deny.
 func (s *OpenAIGatewayService) CanDiscardOpenAI409ResponsePointer(ctx context.Context, body []byte, groupID int64, responseID string) bool {
+	if s != nil && s.settingService != nil {
+		policy, ok := any(s.cfg).(interface{ OpenAILossyHistoryRestartEnabled() bool })
+		if ok && policy.OpenAILossyHistoryRestartEnabled() && utf8.Valid(body) && openAIEncryptedJSONUnambiguous(body) &&
+			s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+			// This grants only permission to discard the pointer. The handler
+			// requires a successful rebuild and verifies its removal from both
+			// body copies before dispatch; no foreign response is consumed.
+			_, changed := discardOpenAIProviderHistory(body)
+			return changed
+		}
+	}
 	if s == nil || s.settingService == nil || !openAI409HasReadableIntent(body) || !s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
 		return false
 	}

@@ -40,7 +40,7 @@ func TestOpenAIWSUnsentHistoryDiagnostics(t *testing.T) {
 			require.Equal(t, tc.reason, fields["restore_reason"])
 			require.Equal(t, int64(7), fields["turn"])
 			for name := range fields {
-				require.Contains(t, []string{"restore_reason", "history_state", "turn", "history_items", "history_bytes", "history_ready", "delivery_pending", "source_previous_present"}, name)
+				require.Contains(t, []string{"restore_reason", "history_state", "history_input_failure", "turn", "history_items", "history_bytes", "history_ready", "delivery_pending", "source_previous_present"}, name)
 			}
 			raw, err := json.Marshal(fields)
 			require.NoError(t, err)

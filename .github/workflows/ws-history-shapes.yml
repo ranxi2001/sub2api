@@ -1,0 +1,95 @@
+name: WS readable history shapes
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/service/openai_lossy_history_restart*.go'
+      - 'backend/internal/service/openai_ws_readable_history_items*.go'
+      - 'backend/internal/service/openai_ws_client_history_recovery_test.go'
+      - 'backend/internal/service/openai_ws_readable_continuation.go'
+      - 'backend/internal/service/openai_409_omit_history.go'
+      - 'backend/internal/config/config.go'
+      - 'backend/internal/handler/openai_ws_history_shapes_test.go'
+      - 'backend/internal/handler/openai_ws_unsent_delta_test.go'
+      - '.github/workflows/ws-history-shapes.yml'
+permissions:
+  contents: read
+jobs:
+  history:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Pinned original history builder
+        if: matrix.phase == 'RED'
+        run: git show 58628d98b9e0781c1b8e3df6259ab487a1490f70:backend/internal/service/openai_ws_agent_recovery.go > backend/internal/service/openai_ws_agent_recovery.go
+      - name: Delivered tool delta and readable historical inputs
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,historyshapes ./internal/service -run '^TestOpenAIWSHistory(ReadableShapes|UnsafeShapesRemainRejected)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/history-shapes.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/history-shapes.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/history-shapes.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/history-shapes.jsonl" <<'PY'
+          import json,sys
+          phase,code,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
+          rows=[json.loads(l) for l in open(path) if l.startswith('{')]
+          assert any(r.get('Action')=='pass' and r.get('Test')=='TestOpenAIWSHistoryUnsafeShapesRemainRejected' for r in rows)
+          names={'TestOpenAIWSHistoryReadableShapes/'+n for n in ('readable_agent','summary_agent','named_task','compaction','compaction_summary','item_reference')}
+          for name in names:
+              assert any(r.get('Action')==('fail' if phase=='RED' else 'pass') and r.get('Test')==name for r in rows),name
+              if phase=='RED':assert 'READABLE_SHAPE_NOT_RESTORED' in ''.join(r.get('Output','') for r in rows if r.get('Test')==name),name
+          assert (code!=0) if phase=='RED' else (code==0)
+          PY
+      - name: Explicit client-readable history policy preserves data without tool grants
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        run: go test -race -tags=unit,historyshapes ./internal/service -run '^TestOpenAI(WSClientHistoryRestart|LossyHistoryRestart)$' -count=1 -timeout=2m
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-history-shapes-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/history-shapes.jsonl
+  socket:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Isolated Redis dependency
+        run: |
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Seventh turn account pause and next-turn continuation
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit,unsentdelta,historyshapes ./internal/handler -run '^TestOpenAIWS(ReadableHistoryShapeTakeover|ClientHistoryTakeover|LossyHistoryTakeover)$' -count=1 -timeout=5m) | tee "$RUNNER_TEMP/history-shapes-socket.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-history-shapes-socket-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/history-shapes-socket.jsonl
