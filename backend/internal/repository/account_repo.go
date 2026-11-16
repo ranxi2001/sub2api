@@ -315,6 +315,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 // CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.CreateWithAccountGroups(ctx, account, groups)
+	}
 	if account == nil {
 		return service.ErrAccountNilInput
 	}

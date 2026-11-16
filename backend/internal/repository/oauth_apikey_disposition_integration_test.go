@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -30,8 +31,7 @@ func TestOAuthAPIKeyDispositionAtomicCreate(t *testing.T) {
 	// Both account and timer changes roll back with the caller-owned import transaction.
 	tx, err := integrationEntClient.Tx(t.Context())
 	require.NoError(t, err)
-	scoped := newAccountRepositoryWithSQL(tx.Client(), tx.Client(), nil)
-	require.NoError(t, scoped.Create(t.Context(), source))
+	require.NoError(t, repo.CreateWithAccountGroups(dbent.NewTxContext(t.Context(), tx), source, nil))
 	require.NoError(t, tx.Rollback())
 	var count int
 	require.NoError(t, integrationDB.QueryRow("SELECT count(*) FROM account_schedulable_timers WHERE account_id=$1", key.ID).Scan(&count))

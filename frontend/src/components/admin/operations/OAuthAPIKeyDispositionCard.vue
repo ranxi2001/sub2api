@@ -55,7 +55,7 @@ const model = defineModel<OAuthAPIKeyDispositionConfig>({ required: true })
 const props = defineProps<{ userId: number | null | undefined; groups: Group[]; platform: string; initialEnabled: boolean }>()
 const { t } = useI18n()
 const accounts = ref<AccountListItem[]>([])
-const loading = ref(true), failed = ref(false)
+const loading = ref(false), failed = ref(false)
 const unavailableAccountIds = computed(() => model.value.account_ids.filter(id => !accounts.value.some(account => account.id === id)))
 const search = ref(''), appliedSearch = ref(''), accountGroup = ref('')
 const accountType = ref('apikey'), accountStatuses = ref(['active'])
@@ -130,7 +130,10 @@ function validationError(): string | null {
   return null
 }
 defineExpose({ validationError })
-watch(() => props.platform, () => { accounts.value = []; accountGroup.value = ''; void loadAccounts() })
-onMounted(loadAccounts)
+watch(() => props.platform, () => { accounts.value = []; accountGroup.value = ''; generation++; loading.value = false })
+watch(() => [props.platform, model.value.enabled, model.value.scope], () => {
+  if (model.value.enabled && model.value.scope === 'accounts') void loadAccounts()
+})
+onMounted(() => { if (model.value.enabled && model.value.scope === 'accounts') void loadAccounts() })
 onBeforeUnmount(() => { alive = false; generation++ })
 </script>

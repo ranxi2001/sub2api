@@ -15,7 +15,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: 
 enableAutoUnmount(afterEach)
 const groups = [{ id: 5, name: 'Demo group', platform: 'openai' }] as Group[]
 function card(pinia = createPinia()) {
-  const wrapper = mount(Card, { props: { modelValue: reactive(oauthAPIKeyDispositionPayload()), groups, platform: 'openai', initialEnabled: true, userId: 41 }, global: { plugins: [pinia] } })
+  const wrapper = mount(Card, { props: { modelValue: reactive(oauthAPIKeyDispositionPayload({ enabled: true })), groups, platform: 'openai', initialEnabled: true, userId: 41 }, global: { plugins: [pinia] } })
   return wrapper
 }
 beforeEach(() => {
