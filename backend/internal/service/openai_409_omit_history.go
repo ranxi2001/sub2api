@@ -135,8 +135,15 @@ func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.
 	}
 	defer func() {
 		if _, ws := ctx.Value(openAIWSAgentRecoveryRetryKey{}).(*atomic.Bool); ws && resultErr != nil {
-			if next, clean, ok := s.restartOpenAIWSClientReadableHistory(ctx, c, body, session, model, resultErr); ok {
-				nextCtx, nextBody, changed, resultErr = next, clean, true, nil
+			// Some protocol counterexamples restore the pre-policy WS file.
+			// Keep that historical implementation buildable without injecting
+			// the candidate recovery algorithm into its RED baseline.
+			if restarter, available := any(s).(interface {
+				restartOpenAIWSClientReadableHistory(context.Context, *gin.Context, []byte, string, string, error) (context.Context, []byte, bool)
+			}); available {
+				if next, clean, ok := restarter.restartOpenAIWSClientReadableHistory(ctx, c, body, session, model, resultErr); ok {
+					nextCtx, nextBody, changed, resultErr = next, clean, true, nil
+				}
 			}
 		}
 	}()
