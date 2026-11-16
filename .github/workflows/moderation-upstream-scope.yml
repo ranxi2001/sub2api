@@ -43,7 +43,7 @@ jobs:
           name: moderation-scope-red-${{ github.sha }}
           path: ${{ runner.temp }}/moderation-scope
   ui-evidence:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

@@ -72,7 +72,7 @@ jobs:
           if-no-files-found: error
   rendered:
     if: github.head_ref == 'fix/issue825-video-pricing-unit' || github.ref_name == 'fix/issue825-video-pricing-unit'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

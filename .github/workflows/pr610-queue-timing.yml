@@ -125,7 +125,7 @@ jobs:
 
   ui:
     if: github.head_ref == 'fix/queue-wait-ttft'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
