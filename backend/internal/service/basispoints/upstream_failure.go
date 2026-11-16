@@ -12,17 +12,33 @@ type UpstreamFailure struct {
 	Code    string
 	Type    string
 	Message string
+	Search  *SearchFailure
 }
 
 func (f *UpstreamFailure) Error() string { return f.Message }
 
 func (f *UpstreamFailure) Details() map[string]any {
-	return object{"status": f.Status, "code": f.Code, "type": f.Type, "message": f.Message}
+	detail := object{"status": f.Status, "code": f.Code, "type": f.Type, "message": f.Message}
+	if f.Search != nil {
+		detail["search_diagnostic"] = f.Search.details()
+	}
+	return detail
 }
 
 // ParseUpstreamFailure recognizes failure terminals only. Unknown identifiers
 // and free-form upstream messages never enter client responses or diagnostics.
 func ParseUpstreamFailure(raw []byte) *UpstreamFailure {
+	return parseUpstreamFailure(raw, false)
+}
+
+// ParseNormalizedUpstreamFailure is for gateway consumption of bridge output,
+// never raw model/correction events. Only that boundary may retain locally
+// attested search diagnostics that have already passed bridge normalization.
+func ParseNormalizedUpstreamFailure(raw []byte) *UpstreamFailure {
+	return parseUpstreamFailure(raw, true)
+}
+
+func parseUpstreamFailure(raw []byte, searchDiagnostics bool) *UpstreamFailure {
 	if ParseBridgeFailure(raw) != nil {
 		return nil
 	}
@@ -30,10 +46,17 @@ func ParseUpstreamFailure(raw []byte) *UpstreamFailure {
 	if decode(raw, &payload) != nil {
 		return nil
 	}
-	return classifyUpstreamFailure(text(payload["type"]), payload)
+	return classifyUpstreamFailureWithSearch(text(payload["type"]), payload, searchDiagnostics)
 }
 
+// Raw upstream readers, including both correction readers, cannot attest to
+// search HTTP evidence. Keep this default safe even when Details bypasses the
+// ordinary bridge normalizer on an error return.
 func classifyUpstreamFailure(kind string, payload object) *UpstreamFailure {
+	return classifyUpstreamFailureWithSearch(kind, payload, false)
+}
+
+func classifyUpstreamFailureWithSearch(kind string, payload object, searchDiagnostics bool) *UpstreamFailure {
 	switch kind {
 	case "error", "response.failed", "response.cancelled":
 	default:
@@ -79,8 +102,18 @@ func classifyUpstreamFailure(kind string, payload object) *UpstreamFailure {
 			errorType = "invalid_request_error"
 		}
 	}
-	return &UpstreamFailure{Status: status, Code: code, Type: errorType,
+	failure := &UpstreamFailure{Status: status, Code: code, Type: errorType,
 		Message: "Excel BPS upstream failure: " + code + "; request was not replayed"}
+	if code == "basispoints_search_failed" {
+		failure.Search = NewSearchFailure("unknown", "unknown", 0)
+		if searchDiagnostics {
+			failure.Search = parseSearchFailure(detail["search_diagnostic"])
+		}
+		// The safe summary also survives compact keepalives and existing Ops
+		// consumers that retain only the normalized message.
+		failure.Message += "; " + failure.Search.Error()
+	}
+	return failure
 }
 
 func failureStatus(value any) int {
@@ -125,8 +158,8 @@ func failureIdentifierStatus(identifier string) int {
 
 // normalizeFailureEvent preserves response identity/output/usage after the
 // bridge has withheld tools, but replaces error details with safe identifiers.
-func normalizeFailureEvent(kind string, payload object) object {
-	failure := classifyUpstreamFailure(kind, payload)
+func (b *Bridge) normalizeFailureEvent(kind string, payload object) object {
+	failure := classifyUpstreamFailureWithSearch(kind, payload, b.searchDiagnostics)
 	if failure == nil {
 		return payload
 	}
