@@ -6,6 +6,7 @@ on:
       - 'tools/*totp*'
       - 'tools/reauth-runtime/**'
       - '.github/workflows/issue881-totp.yml'
+      - '.github/scripts/*issue881*'
   workflow_dispatch:
 permissions:
   contents: read
@@ -44,10 +45,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           mkdir -p evidence
           git rev-parse HEAD HEAD^{tree} > evidence/head.txt
-      - name: Real PG RED against pre-fix recovery Upsert SQL
+      - name: Validate RED evidence gate
+        run: python3 -m unittest discover -s .github/scripts -p 'test_issue881_red_evidence.py' -v
+      - name: Real PG RED compatibility reproduction using existing Upsert SQL
         shell: bash
         run: |
           set -euo pipefail
+          # Compatibility shim delegates to the real existing Upsert SQL; this is
+          # not a full historical-blob restoration. Restore candidate before GREEN.
           source=backend/internal/repository/openai_totp_recovery.go
           cp "$source" "$RUNNER_TEMP/recovery-green.go"
           trap 'cp "$RUNNER_TEMP/recovery-green.go" "$source"' EXIT
@@ -65,8 +70,8 @@ jobs:
           echo "$result" > evidence/red-recovery-pg.exit
           cat evidence/red-recovery-pg.log
           test "$result" -ne 0
-          ! grep -Eq 'build failed|setup failed|undefined:|no tests to run' evidence/red-recovery-pg.log
-          grep -F 'recovery loser must conflict' evidence/red-recovery-pg.log
+          if grep -Eqi -- 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|fatal error:|data race|race detected|(^|[^[:alnum:]_])timeout([^[:alnum:]_]|$)|timed out|deadline exceeded' evidence/red-recovery-pg.log; then exit 1; fi
+          python3 .github/scripts/issue881-red-evidence.py evidence/red-recovery-pg.log
       - name: Real PG RED against pre-fix migration reload
         shell: bash
         run: |
@@ -79,6 +84,8 @@ jobs:
           echo "$result" > evidence/red-migration-pg.exit
           cat evidence/red-migration-pg.log
           test "$result" -ne 0
+          if grep -Eqi -- 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|fatal error:|data race|race detected|(^|[^[:alnum:]_])timeout([^[:alnum:]_]|$)|timed out|deadline exceeded' evidence/red-migration-pg.log; then exit 1; fi
+          grep -Eq -- '^--- FAIL: TestTOTPBindingMigrationCanReloadWithoutReplacingSnapshot \(' evidence/red-migration-pg.log
           grep -F 'migration reload must be idempotent' evidence/red-migration-pg.log
       - name: Actual handler and service GREEN
         shell: bash
@@ -86,13 +93,13 @@ jobs:
           set -euo pipefail
           git diff --exit-code
           (cd backend && go test -tags=unit ./internal/handler/admin ./internal/service -run '^Test(TOTP|OpenAIOAuthReauth|OpenAISessionExport)' -count=1 -v -timeout=10m) 2>&1 | tee evidence/green-handler-service.log
-          ! grep -Eq -- '--- SKIP:|no tests to run' evidence/green-handler-service.log
+          if grep -Eqi -- 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|fatal error:|data race|race detected|(^|[^[:alnum:]_])timeout([^[:alnum:]_]|$)|timed out|deadline exceeded' evidence/green-handler-service.log; then exit 1; fi
       - name: Real PG GREEN migration reload, binding, CAS, recovery conflicts
         shell: bash
         run: |
           set -euo pipefail
           (cd backend && go test -tags=integration ./internal/repository -run '^Test(TOTP|OAuth429)' -count=1 -v -timeout=10m) 2>&1 | tee evidence/green-persistence.log
-          ! grep -Eq -- '--- SKIP:|no tests to run' evidence/green-persistence.log
+          if grep -Eqi -- 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|fatal error:|data race|race detected|(^|[^[:alnum:]_])timeout([^[:alnum:]_]|$)|timed out|deadline exceeded' evidence/green-persistence.log; then exit 1; fi
       - name: Production Go build
         shell: bash
         run: |
