@@ -449,7 +449,7 @@ func (s *Store) execute(ctx context.Context, candidate Task) error {
 	reason := Decision(t.Action == "open", t.ExecuteAt, now, a.status, a.expires, a.deleted != nil, s.policy())
 	autoDisposition := strings.HasPrefix(t.Reason, "oauth_initial:")
 	if reason == "" && autoDisposition {
-		reason, err = oauthDispositionDecision(ctx, tx, t)
+		reason, err = oauthDispositionDecision(ctx, tx, t, now)
 		if err != nil {
 			return err
 		}
@@ -532,7 +532,7 @@ func (s *Store) retry(ctx context.Context, t Task) error {
 	if attempts >= 3 {
 		status = "failed"
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE account_schedulable_timers SET attempts=$4,status=$5,next_attempt_at=$6,actual_at=$7,reason='execution_error'
+	result, err := tx.ExecContext(ctx, `UPDATE account_schedulable_timers SET attempts=$4,status=$5,next_attempt_at=$6,actual_at=$7,reason=CASE WHEN reason LIKE 'oauth_initial:%' THEN reason ELSE 'execution_error' END
  WHERE account_id=$1 AND action=$2 AND version=$3 AND status='pending' AND attempts=$8`, t.AccountID, t.Action, t.Version, attempts, status, now.Add(time.Duration(1<<uint(attempts-1))*PollInterval), now, t.Attempts)
 	if err != nil {
 		return err

@@ -1,5 +1,7 @@
 export default {
   apikeyDisposition: {
+    timerSource: 'OAuth initial configuration action',
+    superseded: 'Account changed or the paired close did not execute; automatic action skipped',
     "title": "API Key account actions",
     "hint": "After a new OAuth account on the selected platform completes initial configuration, pause or disable scheduling for selected API Key accounts. Existing accounts, reauthorization and manual edits do not trigger this policy.",
     "initialDisabled": "Initial configuration is disabled. This policy takes effect when initial configuration is enabled.",

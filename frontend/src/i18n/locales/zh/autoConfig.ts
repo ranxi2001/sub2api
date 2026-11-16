@@ -1,5 +1,7 @@
 export default {
   apikeyDisposition: {
+    timerSource: 'OAuth 首次配置自动处置',
+    superseded: '账号已变更或配对关闭未执行，已跳过自动处置',
     "title": "API Key 账户自动处置",
     "hint": "所选平台的新 OAuth 账号完成首次配置后，自动暂停或关闭指定 API Key 账号的调度。已有账号、重新授权和手动编辑不触发。",
     "initialDisabled": "首次配置尚未启用；本规则将在首次配置启用后触发。",

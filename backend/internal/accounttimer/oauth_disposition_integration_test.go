@@ -4,6 +4,8 @@ package accounttimer
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -96,12 +98,16 @@ func TestOAuthDispositionEligibilityAndExistingTimers(t *testing.T) {
 	}
 }
 func TestOAuthDispositionManualAndConcurrentChanges(t *testing.T) {
-	for _, change := range []string{"manual", "other_write", "no_close", "type_changed", "cancel_close"} {
+	for _, change := range []string{"manual", "other_write", "no_close", "type_changed", "platform_changed", "cancel_close"} {
 		t.Run(change, func(t *testing.T) {
 			s, now := dispositionFixture(t)
 			p := dispositionPolicy()
 			p.DelayMinutes = 0
 			scheduleDisposition(t, s, *now, p, true)
+			if change == "platform_changed" {
+				_, err := s.DB.Exec("UPDATE accounts SET platform='anthropic' WHERE id=7")
+				require.NoError(t, err)
+			}
 			if change == "type_changed" {
 				_, err := s.DB.Exec("UPDATE accounts SET type='oauth' WHERE id=7")
 				require.NoError(t, err)
@@ -168,4 +174,26 @@ func TestOAuthDispositionManualScopeDisableAndConcurrentImports(t *testing.T) {
 	require.NoError(t, s.RunDue(t.Context()))
 	require.NoError(t, s.DB.QueryRow("SELECT schedulable FROM accounts WHERE id=7").Scan(&enabled))
 	require.False(t, enabled, fmt.Sprint(snap))
+}
+
+func TestOAuthDispositionRetryPreservesOwnership(t *testing.T) {
+	s, now := dispositionFixture(t)
+	p := dispositionPolicy()
+	p.DelayMinutes = 0
+	scheduleDisposition(t, s, *now, p, true)
+	enqueue := s.Enqueue
+	s.Enqueue = func(context.Context, *sql.Tx, int64) error { return errors.New("fixture outbox unavailable") }
+	require.NoError(t, s.RunDue(t.Context()))
+	snap, err := s.List(t.Context(), 7)
+	require.NoError(t, err)
+	require.Equal(t, 1, snap.Tasks[0].Attempts)
+	require.Equal(t, "oauth_initial:100:openai", snap.Tasks[0].Reason)
+	s.Enqueue = enqueue
+	*now = now.Add(time.Minute)
+	require.NoError(t, s.RunDue(t.Context()))
+	*now = now.Add(180 * time.Minute)
+	require.NoError(t, s.RunDue(t.Context()))
+	var enabled bool
+	require.NoError(t, s.DB.QueryRow("SELECT schedulable FROM accounts WHERE id=7").Scan(&enabled))
+	require.True(t, enabled)
 }

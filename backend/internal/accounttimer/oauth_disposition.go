@@ -92,7 +92,7 @@ func ScheduleOAuthDisposition(ctx context.Context, q dispositionExecutor, source
 	if err != nil {
 		return err
 	}
-	reason := fmt.Sprintf("oauth_initial:%d", sourceID)
+	reason := fmt.Sprintf("oauth_initial:%d:%s", sourceID, platform)
 	for _, id := range ids {
 		pending, e := q.QueryContext(ctx, `SELECT 1 FROM account_schedulable_timers WHERE account_id=$1 AND status='pending' LIMIT 1`, id)
 		if e != nil {
@@ -134,13 +134,17 @@ func ScheduleOAuthDisposition(ctx context.Context, q dispositionExecutor, source
 
 // Restore only the switch changed by the paired close, provided no later write
 // touched the account. Explicit manual edits also cancel both native timers.
-func oauthDispositionDecision(ctx context.Context, tx *sql.Tx, t Task) (string, error) {
+func oauthDispositionDecision(ctx context.Context, tx *sql.Tx, t Task, now time.Time) (string, error) {
+	parts := strings.Split(t.Reason, ":")
+	if len(parts) != 3 {
+		return "oauth_disposition_superseded", nil
+	}
 	var eligible bool
-	err := tx.QueryRowContext(ctx, `SELECT type='apikey' AND parent_account_id IS NULL AND status='active'
+	err := tx.QueryRowContext(ctx, `SELECT type='apikey' AND platform=$4 AND parent_account_id IS NULL AND status='active' AND (expires_at IS NULL OR expires_at>$5)
  AND CASE WHEN $2='close' THEN schedulable ELSE NOT schedulable AND EXISTS (
  SELECT 1 FROM account_schedulable_timers c WHERE c.account_id=a.id AND c.action='close'
  AND c.status='executed' AND c.reason=$3 AND c.actual_at=a.updated_at) END
- FROM accounts a WHERE id=$1`, t.AccountID, t.Action, t.Reason).Scan(&eligible)
+ FROM accounts a WHERE id=$1`, t.AccountID, t.Action, t.Reason, parts[2], now).Scan(&eligible)
 	if err != nil {
 		return "", err
 	}

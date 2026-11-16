@@ -156,7 +156,11 @@ let loadSequence = 0
 watch(form, () => { preview.value = null; dailyPreview.value = null; confirmed.value = false }, { flush: 'sync' })
 watch(action, () => { preview.value = null; confirmed.value = false }, { flush: 'sync' })
 watch(() => props.refreshKey, () => { expanded.value = false; void load() })
-function reasonText(reason: string) { return t(`admin.accounts.timer.errors.${reason}`) }
+function reasonText(reason: string) {
+  if (reason.startsWith('oauth_initial:')) return t('autoConfig.apikeyDisposition.timerSource')
+  if (reason === 'oauth_disposition_superseded') return t('autoConfig.apikeyDisposition.superseded')
+  return t(`admin.accounts.timer.errors.${reason}`)
+}
 function showError(err: unknown) {
   const code = (err as { response?: { data?: { reason?: string } } })?.response?.data?.reason?.replace(/^TIMER_/, '')
   const known = ['timezone', 'datetime', 'dst', 'duration', 'mode', 'past', 'confirmation', 'version', 'conflict', 'request', 'account_deleted']
