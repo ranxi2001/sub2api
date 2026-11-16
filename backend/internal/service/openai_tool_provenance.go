@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -462,6 +463,12 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputs(ctx context.Context, r *op
 			case <-timer.C:
 			}
 			raw, err = s.toolProofGet(ctx, key)
+			// Once a pending proof was observed, exhausting this wait is the
+			// same ownership refusal whether the timer or GET sees the deadline.
+			// An independent backend timeout/error remains a store failure.
+			if ctx.Err() == context.DeadlineExceeded && errors.Is(err, context.DeadlineExceeded) {
+				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r)
+			}
 		}
 		if err != nil {
 			return openAIRecoveryDiagnosticError("store_unavailable", "tool_provenance_unavailable", r)

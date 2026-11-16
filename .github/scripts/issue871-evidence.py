@@ -14,6 +14,10 @@ BUSINESS_ROOT = "TestExcelBPSSearchBusinessThroughForward"
 BUSINESS_LEAF = BUSINESS_ROOT + "/direct/json"
 BUSINESS_MARKER = "issue871_expected_native_search_history"
 BUSINESS_ASSERTION = BUSINESS_MARKER + ': got "__sub2api_web_search"; want "run_officejs"'
+PENDING_ROOT = "TestOpenAIToolProvenancePendingDeadline"
+PENDING_LEAF = PENDING_ROOT + "/function/pending_deadline"
+PENDING_MARKER = "WS_PENDING_DEADLINE_CLASSIFICATION"
+PENDING_ASSERTION = PENDING_MARKER + ': got "encrypted_agent_recovery_store_unavailable"; want "encrypted_agent_recovery_owner_conflict"'
 
 
 def validate(phase, status, raw, stderr="", contract="diagnosis"):
@@ -22,6 +26,9 @@ def validate(phase, status, raw, stderr="", contract="diagnosis"):
     elif contract == "business":
         nodes = {BUSINESS_ROOT, BUSINESS_LEAF}
         leaf, marker, assertion = BUSINESS_LEAF, BUSINESS_MARKER, BUSINESS_ASSERTION
+    elif contract == "pending_deadline":
+        nodes = {PENDING_ROOT, PENDING_LEAF}
+        leaf, marker, assertion = PENDING_LEAF, PENDING_MARKER, PENDING_ASSERTION
     else:
         raise ValueError("unknown evidence contract")
     if phase not in {"RED", "GREEN"} or status != (1 if phase == "RED" else 0):

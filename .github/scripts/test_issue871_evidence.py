@@ -13,6 +13,9 @@ def transcript(phase, contract="diagnosis"):
     if contract == "business":
         root, leaf = gate.BUSINESS_ROOT, gate.BUSINESS_LEAF
         marker, assertion = "", gate.BUSINESS_ASSERTION
+    elif contract == "pending_deadline":
+        root, leaf = gate.PENDING_ROOT, gate.PENDING_LEAF
+        marker, assertion = "", gate.PENDING_ASSERTION
     terminal = "fail" if phase == "RED" else "pass"
     events = [dict(Action="start", Package=gate.PACKAGE)]
     for name in (root, leaf):
@@ -27,6 +30,26 @@ def transcript(phase, contract="diagnosis"):
 
 
 class Issue871EvidenceTest(unittest.TestCase):
+    def test_pending_deadline_contract(self):
+        for phase, code in (("RED", 1), ("GREEN", 0)):
+            raw = transcript(phase, "pending_deadline")
+            gate.validate(phase, code, raw, contract="pending_deadline")
+            for noise in ("panic: fixture", "build failed", "setup failed", "no tests to run",
+                          "DATA RACE", "--- SKIP: fixture", "test timed out", "fatal error"):
+                with self.subTest(phase=phase, noise=noise), self.assertRaises(ValueError):
+                    gate.validate(phase, code, raw, noise, "pending_deadline")
+            for invalid in ("", raw + "\n" + raw, raw.replace(gate.PENDING_LEAF, gate.PENDING_ROOT + "/wrong"),
+                            raw.replace('"Action": "run"', '"Action": "skip"', 1), transcript(phase)):
+                with self.subTest(phase=phase, invalid=invalid), self.assertRaises(ValueError):
+                    gate.validate(phase, code, invalid, contract="pending_deadline")
+            with self.assertRaises(ValueError):
+                gate.validate(phase, 2, raw, contract="pending_deadline")
+        red = transcript("RED", "pending_deadline")
+        for invalid in (red.replace(gate.PENDING_MARKER, "other_assertion"),
+                        red.replace("encrypted_agent_recovery_store_unavailable", "other_error")):
+            with self.assertRaises(ValueError):
+                gate.validate("RED", 1, invalid, contract="pending_deadline")
+
     def test_business_named_red_and_green(self):
         for phase, code in (("RED", 1), ("GREEN", 0)):
             raw = transcript(phase, "business")
