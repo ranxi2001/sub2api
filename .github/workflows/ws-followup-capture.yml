@@ -5,6 +5,7 @@ on:
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_ws_v2_passthrough_adapter.go'
       - 'backend/internal/handler/openai_ws_followup_capture_test.go'
+      - 'backend/internal/requestcapture/followup_test_support.go'
       - '.github/workflows/ws-followup-capture.yml'
 permissions:
   contents: read

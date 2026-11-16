@@ -73,6 +73,7 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 			defer manager.Close()
 			task, e := manager.Create(ctx, requestcapture.CreateTask{TargetType: "user", TargetID: h.apiKey.UserID, DurationMinutes: 1}, "fixture")
 			require.NoError(t, e)
+			observedSession := make(chan *requestcapture.Session, 1)
 			router := gin.New()
 			router.Use(func(c *gin.Context) {
 				c.Set(string(middleware.ContextKeyAPIKey), h.apiKey)
@@ -81,6 +82,7 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 			})
 			router.Use(middleware.RequestCapture(manager))
 			router.Use(func(c *gin.Context) {
+				observedSession <- requestcapture.FromContext(c.Request.Context())
 				if requestcapture.FromContext(c.Request.Context()) == nil {
 					t.Error("fixture capture session was not admitted")
 				}
@@ -92,6 +94,7 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 			conn, _, e := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", &coderws.DialOptions{HTTPHeader: http.Header{"Session_id": {"fixture-capture"}, "Thread-Id": {"fixture-capture-thread"}}})
 			require.NoError(t, e)
 			defer conn.CloseNow()
+			session := <-observedSession
 			issue715WSSend(t, conn, `{"type":"response.create","model":"gpt-5.1","store":true,"input":[{"role":"user","content":"fixture first"}]}`)
 			require.Equal(t, "response.completed", gjson.GetBytes(issue715WSRead(t, conn), "type").String())
 			second := `{"type":"response.create","model":"gpt-5.1","store":true,"previous_response_id":"resp_capture_first","input":[{"role":"user","content":"fixture second"}]}`
@@ -102,6 +105,7 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 			require.Eventually(t, func() bool { return manager.Stats().ActiveRequests == 0 }, 3*time.Second, 5*time.Millisecond)
 			records, e := manager.Records(ctx, task.ID, "", true, 10, 0)
 			require.NoError(t, e)
+			t.Logf("actual capture lifecycle: %+v", requestcapture.FollowupTestState(session))
 			taskState, taskErr := manager.Task(ctx, task.ID)
 			require.NoError(t, taskErr)
 			require.Len(t, records, 1, "FOLLOWUP_ERROR_CAPTURE_MISSING: only second failed turn must be retained; stats=%+v task=%+v", manager.Stats(), taskState)
