@@ -3786,6 +3786,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if err := h.concurrencyHelper.RevalidateTurnAuth(turnCtx); err != nil {
 					return mapOpenAIWSTurnAdmissionError(err)
 				}
+				service.SetOpenAIWSRecoveryClientModel(c, model)
 				return nil
 			},
 			BeforeRequestWithClientPayload: func(turn int, payload, clientPayload []byte, originalModel string) error {
