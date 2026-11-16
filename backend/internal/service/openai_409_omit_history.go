@@ -162,6 +162,17 @@ func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.
 // It may only be discarded, under the explicit Beta policy, in favor of the
 // caller's own readable task. Existing foreign ownership/store failures deny.
 func (s *OpenAIGatewayService) CanDiscardOpenAI409ResponsePointer(ctx context.Context, body []byte, groupID int64, responseID string) bool {
+	if s != nil && s.settingService != nil {
+		policy, ok := any(s.cfg).(interface{ OpenAILossyHistoryRestartEnabled() bool })
+		if ok && policy.OpenAILossyHistoryRestartEnabled() && utf8.Valid(body) && openAIEncryptedJSONUnambiguous(body) &&
+			s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+			// This grants only permission to discard the pointer. The handler
+			// requires a successful rebuild and verifies its removal from both
+			// body copies before dispatch; no foreign response is consumed.
+			_, changed := discardOpenAIProviderHistory(body)
+			return changed
+		}
+	}
 	if s == nil || s.settingService == nil || !openAI409HasReadableIntent(body) || !s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
 		return false
 	}

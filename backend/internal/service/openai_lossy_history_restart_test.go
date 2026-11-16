@@ -28,6 +28,9 @@ func TestOpenAILossyHistoryRestart(t *testing.T) {
 				ctx = context.Background()
 			}
 			next, clean, changed, err := svc.PrepareOpenAI409ReadableContinuation(ctx, c, []byte(body), "fixture-session", "gpt-6-astra")
+			if gjson.Get(body, "previous_response_id").Exists() {
+				require.True(t, svc.CanDiscardOpenAI409ResponsePointer(ctx, []byte(body), 715, "resp_foreign"))
+			}
 			require.NoError(t, err)
 			require.True(t, changed)
 			require.NotContains(t, string(clean), "fixture-cipher")
