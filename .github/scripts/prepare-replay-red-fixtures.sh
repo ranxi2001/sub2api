@@ -44,6 +44,30 @@ if ! test -f "$tree/$seam"; then
   exclude_absent_fixture backend/internal/handler/openai_issue842_oauth_repair_test.go backend/internal/service/openai_ws_agent_recovery.go
 fi
 
+# PR878 added a Group field used by otherwise unrelated service-package tests.
+# A full old-source overlay must compile them against that same historical API;
+# selected recovery oracles and all candidate GREEN tests remain untouched.
+contract=backend/internal/service/group.go
+if ! git -C "$tree" grep -q 'FreeOpenAIUltrafast' "$baseline" -- "$contract"; then
+  expected_contract=$(git -C "$tree" rev-parse "$baseline:$contract")
+  test "$(git -C "$tree" hash-object "$contract")" = "$expected_contract"
+  for target in backend/internal/service/admin_group_duplicate_test.go backend/internal/service/admin_service_group_test.go backend/internal/service/api_key_auth_cache_openai_fast_test.go backend/internal/service/free_ultrafast_customer_cost_test.go; do
+    if ! git -C "$tree" cat-file -e "$candidate:$target" 2>/dev/null; then
+      continue
+    fi
+    candidate_blob=$(git -C "$tree" rev-parse "$candidate:$target")
+    test "$(git -C "$tree" hash-object "$target")" = "$candidate_blob"
+    if git -C "$tree" cat-file -e "$baseline:$target" 2>/dev/null; then
+      expected=$(git -C "$tree" rev-parse "$baseline:$target")
+      git -C "$tree" show "$baseline:$target" > "$tree/$target"
+      test "$(git -C "$tree" hash-object "$target")" = "$expected"
+      printf 'historical group fixture path=%s candidate_blob=%s baseline_blob=%s contract_blob=%s\n' "$target" "$candidate_blob" "$expected" "$expected_contract"
+    else
+      exclude_absent_fixture "$target" "$contract"
+    fi
+  done
+fi
+
 # Older Account/search contracts cannot compile the unrelated new search
 # fixture in a service-package RED. Preserve the exact historical Account leaf;
 # only exclude the test when its baseline absence and candidate blob are proven.

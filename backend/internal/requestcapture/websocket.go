@@ -67,12 +67,34 @@ func (s *Session) Frame(stage string, attempt int, payload []byte) {
 		return
 	}
 	s.frameMu.Lock()
+	defer s.frameMu.Unlock()
+	s.frameLocked(stage, attempt, payload)
+}
+
+// Commit a successfully written client frame before the next inbound turn can
+// reset its capture state. The actual write retains the caller's timeout.
+func (s *Session) DeliverClientFrame(payload []byte, write func() error) error {
+	if s == nil {
+		return write()
+	}
+	s.frameMu.Lock()
+	defer s.frameMu.Unlock()
+	err := write()
+	if err != nil {
+		s.MarkPartial("client_write_failed")
+		s.MarkError("client_write_failed")
+		return err
+	}
+	s.frameLocked("client_response", 0, payload)
+	return nil
+}
+
+func (s *Session) frameLocked(stage string, attempt int, payload []byte) {
 	s.mu.Lock()
 	turn := s.turn
 	closed := s.closed || s.failed || s.turnEnded
 	s.mu.Unlock()
 	if closed {
-		s.frameMu.Unlock()
 		return
 	}
 	if s.frameStreams == nil {
@@ -102,7 +124,6 @@ func (s *Session) Frame(stage string, attempt int, payload []byte) {
 	if stage == "client_response" && terminal {
 		s.endTurnLocked()
 	}
-	s.frameMu.Unlock()
 }
 func isTerminalFrame(payload []byte) bool {
 	switch gjson.GetBytes(payload, "type").String() {

@@ -76,6 +76,17 @@ export function parseOperationJSON(raw) {
   } catch { return null; }
 }
 
+// Preserve only an explicit OTP rejection at the MFA verification boundary.
+// Generic diagnostic mapping must not erase the evidence needed for bounded matching.
+export function isTotpRejectionResponse(result) {
+  if (![400,401].includes(Number(result?.res?.status))) return false;
+  const payload = parseOperationJSON(result?.text);
+  const error = payload?.error;
+  const code = typeof error === 'string' ? error : error?.code;
+  if (['invalid_otp','incorrect_otp','wrong_otp','invalid_totp','incorrect_totp','wrong_totp','invalid_code','incorrect_code','wrong_code'].includes(code)) return true;
+  return false; // Descriptive text alone is not structured OTP rejection evidence.
+}
+
 export function observeProtocolResponse(result, fallback = 'protocol_error') {
   const payload = parseOperationJSON(result?.text);
   const status = Number(result?.res?.status);
@@ -91,6 +102,8 @@ function reasonFor(error, stage) {
   try {
     if (reasons.has(error?.message)) return error.message;
     const text = typeof error?.message === 'string' ? error.message : '';
+    if (text.startsWith('TOTP_REJECTED:')) return 'totp_rejected';
+    if (text.startsWith('TOTP_FACTOR_') || text === 'TOTP_VERIFICATION_UNCONFIRMED') return 'interaction_required';
     if (text.startsWith('PROXY_RISK_CONTROL: ')) return 'security_check';
     if (/^(?:CODEX_AUTH_LOGIN_REQUIRED|SESSION_SELECTION_INVALID):/.test(text)) return 'session_unavailable';
     if (['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(error?.code) || ['fetch failed', 'timed out'].includes(text)) return 'transport_error';

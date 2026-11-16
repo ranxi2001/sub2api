@@ -81,3 +81,13 @@ test('private snapshots contain only bounded enums, time and the task binding', 
     assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).reason, 'protocol_error');
   } finally { fs.rmSync(root, {recursive: true, force: true}); }
 });
+
+test('only explicit 400/401 OTP rejection permits another factor', async () => {
+ const {isTotpRejectionResponse}=await import('./openai_codex_diagnostics.mjs');
+ const response=(status,error)=>({res:{status},text:JSON.stringify({error})});
+ assert.equal(isTotpRejectionResponse(response(400,{code:'invalid_otp'})),true);
+ assert.equal(isTotpRejectionResponse(response(401,{message:'invalid totp'})),false);
+ for (const value of [response(429,{code:'invalid_otp'}),response(500,{code:'invalid_otp'}),response(400,{code:'unknown',message:'invalid totp'}),response(400,{message:'nested invalid otp data'})]) {
+  assert.equal(isTotpRejectionResponse(value),false);
+ }
+});

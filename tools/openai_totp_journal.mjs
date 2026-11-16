@@ -40,6 +40,9 @@ export function openJournal(root) {
     if (fs.existsSync(target)) {
       const old = read(id)
       if (old.candidate && old.candidate !== record.candidate) throw Error('candidate_overwrite_refused')
+      for (const key of ['factor_id', 'session_id', 'previous_factor_id', 'email', 'previous']) {
+        if (old[key] && old[key] !== record[key]) throw Error('provenance_overwrite_refused')
+      }
     }
     const nonce = crypto.randomBytes(12)
     const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce)

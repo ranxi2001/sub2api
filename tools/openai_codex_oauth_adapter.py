@@ -16,6 +16,7 @@ except ImportError:
     from openai_excel_oauth_adapter import replace_exact
 
 PINNED_PROTOCOL_BLOB = 'ff2db2507e401c29fa78705e44f5b40a3108a8c6'
+BOUND_PROTOCOL_BLOB = '7d5143da87e36ad79c2d050003df99319736b866'
 STAGES = frozenset(('starting', 'web_login', 'password_accepted', 'mfa_challenge',
                    'mfa_accepted', 'web_redirect', 'oauth_authorize', 'session_select',
                    'workspace_select', 'callback_validation', 'token_exchange', 'oauth_output', 'completed'))
@@ -31,15 +32,15 @@ MAX_DIAGNOSTIC_BYTES = 1024
 
 def codex_source(source):
     raw = source.encode('utf-8')
-    if hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest() != PINNED_PROTOCOL_BLOB:
+    if hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest() not in (PINNED_PROTOCOL_BLOB, BOUND_PROTOCOL_BLOB):
         raise ValueError('unsupported_codex_runtime_layout')
     source = replace_exact(source, 'import crypto from "node:crypto";', '''import crypto from "node:crypto";
-import {createProtocolDiagnostics, validateCodexCallback, observeProtocolResponse} from "./openai_codex_diagnostics.mjs";
+import {createProtocolDiagnostics, validateCodexCallback, observeProtocolResponse, isTotpRejectionResponse} from "./openai_codex_diagnostics.mjs";
 const protocolDiagnostic = createProtocolDiagnostics(process.env.SUB2API_PROTOCOL_DIAGNOSTIC_PATH,
   Number(process.env.SUB2API_PROTOCOL_TASK_ID));
 console.log = console.warn = console.error = () => {};''')
     for old, new in (
-        ('    assertOk(result, `${method} ${url}`);', '    observeProtocolResponse(result);\n    assertOk(result, `${method} ${url}`);'),
+        ('    assertOk(result, `${method} ${url}`);', '    if (new URL(url).pathname === "/api/accounts/mfa/verify" && isTotpRejectionResponse(result)) throw new Error(`HTTP ${result.res.status} invalid_otp`);\n    observeProtocolResponse(result);\n    assertOk(result, `${method} ${url}`);'),
         ('async function loginChatgptWeb(client, { chatgptBase, authBase, email, rl, password, totpSecret }) {',
          'async function loginChatgptWeb(client, { chatgptBase, authBase, email, rl, password, totpSecret }) {\n  protocolDiagnostic.mark("web_login");'),
         ('      console.log("[ok] Password accepted");', '      protocolDiagnostic.mark("password_accepted");'),
@@ -68,6 +69,8 @@ console.log = console.warn = console.error = () => {};''')
         ('    if (!data[key]) throw new Error(`Token response missing ${key}.`);',
          '    if (typeof data[key] !== "string" || !data[key].trim()) throw new Error("credentials_incomplete");'),
     ):
+        if old == '      if (!isRejectedTotpError(error)) throw error;' and 'TOTP_FACTOR_BINDING_REQUIRED' in source:
+            continue  # The tracked bounded MFA flow already terminates explicit rejection.
         source = replace_exact(source, old, new)
     # Both saved-session and freshly authenticated-session failures must end the
     # queued attempt. Do not turn a rejected OAuth result into another login.

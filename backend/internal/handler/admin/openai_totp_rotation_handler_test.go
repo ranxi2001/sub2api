@@ -14,7 +14,7 @@ import (
 func TestTOTPRotationAdminEndpointsRejectObserversAndDisableCaching(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := &OpenAIOAuthReauthHandler{}
-	for _, endpoint := range []gin.HandlerFunc{h.RotationStatus, h.RotateTOTP, h.RetryTOTP, h.ExportTOTP} {
+	for _, endpoint := range []gin.HandlerFunc{h.RotationStatus, h.RotateTOTP, h.RetryTOTP, h.ExportTOTP, h.ExportTOTPRecovery, h.ImportTOTPRecovery} {
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
 		c.Request = httptest.NewRequest(http.MethodPost, "/accounts/42", strings.NewReader("{}"))
