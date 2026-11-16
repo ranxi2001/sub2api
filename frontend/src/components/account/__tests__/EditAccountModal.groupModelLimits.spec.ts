@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 
 const { updateAccountMock } = vi.hoisted(() => ({ updateAccountMock: vi.fn() }))
@@ -52,9 +53,11 @@ const account = () => ({
 })
 
 function mountModal(overrides: Record<string, unknown> = {}) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
   return mount(EditAccountModal, {
     props: { show: true, account: { ...account(), ...overrides }, proxies: [], groups },
-    global: { stubs: {
+    global: { plugins: [pinia], stubs: {
       BaseDialog: BaseDialogStub, Select: true, Icon: true, ProxySelector: true,
       GroupSelector: true, ModelWhitelistSelector: true
     } }

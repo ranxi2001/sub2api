@@ -3,6 +3,7 @@ export default {
   "codex": "Codex（保留现有 BPS / Prism 配置）",
   "siwc": "SIWC API（Sign in with ChatGPT）",
   "protocolHint": "授权完成后可随时切换，保存账号后生效。SIWC 使用 ChatGPT 套餐调用官方 Responses API，Codex 凭据独立保留。",
+  "proxyHint": "SIWC 复用账号的代理设置。选择“按请求分散”时使用已保存的代理组；组内无可用代理则阻断，不回退直连，账号总并发上限不变。",
   "bound": "SIWC 已绑定（凭据存在，不代表实时可用性）",
   "unbound": "SIWC 尚未绑定",
   "automatic": "使用已保存的密码 / 2FA 授权",

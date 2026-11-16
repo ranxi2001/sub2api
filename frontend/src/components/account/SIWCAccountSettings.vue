@@ -8,6 +8,7 @@
       <option value="siwc" :disabled="!loaded || !status?.bound">{{ t('siwc.siwc') }}</option>
     </select>
     <p class="input-hint">{{ t('siwc.protocolHint') }}</p>
+    <p class="input-hint">{{ t('siwc.proxyHint') }}</p>
     <p role="status" class="text-sm" data-testid="siwc-status">{{ t(status?.bound ? 'siwc.bound' : 'siwc.unbound') }}</p>
     <div class="flex flex-wrap gap-2">
       <button type="button" class="btn btn-secondary btn-sm" :disabled="busy || activeTask" data-testid="siwc-auto" @click="automatic">{{ t('siwc.automatic') }}</button>

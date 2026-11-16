@@ -70,4 +70,6 @@ export const NEW_FEATURE_NOTICES = {
   usageRateCard: 'usage-rpm-tpm-card-initial-announcement',
   tempUnschedStreamCountWindow: 'temp-unsched-stream-timing-count-window',
   bpsAccountSearch: 'bps-account-search-initial-announcement',
+  bpsAccountMultiProxy: 'bps-account-multi-proxy-request-routing',
+  openaiAccountMultiProxy: '2026-11-16-openai-account-multi-proxy',
 } as const

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { i18n } from '@/i18n'
 import zhCommon from '@/i18n/locales/zh/common'
@@ -179,6 +180,8 @@ function buildGrokOAuthAccount(
 const mounted: Array<{ unmount: () => void }> = []
 
 function mountModal(account: any, attachTo?: HTMLElement) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
   const wrapper = mount(EditAccountModal, {
     ...(attachTo ? { attachTo } : {}),
     props: {
@@ -188,6 +191,7 @@ function mountModal(account: any, attachTo?: HTMLElement) {
       groups: []
     },
     global: {
+      plugins: [pinia],
       stubs: {
         BaseDialog: BaseDialogStub,
         Select: true,
@@ -203,6 +207,8 @@ function mountModal(account: any, attachTo?: HTMLElement) {
 }
 
 function mountLiveSelectorModal(account: any) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
   const wrapper = mount(EditAccountModal, {
     props: {
       show: true,
@@ -211,6 +217,7 @@ function mountLiveSelectorModal(account: any) {
       groups: []
     },
     global: {
+      plugins: [pinia],
       stubs: {
         BaseDialog: BaseDialogStub,
         Select: true,
