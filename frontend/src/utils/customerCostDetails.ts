@@ -9,7 +9,7 @@ const close = (a: number, b: number) => Math.abs(a - b) <= 1e-10 + Math.abs(b) *
 
 export function customerCostSnapshot(row: UsageLog | null): CustomerCostDetails | null {
   const detail = row?.customer_cost_details
-  if (!row || !['priority', 'fast'].includes(row.service_tier ?? '') || !detail || ![1, 2].includes(detail.version) || detail.free_fast !== true) return null
+  if (!row || !['priority', 'fast', 'ultrafast'].includes(row.service_tier ?? '') || !detail || ![1, 2].includes(detail.version) || (row.service_tier === 'ultrafast' ? detail.free_ultrafast !== true : detail.free_fast !== true)) return null
   if (![...components.map(key => detail[key]), detail.total_cost, detail.actual_cost, detail.multiplier].every(value => Number.isFinite(value) && value >= 0)) return null
   const sum = components.reduce((total, key) => total + detail[key], 0)
   if (!close(sum, detail.total_cost) || !close(sum * detail.multiplier, detail.actual_cost) || !closeMoney(detail.actual_cost, row.actual_cost)) return null
@@ -22,7 +22,7 @@ export function customerCostSnapshot(row: UsageLog | null): CustomerCostDetails 
 // Mixed modalities, per-request prices and additive fees can legitimately use
 // different rates: retain their recorded display when no snapshot exists.
 export function customerCostsUnknown(row: UsageLog | null): boolean {
-  if (!row || !['priority', 'fast'].includes(row.service_tier ?? '') || customerCostSnapshot(row)) return false
+  if (!row || !['priority', 'fast', 'ultrafast'].includes(row.service_tier ?? '') || customerCostSnapshot(row)) return false
   if (row.customer_cost_details) return true
   if (row.billing_mode && row.billing_mode !== 'token') return false
   if ([row.image_count, row.image_input_tokens, row.image_output_tokens, row.image_input_cost, row.image_output_cost].some(value => (value ?? 0) > 0)) return false

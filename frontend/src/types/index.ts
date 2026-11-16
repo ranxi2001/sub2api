@@ -662,6 +662,7 @@ export interface AdminGroup extends Group {
   i18n?: GroupI18n
   force_openai_fast: boolean
   free_openai_fast: boolean
+  free_openai_ultrafast: boolean
   // 仅允许流式请求（管理端请求策略，用户侧分组不返回）
   stream_only: boolean
   codex_cli_only?: boolean
@@ -863,6 +864,7 @@ export interface CreateGroupRequest {
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
+  free_openai_ultrafast?: boolean
   stream_only?: boolean
   codex_cli_only?: boolean
   block_subagents?: boolean
@@ -934,6 +936,7 @@ export interface UpdateGroupRequest {
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
+  free_openai_ultrafast?: boolean
   stream_only?: boolean
   codex_cli_only?: boolean
   block_subagents?: boolean
@@ -2029,6 +2032,7 @@ export interface CustomerCostDetails {
   cache_cost_details?: CustomerCacheCostDetail[]
   version: number
   free_fast: boolean
+  free_ultrafast?: boolean
   input_cost: number
   output_cost: number
   image_input_cost: number

@@ -1,0 +1,113 @@
+name: Free UltraFast
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - 'frontend/src/views/admin/GroupsView.vue'
+      - 'frontend/src/views/admin/__tests__/GroupsView.freeUltrafast.spec.ts'
+      - 'frontend/src/utils/customerCostDetails.ts'
+      - 'frontend/src/utils/__tests__/customerCostDetails.ultrafast.spec.ts'
+      - 'frontend/src/constants/newFeatureNotices.ts'
+      - '.github/workflows/free-ultrafast.yml'
+      - '.github/scripts/free-ultrafast-browser.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: free-ultrafast-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  billing-and-persistence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=1'
+      GOMEMLIMIT: 3500MiB
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@localhost:15432/ultrafast?sslmode=disable
+      SUB2API_TEST_REDIS_URL: redis://localhost:16379/0
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: ultrafast
+        ports: ['15432:5432']
+        options: --health-cmd "pg_isready -U fixture -d ultrafast" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['16379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Ent reproducibility
+        run: |
+          (cd backend && go generate ./ent)
+          git diff --exit-code -- backend/ent backend/go.mod backend/go.sum
+      - name: Billing, DTO, administration and cache regressions
+        working-directory: backend
+        run: >-
+          go test -tags=unit ./internal/service ./internal/handler/admin ./internal/handler/dto ./migrations
+          -run 'Test(FreeUltrafast|FreeFastCustomerCost|DuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState|GroupFreeOpenAI|GroupRequestsDecodeForceOpenAIFast|GroupMapperExposesForceOpenAIFast|APIKeyAuthSnapshotGroupForceOpenAIFast|AdminService_.*Group.*(Fast|Duplicate)|OpenAIGatewayServiceRecordUsage_FreeOpenAIFast)' -count=1 -timeout=15m
+      - name: Database persistence and authentication projection
+        working-directory: backend
+        run: >-
+          go test -tags=integration ./internal/repository
+          -run '^Test(FreeUltrafastGroupPersistence|FreeUltrafastCustomerCostDurableReplay|GetByKeyForAuthCarriesGroupForceOpenAIFast)$' -count=1 -timeout=10m
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Form, cost display and notice regressions
+        run: >-
+          pnpm --dir frontend exec vitest run
+          src/views/admin/__tests__/GroupsView.freeUltrafast.spec.ts
+          src/utils/__tests__/customerCostDetails.ultrafast.spec.ts
+          src/components/common/__tests__/NewFeatureBadge.spec.ts
+          src/components/admin/usage/__tests__/UsageTable.spec.ts
+          --maxWorkers=1 --minWorkers=1
+      - name: Changed frontend lint
+        run: >-
+          pnpm --dir frontend exec eslint src/views/admin/GroupsView.vue
+          src/views/admin/__tests__/GroupsView.freeUltrafast.spec.ts
+          src/utils/customerCostDetails.ts src/utils/__tests__/customerCostDetails.ultrafast.spec.ts
+      - name: Frontend build and type check
+        run: pnpm --dir frontend run build
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/ultrafast-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/ultrafast-browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Real GroupsView screenshots and saved state
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/ultrafast-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/ultrafast-screenshots
+          SOURCE_BASE: 2927209f5492d8cb690b83a1964b2f093c19ad7a
+        run: node .github/scripts/free-ultrafast-browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: free-ultrafast-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/ultrafast-screenshots
+          if-no-files-found: warn

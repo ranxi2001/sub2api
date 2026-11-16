@@ -96,6 +96,12 @@ jobs:
           set -euo pipefail
           # Restore candidate production paths after the original baseline RED.
           git restore backend/internal/service/openai_gateway_usage.go backend/internal/service/usage_log.go backend/internal/handler/dto/types.go backend/internal/handler/dto/mappers.go backend/internal/handler/admin/scoped_admin_usage_response.go backend/internal/repository/usage_log_repo_insert.go backend/internal/repository/usage_log_repo_query.go
+          # UltraFast adds a new snapshot marker. Keep the original Free Fast
+          # gateway while overlaying the historical cache-price producer, so
+          # this RED remains a cache-price assertion rather than a missing-field
+          # compilation failure. Candidate UltraFast runs in its own workflow.
+          git fetch --no-tags --depth=1 origin 2927209f5492d8cb690b83a1964b2f093c19ad7a
+          git show 2927209f5492d8cb690b83a1964b2f093c19ad7a:backend/internal/service/openai_gateway_usage.go > backend/internal/service/openai_gateway_usage.go
           baseline=6826ea7c13459f0fb8080b0753da4b8ae73dd383
           git fetch --no-tags --depth=1 origin "$baseline"
           git show "$baseline:backend/internal/service/customer_cost_details.go" > backend/internal/service/customer_cost_details.go

@@ -183,8 +183,9 @@ type AdminGroup struct {
 	Group
 	// ForceOpenAIFast 是管理端请求策略，用户侧分组 DTO 无需暴露。
 	ForceOpenAIFast bool `json:"force_openai_fast"`
-	// FreeOpenAIFast 是管理端计费策略，用户侧分组 DTO 无需暴露。
-	FreeOpenAIFast bool `json:"free_openai_fast"`
+	// FreeOpenAIFast/FreeOpenAIUltrafast 是独立的管理端计费策略，用户侧分组 DTO 无需暴露。
+	FreeOpenAIFast      bool `json:"free_openai_fast"`
+	FreeOpenAIUltrafast bool `json:"free_openai_ultrafast"`
 	// StreamOnly 是管理端请求策略（只接受流式的对话生成请求），用户侧分组 DTO 无需暴露。
 	StreamOnly     bool `json:"stream_only"`
 	CodexCLIOnly   bool `json:"codex_cli_only"`

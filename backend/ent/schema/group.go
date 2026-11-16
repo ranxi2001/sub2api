@@ -269,6 +269,9 @@ func (Group) Fields() []ent.Field {
 		field.Bool("free_openai_fast").
 			Default(false).
 			Comment("是否让此 OpenAI/Composite 分组的 Fast 请求按 Standard 价格计费"),
+		field.Bool("free_openai_ultrafast").
+			Default(false).
+			Comment("是否让此 OpenAI/Composite 分组的 UltraFast 请求按 Standard 价格向用户计费"),
 		field.Bool("require_oauth_only").
 			Default(false).
 			Comment("仅允许非 apikey 类型账号关联到此分组"),
