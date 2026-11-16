@@ -261,7 +261,7 @@ AND (identity->>'UserMax')::int=0 AND (identity->>'UserID')::bigint=ANY($2::bigi
 			return nil, err
 		}
 		if out[u.ID] == nil {
-			out[u.ID] = &service.UserLoadInfo{UserID: u.ID}
+			return nil, errors.New("regional user statistics incomplete")
 		}
 		n += out[u.ID].CurrentConcurrency + liveCounts[u.ID]
 		out[u.ID].CurrentConcurrency = n

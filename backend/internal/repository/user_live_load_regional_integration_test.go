@@ -16,7 +16,7 @@ import (
 
 func userLiveLoadRegionalCache(t *testing.T, local bool) *regionalConcurrencyCache {
 	t.Helper()
-	p := &slots.Primary{DB: integrationDB, Limit: func(context.Context, *sql.Tx, slots.Resource) (int, error) { return 2, nil }}
+	p := &slots.Primary{DB: integrationDB, Limit: func(context.Context, *sql.Tx, slots.Resource) (int, error) { return 1, nil }}
 	var l *slots.Local
 	if local {
 		l = &slots.Local{DB: integrationDB, Region: fmt.Sprintf("user-load-%d", time.Now().UnixNano())}
@@ -26,6 +26,21 @@ func userLiveLoadRegionalCache(t *testing.T, local bool) *regionalConcurrencyCac
 	cache, err := NewRegionalConcurrencyCache(base, p, l)
 	require.NoError(t, err)
 	return cache.(*regionalConcurrencyCache)
+}
+
+func acquireUserLiveLoadResource(t *testing.T, c *regionalConcurrencyCache, kind string, id int64, source string) {
+	t.Helper()
+	ctx := context.Background()
+	if c.local != nil {
+		now := time.Now().UTC().Add(-time.Millisecond).Truncate(time.Microsecond)
+		g := slots.Grant{LeaseID: fmt.Sprintf("load-%s-%d", kind, id), Region: c.local.Region, Resource: slots.Resource{Kind: kind, ID: id}, Slots: 1, Revision: 1, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
+		p := &slots.Primary{DB: integrationDB, Limit: func(context.Context, *sql.Tx, slots.Resource) (int, error) { return 1, nil }}
+		require.NoError(t, p.Issue(ctx, g))
+		require.NoError(t, c.local.Install(ctx, g))
+	}
+	ok, err := c.acquire(ctx, kind, id, source)
+	require.NoError(t, err)
+	require.True(t, ok)
 }
 
 func assertUserLiveLoad(t *testing.T, c *regionalConcurrencyCache, id int64, expected int) {
@@ -49,7 +64,9 @@ func TestUserLiveLoadRegionalUnlimitedLifecycle(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, slot.Acquired)
 			assertUserLiveLoad(t, c, id, 1)
-			r := service.LiveLeaseTransferRequest{AccountID: id, UserID: id, APIKeyID: id, UserRequestID: slot.RequestID, LeaseID: fmt.Sprint(id)}
+			r := service.LiveLeaseTransferRequest{AccountID: id, AccountMax: 1, AccountRequestID: "account", UserID: id, APIKeyID: id, APIKeyMax: 1, KeyRequestID: "key", UserRequestID: slot.RequestID, LeaseID: fmt.Sprint(id)}
+			acquireUserLiveLoadResource(t, c, "account", id, r.AccountRequestID)
+			acquireUserLiveLoadResource(t, c, "api_key", id, r.KeyRequestID)
 			for range 2 {
 				ok, err := c.AcquireLiveLeaseTransferring(ctx, r)
 				require.NoError(t, err)
@@ -58,12 +75,19 @@ func TestUserLiveLoadRegionalUnlimitedLifecycle(t *testing.T) {
 			}
 			slot.ReleaseFunc() // SDP returns; the call is still active.
 			slot.ReleaseFunc()
+			require.NoError(t, c.ReleaseAccountSlot(ctx, id, r.AccountRequestID))
+			require.NoError(t, c.ReleaseAPIKeySlot(ctx, id, r.KeyRequestID))
+			ok, err := c.AcquireAPIKeySlot(ctx, id, 1, "extra-key")
+			require.NoError(t, err)
+			require.False(t, ok, "the positive key budget remains occupied by Live")
 			assertUserLiveLoad(t, c, id, 1)
 			next := r
 			next.ReplacedAccountID = r.AccountID
 			next.AccountID++
+			next.AccountRequestID = "next-account"
 			next.UserRequestID = "" // Migration must retain the joint identity.
-			ok, err := c.MigrateLiveLeaseAccount(ctx, next)
+			acquireUserLiveLoadResource(t, c, "account", next.AccountID, next.AccountRequestID)
+			ok, err = c.MigrateLiveLeaseAccount(ctx, next)
 			require.NoError(t, err)
 			require.True(t, ok)
 			assertUserLiveLoad(t, c, id, 1)
@@ -104,6 +128,9 @@ func TestUserLiveLoadRegionalFailureCancellationAndFailOpen(t *testing.T) {
 			r.AccountMax = 0
 			r.AccountRequestID = ""
 			r.LeaseID += "-abort"
+			abortSlot, err := svc.AcquireUserSlot(ctx, id, 0)
+			require.NoError(t, err)
+			r.UserRequestID = abortSlot.RequestID
 			ok, err = c.AcquireLiveLeaseTransferring(ctx, r)
 			require.NoError(t, err)
 			require.True(t, ok)
@@ -112,6 +139,8 @@ func TestUserLiveLoadRegionalFailureCancellationAndFailOpen(t *testing.T) {
 				require.NoError(t, c.AbortLiveLeaseTransfer(ctx, r))
 				assertUserLiveLoad(t, c, id, 0)
 			}
+			abortSlot.ReleaseFunc()
+			assertUserLiveLoad(t, c, id, 0)
 			_, err = c.AcquireLiveLeaseTransferring(ctx, r)
 			require.ErrorIs(t, err, service.ErrLiveLeaseTransferFenced)
 			// A failed tracking write must not prevent SQL Live admission, and a

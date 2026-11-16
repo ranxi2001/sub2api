@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/regional/slots"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -250,8 +251,22 @@ func (c *regionalConcurrencyCache) finishLive(ctx context.Context, r service.Liv
 	if old.UserID != r.UserID || old.APIKeyID != r.APIKeyID {
 		return slots.ErrConflict
 	}
+	commit := func() error {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		// The handoff owns unlimited-user statistics too. Retire any remaining
+		// ordinary source on close/abort, even if the SDP handler has not returned.
+		// Auxiliary failures never change admission or a successful SQL release.
+		if !accountOnly && old.UserMax == 0 && old.UserRequestID != "" {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			defer cancel()
+			_ = c.ReleaseTrackedUserSlot(cleanupCtx, old.UserID, old.UserRequestID)
+		}
+		return nil
+	}
 	if state == "closed" || state == "aborted" {
-		return tx.Commit()
+		return commit()
 	}
 	if accountOnly && old.AccountID != r.AccountID {
 		return slots.ErrConflict
@@ -284,7 +299,7 @@ func (c *regionalConcurrencyCache) finishLive(ctx context.Context, r service.Liv
 			return err
 		}
 	}
-	return tx.Commit()
+	return commit()
 }
 func (c *regionalConcurrencyCache) AbortLiveLeaseTransfer(ctx context.Context, r service.LiveLeaseTransferRequest) error {
 	return c.finishLive(ctx, r, true, false)

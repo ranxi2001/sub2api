@@ -131,12 +131,16 @@ var (
 
 		redis.call('ZREMRANGEBYSCORE', key, '-inf', expireBefore)
 		redis.call('ZREMRANGEBYSCORE', liveKey, '-inf', now - 60)
-		local count = redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
-		-- Regional SQL Live handoffs already own these ordinary statistics members.
-		-- Exclude only sources still present, atomically with pruning/counting.
+		return redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
+	`)
+
+	// Regional SQL handoffs own these statistics sources. Count/exclude them
+	// atomically on one key, preserving the batch reader's Cluster compatibility.
+	countUserSlotsExcludingScript = redis.NewScript(`
+		local count = redis.call('ZCARD', KEYS[1])
 		local seen = {}
-		for i = 2, #ARGV do
-			if not seen[ARGV[i]] and redis.call('ZSCORE', key, ARGV[i]) ~= false then count = count - 1 end
+		for i = 1, #ARGV do
+			if not seen[ARGV[i]] and redis.call('ZSCORE', KEYS[1], ARGV[i]) ~= false then count = count - 1 end
 			seen[ARGV[i]] = true
 		end
 		return count
@@ -1747,18 +1751,18 @@ func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users
 		uc := userCmds{
 			id:             u.ID,
 			maxConcurrency: u.MaxConcurrency,
+			liveCmd:        pipe.ZCard(ctx, liveKey),
 			getCmd:         pipe.Get(ctx, waitKey),
 		}
 		if sources := excluded[u.ID]; len(sources) > 0 {
-			args := []interface{}{c.slotTTLSeconds}
+			args := make([]interface{}, 0, len(sources))
 			for _, source := range sources {
 				args = append(args, source)
 			}
 			// EVAL works on a cold script cache when queued in a pipeline.
-			uc.countCmd = getCountScript.Eval(ctx, pipe, []string{slotKey, liveKey}, args...)
+			uc.countCmd = countUserSlotsExcludingScript.Eval(ctx, pipe, []string{slotKey}, args...)
 		} else {
 			uc.zcardCmd = pipe.ZCard(ctx, slotKey)
-			uc.liveCmd = pipe.ZCard(ctx, liveKey)
 		}
 		cmds = append(cmds, uc)
 	}
@@ -1775,6 +1779,7 @@ func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users
 			if err != nil {
 				return nil, err
 			}
+			currentConcurrency += int(uc.liveCmd.Val())
 		} else {
 			currentConcurrency = int(uc.zcardCmd.Val() + uc.liveCmd.Val())
 		}
