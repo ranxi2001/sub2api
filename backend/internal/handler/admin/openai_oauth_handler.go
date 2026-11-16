@@ -107,9 +107,11 @@ func NewOpenAIOAuthHandler(
 
 // OpenAIGenerateAuthURLRequest represents the request for generating OpenAI auth URL
 type OpenAIGenerateAuthURLRequest struct {
-	ProxyID     *int64 `json:"proxy_id"`
-	RedirectURI string `json:"redirect_uri"`
-	OAuthClient string `json:"oauth_client"`
+	ProxyID     *int64  `json:"proxy_id"`
+	ProxyMode   string  `json:"proxy_mode"`
+	ProxyIDs    []int64 `json:"proxy_ids"`
+	RedirectURI string  `json:"redirect_uri"`
+	OAuthClient string  `json:"oauth_client"`
 }
 
 // GenerateAuthURL generates OpenAI OAuth authorization URL
@@ -123,9 +125,11 @@ func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 		}
 	}
 
-	result, err := h.openaiOAuthService.GenerateAuthURL(
+	result, err := h.openaiOAuthService.GenerateAuthURLWithProxySettings(
 		c.Request.Context(),
 		req.ProxyID,
+		req.ProxyMode,
+		req.ProxyIDs,
 		req.RedirectURI,
 		oauthPlatformFromPath(c),
 		req.OAuthClient,
@@ -140,11 +144,13 @@ func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 
 // OpenAIExchangeCodeRequest represents the request for exchanging OpenAI auth code
 type OpenAIExchangeCodeRequest struct {
-	SessionID   string `json:"session_id" binding:"required"`
-	Code        string `json:"code" binding:"required"`
-	State       string `json:"state" binding:"required"`
-	RedirectURI string `json:"redirect_uri"`
-	ProxyID     *int64 `json:"proxy_id"`
+	SessionID   string  `json:"session_id" binding:"required"`
+	Code        string  `json:"code" binding:"required"`
+	State       string  `json:"state" binding:"required"`
+	RedirectURI string  `json:"redirect_uri"`
+	ProxyID     *int64  `json:"proxy_id"`
+	ProxyMode   string  `json:"proxy_mode"`
+	ProxyIDs    []int64 `json:"proxy_ids"`
 }
 
 // ExchangeCode exchanges OpenAI authorization code for tokens
@@ -162,6 +168,8 @@ func (h *OpenAIOAuthHandler) ExchangeCode(c *gin.Context) {
 		State:       req.State,
 		RedirectURI: req.RedirectURI,
 		ProxyID:     req.ProxyID,
+		ProxyMode:   req.ProxyMode,
+		ProxyIDs:    req.ProxyIDs,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

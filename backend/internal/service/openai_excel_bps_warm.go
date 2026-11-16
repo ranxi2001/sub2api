@@ -18,23 +18,31 @@ type BPSWarmAccountRepository interface {
 	ListBPSWarmAccounts(context.Context) ([]Account, error)
 }
 
+// Recovery probes remain eligible for warming without mutating the repository
+// account or re-enabling it for normal scheduling.
+func effectiveExcelBPSWarmAccount(account *Account) (*Account, bool) {
+	if !account.IsExcelBPS403RecoveryPending() {
+		return account, false
+	}
+	probe := *account
+	probe.Extra = cloneExcelBPSRecoveryExtra(account.Extra)
+	probe.Extra["openai_excel_bps"] = true
+	return &probe, true
+}
+
 func excelBPSWarmTargets(accounts []Account) (managed, static int) {
 	for i := range accounts {
-		a := &accounts[i]
+		a, recovery := effectiveExcelBPSWarmAccount(&accounts[i])
 		// Keep one healthy exit available for opted-in disabled accounts, even
 		// when no production account still uses their proxy pool.
-		if a.IsExcelBPS403RecoveryPending() {
-			probe := *a
-			probe.Extra = cloneExcelBPSRecoveryExtra(a.Extra)
-			probe.Extra["openai_excel_bps"] = true
-			probe.Concurrency = 1
-			a = &probe
+		if recovery {
+			a.Concurrency = 1
 		}
-		if !a.IsActive() || !a.Schedulable || !a.IsExcelBPSMihomoEnabled() {
+		if !a.IsActive() || !a.Schedulable || (!a.IsExcelBPSMihomoEnabled() && !a.OpenAIRequestProxyEnabled()) {
 			continue
 		}
 		target := max(1, min(a.Concurrency, excelBPSWarmMaxTarget))
-		if a.ExcelBPSProxySource() == ExcelBPSProxySourceIPPool {
+		if a.OpenAIRequestProxyEnabled() || a.ExcelBPSProxySource() == ExcelBPSProxySourceIPPool {
 			static = min(excelBPSWarmMaxTarget, static+target)
 		} else {
 			managed = min(excelBPSWarmMaxTarget, managed+target)
@@ -107,6 +115,14 @@ func (s *OpenAIGatewayService) syncBPSWarmPool(ctx context.Context) {
 		return
 	}
 	managed, static := excelBPSWarmTargets(accounts)
+	groups := make(map[int64][]int64)
+	for i := range accounts {
+		a, _ := effectiveExcelBPSWarmAccount(&accounts[i])
+		if a.IsActive() && a.Schedulable && a.OpenAIRequestProxyEnabled() {
+			groups[a.ID] = a.OpenAIRequestProxyIDs()
+		}
+	}
+	mihomo.SetBPSStaticRequestGroups(groups)
 	if static > 0 {
 		proxyCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 		s.refreshExcelBPSIPPool(proxyCtx)

@@ -127,7 +127,7 @@ func (s *OpenAIGatewayService) FetchExcelBPSModelsList(ctx context.Context, acco
 		fetchCtx, cancel := context.WithTimeout(fetchCtx, 5*time.Second)
 		defer cancel()
 		var lease excelBPSLease
-		if account.IsExcelBPSMihomoEnabled() {
+		if account.IsExcelBPSMihomoEnabled() || account.ExcelBPSRequestProxyEnabled() {
 			proxy, lease, err = s.excelBPSAcquireFor(account)(fetchCtx, fmt.Sprintf("transient:bps-models:%d", account.ID))
 			if err != nil {
 				return nil, fmt.Errorf("excel BPS discovery proxy is unavailable")

@@ -21,6 +21,17 @@ type openAIConnectionTokenClient interface {
 	RevokeConnectionToken(context.Context, string, string, string) error
 }
 
+func (s *OpenAIOAuthReauthService) validateConnectionMaintenanceProxyMode(ctx context.Context, accountID int64) error {
+	account, err := s.connectionAccount(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if account.OpenAIRequestProxyEnabled() {
+		return infraerrors.BadRequest("OPENAI_PROXY_CONNECTION_UNSUPPORTED", "Switch to single proxy mode before managing a fixed authorization connection")
+	}
+	return nil
+}
+
 func (s *OpenAIOAuthReauthService) readConnectionCredentials(c *OpenAIAuthConnection) (map[string]any, error) {
 	if c.CredentialsCiphertext == "" {
 		return map[string]any{}, nil
@@ -61,6 +72,9 @@ func (s *OpenAIOAuthReauthService) encryptConnectionCredentials(c *OpenAIAuthCon
 
 func (s *OpenAIOAuthReauthService) BeginConnectionAuthorization(ctx context.Context, accountID int64, id string) (*OpenAIAuthURLResult, error) {
 	if _, err := s.managementConnectionAccount(ctx, accountID); err != nil {
+		return nil, err
+	}
+	if err := s.validateConnectionMaintenanceProxyMode(ctx, accountID); err != nil {
 		return nil, err
 	}
 	c, err := s.authConnection(ctx, accountID, id)
@@ -147,6 +161,9 @@ func (s *OpenAIOAuthReauthService) BeginConnectionAuthorization(ctx context.Cont
 
 func (s *OpenAIOAuthReauthService) CompleteConnectionAuthorization(ctx context.Context, accountID int64, id, sessionID, callback string) error {
 	if _, err := s.managementConnectionAccount(ctx, accountID); err != nil {
+		return err
+	}
+	if err := s.validateConnectionMaintenanceProxyMode(ctx, accountID); err != nil {
 		return err
 	}
 	c, err := s.authConnection(ctx, accountID, id)
@@ -295,6 +312,9 @@ func connectionCapabilities(kind, scope string) []string {
 }
 
 func (s *OpenAIOAuthReauthService) ConnectionAccessToken(ctx context.Context, accountID int64, id string) (string, error) {
+	if err := s.validateConnectionMaintenanceProxyMode(ctx, accountID); err != nil {
+		return "", err
+	}
 	c, err := s.authConnection(ctx, accountID, id)
 	if err != nil {
 		return "", err
@@ -446,6 +466,9 @@ func stringCredential(creds map[string]any, key string) string { v, _ := creds[k
 
 func (s *OpenAIOAuthReauthService) RevokeAuthConnection(ctx context.Context, accountID int64, id string, revision int64) (bool, error) {
 	if _, err := s.managementConnectionAccount(ctx, accountID); err != nil {
+		return false, err
+	}
+	if err := s.validateConnectionMaintenanceProxyMode(ctx, accountID); err != nil {
 		return false, err
 	}
 	lease, err := s.lockAuthConnection(ctx, accountID, id)

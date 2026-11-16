@@ -467,7 +467,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if account.Proxy != nil {
 		attachmentProxy = account.Proxy.URL()
 	}
-	if images != nil && images.HasImages() && account.IsExcelBPSMihomoEnabled() {
+	if images != nil && images.HasImages() && (account.IsExcelBPSMihomoEnabled() || account.ExcelBPSRequestProxyEnabled()) {
 		var lease excelBPSLease
 		// Pin the attachment upload and the Responses request to the same exit,
 		// whichever pool the account chose.
@@ -857,6 +857,9 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 
 	if len(compactOutput) > 0 {
 		converted = basispoints.WithCompactedWindow(requestCtx, converted, compactOutput, compactUsageWire)
+	}
+	if account.ExcelBPSRequestProxyEnabled() {
+		converted = ownExcelBPSRequestBody(ctx, converted, lease)
 	}
 	defer func() { _ = converted.Close() }()
 	// The bridge sees the body after group policy mapping. Keep the original

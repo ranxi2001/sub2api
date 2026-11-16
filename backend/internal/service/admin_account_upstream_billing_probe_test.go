@@ -705,7 +705,16 @@ func TestBulkUpdateAccountsRejectsProbeSettingWhenTargetIsMissing(t *testing.T) 
 }
 
 func TestBulkUpdateAccountsInvalidatesProbeSnapshotForIdentityCredentials(t *testing.T) {
-	repo := &upstreamBillingProbeAccountRepo{}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{
+		1: {
+			ID:          1,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Credentials: map[string]any{"api_key": "sk-existing"},
+			Extra:       map[string]any{UpstreamBillingProbeExtraKey: map[string]any{"status": "ok"}},
+		},
+	}}
 	input := &BulkUpdateAccountsInput{
 		AccountIDs:  []int64{1},
 		Credentials: map[string]any{"api_key": "sk-new"},
@@ -738,7 +747,16 @@ func TestBulkUpdateAccountsInvalidatesProbeSnapshotForProxyUpdate(t *testing.T) 
 }
 
 func TestBulkUpdateAccountsKeepsProbeSnapshotForUnrelatedCredentials(t *testing.T) {
-	repo := &upstreamBillingProbeAccountRepo{}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{
+		1: {
+			ID:          1,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Credentials: map[string]any{"api_key": "sk-existing"},
+			Extra:       map[string]any{UpstreamBillingProbeExtraKey: map[string]any{"status": "ok"}},
+		},
+	}}
 	input := &BulkUpdateAccountsInput{
 		AccountIDs:  []int64{1},
 		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-old": "gpt-new"}},

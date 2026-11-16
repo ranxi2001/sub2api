@@ -100,6 +100,7 @@ func (m *Manager) BPSWarmStatus() BPSWarmStatus {
 
 // A single service-owned worker refills both sources, never a request goroutine.
 func WarmBPSPools(ctx context.Context, managedTarget, staticTarget int) {
+	bpsStaticManager.warmBPSRequestGroups(ctx)
 	if m := managedManager(); m != nil {
 		m.warmBPSPool(ctx, managedTarget)
 	}

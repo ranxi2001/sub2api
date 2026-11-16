@@ -78,6 +78,15 @@ func (s *astraRoutingUpstream) Do(r *http.Request, p string, a int64, n int) (*h
 	return s.DoWithTLS(r, p, a, n, nil)
 }
 func (s *astraRoutingUpstream) DoWithTLS(r *http.Request, p string, a int64, n int, f *tlsfingerprint.Profile) (*http.Response, error) {
+	if r != nil {
+		leased, err := service.ValidateOpenAIRequestProxyEgress(r.Context(), a, p)
+		if err != nil {
+			return nil, err
+		}
+		if leased {
+			return s.delegate.DoWithTLS(r, p, a, n, f)
+		}
+	}
 	if r != nil && service.IsBoundAstraTicketRequest(r.Context()) {
 		return s.delegate.DoWithTLS(r, p, a, n, f)
 	}

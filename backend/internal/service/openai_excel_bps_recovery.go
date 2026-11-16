@@ -256,7 +256,7 @@ func (s *OpenAIGatewayService) probeExcelBPS403Recovery(ctx context.Context, acc
 		proxy = account.Proxy.URL()
 	}
 	var lease excelBPSLease
-	if probe.IsExcelBPSMihomoEnabled() {
+	if probe.IsExcelBPSMihomoEnabled() || probe.ExcelBPSRequestProxyEnabled() {
 		proxy, lease, err = s.excelBPSAcquireFor(&probe)(ctx, "transient:bps-403-recovery:"+nonce)
 		if err != nil {
 			return err

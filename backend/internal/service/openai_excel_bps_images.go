@@ -274,6 +274,9 @@ func (s *OpenAIGatewayService) forwardExcelBPSImages(ctx context.Context, c *gin
 	if lease != nil {
 		defer lease.Release()
 	}
+	if account.ExcelBPSRequestProxyEnabled() {
+		resp.Body = ownExcelBPSRequestBody(ctx, resp.Body, lease)
+	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

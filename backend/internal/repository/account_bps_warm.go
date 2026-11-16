@@ -25,12 +25,16 @@ SELECT id, platform, type, status, schedulable, concurrency, parent_account_id,
            'openai_excel_bps', extra->'openai_excel_bps',
            'openai_excel_bps_mihomo', extra->'openai_excel_bps_mihomo',
            'openai_excel_bps_proxy_source', extra->'openai_excel_bps_proxy_source',
+           'openai_excel_bps_proxy_mode', extra->'openai_excel_bps_proxy_mode',
+           'openai_excel_bps_proxy_ids', extra->'openai_excel_bps_proxy_ids',
            'openai_excel_bps_authorization_pending', extra->'openai_excel_bps_authorization_pending',
            'openai_excel_bps_auto_recover_on_403', extra->'openai_excel_bps_auto_recover_on_403',
            'openai_excel_bps_auto_disable_on_403', extra->'openai_excel_bps_auto_disable_on_403',
            'openai_excel_bps_403_disabled_at', extra->'openai_excel_bps_403_disabled_at',
            'openai_siwc', extra->'openai_siwc'
-       )
+       ) || CASE WHEN extra ? 'openai_proxy_mode'
+                 THEN jsonb_build_object('openai_proxy_mode', extra->'openai_proxy_mode', 'openai_proxy_ids', extra->'openai_proxy_ids')
+                 ELSE '{}'::jsonb END
 FROM accounts
 WHERE deleted_at IS NULL AND platform = $1 AND status = $2
 ORDER BY priority, id`

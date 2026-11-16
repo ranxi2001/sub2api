@@ -1470,6 +1470,11 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"openai_passthrough",
 		"openai_oauth_passthrough",
 		"openai_excel_bps",
+		service.ExcelBPSProxyModeKey,
+		service.ExcelBPSProxyIDsKey,
+		service.OpenAIProxyModeKey,
+		service.OpenAIProxyIDsKey,
+		"openai_excel_bps_proxy_source",
 		"openai_excel_bps_auto_disable_on_403",
 		service.ExcelBPSAutoRecoverOn403Key,
 		service.ExcelBPS403RecoveryIntervalMinutesKey,
@@ -1506,7 +1511,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
-		if value, ok := extra[key]; ok && (value != nil || key == "openai_excel_bps_models") {
+		if value, ok := extra[key]; ok && (value != nil || key == "openai_excel_bps_models" || key == service.OpenAIProxyModeKey) {
 			if key == service.UpstreamBillingProbeExtraKey {
 				filteredProbe := filterSchedulerUpstreamBillingProbe(value)
 				if filteredProbe == nil {
