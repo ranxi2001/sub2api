@@ -2,7 +2,7 @@
   <div class="space-y-1 whitespace-nowrap text-xs tabular-nums" :title="t('admin.users.liveUsageHint')">
     <div class="flex items-center gap-2">
       <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.liveConcurrency') }}</span>
-      <UserConcurrencyCell v-if="user.current_concurrency != null" :current="user.current_concurrency" :max="user.concurrency" :show-unlimited="true" />
+      <UserConcurrencyCell v-if="user.concurrency_available !== false && user.current_concurrency != null" :current="user.current_concurrency" :max="user.concurrency" :show-unlimited="true" />
       <span v-else :title="t('admin.users.liveUsageUnavailable')">—</span>
     </div>
     <div class="flex items-center gap-2">

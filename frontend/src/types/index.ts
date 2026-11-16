@@ -115,6 +115,7 @@ export interface AdminUser extends User {
   // 当前并发数（仅管理员列表接口返回）
   current_rpm?: number | null
   current_concurrency?: number
+  concurrency_available?: boolean // false means the legacy numeric field is not a measurement
 }
 
 export interface LoginRequest {

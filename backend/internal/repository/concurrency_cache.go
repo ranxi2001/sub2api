@@ -131,7 +131,15 @@ var (
 
 		redis.call('ZREMRANGEBYSCORE', key, '-inf', expireBefore)
 		redis.call('ZREMRANGEBYSCORE', liveKey, '-inf', now - 60)
-		return redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
+		local count = redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
+		-- Regional SQL Live handoffs already own these ordinary statistics members.
+		-- Exclude only sources still present, atomically with pruning/counting.
+		local seen = {}
+		for i = 2, #ARGV do
+			if not seen[ARGV[i]] and redis.call('ZSCORE', key, ARGV[i]) ~= false then count = count - 1 end
+			seen[ARGV[i]] = true
+		end
+		return count
 	`)
 
 	acquireLiveLeaseScript = redis.NewScript(`
@@ -1704,6 +1712,10 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 }
 
 func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
+	return c.getUsersLoadBatchExcluding(ctx, users, nil)
+}
+
+func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users []service.UserWithConcurrency, excluded map[int64][]string) (map[int64]*service.UserLoadInfo, error) {
 	if len(users) == 0 {
 		return map[int64]*service.UserLoadInfo{}, nil
 	}
@@ -1722,6 +1734,7 @@ func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []servic
 		maxConcurrency int
 		zcardCmd       *redis.IntCmd
 		liveCmd        *redis.IntCmd
+		countCmd       *redis.Cmd
 		getCmd         *redis.StringCmd
 	}
 	cmds := make([]userCmds, 0, len(users))
@@ -1734,9 +1747,18 @@ func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []servic
 		uc := userCmds{
 			id:             u.ID,
 			maxConcurrency: u.MaxConcurrency,
-			zcardCmd:       pipe.ZCard(ctx, slotKey),
-			liveCmd:        pipe.ZCard(ctx, liveKey),
 			getCmd:         pipe.Get(ctx, waitKey),
+		}
+		if sources := excluded[u.ID]; len(sources) > 0 {
+			args := []interface{}{c.slotTTLSeconds}
+			for _, source := range sources {
+				args = append(args, source)
+			}
+			// EVAL works on a cold script cache when queued in a pipeline.
+			uc.countCmd = getCountScript.Eval(ctx, pipe, []string{slotKey, liveKey}, args...)
+		} else {
+			uc.zcardCmd = pipe.ZCard(ctx, slotKey)
+			uc.liveCmd = pipe.ZCard(ctx, liveKey)
 		}
 		cmds = append(cmds, uc)
 	}
@@ -1747,7 +1769,15 @@ func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []servic
 
 	loadMap := make(map[int64]*service.UserLoadInfo, len(users))
 	for _, uc := range cmds {
-		currentConcurrency := int(uc.zcardCmd.Val() + uc.liveCmd.Val())
+		var currentConcurrency int
+		if uc.countCmd != nil {
+			currentConcurrency, err = uc.countCmd.Int()
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			currentConcurrency = int(uc.zcardCmd.Val() + uc.liveCmd.Val())
+		}
 		waitingCount := 0
 		if v, err := uc.getCmd.Int(); err == nil {
 			waitingCount = v

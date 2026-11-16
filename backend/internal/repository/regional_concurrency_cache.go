@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/regional/slots"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // regionalConcurrencyCache keeps admission, FIFO, and Live ownership in SQL.
@@ -84,12 +85,11 @@ func (c *regionalConcurrencyCache) GetAccountConcurrency(ctx context.Context, id
 	return c.count(ctx, "account", id)
 }
 func (c *regionalConcurrencyCache) GetUserConcurrency(ctx context.Context, id int64) (int, error) {
-	n, err := c.count(ctx, "user", id)
+	loads, err := c.GetUsersLoadBatch(ctx, []service.UserWithConcurrency{{ID: id}})
 	if err != nil {
 		return 0, err
 	}
-	tracked, err := c.ConcurrencyCache.GetUserConcurrency(ctx, id)
-	return n + tracked, err
+	return loads[id].CurrentConcurrency, nil
 }
 func (c *regionalConcurrencyCache) TrackUserSlot(ctx context.Context, id int64, request string) error {
 	if tracker, ok := c.ConcurrencyCache.(service.UserSlotTracker); ok {
@@ -205,9 +205,53 @@ func (c *regionalConcurrencyCache) GetAccountsLoadBatch(ctx context.Context, acc
 	return out, nil
 }
 func (c *regionalConcurrencyCache) GetUsersLoadBatch(ctx context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
-	// Redis contains unlimited-user statistics and local queues; add the
-	// authoritative persistent budget without re-reading Redis per user.
-	out, err := c.ConcurrencyCache.GetUsersLoadBatch(ctx, users)
+	if len(users) == 0 {
+		return map[int64]*service.UserLoadInfo{}, nil
+	}
+	ids := make([]int64, len(users))
+	for i, u := range users {
+		ids[i] = u.ID
+	}
+	// Unlimited users have statistics in Redis, not budget slots. Their durable
+	// Live owner is the existing handoff row, including across account migration.
+	// Keep Limited=false in liveMembers: statistics must not acquire authority.
+	rows, err := c.database().QueryContext(ctx, `SELECT (identity->>'UserID')::bigint, identity->>'UserRequestID'
+FROM regional_live_handoffs WHERE region_id=$1 AND state='active'
+AND (identity->>'UserMax')::int=0 AND (identity->>'UserID')::bigint=ANY($2::bigint[])`, c.region(), pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	liveCounts := make(map[int64]int)
+	excluded := make(map[int64][]string)
+	for rows.Next() {
+		var id int64
+		var source string
+		if err = rows.Scan(&id, &source); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		liveCounts[id]++
+		if source != "" {
+			excluded[id] = append(excluded[id], source)
+		}
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	var out map[int64]*service.UserLoadInfo
+	if len(excluded) > 0 {
+		reader, ok := c.ConcurrencyCache.(interface {
+			getUsersLoadBatchExcluding(context.Context, []service.UserWithConcurrency, map[int64][]string) (map[int64]*service.UserLoadInfo, error)
+		})
+		if !ok {
+			return nil, errors.New("regional user statistics reader unavailable")
+		}
+		out, err = reader.getUsersLoadBatchExcluding(ctx, users, excluded)
+	} else {
+		out, err = c.ConcurrencyCache.GetUsersLoadBatch(ctx, users)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +263,7 @@ func (c *regionalConcurrencyCache) GetUsersLoadBatch(ctx context.Context, users 
 		if out[u.ID] == nil {
 			out[u.ID] = &service.UserLoadInfo{UserID: u.ID}
 		}
-		n += out[u.ID].CurrentConcurrency
+		n += out[u.ID].CurrentConcurrency + liveCounts[u.ID]
 		out[u.ID].CurrentConcurrency = n
 		if u.MaxConcurrency > 0 {
 			out[u.ID].LoadRate = (n + out[u.ID].WaitingCount) * 100 / u.MaxConcurrency

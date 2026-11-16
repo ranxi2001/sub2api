@@ -8,6 +8,15 @@ const render = (rpm: number | null | undefined, limit: number) => mount(UserLive
   props: { user: { current_concurrency: 2, concurrency: 10, current_rpm: rpm, rpm_limit: limit } as AdminUser }
 })
 describe('UserLiveUsageCell', () => {
+  it('keeps failed concurrency reads unknown while preserving legacy numeric responses', async () => {
+    const wrapper = render(0, 0)
+    await wrapper.setProps({ user: { ...wrapper.props('user'), current_concurrency: 0, concurrency_available: false } })
+    expect(wrapper.findComponent({ name: 'UserConcurrencyCell' }).exists()).toBe(false)
+    expect(wrapper.text()).toContain('—')
+    await wrapper.setProps({ user: { ...wrapper.props('user'), concurrency_available: true } })
+    expect(wrapper.findComponent({ name: 'UserConcurrencyCell' }).exists()).toBe(true)
+    expect(render(0, 0).findComponent({ name: 'UserConcurrencyCell' }).exists()).toBe(true)
+  })
   it('shows actual zero and over-limit counts', () => {
     expect(render(0, 60).text()).toContain('0 / 60')
     const over = render(61, 60)
