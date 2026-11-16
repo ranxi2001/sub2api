@@ -28,10 +28,10 @@ const baseFixture = testSource.slice(fixtureStart, fixtureEnd).replaceAll('sub3.
 const errors = []
 let browser, server
 try {
-  // Keep historical imports, locales and CSS in their complete original tree.
+  // Preserve the full revision: frontend imports also read docs/legal via ?raw.
   mkdirSync(baselineDirectory)
-  const archive = join(baselineDirectory, 'frontend.tar')
-  execFileSync('git', ['archive', '--format=tar', `--output=${archive}`, process.env.SOURCE_BASE, 'frontend'])
+  const archive = join(baselineDirectory, 'source.tar')
+  execFileSync('git', ['archive', '--format=tar', `--output=${archive}`, process.env.SOURCE_BASE])
   execFileSync('tar', ['-xf', archive, '-C', baselineDirectory])
   const baselineRoot = join(baselineDirectory, 'frontend')
   for (const dependency of ['package.json', 'pnpm-lock.yaml']) {
