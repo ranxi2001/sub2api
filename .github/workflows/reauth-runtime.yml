@@ -8,6 +8,11 @@ on:
       - 'tools/fixtures/codex-http-transport.mjs'
       - 'tools/fixtures/session-studio/**'
       - 'tools/fixtures/credential-operation-errors.json'
+      - 'backend/internal/service/openai_totp*'
+      - 'backend/internal/repository/openai_totp*'
+      - 'backend/internal/handler/admin/openai_totp*'
+      - 'backend/migrations/382_openai_totp_binding.sql'
+      - 'tools/fixtures/totp-http-transport.mjs'
       - 'tools/openai_totp_*'
       - 'tools/test_openai_totp_*'
       - 'tools/openai_siwc_*'
@@ -39,6 +44,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact head
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - uses: docker/setup-buildx-action@v3
       - name: Package and validate without publishing
         env:
@@ -47,7 +56,7 @@ jobs:
         run: bash tools/reauth-runtime/build.sh
       - uses: actions/upload-artifact@v7
         with:
-          name: reauth-runtime-test-${{ matrix.arch }}
+          name: reauth-runtime-test-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: reauth-output/*.tar.gz
           retention-days: 3
 
@@ -75,6 +84,10 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact head
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
@@ -84,7 +97,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v8
         with:
-          name: reauth-runtime-test-amd64
+          name: reauth-runtime-test-amd64-${{ github.event.pull_request.head.sha || github.sha }}
           path: reauth-input
       - name: Build local API
         working-directory: backend
@@ -125,10 +138,15 @@ jobs:
             sleep 2
           done
           curl -fsS "$STAGING_API_URL/health"
-          python tools/reauth-runtime/test_deployment.py
+          set -o pipefail
+          python tools/reauth-runtime/test_deployment.py 2>&1 | tee "$STAGING_ROOT/acceptance.log"
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: totp-deployment-verification
-          path: ${{ runner.temp }}/totp-staging/verification.json
+          name: totp-deployment-verification-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/totp-staging/verification.json
+            ${{ runner.temp }}/totp-staging/acceptance.log
+            ${{ runner.temp }}/totp-staging/api.log
           if-no-files-found: error
           retention-days: 3

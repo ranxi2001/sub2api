@@ -140,7 +140,7 @@ class PinnedCodexProtocolTests(unittest.TestCase):
     def test_real_pinned_cli_with_only_mock_http(self):
         dependency = Path(os.environ['EXCEL_TEST_TOSUB2_ROOT'])
         original = (dependency / 'src/protocol-login.mjs').read_bytes()
-        for mode, expected in [('success', None), ('workspace-success', None), ('missing-callback', 'callback_missing'),
+        for mode, expected in [('success', None), ('multi-factor', None), ('workspace-success', None), ('missing-callback', 'callback_missing'),
                                ('wrong-state', 'callback_state_mismatch'), ('exchange-failed', 'token_exchange_failed'),
                                ('incomplete', 'credentials_incomplete'), ('session-rejected', 'session_unavailable'),
                                ('workspace-mismatch', 'workspace_mismatch')]:
@@ -173,7 +173,7 @@ class PinnedCodexProtocolTests(unittest.TestCase):
                     self.assertFalse(output.exists())
                 trace = routes.read_text()
                 self.assertEqual(trace.count('POST /api/accounts/password/verify'), 1)
-                self.assertEqual(trace.count('POST /api/accounts/mfa/verify'), 1)
+                self.assertEqual(trace.count('POST /api/accounts/mfa/verify'), 2 if mode == 'multi-factor' else 1)
                 if mode in ('missing-callback', 'wrong-state', 'session-rejected', 'workspace-mismatch'):
                     self.assertNotIn('POST /oauth/token', trace)
         self.assertEqual((dependency / 'src/protocol-login.mjs').read_bytes(), original)

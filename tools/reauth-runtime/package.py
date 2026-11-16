@@ -59,6 +59,7 @@ for name, binary in (("python", "python-root/bin/python3"), ("node", "node.bin")
     )
     script.chmod(0o755)
 manifest = {"tosub2_commit": "8548397e89bf80e508eda64a87e0d556d43abc84",
+            "totp_factor_binding_patch": "issue881-v1",
             "architecture": platform.machine(), "python": platform.python_version(),
             "node": subprocess.check_output(["node", "--version"], text=True).strip(),
             "python_packages": subprocess.check_output([sys.executable, "-m", "pip", "freeze"], text=True).splitlines()}

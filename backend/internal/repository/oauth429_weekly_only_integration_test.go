@@ -56,6 +56,7 @@ func TestOAuth429WeeklyOnlyRotationPreservesScheduling(t *testing.T) {
 					for _, step := range [][3]string{{"running", "enrolling", ""}, {"enrolling", "prepared", "enc:fictional-new"}, {"prepared", "activating", ""}, {"activating", "verifying", ""}} {
 						require.NoError(t, rotation.TransitionTOTPRotation(ctx, task.TaskID, "fictional-worker", step[0], step[1], step[2]))
 					}
+					require.NoError(t, rotation.BindTOTPRotation(ctx, task.TaskID, "fictional-worker", "enc:fictional-new", "enc:fictional-new"))
 				}
 				require.NoError(t, rotation.FinishTOTPRotation(ctx, task.TaskID, "fictional-worker", success, ""))
 				after, err := accounts.GetByID(ctx, a.ID)

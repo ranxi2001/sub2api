@@ -1,0 +1,95 @@
+--- a/src/protocol-login.mjs
++++ b/src/protocol-login.mjs
+@@ -1090,6 +1090,7 @@
+     emailVerified: true,
+     loginMethod,
+     mfaVerified: mfaRequired,
++    mfaFactorId: client.totpFactorId || null,
+   };
+ }
+ 
+@@ -1133,52 +1134,45 @@
+ }
+ 
+ async function completeTotpMfaIfNeeded(client, { authBase, rl, deviceId, payload, totpSecret, referer }) {
++  delete client.totpFactorId;
+   if (!isMfaChallengePayload(payload)) return payload;
+-  const factor = pickTotpFactor(payload);
+-  if (!factor?.id) throw new Error("2FA is required, but the response does not contain a TOTP factor ID");
+-
++  const session = payload?.["oai-client-auth-session"] || {};
++  const factors = [...new Map([
++    ...(Array.isArray(session.mfa_challenge_factors) ? session.mfa_challenge_factors : []),
++    ...(Array.isArray(session.mfa_factors) ? session.mfa_factors : []),
++  ].filter(f => f?.factor_type === "totp" && typeof f.id === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(f.id))
++    .map(f => [f.id, f])).values()];
+   console.log("[mfa] TOTP 2FA challenge reached.");
+-  await authJsonStep(client, authBase, "POST", "/api/accounts/mfa/issue_challenge", {
+-    type: "totp",
+-    id: factor.id,
+-    force_fresh_challenge: false,
+-  }, { referer });
+-
+-  let code;
+-  let generatedFromSecret = false;
+-  if (totpSecret) {
+-    code = generateTotp(totpSecret);
+-    generatedFromSecret = true;
+-    console.log("[mfa] Generated a 6-digit code from the configured 2FA key.");
+-  } else {
+-    code = await askTotpOtp(rl);
+-  }
+-  const challengeUrl = getContinueUrl(payload) || `${authBase}/mfa-challenge/${factor.id}`;
+-  for (;;) {
++  const bound = process.env.CHATGPT_TOTP_FACTOR_ID || "";
++  const selected = bound ? factors.filter(f => f.id === bound) : factors;
++  if (!selected.length) throw new Error("TOTP_FACTOR_NOT_FOUND");
++  // A code cannot identify its factor without a challenge. Bound the legacy
++  // discovery budget before sending anything, and never retry uncertain I/O.
++  if (!bound && selected.length > 2) throw new Error("TOTP_FACTOR_BINDING_REQUIRED");
++  if (!totpSecret) throw new Error("TOTP_SECRET_REQUIRED");
++  for (const factor of selected) {
++    await authJsonStep(client, authBase, "POST", "/api/accounts/mfa/issue_challenge", {
++      type: "totp", id: factor.id, force_fresh_challenge: false,
++    }, { referer });
++    const code = generateTotp(totpSecret);
++    const sentinelHeaders = await createSentinelHeaders(client, {authBase, deviceId, flow: "password_verify"});
+     try {
+-      const sentinelHeaders = await createSentinelHeaders(client, {
+-        authBase,
+-        deviceId,
+-        flow: "password_verify",
+-      });
+       const { data } = await authJsonStep(client, authBase, "POST", "/api/accounts/mfa/verify", {
+-        type: "totp",
+-        id: factor.id,
+-        code,
+-      }, { referer: challengeUrl, headers: sentinelHeaders });
++        type: "totp", id: factor.id, code,
++      }, { referer: `${authBase}/mfa-challenge/${encodeURIComponent(factor.id)}`, headers: sentinelHeaders });
++      if (data?.error || isMfaChallengePayload(data) || !getContinueUrl(data)) {
++        throw new Error("TOTP_VERIFICATION_UNCONFIRMED");
++      }
++      client.totpFactorId = factor.id;
+       console.log("[ok] 2FA verification accepted");
+       return data;
+     } catch (error) {
+-      if (!isRejectedTotpError(error)) throw error;
+-      console.log(
+-        generatedFromSecret
+-          ? "[warn] The code generated from the configured 2FA key was rejected; enter a current code manually."
+-          : "[warn] The 2FA code was rejected; enter a new code.",
+-      );
+-      generatedFromSecret = false;
+-      code = await askTotpOtp(rl);
+-    }
+-  }
++      // Only an explicit 400/401 OTP rejection permits trying another ID.
++      // In particular a 429/5xx body mentioning an OTP is not a rejection.
++      if (!/HTTP (?:400|401)\b/.test(String(error?.message || "")) || !isRejectedTotpError(error)) throw error;
++    }
++  }
++  throw new Error("TOTP_REJECTED: The code generated from the configured 2FA key was rejected");
+ }
+ 
+ function isRejectedPasswordError(error) {
