@@ -3,33 +3,107 @@ on:
   pull_request:
     paths:
       - backend/internal/service/basispoints/web_search*
+      - backend/internal/service/basispoints/upstream_failure.go
+      - backend/internal/service/openai_excel_bps.go
       - backend/internal/service/openai_excel_bps_search*
       - backend/internal/service/bps_search_settings_test.go
       - frontend/src/components/account/ExcelBPSSearchOptions.vue
       - frontend/src/components/account/__tests__/ExcelBPSSearchOptions.spec.ts
       - frontend/src/utils/excelBPSDefaults.ts
       - .github/scripts/bps-search-preview.mjs
+      - .github/scripts/issue871-evidence.py
+      - .github/scripts/test_issue871_evidence.py
       - .github/workflows/bps-search.yml
 permissions:
   contents: read
 jobs:
   search-protocol:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Record exact candidate and baseline source identities
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain)"
+          evidence_dir="$RUNNER_TEMP/issue871-evidence"
+          baseline_sha=ff1082fd51038f10dcb3a8ecb1d5a738258b0f66
+          mkdir -p "$evidence_dir"
+          git rev-parse HEAD HEAD^{tree} HEAD^ > "$evidence_dir/candidate.txt"
+          git rev-parse "$baseline_sha" "$baseline_sha^{tree}" > "$evidence_dir/baseline.txt"
+          git ls-tree -r HEAD -- backend .github/workflows/bps-search.yml .github/scripts/issue871-evidence.py .github/scripts/test_issue871_evidence.py > "$evidence_dir/candidate-blobs.txt"
+          git ls-tree -r "$baseline_sha" -- backend > "$evidence_dir/baseline-blobs.txt"
+          cp .github/scripts/issue871-evidence.py .github/scripts/test_issue871_evidence.py "$evidence_dir/"
+      - name: Validate behavioral evidence gate mutations
+        run: python3 -m unittest discover -s .github/scripts -p 'test_issue871_evidence.py'
+      - name: RED isolated production baseline with candidate standalone diagnostics fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/issue871-evidence"
+          baseline_sha=ff1082fd51038f10dcb3a8ecb1d5a738258b0f66
+          fixture_path=backend/internal/service/openai_excel_bps_search_diagnostics_test.go
+          git worktree add --detach "$RUNNER_TEMP/issue871-red" "$baseline_sha"
+          test "$(git -C "$RUNNER_TEMP/issue871-red" rev-parse HEAD)" = "$baseline_sha"
+          git show "HEAD:$fixture_path" > "$RUNNER_TEMP/issue871-red/$fixture_path"
+          git rev-parse "HEAD:$fixture_path" > "$evidence_dir/fixture-blob.txt"
+          test "$(git hash-object "$RUNNER_TEMP/issue871-red/$fixture_path")" = "$(git rev-parse "HEAD:$fixture_path")"
+          cp "$RUNNER_TEMP/issue871-red/$fixture_path" "$evidence_dir/standalone-diagnostics_test.go"
+          git -C "$RUNNER_TEMP/issue871-red" status --short > "$evidence_dir/red-status.txt"
+          git -C "$RUNNER_TEMP/issue871-red" diff --exit-code HEAD
+          set +e
+          (cd "$RUNNER_TEMP/issue871-red/backend" && go test -tags=unit ./internal/service -run '^TestExcelBPSSearchDiagnosticsThroughForward$/^search_403$/^json$' -count=1 -json -timeout=5m) > "$evidence_dir/red.jsonl" 2> "$evidence_dir/red.stderr"
+          test_status=$?
+          set -e
+          printf '%s\n' "$test_status" > "$evidence_dir/red-exit.txt"
+          python3 .github/scripts/issue871-evidence.py RED "$test_status" "$evidence_dir/red.jsonl" "$evidence_dir/red.stderr"
+          test "$(git -C "$RUNNER_TEMP/issue871-red" rev-parse HEAD)" = "$baseline_sha"
+          git -C "$RUNNER_TEMP/issue871-red" diff --exit-code HEAD
+      - name: GREEN clean exact candidate diagnosis boundary
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/issue871-evidence"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain)"
+          set +e
+          (cd backend && go test -race -tags=unit ./internal/service -run '^TestExcelBPSSearchDiagnosticsThroughForward$/^search_403$/^json$' -count=1 -json -timeout=5m) > "$evidence_dir/green.jsonl" 2> "$evidence_dir/green.stderr"
+          test_status=$?
+          set -e
+          printf '%s\n' "$test_status" > "$evidence_dir/green-exit.txt"
+          python3 .github/scripts/issue871-evidence.py GREEN "$test_status" "$evidence_dir/green.jsonl" "$evidence_dir/green.stderr"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain)"
       - working-directory: backend
         run: go test -race ./internal/service/basispoints -run 'Test(WebSearch|AlphaSearch|ToolChoice|CurrentEncrypted|CompactionPolicy)' -count=1 -v
       - working-directory: backend
         run: go test -race -tags=unit ./internal/service -run 'Test(ExcelBPSAccountSearch|ExcelBPSSearch|BPSSearchDefaults)' -count=1 -v -timeout=10m
       - working-directory: backend
         run: go test -tags=integration ./internal/repository -run '^TestQuality(BPSSnapshotEqualDefaultsAndManualChanges|EnableBPSRestoreAfterAccountEditorSave|BPSSearchRestorePreservesManualChanges)$' -count=1 -v -timeout=10m
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue871-behavior-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue871-evidence/
+          retention-days: 30
   search-ui:
     runs-on: ubuntu-latest
     timeout-minutes: 20

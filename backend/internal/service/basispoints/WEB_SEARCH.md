@@ -86,6 +86,11 @@ HTTP bodies, query, credential, URL, or identity values. Normal hosted-search
 query/source output continues under its existing contract. Client cancellation
 retains cancellation handling instead of emitting a search failure.
 
+Raw failure classification, including both tool-correction readers, always
+discards claimed search diagnostics. Only the local search bridge and the
+gateway parser of its normalized output retain this evidence; correction
+errors that bypass ordinary stream normalization still report `unknown`.
+
 These diagnostics address evidence loss only. The cause of the historical
 failure in issue #871 and real upstream search recovery remain unverified.
 

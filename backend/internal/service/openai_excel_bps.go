@@ -915,7 +915,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				result.ResponseID = gjson.GetBytes(payload, "response.id").String()
 				result.UpstreamResponseModel = gjson.GetBytes(payload, "response.model").String()
 				result.UpstreamResponseServiceTier = normalizeObservedOpenAIServiceTier(gjson.GetBytes(payload, "response.service_tier").String())
-				upstreamFailure = basispoints.ParseUpstreamFailure(payload)
+				upstreamFailure = basispoints.ParseNormalizedUpstreamFailure(payload)
 				if bridgeFailure != nil {
 					markPriorityAttemptFailure(ctx)
 					setOpsUpstreamError(c, resp.StatusCode, "", "")

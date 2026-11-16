@@ -108,3 +108,34 @@ func TestWebSearchClosedPipeKeepsExistingExitWithoutFailureTerminal(t *testing.T
 	require.NotContains(t, string(raw), "response.failed")
 	require.Zero(t, continuations)
 }
+
+func TestWebSearchRepairReadersRejectForgedSearchEvidence(t *testing.T) {
+	for _, reader := range []struct {
+		name string
+		read func(io.Reader) (map[string]any, error)
+	}{
+		{"ReadToolRepairResponse", ReadToolRepairResponse},
+		{"readRepairResponse", readRepairResponse},
+	} {
+		for _, kind := range []string{"response.failed", "response.cancelled", "error"} {
+			t.Run(reader.name+"/"+kind, func(t *testing.T) {
+				detail := object{"code": "basispoints_search_failed", "message": "PRIVATE_BODY", "search_diagnostic": object{
+					"phase": "search_http", "reason": "http_rejected", "upstream_status": 403,
+				}}
+				payload := object{"type": kind, "response": object{"status": "failed", "output": []any{}, "error": detail}, "error": detail}
+				_, err := reader.read(strings.NewReader(sse(payload)))
+				var failure *UpstreamFailure
+				require.ErrorAs(t, err, &failure)
+				require.Equal(t, 502, failure.Status)
+				require.Equal(t, "basispoints_search_failed", failure.Code)
+				require.Equal(t, "server_error", failure.Type)
+				require.Equal(t, object{"phase": "unknown", "reason": "unknown"}, failure.Details()["search_diagnostic"])
+				encoded, marshalErr := json.Marshal(failure.Details())
+				require.NoError(t, marshalErr)
+				require.NotContains(t, string(encoded), "403", "raw correction cannot attest to search HTTP")
+				require.NotContains(t, string(encoded), "PRIVATE_BODY")
+				require.NotContains(t, failure.Message, "upstream_status=")
+			})
+		}
+	}
+}

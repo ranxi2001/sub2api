@@ -192,7 +192,7 @@ func TestExcelBPSSearchDiagnosticsThroughForward(t *testing.T) {
 				}
 				message := detail.Get("message").String()
 				require.Contains(t, message, "request was not replayed")
-				require.Contains(t, message, "phase="+tc.phase+"; reason="+tc.reason)
+				require.Contains(t, message, "phase="+tc.phase+"; reason="+tc.reason, "issue871_expected_search_diagnosis")
 				ops, ok := GetOpsStreamError(c)
 				require.True(t, ok)
 				require.Equal(t, 502, ops.IntendedStatus)
@@ -272,6 +272,70 @@ func TestExcelBPSSearchCancellationDoesNotSendContinuation(t *testing.T) {
 				_, providerFailure := c.Get(OpsUpstreamErrorMessageKey)
 				require.False(t, providerFailure)
 				require.Equal(t, 10, result.Usage.InputTokens)
+			})
+		}
+	}
+}
+
+func TestExcelBPSSearchRepairProvenanceThroughForward(t *testing.T) {
+	for _, repair := range []string{"transport", "unknown_target"} {
+		for _, mode := range []string{"json", "sse", "compact_keepalive"} {
+			t.Run(repair+"/"+mode, func(t *testing.T) {
+				code, summary := "text(42);", "Run client tool"
+				if repair == "unknown_target" {
+					code, summary = `{"name":"missing","arguments":{}}`, "Run"
+				}
+				first := issue871HTTP(200, excelBPSRepairWire(t, "original", summary, code))
+				forged := issue871HTTP(200, "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"output\":[],\"error\":{\"code\":\"basispoints_search_failed\",\"message\":\"PRIVATE_BODY\",\"search_diagnostic\":{\"phase\":\"search_http\",\"reason\":\"http_rejected\",\"upstream_status\":403}}}}\n\n")
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{first, forged}}
+				svc := openAIClientToolsTestService(upstream)
+				account := excelAccount()
+				account.Extra["openai_excel_bps_auto_disable_on_403"] = true
+				body := []byte(fmt.Sprintf(`{"model":"gpt-5.6-sol","stream":%t,"input":"test correction","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}]}`, mode == "sse"))
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+				if mode == "compact_keepalive" {
+					MarkOpenAICompactClientStream(c)
+					stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
+					defer stop()
+					value, ok := c.Get(openAICompactSSEKeepaliveKey)
+					require.True(t, ok)
+					keepalive, ok := value.(*openAICompactSSEKeepalive)
+					require.True(t, ok)
+					require.True(t, keepalive.beat())
+				}
+				_, err := svc.Forward(c.Request.Context(), c, account, body)
+				require.Error(t, err)
+				require.Len(t, upstream.requests, 2, "one existing correction, no extra submission")
+				for _, request := range upstream.requests {
+					require.Equal(t, "/basispoints/api/responses", request.URL.Path, "no search HTTP request occurred")
+				}
+				if repair == "transport" {
+					require.Contains(t, string(upstream.bodies[1]), "invalid_client_tool_transport", "must exercise ReadToolRepairResponse")
+				} else {
+					require.Contains(t, string(upstream.bodies[1]), "previous response selected a tool absent", "must exercise readRepairResponse")
+				}
+				detail := issue871Error(t, rec.Body.String(), mode != "json")
+				require.Equal(t, "basispoints_search_failed", detail.Get("code").String())
+				require.Contains(t, detail.Get("message").String(), "phase=unknown; reason=unknown")
+				ops, ok := GetOpsStreamError(c)
+				require.True(t, ok)
+				require.Equal(t, 502, ops.IntendedStatus)
+				require.Equal(t, 200, ops.UpstreamStatus)
+				require.Equal(t, "server_error", ops.ErrType)
+				require.Equal(t, "unknown", gjson.Get(ops.UpstreamDetail, "search_diagnostic.phase").String())
+				require.Equal(t, "unknown", gjson.Get(ops.UpstreamDetail, "search_diagnostic.reason").String())
+				require.False(t, gjson.Get(ops.UpstreamDetail, "search_diagnostic.upstream_status").Exists())
+				if mode != "compact_keepalive" {
+					require.False(t, detail.Get("search_diagnostic.upstream_status").Exists())
+				}
+				for _, unsafe := range []string{"403", "upstream_status", "PRIVATE_BODY", "http_rejected"} {
+					require.NotContains(t, detail.Raw+ops.Message+ops.UpstreamMessage+ops.UpstreamDetail, unsafe)
+				}
+				require.NotContains(t, rec.Body.String(), "response.completed")
+				require.True(t, account.IsExcelBPSEnabled())
+				require.False(t, svc.isExcelBPSCoolingDown(account, "gpt-5.6-sol"))
 			})
 		}
 	}
