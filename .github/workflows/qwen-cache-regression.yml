@@ -32,7 +32,7 @@ jobs:
       - working-directory: backend
         run: go test -tags=unit ./internal/service -run 'Test(Qwen|StrictSessionAffinity)' -count=1 -v
   actual-component:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

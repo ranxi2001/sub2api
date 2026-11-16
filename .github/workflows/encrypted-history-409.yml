@@ -101,7 +101,7 @@ jobs:
             ${{ runner.temp }}/omit-history-red.log
             ${{ runner.temp }}/omit-history-red-compat.txt
   screenshots:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
