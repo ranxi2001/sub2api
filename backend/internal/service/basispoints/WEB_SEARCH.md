@@ -55,6 +55,45 @@ is invented for it. Any provider-side search cost/entitlement needs separate
 operational verification before enabling accounts. No real paid call is part of
 CI or local validation.
 
+## Failure diagnostics
+
+`basispoints_search_failed` keeps its existing semantic status 502 and
+`server_error` type. It does not imply that the search endpoint returned 502,
+or even that a search HTTP request was sent. Failures do not cause replay,
+account cooldown, or account disabling based on the diagnostic HTTP status.
+
+Normalized JSON/SSE errors include `error.search_diagnostic` with allowlisted
+`phase`, `reason`, and optional `upstream_status`. The same safe summary is
+appended to `error.message` and retained in existing Ops error message/detail
+fields. An already committed compact keepalive retains the summary in its
+failure message; its existing compact error shape is unchanged.
+
+| Phase | Meaning / example reasons |
+| --- | --- |
+| `search_http` | Search request/transport/rejection: `request_failed`, `transport_failed`, `http_rejected`, `deadline_exceeded`, `canceled` |
+| `search_result` | Search body processing: `read_failed`, `parse_failed` |
+| `model_initial` | First model stream: `invalid_event`, `unexpected_eof`, `model_did_not_complete`, or fixed stream identity/validation reasons |
+| `model_continuation` | Continuation request, HTTP rejection, stream or continuation validation failure |
+| `tool_validation` | Tool batch/identity/arguments rejection, including `invalid_tool_response`, `mixed_tool_batch`, `parallel_search_unavailable`, `duplicate_item_id`, `duplicate_call_id` |
+| `unknown` | No recognized local failure phase is available |
+
+Unrecognized or missing reasons become `unknown`; missing HTTP evidence is
+omitted, never replaced with the semantic status. Search result read/parse
+failures can correctly report observed HTTP 200. Model stream failures omit
+HTTP status because that bridge boundary has only a response body. Raw model
+claims cannot supply search HTTP evidence. Diagnostics contain no error text,
+HTTP bodies, query, credential, URL, or identity values. Normal hosted-search
+query/source output continues under its existing contract. Client cancellation
+retains cancellation handling instead of emitting a search failure.
+
+Raw failure classification, including both tool-correction readers, always
+discards claimed search diagnostics. Only the local search bridge and the
+gateway parser of its normalized output retain this evidence; correction
+errors that bypass ordinary stream normalization still report `unknown`.
+
+These diagnostics address evidence loss only. The cause of the historical
+failure in issue #871 and real upstream search recovery remain unverified.
+
 ## Management entry points
 
 The account editor, bulk editor, OAuth BPS defaults card and quality-rule BPS
