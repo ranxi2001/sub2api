@@ -157,3 +157,29 @@ func TestFreeFastCustomerCostCachePersistence(t *testing.T) {
 	require.NoError(t, repo.db.QueryRowContext(ctx, "SELECT quota_used::text FROM api_keys WHERE id=$1", cmd.APIKeyID).Scan(&quota))
 	require.Equal(t, "0.04536475", quota, "display cache prices cannot change or repeat the command")
 }
+
+func TestFreeUltrafastCustomerCostDurableReplay(t *testing.T) {
+	ctx := context.Background()
+	repo, cmd, usage, _ := durableBillingFixture(t)
+	cmd.BalanceCost, cmd.APIKeyQuotaCost = .000996, .000996
+	usage.InputCost, usage.OutputCost, usage.TotalCost, usage.ActualCost = .00426, .0057, .00996, .000996
+	const snapshot = `{"version":1,"free_fast":false,"free_ultrafast":true,"input_cost":0.00071,"output_cost":0.00095,"image_input_cost":0,"image_output_cost":0,"cache_creation_cost":0,"cache_read_cost":0,"total_cost":0.00166,"actual_cost":0.000996,"multiplier":0.6}`
+	require.NoError(t, json.Unmarshal([]byte(`{"CustomerCostDetails":`+snapshot+`}`), &usage))
+	require.NoError(t, repo.StageUsageBilling(ctx, &cmd, &usage))
+	// A later retry sees different config/display data; the first event wins.
+	require.NoError(t, json.Unmarshal([]byte(`{"CustomerCostDetails":{"version":99}}`), &usage))
+	require.NoError(t, repo.StageUsageBilling(ctx, &cmd, &usage))
+	key := service.UsageBillingEventKey{RequestID: cmd.RequestID, APIKeyID: cmd.APIKeyID}
+	for i := 0; i < 2; i++ {
+		_, err := repo.ApplyStagedUsageBilling(ctx, key)
+		require.NoError(t, err)
+	}
+	var saved string
+	require.NoError(t, repo.db.QueryRowContext(ctx, "SELECT customer_cost_details::text FROM usage_logs WHERE request_id=$1 AND api_key_id=$2", cmd.RequestID, cmd.APIKeyID).Scan(&saved))
+	require.JSONEq(t, snapshot, saved)
+	var balance, quota string
+	require.NoError(t, repo.db.QueryRowContext(ctx, "SELECT balance::text FROM users WHERE id=$1", cmd.UserID).Scan(&balance))
+	require.NoError(t, repo.db.QueryRowContext(ctx, "SELECT quota_used::text FROM api_keys WHERE id=$1", cmd.APIKeyID).Scan(&quota))
+	require.Equal(t, "99.99900400", balance)
+	require.Equal(t, "0.00099600", quota)
+}

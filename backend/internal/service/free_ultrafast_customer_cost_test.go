@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -37,8 +38,9 @@ func TestFreeUltrafastCustomerCost(t *testing.T) {
 				platform = PlatformOpenAI
 			}
 			in, out, write, read := 10e-6, 50e-6, 12.5e-6, 1e-6
-			group := &Group{ID: 77, Platform: platform, Hydrated: true, RateMultiplier: .6, FreeOpenAIFast: tc.freeFast, FreeOpenAIUltrafast: tc.freeUltra,
+			group := &Group{ID: 77, Platform: platform, Hydrated: true, RateMultiplier: .6, FreeOpenAIFast: tc.freeFast,
 				ModelPricing: []ChannelModelPricing{{Models: []string{"gpt-5.4"}, BillingMode: BillingModeToken, InputPrice: &in, OutputPrice: &out, CacheWritePrice: &write, CacheReadPrice: &read}}}
+			require.NoError(t, json.Unmarshal([]byte(fmt.Sprintf(`{"FreeOpenAIUltrafast":%t}`, tc.freeUltra)), group))
 			account := &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{OpenAIResponseTierBillingEnabledKey: tc.responseBilling}}
 			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 				Result: &OpenAIForwardResult{RequestID: "synthetic-ultra-" + tc.name, Model: "gpt-5.4", ServiceTier: &tc.requested, UpstreamResponseServiceTier: tc.observed, Usage: OpenAIUsage{InputTokens: 71, OutputTokens: 19}, Duration: time.Second},
@@ -51,19 +53,29 @@ func TestFreeUltrafastCustomerCost(t *testing.T) {
 			require.Equal(t, QuantizeUsageBillingAmount(standard*tc.customerFactor*personal), log.ActualCost)
 			require.Equal(t, tc.billingTier, *log.ServiceTier)
 			require.False(t, group.ForceOpenAIFast, "customer discount must not force an upstream tier")
+			var saved struct{ CustomerCostDetails json.RawMessage }
+			encoded, err := json.Marshal(log)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(encoded, &saved))
 			if !tc.snapshot {
-				require.Nil(t, log.CustomerCostDetails)
+				require.True(t, len(saved.CustomerCostDetails) == 0 || string(saved.CustomerCostDetails) == "null")
 				return
 			}
-			detail := log.CustomerCostDetails
-			require.NotNil(t, detail)
+			var detail struct {
+				FreeUltrafast bool    `json:"free_ultrafast"`
+				FreeFast      bool    `json:"free_fast"`
+				TotalCost     float64 `json:"total_cost"`
+				Multiplier    float64 `json:"multiplier"`
+			}
+			require.NotEmpty(t, saved.CustomerCostDetails)
+			require.NoError(t, json.Unmarshal(saved.CustomerCostDetails, &detail))
 			require.Equal(t, tc.billingTier == "ultrafast", detail.FreeUltrafast)
 			require.Equal(t, tc.billingTier == "priority", detail.FreeFast)
 			require.InDelta(t, standard, detail.TotalCost, 1e-12)
 			require.InDelta(t, personal, detail.Multiplier, 1e-12)
 			before, err := json.Marshal(detail)
 			require.NoError(t, err)
-			group.FreeOpenAIUltrafast = false
+			require.NoError(t, json.Unmarshal([]byte(`{"FreeOpenAIUltrafast":false}`), group))
 			group.RateMultiplier = 9
 			after, err := json.Marshal(detail)
 			require.NoError(t, err)
@@ -88,8 +100,9 @@ func TestFreeUltrafastMixedCacheAndLongContext(t *testing.T) {
 			}})
 			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
 			in, out, write, write12h, read := 10e-6, 50e-6, 12.5e-6, 25e-6, 1e-6
-			group := &Group{ID: 77, Platform: PlatformOpenAI, Hydrated: true, RateMultiplier: .6, FreeOpenAIUltrafast: true, LongContextPricingEnabled: true,
+			group := &Group{ID: 77, Platform: PlatformOpenAI, Hydrated: true, RateMultiplier: .6, LongContextPricingEnabled: true,
 				ModelPricing: []ChannelModelPricing{{Models: []string{"gpt-6.2-astra"}, BillingMode: BillingModeToken, InputPrice: &in, OutputPrice: &out, CacheWritePrice: &write, CacheWrite12hPrice: &write12h, CacheReadPrice: &read}}}
+			require.NoError(t, json.Unmarshal([]byte(`{"FreeOpenAIUltrafast":true}`), group))
 			tier := "ultrafast"
 			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 				Result: &OpenAIForwardResult{RequestID: "synthetic-ultra-cache-" + name, Model: "gpt-6.2-astra", ServiceTier: &tier, Duration: time.Second,
@@ -106,12 +119,17 @@ func TestFreeUltrafastMixedCacheAndLongContext(t *testing.T) {
 			standard := (float64(ordinary)*in+11*write+13*write12h+17*read)*inputFactor + 19*out*outputFactor
 			require.InDelta(t, standard*6, log.TotalCost, 1e-9)
 			require.Equal(t, QuantizeUsageBillingAmount(standard*.6), log.ActualCost)
-			require.NotNil(t, log.CustomerCostDetails)
-			require.True(t, log.CustomerCostDetails.FreeUltrafast)
-			require.Equal(t, 2, log.CustomerCostDetails.Version)
-			require.Len(t, log.CustomerCostDetails.CacheCostDetails, 3)
-			require.InDelta(t, (11*write+13*write12h)*inputFactor, log.CustomerCostDetails.CacheCreationCost, 1e-12)
-			require.InDelta(t, 17*read*inputFactor, log.CustomerCostDetails.CacheReadCost, 1e-12)
+			var saved struct{ CustomerCostDetails map[string]any }
+			encoded, err := json.Marshal(log)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(encoded, &saved))
+			detail := saved.CustomerCostDetails
+			require.NotNil(t, detail)
+			require.Equal(t, true, detail["free_ultrafast"])
+			require.EqualValues(t, 2, detail["version"])
+			require.Len(t, detail["cache_cost_details"], 3)
+			require.InDelta(t, (11*write+13*write12h)*inputFactor, detail["cache_creation_cost"], 1e-12)
+			require.InDelta(t, 17*read*inputFactor, detail["cache_read_cost"], 1e-12)
 			require.Equal(t, long, log.LongContextBillingApplied)
 		})
 	}
