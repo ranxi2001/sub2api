@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestFreeUltrafastCustomerCost(t *testing.T) {
@@ -132,5 +134,22 @@ func TestFreeUltrafastMixedCacheAndLongContext(t *testing.T) {
 			require.InDelta(t, 17*read*inputFactor, detail["cache_read_cost"], 1e-12)
 			require.Equal(t, long, log.LongContextBillingApplied)
 		})
+	}
+}
+
+func TestFreeUltrafastDoesNotForceOutboundTier(t *testing.T) {
+	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
+	group := &Group{ID: 77, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true}
+	require.NoError(t, json.Unmarshal([]byte(`{"FreeOpenAIUltrafast":true}`), group))
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	for _, tier := range []string{"", "priority", "ultrafast"} {
+		body := []byte(`{"model":"gpt-5.6-sol","input":"synthetic"}`)
+		if tier != "" {
+			body = []byte(fmt.Sprintf(`{"model":"gpt-5.6-sol","service_tier":%q}`, tier))
+		}
+		after, err := svc.applyOpenAIFastPolicyToBody(ctx, account, "gpt-5.6-sol", body)
+		require.NoError(t, err)
+		require.Equal(t, tier, gjson.GetBytes(after, "service_tier").String())
 	}
 }

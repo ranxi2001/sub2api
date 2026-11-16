@@ -49,7 +49,7 @@ func TestGetByKeyForAuthCarriesGroupForceOpenAIFast(t *testing.T) {
 func TestFreeUltrafastGroupPersistence(t *testing.T) {
 	ctx := context.Background()
 	repo := NewGroupRepository(integrationEntClient, integrationDB)
-	group := &service.Group{Name: fmt.Sprintf("ultra-persist-%d", time.Now().UnixNano()), Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: .6, FreeOpenAIUltrafast: true}
+	group := &service.Group{Name: fmt.Sprintf("ultra-persist-%d", time.Now().UnixNano()), Platform: service.PlatformOpenAI, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard, MaxReasoningEffortOverLimit: "downgrade", RateMultiplier: .6, FreeOpenAIUltrafast: true}
 	require.NoError(t, repo.Create(ctx, group))
 	t.Cleanup(func() {
 		_, err := integrationDB.ExecContext(ctx, "DELETE FROM groups WHERE id=$1", group.ID)

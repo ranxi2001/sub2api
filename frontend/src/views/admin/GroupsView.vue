@@ -1685,6 +1685,7 @@
                 {{ t("admin.groups.openaiFast.freeUltrafast") }}
               </label>
               <NewFeatureBadge
+                v-if="authStore.user?.id != null"
                 :notice-id="NEW_FEATURE_NOTICES.groupFreeUltrafast"
                 :user-id="authStore.user?.id"
               />
@@ -3413,6 +3414,7 @@
                 {{ t("admin.groups.openaiFast.freeUltrafast") }}
               </label>
               <NewFeatureBadge
+                v-if="authStore.user?.id != null"
                 :notice-id="NEW_FEATURE_NOTICES.groupFreeUltrafast"
                 :user-id="authStore.user?.id"
               />
