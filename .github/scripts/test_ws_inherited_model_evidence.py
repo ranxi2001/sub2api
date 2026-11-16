@@ -16,7 +16,7 @@ def transcript(suite="handler", phase="RED"):
     package, tests, red, positives, fences = GATE.contract(suite)
     package = "github.com/Wei-Shaw/sub2api/internal/" + package
     failures = set()
-    if suite == "handler" and phase == "RED":
+    if red and phase == "RED":
         for leaf in red:
             parts = leaf.split("/")
             failures.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
@@ -24,7 +24,9 @@ def transcript(suite="handler", phase="RED"):
     rows = [{"Package": package, "Action": "start"}]
     for name in sorted(tests):
         rows.append({"Package": package, "Action": "run", "Test": name})
-        if name in red and name in failures:
+        if suite == "pending" and name in positives:
+            output = "PENDING_OBSERVATION_LOST: owner_pending=1" if name in failures else "PENDING_OBSERVATION_CONTROL_OK: classification preserved; no ownership publication"
+        elif name in red and name in failures:
             output = GATE.MARKER + " T1/T2 completed on A; T2 omitted model; O1/O2 and C delivered; proof=failed; T3 tool_provenance_unknown; A disabled; B sends=0; records unchanged"
         elif name in positives:
             output = "INHERITED_MODEL_TOOL_LOOP_OK: B sends=1; executions=1; A disabled"
@@ -44,12 +46,35 @@ def encode(rows):
 
 class EvidenceTests(unittest.TestCase):
     def test_complete_contracts(self):
-        for suite in ("handler", "guards", "guards_with_client_model"):
+        for suite in ("handler", "guards", "guards_with_client_model", "pending"):
             for phase in ("RED", "GREEN"):
                 with self.subTest(suite=suite, phase=phase):
-                    status = int(suite == "handler" and phase == "RED")
+                    status = int(suite in {"handler", "pending"} and phase == "RED")
                     result = GATE.validate(suite, phase, status, encode(transcript(suite, phase)))
-                    self.assertEqual(status * 4, result["behavioral_red_leaves"])
+                    self.assertEqual(status * len(GATE.contract(suite)[2]), result["behavioral_red_leaves"])
+
+    def test_pending_requires_exact_failure_and_all_error_controls(self):
+        for change in ("marker", "missing_backend_error", "failed_control", "skip", "duplicate", "wrong_status"):
+            with self.subTest(change=change):
+                rows = transcript("pending")
+                status = 1
+                if change == "marker":
+                    for row in rows:
+                        row["Output"] = row.get("Output", "").replace("PENDING_OBSERVATION_LOST:", "other failure")
+                elif change == "missing_backend_error":
+                    rows = [r for r in rows if r.get("Test") != GATE.PENDING_ROOT + "/pending_backend_deadline"]
+                elif change == "failed_control":
+                    for row in rows:
+                        if row.get("Test") == GATE.PENDING_ROOT + "/pending_backend_deadline" and row["Action"] == "pass":
+                            row["Action"] = "fail"
+                elif change == "skip":
+                    rows[3]["Action"] = "skip"
+                elif change == "duplicate":
+                    rows.append(rows[-1])
+                else:
+                    status = 0
+                with self.assertRaises(ValueError):
+                    GATE.validate("pending", "RED", status, encode(rows))
 
     def test_runtime_build_and_skip_contamination(self):
         for diagnostic in ("[build failed]", "undefined: fixture", "panic: fixture", "WARNING: DATA RACE", "test timed out after 5m", "no tests to run", "--- SKIP: fixture", "signal: killed"):

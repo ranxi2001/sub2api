@@ -21,9 +21,19 @@ NEGATIVES = (
 )
 KINDS = ("function", "custom")
 MARKER = "INHERITED_MODEL_TOOL_PROOF_NOT_RESUMED:"
+PENDING_ROOT = "TestOpenAIAgentPendingObservation"
+PENDING_CASES = (
+    "pending_get_deadline", "pending_get_cancel", "latest_pending_get_deadline", "pending_timer_deadline",
+    "initial_backend_error", "initial_backend_deadline", "pending_backend_error", "pending_backend_deadline",
+    "completed", "failed", "conflicted", "missing",
+)
 
 
 def contract(suite):
+    if suite == "pending":
+        leaves = {f"{PENDING_ROOT}/{case}" for case in PENDING_CASES}
+        red = {f"{PENDING_ROOT}/{case}" for case in ("pending_get_deadline", "pending_get_cancel", "latest_pending_get_deadline")}
+        return "service", leaves | {PENDING_ROOT}, red, leaves, set()
     if suite == "handler":
         roots = {POSITIVE, FENCES}
         parents = {f"{root}/{kind}" for root in roots for kind in KINDS}
@@ -71,7 +81,7 @@ def validate(suite, phase, status, transcript):
         rows.append(row)
     counts = Counter((r.get("Action"), r.get("Test")) for r in rows)
     failures = set()
-    if suite == "handler" and phase == "RED":
+    if red_leaves and phase == "RED":
         for leaf in red_leaves:
             parts = leaf.split("/")
             failures.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
@@ -88,7 +98,11 @@ def validate(suite, phase, status, transcript):
             raise ValueError(f"wrong/missing/repeated outcome: {name}")
     for name in positives | fences:
         output = "".join(r.get("Output", "") for r in rows if r.get("Test") == name)
-        if name in failures:
+        if suite == "pending":
+            required = ("PENDING_OBSERVATION_LOST:", "owner_pending=1") if name in failures else (
+                "PENDING_OBSERVATION_CONTROL_OK:", "classification preserved", "no ownership publication",
+            )
+        elif name in failures:
             required = (
                 MARKER, "T1/T2 completed on A", "T2 omitted model", "O1/O2 and C delivered",
                 "proof=failed", "T3 tool_provenance_unknown", "A disabled", "B sends=0", "records unchanged",
