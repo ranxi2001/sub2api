@@ -1,0 +1,176 @@
+name: WS inherited model tool proof
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai*'
+      - 'backend/internal/handler/openai*'
+      - '.github/workflows/ws-inherited-model.yml'
+      - '.github/scripts/*ws-inherited-model*'
+      - '.github/scripts/test_ws_inherited_model_evidence.py'
+      - '.github/scripts/assert-readable-continuation.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inherited-model:
+    name: Inherited model ${{ matrix.phase }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+      PHASE: ${{ matrix.phase }}
+    steps:
+      - name: Initialize evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EVIDENCE="$RUNNER_TEMP/ws-inherited-model-evidence"
+          echo "EVIDENCE=$EVIDENCE" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Isolated Redis fixture dependency
+        run: |
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Exact source and identical candidate fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          mkdir -p "$EVIDENCE"
+          git fetch --no-tags --depth=1 origin da526bfbab47efd40549cab98f1069f9b2b45b9f
+          python3 .github/scripts/prepare-ws-inherited-model-red.py "$RUNNER_TEMP/ws-inherited-model-baseline" "$EVIDENCE"
+          if [ "$PHASE" = RED ]; then
+            echo "TEST_ROOT=$RUNNER_TEMP/ws-inherited-model-baseline" >> "$GITHUB_ENV"
+          else
+            echo "TEST_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          fi
+          python3 -m unittest discover -s .github/scripts -p 'test_ws_inherited_model_evidence.py' -v > "$EVIDENCE/parser-tests.log" 2>&1
+      - name: Authenticated same-socket tool loop and refusal controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$TEST_ROOT/backend" && go test -race -p=2 -json -tags=unit,inheritedmodel ./internal/handler -run '^TestOpenAIWSInheritedModel(ToolProof|ProofFences)$' -count=1 -timeout=5m) > "$EVIDENCE/handler.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$EVIDENCE/handler.exit"
+          cat "$EVIDENCE/handler.jsonl"
+          python3 .github/scripts/ws-inherited-model-evidence.py handler "$PHASE" "$status" "$EVIDENCE/handler.jsonl" | tee "$EVIDENCE/handler-verdict.json"
+      - name: Delivery, model scope and final wire integrity controls
+        if: ${{ (success() || failure()) && env.TEST_ROOT != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          suite=guards
+          pattern='^Test(OpenAIToolProvenanceDeliveryAndScope|OpenAIWSMixedOwnerFinalSendFences)$'
+          if [ "$PHASE" = GREEN ]; then
+            suite=guards_with_client_model
+            pattern='^Test(OpenAIToolProvenanceDeliveryAndScope|OpenAIWSMixedOwnerFinalSendFences|OpenAIWSRecoveryEffectiveClientModel)$'
+          fi
+          set +e
+          (cd "$TEST_ROOT/backend" && go test -race -p=2 -json -tags=unit,ownerconflict,inheritedmodel ./internal/service -run "$pattern" -count=1 -timeout=5m) > "$EVIDENCE/guards.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$EVIDENCE/guards.exit"
+          cat "$EVIDENCE/guards.jsonl"
+          python3 .github/scripts/ws-inherited-model-evidence.py "$suite" "$PHASE" "$status" "$EVIDENCE/guards.jsonl" | tee "$EVIDENCE/guards-verdict.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-inherited-model-${{ matrix.phase }}-${{ env.CANDIDATE }}
+          path: ${{ env.EVIDENCE }}
+          if-no-files-found: error
+  pending-observation:
+    name: Pending observation ${{ matrix.phase }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+      PHASE: ${{ matrix.phase }}
+      PENDING_BASELINE: c213c632e428423ecc271ace88743f7b1d64b48e
+    steps:
+      - name: Initialize pending evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EVIDENCE="$RUNNER_TEMP/ws-pending-observation-evidence"
+          echo "EVIDENCE=$EVIDENCE" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Restore only the pinned pending-wait implementation for RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git diff --exit-code
+          git fetch --no-tags --depth=1 origin "$PENDING_BASELINE"
+          target=backend/internal/service/openai_agent_message_delivery.go
+          fixture=backend/internal/service/openai_agent_pending_observation_test.go
+          if [ "$PHASE" = RED ]; then
+            git show "$PENDING_BASELINE:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$PENDING_BASELINE:$target")"
+            test "$(git diff --name-only)" = "$target"
+          fi
+          test "$(git hash-object "$fixture")" = "$(git rev-parse "$CANDIDATE:$fixture")"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          target = 'backend/internal/service/openai_agent_message_delivery.go'
+          fixture = 'backend/internal/service/openai_agent_pending_observation_test.go'
+          result = {
+              'candidate': git('rev-parse', 'HEAD'), 'baseline': os.environ['PENDING_BASELINE'],
+              'phase': os.environ['PHASE'], 'test_blob': git('hash-object', fixture),
+              'old_production_blob': git('rev-parse', os.environ['PENDING_BASELINE'] + ':' + target),
+              'actual_production_blob': git('hash-object', target),
+              'candidate_production_blob': git('rev-parse', 'HEAD:' + target),
+              'changed_paths': git('diff', '--name-only').splitlines(),
+          }
+          (pathlib.Path(os.environ['EVIDENCE']) / 'source-manifest.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
+          python3 -B -m unittest discover -s .github/scripts -p 'test_ws_inherited_model_evidence.py' -v > "$EVIDENCE/parser-tests.log" 2>&1
+      - name: Deterministic pending deadline and independent backend error controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -p=2 -json -tags=unit,inheritedmodel ./internal/service -run '^TestOpenAIAgentPendingObservation$' -count=1 -timeout=3m) > "$EVIDENCE/pending.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$EVIDENCE/pending.exit"
+          cat "$EVIDENCE/pending.jsonl"
+          python3 .github/scripts/ws-inherited-model-evidence.py pending "$PHASE" "$status" "$EVIDENCE/pending.jsonl" | tee "$EVIDENCE/pending-verdict.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-pending-observation-${{ matrix.phase }}-${{ env.CANDIDATE }}
+          path: ${{ env.EVIDENCE }}
+          if-no-files-found: error

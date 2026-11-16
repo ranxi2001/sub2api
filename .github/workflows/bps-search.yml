@@ -92,6 +92,53 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           git diff --exit-code HEAD
           test -z "$(git status --porcelain)"
+      - name: RED business continuation on pinned current production baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/issue871-evidence"
+          baseline_sha=da526bfbab47efd40549cab98f1069f9b2b45b9f
+          fixture_path=backend/internal/service/openai_excel_bps_search_business_test.go
+          red_dir="$RUNNER_TEMP/issue871-business-red"
+          git worktree add --detach "$red_dir" "$baseline_sha"
+          test "$(git -C "$red_dir" rev-parse HEAD)" = "$baseline_sha"
+          git rev-parse "$baseline_sha" "$baseline_sha^{tree}" > "$evidence_dir/business-baseline.txt"
+          git ls-tree -r "$baseline_sha" -- backend > "$evidence_dir/business-baseline-blobs.txt"
+          git show "HEAD:$fixture_path" > "$red_dir/$fixture_path"
+          git rev-parse "HEAD:$fixture_path" > "$evidence_dir/business-fixture-blob.txt"
+          test "$(git hash-object "$red_dir/$fixture_path")" = "$(git rev-parse "HEAD:$fixture_path")"
+          cp "$red_dir/$fixture_path" "$evidence_dir/business_test.go"
+          git -C "$red_dir" status --short > "$evidence_dir/business-red-status.txt"
+          test "$(git -C "$red_dir" status --porcelain)" = "?? $fixture_path"
+          git -C "$red_dir" diff --exit-code HEAD
+          set +e
+          (cd "$red_dir/backend" && go test -tags=unit ./internal/service -run '^TestExcelBPSSearchBusinessThroughForward$/^direct$/^json$' -count=1 -json -timeout=5m) > "$evidence_dir/business-red.jsonl" 2> "$evidence_dir/business-red.stderr"
+          test_status=$?
+          set -e
+          printf '%s\n' "$test_status" > "$evidence_dir/business-red-exit.txt"
+          python3 .github/scripts/issue871-evidence.py RED "$test_status" "$evidence_dir/business-red.jsonl" "$evidence_dir/business-red.stderr" business
+          test "$(git -C "$red_dir" rev-parse HEAD)" = "$baseline_sha"
+          git -C "$red_dir" diff --exit-code HEAD
+          test "$(git -C "$red_dir" status --porcelain)" = "?? $fixture_path"
+      - name: GREEN business continuation on exact candidate
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/issue871-evidence"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain)"
+          set +e
+          (cd backend && go test -race -tags=unit ./internal/service -run '^TestExcelBPSSearchBusinessThroughForward$/^direct$/^json$' -count=1 -json -timeout=5m) > "$evidence_dir/business-green.jsonl" 2> "$evidence_dir/business-green.stderr"
+          test_status=$?
+          set -e
+          printf '%s\n' "$test_status" > "$evidence_dir/business-green-exit.txt"
+          python3 .github/scripts/issue871-evidence.py GREEN "$test_status" "$evidence_dir/business-green.jsonl" "$evidence_dir/business-green.stderr" business
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain)"
       - name: Repeat real Forward repair ownership and provenance with race detection
         working-directory: backend
         shell: bash

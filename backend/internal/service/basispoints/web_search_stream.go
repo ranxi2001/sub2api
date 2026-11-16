@@ -171,6 +171,17 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 			if query == "" || len(query) > 4096 {
 				return NewSearchFailure("tool_validation", "invalid_query", 0)
 			}
+			// Direct catalog calls are accepted by translateCall, but their
+			// private names are not BPS-native tools. Use the same history
+			// wrapper as ordinary direct client calls before continuing.
+			// Genuine run_officejs calls retain their original wire fields.
+			name := text(item["name"])
+			if name != "run_officejs" && name != "functions.run_officejs" {
+				item, translateErr = check.rebuildNativeHistoryCall(translated)
+				if translateErr != nil {
+					return searchFailureAt(translateErr, "tool_validation", "invalid_tool_response")
+				}
+			}
 			nativeSearch = append(nativeSearch, item)
 			searchIndexes = append(searchIndexes, i)
 			queries = append(queries, query)
@@ -203,6 +214,7 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 		}
 		index := searchIndexes[0]
 		nativeOutput := append([]any(nil), output...)
+		nativeOutput[index] = nativeSearch[0]
 		// Intermediate prose is not the final structured answer. It remains only
 		// in the native continuation and never enters the validated final JSON.
 		if b.structured != nil {

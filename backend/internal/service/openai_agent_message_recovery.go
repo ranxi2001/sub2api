@@ -116,6 +116,12 @@ func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Contex
 	request.userID = openAIReadableRecoveryUser(c, keyID)
 	request.httpResponsePointer = openAIAgentRecoveryHTTPUser(c, keyID) > 0
 	request.shadowModel = gjson.GetBytes(body, "model").String()
+	if strings.TrimSpace(request.shadowModel) == "" {
+		// A follow-up WS frame may legally inherit its client model. Use the
+		// authenticated current-frame preflight value, never the mapped model
+		// argument or the connection's initial model after an explicit switch.
+		request.shadowModel = openAIWSRecoveryClientModelFromContext(c)
+	}
 	request.shadowReadableIntent = openAI409HasReadableIntent(body)
 	request.shadowObservation, _ = ctx.Value(openAIReadableShadowContextKey{}).(*openAIReadableShadowObservation)
 	if request.shadowObservation != nil {
