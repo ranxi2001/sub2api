@@ -106,3 +106,41 @@ func (c *userRPMCacheImpl) GetUserRPM(ctx context.Context, userID int64) (int, e
 	}
 	return val, nil
 }
+
+// GetUserRPMBatch samples the same keys as GetUserRPM with one Redis TIME and
+// one pipeline for the visible users. Missing keys are zero; failures stay unknown.
+func (c *userRPMCacheImpl) GetUserRPMBatch(ctx context.Context, userIDs []int64) (map[int64]int, error) {
+	out := make(map[int64]int, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	minute, err := c.minuteTS(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pipe := c.rdb.Pipeline()
+	commands := make(map[int64]*redis.StringCmd, len(userIDs))
+	for _, id := range userIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := commands[id]; !exists {
+			commands[id] = pipe.Get(ctx, fmt.Sprintf("%s%d:%d", userRPMKeyPrefix, id, minute))
+		}
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, err
+	}
+	for id, command := range commands {
+		count, err := command.Int()
+		if err == redis.Nil {
+			out[id] = 0
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[id] = count
+	}
+	return out, nil
+}

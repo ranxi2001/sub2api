@@ -1,6 +1,8 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
+	src/views/admin/__tests__/UsersView.spec.ts \
+	src/components/user/__tests__/UserLiveUsageCell.spec.ts \
 	src/components/common/__tests__/NewFeatureBadge.spec.ts \
 	src/components/admin/group/__tests__/GroupAntiDistillationSettings.spec.ts \
 	src/views/admin/__tests__/ChannelsView.modelSync.spec.ts \

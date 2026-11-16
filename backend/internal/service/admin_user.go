@@ -61,7 +61,39 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 			s.loadUserGroupRatesOneByOne(ctx, users)
 		}
 	}
+	s.populateUserRPM(ctx, users)
 	return users, result.Total, nil
+}
+
+// populateUserRPM reads the existing limiter counters without querying usage logs
+// or changing admission behavior. Zero limits are still counted.
+func (s *adminServiceImpl) populateUserRPM(ctx context.Context, users []User) {
+	reader, ok := s.userRPMCache.(interface {
+		GetUserRPMBatch(context.Context, []int64) (map[int64]int, error)
+	})
+	if !ok {
+		return
+	}
+	ids := make([]int64, 0, len(users))
+	for i := range users {
+		users[i].CurrentRPM = nil
+		ids = append(ids, users[i].ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	counts, err := reader.GetUserRPMBatch(ctx, ids)
+	if err != nil {
+		// Metrics failure must not prevent user management.
+		return
+	}
+	for i := range users {
+		if count, exists := counts[users[i].ID]; exists {
+			users[i].CurrentRPM = &count
+		}
+	}
 }
 
 func (s *adminServiceImpl) loadUserGroupRatesOneByOne(ctx context.Context, users []User) {

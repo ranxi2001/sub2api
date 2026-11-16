@@ -12,7 +12,7 @@
       </svg>
       <span class="font-mono">{{ current }}</span>
       <span class="text-gray-400 dark:text-gray-500">/</span>
-      <span class="font-mono">{{ max }}</span>
+      <span class="font-mono">{{ showUnlimited && max <= 0 ? '∞' : max }}</span>
     </span>
   </div>
 </template>
@@ -23,6 +23,7 @@ import { computed } from 'vue'
 const props = defineProps<{
   current: number
   max: number
+  showUnlimited?: boolean
 }>()
 
 // Status color based on usage

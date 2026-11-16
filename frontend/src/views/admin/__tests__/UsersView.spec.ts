@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 import type { AdminUser } from '@/types'
 import UsersView from '../UsersView.vue'
+
+enableAutoUnmount(afterEach)
 
 const {
   listUsers,
@@ -112,6 +114,7 @@ const DataTableStub = {
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
         <div :data-test="'actions-' + row.id"><slot name="cell-actions" :row="row" /></div>
+        <div :data-test="'live-' + row.id"><slot name="cell-live_usage" :row="row" /></div>
         <div :data-test="'balance-' + row.id"><slot name="cell-balance" :row="row" :value="row.balance" /></div>
       </div>
     </div>
@@ -214,6 +217,41 @@ describe('admin UsersView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('shows the limiter column by default and distinguishes missing RPM from zero', async () => {
+    listUsers.mockResolvedValueOnce({ items: [createAdminUser({ current_rpm: 0, rpm_limit: 60 })], total: 1, pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    expect(wrapper.get('[data-test="columns"]').text()).toContain('live_usage')
+    expect(wrapper.get('[data-test="live-42"]').text()).toContain('0 / 60')
+    expect(wrapper.find('[data-notice="user-live-load-initial-announcement"]').exists()).toBe(true)
+  })
+
+  it('refreshes at most once a minute and pauses for hidden pages or columns', async () => {
+    vi.useFakeTimers()
+    const hiddenSpy = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(59_999)
+    expect(listUsers).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(listUsers).toHaveBeenCalledTimes(2)
+    hiddenSpy.mockReturnValue(true)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(listUsers).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+    hiddenSpy.mockReturnValue(false)
+    localStorage.setItem('user-hidden-columns', JSON.stringify(['live_usage']))
+    const hidden = mountBulkDeleteView()
+    await flushPromises()
+    const calls = listUsers.mock.calls.length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(listUsers).toHaveBeenCalledTimes(calls)
+    hidden.unmount()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(listUsers).toHaveBeenCalledTimes(calls)
   })
 
   it('cancels bulk deletion without deleting or clearing selected users', async () => {

@@ -25,6 +25,7 @@ type UserWithConcurrency struct {
 	dto.AdminUser
 	AutoCreditOutstanding string `json:"auto_credit_outstanding"`
 	CurrentConcurrency    int    `json:"current_concurrency"`
+	CurrentRPM            *int   `json:"current_rpm"`
 }
 
 // UserHandler handles admin user management
@@ -210,6 +211,7 @@ func (h *UserHandler) List(c *gin.Context) {
 		out[i] = UserWithConcurrency{
 			AdminUser:             *dto.UserFromServiceAdmin(&users[i]),
 			AutoCreditOutstanding: debt[users[i].ID],
+			CurrentRPM:            users[i].CurrentRPM,
 		}
 		if info := loadInfo[users[i].ID]; info != nil {
 			out[i].CurrentConcurrency = info.CurrentConcurrency
