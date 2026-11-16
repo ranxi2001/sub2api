@@ -49,6 +49,97 @@ class ResidualFixtureOwnershipTest(unittest.TestCase):
         self.assertIsNotNone(match)
         return textwrap.dedent(match.group()), match.group(1).split()
 
+    def test_actual_residual_rollback_and_exact_test_support_overlay(self):
+        step = self.residual_step()
+        rollback = re.search(r"(?ms)^            while IFS= read -r target; do\n.*?^            git -C .*?diff --exit-code .*?':!backend/\*\*/\*_test.go'$", step)
+        self.assertIsNotNone(rollback)
+        overlay = re.search(r"(?ms)^            # BEGIN residual Redis test-support overlay\n.*?^            # END residual Redis test-support overlay$", step)
+        self.assertIsNotNone(overlay)
+        self.assertLess(rollback.end(), overlay.start())
+        self.assertEqual(step[:overlay.start()].count("':!backend/**/*_test.go'"), 1)
+        rollback = textwrap.dedent(rollback.group())
+        overlay = textwrap.dedent(overlay.group())
+        helper = "backend/internal/testutil/redissession/store.go"
+        production = "backend/internal/service/production.go"
+        unrelated = "backend/internal/service/new_production.go"
+        oauth = "backend/internal/service/openai_oauth_reauth_request_proxy_test.go"
+        selected = {"backend/internal/handler/openai_409_ws_rebuild_test.go", "backend/internal/service/openai_409_ws_ticket_test.go"}
+        fixture_sources = {path: "candidate selected test\n" for path in selected}
+        fixture_sources[oauth] = 'package service\nimport _ "github.com/Wei-Shaw/sub2api/internal/testutil/redissession"\n'
+        for scenario in ("valid", "dirty-source", "other-path", "other-production", "source-symlink", "unexpected-target"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                source, red = Path(directory) / "candidate", Path(directory) / "red"
+                source.mkdir()
+                env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+                env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+
+                def git(*args, cwd=source):
+                    return subprocess.run(["git", "-c", "user.name=CI fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.devnull, "-c", "init.templateDir=", *args], cwd=cwd, env=env, check=True, capture_output=True, text=True, timeout=15).stdout.strip()
+
+                def write(root, path, content):
+                    target = root / path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(content)
+
+                def run(shell):
+                    return subprocess.run(["bash", "-c", "set -euo pipefail\n" + shell], cwd=source, env=env, capture_output=True, text=True, timeout=15)
+
+                git("init", "-q")
+                write(source, production, "package service // baseline\n")
+                for path in selected:
+                    write(source, path, "baseline selected test\n")
+                git("add", ".")
+                git("commit", "-qm", "baseline")
+                baseline = git("rev-parse", "HEAD")
+                write(source, production, "package service // candidate\n")
+                write(source, unrelated, "package service // candidate-only production\n")
+                write(source, helper, "package redissession // candidate test support\n")
+                for path, content in fixture_sources.items():
+                    write(source, path, content)
+                git("add", ".")
+                git("commit", "-qm", "candidate")
+                candidate = git("rev-parse", "HEAD")
+                helper_blob = git("rev-parse", f"{candidate}:{helper}")
+                git("worktree", "add", "--detach", str(red), candidate)
+                evidence_dir = Path(directory) / "evidence/ws-evidence"
+                evidence_dir.mkdir(parents=True)
+                env.update(baseline=baseline, CANDIDATE_SHA=candidate, tested_tree=str(red), GITHUB_WORKSPACE=str(source), RUNNER_TEMP=str(evidence_dir.parent))
+
+                result = run(rollback)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse((red / helper).exists(), "the actual old rollback must delete the new non-test helper")
+                self.assertFalse((red / unrelated).exists())
+                self.assertIn("internal/testutil/redissession", (red / oauth).read_text(), "the importing candidate test survives the actual old rollback")
+                self.assertEqual((red / production).read_text(), "package service // baseline\n")
+                self.assertEqual(git("diff", "--name-only", baseline, "--", "backend/**/*.go", ":!backend/**/*_test.go", cwd=red), "")
+                script = overlay
+                if scenario == "dirty-source":
+                    write(source, helper, "unexpected candidate helper mutation\n")
+                elif scenario == "other-path":
+                    script = script.replace("helper=" + helper, "helper=" + unrelated, 1)
+                elif scenario == "other-production":
+                    write(red, production, "unexpected production mutation\n")
+                elif scenario == "source-symlink":
+                    (source / helper).unlink()
+                    (source / helper).symlink_to(source / production)
+                elif scenario == "unexpected-target":
+                    write(red, helper, "unexpected restored helper\n")
+                result = run(script)
+                manifest = evidence_dir / "residual-test-support.txt"
+                if scenario != "valid":
+                    self.assertNotEqual(result.returncode, 0, "untrusted helper state or another production path must be rejected")
+                    self.assertFalse(manifest.exists(), "rejected preparation must not produce a success manifest")
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(git("hash-object", str(red / helper)), helper_blob)
+                self.assertEqual(git("diff", "--name-only", baseline, "--", "backend/**/*.go", ":!backend/**/*_test.go", cwd=red), helper)
+                self.assertEqual((red / production).read_text(), "package service // baseline\n")
+                self.assertFalse((red / unrelated).exists())
+                for path, content in fixture_sources.items():
+                    self.assertEqual((red / path).read_text(), content)
+                fields = dict(field.split("=", 1) for field in manifest.read_text().split())
+                self.assertEqual(fields, {"path": helper, "baseline": baseline, "baseline_blob": "absent", "candidate": candidate, "candidate_blob": helper_blob, "source_blob": helper_blob, "restored_blob": helper_blob})
+
     def test_residual_fixtures_have_one_owner_in_shared_helper_chain(self):
         _, inline = self.inline_loop()
         self.assertEqual(len(inline), len(set(inline)))

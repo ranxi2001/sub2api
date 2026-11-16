@@ -205,6 +205,32 @@ jobs:
               fi
             done < <(git diff --no-renames --name-only "$baseline" "$CANDIDATE_SHA" -- 'backend/**/*.go')
             git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+            # BEGIN residual Redis test-support overlay
+            # The complete production baseline is proved above. Restore only
+            # this candidate test dependency, with an explicit blob manifest.
+            helper=backend/internal/testutil/redissession/store.go
+            test "$helper" = backend/internal/testutil/redissession/store.go
+            if git cat-file -e "$baseline:$helper" 2>/dev/null; then exit 1; fi
+            candidate_blob=$(git rev-parse "$CANDIDATE_SHA:$helper")
+            test "$(git cat-file -t "$candidate_blob")" = blob
+            for support_dir in backend backend/internal backend/internal/testutil backend/internal/testutil/redissession; do
+              test ! -L "$GITHUB_WORKSPACE/$support_dir"
+              test ! -L "$tested_tree/$support_dir"
+            done
+            test -f "$GITHUB_WORKSPACE/$helper"
+            test ! -L "$GITHUB_WORKSPACE/$helper"
+            source_blob=$(git hash-object "$GITHUB_WORKSPACE/$helper")
+            test "$source_blob" = "$candidate_blob"
+            test ! -e "$tested_tree/$helper"
+            test ! -L "$tested_tree/$helper"
+            mkdir -p -- "$(dirname -- "$tested_tree/$helper")"
+            git show "$CANDIDATE_SHA:$helper" > "$tested_tree/$helper"
+            restored_blob=$(git hash-object "$tested_tree/$helper")
+            test "$restored_blob" = "$candidate_blob"
+            git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go' ":!$helper"
+            test "$(git -C "$tested_tree" diff --name-only "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go')" = "$helper"
+            printf 'path=%s baseline=%s baseline_blob=absent candidate=%s candidate_blob=%s source_blob=%s restored_blob=%s\n' "$helper" "$baseline" "$CANDIDATE_SHA" "$candidate_blob" "$source_blob" "$restored_blob" > "$RUNNER_TEMP/ws-evidence/residual-test-support.txt"
+            # END residual Redis test-support overlay
           fi
           git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           if [ "$PHASE" = RED ]; then
