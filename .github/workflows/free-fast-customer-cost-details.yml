@@ -118,7 +118,8 @@ jobs:
   frontend:
     env:
       NODE_OPTIONS: --max-old-space-size=4096
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 has no Chromium package for Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
