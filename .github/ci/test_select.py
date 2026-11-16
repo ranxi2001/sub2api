@@ -30,7 +30,7 @@ class SelectionTests(unittest.TestCase):
         self.git('init', '-q')
         self.git('config', 'user.email', 'fixture@example.invalid')
         self.git('config', 'user.name', 'Fixture')
-        self.write('.github/workflows/main.yml', 'name: CI\npermissions:\n  contents: read\njobs:\n  backend:\n    runs-on: ubuntu-latest\n    steps:\n      - run: go test ./...\n  frontend:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pnpm test\n')
+        self.write('.github/workflows/main.yml', 'name: CI\npermissions:\n  contents: read\njobs:\n  backend:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v6\n        with:\n          ref: ${{ github.event.pull_request.head.sha || github.sha }}\n      - run: go test ./...\n  frontend:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v6\n        with:\n          ref: ${{ github.event.pull_request.head.sha || github.sha }}\n      - run: pnpm test\n')
         self.write('backend/a.go', 'package a\n')
         self.write('frontend/a.ts', 'export const a = 1\n')
         self.base = self.save()
@@ -122,6 +122,20 @@ class SelectionTests(unittest.TestCase):
                 return {'backend'}
         result = ci.select('main.yml', self.scopes, 'push', {'before': self.base}, head, Evidence())
         self.assertFalse(result['backend'][0])
+
+    def test_default_merge_checkout_is_not_reusable(self):
+        p = self.root / '.github/workflows/main.yml'
+        p.write_text(p.read_text().replace('          ref: ${{ github.event.pull_request.head.sha || github.sha }}', '          fetch-depth: 0'))
+        self.write('backend/a.go', 'package updated\n')
+        previous = self.save()
+        self.write('docs/notes.md', 'unchanged application')
+        head = self.save()
+        class Evidence:
+            def candidates(self, *args):
+                return [{'id': 42, 'head_sha': previous}]
+            def successful_jobs(self, run_id):
+                return {'backend'}
+        self.assertTrue(self.select(head, Evidence())['backend'][0])
 
     def test_other_pr_and_other_repository_results_are_not_candidates(self):
         evidence = ci.Evidence('fixture/repo', 'unused')

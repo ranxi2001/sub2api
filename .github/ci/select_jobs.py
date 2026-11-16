@@ -60,6 +60,15 @@ def definition(sha, filename, job):
             'permissions': workflow.get('permissions')}
 
 
+def checks_candidate(sha, filename, job):
+    # Default checkout on pull_request tests the synthetic merge tree, whose
+    # base can change independently. Only reuse explicitly pinned head checks.
+    steps = workflow_at(sha, filename)['jobs'][job].get('steps', [])
+    checkouts = [step for step in steps if step.get('uses', '').startswith('actions/checkout@')]
+    expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+    return bool(checkouts) and all(step.get('with', {}).get('ref') == expected for step in checkouts)
+
+
 def fingerprint(sha, filename, job, patterns):
     spec = definition(sha, filename, job)
     # actions:read only permits evidence lookup, not test/runtime behavior.
@@ -151,7 +160,9 @@ def select(filename, scopes, event_name, event, head, evidence=None, force=False
                     same = fingerprint(old, filename, job, patterns) == fingerprint(head, filename, job, patterns)
                 except (KeyError, subprocess.CalledProcessError):
                     continue
-                if same and job in evidence.successful_jobs(run['id']):
+                if (same and checks_candidate(old, filename, job)
+                        and checks_candidate(head, filename, job)
+                        and job in evidence.successful_jobs(run['id'])):
                     selected[job] = (False, f"reused successful run {run['id']} at {old}")
     except Exception as error:
         # Missing token, API limits or unavailable commits must never skip tests.
