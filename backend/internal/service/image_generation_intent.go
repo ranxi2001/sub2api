@@ -301,7 +301,7 @@ func openAIJSONInputContainsImageGenTool(input gjson.Result) bool {
 }
 
 func openAIRequestBodyHasImageGenerationDeclaration(body []byte) bool {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
+	if len(body) == 0 || !openAIBodyMayDeclareImageGeneration(body) || !gjson.ValidBytes(body) {
 		return false
 	}
 	return openAIJSONToolsContainImageGeneration(gjson.GetBytes(body, "tools")) ||
@@ -310,7 +310,7 @@ func openAIRequestBodyHasImageGenerationDeclaration(body []byte) bool {
 }
 
 func openAIRequestBodyImageGenerationToolNeedsNormalization(body []byte) bool {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
+	if len(body) == 0 || !openAIBodyMayDeclareImageGeneration(body) || !gjson.ValidBytes(body) {
 		return false
 	}
 	tools := gjson.GetBytes(body, "tools")
