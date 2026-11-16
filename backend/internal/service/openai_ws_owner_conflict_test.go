@@ -7,9 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -19,6 +22,97 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
+
+type pendingDeadlineToolProofCache struct {
+	GatewayCache
+	get    func(context.Context, string) (string, error)
+	writes int
+}
+
+func (c *pendingDeadlineToolProofCache) GetOpenAIToolProvenance(ctx context.Context, key string) (string, error) {
+	return c.get(ctx, key)
+}
+
+func (c *pendingDeadlineToolProofCache) ReserveOpenAIToolProvenance(context.Context, string, string, time.Duration) error {
+	c.writes++
+	return errors.New("unexpected proof reservation")
+}
+
+func (c *pendingDeadlineToolProofCache) FinishOpenAIToolProvenance(context.Context, string, string, string, bool, time.Duration) error {
+	c.writes++
+	return errors.New("unexpected proof completion")
+}
+
+func TestOpenAIToolProvenancePendingDeadline(t *testing.T) {
+	backendErr := errors.New("PRIVATE_BACKEND_ERROR")
+	for _, kind := range []string{"function", "custom"} {
+		for _, tc := range []struct {
+			name          string
+			pending, wait bool
+			readErr       error
+			wantReason    string
+		}{
+			{"pending_deadline", true, true, context.DeadlineExceeded, "owner_conflict"},
+			{"initial_deadline", false, true, context.DeadlineExceeded, "store_unavailable"},
+			{"initial_store_failure", false, false, backendErr, "store_unavailable"},
+			{"initial_backend_deadline", false, false, context.DeadlineExceeded, "store_unavailable"},
+			{"pending_store_failure", true, false, backendErr, "store_unavailable"},
+			{"pending_backend_deadline", true, false, context.DeadlineExceeded, "store_unavailable"},
+			{"pending_store_failure_at_deadline", true, true, backendErr, "store_unavailable"},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					callType, field := "function_call", "arguments"
+					if kind == "custom" {
+						callType, field = "custom_tool_call", "input"
+					}
+					body := []byte(fmt.Sprintf(`{"input":[{"type":%q,"call_id":"fixture-call","name":"fixture-tool",%q:"{}"},{"type":%q,"call_id":"fixture-call","output":"fixture-result"}]}`, callType, field, callType+"_output"))
+					request := &openAIAgentRecoveryRequest{userID: 1, keyID: 2, model: "fixture-model"}
+					var keys []string
+					var readContextErr error
+					cache := &pendingDeadlineToolProofCache{get: func(ctx context.Context, key string) (string, error) {
+						keys = append(keys, key)
+						if tc.pending && len(keys) == 1 {
+							return "pending:fixture-unconfirmed", nil
+						}
+						if tc.wait {
+							// The second GET has already started. Virtual time now
+							// exhausts the real wait context, never a scheduling race
+							// between the polling timer and the deadline select.
+							<-ctx.Done()
+						}
+						readContextErr = ctx.Err()
+						return "", fmt.Errorf("synthetic cache read: %w", tc.readErr)
+					}}
+					svc := &OpenAIGatewayService{cache: cache}
+					err := svc.verifyOpenAIToolInputs(context.Background(), request, body)
+					wantReads := 1
+					if tc.pending {
+						wantReads = 2
+					}
+					require.Len(t, keys, wantReads, "exercise the intended GET, without replay")
+					for _, key := range keys {
+						require.Equal(t, request.toolKey("fixture-call"), key)
+					}
+					if tc.wait {
+						require.ErrorIs(t, readContextErr, context.DeadlineExceeded)
+					} else {
+						require.NoError(t, readContextErr, "independent backend errors precede wait expiry")
+					}
+					var refusal *OpenAIAgentRecoveryError
+					require.ErrorAs(t, err, &refusal)
+					wantCode := "encrypted_agent_recovery_" + tc.wantReason
+					if got := refusal.ClientCode(); got != wantCode {
+						t.Fatalf("WS_PENDING_DEADLINE_CLASSIFICATION: got %q; want %q", got, wantCode)
+					}
+					require.Empty(t, request.toolProofs, "an incomplete proof must not grant permission")
+					require.Zero(t, cache.writes, "verification must not publish ownership")
+					require.NotContains(t, err.Error(), "PRIVATE_BACKEND_ERROR")
+				})
+			})
+		}
+	}
+}
 
 // Calls are learned only from the real response observer and successful write
 // completion; the client input below cannot populate the proof store.
