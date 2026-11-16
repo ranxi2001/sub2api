@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -77,10 +78,10 @@ func (s *OpenAIGatewayService) awaitOpenAIAgentRecovery(ctx context.Context, sha
 			found = found && time.Now().Before(b.expiresAt)
 		}
 		if err != nil {
-			if observedPending && ctx.Err() != nil {
-				// This Get may return no record when the same wait context
-				// expires. Retain the observed fence for diagnostics, while
-				// found=false and the error still prohibit an ownership grant.
+			if observedPending && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				// Retain pending diagnostics only for the wait's context error.
+				// Independent storage failures remain unavailable; found=false
+				// and the error still prohibit an ownership grant.
 				return lastPending, false, openAIAgentRecoveryError("delivery_pending")
 			}
 			return b, false, openAIAgentRecoveryError("store_unavailable")
