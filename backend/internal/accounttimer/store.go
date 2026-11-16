@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -446,6 +447,13 @@ func (s *Store) execute(ctx context.Context, candidate Task) error {
 		return nil
 	}
 	reason := Decision(t.Action == "open", t.ExecuteAt, now, a.status, a.expires, a.deleted != nil, s.policy())
+	autoDisposition := strings.HasPrefix(t.Reason, "oauth_initial:")
+	if reason == "" && autoDisposition {
+		reason, err = oauthDispositionDecision(ctx, tx, t)
+		if err != nil {
+			return err
+		}
+	}
 	result := "executed"
 	var next time.Time
 	if t.Recurrence == "daily" && reason != "account_deleted" {
@@ -473,6 +481,16 @@ func (s *Store) execute(ctx context.Context, candidate Task) error {
 			_ = tx.Rollback()
 			return s.retry(ctx, t)
 		}
+	}
+	if autoDisposition && result == "executed" {
+		if t.Action == "close" {
+			// A delayed worker still provides the full configured pause after closing.
+			_, err = tx.ExecContext(ctx, `UPDATE account_schedulable_timers SET execute_at=$3::timestamptz+(execute_at-$4::timestamptz),next_attempt_at=$3::timestamptz+(execute_at-$4::timestamptz) WHERE account_id=$1 AND action='open' AND status='pending' AND reason=$2`, t.AccountID, t.Reason, now, t.ExecuteAt)
+			if err != nil {
+				return err
+			}
+		}
+		reason = t.Reason
 	}
 	if !next.IsZero() {
 		// Audit this occurrence using its original version, while atomically

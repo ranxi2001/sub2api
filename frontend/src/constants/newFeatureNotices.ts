@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  oauthAPIKeyDisposition: 'oauth-initial-apikey-disposition',
   matureProviders: 'mature-provider-operations-initial-announcement',
   matureProviderImport: 'mature-provider-account-import-initial-announcement',
   qqCommunity: 'qq-community-operations-initial-announcement',
