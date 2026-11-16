@@ -197,7 +197,7 @@ func (h *ChannelHandler) resolveMatureProviderKey(ctx context.Context, id int64,
 			base += "/v1"
 		}
 		credentials = map[string]any{"api_key": key.secret, "base_url": base}
-		provenance = map[string]any{"provider_id": id, "provider_name": s.record.Name, "site_type": s.record.SiteType, "key_id": key.ID, "key_name": key.Name, "group_id": key.GroupID, "group_name": key.GroupName, "group_multiplier": key.GroupMultiplier}
+		provenance = map[string]any{"provider_id": id, "provider_revision": s.record.Revision, "provider_name": s.record.Name, "site_type": s.record.SiteType, "key_id": key.ID, "key_name": key.Name, "group_id": key.GroupID, "group_name": key.GroupName, "group_multiplier": key.GroupMultiplier}
 		return nil
 	})
 	return credentials, provenance, err

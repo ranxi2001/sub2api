@@ -17,6 +17,7 @@ import (
 
 type providerMetrics = service.ProviderMetrics
 type providerRecord struct {
+	Revision                                                                                   int64
 	ID, Name, SiteType, BaseURL, AuthMode, Account, UserID, Status, ErrorKind, SecretEncrypted string
 	UpdatedAt                                                                                  *time.Time
 }
@@ -88,7 +89,7 @@ func (h *ChannelHandler) matureProviderClient() (*http.Client, error) {
 }
 
 func providerProtocolRecord(p *service.MatureProvider) providerRecord {
-	return providerRecord{ID: strconv.FormatInt(p.ID, 10), Name: p.Name, SiteType: p.SiteType, BaseURL: p.BaseURL, AuthMode: p.AuthMode, Account: p.Account, UserID: p.UserID, Status: p.Status}
+	return providerRecord{ID: strconv.FormatInt(p.ID, 10), Revision: p.Revision, Name: p.Name, SiteType: p.SiteType, BaseURL: p.BaseURL, AuthMode: p.AuthMode, Account: p.Account, UserID: p.UserID, Status: p.Status}
 }
 
 func (h *ChannelHandler) RefreshMatureProvider(c *gin.Context) {

@@ -108,7 +108,6 @@ func TestUpstreamChannelEntityHTTPAccountProfitPersistence(t *testing.T) {
 	require.Equal(t, 403, request("PUT", "/upstream-channel-bindings", service.UpstreamChannelBindingsMutation{}, userToken).Code)
 	var key int64
 	require.NoError(t, db.QueryRow(`INSERT INTO api_keys(user_id,key,name) VALUES($1,'entity-fixture-key','fixture') RETURNING id`, uid).Scan(&key))
-	now := time.Now().UTC().Truncate(time.Second)
 	rawAccounts := []struct{ platform, kind, url string }{{"openai", "apikey", "https://same.example/v1"}, {"openai", "apikey", "https://different.example:8443/Tenant/v2"}, {"gemini", "oauth", ""}, {"openai", "apikey", "https://name:private@secret.example/v1?token=secret-query"}, {"openai", "apikey", "https://same.example/v1"}, {"openai", "apikey", "https://fallback.example/v1"}, {"gemini", "oauth", ""}}
 	ids := []int64{}
 	for i, fixture := range rawAccounts {
@@ -116,10 +115,6 @@ func TestUpstreamChannelEntityHTTPAccountProfitPersistence(t *testing.T) {
 		var id int64
 		require.NoError(t, db.QueryRow(`INSERT INTO accounts(name,platform,type,credentials,extra) VALUES($1,$2,$3,$4::jsonb,'{"cost_multiplier":0.25}') RETURNING id`, fmt.Sprintf("entity-account-%d", i), fixture.platform, fixture.kind, string(credentials)).Scan(&id))
 		ids = append(ids, id)
-		_, e = db.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,account_stats_cost,account_rate_multiplier,created_at) VALUES($1,$2,$3,$4,'entity-model',10,4,8,999,$5)`, uid, key, id, fmt.Sprintf("entity-request-%d", i), now.Add(-time.Minute))
-		require.NoError(t, e)
-		_, e = db.Exec(`INSERT INTO ops_error_logs(account_id,model,error_phase,error_type,status_code,is_count_tokens,created_at) VALUES($1,'entity-model','upstream','http_error',502,false,$2)`, id, now.Add(-time.Minute))
-		require.NoError(t, e)
 	}
 	bindings := func(accounts []int64) []service.UpstreamChannelBinding {
 		parts := []string{}
@@ -145,10 +140,19 @@ func TestUpstreamChannelEntityHTTPAccountProfitPersistence(t *testing.T) {
 			require.Equal(t, target, saved.ChannelID, "explicit binding must persist independently of URL eligibility")
 		}
 	}
-	var usageBefore string
-	require.NoError(t, db.QueryRow(`SELECT jsonb_agg(to_jsonb(u) ORDER BY id)::text FROM usage_logs u`).Scan(&usageBefore))
 	bind(a.ID, ids[:4])
 	bind(b.ID, ids[4:5])
+	for i, id := range ids {
+		_, e = db.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,account_stats_cost,account_rate_multiplier,created_at) VALUES($1,$2,$3,$4,'entity-model',10,4,8,999,clock_timestamp())`, uid, key, id, fmt.Sprintf("entity-request-%d", i))
+		require.NoError(t, e)
+		_, e = db.Exec(`INSERT INTO ops_error_logs(account_id,model,error_phase,error_type,status_code,is_count_tokens,created_at) VALUES($1,'entity-model','upstream','http_error',502,false,clock_timestamp())`, id)
+		require.NoError(t, e)
+	}
+	var usageBefore string
+	require.NoError(t, db.QueryRow(`SELECT jsonb_agg(to_jsonb(u) ORDER BY id)::text FROM usage_logs u`).Scan(&usageBefore))
+	var now time.Time
+	require.NoError(t, db.QueryRow(`SELECT clock_timestamp() + interval '1 second'`).Scan(&now))
+	now = now.UTC()
 	require.Greater(t, get(a.ID).Revision, a.Revision, "membership changes invalidate multi-account edit confirmation")
 	a = get(a.ID)
 	b = get(b.ID)
@@ -278,7 +282,12 @@ func TestUpstreamChannelEntityHTTPAccountProfitPersistence(t *testing.T) {
 	var fallback struct{ Rows []row }
 	out = profit("https://different.example:8443/Tenant/v2", 1)
 	require.NoError(t, json.Unmarshal(out.Usage, &fallback))
-	require.Equal(t, "unbound_url", fallback.Rows[0].Assignment)
+	require.Empty(t, fallback.Rows, "unlinking today must not move historical income to the URL bucket")
+	out = profit(aKey, 1)
+	require.NoError(t, json.Unmarshal(out.Usage, &afterRename))
+	require.Len(t, afterRename.Rows, 1)
+	require.Equal(t, 4, afterRename.Rows[0].Requests)
+	require.Equal(t, 6.0, afterRename.Rows[0].Profit)
 	// Ordinary account deletion is soft: retain explicit ownership for historical usage.
 	beforeDeleteRevision := get(b.ID).Revision
 	require.NoError(t, repository.NewAdminAccountRepository(client, db, nil).Delete(ctx, ids[4]))

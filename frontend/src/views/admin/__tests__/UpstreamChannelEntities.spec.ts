@@ -7,7 +7,7 @@ vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template:
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@/api/admin/profitOperations', () => ({ readProfitOperations: vi.fn() }))
+vi.mock('@/api/admin/profitOperations', () => ({ readProfitOperations: vi.fn(), listProfitProviders: () => Promise.resolve({items: [], total: 0, page: 1, page_size: 20}) }))
 vi.mock('@/api/admin/upstreamChannels', () => ({ listUpstreamChannels: vi.fn().mockResolvedValue({ items: [], total: 0 }) }))
 beforeEach(() => vi.mocked(readProfitOperations).mockResolvedValue({ usage: { catalog: [], rows: [{ key: 'channel:7', name: '渠道A', assignment: 'explicit', channel_id: 7, channel_remark: '统一采购' }], accounts: [], summary: {} }, scope: {}, quality: { status: 'ready', data: { summary: {}, rows: [] } }, errors: { status: 'ready', data: { rows: [] } } } as unknown as OperationsSnapshot))
 it('offers actual entity management and marks explicit ownership in the exact profit page', async () => {
