@@ -282,7 +282,8 @@ var (
 		if accountMax > 0 then
 			redis.call('ZREM', accountRegular, accountSource)
 		end
-		if userMax > 0 then
+		-- Move an unlimited user's stats-only member as well.
+		if userSource ~= '' then
 			redis.call('ZREM', userRegular, userSource)
 		end
 		-- A stats-only key member is moved as well, so the unlimited tracking

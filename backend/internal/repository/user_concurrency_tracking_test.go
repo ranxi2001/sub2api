@@ -41,3 +41,29 @@ func TestUnlimitedUserConcurrencySharesExistingLimitCounters(t *testing.T) {
 	require.True(t, limited.Acquired)
 	limited.ReleaseFunc()
 }
+
+func TestUnlimitedUserLiveTransferCountsExactlyOnce(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	svc := service.NewConcurrencyService(cache)
+	ctx := context.Background()
+	slot, err := svc.AcquireUserSlot(ctx, 42, 0)
+	require.NoError(t, err)
+	request := service.LiveLeaseTransferRequest{AccountID: 10, UserID: 42, APIKeyID: 20, UserRequestID: slot.RequestID, LeaseID: "user-stats-live"}
+	acquired, err := cache.AcquireLiveLeaseTransferring(ctx, request)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	count, err := cache.GetUserConcurrency(ctx, 42)
+	require.NoError(t, err)
+	require.Equal(t, 1, count, "ordinary stats slot must move into the Live lease")
+	slot.ReleaseFunc()
+	count, err = cache.GetUserConcurrency(ctx, 42)
+	require.NoError(t, err)
+	require.Equal(t, 1, count, "releasing the old owner must preserve the Live lease")
+	require.NoError(t, cache.ReleaseLiveLease(ctx, 10, 42, 20, request.LeaseID))
+	count, err = cache.GetUserConcurrency(ctx, 42)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
