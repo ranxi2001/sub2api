@@ -218,3 +218,51 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 	require.Equal(t, "Bearer fixture-B", owners[switchTurn])
 	require.Equal(t, 1, executions)
 }
+
+// Raw custom output IDs use a different prefix from replayable output IDs.
+// The source remains immutable; only the existing top-level ID sanitizer may
+// explain the difference when the bridge mints a current-turn projection.
+func TestOpenAIWSBridgeNormalizedDeltaID(t *testing.T) {
+	for _, id := range []string{"foreign-provider-id", "ctc_original_output"} {
+		t.Run(id, func(t *testing.T) {
+			var mu sync.Mutex
+			var frames [][]byte
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, e := io.ReadAll(r.Body)
+				if e != nil {
+					t.Error(e)
+					return
+				}
+				mu.Lock()
+				frames = append(frames, body)
+				n := len(frames)
+				mu.Unlock()
+				output := `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fixture previous"}]}]`
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprintf(w, `data: {"type":"response.completed","response":{"id":"resp_normalized_%d","model":"gpt-5.1","status":"completed","output":%s}}`+"\n\n", n, output)
+			}))
+			defer upstream.Close()
+			clients := issue805Redis(t)
+			headers := http.Header{"Session_id": {"fixture-normalized-session"}, "Thread-Id": {"fixture-normalized-thread"}}
+			h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, upstream.URL, headers, map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}, repository.NewGatewayCache(clients()), func(k *service.APIKey) { k.AllowLongContext = true }, func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, _ *service.AccountRepository) {
+				a.Extra["openai_apikey_responses_websockets_v2_mode"] = service.OpenAIWSIngressModeHTTPBridge
+				a.Extra["codex_fingerprint_mode"] = "off"
+			})
+			defer issue600Finish(t, h, headers)
+			issue715WSSend(t, h.clientConn, `{"type":"response.create","model":"gpt-5.1","store":false,"input":[{"role":"user","content":"fixture original"}]}`)
+			require.Equal(t, "response.completed", gjson.GetBytes(issue715WSRead(t, h.clientConn), "type").String())
+			issue715WSSend(t, h.clientConn, fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":false,"previous_response_id":"resp_normalized_1","input":[{"type":"message","role":"user","id":%q,"content":"fixture next","number":9007199254740993}]}`, id))
+			result := issue715WSRead(t, h.clientConn)
+			require.Equal(t, "response.completed", gjson.GetBytes(result, "type").String(), "NORMALIZED_DELTA_REFUSED: %s", result)
+			mu.Lock()
+			defer mu.Unlock()
+			require.Len(t, frames, 2)
+			items := gjson.GetBytes(frames[1], "input").Array()
+			require.Len(t, items, 3)
+			require.Equal(t, "fixture next", items[2].Get("content").String())
+			require.Equal(t, "9007199254740993", items[2].Get("number").Raw)
+			require.False(t, items[2].Get("id").Exists())
+			require.False(t, gjson.GetBytes(frames[1], "previous_response_id").Exists())
+		})
+	}
+}
