@@ -105,6 +105,10 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 			accounts = &readableWSAccounts{issue600SwitchRepo: &issue600SwitchRepo{&openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{*a, b}}}}
 			*repo = accounts
 		})
+	completion := h.handlerDone
+	finished := make(chan struct{})
+	h.handlerDone = finished
+	go func() { <-completion; close(finished) }()
 	defer issue600Finish(t, h, headers)
 	awaitUsage := func() {
 		select {
@@ -158,6 +162,15 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 		readCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_, raw, e := h.clientConn.Read(readCtx)
+		if e == nil {
+			require.Equal(t, "error", gjson.GetBytes(raw, "type").String())
+			_, _, e = h.clientConn.Read(readCtx)
+		}
+		select {
+		case <-finished:
+		case <-readCtx.Done():
+			t.Fatal("refusal did not finish; no post-check generation permitted")
+		}
 		mu.Lock()
 		n := len(frames)
 		mu.Unlock()

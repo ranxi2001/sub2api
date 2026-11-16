@@ -606,7 +606,26 @@ func openAIWSWireRefusal(ctx context.Context, stage string, source, payload []by
 			storeKind = "other"
 		}
 	}
+	sanitized, idsChanged, sanitizeErr := sanitizeOpenAIResponsesInputItemIDs(source)
+	tailMatchesSource, tailMatchesIDs := false, false
+	if sourceInput.IsArray() && wireInput.IsArray() {
+		original, wire := sourceInput.Array(), wireInput.Array()
+		if len(original) > 0 && len(wire) >= len(original) {
+			var tail []json.RawMessage
+			for _, item := range wire[len(wire)-len(original):] {
+				tail = append(tail, json.RawMessage(item.Raw))
+			}
+			encoded, e := json.Marshal(tail)
+			if e == nil {
+				tailBody := append(append([]byte(`{"input":`), encoded...), '}')
+				tailMatchesSource = openAIAgentRecoveryInputDigest(source) == openAIAgentRecoveryInputDigest(tailBody)
+				tailMatchesIDs = sanitizeErr == nil && openAIAgentRecoveryInputDigest(sanitized) == openAIAgentRecoveryInputDigest(tailBody)
+			}
+		}
+	}
 	logger.FromContext(ctx).Warn("openai.encrypted_history_409_refused", zap.String("stage", stage),
+		zap.Bool("source_ids_normalized", idsChanged), zap.Bool("tail_matches_source", tailMatchesSource), zap.Bool("tail_matches_normalized_ids", tailMatchesIDs),
+		zap.Int("source_agent_items", len(openAIAgentRecoveryItemDigests(source))), zap.Int("wire_agent_items", len(openAIAgentRecoveryItemDigests(payload))),
 		zap.String("source_input_kind", inputKind), zap.String("source_store", storeKind),
 		zap.Int("source_input_items", len(sourceInput.Array())), zap.Int("wire_input_items", len(wireInput.Array())),
 		zap.Bool("source_previous_present", gjson.GetBytes(source, "previous_response_id").String() != ""),
