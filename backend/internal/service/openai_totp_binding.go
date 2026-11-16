@@ -23,9 +23,10 @@ func validTOTPFactorID(id string) bool {
 		return false
 	}
 	for _, c := range id {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
-			return false
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' {
+			continue
 		}
+		return false
 	}
 	return true
 }

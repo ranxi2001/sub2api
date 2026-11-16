@@ -193,7 +193,9 @@ func TestTOTPJournalRecoveryIsIdempotentAndCannotReplaceProvenance(t *testing.T)
 func TestTOTPRecoveryExportAfterAccountDeletionUsesTaskSnapshot(t *testing.T) {
 	svc, repo := newRotationService(t)
 	ctx := context.Background()
-	svc.accounts.(*reauthTestAccountReader).account = nil
+	reader, ok := svc.accounts.(*reauthTestAccountReader)
+	require.True(t, ok)
+	reader.account = nil
 	out, err := svc.ExportTOTPRecovery(ctx, 7, "USER@example.com", "candidate", true)
 	require.NoError(t, err)
 	require.Equal(t, "GEZDGNBVGY3TQOJQ", out.Secret)
@@ -209,7 +211,8 @@ func TestTOTPRecoveryImportBindsMatchingUnconfiguredAccountWithoutEnrollment(t *
 	ctx := context.Background()
 	require.NoError(t, svc.RecoverTOTPCandidate(ctx, 7, "GEZDGNBVGY3TQOJQ", "F2", "session"))
 	repo.config = nil
-	reader := svc.accounts.(*reauthTestAccountReader)
+	reader, ok := svc.accounts.(*reauthTestAccountReader)
+	require.True(t, ok)
 	reader.account.Credentials["email"] = "wrong@example.com"
 	require.Error(t, svc.ImportTOTPRecovery(ctx, 42, 7, "user@example.com", "candidate"))
 	reader.account.Credentials["email"] = "user@example.com"
