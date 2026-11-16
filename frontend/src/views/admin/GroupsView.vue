@@ -1679,6 +1679,26 @@
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.freeHint") }}
           </p>
+          <div class="flex items-center justify-between gap-4 mt-4">
+            <div class="flex items-center gap-2">
+              <label class="text-sm text-gray-600 dark:text-gray-400">
+                {{ t("admin.groups.openaiFast.freeUltrafast") }}
+              </label>
+              <NewFeatureBadge
+                v-if="authStore.user?.id != null"
+                :notice-id="NEW_FEATURE_NOTICES.groupFreeUltrafast"
+                :user-id="authStore.user?.id"
+              />
+            </div>
+            <Toggle
+              data-testid="create-free-openai-ultrafast"
+              :aria-label="t('admin.groups.openaiFast.freeUltrafast')"
+              v-model="createForm.free_openai_ultrafast"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.freeUltrafastHint") }}
+          </p>
         </div>
 
         <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
@@ -3387,6 +3407,26 @@
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.freeHint") }}
+          </p>
+          <div class="flex items-center justify-between gap-4 mt-4">
+            <div class="flex items-center gap-2">
+              <label class="text-sm text-gray-600 dark:text-gray-400">
+                {{ t("admin.groups.openaiFast.freeUltrafast") }}
+              </label>
+              <NewFeatureBadge
+                v-if="authStore.user?.id != null"
+                :notice-id="NEW_FEATURE_NOTICES.groupFreeUltrafast"
+                :user-id="authStore.user?.id"
+              />
+            </div>
+            <Toggle
+              data-testid="edit-free-openai-ultrafast"
+              :aria-label="t('admin.groups.openaiFast.freeUltrafast')"
+              v-model="editForm.free_openai_ultrafast"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiFast.freeUltrafastHint") }}
           </p>
         </div>
 
@@ -5121,6 +5161,7 @@ const createForm = reactive({
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
+  free_openai_ultrafast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
   allow_image_generation: false,
@@ -5492,6 +5533,7 @@ const editForm = reactive({
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
+  free_openai_ultrafast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
   allow_image_generation: false,
@@ -5997,6 +6039,7 @@ const closeCreateModal = () => {
   createForm.long_context_pricing_enabled = true;
   createForm.force_openai_fast = false;
   createForm.free_openai_fast = false;
+  createForm.free_openai_ultrafast = false;
   createForm.model_pricing = [];
   createForm.web_search_price_per_call = null;
   createForm.search_price_per_1k = null;
@@ -6128,6 +6171,10 @@ const handleCreateGroup = async () => {
       free_openai_fast: normalizeGroupOpenAIFast(
         createForm.platform,
         createForm.free_openai_fast,
+      ),
+      free_openai_ultrafast: normalizeGroupOpenAIFast(
+        createForm.platform,
+        createForm.free_openai_ultrafast,
       ),
       model_pricing: groupPricingToAPI(
         createForm.model_pricing,
@@ -6275,6 +6322,7 @@ const handleEdit = async (group: AdminGroup) => {
     group.long_context_pricing_enabled ?? true;
   editForm.force_openai_fast = group.force_openai_fast ?? false;
   editForm.free_openai_fast = group.free_openai_fast ?? false;
+  editForm.free_openai_ultrafast = group.free_openai_ultrafast ?? false;
   editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
   editForm.allow_image_generation = group.allow_image_generation ?? false;
   editForm.allow_batch_image_generation =
@@ -6413,6 +6461,7 @@ const closeEditModal = () => {
   editForm.long_context_pricing_enabled = true;
   editForm.force_openai_fast = false;
   editForm.free_openai_fast = false;
+  editForm.free_openai_ultrafast = false;
   editForm.model_pricing = [];
   editForm.web_search_price_per_call = null;
   editForm.search_price_per_1k = null;
@@ -6475,6 +6524,10 @@ const handleUpdateGroup = async () => {
       free_openai_fast: normalizeGroupOpenAIFast(
         editForm.platform,
         editForm.free_openai_fast,
+      ),
+      free_openai_ultrafast: normalizeGroupOpenAIFast(
+        editForm.platform,
+        editForm.free_openai_ultrafast,
       ),
       model_pricing: groupPricingToAPI(
         editForm.model_pricing,

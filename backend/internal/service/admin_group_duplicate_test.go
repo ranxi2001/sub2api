@@ -171,6 +171,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 		AllowLive:                       true,
 		ForceOpenAIFast:                 true,
 		FreeOpenAIFast:                  true,
+		FreeOpenAIUltrafast:             true,
 		RequireOAuthOnly:                true,
 		RequirePrivacySet:               true,
 		DefaultMappedModel:              "gpt-5.4",
@@ -223,6 +224,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.True(t, duplicate.CodexCLIOnly, "duplicating a group must preserve its client restriction")
 	require.True(t, duplicate.BlockSubagents)
 	require.Equal(t, source.FreeOpenAIFast, duplicate.FreeOpenAIFast)
+	require.Equal(t, source.FreeOpenAIUltrafast, duplicate.FreeOpenAIUltrafast)
 	require.Equal(t, source.ModelAllowlist, duplicate.ModelAllowlist)
 	require.Equal(t, source.RPMLimit, duplicate.RPMLimit)
 	require.Equal(t, source.MaxReasoningEffort, duplicate.MaxReasoningEffort)

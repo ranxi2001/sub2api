@@ -183,7 +183,7 @@ jobs:
           path: ${{ runner.temp }}/issue594-*.log
   ui:
     needs: red
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

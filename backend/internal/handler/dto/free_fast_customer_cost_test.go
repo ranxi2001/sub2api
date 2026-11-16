@@ -40,3 +40,12 @@ func TestFreeFastCustomerCostCacheDTO(t *testing.T) {
 		require.JSONEq(t, `[{"kind":"write_12h","tokens":13,"unit_price":0.000025}]`, string(snapshot["cache_cost_details"]), "customer cache price DTO parity")
 	}
 }
+
+func TestFreeUltrafastCustomerCostDTO(t *testing.T) {
+	row := &service.UsageLog{}
+	require.NoError(t, json.Unmarshal([]byte(`{"CustomerCostDetails":{"version":1,"free_fast":false,"free_ultrafast":true,"input_cost":0.00071,"output_cost":0.00095,"total_cost":0.00166,"actual_cost":0.000996,"multiplier":0.6}}`), row))
+	encoded, err := json.Marshal(UsageLogFromService(row))
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"free_ultrafast":true`)
+	require.Contains(t, string(encoded), `"free_fast":false`)
+}
