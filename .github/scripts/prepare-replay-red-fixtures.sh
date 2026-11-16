@@ -44,6 +44,16 @@ if ! test -f "$tree/$seam"; then
   exclude_absent_fixture backend/internal/handler/openai_issue842_oauth_repair_test.go backend/internal/service/openai_ws_agent_recovery.go
 fi
 
+# GPT-6.2 catalog/pricing tests use APIs absent in older full-source overlays.
+# Only the unrelated post-baseline fixture is excluded, with both the original
+# production contract and candidate test blob checked by the helper.
+contract=backend/internal/service/openai_model_alias.go
+target=backend/internal/service/openai_gpt62_test.go
+if git -C "$tree" cat-file -e "$candidate:$target" 2>/dev/null &&
+   ! git -C "$tree" grep -q 'func normalizeOpenAIGPT62Model' "$baseline" -- "$contract"; then
+  exclude_absent_fixture "$target" "$contract"
+fi
+
 # PR878 added a Group field used by otherwise unrelated service-package tests.
 # A full old-source overlay must compile them against that same historical API;
 # selected recovery oracles and all candidate GREEN tests remain untouched.

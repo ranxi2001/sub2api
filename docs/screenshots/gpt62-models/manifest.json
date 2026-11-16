@@ -1,0 +1,14 @@
+{
+  "source_commit": "e76af8e73dbdda6a87adf0bbf4de70cbdea374bc",
+  "baseline": "e3f238e3f173271a82b43d7fd504462c553b495c",
+  "component": "frontend/src/components/account/ModelWhitelistSelector.vue",
+  "scope": "Actual component, local preview; no production or backend persistence validation",
+  "before_models": 0,
+  "after_models": 3,
+  "selected_models": [
+    "gpt-6.2-astra",
+    "gpt-6.2-astra-pro",
+    "gpt-6.2-sol"
+  ],
+  "browser_errors": []
+}
