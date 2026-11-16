@@ -1,11 +1,12 @@
 # 历史 CI 归档
 
-2026-11-17 从 `.github/workflows/` 迁出 31 份工作流。GitHub Actions 不加载本目录；文件原样保留，便于追溯旧 PR 的验收命令、固定基线和截图步骤。测试源码及取证脚本仍在原位置。
+2026-11-17 从 `.github/workflows/` 迁出 32 份工作流。GitHub Actions 不加载本目录；文件原样保留，便于追溯旧 PR 的验收命令、固定基线和截图步骤。测试源码及取证脚本仍在原位置。
 
-归档基线：`e3f238e3f`（production）。归档对象只包含已合并功能的专用分支验收、旧上游版本同步、历史截图和试用构建；当前开放 PR 的专用入口保留。主 CI 继续执行后端 unit/integration、前端关键测试、lint、部署及发布辅助脚本检查。
+归档基线：`e3f238e3f`（production）。归档对象只包含已合并功能的专用分支验收、旧上游版本同步、历史截图和试用构建；当前开放 PR 的专用入口保留；另外归档仅允许在 `Wei-Shaw/sub2api` 执行的上游 CLA 工作流，它在本 fork 不提供检查。主 CI 继续执行后端 unit/integration、前端关键测试、lint、部署及发布辅助脚本检查。
 
 | 工作流 | 历史关联 |
 | --- | --- |
+| [cla.yml](cla.yml) | 上游专用 CLA；本 fork 的两个 job 均被仓库条件排除 |
 | [account-connection-timing.yml](account-connection-timing.yml) | [#602](https://github.com/ranxi2001/sub2api/pull/602) |
 | [account-ops-selector.yml](account-ops-selector.yml) | [#837](https://github.com/ranxi2001/sub2api/pull/837) |
 | [admin-usage-platform-filter.yml](admin-usage-platform-filter.yml) | [#836](https://github.com/ranxi2001/sub2api/pull/836) |
@@ -38,6 +39,6 @@
 | [upstream-v0221-regression.yml](upstream-v0221-regression.yml) | [#789](https://github.com/ranxi2001/sub2api/pull/789) |
 | [upstream-v0221-ui.yml](upstream-v0221-ui.yml) | [#789](https://github.com/ranxi2001/sub2api/pull/789) |
 
-主 CI 同时移除已合并分支的 `issue854-behavior`、`pelican-round-evidence`、`pr612-regressions`、`pr612-regressions-red` 以及质量模板、用户启用和 Issue854 的条件步骤；原定义可从上述归档基线的 `.github/workflows/backend-ci.yml` 查阅。
+主 CI 同时移除已合并分支的 `issue854-behavior`、`pelican-round-evidence`、`pr612-regressions`、`pr612-regressions-red` 以及质量模板、用户启用和 Issue854 的条件步骤；VIP 入账工作流也清除旧分支的两段 RED 步骤和 `source-format` job，保留 PostgreSQL GREEN 回归。原定义可从上述归档基线的 `.github/workflows/backend-ci.yml` 查阅。
 
 需要重跑历史验收时，在任务分支恢复所需文件到 `.github/workflows/`，先核对固定 SHA、分支条件、工具链、runner 和脚本路径。归档文件保留当时配置，不保证在新代码上直接可运行。常规回归优先并入主 CI；确需专用工作流时按相关路径触发，临时 RED/GREEN、截图或试用构建在任务完成后归档。
