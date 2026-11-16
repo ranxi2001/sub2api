@@ -1822,6 +1822,15 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
 
+	// Image generation already survives client disconnects so completed work
+	// can be accounted for. Its proxy scope follows that upstream lifecycle.
+	proxyCtx, releaseProxy, proxyErr := s.beginOpenAIRequestProxy(upstreamCtx, c, account)
+	if proxyErr != nil {
+		return nil, proxyErr
+	}
+	defer releaseProxy()
+	upstreamCtx = proxyCtx
+
 	if direct && account.IsExcelBPSImagesEnabledForModel(requestModel) && s.excelBPSGloballyEnabled(ctx) {
 		if reason := excelBPSImagesUnsupportedReason(parsed); reason != "" {
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Images request stays on Codex: account_id=%d bps_unsupported=%s", account.ID, reason)
@@ -1832,15 +1841,6 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			}
 		}
 	}
-	// Image generation already survives client disconnects so completed work
-	// can be accounted for. Its proxy scope follows that upstream lifecycle.
-	proxyCtx, releaseProxy, proxyErr := s.beginOpenAIRequestProxy(upstreamCtx, c, account)
-	if proxyErr != nil {
-		return nil, proxyErr
-	}
-	defer releaseProxy()
-	upstreamCtx = proxyCtx
-
 	credentialAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, err

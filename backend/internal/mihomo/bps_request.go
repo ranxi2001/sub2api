@@ -16,6 +16,7 @@ const BPSStaticRequestMembershipMaxAge = 30 * time.Second
 // logged. Expiry is checked again on every acquisition, not just on refresh.
 type BPSStaticProxy struct {
 	ID        int64
+	Name      string
 	URL       string
 	ExpiresAt *time.Time
 }
@@ -96,6 +97,7 @@ func AcquireBPSStaticRequestLease(ctx context.Context, accountID int64, proxyIDs
 	}
 	nodes := make([]string, 0, len(proxyIDs))
 	seen := map[string]bool{}
+	selected := make(map[string]BPSStaticProxy)
 	for _, id := range proxyIDs {
 		p, ok := m.bpsRequests.records[id]
 		if !ok || id <= 0 || (p.ExpiresAt != nil && !p.ExpiresAt.After(now)) {
@@ -107,6 +109,7 @@ func AcquireBPSStaticRequestLease(ctx context.Context, accountID int64, proxyIDs
 			continue
 		}
 		seen[node] = true
+		selected[node] = p
 		nodes = append(nodes, node)
 	}
 	if accountID <= 0 || len(nodes) == 0 {
@@ -150,7 +153,7 @@ func AcquireBPSStaticRequestLease(ctx context.Context, accountID int64, proxyIDs
 			// SetBPSStaticRequestGroups removes unconfigured idle accounts.
 		})
 	}
-	return &BPSLease{ProxyURL: m.bpsStatic[best], manager: m, node: best, generation: m.bpsHealthAtLocked(best, now).generation, release: release}, nil
+	return &BPSLease{ProxyID: selected[best].ID, ProxyName: selected[best].Name, ProxyURL: m.bpsStatic[best], manager: m, node: best, generation: m.bpsHealthAtLocked(best, now).generation, release: release}, nil
 }
 
 // Warming selected subsets is independent of the old global warm target. A

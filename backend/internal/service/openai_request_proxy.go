@@ -14,6 +14,9 @@ import (
 var errOpenAIRequestProxyUnavailable = errors.New("selected OpenAI request proxies are unavailable")
 
 type openAIRequestProxyContextKey struct{}
+
+const openAIRequestProxyOpsKey = "openai_request_proxy_ops_route"
+
 type openAIRequestProxyRoute struct {
 	accountID   int64
 	proxy       string
@@ -101,11 +104,19 @@ func (b *openAIRequestProxyOwnedBody) Close() error {
 // The scope ends only after Forward finishes consuming its final response.
 func (s *OpenAIGatewayService) beginOpenAIRequestProxy(ctx context.Context, c *gin.Context, account *Account) (context.Context, func(), error) {
 	noop := func() {}
+	// Every attempt replaces attribution, including a failed acquisition after
+	// another account was tried on this Gin request.
+	if c != nil {
+		c.Set(openAIRequestProxyOpsKey, (*openAIRequestProxyRoute)(nil))
+	}
 	if account == nil || !account.OpenAIRequestProxyEnabled() {
 		return ctx, noop, nil
 	}
 	if route, _ := ctx.Value(openAIRequestProxyContextKey{}).(*openAIRequestProxyRoute); route != nil {
 		if route.accountID == account.ID {
+			if c != nil {
+				c.Set(openAIRequestProxyOpsKey, route)
+			}
 			return ctx, noop, nil
 		}
 		return ctx, noop, writeOpenAIRequestProxyError(c, "openai_proxy_unavailable", "Selected proxy scope does not match the account")
@@ -118,6 +129,9 @@ func (s *OpenAIGatewayService) beginOpenAIRequestProxy(ctx context.Context, c *g
 		return ctx, noop, writeOpenAIRequestProxyError(c, "openai_proxy_unavailable", "No selected proxy is ready; direct fallback is disabled")
 	}
 	route := &openAIRequestProxyRoute{accountID: account.ID, proxy: lease.ProxyURL, lease: lease}
+	if c != nil {
+		c.Set(openAIRequestProxyOpsKey, route)
+	}
 	release := route.finish
 	stop := context.AfterFunc(ctx, release)
 	return context.WithValue(ctx, openAIRequestProxyContextKey{}, route), func() { stop(); release() }, nil

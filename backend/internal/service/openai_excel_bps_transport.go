@@ -73,7 +73,10 @@ func acquireExcelBPSProxy(ctx context.Context, scope string, excluded ...string)
 func (s *OpenAIGatewayService) excelBPSAcquireFor(account *Account) excelBPSAcquire {
 	if account.ExcelBPSRequestProxyEnabled() {
 		ids := account.ExcelBPSRequestProxyIDs()
-		return func(ctx context.Context, _ string, excluded ...string) (string, excelBPSLease, error) {
+		return func(ctx context.Context, scope string, excluded ...string) (string, excelBPSLease, error) {
+			if route, ok := openAIRequestProxyFromContext(ctx, account.ID); ok {
+				return pinnedExcelBPSAcquire(route.proxy, route.lease)(ctx, scope, excluded...)
+			}
 			lease, err := mihomo.AcquireBPSStaticRequestLease(ctx, account.ID, ids, excluded...)
 			if err != nil {
 				return "", nil, err
@@ -129,7 +132,7 @@ func (s *OpenAIGatewayService) refreshExcelBPSIPPool(ctx context.Context) {
 		if proxies[i].IsExpired(now) {
 			continue
 		}
-		records = append(records, mihomo.BPSStaticProxy{ID: proxies[i].ID, URL: proxies[i].URL(), ExpiresAt: proxies[i].ExpiresAt})
+		records = append(records, mihomo.BPSStaticProxy{ID: proxies[i].ID, Name: proxies[i].Name, URL: proxies[i].URL(), ExpiresAt: proxies[i].ExpiresAt})
 	}
 	mihomo.SetBPSStaticProxyRecords(records)
 }
