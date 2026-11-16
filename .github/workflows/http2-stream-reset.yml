@@ -403,7 +403,7 @@ jobs:
 
   user-surface:
     if: github.head_ref == 'fix/http2-stream-error-clarity' || github.ref_name == 'fix/http2-stream-error-clarity' || github.head_ref == 'fix/http2-reset-review-followup-20261114' || github.ref_name == 'fix/http2-reset-review-followup-20261114'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

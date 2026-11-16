@@ -57,7 +57,7 @@ jobs:
         working-directory: backend
         run: go test -tags=integration ./internal/repository -run '^TestChannelOperations' -count=1 -v
   frontend-workflow:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
