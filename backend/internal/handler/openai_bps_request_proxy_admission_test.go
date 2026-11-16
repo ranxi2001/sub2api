@@ -1,5 +1,7 @@
-//go:build unit
+//go:build unit && bps_request_integration
 
+// The integration tag keeps this new-API fixture out of historical unit RED
+// overlays; account-request-proxy.yml runs both admission backends explicitly.
 package handler
 
 import (
