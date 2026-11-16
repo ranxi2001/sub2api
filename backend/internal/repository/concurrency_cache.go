@@ -409,7 +409,7 @@ var (
 		redis.call('ZREMRANGEBYSCORE', key, '-inf', expireBefore)
 		redis.call('ZADD', key, now, requestID)
 		redis.call('EXPIRE', key, ttl)
-		return 1
+		return now
 	`)
 
 	// acquireOpenAIWSIngressLeaseScript atomically reaps crashed members and
@@ -927,7 +927,10 @@ func (c *concurrencyCache) GetAccountConcurrencyBatch(ctx context.Context, accou
 
 // TrackUserSlot reuses the regular user set and its existing stale-slot TTL.
 func (c *concurrencyCache) TrackUserSlot(ctx context.Context, userID int64, requestID string) error {
-	_, err := trackSlotScript.Run(ctx, c.rdb, []string{userSlotKey(userID)}, c.slotTTLSeconds, requestID).Result()
+	now, err := trackSlotScript.Run(ctx, c.rdb, []string{userSlotKey(userID)}, c.slotTTLSeconds, requestID).Int64()
+	if err == nil {
+		c.touchActiveIndexAt(ctx, userActiveIndexKey, userID, now+int64(c.slotTTLSeconds))
+	}
 	return err
 }
 

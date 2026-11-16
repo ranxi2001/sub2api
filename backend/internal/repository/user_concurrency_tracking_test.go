@@ -23,6 +23,7 @@ func TestUnlimitedUserConcurrencySharesExistingLimitCounters(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, first.Acquired)
 	require.True(t, second.Acquired)
+	require.NoError(t, client.ZScore(ctx, userActiveIndexKey, "42").Err())
 	loads, err := svc.GetUsersLoadBatch(ctx, []service.UserWithConcurrency{{ID: 42, MaxConcurrency: 0}})
 	require.NoError(t, err)
 	require.Equal(t, 2, loads[42].CurrentConcurrency)
