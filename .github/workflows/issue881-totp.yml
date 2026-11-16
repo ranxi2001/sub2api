@@ -1,0 +1,151 @@
+name: Issue881 TOTP persistence acceptance
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'tools/*totp*'
+      - 'tools/reauth-runtime/**'
+      - '.github/workflows/issue881-totp.yml'
+      - '.github/scripts/*issue881*'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  persistence:
+    if: github.head_ref == 'fix/issue881-totp-factor-binding' || github.ref_name == 'fix/issue881-totp-factor-binding'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: issue881
+        ports: ['15432:5432']
+        options: --health-cmd "pg_isready -U fixture" --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['16379:6379']
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/issue881?sslmode=disable
+      SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Freeze identity
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          mkdir -p evidence
+          git rev-parse HEAD HEAD^{tree} > evidence/head.txt
+      - name: Validate RED evidence gate
+        run: python3 -m unittest discover -s .github/scripts -p 'test_issue881_red_evidence.py' -v
+      - name: Real PG RED compatibility reproduction using existing Upsert SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Compatibility shim delegates to the real existing Upsert SQL; this is
+          # not a full historical-blob restoration. Restore candidate before GREEN.
+          source=backend/internal/repository/openai_totp_recovery.go
+          cp "$source" "$RUNNER_TEMP/recovery-green.go"
+          trap 'cp "$RUNNER_TEMP/recovery-green.go" "$source"' EXIT
+          python3 - <<'PY'
+          from pathlib import Path
+          Path('backend/internal/repository/openai_totp_recovery.go').write_text('''package repository
+          import ("context"; "github.com/Wei-Shaw/sub2api/internal/service")
+          func (r *openAIOAuthReauthRepository) InsertTOTPRecoveryConfig(ctx context.Context, c *service.OpenAIOAuthReauthStoredConfig) error {return r.UpsertConfig(ctx,c)}
+          ''')
+          PY
+          set +e
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestTOTPRecoveryInsertNeverOverwritesExistingOrConcurrentConfig$' -count=1 -v -timeout=10m) > evidence/red-recovery-pg.log 2>&1
+          result=$?
+          set -e
+          echo "$result" > evidence/red-recovery-pg.exit
+          cat evidence/red-recovery-pg.log
+          test "$result" -ne 0
+          if grep -Eqi -- 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|fatal error:|data race|race detected|(^|[^[:alnum:]_])timeout([^[:alnum:]_]|$)|timed out|deadline exceeded' evidence/red-recovery-pg.log; then exit 1; fi
+          python3 .github/scripts/issue881-red-evidence.py evidence/red-recovery-pg.log
+      - name: Real PG RED against pre-fix migration reload
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed 's/ADD COLUMN IF NOT EXISTS/ADD COLUMN/g' backend/migrations/382_openai_totp_binding.sql > "$RUNNER_TEMP/migration-red.sql"
+          set +e
+          (cd backend && ISSUE881_MIGRATION_TEST_FILE="$RUNNER_TEMP/migration-red.sql" go test -tags=integration ./internal/repository -run '^TestTOTPBindingMigrationCanReloadWithoutReplacingSnapshot$' -count=1 -v -timeout=10m) > evidence/red-migration-pg.log 2>&1
+          result=$?
+          set -e
+          echo "$result" > evidence/red-migration-pg.exit
+          cat evidence/red-migration-pg.log
+          test "$result" -ne 0
+          if grep -Eqi -- 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|fatal error:|data race|race detected|(^|[^[:alnum:]_])timeout([^[:alnum:]_]|$)|timed out|deadline exceeded' evidence/red-migration-pg.log; then exit 1; fi
+          grep -Eq -- '^--- FAIL: TestTOTPBindingMigrationCanReloadWithoutReplacingSnapshot \(' evidence/red-migration-pg.log
+          grep -F 'migration reload must be idempotent' evidence/red-migration-pg.log
+      - name: Actual handler and service GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          (cd backend && go test -tags=unit ./internal/handler/admin ./internal/service -run '^Test(TOTP|OpenAIOAuthReauth|OpenAISessionExport)' -count=1 -v -timeout=10m) 2>&1 | tee evidence/green-handler-service.log
+          if grep -Eqi -- 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|fatal error:|data race|race detected|(^|[^[:alnum:]_])timeout([^[:alnum:]_]|$)|timed out|deadline exceeded' evidence/green-handler-service.log; then exit 1; fi
+      - name: Real PG GREEN migration reload, binding, CAS, recovery conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -tags=integration ./internal/repository -run '^Test(TOTP|OAuth429)' -count=1 -v -timeout=10m) 2>&1 | tee evidence/green-persistence.log
+          if grep -Eqi -- 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|fatal error:|data race|race detected|(^|[^[:alnum:]_])timeout([^[:alnum:]_]|$)|timed out|deadline exceeded' evidence/green-persistence.log; then exit 1; fi
+      - name: Production Go build
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/sub2api-production" ./cmd/server) 2>&1 | tee evidence/production-build.log
+          sha256sum "$RUNNER_TEMP/sub2api-production" > evidence/production-build.sha256
+          git diff --exit-code
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue881-persistence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/
+
+  production-build:
+    if: github.head_ref == 'fix/issue881-totp-factor-binding' || github.ref_name == 'fix/issue881-totp-factor-binding'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Production frontend and embedded Linux binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head.txt
+          pnpm --dir frontend install --frozen-lockfile 2>&1 | tee evidence/dependencies.log
+          pnpm --dir frontend run build 2>&1 | tee evidence/frontend-build.log
+          (cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embed -trimpath -ldflags="-s -w -X main.Commit=${{ github.event.pull_request.head.sha || github.sha }}" -o "$RUNNER_TEMP/sub2api-production" ./cmd/server) 2>&1 | tee evidence/production-build.log
+          sha256sum "$RUNNER_TEMP/sub2api-production" > evidence/binary.sha256
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue881-production-build-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/

@@ -28,19 +28,19 @@ class RotationTests(unittest.TestCase):
         self.session = Mock()
         def request(method, path, payload):
             self.events.append('activate' if path.endswith('activate_enrollment') else 'enroll')
-            return {'success': True} if path.endswith('activate_enrollment') else {'secret': NEW, 'session_id': 'fake-session'}
+            return {'success': True} if path.endswith('activate_enrollment') else {'secret': NEW, 'session_id': 'fake-session', 'factor_id': 'F2'}
         self.session.request.side_effect = request
-        self.login = Mock(side_effect=[{'cookies': []}, None])
+        self.login = Mock(return_value={'web': {'mfaVerified': True, 'mfaFactorId': 'F2'}})
 
     def run_rotation(self):
         rotate(self.api, self.claim, session_factory=lambda *a: self.session, login=self.login, journal_factory=lambda: self.journal)
 
-    def test_activation_requires_both_durable_copies_and_both_verifications(self):
+    def test_activation_requires_durable_pair_and_bound_candidate_verification(self):
         self.run_rotation()
         self.assertLess(self.events.index('journal_candidate'), self.events.index('prepared'))
         self.assertLess(self.events.index('prepared'), self.events.index('activate'))
         self.api.totp_finish.assert_called_once_with(7, True)
-        self.assertEqual([call.args[2] for call in self.login.call_args_list], [NEW, OLD])
+        self.assertEqual([call.args[2] for call in self.login.call_args_list], [NEW])
 
     def test_local_write_failure_never_activates(self):
         self.journal.save.side_effect = [None, OSError('disk full')]
@@ -65,29 +65,65 @@ class RotationTests(unittest.TestCase):
         self.api.totp_finish.assert_called_once_with(7, False, 'activation_unconfirmed')
         self.login.assert_not_called()
 
-    def test_old_secret_still_works_never_reports_success(self):
-        self.login.side_effect = [{}, {}]
+    def test_two_valid_factors_accepts_addition_without_requiring_revocation(self):
+        self.login.side_effect = lambda _cfg, claim, secret: {'web': {'mfaVerified': True, 'mfaFactorId': 'F2' if secret == NEW else 'F1'}}
+        self.run_rotation()
+        self.api.totp_finish.assert_called_once_with(7, True)
+        self.assertEqual(self.login.call_count, 1)
+        self.assertEqual(self.journal.save.call_args.args[3], 'F2')
+        self.api.totp_phase.assert_any_call(7, 'bound', NEW, 'F2')
+
+    def test_candidate_rejected_remains_uncertain(self):
+        self.login.return_value = None
+        self.run_rotation()
+        self.api.totp_finish.assert_called_once_with(7, False, 'verification_failed')
+        self.assertEqual(self.login.call_count, 1)
+
+    def test_missing_factor_evidence_cannot_finish(self):
+        self.login.return_value = {'web': {'mfaVerified': True}}
+        self.run_rotation()
+        self.api.totp_finish.assert_called_once_with(7, False, 'factor_binding_unconfirmed')
+
+    def test_wrong_bound_factor_cannot_finish(self):
+        self.login.return_value = {'web': {'mfaVerified': True, 'mfaFactorId': 'F1'}}
+        self.run_rotation()
+        self.api.totp_finish.assert_called_once_with(7, False, 'factor_binding_unconfirmed')
+
+    def test_network_error_does_not_verify_candidate(self):
+        self.login.side_effect = RotationError('login_failed')
         self.run_rotation()
         self.api.totp_finish.assert_called_once_with(7, False, 'verification_failed')
 
-    def test_network_error_is_not_evidence_old_secret_was_rejected(self):
-        self.login.side_effect = [{}, RotationError('login_failed')]
-        self.run_rotation()
-        self.api.totp_finish.assert_called_once_with(7, False, 'verification_failed')
-
-    def test_recovery_only_verifies_saved_candidate(self):
-        self.claim.update(action='verify_new', candidate_secret=NEW)
+    def test_recovery_only_verifies_saved_candidate_with_its_factor(self):
+        self.claim.update(action='verify_new', candidate_secret=NEW, candidate_factor_id='F2')
         self.run_rotation()
         self.session.request.assert_not_called()
-        self.journal.save.assert_not_called()
-        self.api.totp_phase.assert_called_once_with(7, 'verify_recovery')
+        self.assertEqual(self.login.call_args.args[1]['totp_factor_id'], 'F2')
         self.api.totp_finish.assert_called_once_with(7, True)
 
-    def test_old_recovery_requires_new_secret_rejection(self):
-        self.claim.update(action='verify_old', candidate_secret=NEW)
+    def test_old_recovery_does_not_require_candidate_rejection(self):
+        self.claim.update(action='verify_old', candidate_secret=NEW, totp_factor_id='F1')
+        self.login.return_value = {'web': {'mfaVerified': True, 'mfaFactorId': 'F1'}}
         self.run_rotation()
-        self.assertEqual([call.args[2] for call in self.login.call_args_list], [OLD, NEW])
+        self.assertEqual([call.args[2] for call in self.login.call_args_list], [OLD])
+        self.api.totp_phase.assert_any_call(7, 'bound', OLD, 'F1')
         self.api.totp_finish.assert_called_once_with(7, True)
+
+    def test_enrollment_session_id_is_not_guessed_to_be_factor_id(self):
+        self.session.request.side_effect = [{'secret': NEW, 'session_id': 'not-a-factor'}, {'success': True}]
+        self.run_rotation()
+        self.assertEqual(self.login.call_args.args[1].get('totp_factor_id', ''), '')
+        self.api.totp_phase.assert_any_call(7, 'prepared', NEW, '', 'not-a-factor')
+        self.api.totp_phase.assert_any_call(7, 'bound', NEW, 'F2')
+
+    def test_bound_write_failure_preserves_encrypted_recovery_and_never_reenrolls(self):
+        def phase(task, stage, *args):
+            if stage == 'bound': raise TimeoutError('lost bound ack')
+        self.api.totp_phase.side_effect = phase
+        self.run_rotation()
+        self.api.totp_finish.assert_called_once_with(7, False, 'verification_failed')
+        self.assertEqual(self.session.request.call_count, 2)
+        self.assertEqual(self.journal.save.call_args.args[3], 'F2')
 
     def test_missing_journal_prevents_all_upstream_calls(self):
         rotate(self.api, self.claim, session_factory=self.session,

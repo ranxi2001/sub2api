@@ -23,6 +23,11 @@ type OpenAITOTPRotation struct {
 	HasCandidate        bool      `json:"has_candidate"`
 	WorkerID            string    `json:"-"`
 	CandidateCiphertext string    `json:"-"`
+	PreviousCiphertext  string    `json:"-"`
+	PasswordCiphertext  string    `json:"-"`
+	LoginEmail          string    `json:"-"`
+	BindingVerified     bool      `json:"-"`
+	Outcome             string    `json:"outcome,omitempty"`
 	ConfigUpdatedAt     time.Time `json:"-"`
 }
 
@@ -55,6 +60,9 @@ func safeRotation(r *OpenAITOTPRotation) *OpenAITOTPRotation {
 	}
 	copy := *r
 	copy.HasCandidate = copy.CandidateCiphertext != ""
+	if copy.State == "succeeded" && copy.BindingVerified {
+		copy.Outcome = "selected_factor_verified_no_revocation"
+	}
 	return &copy
 }
 func normalizeRotationSecret(raw string) (string, error) {
@@ -133,6 +141,13 @@ func (s *OpenAIOAuthReauthService) createTOTPRotation(ctx context.Context, id in
 	if err != nil {
 		return nil, err
 	}
+	binding, err := s.decryptTOTP(cfg.TOTPSecretCiphertext)
+	if err != nil {
+		return nil, err
+	}
+	if binding.RecoveryTaskID != 0 {
+		return nil, infraerrors.Conflict("TOTP_RECOVERY_UNRESOLVED", "Imported recovery credentials allow login only; resolve the original factor set before enrolling again")
+	}
 	// Re-read the account instead of trusting the gateway's scheduling snapshot.
 	if automatic && (!openAITOTPRotateOn429Enabled(account) || !account.IsActive()) {
 		return nil, nil
@@ -168,15 +183,18 @@ func (s *OpenAIOAuthReauthService) createTOTPRotation(ctx context.Context, id in
 }
 
 type OpenAITOTPRotationClaim struct {
-	Operation  string `json:"operation"`
-	TaskID     int64  `json:"task_id"`
-	AccountID  int64  `json:"account_id"`
-	Action     string `json:"action"`
-	LoginEmail string `json:"login_email"`
-	Password   string `json:"password"`
-	TOTPSecret string `json:"totp_secret"`
-	Candidate  string `json:"candidate_secret,omitempty"`
-	ProxyURL   string `json:"proxy_url,omitempty"`
+	Operation                    string `json:"operation"`
+	TaskID                       int64  `json:"task_id"`
+	AccountID                    int64  `json:"account_id"`
+	Action                       string `json:"action"`
+	LoginEmail                   string `json:"login_email"`
+	Password                     string `json:"password"`
+	TOTPSecret                   string `json:"totp_secret"`
+	TOTPFactorID                 string `json:"totp_factor_id,omitempty"`
+	CandidateFactorID            string `json:"candidate_factor_id,omitempty"`
+	CandidateEnrollmentSessionID string `json:"candidate_enrollment_session_id,omitempty"`
+	Candidate                    string `json:"candidate_secret,omitempty"`
+	ProxyURL                     string `json:"proxy_url,omitempty"`
 }
 
 func (s *OpenAIOAuthReauthService) ClaimTOTPRotation(ctx context.Context, worker string) (*OpenAITOTPRotationClaim, error) {
@@ -207,10 +225,14 @@ func (s *OpenAIOAuthReauthService) ClaimTOTPRotation(ctx context.Context, worker
 		claim.Password, err = s.decryptReauthSecret(cfg.PasswordCiphertext, "Password cannot be decrypted")
 	}
 	if err == nil {
-		claim.TOTPSecret, err = s.decryptReauthSecret(cfg.TOTPSecretCiphertext, "TOTP cannot be decrypted")
+		var b openAITOTPBinding
+		b, err = s.decryptTOTP(record.PreviousCiphertext)
+		claim.TOTPSecret, claim.TOTPFactorID = b.Secret, b.FactorID
 	}
 	if err == nil && record.CandidateCiphertext != "" {
-		claim.Candidate, err = s.decryptReauthSecret(record.CandidateCiphertext, "Candidate TOTP cannot be decrypted")
+		var b openAITOTPBinding
+		b, err = s.decryptTOTP(record.CandidateCiphertext)
+		claim.Candidate, claim.CandidateFactorID, claim.CandidateEnrollmentSessionID = b.Secret, b.FactorID, b.EnrollmentSessionID
 	}
 	if err == nil {
 		source, sourceErr := normalizeReauthProxySource(cfg.ProxySource, cfg.ProxyID)
@@ -247,13 +269,23 @@ func (s *OpenAIOAuthReauthService) ClaimTOTPRotation(ctx context.Context, worker
 }
 
 // Phase is an acknowledged write barrier. Enrollment/activation must not run until it succeeds.
-func (s *OpenAIOAuthReauthService) TOTPRotationPhase(ctx context.Context, task int64, worker, phase, secret string) error {
+func (s *OpenAIOAuthReauthService) TOTPRotationPhase(ctx context.Context, task int64, worker, phase, secret string, provenance ...string) error {
 	repo, err := s.rotationRepo()
 	if err != nil {
 		return err
 	}
 	from := ""
 	candidate := ""
+	factor, session := "", ""
+	if len(provenance) > 0 {
+		factor = provenance[0]
+	}
+	if len(provenance) > 1 {
+		session = provenance[1]
+	}
+	if phase == "bound" {
+		return s.bindTOTPRotation(ctx, task, worker, secret, factor)
+	}
 	switch phase {
 	case "enrolling":
 		from = "running"
@@ -266,7 +298,7 @@ func (s *OpenAIOAuthReauthService) TOTPRotationPhase(ctx context.Context, task i
 		if err != nil {
 			return err
 		}
-		candidate, err = s.encryptor.Encrypt(secret)
+		candidate, err = s.encryptTOTP(openAITOTPBinding{Secret: secret, FactorID: factor, EnrollmentSessionID: session})
 		if err != nil {
 			return infraerrors.InternalServer("TOTP_ENCRYPT_FAILED", "Could not preserve candidate TOTP")
 		}
@@ -294,7 +326,8 @@ func (s *OpenAIOAuthReauthService) FinishTOTPRotation(ctx context.Context, task 
 		code = ""
 	} else {
 		switch code {
-		case "login_failed", "identity_mismatch", "enrollment_failed", "activation_unconfirmed", "verification_failed", "worker_failed":
+		case "login_failed", "identity_mismatch", "enrollment_failed", "activation_unconfirmed", "verification_failed", "worker_failed",
+			"new_accepted_old_valid", "old_accepted_new_valid", "factor_binding_unconfirmed":
 		default:
 			code = "worker_failed"
 		}
@@ -329,6 +362,7 @@ type OpenAITOTPExport struct {
 	OTPAuthURI string `json:"otpauth_uri"`
 	State      string `json:"state"`
 	Source     string `json:"source"`
+	FactorID   string `json:"factor_id,omitempty"`
 }
 
 func (s *OpenAIOAuthReauthService) ExportTOTP(ctx context.Context, id int64, source string, includePassword bool) (*OpenAITOTPExport, error) {
@@ -363,20 +397,18 @@ func (s *OpenAIOAuthReauthService) ExportTOTP(ctx context.Context, id int64, sou
 		if rotation == nil || rotation.State != "uncertain" {
 			return nil, rotationError()
 		}
+		ciphertext = rotation.PreviousCiphertext
 	default:
 		return nil, infraerrors.BadRequest("TOTP_EXPORT_INVALID", "Invalid export source")
 	}
-	secret, err := s.decryptReauthSecret(ciphertext, "TOTP cannot be decrypted")
+	binding, err := s.decryptTOTP(ciphertext)
 	if err != nil {
 		return nil, err
 	}
-	secret, err = normalizeRotationSecret(secret)
+	result, err := totpExport(cfg.LoginEmail, binding, state, source)
 	if err != nil {
 		return nil, err
 	}
-	result := &OpenAITOTPExport{Email: cfg.LoginEmail, Secret: secret, State: state, Source: source}
-	q := url.Values{"secret": {secret}, "issuer": {"OpenAI"}, "algorithm": {"SHA1"}, "digits": {"6"}, "period": {"30"}}
-	result.OTPAuthURI = "otpauth://totp/" + url.PathEscape("OpenAI:"+cfg.LoginEmail) + "?" + q.Encode()
 	if includePassword {
 		result.Password, err = s.decryptReauthSecret(cfg.PasswordCiphertext, "Password cannot be decrypted")
 		if err != nil {
@@ -386,23 +418,55 @@ func (s *OpenAIOAuthReauthService) ExportTOTP(ctx context.Context, id int64, sou
 	return result, nil
 }
 
-func (s *OpenAIOAuthReauthService) RecoverTOTPCandidate(ctx context.Context, task int64, secret string) error {
-	repo, err := s.rotationRepo()
+func totpExport(email string, binding openAITOTPBinding, state, source string) (*OpenAITOTPExport, error) {
+	secret, err := normalizeRotationSecret(binding.Secret)
+	if err != nil {
+		return nil, err
+	}
+	result := &OpenAITOTPExport{Email: email, Secret: secret, FactorID: binding.FactorID, State: state, Source: source}
+	q := url.Values{"secret": {secret}, "issuer": {"OpenAI"}, "algorithm": {"SHA1"}, "digits": {"6"}, "period": {"30"}}
+	result.OTPAuthURI = "otpauth://totp/" + url.PathEscape("OpenAI:"+email) + "?" + q.Encode()
+	return result, nil
+}
+
+func (s *OpenAIOAuthReauthService) RecoverTOTPCandidate(ctx context.Context, task int64, secret string, provenance ...string) error {
+	repo, err := s.bindingRepo()
 	if err != nil {
 		return err
 	}
-	if err = s.ensureDurableEncryption(); err != nil {
-		return err
+	r, err := repo.GetTOTPRotationByTask(ctx, task)
+	if err != nil || r == nil || r.State != "uncertain" {
+		return rotationError()
+	}
+	factor, session := "", ""
+	if len(provenance) > 0 {
+		factor = provenance[0]
+	}
+	if len(provenance) > 1 {
+		session = provenance[1]
 	}
 	secret, err = normalizeRotationSecret(secret)
 	if err != nil {
 		return err
 	}
-	candidate, err := s.encryptor.Encrypt(secret)
-	if err != nil {
-		return infraerrors.InternalServer("TOTP_ENCRYPT_FAILED", "Could not preserve candidate TOTP")
+	if r.CandidateCiphertext != "" {
+		old, e := s.decryptTOTP(r.CandidateCiphertext)
+		if e != nil {
+			return e
+		}
+		normalized, e := normalizeRotationSecret(old.Secret)
+		if e != nil || normalized != secret || old.FactorID != "" && old.FactorID != factor || old.EnrollmentSessionID != "" && old.EnrollmentSessionID != session {
+			return rotationError()
+		}
+		if old.FactorID == factor && old.EnrollmentSessionID == session {
+			return nil
+		}
 	}
-	if err = repo.RecoverTOTPCandidate(ctx, task, candidate); err != nil {
+	candidate, err := s.encryptTOTP(openAITOTPBinding{Secret: secret, FactorID: factor, EnrollmentSessionID: session})
+	if err != nil {
+		return err
+	}
+	if err = repo.RestoreTOTPProvenance(ctx, task, r.CandidateCiphertext, candidate); err != nil {
 		return rotationError()
 	}
 	return nil

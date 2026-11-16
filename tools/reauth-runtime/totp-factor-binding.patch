@@ -1,0 +1,115 @@
+--- a/src/protocol-login.mjs
++++ b/src/protocol-login.mjs
+@@ -269,0 +270,3 @@
++    if (method === "POST" && new URL(url).pathname === "/api/accounts/mfa/verify" && isExplicitTotpRejection(result)) {
++      throw new TotpRejectionError("TOTP_CHALLENGE_REJECTED");
++    }
+@@ -1092,0 +1096 @@
++    mfaFactorId: client.totpFactorId || null,
+@@ -1134,0 +1139,29 @@
++class TotpRejectionError extends Error {}
++
++function isExplicitTotpRejection(result) {
++  if (![400, 401].includes(result?.res?.status)) return false;
++  const raw = result?.text;
++  if (typeof raw !== "string" || Buffer.byteLength(raw) > 32768) return false;
++  try {
++    const payload = JSON.parse(raw);
++    // Duplicate keys make even a known code ambiguous. Reject before using it.
++    const tokens = raw.match(/"(?:[^"\\]|\\.)*"|[{}[\]:,]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/g) || [];
++    const stack = [];
++    for (let i = 0; i < tokens.length; i++) {
++      const token = tokens[i];
++      if (token === "{") stack.push(new Set());
++      else if (token === "[") stack.push(null);
++      else if (token === "}" || token === "]") stack.pop();
++      else if (token.startsWith('"') && tokens[i + 1] === ":") {
++        const keys = stack.at(-1), key = JSON.parse(token);
++        if (!keys || keys.has(key)) return false;
++        keys.add(key);
++      }
++      if (stack.length > 32) return false;
++    }
++    const error = payload?.error;
++    const code = typeof error === "string" ? error : error?.code;
++    return ["invalid_otp", "incorrect_otp", "wrong_otp", "invalid_totp", "incorrect_totp", "wrong_totp", "invalid_code", "incorrect_code", "wrong_code"].includes(code);
++  } catch { return false; }
++}
++
+@@ -1135,0 +1169 @@
++  delete client.totpFactorId;
+@@ -1137,3 +1171,6 @@
+-  const factor = pickTotpFactor(payload);
+-  if (!factor?.id) throw new Error("2FA is required, but the response does not contain a TOTP factor ID");
+-
++  const session = payload?.["oai-client-auth-session"] || {};
++  const factors = [...new Map([
++    ...(Array.isArray(session.mfa_challenge_factors) ? session.mfa_challenge_factors : []),
++    ...(Array.isArray(session.mfa_factors) ? session.mfa_factors : []),
++  ].filter(f => f?.factor_type === "totp" && typeof f.id === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(f.id))
++    .map(f => [f.id, f])).values()];
+@@ -1141,17 +1178,13 @@
+-  await authJsonStep(client, authBase, "POST", "/api/accounts/mfa/issue_challenge", {
+-    type: "totp",
+-    id: factor.id,
+-    force_fresh_challenge: false,
+-  }, { referer });
+-
+-  let code;
+-  let generatedFromSecret = false;
+-  if (totpSecret) {
+-    code = generateTotp(totpSecret);
+-    generatedFromSecret = true;
+-    console.log("[mfa] Generated a 6-digit code from the configured 2FA key.");
+-  } else {
+-    code = await askTotpOtp(rl);
+-  }
+-  const challengeUrl = getContinueUrl(payload) || `${authBase}/mfa-challenge/${factor.id}`;
+-  for (;;) {
++  const bound = process.env.CHATGPT_TOTP_FACTOR_ID || "";
++  const selected = bound ? factors.filter(f => f.id === bound) : factors;
++  if (!selected.length) throw new Error("TOTP_FACTOR_NOT_FOUND");
++  // A code cannot identify its factor without a challenge. Bound the legacy
++  // discovery budget before sending anything, and never retry uncertain I/O.
++  if (!bound && selected.length > 2) throw new Error("TOTP_FACTOR_BINDING_REQUIRED");
++  if (!totpSecret) throw new Error("TOTP_SECRET_REQUIRED");
++  for (const factor of selected) {
++    await authJsonStep(client, authBase, "POST", "/api/accounts/mfa/issue_challenge", {
++      type: "totp", id: factor.id, force_fresh_challenge: false,
++    }, { referer });
++    const code = generateTotp(totpSecret);
++    const sentinelHeaders = await createSentinelHeaders(client, {authBase, deviceId, flow: "password_verify"});
+@@ -1159,5 +1191,0 @@
+-      const sentinelHeaders = await createSentinelHeaders(client, {
+-        authBase,
+-        deviceId,
+-        flow: "password_verify",
+-      });
+@@ -1165,4 +1193,6 @@
+-        type: "totp",
+-        id: factor.id,
+-        code,
+-      }, { referer: challengeUrl, headers: sentinelHeaders });
++        type: "totp", id: factor.id, code,
++      }, { referer: `${authBase}/mfa-challenge/${encodeURIComponent(factor.id)}`, headers: sentinelHeaders });
++      if (data?.error || isMfaChallengePayload(data) || !getContinueUrl(data)) {
++        throw new Error("TOTP_VERIFICATION_UNCONFIRMED");
++      }
++      client.totpFactorId = factor.id;
+@@ -1172,10 +1202,6 @@
+-      if (!isRejectedTotpError(error)) throw error;
+-      console.log(
+-        generatedFromSecret
+-          ? "[warn] The code generated from the configured 2FA key was rejected; enter a current code manually."
+-          : "[warn] The 2FA code was rejected; enter a new code.",
+-      );
+-      generatedFromSecret = false;
+-      code = await askTotpOtp(rl);
+-    }
+-  }
++      // Only the raw HTTP boundary can establish an explicit OTP rejection.
++      // Never infer it from exception prose or a provider's descriptive message.
++      if (!(error instanceof TotpRejectionError)) throw error;
++    }
++  }
++  throw new Error("TOTP_REJECTED: The code generated from the configured 2FA key was rejected");

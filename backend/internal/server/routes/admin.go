@@ -490,6 +490,8 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 			accounts.POST("/:id/totp-rotation", h.Admin.OpenAIOAuthReauth.RotateTOTP)
 			accounts.POST("/:id/totp-rotation/verify", h.Admin.OpenAIOAuthReauth.RetryTOTP)
 			accounts.POST("/:id/totp-export", h.Admin.OpenAIOAuthReauth.ExportTOTP)
+			accounts.POST("/totp-recovery-export", h.Admin.OpenAIOAuthReauth.ExportTOTPRecovery)
+			accounts.POST("/:id/totp-recovery-import", h.Admin.OpenAIOAuthReauth.ImportTOTPRecovery)
 			accounts.PUT("/:id/openai-reauth/email", h.Admin.OpenAIOAuthReauth.SaveConfig)
 			accounts.POST("/:id/openai-reauth", h.Admin.OpenAIOAuthReauth.CreateTask)
 		}

@@ -504,6 +504,16 @@ func (s *OpenAIOAuthReauthService) SaveCredentialConfig(ctx context.Context, acc
 			}
 		}
 	}
+	if existing != nil && !strings.EqualFold(existing.LoginEmail, email) && stored.TOTPSecretCiphertext != "" {
+		binding, err := s.decryptTOTP(stored.TOTPSecretCiphertext)
+		if err != nil {
+			return nil, err
+		}
+		stored.TOTPSecretCiphertext, err = s.encryptor.Encrypt(binding.Secret)
+		if err != nil {
+			return nil, infraerrors.InternalServer("TOTP_ENCRYPT_FAILED", "Could not preserve TOTP secret")
+		}
+	}
 	if err := s.repo.UpsertConfig(ctx, stored); err != nil {
 		if infraerrors.Code(err) == 409 {
 			return nil, err
@@ -548,11 +558,11 @@ func (s *OpenAIOAuthReauthService) configView(ctx context.Context, stored *OpenA
 		}
 		view.PasswordConfigured = password != ""
 		if stored.TOTPSecretCiphertext != "" {
-			totp, decryptErr := s.decryptReauthSecret(stored.TOTPSecretCiphertext, "saved TOTP secret cannot be decrypted")
+			totp, decryptErr := s.decryptTOTP(stored.TOTPSecretCiphertext)
 			if decryptErr != nil {
 				return nil, decryptErr
 			}
-			view.TOTPConfigured = totp != ""
+			view.TOTPConfigured = totp.Secret != ""
 		}
 		view.Configured = view.PasswordConfigured
 	default:
@@ -700,6 +710,7 @@ type OpenAIOAuthReauthClaim struct {
 	ReloginHeaders    map[string]string `json:"relogin_headers,omitempty"`
 	Password          string            `json:"password,omitempty"`
 	TOTPSecret        string            `json:"totp_secret,omitempty"`
+	TOTPFactorID      string            `json:"totp_factor_id,omitempty"`
 	OTPURL            string            `json:"otp_url,omitempty"`
 	AuthURL           string            `json:"auth_url,omitempty"`
 	ProxyURL          string            `json:"proxy_url,omitempty"`
@@ -890,7 +901,9 @@ func (s *OpenAIOAuthReauthService) ClaimTaskWithEngines(ctx context.Context, wor
 			return nil, nil
 		}
 		if stored.TOTPSecretCiphertext != "" {
-			claim.TOTPSecret, err = s.decryptReauthSecret(stored.TOTPSecretCiphertext, "TOTP secret cannot be decrypted")
+			var binding openAITOTPBinding
+			binding, err = s.decryptTOTP(stored.TOTPSecretCiphertext)
+			claim.TOTPSecret, claim.TOTPFactorID = binding.Secret, binding.FactorID
 			if err != nil {
 				_ = s.repo.MarkFailed(ctx, record.ID, workerID, "TOTP secret cannot be decrypted")
 				return nil, nil
@@ -1311,7 +1324,7 @@ func sanitizeReauthError(raw string) string {
 		return code
 	}
 	switch msg {
-	case "password/TOTP protocol failed (exit 1)", "proxy_unavailable", "password_rejected", "totp_rejected", "upstream_rejected", "worker_timeout":
+	case "password/TOTP protocol failed (exit 1)", "proxy_unavailable", "password_rejected", "totp_rejected", "upstream_rejected", "worker_timeout", "factor_binding_runtime_required":
 		return msg
 	}
 	return "re-login failed; provider details omitted"

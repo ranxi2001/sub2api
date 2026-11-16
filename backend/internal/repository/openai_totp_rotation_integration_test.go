@@ -138,6 +138,8 @@ func TestTOTPRotationAtomicActivationAndExclusion(t *testing.T) {
 	unchanged, err := repo.GetConfig(ctx, cfg.AccountID)
 	require.NoError(t, err)
 	require.Equal(t, "enc:old", unchanged.TOTPSecretCiphertext)
+	require.Error(t, repo.FinishTOTPRotation(ctx, r.TaskID, "worker", true, ""), "unbound verification must not promote a candidate")
+	require.NoError(t, repo.BindTOTPRotation(ctx, r.TaskID, "worker", "enc:new", "enc:new"))
 	// Force the effective-config write to fail after the rotation state UPDATE.
 	_, err = integrationDB.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE openai_oauth_reauth_configs ADD CONSTRAINT totp_test_write_failure CHECK(account_id <> %d OR totp_secret_ciphertext <> 'enc:new') NOT VALID`, cfg.AccountID))
 	require.NoError(t, err)
@@ -194,6 +196,7 @@ func TestTOTPRotationExpirationPreservesCandidateAndFencesWorker(t *testing.T) {
 	require.Equal(t, "verify_new", next.Action)
 	require.Error(t, repo.TransitionTOTPRotation(ctx, r.TaskID, "new", "running", "enrolling", ""))
 	require.NoError(t, repo.TransitionTOTPRotation(ctx, r.TaskID, "new", "running", "verifying", ""))
+	require.NoError(t, repo.BindTOTPRotation(ctx, r.TaskID, "new", "enc:new", "enc:new"))
 	require.NoError(t, repo.FinishTOTPRotation(ctx, r.TaskID, "new", true, ""))
 }
 
@@ -210,6 +213,7 @@ func TestTOTPRotationLocalJournalRecoveryAndOriginalVerification(t *testing.T) {
 	_, err = repo.ClaimTOTPRotation(ctx, "recovery")
 	require.NoError(t, err)
 	require.NoError(t, repo.TransitionTOTPRotation(ctx, r.TaskID, "recovery", "running", "verifying", ""))
+	require.NoError(t, repo.BindTOTPRotation(ctx, r.TaskID, "recovery", "enc:old", "enc:old"))
 	require.NoError(t, repo.FinishTOTPRotation(ctx, r.TaskID, "recovery", true, ""))
 	current, err := repo.GetConfig(ctx, cfg.AccountID)
 	require.NoError(t, err)
@@ -240,4 +244,29 @@ func TestTOTPRotationConcurrentCreationHasSingleWinner(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, successes)
+}
+
+func TestTOTPBindingCASAndSoftDeletedRecoverySnapshot(t *testing.T) {
+	ctx, repo, cfg := totpRotationFixture(t)
+	r, err := repo.CreateTOTPRotation(ctx, cfg.AccountID, "snapshot", cfg.UpdatedAt)
+	require.NoError(t, err)
+	_, err = repo.ClaimTOTPRotation(ctx, "owner")
+	require.NoError(t, err)
+	for _, step := range [][3]string{{"running", "enrolling", ""}, {"enrolling", "prepared", "enc:paired"}, {"prepared", "activating", ""}, {"activating", "verifying", ""}} {
+		require.NoError(t, repo.TransitionTOTPRotation(ctx, r.TaskID, "owner", step[0], step[1], step[2]))
+	}
+	require.Error(t, repo.BindTOTPRotation(ctx, r.TaskID, "other", "enc:paired", "enc:bound"))
+	require.Error(t, repo.BindTOTPRotation(ctx, r.TaskID, "owner", "enc:stale", "enc:bound"))
+	require.NoError(t, repo.BindTOTPRotation(ctx, r.TaskID, "owner", "enc:paired", "enc:bound"))
+	require.NoError(t, repo.FinishTOTPRotation(ctx, r.TaskID, "owner", false, "verification_failed"))
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET deleted_at=NOW() WHERE id=$1`, cfg.AccountID)
+	require.NoError(t, err)
+	saved, err := repo.GetTOTPRotationByTask(ctx, r.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, "owner@example.test", saved.LoginEmail)
+	require.Equal(t, "enc:bound", saved.CandidateCiphertext)
+	require.Equal(t, "enc:password", saved.PasswordCiphertext)
+	require.Equal(t, "uncertain", saved.State)
+	require.NoError(t, repo.RestoreTOTPProvenance(ctx, r.TaskID, "enc:bound", "enc:recovered"))
+	require.Error(t, repo.RestoreTOTPProvenance(ctx, r.TaskID, "enc:bound", "enc:stale"))
 }

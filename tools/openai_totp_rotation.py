@@ -61,10 +61,11 @@ class Journal:
             raise RotationError('journal_unavailable')
         return json.loads(child.stdout)
 
-    def save(self, claim, candidate='', session_id=''):
+    def save(self, claim, candidate='', session_id='', factor_id=''):
         self.call({'action': 'write', 'record': {'task_id': claim['task_id'], 'account_id': claim['account_id'],
                    'email': claim['login_email'], 'password': claim['password'], 'previous': claim['totp_secret'],
-                   'candidate': candidate, 'session_id': session_id}})
+                   'candidate': candidate, 'session_id': session_id, 'factor_id': factor_id,
+                   'previous_factor_id': claim.get('totp_factor_id', '')}})
 
     def acknowledge(self, task_id):
         self.call({'action': 'acknowledge', 'task_id': task_id})
@@ -74,7 +75,7 @@ class Journal:
             if record.get('candidate') and not record.get('database_acknowledged'):
                 # The API accepts this only for an uncertain task with no different candidate.
                 try:
-                    api.totp_recover(record['task_id'], record['candidate'])
+                    api.totp_recover(record['task_id'], record['candidate'], record.get('factor_id', ''), record.get('session_id', ''))
                     self.acknowledge(record['task_id'])
                 except Exception:
                     pass  # Keep the encrypted journal for a later reconciliation.
@@ -91,7 +92,8 @@ def login_web(config, claim, secret):
             'PATH', 'LANG', 'SYSTEMROOT', 'TEMP', 'TMP', 'PYTHONHOME', 'LD_LIBRARY_PATH',
             'SSL_CERT_FILE', 'CURL_CA_BUNDLE', 'TOSUB2_PYTHON', 'NODE_EXECUTABLE')}
         child_env.update(CHATGPT_LOGIN_PASSWORD=claim['password'], CHATGPT_TOTP_SECRET=secret,
-                         CHATGPT_PROXY_MAX_ATTEMPTS='1', CHATGPT_PROXY_URL=claim.get('proxy_url', ''))
+                         CHATGPT_PROXY_MAX_ATTEMPTS='1', CHATGPT_PROXY_URL=claim.get('proxy_url', ''),
+                         CHATGPT_TOTP_FACTOR_ID=claim.get('totp_factor_id', ''))
         command = [os.getenv('NODE_EXECUTABLE', 'node'), str(root / 'src/protocol-login.mjs'),
                    '--email', claim['login_email'], '--web-only', '--output-mode', 'session', '--out', str(session_file)]
         try:
@@ -103,6 +105,8 @@ def login_web(config, claim, secret):
         output = result.stdout + '\n' + result.stderr
         if 'The code generated from the configured 2FA key was rejected' in output:
             return None
+        if 'TOTP_FACTOR_' in output:
+            raise RotationError('factor_binding_unconfirmed')
         if 'Password was rejected' in output:
             raise RotationError('password_rejected')
         if result.returncode or not session_file.exists():
@@ -110,8 +114,11 @@ def login_web(config, claim, secret):
                 raise RotationError('proxy_unavailable')
             raise RotationError('login_failed')
         data = json.loads(session_file.read_text())
-        if data.get('web', {}).get('mfaVerified') is not True:
+        web = data.get('web', {})
+        if web.get('mfaVerified') is not True:
             raise RotationError('verification_failed')
+        if not valid_factor_id(web.get('mfaFactorId')) or (claim.get('totp_factor_id') and web['mfaFactorId'] != claim['totp_factor_id']):
+            raise RotationError('factor_binding_unconfirmed')
         return data
 
 
@@ -163,20 +170,33 @@ class WebSession:
 
 
 def verify_pair(config, claim, candidate, action, login):
-    accepted, rejected = (claim['totp_secret'], candidate) if action == 'verify_old' else (candidate, claim['totp_secret'])
-    if not accepted or login(config, claim, accepted) is None:
+    """Verify the selected credential; adding a factor does not revoke another."""
+    old = action == 'verify_old'
+    secret = claim['totp_secret'] if old else candidate
+    factor = claim.get('totp_factor_id' if old else 'candidate_factor_id', '')
+    if not secret:
         raise RotationError('verification_failed')
-    # A fresh time window avoids mistaking replay rejection of the initial OTP for revocation.
-    if rejected:
-        time.sleep(31 - time.time() % 30)
-    if rejected and login(config, claim, rejected) is not None:
+    data = login(config, {**claim, 'totp_factor_id': factor}, secret)
+    if data is None:
         raise RotationError('verification_failed')
+    web = data.get('web', {})
+    verified = web.get('mfaFactorId')
+    if web.get('mfaVerified') is not True or not valid_factor_id(verified) or (factor and verified != factor):
+        raise RotationError('factor_binding_unconfirmed')
+    return secret, verified
+
+
+def valid_factor_id(value):
+    import re
+    return isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,256}', value) is not None
 
 
 def rotate(api, claim, *, session_factory=WebSession, login=login_web, journal_factory=Journal):
     task = claim['task_id']
     action = claim.get('action', 'rotate')
+    claim = dict(claim)
     candidate = claim.get('candidate_secret', '')
+    session_id = claim.get('candidate_enrollment_session_id', '')
     session = None
     stage = 'login_failed'
     try:
@@ -190,14 +210,18 @@ def rotate(api, claim, *, session_factory=WebSession, login=login_web, journal_f
             candidate = data.get('secret', '')
             session_id = data.get('session_id', '')
             # Preserve the raw returned candidate before further validation or activation.
-            journal.save(claim, candidate, session_id)
+            factor_id = data.get('factor_id', '')
+            journal.save(claim, candidate, session_id, factor_id)
+            if factor_id and not valid_factor_id(factor_id):
+                raise RotationError('enrollment_failed')
+            claim['candidate_factor_id'] = factor_id
             if not isinstance(candidate, str) or not isinstance(session_id, str) or not candidate or not session_id:
                 raise RotationError('enrollment_failed')
             normalized = lambda value: ''.join(value.upper().split()).rstrip('=')
             if normalized(candidate) == normalized(claim['totp_secret']):
                 raise RotationError('enrollment_failed')
             code = totp(candidate)
-            api.totp_phase(task, 'prepared', candidate)  # Database commit ACK is required.
+            api.totp_phase(task, 'prepared', candidate, factor_id, session_id)  # Database commit ACK is required.
             journal.acknowledge(task)
             api.totp_phase(task, 'activating')
             stage = 'activation_unconfirmed'
@@ -206,14 +230,25 @@ def rotate(api, claim, *, session_factory=WebSession, login=login_web, journal_f
             if activation.get('success') is not True:
                 raise RotationError('activation_unconfirmed')
             api.totp_phase(task, 'verifying')
+            # Activation may consume this time window's OTP. Verify once in a
+            # fresh window instead of treating replay rejection as a bad binding.
+            time.sleep(31 - time.time() % 30)
         elif action in ('verify_new', 'verify_old'):
             api.totp_phase(task, 'verify_recovery')
         else:
             raise RotationError('worker_failed')
         stage = 'verification_failed'
-        verify_pair(api.config, claim, candidate, action, login)
+        secret, verified_factor = verify_pair(api.config, claim, candidate, action, login)
+        if action != 'verify_old':
+            journal.save(claim, candidate, session_id, verified_factor)
+        api.totp_phase(task, 'bound', secret, verified_factor)
+        if action != 'verify_old':
+            journal.acknowledge(task)
         api.totp_finish(task, True)
-    except Exception:
+    except Exception as exc:
+        if stage == 'verification_failed' and isinstance(exc, RotationError) and exc.code in (
+                'factor_binding_unconfirmed', 'new_accepted_old_valid', 'old_accepted_new_valid'):
+            stage = exc.code
         # Never expose network bodies, login traces, candidates, passwords, or exceptions.
         try:
             api.totp_finish(task, False, stage)

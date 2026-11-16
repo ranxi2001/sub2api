@@ -12,12 +12,12 @@ import (
 )
 
 const rotationSelect = `SELECT task_id, account_id, state, action, worker_id, candidate_ciphertext,
- config_updated_at, error_code, updated_at FROM openai_totp_rotations `
+ config_updated_at, error_code, updated_at, previous_ciphertext, password_ciphertext, login_email, binding_verified FROM openai_totp_rotations `
 
 func scanRotation(row openAIOAuthReauthRow) (*service.OpenAITOTPRotation, error) {
 	var r service.OpenAITOTPRotation
 	err := row.Scan(&r.TaskID, &r.AccountID, &r.State, &r.Action, &r.WorkerID, &r.CandidateCiphertext,
-		&r.ConfigUpdatedAt, &r.ErrorCode, &r.UpdatedAt)
+		&r.ConfigUpdatedAt, &r.ErrorCode, &r.UpdatedAt, &r.PreviousCiphertext, &r.PasswordCiphertext, &r.LoginEmail, &r.BindingVerified)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -55,6 +55,18 @@ func (r *openAIOAuthReauthRepository) createTOTPRotation(ctx context.Context, ac
 	if !current.Equal(version) {
 		return nil, infraerrors.Conflict("TOTP_CONFIG_CHANGED", "Login configuration changed; reload before retrying")
 	}
+	// A deleted-account recovery must not turn reimport into another enrollment.
+	var unresolvedIdentity bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM openai_totp_rotations r
+ JOIN openai_oauth_reauth_configs c ON c.account_id=$1
+ WHERE r.account_id<>$1 AND lower(r.login_email)=lower(c.login_email)
+ AND r.state NOT IN ('succeeded','failed'))`, accountID).Scan(&unresolvedIdentity)
+	if err != nil {
+		return nil, err
+	}
+	if unresolvedIdentity {
+		return nil, infraerrors.Conflict("TOTP_RECOVERY_UNRESOLVED", "Resolve the existing identity's 2FA recovery before another enrollment")
+	}
 	if automatic {
 		// The config row lock serializes this check with creation on every API
 		// replica. Never replace an unresolved task, or rotate repeatedly on a
@@ -77,8 +89,8 @@ func (r *openAIOAuthReauthRepository) createTOTPRotation(ctx context.Context, ac
 		}
 		return nil, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO openai_totp_rotations (task_id,account_id,config_updated_at,previous_ciphertext,password_ciphertext)
- SELECT $1,account_id,$3,totp_secret_ciphertext,password_ciphertext FROM openai_oauth_reauth_configs WHERE account_id=$2`, taskID, accountID, version)
+	_, err = tx.ExecContext(ctx, `INSERT INTO openai_totp_rotations (task_id,account_id,config_updated_at,previous_ciphertext,password_ciphertext,login_email)
+ SELECT $1,account_id,$3,totp_secret_ciphertext,password_ciphertext,login_email FROM openai_oauth_reauth_configs WHERE account_id=$2`, taskID, accountID, version)
 	if err != nil {
 		return nil, err
 	}
@@ -94,9 +106,9 @@ func (r *openAIOAuthReauthRepository) ClaimTOTPRotation(ctx context.Context, wor
 	}
 	return scanRotation(r.db.QueryRowContext(ctx, `WITH next AS (SELECT task_id FROM openai_totp_rotations
  WHERE state='queued' ORDER BY task_id FOR UPDATE SKIP LOCKED LIMIT 1)
- UPDATE openai_totp_rotations r SET state='running',worker_id=$1,updated_at=NOW(),error_code=''
+ UPDATE openai_totp_rotations r SET state='running',worker_id=$1,updated_at=NOW(),error_code='',binding_verified=FALSE
  FROM next WHERE r.task_id=next.task_id
- RETURNING r.task_id,r.account_id,r.state,r.action,r.worker_id,r.candidate_ciphertext,r.config_updated_at,r.error_code,r.updated_at`, worker))
+ RETURNING r.task_id,r.account_id,r.state,r.action,r.worker_id,r.candidate_ciphertext,r.config_updated_at,r.error_code,r.updated_at,r.previous_ciphertext,r.password_ciphertext,r.login_email,r.binding_verified`, worker))
 }
 
 func (r *openAIOAuthReauthRepository) TransitionTOTPRotation(ctx context.Context, taskID int64, worker, from, to, candidate string) error {
@@ -149,7 +161,7 @@ func (r *openAIOAuthReauthRepository) FinishTOTPRotation(ctx context.Context, ta
 	}
 	state := "uncertain"
 	if success {
-		if rotation.State != "verifying" || !version.Equal(rotation.ConfigUpdatedAt) {
+		if rotation.State != "verifying" || !rotation.BindingVerified || !version.Equal(rotation.ConfigUpdatedAt) {
 			return sql.ErrNoRows
 		}
 		if rotation.Action != "verify_old" && rotation.CandidateCiphertext == "" {
@@ -163,8 +175,12 @@ func (r *openAIOAuthReauthRepository) FinishTOTPRotation(ctx context.Context, ta
 	if err != nil {
 		return err
 	}
-	if success && rotation.Action != "verify_old" {
-		_, err = tx.ExecContext(ctx, `UPDATE openai_oauth_reauth_configs SET totp_secret_ciphertext=$2,updated_at=NOW() WHERE account_id=$1`, rotation.AccountID, rotation.CandidateCiphertext)
+	if success {
+		selected := rotation.CandidateCiphertext
+		if rotation.Action == "verify_old" {
+			selected = rotation.PreviousCiphertext
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE openai_oauth_reauth_configs SET totp_secret_ciphertext=$2,updated_at=NOW() WHERE account_id=$1`, rotation.AccountID, selected)
 		if err != nil {
 			return err
 		}
@@ -198,4 +214,44 @@ func (r *openAIOAuthReauthRepository) expireTOTPRotations(ctx context.Context, a
  WHERE ($1::bigint=0 OR account_id=$1) AND state IN ('running','enrolling','prepared','activating','verifying')
  AND updated_at < NOW()-INTERVAL '15 minutes'`, accountID)
 	return err
+}
+
+// Read immutable recovery snapshots even when the original account is soft-deleted.
+func (r *openAIOAuthReauthRepository) GetTOTPRotationByTask(ctx context.Context, taskID int64) (*service.OpenAITOTPRotation, error) {
+	if err := r.expireTOTPRotations(ctx, 0); err != nil {
+		return nil, err
+	}
+	return scanRotation(r.db.QueryRowContext(ctx, rotationSelect+`WHERE task_id=$1`, taskID))
+}
+
+func (r *openAIOAuthReauthRepository) BindTOTPRotation(ctx context.Context, taskID int64, worker, expected, updated string) error {
+	return r.writeTOTPProvenance(ctx, `UPDATE openai_totp_rotations SET
+ candidate_ciphertext=CASE WHEN action='verify_old' THEN candidate_ciphertext ELSE $4 END,
+ previous_ciphertext=CASE WHEN action='verify_old' THEN $4 ELSE previous_ciphertext END,
+ binding_verified=TRUE,updated_at=NOW()
+ WHERE task_id=$1 AND worker_id=$2 AND state='verifying'
+ AND CASE WHEN action='verify_old' THEN previous_ciphertext ELSE candidate_ciphertext END=$3
+ AND $3<>'' AND $4<>''`, taskID, worker, expected, updated)
+}
+
+func (r *openAIOAuthReauthRepository) RestoreTOTPProvenance(ctx context.Context, taskID int64, expected, candidate string) error {
+	return r.writeTOTPProvenance(ctx, `UPDATE openai_totp_rotations SET candidate_ciphertext=$3,
+ binding_verified=FALSE,error_code='candidate_recovered',updated_at=NOW()
+ WHERE task_id=$1 AND state='uncertain' AND candidate_ciphertext=$2`, taskID, expected, candidate)
+}
+
+func (r *openAIOAuthReauthRepository) writeTOTPProvenance(ctx context.Context, query string, args ...any) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, "SET LOCAL synchronous_commit = on"); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err = requireOpenAIOAuthReauthTaskUpdate(result, err); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

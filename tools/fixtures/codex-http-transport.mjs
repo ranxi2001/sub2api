@@ -33,11 +33,12 @@ export class TlsFingerprintTransport {
       assert.equal(JSON.parse(options.body).password, 'synthetic-password');
       if (mode === 'operation-error') return Response.json(JSON.parse(process.env.CODEX_TEST_ERROR), {status: 400});
       return Response.json({page: {type: 'mfa_challenge'}, 'oai-client-auth-session': {
-        mfa_factors: [{factor_type: 'totp', id: 'synthetic-factor'}],
+        mfa_factors: [...(mode === 'multi-factor' ? [{factor_type:'totp',id:'old-factor'}] : []), {factor_type: 'totp', id: 'synthetic-factor'}],
       }});
     }
     if (route === 'POST /api/accounts/mfa/issue_challenge') return Response.json({});
     if (route === 'POST /api/accounts/mfa/verify') {
+      if (JSON.parse(options.body).id === 'old-factor') return Response.json({error:{code:'invalid_otp'}},{status:400});
       assert.match(JSON.parse(options.body).code, /^\d{6}$/);
       return Response.json({continue_url: 'https://chatgpt.com/auth-complete'});
     }

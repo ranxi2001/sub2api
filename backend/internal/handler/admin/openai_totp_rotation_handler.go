@@ -121,16 +121,18 @@ func (h *OpenAIOAuthReauthHandler) TOTPPhase(c *gin.Context) {
 		return
 	}
 	var req struct {
-		WorkerID string `json:"worker_id"`
-		Phase    string `json:"phase"`
-		Secret   string `json:"secret"`
+		WorkerID            string `json:"worker_id"`
+		Phase               string `json:"phase"`
+		Secret              string `json:"secret"`
+		FactorID            string `json:"factor_id"`
+		EnrollmentSessionID string `json:"enrollment_session_id"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
 	if err = c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid phase request")
 		return
 	}
-	if err = h.service.TOTPRotationPhase(c.Request.Context(), task, req.WorkerID, req.Phase, req.Secret); err != nil {
+	if err = h.service.TOTPRotationPhase(c.Request.Context(), task, req.WorkerID, req.Phase, req.Secret, req.FactorID, req.EnrollmentSessionID); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -173,16 +175,66 @@ func (h *OpenAIOAuthReauthHandler) TOTPRecover(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Secret string `json:"secret"`
+		Secret              string `json:"secret"`
+		FactorID            string `json:"factor_id"`
+		EnrollmentSessionID string `json:"enrollment_session_id"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
 	if err = c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid recovery request")
 		return
 	}
-	if err = h.service.RecoverTOTPCandidate(c.Request.Context(), task, req.Secret); err != nil {
+	if err = h.service.RecoverTOTPCandidate(c.Request.Context(), task, req.Secret, req.FactorID, req.EnrollmentSessionID); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, gin.H{"accepted": true})
+}
+
+// Recovery uses a task ID, since the original account may have been soft-deleted.
+func (h *OpenAIOAuthReauthHandler) ExportTOTPRecovery(c *gin.Context) {
+	if !rotationPrivate(c) {
+		return
+	}
+	var req struct {
+		TaskID          int64  `json:"task_id"`
+		Email           string `json:"expected_email"`
+		Source          string `json:"source"`
+		IncludePassword bool   `json:"include_password"`
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	if err := c.ShouldBindJSON(&req); err != nil || req.TaskID <= 0 {
+		response.BadRequest(c, "Invalid recovery request")
+		return
+	}
+	result, err := h.service.ExportTOTPRecovery(c.Request.Context(), req.TaskID, req.Email, req.Source, req.IncludePassword)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+func (h *OpenAIOAuthReauthHandler) ImportTOTPRecovery(c *gin.Context) {
+	if !rotationPrivate(c) {
+		return
+	}
+	id, ok := parseReauthAccountID(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		TaskID int64  `json:"task_id"`
+		Email  string `json:"expected_email"`
+		Source string `json:"source"`
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	if err := c.ShouldBindJSON(&req); err != nil || req.TaskID <= 0 {
+		response.BadRequest(c, "Invalid recovery request")
+		return
+	}
+	if err := h.service.ImportTOTPRecovery(c.Request.Context(), id, req.TaskID, req.Email, req.Source); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"imported": true, "verified": false, "engine": "local_worker"})
 }

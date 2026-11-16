@@ -63,10 +63,10 @@ class MockMFA:
     def request(self, method, route, payload=None):
         if route.endswith('/enroll'):
             phases.append('enroll')
-            return {'secret': NEW, 'session_id': 'synthetic-enrollment'}
+            return {'secret': NEW, 'session_id': 'synthetic-enrollment', 'factor_id': 'F2'}
         assert route.endswith('/activate_enrollment')
         saved = next(x for x in journal.call({'action': 'list'}) if x['task_id'] == task['task_id'])
-        assert saved['candidate'] == NEW and saved['database_acknowledged']
+        assert saved['candidate'] == NEW and saved['factor_id'] == 'F2' and saved['database_acknowledged']
         status = request('GET', f'/admin/accounts/{ID}/totp-rotation')
         assert status['state'] == 'activating' and status['has_candidate']
         phases.append('activate-after-local-and-database-save')
@@ -76,16 +76,18 @@ class MockMFA:
         pass
 
 def mock_login(_config, _claim, secret):
-    phases.append('verify-new' if secret == NEW else 'verify-old-rejected')
-    return {'cookies': []} if secret == NEW else None
+    assert _claim['totp_factor_id'] == 'F2'
+    phases.append('verify-new')
+    # The old factor remains valid. Success verifies the selected factor only.
+    return {'web': {'mfaVerified': True, 'mfaFactorId': 'F2'}}
 
 with patch('openai_totp_rotation.time.sleep'):
     rotate(api, claim, session_factory=lambda *_: MockMFA(), login=mock_login)
 status = request('GET', f'/admin/accounts/{ID}/totp-rotation')
-assert status['state'] == 'succeeded', status
+assert status['state'] == 'succeeded' and status['outcome'] == 'selected_factor_verified_no_revocation', status
 exported = request('POST', f'/admin/accounts/{ID}/totp-export', {'source': 'current', 'include_password': False})
-assert exported['secret'] == NEW and 'password' not in exported
-assert phases == ['enroll', 'activate-after-local-and-database-save', 'verify-new', 'verify-old-rejected'], phases
+assert exported['secret'] == NEW and exported['factor_id'] == 'F2' and 'password' not in exported
+assert phases == ['enroll', 'activate-after-local-and-database-save', 'verify-new'], phases
 print('Real API/PostgreSQL rotation: succeeded; export and encrypted configuration updated.', flush=True)
 
 task2 = request('POST', f'/admin/accounts/{ID}/totp-rotation', {})
@@ -95,7 +97,7 @@ candidate2 = 'MFRGGZDFMZTWQ2LKNNWG23TPOI'
 class TimeoutMFA:
     def request(self, method, route, payload=None):
         if route.endswith('/enroll'):
-            return {'secret': candidate2, 'session_id': 'synthetic-timeout'}
+            return {'secret': candidate2, 'session_id': 'synthetic-timeout', 'factor_id': 'F3'}
         raise TimeoutError('synthetic activation response loss')
     def close(self):
         pass
@@ -114,12 +116,51 @@ assert any(x['task_id'] == task2['task_id'] and x['candidate'] == candidate2 for
 print('Activation timeout: uncertain, new rotation blocked, candidate survives journal reopening.', flush=True)
 request('POST', f'/admin/accounts/{ID}/totp-rotation/verify', {'task_id': task2['task_id'], 'action': 'verify_new'})
 recovery = api.claim_totp()
-assert recovery['action'] == 'verify_new' and recovery['candidate_secret'] == candidate2
+assert recovery['action'] == 'verify_new' and recovery['candidate_secret'] == candidate2 and recovery['candidate_factor_id'] == 'F3'
 with patch('openai_totp_rotation.time.sleep'):
     rotate(api, recovery, session_factory=lambda *_: (_ for _ in ()).throw(AssertionError('Recovery must not enroll')),
-           login=lambda _config, _claim, secret: {} if secret == candidate2 else None)
+           login=lambda _config, _claim, secret: {'web': {'mfaVerified': True, 'mfaFactorId': 'F3'}} if secret == candidate2 and _claim['totp_factor_id'] == 'F3' else None)
 assert request('GET', f'/admin/accounts/{ID}/totp-rotation')['state'] == 'succeeded'
 print('Recovery verifies the saved candidate and completes without another enrollment.', flush=True)
-report = {'account_id': ID, 'successful_task': task['task_id'], 'uncertain_task': task2['task_id'], 'checks': ['packaged-worker-current-symlink', 'real-api-heartbeat', 'postgres-task-creation-and-transitions', 'dual-save-before-activation', 'configuration-update-and-export', 'activation-timeout-and-restart-recovery', 'verify-new-without-reenrollment'], 'upstream': 'mock', 'production_changes': False}
+# An unresolved task retains its own identity/credential snapshot after soft delete.
+task3 = request('POST', f'/admin/accounts/{ID}/totp-rotation', {})
+claim3 = api.claim_totp()
+class DeletedTimeoutMFA:
+    def request(self, method, route, payload=None):
+        if route.endswith('/enroll'):
+            return {'secret': OLD, 'session_id': 'deleted-enrollment', 'factor_id': 'F4'}
+        raise TimeoutError('synthetic activation response loss')
+    def close(self): pass
+rotate(api, claim3, session_factory=lambda *_: DeletedTimeoutMFA(), login=mock_login)
+assert request('GET', f'/admin/accounts/{ID}/totp-rotation')['state'] == 'uncertain'
+request('DELETE', f'/admin/accounts/{ID}')
+recovery_request = {'task_id': task3['task_id'], 'expected_email': 'rotation@example.test', 'source': 'candidate'}
+restored = request('POST', '/admin/accounts/totp-recovery-export', recovery_request)
+assert restored['secret'] == OLD and restored['factor_id'] == 'F4' and 'password' not in restored
+try:
+    request('POST', '/admin/accounts/totp-recovery-export', {**recovery_request, 'expected_email': 'wrong@example.test'})
+except RuntimeError as error:
+    assert str(error).startswith('409 ')
+else:
+    raise AssertionError('wrong recovery identity must fail')
+destination = request('POST', '/admin/accounts', {'name': 'Recovered synthetic', 'platform': 'openai', 'type': 'oauth', 'credentials': {'email': 'rotation@example.test', 'access_token': 'synthetic-token'}, 'extra': {'email': 'rotation@example.test'}, 'concurrency': 1, 'priority': 50})
+new_id = destination['id']
+result = request('POST', f'/admin/accounts/{new_id}/totp-recovery-import', recovery_request)
+assert result['imported'] and result['verified'] is False and result['engine'] == 'local_worker'
+try:
+    request('POST', f'/admin/accounts/{new_id}/totp-rotation', {})
+except RuntimeError as error:
+    assert str(error).startswith('409 ')
+else:
+    raise AssertionError('reimport must not reenroll an unresolved identity')
+normal_task = request('POST', f'/admin/accounts/{new_id}/openai-reauth', {})
+normal_claim = api.claim()
+assert normal_claim['task_id'] == normal_task['id'] and normal_claim['account_id'] == new_id
+assert normal_claim['totp_secret'] == OLD and normal_claim['totp_factor_id'] == 'F4'
+api.fail(normal_claim['task_id'], 'worker_failed')  # No real authentication is performed.
+print('Soft-delete recovery: task snapshot exported, matching new account imported, normal claim bound; reenrollment blocked.', flush=True)
+report = {'account_id': ID, 'successful_task': task['task_id'], 'uncertain_task': task2['task_id'], 'deleted_task': task3['task_id'], 'reimport_account': new_id,
+          'checks': ['packaged-worker-current-symlink', 'real-api-heartbeat', 'postgres-task-creation-and-transitions', 'paired-dual-save-before-activation', 'bound-configuration-update-and-export', 'activation-timeout-and-restart-recovery', 'verify-new-without-reenrollment', 'soft-deleted-task-snapshot-export', 'identity-checked-recovery-import', 'normal-worker-claim-retains-binding', 'reimport-does-not-reenroll'],
+          'upstream': 'mock', 'production_changes': False, 'real_login_2fa': 'NOT EXECUTED'}
 (ROOT / 'verification.json').write_text(json.dumps(report, indent=2) + '\n')
 print(json.dumps(report, indent=2))

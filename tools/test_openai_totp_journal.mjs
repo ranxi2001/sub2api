@@ -71,3 +71,12 @@ test('CLI invoked through a current symlink executes journal operations', t => {
   assert.equal(list.status, 0, list.stderr)
   assert.deepEqual(JSON.parse(list.stdout), [record])
 })
+
+test('candidate provenance cannot be replaced or stripped while keeping the secret', t => {
+  const journal = openJournal(setup(t));
+  journal.write({task_id:7,candidate:'NEW',factor_id:'F2',session_id:'enrollment'});
+  for (const change of [{factor_id:'F1'},{factor_id:''},{session_id:'other'}]) {
+    assert.throws(()=>journal.write({task_id:7,candidate:'NEW',factor_id:'F2',session_id:'enrollment',...change}), /overwrite/);
+  }
+  assert.equal(journal.read(7).factor_id,'F2');
+});
