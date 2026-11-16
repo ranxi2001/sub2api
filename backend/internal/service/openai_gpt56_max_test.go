@@ -17,10 +17,19 @@ import (
 )
 
 func TestAstraForwardPreservesMaxInPayloadAndUsage(t *testing.T) {
-	for _, requestedModel := range []string{"gpt-6-astra", "astra-public"} {
+	for _, model := range []struct{ requested, upstream string }{
+		{requested: "gpt-6-astra", upstream: "gpt-6-astra"},
+		{requested: "astra-public", upstream: "gpt-6-astra"},
+		{requested: "gpt-6.2-astra", upstream: "gpt-6.2-astra"},
+		{requested: "astra62-public", upstream: "gpt-6.2-astra"},
+		{requested: "gpt-6.2-astra-pro", upstream: "gpt-6.2-astra-pro"},
+		{requested: "astra62-pro-public", upstream: "gpt-6.2-astra-pro"},
+		{requested: "gpt-6.2-sol", upstream: "gpt-6.2-sol"},
+		{requested: "sol62-public", upstream: "gpt-6.2-sol"},
+	} {
 		for _, stream := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/stream=%t", requestedModel, stream), func(t *testing.T) {
-				response := `{"id":"resp_astra","model":"gpt-6-astra","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2}}`
+			t.Run(fmt.Sprintf("%s/stream=%t", model.requested, stream), func(t *testing.T) {
+				response := fmt.Sprintf(`{"id":"resp_astra","model":%q,"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":2}}`, model.upstream)
 				contentType := "application/json"
 				if stream {
 					response = "data: {\"type\":\"response.completed\",\"response\":" + response + "}\n\ndata: [DONE]\n\n"
@@ -29,9 +38,9 @@ func TestAstraForwardPreservesMaxInPayloadAndUsage(t *testing.T) {
 				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK,
 					Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(response))}}
 				svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-				account := rawGPT56ResponsesAPIKeyAccount(requestedModel, "gpt-6-astra")
+				account := rawGPT56ResponsesAPIKeyAccount(model.requested, model.upstream)
 				account.Status, account.Schedulable = StatusActive, true
-				body, err := json.Marshal(map[string]any{"model": requestedModel, "stream": stream, "input": "hello", "reasoning": map[string]string{"effort": "max"}})
+				body, err := json.Marshal(map[string]any{"model": model.requested, "stream": stream, "input": "hello", "reasoning": map[string]string{"effort": "max"}})
 				require.NoError(t, err)
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
@@ -39,7 +48,7 @@ func TestAstraForwardPreservesMaxInPayloadAndUsage(t *testing.T) {
 				result, err := svc.Forward(context.Background(), c, account, body)
 				require.NoError(t, err)
 				require.NotNil(t, result)
-				require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.lastBody, "model").String())
+				require.Equal(t, model.upstream, gjson.GetBytes(upstream.lastBody, "model").String())
 				require.Equal(t, "max", gjson.GetBytes(upstream.lastBody, "reasoning.effort").String())
 				require.NotNil(t, result.ReasoningEffort)
 				require.Equal(t, "max", *result.ReasoningEffort)
@@ -66,6 +75,15 @@ func TestNormalizeOpenAIReasoningEffortForMaxCapableModels(t *testing.T) {
 		want  string
 	}{
 		{name: "Astra 保留 max", raw: "max", model: "gpt-6-astra", want: "max"},
+		{name: "Astra 6.2 保留 max", raw: "max", model: "gpt-6.2-astra", want: "max"},
+		{name: "Astra 6.2 提供商与大小写变体", raw: " MAX ", model: " openai/GPT-6.2-ASTRA ", want: "max"},
+		{name: "Astra 6.2 下划线日期变体", raw: "max", model: "gpt_6.2_astra_2026_11_16", want: "max"},
+		{name: "Astra 6.2 强度后缀", raw: "max", model: "gpt-6.2-astra-max", want: "max"},
+		{name: "Astra 6.2 保留 xhigh", raw: "xhigh", model: "gpt-6.2-astra", want: "xhigh"},
+		{name: "Astra 6.2 保留 low", raw: "low", model: "gpt-6.2-astra", want: "low"},
+		{name: "不匹配 Astra 名称前缀碰撞", raw: "max", model: "gpt-6.2-astral", want: "xhigh"},
+		{name: "不扩展未知版本", raw: "max", model: "gpt-6.20-astra", want: "xhigh"},
+		{name: "不扩展未知 6.2 家族", raw: "max", model: "gpt-6.2-unknown", want: "xhigh"},
 		{name: "Sol 保留 max", raw: "max", model: "gpt-5.6-sol", want: "max"},
 		{name: "Terra 保留 max", raw: "max", model: "openai/gpt-5.6-terra", want: "max"},
 		{name: "Luna 后缀保留 max", raw: "max", model: "gpt-5.6-luna-2026-07-09", want: "max"},
