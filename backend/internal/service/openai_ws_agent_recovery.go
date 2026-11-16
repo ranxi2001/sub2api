@@ -470,9 +470,10 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 	if r.localHistory.pending != nil {
 		r.localHistory.outputBytes += len(payload)
 		if r.localHistory.outputBytes > openAIWSLocalHistoryLimit {
-			r.localHistory.pending = nil
+			r.localHistory = openAIWSLocalHistory{}
+			r.accountLocalHistory()
 		} else {
-			r.localHistory.output.AddEvent(event, string(payload))
+			r.localHistory.output.AddEvent(event, payload)
 			r.accountLocalHistory()
 		}
 	}
@@ -778,6 +779,7 @@ func (r *openAIWSAgentRecovery) commitLocalHistory(completed bool) {
 		h.anchor = r.completedBridge
 	}
 	h.pending = nil
+	h.outputBytes = 0
 	h.output = openAIWSToolCallReplayCollector{}
 }
 

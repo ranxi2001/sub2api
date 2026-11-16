@@ -6,6 +6,7 @@ on:
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_ws_readable_continuation.go'
       - 'backend/internal/handler/openai_ws_unsent_delta_test.go'
+      - 'backend/internal/service/openai_ws_unsent_delta_test.go'
       - '.github/workflows/ws-unsent-delta.yml'
 permissions:
   contents: read
@@ -69,9 +70,15 @@ jobs:
               assert status==0 and all(outcomes.get(n)=='pass' for n in expected),outcomes
               assert not any(a in ('fail','skip') for a in outcomes.values()),outcomes
           PY
+      - name: GREEN delivery scope and memory release
+        if: matrix.phase == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit,unsentdelta ./internal/service -run '^TestOpenAIWSUnsentDeltaDeliveryScope$' -count=1 -timeout=2m) | tee "$RUNNER_TEMP/unsent-delta-guards.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: unsent-delta-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/unsent-delta.jsonl
+          path: ${{ runner.temp }}/unsent-delta*.jsonl
           if-no-files-found: error
