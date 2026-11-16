@@ -1566,6 +1566,9 @@ type GatewayOpenAIWSConfig struct {
 	// Explicit operator opt-in: unreadable provider state may be detached while
 	// caller-supplied completed tool history is carried as inert, unverified data.
 	ClientHistoryRecoveryEnabled bool `mapstructure:"client_history_recovery_enabled"`
+	// Explicit destructive compatibility mode for HTTP and WS: discard opaque
+	// provider state and carry tool history only as caller-supplied text.
+	LossyHistoryRestartEnabled bool `mapstructure:"lossy_history_restart_enabled"`
 	// HTTPBridgeThresholdBytes: 触发 HTTP bridge 的入站 WS payload 阈值。
 	HTTPBridgeThresholdBytes int64 `mapstructure:"http_bridge_threshold_bytes"`
 	// SSEAccelerationMaxPayloadBytes bounds the encoded HTTP-to-WS request, including its JSON newline.
@@ -4363,4 +4366,8 @@ func warnIfInsecureURL(field, raw string) {
 
 func (c *Config) OpenAIWSClientHistoryRecoveryEnabled() bool {
 	return c != nil && c.Gateway.OpenAIWS.ClientHistoryRecoveryEnabled
+}
+
+func (c *Config) OpenAILossyHistoryRestartEnabled() bool {
+	return c != nil && c.Gateway.OpenAIWS.LossyHistoryRestartEnabled
 }

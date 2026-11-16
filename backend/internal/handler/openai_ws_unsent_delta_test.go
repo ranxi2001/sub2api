@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -42,6 +43,9 @@ func runUnsentDeltaWithInput(t *testing.T, mode string, switchTurn int, fence, e
 	runUnsentDeltaWithPolicy(t, mode, switchTurn, fence, extraInput, false)
 }
 func runUnsentDeltaWithPolicy(t *testing.T, mode string, switchTurn int, fence, extraInput string, clientHistory bool) {
+	runUnsentDeltaWithLossyPolicy(t, mode, switchTurn, fence, extraInput, clientHistory, false)
+}
+func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fence, extraInput string, clientHistory, lossy bool) {
 	t.Helper()
 	var mu sync.Mutex
 	var frames [][]byte
@@ -110,6 +114,12 @@ func runUnsentDeltaWithPolicy(t *testing.T, mode string, switchTurn int, fence, 
 			a.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
 			a.Extra["codex_fingerprint_mode"] = "off"
 			cfg.Gateway.OpenAIWS.ClientHistoryRecoveryEnabled = clientHistory
+			// Optional interface keeps historical test overlays buildable.
+			if lossy {
+				setLossy := reflect.ValueOf(&cfg.Gateway.OpenAIWS).Elem().FieldByName("LossyHistoryRestartEnabled")
+				require.True(t, setLossy.IsValid())
+				setLossy.SetBool(true)
+			}
 			cfg.Gateway.MaxAccountSwitches = 2
 			cfg.Gateway.Scheduling.OpenAITurnAdmissionCacheTTLSeconds = 0
 			cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 20
@@ -238,11 +248,17 @@ func runUnsentDeltaWithPolicy(t *testing.T, mode string, switchTurn int, fence, 
 	require.Equal(t, "Bearer fixture-B", selected[switchTurn-1])
 	resumed := sent[switchTurn-1]
 	require.NotContains(t, string(resumed), "resp_delta_", "old provider pointer must not reach B")
-	require.Contains(t, string(resumed), "Perform fixture exactly once")
+	if !lossy {
+		require.Contains(t, string(resumed), "Perform fixture exactly once")
+	}
 	require.Contains(t, string(resumed), "fixture applied exactly once")
-	require.Contains(t, string(resumed), "fixture readable progress")
+	if !lossy {
+		require.Contains(t, string(resumed), "fixture readable progress")
+	}
 	require.NotContains(t, string(resumed), "fixture-history-state")
-	require.Contains(t, string(resumed), "9007199254740993")
+	if !lossy {
+		require.Contains(t, string(resumed), "9007199254740993")
+	}
 	require.True(t, gjson.GetBytes(resumed, "tools").IsArray(), "effective tool declarations must survive takeover")
 	for _, item := range gjson.GetBytes(resumed, "input").Array() {
 		require.NotContains(t, item.Get("type").String(), "call", "completed tools must be inert history")

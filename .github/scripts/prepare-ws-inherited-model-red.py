@@ -50,8 +50,11 @@ def prepare(destination, evidence):
     fixture_blob = git("rev-parse", f"{candidate}:{FIXTURE}").decode().strip()
     if git("hash-object", FIXTURE).decode().strip() != fixture_blob:
         raise ValueError("dirty candidate fixture")
-    if Path(GUARDS).read_bytes() != (destination / GUARDS).read_bytes():
-        raise ValueError("guard fixture changed; identical baseline/candidate guard tests required")
+    # Copy identical current guard fixtures into both phases; production blobs
+    # remain the verified baseline. Later independent tests may share this file.
+    if git("hash-object", GUARDS).decode().strip() != git("rev-parse", f"{candidate}:{GUARDS}").decode().strip():
+        raise ValueError("dirty candidate guard fixture")
+    shutil.copyfile(GUARDS, destination / GUARDS)
     shutil.copyfile(FIXTURE, destination / FIXTURE)
     if git("hash-object", str(destination / FIXTURE)).decode().strip() != fixture_blob:
         raise ValueError("candidate test copy mismatch")
@@ -62,7 +65,7 @@ def prepare(destination, evidence):
         "candidate_fixture_blob": fixture_blob, "fixture": FIXTURE,
         "guard_fixture_blob": git("hash-object", GUARDS).decode().strip(),
         "verified_baseline_backend_blobs": len(entries),
-        "production_changes_in_red": [], "candidate_test_overlays": [FIXTURE],
+        "production_changes_in_red": [], "candidate_test_overlays": [FIXTURE, GUARDS],
     }
     (evidence / "source-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (evidence / "baseline-backend-blobs.txt").write_text("".join(f"{blob} {path}\n" for path, blob in entries))

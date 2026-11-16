@@ -251,6 +251,9 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 			}
 		}
 	}
+	if next, clean, changed := s.PrepareOpenAILossyHistoryRestart(ctx, c, body, session, model); changed {
+		return next, clean, true, nil
+	}
 	next := s.WithOpenAIWSAgentRecovery(ctx, c, body, session, model)
 	r := openAIAgentRecoveryFromContext(next)
 	if proof != nil {

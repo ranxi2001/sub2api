@@ -130,11 +130,12 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 	r.bridgeSource = nil
 	r.protected = nil
 	initial := openAIAgentRecoveryFromContext(r.ctx)
+	ctx, clean, lossy := r.service.PrepareOpenAILossyHistoryRestart(r.ctx, r.c, source, r.session, initialModel(initial, source))
 	// Rebuilding one generation does not turn every later native delta into
 	// complete replay history. A response actually delivered by this manager
 	// can continue on that same account; begin still verifies its current
 	// authoritative pointer, account admission and actual outgoing bytes.
-	if initial != nil && initial.omittedHistory && account != nil && account.ID == r.completedAccount &&
+	if !lossy && initial != nil && initial.omittedHistory && account != nil && account.ID == r.completedAccount &&
 		r.completedResponse != "" && gjson.GetBytes(source, "previous_response_id").String() == r.completedResponse &&
 		!gjson.GetBytes(source, "conversation").Exists() && len(openAIAgentRecoveryItemDigests(source)) == 0 {
 		model := gjson.GetBytes(source, "model").String()
@@ -145,7 +146,7 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 			return append([]byte(nil), source...), nil
 		}
 	}
-	if initial == nil || !initial.omittedHistory {
+	if !lossy && (initial == nil || !initial.omittedHistory) {
 		clean, err := r.service.PrepareOpenAIAgentReplayBody(source)
 		if err != nil {
 			return nil, err
@@ -170,8 +171,7 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 		}
 		return append([]byte(nil), clean...), nil
 	}
-	ctx, clean := r.ctx, source
-	if openAIAgentRecoveryInputDigest(source) != initial.inputDigest || openAI409ControlsDigest(source) != initial.replayControlsDigest {
+	if !lossy && (openAIAgentRecoveryInputDigest(source) != initial.inputDigest || openAI409ControlsDigest(source) != initial.replayControlsDigest) {
 		// The next client turn may still carry the old A opaque history.
 		// Rebuild that frame independently, preserving every original fence.
 		var changed bool
