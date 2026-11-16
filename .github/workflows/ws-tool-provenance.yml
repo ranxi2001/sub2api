@@ -9,12 +9,98 @@ on:
       - .github/workflows/ws-tool-provenance.yml
       - .github/scripts/ws-owner-conflict-evidence.py
       - .github/scripts/ws-tool-provenance-evidence.py
+      - .github/scripts/issue871-evidence.py
+      - .github/scripts/test_issue871_evidence.py
       - backend/internal/repository/gateway_cache_tool_provenance.go
 
 permissions:
   contents: read
 
 jobs:
+  pending-deadline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      PENDING_BASELINE: eb2addba4de284f2844eb7450a9e872efbce03b0
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Validate named behavioral evidence gates
+        run: python3 -m unittest discover -s .github/scripts -p 'test_issue871_evidence.py'
+      - name: Pending wait RED on exact baseline with identical candidate tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/ws-pending-evidence"
+          red_dir="$RUNNER_TEMP/ws-pending-red"
+          fixture=backend/internal/service/openai_ws_owner_conflict_test.go
+          mkdir -p "$evidence_dir"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$evidence_dir/candidate.txt"
+          git rev-parse "$PENDING_BASELINE" "$PENDING_BASELINE^{tree}" > "$evidence_dir/baseline.txt"
+          git worktree add --detach "$red_dir" "$PENDING_BASELINE"
+          git show "$CANDIDATE:$fixture" > "$red_dir/$fixture"
+          test "$(git hash-object "$red_dir/$fixture")" = "$(git rev-parse "$CANDIDATE:$fixture")"
+          git rev-parse "$CANDIDATE:$fixture" > "$evidence_dir/fixture-blob.txt"
+          cp "$red_dir/$fixture" "$evidence_dir/pending_test.go"
+          git -C "$red_dir" diff --exit-code "$PENDING_BASELINE" -- . ":(exclude)$fixture"
+          git -C "$red_dir" diff --stat > "$evidence_dir/red-diff.txt"
+          git ls-tree -r "$PENDING_BASELINE" -- backend > "$evidence_dir/baseline-blobs.txt"
+          set +e
+          (cd "$red_dir/backend" && go test -tags=unit,ownerconflict ./internal/service -run '^TestOpenAIToolProvenancePendingDeadline$/^function$/^pending_deadline$' -count=1 -json -timeout=5m) > "$evidence_dir/red.jsonl" 2> "$evidence_dir/red.stderr"
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence_dir/red-exit.txt"
+          python3 .github/scripts/issue871-evidence.py RED "$status" "$evidence_dir/red.jsonl" "$evidence_dir/red.stderr" pending_deadline
+          test "$(git -C "$red_dir" rev-parse HEAD)" = "$PENDING_BASELINE"
+          git -C "$red_dir" diff --exit-code "$PENDING_BASELINE" -- . ":(exclude)$fixture"
+      - name: Pending wait GREEN and deterministic backend error controls with race detection
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/ws-pending-evidence"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test -z "$(git status --porcelain)"
+          set +e
+          (cd backend && go test -race -tags=unit,ownerconflict ./internal/service -run '^TestOpenAIToolProvenancePendingDeadline$/^function$/^pending_deadline$' -count=1 -json -timeout=5m) > "$evidence_dir/green.jsonl" 2> "$evidence_dir/green.stderr"
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence_dir/green-exit.txt"
+          python3 .github/scripts/issue871-evidence.py GREEN "$status" "$evidence_dir/green.jsonl" "$evidence_dir/green.stderr" pending_deadline
+          (cd backend && go test -race -tags=unit,ownerconflict ./internal/service -run '^TestOpenAIToolProvenancePendingDeadline$' -count=1 -json -timeout=5m) > "$evidence_dir/controls.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$evidence_dir/controls.jsonl"
+          python3 - "$evidence_dir/controls.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          for kind in ('function','custom'):
+              for case in ('pending_deadline','initial_deadline','initial_store_failure','initial_backend_deadline','pending_store_failure','pending_backend_deadline','pending_store_failure_at_deadline'):
+                  name=f'TestOpenAIToolProvenancePendingDeadline/{kind}/{case}'
+                  assert sum(r.get('Action')=='pass' and r.get('Test')==name for r in rows)==1,name
+          assert not any(r.get('Action') in ('fail','skip') for r in rows)
+          PY
+      - name: Build production server at exact candidate
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/ws-pending-server" ./cmd/server
+          sha256sum "$RUNNER_TEMP/ws-pending-server" > "$RUNNER_TEMP/ws-pending-evidence/server-sha256.txt"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-pending-deadline-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/ws-pending-evidence
   behavior:
     runs-on: ubuntu-latest
     timeout-minutes: 45
