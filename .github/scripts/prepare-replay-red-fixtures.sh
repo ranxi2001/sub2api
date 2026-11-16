@@ -54,6 +54,14 @@ if ! git -C "$tree" grep -q 'func (a \*Account) IsExcelBPSSearchEnabled' "$basel
     exit 1
   fi
   exclude_absent_fixture backend/internal/service/openai_excel_bps_search_test.go "$contract"
+  # PR872 added independent search diagnostics/race fixtures which also use
+  # that absent API and the excluded search fixture helper. Keep them in every
+  # candidate GREEN; only isolate proven post-baseline files in this old RED.
+  for target in backend/internal/service/openai_excel_bps_search_diagnostics_test.go backend/internal/service/openai_excel_bps_search_race_test.go; do
+    if git -C "$tree" cat-file -e "$candidate:$target" 2>/dev/null; then
+      exclude_absent_fixture "$target" "$contract"
+    fi
+  done
 fi
 
 # Later mixed-owner proofs/diagnostics share the restored recovery struct.
