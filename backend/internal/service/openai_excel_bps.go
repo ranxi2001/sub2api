@@ -755,12 +755,16 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				return s.continueExcelBPSSearch(nextCtx, account, nextBody, token, accountID, proxyURL)
 			})
 	} else {
+		// Both repair callbacks run serially on the bridge goroutine. Their
+		// evolving request body must not replace the caller's immutable body,
+		// which is still read below when constructing result metadata.
+		repairUpstreamBody := upstreamBody
 		converted = bridge.StreamWithRepairs(requestCtx, resp.Body, func(repairCtx context.Context, failed map[string]any, validation error) (map[string]any, error) {
 			if isControlledExperiment(ctx) {
 				return nil, errors.New("controlled experiment disables BPS tool repair submissions")
 			}
 			markPriorityAttemptFailure(repairCtx)
-			correctedBody, err := basispoints.BuildToolRepairRequest(upstreamBody, failed, validation)
+			correctedBody, err := basispoints.BuildToolRepairRequest(repairUpstreamBody, failed, validation)
 			if err != nil {
 				return nil, err
 			}
@@ -803,11 +807,11 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				return nil, fmt.Errorf("excel BPS correction returned HTTP %d", repairResp.StatusCode)
 			}
 			s.UpdateCodexUsageSnapshotFromHeaders(repairCtx, account.ID, repairResp.Header)
-			upstreamBody = correctedBody
+			repairUpstreamBody = correctedBody
 			return basispoints.ReadToolRepairResponse(repairResp.Body)
 		}, func(repairCtx context.Context) (io.ReadCloser, error) {
 			markPriorityAttemptFailure(repairCtx)
-			repairBody, err := basispoints.RepairRequest(upstreamBody)
+			repairBody, err := basispoints.RepairRequest(repairUpstreamBody)
 			if err != nil {
 				return nil, err
 			}

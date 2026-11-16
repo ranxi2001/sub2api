@@ -92,6 +92,20 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           git diff --exit-code HEAD
           test -z "$(git status --porcelain)"
+      - name: Repeat real Forward repair ownership and provenance with race detection
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          race_log="$RUNNER_TEMP/issue871-evidence/repair-race-repeat.log"
+          go test -race -tags=unit ./internal/service -run '^TestExcelBPSSearchRepair(OwnershipRaceThroughForward|ProvenanceThroughForward)$' -count=20 -v -timeout=10m 2>&1 | tee "$race_log"
+          for repair in transport unknown_target; do
+            for outcome in success failed; do
+              for mode in json sse compact_keepalive; do
+                test "$(grep -Fc -- "--- PASS: TestExcelBPSSearchRepairOwnershipRaceThroughForward/$repair/$outcome/$mode " "$race_log")" -eq 20
+              done
+            done
+          done
       - working-directory: backend
         run: go test -race ./internal/service/basispoints -run 'Test(WebSearch|AlphaSearch|ToolChoice|CurrentEncrypted|CompactionPolicy)' -count=1 -v
       - working-directory: backend
