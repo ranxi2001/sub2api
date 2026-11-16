@@ -589,9 +589,8 @@ export default {
         rpmLimitPlaceholder: '0 = unlimited',
         rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.'
       },
-      liveUsageHint: 'Refreshes this page once per minute. Concurrency shows used / limit. RPM shows the existing user limiter count / limit, resets each calendar minute and may include rejected attempts. Users without an RPM limit are not counted; separate group limits are excluded.',
+      liveUsageHint: 'Refreshes this page once per minute. Concurrency shows used / limit. RPM shows the existing user limiter count / limit, resets each calendar minute and may include rejected attempts. Zero limits mean unlimited (∞); usage is still counted. Requests rejected by the earlier group check are excluded.',
       liveConcurrency: 'Concurrency',
-      rpmNotCounted: 'Not counted',
       liveUsageUnavailable: 'Unavailable',
       columns: {
         liveUsage: 'Concurrency / RPM',

@@ -14,8 +14,10 @@ describe('UserLiveUsageCell', () => {
     expect(over.text()).toContain('61 / 60')
     expect(over.find('.text-red-600').exists()).toBe(true)
   })
-  it('does not turn uncounted or unavailable RPM into zero', () => {
-    expect(render(null, 0).text()).toContain('admin.users.rpmNotCounted')
+  it('shows unlimited usage and keeps unavailable RPM distinct from zero', () => {
+    expect(render(12, 0).text()).toContain('12 / ∞')
+    expect(render(0, 0).text()).toContain('0 / ∞')
+    expect(render(null, 0).text()).toContain('— / ∞')
     expect(render(null, 60).text()).toContain('— / 60')
     expect(render(undefined, 60).text()).toContain('— / 60')
   })

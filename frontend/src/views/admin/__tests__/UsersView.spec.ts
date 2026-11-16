@@ -217,6 +217,7 @@ describe('admin UsersView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('shows the limiter column by default and distinguishes missing RPM from zero', async () => {

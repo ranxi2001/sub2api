@@ -66,7 +66,7 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 }
 
 // populateUserRPM reads the existing limiter counters without querying usage logs
-// or changing admission/counting behavior. Unlimited users have no global counter.
+// or changing admission behavior. Zero limits are still counted.
 func (s *adminServiceImpl) populateUserRPM(ctx context.Context, users []User) {
 	reader, ok := s.userRPMCache.(interface {
 		GetUserRPMBatch(context.Context, []int64) (map[int64]int, error)
@@ -77,9 +77,7 @@ func (s *adminServiceImpl) populateUserRPM(ctx context.Context, users []User) {
 	ids := make([]int64, 0, len(users))
 	for i := range users {
 		users[i].CurrentRPM = nil
-		if users[i].RPMLimit > 0 {
-			ids = append(ids, users[i].ID)
-		}
+		ids = append(ids, users[i].ID)
 	}
 	if len(ids) == 0 {
 		return
@@ -92,10 +90,8 @@ func (s *adminServiceImpl) populateUserRPM(ctx context.Context, users []User) {
 		return
 	}
 	for i := range users {
-		if users[i].RPMLimit > 0 {
-			if count, exists := counts[users[i].ID]; exists {
-				users[i].CurrentRPM = &count
-			}
+		if count, exists := counts[users[i].ID]; exists {
+			users[i].CurrentRPM = &count
 		}
 	}
 }

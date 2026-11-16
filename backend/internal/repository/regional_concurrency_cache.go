@@ -84,7 +84,24 @@ func (c *regionalConcurrencyCache) GetAccountConcurrency(ctx context.Context, id
 	return c.count(ctx, "account", id)
 }
 func (c *regionalConcurrencyCache) GetUserConcurrency(ctx context.Context, id int64) (int, error) {
-	return c.count(ctx, "user", id)
+	n, err := c.count(ctx, "user", id)
+	if err != nil {
+		return 0, err
+	}
+	tracked, err := c.ConcurrencyCache.GetUserConcurrency(ctx, id)
+	return n + tracked, err
+}
+func (c *regionalConcurrencyCache) TrackUserSlot(ctx context.Context, id int64, request string) error {
+	if tracker, ok := c.ConcurrencyCache.(service.UserSlotTracker); ok {
+		return tracker.TrackUserSlot(ctx, id, request)
+	}
+	return errors.New("user slot tracking unavailable")
+}
+func (c *regionalConcurrencyCache) ReleaseTrackedUserSlot(ctx context.Context, id int64, request string) error {
+	if tracker, ok := c.ConcurrencyCache.(service.UserSlotTracker); ok {
+		return tracker.ReleaseTrackedUserSlot(ctx, id, request)
+	}
+	return nil
 }
 func (c *regionalConcurrencyCache) GetAccountConcurrencyBatch(ctx context.Context, ids []int64) (map[int64]int, error) {
 	return c.counts(ctx, "account", ids)
@@ -188,20 +205,21 @@ func (c *regionalConcurrencyCache) GetAccountsLoadBatch(ctx context.Context, acc
 	return out, nil
 }
 func (c *regionalConcurrencyCache) GetUsersLoadBatch(ctx context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
-	// The auxiliary Redis result contains local queue information only; replace
-	// all concurrency counts with the authoritative persistent budget.
+	// Redis contains unlimited-user statistics and local queues; add the
+	// authoritative persistent budget without re-reading Redis per user.
 	out, err := c.ConcurrencyCache.GetUsersLoadBatch(ctx, users)
 	if err != nil {
 		return nil, err
 	}
 	for _, u := range users {
-		n, err := c.GetUserConcurrency(ctx, u.ID)
+		n, err := c.count(ctx, "user", u.ID)
 		if err != nil {
 			return nil, err
 		}
 		if out[u.ID] == nil {
 			out[u.ID] = &service.UserLoadInfo{UserID: u.ID}
 		}
+		n += out[u.ID].CurrentConcurrency
 		out[u.ID].CurrentConcurrency = n
 		if u.MaxConcurrency > 0 {
 			out[u.ID].LoadRate = (n + out[u.ID].WaitingCount) * 100 / u.MaxConcurrency

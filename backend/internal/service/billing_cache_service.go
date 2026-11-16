@@ -1004,20 +1004,15 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 		}
 	}
 
-	// ── 第二层：用户级全局硬上限（始终生效） ──
-	if user.RPMLimit > 0 {
-		count, err := s.userRPMCache.IncrementUserRPM(ctx, user.ID)
-		if err != nil {
-			logger.LegacyPrintf(
-				"service.billing_cache",
-				"Warning: rpm increment (user) failed for user=%d: %v",
-				user.ID, err,
-			)
-			return nil // fail-open
-		}
-		if count > user.RPMLimit {
-			return ErrUserRPMExceeded
-		}
+	// Count every request reaching the user-level check, including unlimited
+	// users. Only a positive limit participates in admission.
+	count, err := s.userRPMCache.IncrementUserRPM(ctx, user.ID)
+	if err != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: rpm increment (user) failed for user=%d: %v", user.ID, err)
+		return nil // fail-open
+	}
+	if user.RPMLimit > 0 && count > user.RPMLimit {
+		return ErrUserRPMExceeded
 	}
 
 	return nil

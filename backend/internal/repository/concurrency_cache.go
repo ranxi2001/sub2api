@@ -925,6 +925,16 @@ func (c *concurrencyCache) GetAccountConcurrencyBatch(ctx context.Context, accou
 
 // User slot operations
 
+// TrackUserSlot reuses the regular user set and its existing stale-slot TTL.
+func (c *concurrencyCache) TrackUserSlot(ctx context.Context, userID int64, requestID string) error {
+	_, err := trackSlotScript.Run(ctx, c.rdb, []string{userSlotKey(userID)}, c.slotTTLSeconds, requestID).Result()
+	return err
+}
+
+func (c *concurrencyCache) ReleaseTrackedUserSlot(ctx context.Context, userID int64, requestID string) error {
+	return c.ReleaseUserSlot(ctx, userID, requestID)
+}
+
 func (c *concurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
 	key := userSlotKey(userID)
 	// 时间戳在 Lua 脚本内使用 Redis TIME 命令获取，确保多实例时钟一致
