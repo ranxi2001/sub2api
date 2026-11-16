@@ -1,0 +1,37 @@
+{
+  "sourceHead": "70600fa0587a0f4ffaca75c7fe0c460493758b78",
+  "baseline": "ff1082fd51038f10dcb3a8ecb1d5a738258b0f66",
+  "captures": [
+    "before-layout.png",
+    "after-layout.png",
+    "after-manual-pause.png",
+    "after-group-disable.png",
+    "after-english.png",
+    "after-mobile-dark.png"
+  ],
+  "requests": [
+    {
+      "method": "get",
+      "url": "/admin/account-ops/auto-config"
+    },
+    {
+      "method": "get",
+      "url": "/admin/groups/all"
+    },
+    {
+      "method": "get",
+      "url": "/admin/account-quality-plans"
+    },
+    {
+      "method": "get",
+      "url": "/admin/groups"
+    },
+    {
+      "method": "get",
+      "url": "/admin/accounts"
+    }
+  ],
+  "errors": [],
+  "browserWarnings": [],
+  "boundary": "Actual AutoConfigView and project styles; synthetic API/auth and unrelated child components are stubbed. Component preview only, no production, real upstream or full navigation acceptance."
+}

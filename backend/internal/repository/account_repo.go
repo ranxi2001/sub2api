@@ -139,6 +139,13 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.Create(ctx, account)
 	}
+	if account != nil && account.InitialAPIKeyDisposition != nil {
+		groups := make([]service.AccountGroup, 0, len(account.GroupIDs))
+		for _, id := range account.GroupIDs {
+			groups = append(groups, service.AccountGroup{GroupID: id, Priority: 50})
+		}
+		return r.CreateWithAccountGroups(ctx, account, groups)
+	}
 	client := r.client
 	var tx *dbent.Tx
 	if account != nil && (account.InitialQualityPlan != nil || account.InitialAdmissionPlan != nil || service.InitialUpstreamChannel(ctx) > 0) {
@@ -308,6 +315,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 // CreateWithAccountGroups atomically persists an account, its exact per-group priorities,
 // and the scheduler outbox event used to publish the new routing snapshot.
 func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account *service.Account, groups []service.AccountGroup) error {
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.CreateWithAccountGroups(ctx, account, groups)
+	}
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
@@ -350,6 +360,11 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 			builders = append(builders, builder)
 		}
 		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
+	}
+	if policy := account.InitialAPIKeyDisposition; policy != nil && policy.Enabled && account.Type == service.AccountTypeOAuth {
+		if err := accounttimer.ScheduleOAuthDisposition(ctx, txClient, account.ID, account.Platform, *policy, time.Now().UTC()); err != nil {
 			return err
 		}
 	}

@@ -453,19 +453,20 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OpenCodeGoUsageSnapshotExtraKey)
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
 	account := &Account{
-		InitialQualityPlan:   input.InitialQualityPlan,
-		InitialAdmissionPlan: input.InitialAdmissionPlan,
-		Name:                 input.Name,
-		Notes:                normalizeAccountNotes(input.Notes),
-		Platform:             input.Platform,
-		Type:                 input.Type,
-		Credentials:          input.Credentials,
-		Extra:                accountExtra,
-		ProxyID:              input.ProxyID,
-		Concurrency:          normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
-		Priority:             input.Priority,
-		Status:               StatusActive,
-		Schedulable:          input.InitialAdmissionPlan == nil,
+		InitialAPIKeyDisposition: input.InitialAPIKeyDisposition,
+		InitialQualityPlan:       input.InitialQualityPlan,
+		InitialAdmissionPlan:     input.InitialAdmissionPlan,
+		Name:                     input.Name,
+		Notes:                    normalizeAccountNotes(input.Notes),
+		Platform:                 input.Platform,
+		Type:                     input.Type,
+		Credentials:              input.Credentials,
+		Extra:                    accountExtra,
+		ProxyID:                  input.ProxyID,
+		Concurrency:              normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Priority:                 input.Priority,
+		Status:                   StatusActive,
+		Schedulable:              input.InitialAdmissionPlan == nil,
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -583,13 +584,14 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	account.GroupIDs = append([]int64(nil), groupIDs...)
 	if err := s.validateExcelBPS403GroupSettings(ctx, account); err != nil {
 		return nil, err
 	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
-	if account.InitialAdmissionPlan != nil && s.accountDuplicateRepo != nil {
+	if (account.InitialAdmissionPlan != nil || account.InitialAPIKeyDisposition != nil) && s.accountDuplicateRepo != nil {
 		// Publish the initially blocked account, its groups and both background
 		// plans atomically; the worker cannot race a partially bound import.
 		groups := make([]AccountGroup, 0, len(groupIDs))
@@ -603,7 +605,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		if err := s.accountRepo.Create(ctx, account); err != nil {
 			return nil, err
 		}
-		if len(groupIDs) > 0 {
+		if len(groupIDs) > 0 && account.InitialAPIKeyDisposition == nil {
 			if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
 				return nil, err
 			}

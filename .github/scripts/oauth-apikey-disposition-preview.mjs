@@ -1,0 +1,142 @@
+// Render the actual AutoConfigView with fictional data; PNGs stay outside Git.
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+const [repoArg, outputArg, baseline = 'ff1082fd51038f10dcb3a8ecb1d5a738258b0f66'] = process.argv.slice(2)
+if (!repoArg || !outputArg) throw Error('Usage: node oauth-apikey-disposition-preview.mjs REPO OUTPUT [BASELINE_SHA]')
+const repo = realpathSync(repoArg), root = join(repo, 'frontend'), output = resolve(outputArg)
+const deps = resolve(process.env.SUB2API_PREVIEW_DEPS || root)
+const req = createRequire(join(deps, 'package.json'))
+const { createServer } = await import(pathToFileURL(join(dirname(req.resolve('vite/package.json')), 'dist/node/index.js')).href)
+const vue = (await import(pathToFileURL(req.resolve('@vitejs/plugin-vue')).href)).default
+const { chromium } = await import(pathToFileURL(process.env.SUB2API_PLAYWRIGHT_MODULE || req.resolve('playwright')).href)
+const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trimEnd()
+const sourceHead = git('rev-parse', 'HEAD'), baseHead = git('rev-parse', baseline)
+const cacheDir = mkdtempSync(join(tmpdir(), 'oauth-apikey-disposition-preview-'))
+const port = Number(process.env.SUB2API_PREVIEW_PORT || 4299), origin = `http://127.0.0.1:${port}`
+const entryName = `.oauth-disposition-preview-${process.pid}.js`, entry = join(root, entryName)
+const errors = [], browserWarnings = [], captures = [], requests = []
+let server, browser, context, linked = false, before = false
+mkdirSync(output, { recursive: true })
+try {
+  if (!existsSync(join(root, 'node_modules'))) {
+    symlinkSync(join(deps, 'node_modules'), join(root, 'node_modules'), 'dir')
+    linked = true
+  }
+  writeFileSync(entry, `
+import {mount} from '@vue/test-utils';
+import {h} from 'vue';
+import {createPinia} from 'pinia';
+import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';
+import {apiClient} from '/src/api/client.ts';
+import {defaultExcelBPSDefaults} from '/src/utils/excelBPSDefaults.ts';
+import {defaultOpenAITwoFAAdmissionConfig} from '/src/utils/openaiTwoFAAdmission.ts';
+import {defaultOpenAIAPIKeyFallbackConfig} from '/src/utils/openaiAPIKeyFallback.ts';
+import {defaultModelBillingConfig} from '/src/utils/modelBilling.ts';
+import {defaultOAuthModelMappings} from '/src/utils/oauthModelMappings.ts';
+import View from '/src/views/admin/AutoConfigView.vue';
+import '/src/style.css';
+const locale=new URL(location.href).searchParams.get('locale')||'zh';
+await loadLocaleMessages(locale);i18n.global.locale.value=locale;
+let config={enabled:false,platform:'openai',priority:50,load_factor:1,concurrency:3,cost_multiplier:0.07,group_ids:[],upgrade_enabled:false,upgrade_group_ids:[],successes_per_step:20,upgrade_step:1,max_concurrency:100,cooldown_seconds:60,revision:'synthetic-preview',openai_totp_rotate_on_429:false,openai_disable_scheduling_on_429:false,openai_two_fa_admission:defaultOpenAITwoFAAdmissionConfig(),openai_apikey_fallback:defaultOpenAIAPIKeyFallbackConfig(),openai_disable_scheduling_on_429_7d_threshold_percent:98,excel_bps:defaultExcelBPSDefaults(),model_billing:defaultModelBillingConfig(),model_mappings:defaultOAuthModelMappings('openai')};
+const groups=[{id:5,name:'OpenAI Demo',platform:'openai',status:'active'},{id:6,name:'Anthropic Demo',platform:'anthropic',status:'active'}];
+window.__previewRequests=[];
+apiClient.defaults.adapter=async request=>{let data;window.__previewRequests.push({method:request.method,url:request.url});switch(request.url){
+case '/admin/account-ops/auto-config':if(request.method==='put'){config=typeof request.data==='string'?JSON.parse(request.data):request.data;window.__saved=structuredClone(config)}data=structuredClone(config);break;
+case '/admin/accounts':{
+const expected={page:1,page_size:100,platform:'openai',type:'apikey',lite:'1',sort_by:'id',sort_order:'asc',timezone:'UTC'};
+if(request.method!=='get'||Object.keys(request.params||{}).length!==Object.keys(expected).length||Object.entries(expected).some(([key,value])=>request.params[key]!==value))throw Error('Unexpected preview account query');
+data={items:[{id:71,name:'Demo API Key A',platform:'openai',type:'apikey',status:'active',schedulable:true,group_ids:[5]},{id:72,name:'Demo API Key B',platform:'openai',type:'apikey',status:'active',schedulable:true,group_ids:[5]}],page:1,page_size:100,pages:1,total:2};break;
+}
+case '/admin/groups/all':data=groups;break;
+case '/admin/groups':data={items:groups,page:1,pages:1,page_size:100,total:groups.length};break;
+case '/admin/account-quality-plans':data=[];break;
+default:throw Error('Unexpected preview API: '+request.url);
+}return {config:request,status:200,statusText:'OK',headers:{},data:{code:0,data}}};
+document.getElementById('app').innerHTML='<p class="p-5 text-sm text-gray-500">'+(locale==='en'?'Smart operations → Auto configuration · Actual component with fictional data':'智能运维 → 自动配置 · 实际组件 / 虚构数据')+'</p><div id="preview"></div>';
+window.preview=mount(View,{attachTo:'#preview',global:{plugins:[createPinia(),i18n],stubs:{AppLayout:{setup(_, {slots}){return()=>h('main',{class:'min-h-screen bg-gray-50 p-5 text-gray-900 dark:bg-dark-950 dark:text-gray-100'},slots.default?.())}},SmartOpsNav:true,BPSDefaultsCard:true,OpenAITwoFAAdmissionCard:true,AutoConfigHistory:true,OAuthInitialModelSelection:true}}});
+`, { flag: 'wx' })
+  process.chdir(root)
+  server = await createServer({
+    root, configFile: false, cacheDir,
+    resolve: { alias: { '@': join(root, 'src') } },
+    plugins: [{ name: 'oauth-disposition-preview', enforce: 'pre', load(id) {
+      const clean = id.split('?')[0]
+      if (clean === join(root, 'src/stores/auth.ts')) return 'export const useAuthStore=()=>({user:{id:99999,role:"admin"},isAdmin:true})'
+      if (before && !id.includes('?') && clean === join(root, 'src/views/admin/AutoConfigView.vue')) return git('show', baseHead + ':frontend/src/views/admin/AutoConfigView.vue')
+    }, configureServer(vite) {
+      vite.middlewares.use((request, response, next) => {
+        if (request.url === '/' || request.url?.startsWith('/?')) {
+          response.setHeader('Content-Type', 'text/html')
+          response.end('<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module" src="/' + entryName + '"></script></html>')
+        } else if (request.url === '/favicon.ico') { response.statusCode = 204; response.end() } else next()
+      })
+    } }, vue()],
+    server: { host: '127.0.0.1', port, strictPort: true, fs: { allow: [root, deps, realpathSync(join(root, 'node_modules'))] } },
+    optimizeDeps: { entries: [], include: ['vue', 'pinia', 'vue-i18n', 'vue-router', 'axios', '@vue/test-utils', 'marked', 'dompurify'] }
+  })
+  await server.listen()
+  browser = process.env.SUB2API_CDP_ENDPOINT ? await chromium.connectOverCDP(process.env.SUB2API_CDP_ENDPOINT) : await chromium.launch({ headless: true })
+  context = await browser.newContext({ viewport: { width: 1500, height: 1100 }, locale: 'zh-CN', timezoneId: 'UTC' })
+  const page = await context.newPage()
+  page.on('pageerror', error => { errors.push(error.message); console.error(error.message) })
+  page.on('console', message => {
+    if (message.type() !== 'error') return
+    const text = message.text()
+    // Chromium's unload policy warning is unrelated to rendering or fixture APIs.
+    if (text === 'Permissions policy violation: unload is not allowed in this document.') browserWarnings.push(text)
+    else { errors.push(text); console.error(text) }
+  })
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url())
+    if (url.origin === origin || url.protocol === 'data:') return route.continue()
+    errors.push('External request blocked: ' + url.origin)
+    return route.abort()
+  })
+  const row = () => page.getByTestId('initial-enabled').locator('xpath=ancestor::fieldset[1]')
+  const capture = async (name, locator = row()) => { await locator.screenshot({ path: join(output, name) }); captures.push(name) }
+  before = true
+  await page.goto(origin, { waitUntil: 'networkidle', timeout: 90000 })
+  await page.getByTestId('initial-enabled').waitFor({ timeout: 60000 })
+  await capture('before-layout.png')
+  before = false
+  server.moduleGraph.invalidateAll()
+  await page.reload({ waitUntil: 'networkidle' })
+  const card = page.getByTestId('apikey-disposition')
+  await card.waitFor({ timeout: 60000 })
+  await page.getByTestId('initial-enabled').check()
+  await page.getByTestId('initial-group-5').check()
+  await page.getByTestId('apikey-disposition-enabled').check()
+  await card.locator('[data-account-id="71"] input').check()
+  await capture('after-layout.png')
+  await capture('after-manual-pause.png', card)
+  await page.locator('form').evaluate(form => form.requestSubmit())
+  await page.waitForFunction(() => window.__saved?.apikey_disposition?.account_ids.includes(71))
+  await page.getByTestId('apikey-disposition-scope').selectOption('groups')
+  await page.getByTestId('disposition-group-5').check()
+  await page.getByTestId('apikey-disposition-action').selectOption('disable')
+  await page.locator('form').evaluate(form => form.requestSubmit())
+  await page.waitForFunction(() => window.__saved?.apikey_disposition?.scope === 'groups' && window.__saved?.apikey_disposition?.action === 'disable')
+  await capture('after-group-disable.png', card)
+  await page.goto(origin + '/?locale=en', { waitUntil: 'networkidle' })
+  await page.getByTestId('apikey-disposition').waitFor()
+  await capture('after-english.png', page.getByTestId('apikey-disposition'))
+  await page.evaluate(() => document.documentElement.classList.add('dark'))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await capture('after-mobile-dark.png', page.getByTestId('apikey-disposition'))
+  requests.push(...await page.evaluate(() => window.__previewRequests))
+  writeFileSync(join(output, 'manifest.json'), JSON.stringify({ sourceHead, baseline: baseHead, captures, requests, errors, browserWarnings, boundary: 'Actual AutoConfigView and project styles; synthetic API/auth and unrelated child components are stubbed. Component preview only, no production, real upstream or full navigation acceptance.' }, null, 2) + '\n')
+  if (errors.length) throw Error(errors.join('\n'))
+  console.log('Captured OAuth API Key disposition component evidence at ' + output)
+} finally {
+  await context?.close()
+  if (!process.env.SUB2API_CDP_ENDPOINT) await browser?.close()
+  await server?.close()
+  if (existsSync(entry)) unlinkSync(entry)
+  if (linked) unlinkSync(join(root, 'node_modules'))
+  rmSync(cacheDir, { recursive: true, force: true })
+}

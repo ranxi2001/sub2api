@@ -1,0 +1,83 @@
+name: OAuth API Key disposition
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/accounttimer/**'
+      - 'backend/internal/service/oauth*'
+      - 'backend/internal/service/admin_account.go'
+      - 'backend/internal/repository/account_repo.go'
+      - 'frontend/src/**/OAuthAPIKeyDisposition*'
+      - 'frontend/src/**/oauthAPIKeyDisposition*'
+      - 'frontend/src/**/AutoConfigView*'
+      - '.github/workflows/oauth-apikey-disposition.yml'
+      - '.github/scripts/oauth-apikey-disposition-preview.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposition:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: timer_fixture
+          POSTGRES_PASSWORD: timer_fixture
+          POSTGRES_DB: schedulable_timer_fixture
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U timer_fixture -d schedulable_timer_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: OAuth creation and PostgreSQL timer regressions
+        working-directory: backend
+        env:
+          ACCOUNT_TIMER_TEST_DSN: postgres://timer_fixture:timer_fixture@127.0.0.1:5432/schedulable_timer_fixture?sslmode=disable
+        run: |
+          go test -tags=unit ./internal/service -run '^(TestOAuth(APIKeyDisposition|AutoConfig)|TestAccountReadableSnapshot_DenylistTripwire)' -count=1
+          go test -race -tags=integration ./internal/accounttimer -count=1 -v
+          go test -tags=integration ./internal/repository -run '^TestOAuth(APIKeyDisposition|InitialQuality)' -count=1 -v
+  disposition-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Actual Vue selector and notice regressions
+        run: pnpm --dir frontend exec vitest run src/components/admin/operations/__tests__/OAuthAPIKeyDispositionCard.spec.ts src/views/admin/__tests__/AutoConfigView.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1
+      - name: Prepare isolated screenshot browser
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          npm install --prefix "$RUNNER_TEMP/disposition-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/disposition-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Actual before and after component screenshots
+        env:
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/disposition-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/oauth-apikey-disposition-preview.mjs "$GITHUB_WORKSPACE" "$RUNNER_TEMP/disposition-evidence"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-apikey-disposition-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/disposition-evidence
+          if-no-files-found: warn
+          retention-days: 30

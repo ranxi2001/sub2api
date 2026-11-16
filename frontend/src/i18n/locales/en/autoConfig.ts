@@ -1,4 +1,28 @@
 export default {
+  apikeyDisposition: {
+    timerSource: 'OAuth initial configuration action',
+    superseded: 'Account changed or the paired close did not execute; automatic action skipped',
+    "title": "API Key account actions",
+    "hint": "After a new OAuth account on the selected platform completes initial configuration, pause or disable scheduling for selected API Key accounts. Existing accounts, reauthorization and manual edits do not trigger this policy.",
+    "initialDisabled": "Initial configuration is disabled. This policy takes effect when initial configuration is enabled.",
+    "action": "Action",
+    "pause": "Pause scheduling, then restore",
+    "disable": "Disable scheduling without restoration",
+    "delay": "Delay after initial configuration (minutes)",
+    "duration": "Pause duration (minutes; 180 = 3 hours)",
+    "timezone": "Task display timezone",
+    "scope": "Target scope",
+    "manual": "Select API Key accounts",
+    "allGroups": "All API Key accounts in selected groups",
+    "groupHint": "Resolve API Key parent accounts on the same platform when each import completes; deduplicate across groups. Scheduling is account-wide and affects every group using the account.",
+    "accounts": "API Key accounts (up to 1000)",
+    "selectionHint": "Filter by name, #ID or group; select all matching accounts or individual accounts. Selection persists across pages. Scheduling affects every group using the account.",
+    "selectionLimit": "1000-account limit reached",
+    "accountsFailed": "Could not load the complete account list. Selection is retained; reload before enabling, or disable this policy.",
+    "unavailableHint": "Some selected accounts are missing or are not API Key parent accounts on this platform. Deselect them before saving.",
+    "invalid": "Select accounts or groups. Delay must be an integer from 0 to 43200 minutes; pause duration from 1 to 43200 minutes.",
+    "executionHint": "Disabled by default. Zero delay runs at the next worker poll (about 30 seconds). Pause duration starts when scheduling is actually disabled. Already disabled or invalid accounts and accounts with pending timers are skipped; repeated imports do not extend a pause. Tasks appear in the account list and can be cancelled. Manual scheduling edits cancel pending tasks; other account writes after pausing prevent automatic restoration. Editing or disabling this policy does not revoke existing tasks. A fallback policy selecting the same account may still re-enable scheduling."
+},
   apikeyFallback: {
     title: 'Fallback handling',
     hint: 'Independent of initial configuration. Automatically enable scheduling for selected API Key accounts when all OpenAI OAuth accounts are unavailable, or when the chosen OpenAI OAuth metric falls below your threshold within the selected window. Either condition can trigger fallback.',
