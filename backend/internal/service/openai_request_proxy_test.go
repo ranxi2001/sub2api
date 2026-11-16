@@ -80,7 +80,7 @@ func TestOpenAIRequestProxyWebSocketExplicitlyRejectsBeforeUpstream(t *testing.T
 			serverErr <- err
 			return
 		}
-		defer conn.CloseNow()
+		defer func() { _ = conn.CloseNow() }()
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = r
 		serverErr <- svc.ProxyResponsesWebSocketFromClient(r.Context(), c, conn, account, "test-token", []byte(`{"type":"response.create","model":"gpt-5.4","input":"test"}`), nil)
@@ -90,7 +90,7 @@ func TestOpenAIRequestProxyWebSocketExplicitlyRejectsBeforeUpstream(t *testing.T
 	defer cancel()
 	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	require.NoError(t, err)
-	defer client.CloseNow()
+	defer func() { _ = client.CloseNow() }()
 	select {
 	case err := <-serverErr:
 		var closeErr *OpenAIWSClientCloseError

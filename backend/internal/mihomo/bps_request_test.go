@@ -2,6 +2,7 @@ package mihomo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -56,8 +57,8 @@ func TestBPSRequestPoolDistributesConcurrentRequestsThroughSelectedProxies(t *te
 				errs <- err
 				return
 			}
-			defer resp.Body.Close()
-			_, err = io.ReadAll(resp.Body)
+			_, readErr := io.ReadAll(resp.Body)
+			err = errors.Join(readErr, resp.Body.Close())
 			if err != nil {
 				errs <- err
 			}
@@ -66,11 +67,11 @@ func TestBPSRequestPoolDistributesConcurrentRequestsThroughSelectedProxies(t *te
 	wg.Wait()
 	close(errs)
 	close(leases)
+	for lease := range leases {
+		lease.Release()
+	}
 	for err := range errs {
 		require.NoError(t, err)
-	}
-	for lease := range leases {
-		defer lease.Release()
 	}
 	mu.Lock()
 	defer mu.Unlock()

@@ -51,7 +51,8 @@ func newMaintenanceTaskProxyService(t *testing.T) (*OpenAIOAuthReauthService, *r
 	t.Helper()
 	svc, base := newRotationService(t)
 	t.Cleanup(svc.oauth.Stop)
-	reader := svc.accounts.(*reauthTestAccountReader)
+	reader, ok := svc.accounts.(*reauthTestAccountReader)
+	require.True(t, ok)
 	legacyID := int64(90)
 	reader.account.ProxyID = &legacyID
 	reader.account.Extra = map[string]any{
@@ -98,14 +99,15 @@ func TestOpenAIMaintenanceTaskRequestProxyRejectsUnavailableOrOutsideSources(t *
 		for _, condition := range []string{"unavailable", "unavailable-direct", "fixed_connection", "managed_proxy", "mihomo"} {
 			t.Run(operation+"/"+condition, func(t *testing.T) {
 				svc, reader, rotation, session, proxies := newMaintenanceTaskProxyService(t)
-				if condition == "unavailable" || condition == "unavailable-direct" {
+				switch condition {
+				case "unavailable", "unavailable-direct":
 					proxies.proxies = nil
 					if condition == "unavailable-direct" {
 						reader.account.ProxyID = nil
 					}
-				} else if condition == "fixed_connection" {
+				case "fixed_connection":
 					reader.account.AuthConnectionID = "outside-fixed-connection"
-				} else {
+				default:
 					rotation.config.ProxySource = condition
 					if condition == "managed_proxy" {
 						id := int64(90)

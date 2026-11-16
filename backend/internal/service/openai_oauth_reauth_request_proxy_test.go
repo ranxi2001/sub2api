@@ -6,9 +6,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/redissession"
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
+	redissessiontest "github.com/Wei-Shaw/sub2api/internal/testutil/redissession"
 	"github.com/stretchr/testify/require"
 )
 
@@ -133,14 +131,12 @@ func TestOpenAIOAuthReauthRequestProxyCallbackUsesSharedSIWCSession(t *testing.T
 			name = "removed"
 		}
 		t.Run(name, func(t *testing.T) {
-			mr := miniredis.RunT(t)
-			rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-			t.Cleanup(func() { _ = rdb.Close() })
+			sessionStore := redissessiontest.New(t, siwcSessionPrefix, openai.SessionTTL)
 			svc, reader, repo, _, oldClient, _ := newReauthTestService("acct-1")
 			t.Cleanup(svc.oauth.Stop)
 			store := &siwcTestRepo{reauthTestRepo: repo}
 			svc.repo = store
-			svc.siwcSessionStore = redissession.New(rdb, siwcSessionPrefix, openai.SessionTTL)
+			svc.siwcSessionStore = sessionStore
 			client := &siwcTestClient{reauthTestOAuthClient: oldClient}
 			svc.oauth.oauthClient = client
 			reader.account.Extra = map[string]any{"openai_proxy_mode": "request", "openai_proxy_ids": []any{float64(2)}}

@@ -115,7 +115,8 @@ func TestRemainingMaintenanceConnectionRequestModeRejectsBeforeSideEffects(t *te
 			base, _, _, _, oldClient, _ := newReauthTestService("acct-1")
 			defer base.oauth.Stop()
 			svc.oauth = base.oauth
-			reader := svc.accounts.(*reauthTestAccountReader)
+			reader, ok := svc.accounts.(*reauthTestAccountReader)
+			require.True(t, ok)
 			remainingMaintenanceSelection(reader, svc)
 			client := &remainingMaintenanceClient{reauthTestOAuthClient: oldClient}
 			svc.oauth.oauthClient = client

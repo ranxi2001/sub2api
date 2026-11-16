@@ -26,9 +26,14 @@ func TestAccountDataBPSRequestProxyPortableRoundTrip(t *testing.T) {
 		Data map[string]any `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
-	proxies := envelope.Data["proxies"].([]any)
+	proxies, ok := envelope.Data["proxies"].([]any)
+	require.True(t, ok)
 	require.Len(t, proxies, 2)
-	account := envelope.Data["accounts"].([]any)[0].(map[string]any)
+	accounts, ok := envelope.Data["accounts"].([]any)
+	require.True(t, ok)
+	require.Len(t, accounts, 1)
+	account, ok := accounts[0].(map[string]any)
+	require.True(t, ok)
 	require.NotContains(t, account["extra"], "openai_excel_bps_proxy_ids")
 	require.Equal(t, []any{buildBPSProxyKey("http", "192.0.2.11", 8080, "", ""), buildBPSProxyKey("http", "192.0.2.22", 8080, "", "")}, account["bps_proxy_keys"])
 	// The same exits have different IDs in the destination database.
