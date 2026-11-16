@@ -29,24 +29,37 @@ func TestApplyGeminiChatResponseFormat(t *testing.T) {
 		model      string
 		wantMime   bool
 		wantSchema string
+		wantError  string
 	}{
 		{name: "json_schema writes mime and schema", req: base, format: `{"type":"json_schema","json_schema":{"name":"grade","strict":true,"schema":` + geminiResponseFormatTestSchema + `}}`, wantMime: true, wantSchema: geminiResponseFormatTestSchema},
-		{name: "json_schema without schema writes mime only", req: base, format: `{"type":"json_schema","json_schema":{"name":"grade"}}`, wantMime: true},
+		{name: "json_schema without schema is rejected", req: base, format: `{"type":"json_schema","json_schema":{"name":"grade"}}`, wantError: "response_format.json_schema.schema"},
+		{name: "null schema is rejected", req: base, format: `{"type":"json_schema","json_schema":{"schema":null}}`, wantError: "response_format.json_schema.schema"},
+		{name: "non-object schema is rejected", req: base, format: `{"type":"json_schema","json_schema":{"schema":[]}}`, wantError: "response_format.json_schema.schema"},
 		{name: "json_object writes mime only", req: base, format: `{"type":"json_object"}`, wantMime: true},
 		{name: "json_object creates generationConfig", req: noConfig, format: `{"type":"json_object"}`, wantMime: true},
 		{name: "text leaves request unchanged", req: base, format: `{"type":"text"}`},
 		{name: "null leaves request unchanged", req: base, format: `null`},
 		{name: "empty leaves request unchanged", req: base, format: ``},
-		{name: "invalid json leaves request unchanged", req: base, format: `{"type":"json_object"`},
-		{name: "non-object leaves request unchanged", req: base, format: `"json_object"`},
-		{name: "image model leaves request unchanged", req: base, format: `{"type":"json_object"}`, model: "gemini-2.5-flash-image"},
-		{name: "unlisted image model leaves request unchanged", req: base, format: `{"type":"json_object"}`, model: "models/gemini-3.5-flash-image-preview"},
+		{name: "invalid json is rejected", req: base, format: `{"type":"json_object"`, wantError: "response_format"},
+		{name: "non-object is rejected", req: base, format: `"json_object"`, wantError: "response_format"},
+		{name: "unknown format is rejected", req: base, format: `{"type":"yaml"}`, wantError: "response_format.type"},
+		{name: "missing type is rejected", req: base, format: `{}`, wantError: "response_format.type"},
+		{name: "image model is rejected", req: base, format: `{"type":"json_object"}`, model: "gemini-2.5-flash-image", wantError: "image output"},
+		{name: "unlisted image model is rejected", req: base, format: `{"type":"json_object"}`, model: "models/gemini-3.5-flash-image-preview", wantError: "image output"},
 		{name: "text model writes mime", req: base, format: `{"type":"json_object"}`, model: "gemini-4-argon", wantMime: true},
-		{name: "tools present leaves request unchanged", req: withTools, format: `{"type":"json_schema","json_schema":{"name":"grade","schema":` + geminiResponseFormatTestSchema + `}}`},
+		{name: "tools with schema is rejected", req: withTools, format: `{"type":"json_schema","json_schema":{"name":"grade","schema":` + geminiResponseFormatTestSchema + `}}`, wantError: "with tools"},
+		{name: "text with tools leaves request unchanged", req: withTools, format: `{"type":"text"}`},
+		{name: "text with image model leaves request unchanged", req: base, format: `{"type":"text"}`, model: "gemini-2.5-flash-image"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := applyGeminiChatResponseFormat(tt.req, json.RawMessage(tt.format), tt.model)
+			got, err := applyGeminiChatResponseFormat(tt.req, json.RawMessage(tt.format), tt.model)
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				require.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
 			require.True(t, json.Valid(got), string(got))
 			if !tt.wantMime {
 				require.Equal(t, string(tt.req), string(got))
@@ -77,6 +90,8 @@ func TestGeminiForwardAsChatCompletions_ForwardsResponseFormat(t *testing.T) {
 		wantSchema string
 	}{
 		{name: "non-stream json_schema", format: `{"type":"json_schema","json_schema":{"name":"grade","strict":true,"schema":` + geminiResponseFormatTestSchema + `}}`, wantSchema: geminiResponseFormatTestSchema},
+		{name: "stream json_schema", stream: true, format: `{"type":"json_schema","json_schema":{"name":"grade","strict":true,"schema":` + geminiResponseFormatTestSchema + `}}`, wantSchema: geminiResponseFormatTestSchema},
+		{name: "non-stream json_object", format: `{"type":"json_object"}`},
 		{name: "stream json_object", stream: true, format: `{"type":"json_object"}`},
 	}
 	for _, tt := range tests {
@@ -115,25 +130,39 @@ func TestGeminiForwardAsChatCompletions_ForwardsResponseFormat(t *testing.T) {
 	}
 }
 
-func TestGeminiForwardAsChatCompletions_ResponseFormatSkippedWithTools(t *testing.T) {
+func TestGeminiForwardAsChatCompletions_ResponseFormatRejectedBeforeUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1}}`)),
-	}}}
-	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
-	body := []byte(`{"model":"gemini-4-argon","response_format":{"type":"json_object"},"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{"q":{"type":"string"}}}}}],"messages":[{"role":"user","content":"hi"}]}`)
-	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
-
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, geminiCompatThinkingTestAccount(), body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Len(t, upstream.requestBodies, 1)
-	sent := upstream.requestBodies[0]
-	require.True(t, gjson.GetBytes(sent, "tools").IsArray(), string(sent))
-	require.False(t, gjson.GetBytes(sent, "generationConfig.responseMimeType").Exists(), string(sent))
-	require.False(t, gjson.GetBytes(sent, "generationConfig.responseJsonSchema").Exists(), string(sent))
+	tests := []struct {
+		name, model, format, extra, wantError string
+	}{
+		{name: "missing schema", format: `{"type":"json_schema","json_schema":{"name":"grade"}}`, wantError: "response_format.json_schema.schema"},
+		{name: "invalid schema", format: `{"type":"json_schema","json_schema":{"schema":"object"}}`, wantError: "response_format.json_schema.schema"},
+		{name: "invalid format", format: `"json_object"`, wantError: "response_format"},
+		{name: "unknown format", format: `{"type":"yaml"}`, wantError: "response_format.type"},
+		{name: "image model", model: "gemini-2.5-flash-image", format: `{"type":"json_object"}`, wantError: "image output"},
+		{name: "tools", format: `{"type":"json_object"}`, extra: `,"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{"q":{"type":"string"}}}}}]`, wantError: "with tools"},
+	}
+	for _, tt := range tests {
+		model := tt.model
+		if model == "" {
+			model = "gemini-4-argon"
+		}
+		for _, stream := range []bool{false, true} {
+			t.Run(tt.name+"/stream="+strconv.FormatBool(stream), func(t *testing.T) {
+				upstream := &queuedHTTPUpstreamStub{}
+				svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+				body := []byte(`{"model":"` + model + `","stream":` + strconv.FormatBool(stream) + `,"response_format":` + tt.format + tt.extra + `,"messages":[{"role":"user","content":"hi"}]}`)
+				c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+				result, err := svc.ForwardAsChatCompletions(context.Background(), c, geminiCompatThinkingTestAccount(), body)
+				require.Error(t, err)
+				require.Nil(t, result)
+				require.Equal(t, http.StatusBadRequest, recorder.Code)
+				require.Equal(t, "invalid_request_error", gjson.Get(recorder.Body.String(), "error.type").String())
+				require.Contains(t, gjson.Get(recorder.Body.String(), "error.message").String(), tt.wantError)
+				require.Empty(t, upstream.requestBodies, "invalid format must not send or retry a billable request")
+			})
+		}
+	}
 }
 
 func TestGeminiForwardAsChatCompletions_CodeAssistKeepsResponseSchemaBytes(t *testing.T) {

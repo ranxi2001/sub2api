@@ -111,7 +111,10 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	}
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
 	geminiReq = applyGeminiCompatThinkingConfig(geminiReq, claudeBody, mappedModel, clientStream)
-	geminiReq = applyGeminiChatResponseFormat(geminiReq, responseFormat, mappedModel)
+	geminiReq, err = applyGeminiChatResponseFormat(geminiReq, responseFormat, mappedModel)
+	if err != nil {
+		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
