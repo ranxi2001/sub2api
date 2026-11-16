@@ -116,7 +116,7 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 			require.NoError(t, taskErr)
 			require.Len(t, records, 1, "FOLLOWUP_ERROR_CAPTURE_MISSING: only second failed turn must be retained; stats=%+v task=%+v", manager.Stats(), taskState)
 			record := records[0]
-			require.Equal(t, 2, record.Turn)
+			require.Equal(t, 2, record.Turn, "FOLLOWUP_ERROR_CAPTURE_WRONG_TURN: the second response must not be attributed to the first turn")
 			require.True(t, record.IsError)
 			require.False(t, record.Partial, record.Reason)
 			parts := map[string][]byte{}

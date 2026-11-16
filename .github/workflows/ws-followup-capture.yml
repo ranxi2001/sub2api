@@ -56,7 +56,10 @@ jobs:
               assert code!=0
               for name in names:
                   assert any(r.get('Action')=='fail' and r.get('Test')==name for r in rows),name
-                  assert 'FOLLOWUP_ERROR_CAPTURE_MISSING' in ''.join(r.get('Output','') for r in rows if r.get('Test')==name),name
+                  # Old passthrough captures the upstream failure into turn 1;
+                  # the other modes discard turn 2 after the first terminal.
+                  marker = 'FOLLOWUP_ERROR_CAPTURE_WRONG_TURN' if name.endswith('/passthrough') else 'FOLLOWUP_ERROR_CAPTURE_MISSING'
+                  assert marker in ''.join(r.get('Output','') for r in rows if r.get('Test')==name),name
           else:
               assert code==0
               for name in names: assert any(r.get('Action')=='pass' and r.get('Test')==name for r in rows),name
