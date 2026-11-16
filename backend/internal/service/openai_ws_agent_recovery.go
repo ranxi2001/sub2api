@@ -12,7 +12,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
@@ -644,15 +643,16 @@ const openAIWSLocalHistoryLimit = 8 << 20
 var openAIWSLocalHistoryBytes atomic.Int64
 
 type openAIWSLocalHistory struct {
-	diagnostic  string // Fixed enum only; never retains caller content.
-	outputBytes int
-	tools       json.RawMessage
-	committed   []json.RawMessage
-	pending     []json.RawMessage
-	output      openAIWSLocalOutput
-	anchor      openAIWSBridgeResponseAnchor
-	clientModel string
-	ready       bool
+	diagnostic   string // Fixed enum only; never retains caller content.
+	inputFailure string // Fixed reason for an unsupported source item.
+	outputBytes  int
+	tools        json.RawMessage
+	committed    []json.RawMessage
+	pending      []json.RawMessage
+	output       openAIWSLocalOutput
+	anchor       openAIWSBridgeResponseAnchor
+	clientModel  string
+	ready        bool
 }
 
 type openAIWSRestoredUnsentError struct{ *openAIWSUnsentTurnError }
@@ -663,47 +663,8 @@ func (e *openAIWSRestoredUnsentError) RecoveredWSContext(ctx context.Context) co
 }
 
 func openAIWSPlainItems(body []byte) ([]json.RawMessage, bool) {
-	if len(body) > openAIWSLocalHistoryLimit {
-		return nil, false
-	}
-	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
-		return nil, false
-	}
-	// Historical reasoning can contain a readable summary plus provider state.
-	// Apply the existing explicit Beta representation, preserving supplied text
-	// and marking unavailable state. Tool data and current agent envelopes are
-	// still rejected below; this never fabricates a task from ciphertext.
-	hasReasoning := false
-	for _, item := range gjson.GetBytes(body, "input").Array() {
-		hasReasoning = hasReasoning || item.Get("type").String() == "reasoning"
-	}
-	if hasReasoning {
-		var e error
-		body, e = prepareOpenAI409ReadableReplay(body)
-		if e != nil || len(body) > openAIWSLocalHistoryLimit {
-			return nil, false
-		}
-	}
-	input := gjson.GetBytes(body, "input")
-	var items []json.RawMessage
-	if input.Type == gjson.String {
-		raw, _ := json.Marshal(map[string]any{"type": "message", "role": "user", "content": input.String()})
-		items = []json.RawMessage{raw}
-	} else if input.IsArray() {
-		for _, item := range input.Array() {
-			items = append(items, json.RawMessage(item.Raw))
-		}
-	} else {
-		return nil, false
-	}
-	size := 0
-	for _, raw := range items {
-		size += len(raw)
-		if size > openAIWSLocalHistoryLimit || !openAIWSPlainItem(raw) {
-			return nil, false
-		}
-	}
-	return items, true
+	items, reason := openAIWSReadableHistoryItems(body)
+	return items, reason == ""
 }
 func openAIWSPlainItem(raw []byte) bool {
 	item := gjson.ParseBytes(raw)
@@ -750,8 +711,10 @@ func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
 		r.localHistory = openAIWSLocalHistory{diagnostic: "disabled"}
 		return
 	}
-	items, ok := openAIWSPlainItems(source)
+	items, inputFailure := openAIWSReadableHistoryItems(source)
+	ok := inputFailure == ""
 	if !ok || gjson.GetBytes(source, "conversation").Exists() {
+		r.localHistory.inputFailure = inputFailure
 		r.localHistory.diagnostic = "source_unsupported"
 		if gjson.GetBytes(source, "conversation").Exists() {
 			r.localHistory.diagnostic = "conversation_reference"
@@ -867,6 +830,7 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 		if !restored {
 			logger.FromContext(r.ctx).Warn("openai.ws_unsent_history_restore_skipped",
 				zap.String("restore_reason", reason), zap.String("history_state", h.diagnostic),
+				zap.String("history_input_failure", h.inputFailure),
 				zap.Int("turn", unsent.turn), zap.Int("history_items", len(h.committed)),
 				zap.Int64("history_bytes", r.historyReserved), zap.Bool("history_ready", h.ready),
 				zap.Bool("delivery_pending", r.finish != nil),

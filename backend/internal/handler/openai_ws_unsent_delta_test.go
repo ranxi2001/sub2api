@@ -36,6 +36,9 @@ func TestOpenAIWSUnsentDeltaFences(t *testing.T) {
 	}
 }
 func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
+	runUnsentDeltaWithInput(t, mode, switchTurn, fence, "")
+}
+func runUnsentDeltaWithInput(t *testing.T, mode string, switchTurn int, fence, extraInput string) {
 	t.Helper()
 	var mu sync.Mutex
 	var frames [][]byte
@@ -135,7 +138,7 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 		raw, _ := json.Marshal(b)
 		return string(raw)
 	}
-	issue715WSSend(t, h.clientConn, create(`[{"role":"user","content":"Perform fixture exactly once and retain the task"},{"type":"reasoning","encrypted_content":"fixture-history-state","summary":[{"type":"summary_text","text":"fixture readable progress"}]}]`, ""))
+	issue715WSSend(t, h.clientConn, create(`[{"role":"user","content":"Perform fixture exactly once and retain the task"},{"type":"reasoning","encrypted_content":"fixture-history-state","summary":[{"type":"summary_text","text":"fixture readable progress"}]}`+extraInput+`]`, ""))
 	executions := 0
 	consume := func(raw []byte) {
 		items := gjson.GetBytes(raw, "response.output").Array()
