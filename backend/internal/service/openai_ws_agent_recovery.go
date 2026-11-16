@@ -649,6 +649,21 @@ func openAIWSPlainItems(body []byte) ([]json.RawMessage, bool) {
 	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
 		return nil, false
 	}
+	// Historical reasoning can contain a readable summary plus provider state.
+	// Apply the existing explicit Beta representation, preserving supplied text
+	// and marking unavailable state. Tool data and current agent envelopes are
+	// still rejected below; this never fabricates a task from ciphertext.
+	hasReasoning := false
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		hasReasoning = hasReasoning || item.Get("type").String() == "reasoning"
+	}
+	if hasReasoning {
+		var e error
+		body, e = prepareOpenAI409ReadableReplay(body)
+		if e != nil || len(body) > openAIWSLocalHistoryLimit {
+			return nil, false
+		}
+	}
 	input := gjson.GetBytes(body, "input")
 	var items []json.RawMessage
 	if input.Type == gjson.String {
@@ -672,7 +687,7 @@ func openAIWSPlainItems(body []byte) ([]json.RawMessage, bool) {
 }
 func openAIWSPlainItem(raw []byte) bool {
 	item := gjson.ParseBytes(raw)
-	if !item.IsObject() || item.Get("encrypted_content").Exists() {
+	if !item.IsObject() || openAIWSHasOpaqueField(item, 0) {
 		return false
 	}
 	switch item.Get("type").String() {
@@ -764,15 +779,23 @@ func (r *openAIWSAgentRecovery) commitLocalHistory(completed bool) {
 	if h.output.finalItems != nil {
 		output = h.output.finalItems
 	}
-	for _, item := range output {
-		if !openAIWSPlainItem(item) {
-			h.ready = false
-			h.committed = nil
-			return
-		}
+	if output == nil {
+		output = []json.RawMessage{}
 	}
+	encoded, e := json.Marshal(output)
+	if e != nil {
+		h.ready = false
+		h.committed = nil
+		return
+	}
+	normalized, ok := openAIWSPlainItems(append(append([]byte(`{"input":`), encoded...), '}'))
+	if !ok {
+		h.ready = false
+		h.committed = nil
+		return
+	}
+	output = normalized
 	all := combineOpenAIWSReplayItems(h.pending, output)
-	var ok bool
 	h.committed, ok = openAIWSHistoryCopy(all)
 	h.ready = ok
 	if ok {
@@ -899,4 +922,19 @@ func (r *openAIWSAgentRecovery) accountLocalHistory() {
 		openAIWSLocalHistoryBytes.Add(delta)
 	}
 	r.historyReserved = wanted
+}
+
+func openAIWSHasOpaqueField(value gjson.Result, depth int) bool {
+	if depth > 64 {
+		return true
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return false
+	}
+	opaque := false
+	value.ForEach(func(key, child gjson.Result) bool {
+		opaque = key.String() == "encrypted_content" || openAIWSHasOpaqueField(child, depth+1)
+		return !opaque
+	})
+	return opaque
 }

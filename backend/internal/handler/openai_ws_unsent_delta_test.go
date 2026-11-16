@@ -116,7 +116,7 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 		raw, _ := json.Marshal(b)
 		return string(raw)
 	}
-	issue715WSSend(t, h.clientConn, create(`[{"role":"user","content":"Perform fixture exactly once and retain the task"}]`, ""))
+	issue715WSSend(t, h.clientConn, create(`[{"role":"user","content":"Perform fixture exactly once and retain the task"},{"type":"reasoning","encrypted_content":"fixture-history-state","summary":[{"type":"summary_text","text":"fixture readable progress"}]}]`, ""))
 	executions := 0
 	consume := func(raw []byte) {
 		for _, item := range gjson.GetBytes(raw, "response.output").Array() {
@@ -172,6 +172,8 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 	require.NotContains(t, string(resumed), "resp_delta_", "old provider pointer must not reach B")
 	require.Contains(t, string(resumed), "Perform fixture exactly once")
 	require.Contains(t, string(resumed), "fixture applied exactly once")
+	require.Contains(t, string(resumed), "fixture readable progress")
+	require.NotContains(t, string(resumed), "fixture-history-state")
 	require.Contains(t, string(resumed), "9007199254740993")
 	require.True(t, gjson.GetBytes(resumed, "tools").IsArray(), "effective tool declarations must survive takeover")
 	for _, item := range gjson.GetBytes(resumed, "input").Array() {
