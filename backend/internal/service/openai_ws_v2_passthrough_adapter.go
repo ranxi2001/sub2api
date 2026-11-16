@@ -704,6 +704,9 @@ func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderw
 			payload = c.restoreToolNames(payload)
 		}
 	}
+	if c.controlCtx != nil {
+		ctx = requestcapture.WithSession(ctx, requestcapture.FromContext(c.controlCtx))
+	}
 	return c.agentRecovery.write(payload, func() error {
 		return WriteCapturedWSClient(ctx, c.conn, msgType, payload)
 	})

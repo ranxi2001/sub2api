@@ -1144,6 +1144,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
 			if eventBytes != nil {
 				writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
+				writeCtx = requestcapture.WithSession(writeCtx, requestcapture.FromContext(c.Request.Context()))
 				_ = WriteCapturedWSClient(writeCtx, clientConn, coderws.MessageText, eventBytes)
 				cancel()
 			}
@@ -1190,6 +1191,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	writeClientMessage := func(message []byte) error {
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
+		writeCtx = requestcapture.WithSession(writeCtx, requestcapture.FromContext(c.Request.Context()))
 		defer cancel()
 		message = restoreCodexToolNamesFromContext(c, message)
 		return agentRecovery.write(message, func() error {

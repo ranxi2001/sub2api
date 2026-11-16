@@ -4,6 +4,8 @@ on:
     paths:
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_ws_v2_passthrough_adapter.go'
+      - 'backend/internal/service/openai_ws_request_capture.go'
+      - 'backend/internal/requestcapture/websocket.go'
       - 'backend/internal/handler/openai_ws_followup_capture_test.go'
       - 'backend/internal/requestcapture/followup_test_support.go'
       - '.github/workflows/ws-followup-capture.yml'
@@ -30,7 +32,7 @@ jobs:
       - name: Restore original readers
         if: matrix.phase == 'RED'
         run: |
-          for file in backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go; do
+          for file in backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_request_capture.go backend/internal/requestcapture/websocket.go; do
             git show "2927209f5492d8cb690b83a1964b2f093c19ad7a:$file" > "$file"
           done
       - name: Successful first turn followed by captured error
