@@ -47,9 +47,12 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
         for path in HELPER.ORACLES:
             self.write(path, "package service // historical selected oracle\n")
         adapted_paths = tuple(HELPER.ADAPTED_FIXTURES)
-        self.adapted_historical = b"package service // historical preserved fixture\n\n"
+        self.adapted_historical = {
+            path: ("package service // historical preserved fixture " + path + "\n\n").encode()
+            for path in adapted_paths
+        }
         for path in adapted_paths:
-            self.write(path, self.adapted_historical.decode())
+            self.write(path, self.adapted_historical[path].decode())
         if baseline_fixture:
             self.write(HELPER.FIXTURES[-1], "package service // preexisting fixture\n")
         if baseline_contract:
@@ -89,7 +92,9 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
         self.assertEqual(12, len(set(HELPER.FIXTURES)))
         self.assertFalse(set(HELPER.FIXTURES) & set(HELPER.ORACLES))
         self.assertEqual({"backend/internal/service/openai_excel_bps_warm_test.go":
-                          "9dc2054fd0ab61d0465e1eb12ac060360bc80166"}, HELPER.ADAPTED_FIXTURES)
+                          "9dc2054fd0ab61d0465e1eb12ac060360bc80166",
+                          "backend/internal/service/admin_service_list_users_test.go":
+                          "12597f3f10ff967818cd647bc293d8f27185136c"}, HELPER.ADAPTED_FIXTURES)
         self.assertFalse(set(HELPER.ADAPTED_FIXTURES) & (set(HELPER.FIXTURES) | set(HELPER.ORACLES)))
         root = SCRIPT.resolve().parents[2]
         workflow = (root / ".github/workflows/ws-readable-continuation.yml").read_text()
@@ -108,7 +113,7 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
             source = script.read_text()
             self.assertFalse(any(path in source for path in owned), str(script))
 
-    def test_valid_preparation_removes_twelve_and_restores_one_fixture(self):
+    def test_valid_preparation_removes_twelve_and_restores_two_fixtures(self):
         self.make_repository()
         before = {str(path.relative_to(self.tree)): path.read_bytes() for path in (self.tree / "backend").rglob("*.go")}
         result = self.run_helper()
@@ -116,7 +121,7 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
         self.assertEqual(set(HELPER.FIXTURES), set(before) - set(after))
         expected = {path: content for path, content in before.items() if path not in HELPER.FIXTURES}
         for path in HELPER.ADAPTED_FIXTURES:
-            expected[path] = self.adapted_historical
+            expected[path] = self.adapted_historical[path]
         self.assertEqual(expected, after)
         self.assertEqual(result, json.loads(self.manifest.read_text()))
         self.assertEqual(self.baseline, result["baseline"])
@@ -128,7 +133,7 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
             self.assertEqual("absent", record["actual"])
         for path, blob in result["unchanged_oracles"].items():
             self.assertEqual(blob, self.git("hash-object", str(self.tree / path)))
-        self.assertEqual(1, len(result["adapted_fixtures"]))
+        self.assertEqual(2, len(result["adapted_fixtures"]))
         for record in result["adapted_fixtures"]:
             path = record["path"]
             self.assertEqual(self.git("rev-parse", self.candidate + ":" + path), record["candidate_blob"])
@@ -137,14 +142,33 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
             self.assertEqual(record["baseline_blob"], record["actual_blob"])
 
     def test_adapted_fixture_wrong_baseline_blob_rejected_before_mutation(self):
+        for path in tuple(HELPER.ADAPTED_FIXTURES):
+            with self.subTest(path=path):
+                self.make_repository()
+                before = {str(file.relative_to(self.tree)): file.read_bytes()
+                          for file in (self.tree / "backend").rglob("*.go")}
+                wrong = dict(HELPER.ADAPTED_FIXTURES)
+                wrong[path] = "0" * 40
+                with mock.patch.object(HELPER, "ADAPTED_FIXTURES", wrong):
+                    with self.assertRaisesRegex(ValueError, "adapted fixture baseline blob"):
+                        self.run_helper()
+                after = {str(file.relative_to(self.tree)): file.read_bytes()
+                         for file in (self.tree / "backend").rglob("*.go")}
+                self.assertEqual(before, after)
+                self.assertFalse(self.manifest.exists())
+
+    def test_dirty_last_adapted_fixture_rejected_before_any_mutation(self):
         self.make_repository()
-        path = next(iter(HELPER.ADAPTED_FIXTURES))
-        before = (self.tree / path).read_bytes()
-        with mock.patch.object(HELPER, "ADAPTED_FIXTURES", {path: "0" * 40}):
-            with self.assertRaisesRegex(ValueError, "adapted fixture baseline blob"):
-                self.run_helper()
-        self.assertEqual(before, (self.tree / path).read_bytes())
-        self.assertTrue(all((self.tree / fixture).exists() for fixture in HELPER.FIXTURES))
+        path = next(reversed(HELPER.ADAPTED_FIXTURES))
+        self.assertEqual("backend/internal/service/admin_service_list_users_test.go", path)
+        self.write(path, "dirty final adapted fixture\n")
+        before = {str(file.relative_to(self.tree)): file.read_bytes()
+                  for file in (self.tree / "backend").rglob("*.go")}
+        with self.assertRaisesRegex(ValueError, "dirty candidate"):
+            self.run_helper()
+        after = {str(file.relative_to(self.tree)): file.read_bytes()
+                 for file in (self.tree / "backend").rglob("*.go")}
+        self.assertEqual(before, after, "all adaptations preflight before removals or restorations")
         self.assertFalse(self.manifest.exists())
 
     def test_dirty_last_fixture_is_rejected_before_any_removal(self):

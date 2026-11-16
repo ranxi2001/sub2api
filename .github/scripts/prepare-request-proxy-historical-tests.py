@@ -1,4 +1,4 @@
-"""Isolate twelve PR885 fixtures and restore one existing historical WS fixture."""
+"""Isolate twelve PR885 fixtures and restore two existing historical unit fixtures."""
 
 import json
 import os
@@ -32,6 +32,7 @@ ORACLES = (
 )
 ADAPTED_FIXTURES = {
     "backend/internal/service/openai_excel_bps_warm_test.go": "9dc2054fd0ab61d0465e1eb12ac060360bc80166",
+    "backend/internal/service/admin_service_list_users_test.go": "12597f3f10ff967818cd647bc293d8f27185136c",
 }
 
 
