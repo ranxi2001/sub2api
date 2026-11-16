@@ -31,6 +31,10 @@ var DefaultModels = []Model{
 	{ID: "gpt-6-sol", Object: "model", Created: 1790035200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Sol"},
 	{ID: "gpt-6-luna", Object: "model", Created: 1790035200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Luna"},
 	{ID: "gpt-6-astra", Object: "model", Created: 1788480000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Astra"},
+	// Created records the local catalog addition date, not an upstream release date.
+	{ID: "gpt-6.2-astra", Object: "model", Created: 1794787200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Astra", ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-6.2-astra-pro", Object: "model", Created: 1794787200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Astra Pro", ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-6.2-sol", Object: "model", Created: 1794787200, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Sol", ReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
 	{ID: "codex-auto-review", Object: "model", Created: 1776902400, OwnedBy: "openai", Type: "model", DisplayName: "Codex Auto Review"},
 	{ID: "gpt-image-2", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2"},
 	{ID: "gpt-image-2.5-flare", Object: "model", Created: 1788825600, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2.5 Flare"},
