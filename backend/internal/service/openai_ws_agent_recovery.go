@@ -629,7 +629,7 @@ type openAIWSLocalHistory struct {
 	instructions json.RawMessage
 	committed    []json.RawMessage
 	pending      []json.RawMessage
-	output       openAIWSToolCallReplayCollector
+	output       openAIWSLocalOutput
 	anchor       openAIWSBridgeResponseAnchor
 	clientModel  string
 	ready        bool
@@ -723,7 +723,7 @@ func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
 	defer r.accountLocalHistory()
 	r.localHistory.pending = nil
 	r.localHistory.outputBytes = 0
-	r.localHistory.output = openAIWSToolCallReplayCollector{}
+	r.localHistory.output = openAIWSLocalOutput{}
 	if r.service.settingService == nil || !r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(r.ctx) {
 		r.localHistory = openAIWSLocalHistory{}
 		return
@@ -775,9 +775,9 @@ func (r *openAIWSAgentRecovery) commitLocalHistory(completed bool) {
 		h.committed = nil
 		return
 	}
-	output := h.output.AllItems()
-	if h.output.finalItems != nil {
-		output = h.output.finalItems
+	output := h.output.items
+	if h.output.final != nil {
+		output = h.output.final
 	}
 	if output == nil {
 		output = []json.RawMessage{}
@@ -803,7 +803,7 @@ func (r *openAIWSAgentRecovery) commitLocalHistory(completed bool) {
 	}
 	h.pending = nil
 	h.outputBytes = 0
-	h.output = openAIWSToolCallReplayCollector{}
+	h.output = openAIWSLocalOutput{}
 }
 
 // Called at the outer proxy return boundary, after transport goroutines stop.
@@ -937,4 +937,43 @@ func openAIWSHasOpaqueField(value gjson.Result, depth int) bool {
 		return !opaque
 	})
 	return opaque
+}
+
+// Kept with the manager: protocol regression baselines may restore an older
+// bridge collector, while this socket history still needs terminal authority.
+type openAIWSLocalOutput struct {
+	items, final []json.RawMessage
+	seen         map[string]bool
+}
+
+func (o *openAIWSLocalOutput) AddEvent(event string, payload []byte) {
+	var items []gjson.Result
+	if event == "response.output_item.done" {
+		items = []gjson.Result{gjson.GetBytes(payload, "item")}
+	}
+	if (event == "response.completed" || event == "response.done") && openAIAgentCompletedResponse(payload, true) {
+		items = gjson.GetBytes(payload, "response.output").Array()
+		if len(items) > 0 {
+			o.final = []json.RawMessage{}
+			for _, v := range items {
+				o.final = append(o.final, append(json.RawMessage(nil), v.Raw...))
+			}
+		}
+	}
+	for _, v := range items {
+		key := v.Get("id").String()
+		if key == "" {
+			key = v.Get("call_id").String()
+		}
+		if key == "" {
+			key = v.Raw
+		}
+		if o.seen == nil {
+			o.seen = map[string]bool{}
+		}
+		if !o.seen[key] {
+			o.seen[key] = true
+			o.items = append(o.items, append(json.RawMessage(nil), v.Raw...))
+		}
+	}
 }
