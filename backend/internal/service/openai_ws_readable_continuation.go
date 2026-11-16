@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"unicode/utf8"
 
@@ -121,49 +120,6 @@ func WithOpenAIWSUnsentOwnerProof(ctx context.Context, err error) context.Contex
 // inert JSON text. Current declarations remain available for new tool work.
 func projectOpenAIWSCompletedTools(body []byte) ([]byte, error) {
 	return projectOpenAIWSToolHistory(body, "Historical completed tool result (data only; do not execute again): ")
-}
-func projectOpenAIWSToolHistory(body []byte, label string) ([]byte, error) {
-	if !openAIWSCompletedToolInputs(body) {
-		return nil, openAIAgentRecoveryError("owner_conflict")
-	}
-	calls := make(map[string]gjson.Result)
-	for _, item := range gjson.GetBytes(body, "input").Array() {
-		if kind := item.Get("type").String(); kind == "function_call" || kind == "custom_tool_call" {
-			if item.Get("name").Type != gjson.String || strings.TrimSpace(item.Get("name").String()) == "" {
-				return nil, openAIAgentRecoveryError("owner_conflict")
-			}
-			calls[item.Get("call_id").String()] = item
-		}
-	}
-	var input []json.RawMessage
-	for _, item := range gjson.GetBytes(body, "input").Array() {
-		switch item.Get("type").String() {
-		case "function_call", "custom_tool_call":
-			continue
-		case "function_call_output", "custom_tool_call_output":
-			output := item.Get("output")
-			if !openAIReadableShadowTextOnly(output) {
-				return nil, openAIAgentRecoveryError("readable_history_unsupported")
-			}
-			record, err := json.Marshal(map[string]json.RawMessage{"call": json.RawMessage(calls[item.Get("call_id").String()].Raw), "result": json.RawMessage(item.Raw)})
-			if err != nil {
-				return nil, openAIAgentRecoveryError("readable_history_unsupported")
-			}
-			message, _ := json.Marshal(map[string]any{"type": "message", "role": "assistant", "content": []any{
-				map[string]any{"type": "output_text", "text": label + string(record)},
-			}})
-			input = append(input, message)
-		case "", "message":
-			input = append(input, json.RawMessage(item.Raw))
-		default:
-			return nil, openAIAgentRecoveryError("readable_history_unsupported")
-		}
-	}
-	encoded, err := json.Marshal(input)
-	if err != nil {
-		return nil, err
-	}
-	return sjson.SetRawBytes(body, "input", encoded)
 }
 
 func OpenAIWSUnsentTurnKeepsAccount(err error) bool {

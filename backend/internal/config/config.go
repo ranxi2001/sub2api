@@ -2811,6 +2811,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.smart_protocol.large_output_threshold", 2000)
 	viper.SetDefault("gateway.openai_ws.smart_protocol.long_context_bytes", 200000)
 	viper.SetDefault("gateway.openai_ws.http_bridge_enabled", true)
+	viper.SetDefault("gateway.openai_ws.client_history_recovery_enabled", false)
+	viper.SetDefault("gateway.openai_ws.lossy_history_restart_enabled", false)
 	viper.SetDefault("gateway.openai_ws.http_bridge_threshold_bytes", 15*1024*1024)
 	viper.SetDefault("gateway.openai_ws.sse_acceleration_max_payload_bytes", 15*1024*1024)
 	viper.SetDefault("gateway.openai_ws.responses_websockets", false)
