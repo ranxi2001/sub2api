@@ -2,7 +2,15 @@ name: CI
 
 on:
   push:
+    branches: [production]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
+
+# PR updates replace older runs; other events keep a separate group per commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -11,197 +19,6 @@ env:
   EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
-  issue854-behavior:
-    if: github.event_name == 'pull_request' && github.head_ref == 'fix/issue854-ws-owner-continuation'
-    runs-on: macos-15-intel
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-      - name: Assert exact candidate
-        run: |
-          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          git diff --exit-code
-          mkdir -p "$RUNNER_TEMP/issue854-evidence"
-          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue854-evidence/candidate.txt"
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-      - name: Install isolated Redis fixture dependency
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: '1'
-          HOMEBREW_NO_INSTALL_CLEANUP: '1'
-        run: |
-          if ! command -v redis-server >/dev/null; then
-            brew install redis
-          fi
-          redis-server --version
-      - name: Validate evidence parser mutations
-        run: python3 -m unittest discover -s .github/scripts -p 'test_issue854_evidence.py'
-      - name: RED exact baseline production blobs with candidate tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          baseline=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
-          git worktree add --detach "$RUNNER_TEMP/issue854-red" "$EXPECTED_HEAD_SHA"
-          git rev-parse "$baseline" "$baseline^{tree}" > "$RUNNER_TEMP/issue854-evidence/baseline.txt"
-          git diff --name-only "$baseline" "$EXPECTED_HEAD_SHA" -- backend | while IFS= read -r target; do
-            case "$target" in
-              *_test.go) continue ;;
-              *.go)
-                if git cat-file -e "$baseline:$target" 2>/dev/null; then
-                  printf '%s %s\n' "$(git rev-parse "$baseline:$target")" "$target" >> "$RUNNER_TEMP/issue854-evidence/baseline-blobs.txt"
-                  git show "$baseline:$target" > "$RUNNER_TEMP/issue854-red/$target"
-                  test "$(git hash-object "$RUNNER_TEMP/issue854-red/$target")" = "$(git rev-parse "$baseline:$target")"
-                else
-                  rm -- "$RUNNER_TEMP/issue854-red/$target"
-                fi ;;
-            esac
-          done
-          cd "$RUNNER_TEMP/issue854-red"
-          bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue854-evidence/independent-fixtures.txt"
-          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-replay-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue854-evidence/replay-fixtures.txt"
-          git diff --stat > "$RUNNER_TEMP/issue854-evidence/red-diff.txt"
-          for suite in lifecycle persistence upstream ws-upstream r1 http-empty-image; do
-            case "$suite" in
-              lifecycle) test_name=TestIssue854OwnerContinuation ;;
-              persistence) test_name=TestIssue854OwnerFailurePersistence ;;
-              upstream) test_name=TestIssue854UpstreamOwnerRateLimit ;;
-              ws-upstream) test_name=TestIssue854WSOwnerRateLimit ;;
-              r1) test_name=TestIssue854FreshOwnerSelection ;;
-              http-empty-image) test_name='TestIssue854HTTPTransformMatrix$/.*/.*/empty_image' ;;
-              http-transform) test_name=TestIssue854HTTPTransformMatrix ;;
-              http-route) test_name=TestIssue854HTTPRouteAdmission ;;
-            esac
-            set +e
-            (cd backend && go test -tags=unit,issue854matrix ./internal/handler -run "^${test_name}$" -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/red-$suite.jsonl" 2>&1
-            status=$?
-            set -e
-            cat "$RUNNER_TEMP/issue854-evidence/red-$suite.jsonl"
-            python3 .github/scripts/issue854-evidence.py RED "$status" "$RUNNER_TEMP/issue854-evidence/red-$suite.jsonl" "$suite"
-          done
-      - name: GREEN clean candidate and lifecycle race checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          git diff --exit-code
-          for suite in lifecycle persistence upstream ws-upstream r1 http-transform http-route; do
-            case "$suite" in
-              lifecycle) test_name=TestIssue854OwnerContinuation ;;
-              persistence) test_name=TestIssue854OwnerFailurePersistence ;;
-              upstream) test_name=TestIssue854UpstreamOwnerRateLimit ;;
-              ws-upstream) test_name=TestIssue854WSOwnerRateLimit ;;
-              r1) test_name=TestIssue854FreshOwnerSelection ;;
-              http-transform) test_name=TestIssue854HTTPTransformMatrix ;;
-              http-route) test_name=TestIssue854HTTPRouteAdmission ;;
-            esac
-            set +e
-            (cd backend && go test -race -tags=unit,issue854matrix ./internal/handler -run "^${test_name}$" -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/green-$suite.jsonl" 2>&1
-            status=$?
-            set -e
-            cat "$RUNNER_TEMP/issue854-evidence/green-$suite.jsonl"
-            python3 .github/scripts/issue854-evidence.py GREEN "$status" "$RUNNER_TEMP/issue854-evidence/green-$suite.jsonl" "$suite"
-          done
-      - name: Contract and safety regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          (cd backend && go test -race -tags=unit ./internal/handler -run '^Test(OpenAI409(WSReadableBoundaries|WSReviewRepairs|WSResidualRepairs|WSNativeNamespaceRecovery|WSRecoveredAudit|WSRecoveredAuditNextTurn|WSAmbiguousOracleMutations|HTTPTaskRebuild|HTTPRebuildBoundaries|HTTPToolDefinitionOracle)|OpenAI409HTTPProjectionAndPassthrough|OpenAI409WSInitialWithoutPointer|Issue854HTTPContinuation|Issue854LostOwnerEvidence|Issue805|Issue758WS)' -count=1 -json -timeout=10m) > "$RUNNER_TEMP/issue854-evidence/contracts.jsonl" 2>&1
-          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue854-evidence/contracts.jsonl"
-          python3 .github/scripts/assert-ws-readable.py GREEN 0 "$RUNNER_TEMP/issue854-evidence/contracts.jsonl" ws-boundaries
-          (cd backend && go test -race -tags=unit,issue854matrix ./internal/service -run '^Test(OpenAI409PhysicalTimezonePreservesReadableTask|OpenAI409NamespaceProjectionPreservesNumbers|Issue854HTTPProjectionIntegrity|Issue854BeforeSendRecoveryGuards|OpenAI409WSUnsentTurnBoundary|Issue715WS|OpenAI409WS|OpenAIWS.*(Agent|Replay))' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/service-contracts.jsonl" 2>&1
-          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue854-evidence/service-contracts.jsonl"
-      - name: PostgreSQL terminal failure roundtrip
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: '1'
-          HOMEBREW_NO_INSTALL_CLEANUP: '1'
-          ISSUE854_TEST_POSTGRES_DSN: postgres://fixture@127.0.0.1:15439/issue854_fixture?sslmode=disable
-        shell: bash
-        run: |
-          set -euo pipefail
-          brew install postgresql@16
-          pg_bin="$(brew --prefix postgresql@16)/bin"
-          "$pg_bin/initdb" -D "$RUNNER_TEMP/issue854-pg" -U fixture -A trust
-          "$pg_bin/pg_ctl" -D "$RUNNER_TEMP/issue854-pg" -l "$RUNNER_TEMP/issue854-evidence/postgres.log" -o '-h 127.0.0.1 -p 15439' start
-          trap '"$pg_bin/pg_ctl" -D "$RUNNER_TEMP/issue854-pg" stop -m fast' EXIT
-          "$pg_bin/createdb" -h 127.0.0.1 -p 15439 -U fixture issue854_fixture
-          set +e
-          (cd backend && go test -race -tags=unit,issue854pg ./internal/handler -run '^TestIssue854PostgresRoundtrip$' -count=1 -json -timeout=5m) > "$RUNNER_TEMP/issue854-evidence/postgres.jsonl" 2>&1
-          status=$?
-          set -e
-          cat "$RUNNER_TEMP/issue854-evidence/postgres.jsonl"
-          python3 .github/scripts/issue854-evidence.py GREEN "$status" "$RUNNER_TEMP/issue854-evidence/postgres.jsonl" postgres
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: issue854-evidence-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/issue854-evidence/
-
-  pelican-round-evidence:
-    if: github.event_name == 'pull_request' && github.head_ref == 'fix/issue795-round-evidence-followup-20261112'
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-      - name: Assert exact candidate head
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-      - name: GREEN candidate regressions with fake upstream and real PostgreSQL
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/pelican-evidence"
-          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/pelican-evidence/candidate.txt"
-          git diff --exit-code
-          cd backend
-          go test -race -tags=unit ./internal/service -run '^Test(Pelican|Intelligence|LegacyCandy|ScheduledPlanContains)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/pelican-evidence/green-service.log"
-          go test -tags=integration ./internal/repository -run '^TestPelican(GroupTestRepo_|SchedulePersistenceLeaseAndRetention|HistoryReturnsEveryRetainedOutputAcrossAccounts)' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/pelican-evidence/green-repository.log"
-          grep -q -- '--- PASS: TestPelicanScheduledActualPromptMatchesSentPayload' "$RUNNER_TEMP/pelican-evidence/green-service.log"
-          grep -q -- '--- PASS: TestPelicanGroupTestRepo_StaleNominalRoundCannotClaimLaterRound' "$RUNNER_TEMP/pelican-evidence/green-repository.log"
-      - name: RED old production sources in isolated worktree retaining candidate regressions
-        shell: bash
-        run: |
-          set -euo pipefail
-          original=b5990096ae10a0b2481182f2ac45812effacda22
-          git fetch --no-tags --depth=1 origin "$original"
-          git worktree add --detach "$RUNNER_TEMP/pelican-red" "$EXPECTED_HEAD_SHA"
-          cd "$RUNNER_TEMP/pelican-red"
-          for target in backend/internal/service/pelican_scheduled.go backend/internal/repository/pelican_group_tests_repo.go; do
-            git rev-parse "$original:$target" >> "$RUNNER_TEMP/pelican-evidence/original-blobs.txt"
-            git show "$original:$target" > "$target"
-          done
-          git diff --stat > "$RUNNER_TEMP/pelican-evidence/red-diff.txt"
-          cd backend
-          set +e
-          go test -tags=unit ./internal/service -run '^TestPelicanScheduledActualPromptMatchesSentPayload$' -count=1 -v -timeout=10m > "$RUNNER_TEMP/pelican-evidence/red-service.log" 2>&1
-          service_status=$?
-          go test -tags=integration ./internal/repository -run '^TestPelicanGroupTestRepo_StaleNominalRoundCannotClaimLaterRound$' -count=1 -v -timeout=10m > "$RUNNER_TEMP/pelican-evidence/red-repository.log" 2>&1
-          repository_status=$?
-          set -e
-          cat "$RUNNER_TEMP/pelican-evidence/red-service.log"
-          cat "$RUNNER_TEMP/pelican-evidence/red-repository.log"
-          test "$service_status" -ne 0
-          test "$repository_status" -ne 0
-          ! grep -Eiq 'build failed|no tests to run|undefined:|--- SKIP:' "$RUNNER_TEMP/pelican-evidence/red-service.log" "$RUNNER_TEMP/pelican-evidence/red-repository.log"
-          grep -q -- '--- FAIL: TestPelicanScheduledActualPromptMatchesSentPayload/custom' "$RUNNER_TEMP/pelican-evidence/red-service.log"
-          grep -q 'saved actual prompt must match sent payload including delivery contract' "$RUNNER_TEMP/pelican-evidence/red-service.log"
-          grep -q -- '--- FAIL: TestPelicanGroupTestRepo_StaleNominalRoundCannotClaimLaterRound' "$RUNNER_TEMP/pelican-evidence/red-repository.log"
-          grep -q 'stale nominal round must not claim a later due round' "$RUNNER_TEMP/pelican-evidence/red-repository.log"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: pelican-round-evidence-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/pelican-evidence/
-
   shell:
     runs-on: macos-15-intel
     steps:
@@ -266,46 +83,6 @@ jobs:
             sudo apt-get install -y --no-install-recommends redis-server
           fi
           redis-server --version
-      - name: Verify scope conflict regression against original handlers
-        if: github.head_ref == 'fix/quality-template-switch-conflicts' || github.ref_name == 'fix/quality-template-switch-conflicts'
-        shell: bash
-        run: |
-          set -euo pipefail
-          target=backend/internal/handler/admin/scheduled_test_handler.go
-          cp "$target" "$RUNNER_TEMP/quality-current-handler.go"
-          trap 'cp "$RUNNER_TEMP/quality-current-handler.go" "$target"' EXIT
-          git fetch --no-tags --depth=1 origin 9fcfe25d600a331abcc28a1788e597e5542d4cd3
-          git show 9fcfe25d600a331abcc28a1788e597e5542d4cd3:"$target" > "$target"
-          set +e
-          (cd backend && go test ./internal/handler/admin -run '^TestQualityScopeConflictsUse409ForUpdateAndDelete$' -count=1) > "$RUNNER_TEMP/quality-red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/quality-red.log"
-          test "$result" -ne 0
-          grep -q 'FAIL: TestQualityScopeConflictsUse409ForUpdateAndDelete' "$RUNNER_TEMP/quality-red.log"
-          grep -Eq 'actual.*(400|500)' "$RUNNER_TEMP/quality-red.log"
-      - name: Verify user enable reason regression against original handler
-        if: github.head_ref == 'fix/moderation-user-quick-enable' || github.ref_name == 'fix/moderation-user-quick-enable'
-        shell: bash
-        run: |
-          set -euo pipefail
-          target=backend/internal/handler/admin/user_handler.go
-          cp "$target" "$RUNNER_TEMP/user-enable-current-handler.go"
-          trap 'cp "$RUNNER_TEMP/user-enable-current-handler.go" "$target"' EXIT
-          git fetch --no-tags --depth=1 origin bccac61c757f2c04a2360063c4057db2b270c856
-          git show bccac61c757f2c04a2360063c4057db2b270c856:"$target" > "$target"
-          set +e
-          (cd backend && go test -tags=unit ./internal/handler/admin -run '^TestUserQuickEnableReasonLimit$' -count=1) > "$RUNNER_TEMP/user-enable-red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/user-enable-red.log"
-          test "$result" -ne 0
-          grep -q 'FAIL: TestUserQuickEnableReasonLimit' "$RUNNER_TEMP/user-enable-red.log"
-          grep -q 'actual.*200' "$RUNNER_TEMP/user-enable-red.log"
-      - name: Verify user enable regressions
-        if: github.head_ref == 'fix/moderation-user-quick-enable' || github.ref_name == 'fix/moderation-user-quick-enable'
-        working-directory: backend
-        run: go test -tags=unit ./internal/handler/admin ./internal/server/middleware ./internal/service ./internal/repository -run 'TestUserQuickEnable|TestAdminService_UserQuickEnable|TestModerationRecoveryUnbanDoesNotClaimOtherDisable' -count=1 -v
       - name: Usage trend local bucket regressions
         working-directory: backend
         run: go test -tags=integration ./internal/repository -run '^TestUsageTrendAggregateTimezone' -count=1 -v
@@ -323,7 +100,7 @@ jobs:
         run: make test-integration
 
   frontend:
-    runs-on: ${{ (github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation') && 'macos-15-intel' || vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -344,12 +121,7 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
       - name: Frontend typecheck and critical vitest
-        env:
-          NODE_OPTIONS: ${{ (github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation') && '--max-old-space-size=4096' || '' }}
         run: make test-frontend
-      - name: Issue854 transport failure presentation
-        if: github.head_ref == 'fix/issue854-ws-owner-continuation' || github.ref_name == 'fix/issue854-ws-owner-continuation'
-        run: pnpm --dir frontend exec vitest run src/views/admin/ops/components/__tests__/OpsErrorLogTable.spec.ts src/views/admin/ops/components/__tests__/OpsErrorDetailModal.spec.ts
 
   golangci-lint:
     runs-on: ubuntu-latest
@@ -374,82 +146,6 @@ jobs:
           version: v2.14.0
           args: --timeout=30m
           working-directory: backend
-
-  pr612-regressions:
-    if: github.head_ref == 'fix/openai-header-timeout-default' || github.ref_name == 'fix/openai-header-timeout-default'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Assert exact candidate head
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-      - name: Exact candidate identity
-        run: git rev-parse HEAD
-      - name: Header safety, runtime settings and cache race regressions (loopback only)
-        working-directory: backend
-        run: >-
-          go test -race -tags=unit ./internal/service ./internal/repository ./internal/handler ./internal/handler/admin
-          -run '^(TestPR612|TestOpenAIResponseHeaderTimeout|TestApplyProfilePoolSettingsUsesRuntimeOpenAIResponseHeaderTimeout|TestDefaultOpenAIResponseHeaderTimeoutSettings|TestRuntimeProxyChainEveryHopMustProveUnsent)'
-          -count=1 -v -timeout=3m
-
-  pr612-regressions-red:
-    if: github.head_ref == 'fix/openai-header-timeout-default' || github.ref_name == 'fix/openai-header-timeout-default'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      matrix:
-        defect: [safety, cache]
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          path: red
-      - name: Assert exact candidate head
-        working-directory: red
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: red/backend/go.mod
-          cache-dependency-path: red/backend/go.sum
-      - name: Restore only the defective production file in isolated RED checkout
-        working-directory: red
-        env:
-          DEFECT: ${{ matrix.defect }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git rev-parse HEAD
-          original=3abcf230ee6dd4487d9fd880ad83040289c259a7
-          git fetch --no-tags --depth=1 origin "$original"
-          if [ "$DEFECT" = safety ]; then
-            target=backend/internal/service/openai_plugin_transport.go
-            packages=(./internal/handler)
-            regression='^TestPR612DelayedHeadersNeverReplaySubmittedPOST$'
-            diagnostic='submitted POST was replayed'
-          else
-            target=backend/internal/service/setting_openai_response_header_timeout.go
-            packages=(./internal/service ./internal/repository)
-            regression='^(TestOpenAIResponseHeaderTimeoutStaleRefreshCannotUndoDisable|TestPR612StaleReaderDisableControlsNextHTTPRequest)$'
-            diagnostic='old refresh must return the newer disable|neither success nor error refresh may republish|disabled next-request transport must have timeout 0'
-          fi
-          git rev-parse "$original:$target"
-          git show "$original:$target" > "$target"
-          git diff --stat
-          set +e
-          (cd backend && go test -tags=unit "${packages[@]}" -run "$regression" -count=1 -v -timeout=2m) > "$RUNNER_TEMP/pr612-red.log" 2>&1
-          result=$?
-          set -e
-          cat "$RUNNER_TEMP/pr612-red.log"
-          test "$result" -ne 0
-          ! grep -Eq 'build failed|no tests to run|undefined:' "$RUNNER_TEMP/pr612-red.log"
-          grep -q -- '--- FAIL: Test' "$RUNNER_TEMP/pr612-red.log"
-          grep -Eq "$diagnostic" "$RUNNER_TEMP/pr612-red.log"
 
   release-helpers:
     runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
