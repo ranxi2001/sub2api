@@ -23,8 +23,14 @@ jobs:
     env:
       CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
       PHASE: ${{ matrix.phase }}
-      EVIDENCE: ${{ runner.temp }}/ws-inherited-model-evidence
     steps:
+      - name: Initialize evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EVIDENCE="$RUNNER_TEMP/ws-inherited-model-evidence"
+          echo "EVIDENCE=$EVIDENCE" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE"
       - uses: actions/checkout@v6
         with:
           ref: ${{ env.CANDIDATE }}
