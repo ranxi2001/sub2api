@@ -27,6 +27,13 @@ func TestOpenAIWSHistoryReadableShapes(t *testing.T) {
 			SetOpenAIWSRecoveryPrincipal(c, 715, 715)
 			defer func() { manager.abort(); require.Equal(t, before, openAIWSLocalHistoryBytes.Load()) }()
 			source := `{"model":"gpt-6-astra","input":[{"role":"user","content":"fixture original task"},` + tc.input + `]}`
+			if tc.name == "readable_agent" || tc.name == "summary_agent" {
+				// Produce the encrypted envelope through an actual successful
+				// delivery first. Readable text never grants an unknown owner.
+				require.NoError(t, issue715WSBegin(t, manager, a, `{"model":"gpt-6-astra","input":[{"role":"user","content":"fixture original task"}]}`, "ctx_pool"))
+				require.NoError(t, manager.write([]byte(`{"type":"response.completed","response":{"id":"resp_shape_seed","status":"completed","output":[`+tc.input+`]}}`), func() error { return nil }))
+				source = `{"model":"gpt-6-astra","previous_response_id":"resp_shape_seed","input":[{"role":"user","content":"fixture original task"},` + tc.input + `]}`
+			}
 			require.NoError(t, issue715WSBegin(t, manager, a, source, "ctx_pool"))
 			terminal := []byte(`{"type":"response.completed","response":{"id":"resp_shape","status":"completed","output":[{"type":"function_call","call_id":"call_shape","name":"fixture","arguments":"{\"n\":9007199254740993}","status":"completed"}]}}`)
 			delivered := 0
