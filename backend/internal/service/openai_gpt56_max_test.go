@@ -22,6 +22,10 @@ func TestAstraForwardPreservesMaxInPayloadAndUsage(t *testing.T) {
 		{requested: "astra-public", upstream: "gpt-6-astra"},
 		{requested: "gpt-6.2-astra", upstream: "gpt-6.2-astra"},
 		{requested: "astra62-public", upstream: "gpt-6.2-astra"},
+		{requested: "gpt-6.2-astra-pro", upstream: "gpt-6.2-astra-pro"},
+		{requested: "astra62-pro-public", upstream: "gpt-6.2-astra-pro"},
+		{requested: "gpt-6.2-sol", upstream: "gpt-6.2-sol"},
+		{requested: "sol62-public", upstream: "gpt-6.2-sol"},
 	} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%t", model.requested, stream), func(t *testing.T) {

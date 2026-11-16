@@ -2629,16 +2629,13 @@ func normalizeOpenAIReasoningEffortForModel(raw, model string) string {
 // supportsOpenAIReasoningEffortMax reports model families whose upstream scale
 // has a distinct max level. Other models keep the legacy max -> xhigh behavior.
 func supportsOpenAIReasoningEffortMax(model string) bool {
-	if isOpenAIGPT6Model(model) || isOpenAIGPT56Model(model) {
+	if isOpenAIGPT6Model(model) || isOpenAIGPT56Model(model) || normalizeOpenAIGPT62Model(model) != "" {
 		return true
 	}
 
 	normalized := strings.ToLower(lastOpenAIModelSegment(model))
 	normalized = strings.ReplaceAll(normalized, "_", "-")
 	switch {
-	case normalized == "gpt-6.2-astra", strings.HasPrefix(normalized, "gpt-6.2-astra-"):
-		// Keep the 6.2 effort capability separate from model aliases and pricing.
-		return true
 	case strings.HasPrefix(normalized, "deepseek-v4"), strings.HasPrefix(normalized, "deepseek-flash"):
 		// deepseek-flash（= DeepSeek-V4.1-Flash）与 v4 系同为 low/high/max 档位。
 		return true
