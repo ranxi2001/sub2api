@@ -23,6 +23,12 @@ Open an OpenAI OAuth parent account and use the **OpenAI request protocol** pane
 3. Once bound, select **SIWC API** and save the account. Selecting **Codex** and
    saving restores the existing Codex/BPS/Prism routing configuration.
 
+The parent account's existing **Proxy** field selects either a single proxy or
+**Multiple proxies (distribute by request)** for SIWC as well. There is no
+separate SIWC proxy-group entry. Save and reopen the editor to check the selected
+protocol, proxy mode and members; the original single-proxy setting and account
+concurrency limit remain available.
+
 Authorization stores a grant but does not silently change the selected protocol.
 The UI's bound status means credentials are present; it is not an entitlement or
 live availability check. The existing account connection test uses the selected
@@ -125,6 +131,37 @@ classification. Known eligibility rejections stop the current request without
 automatic account failover, OAuth repetition, credential deletion, cooldown or
 permanent account status changes. They describe user/workspace/policy eligibility;
 they do not prove model quality degradation or an account risk-control flag.
+
+### Account proxy modes
+
+A SIWC grant bound to an ordinary OpenAI OAuth parent account supports the same
+`openai_proxy_mode` and `openai_proxy_ids` settings as that account's other
+supported HTTP routes. Single-proxy mode retains the existing behavior. In
+request mode, the Responses, Chat Completions and Messages entry points use only
+the account's manually selected, currently valid proxies. Different logical
+requests in one session can use different exits; selection prefers the fewest
+in-flight requests, rotates ties and permits reuse when every exit is busy.
+The account's total concurrency limit, SIWC entitlement and upstream quota stay
+the same. Multiple configured records do not guarantee distinct public IPs or
+higher upstream throughput.
+
+The logical request acquires its exit before SIWC token lookup. A refresh
+triggered by that request uses the same exit as inference; independent
+authorization and refresh operations retain their existing selected-group
+policy. An authorization callback still uses its original session exit and
+rechecks that it belongs to the current valid group. Completion, upstream error
+or cancellation releases the request's in-flight occupancy. If no selected
+proxy is usable, the request fails without sending through the old single
+proxy, an unselected proxy or a direct connection. A transport failure does not
+automatically replay a sent request through another exit.
+
+Proxy selection preserves the independent SIWC grant, official Responses URL
+and SIWC header rules. It does not enable Images, `/responses/compact`, real
+WebSocket or other unsupported SIWC endpoints, and it does not relax fixed or
+managed authorization-connection constraints. Identity-only SIWC connections
+do not gain inference capability. See [OpenAI account proxies](bps-account-multi-proxy.md)
+for configuration, snapshot freshness, multi-instance behavior and upgrade or
+rollback requirements.
 
 ## Admin API
 

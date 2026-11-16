@@ -1822,6 +1822,15 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
 
+	// Image generation already survives client disconnects so completed work
+	// can be accounted for. Its proxy scope follows that upstream lifecycle.
+	proxyCtx, releaseProxy, proxyErr := s.beginOpenAIRequestProxy(upstreamCtx, c, account)
+	if proxyErr != nil {
+		return nil, proxyErr
+	}
+	defer releaseProxy()
+	upstreamCtx = proxyCtx
+
 	if direct && account.IsExcelBPSImagesEnabledForModel(requestModel) && s.excelBPSGloballyEnabled(ctx) {
 		if reason := excelBPSImagesUnsupportedReason(parsed); reason != "" {
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Images request stays on Codex: account_id=%d bps_unsupported=%s", account.ID, reason)
@@ -1832,7 +1841,6 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			}
 		}
 	}
-
 	credentialAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, err
@@ -1908,7 +1916,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
 		if direct && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
-			return s.forwardOpenAIImagesOAuth(withOpenAIImagesForceResponses(ctx), c, account, parsed, channelMappedModel)
+			return s.forwardOpenAIImagesOAuth(withOpenAIImagesForceResponses(upstreamCtx), c, account, parsed, channelMappedModel)
 		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")

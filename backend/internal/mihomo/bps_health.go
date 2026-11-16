@@ -50,6 +50,9 @@ type bpsNodeHealth struct {
 // It contains no supplier credentials. Reports always refer to this exit,
 // even if a later request has rebound the same session.
 type BPSLease struct {
+	// Durable identity of a selected managed proxy; never contains its URL credentials.
+	ProxyID     int64
+	ProxyName   string
 	ProxyURL    string
 	manager     *Manager
 	node        string

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
 const (
@@ -175,6 +177,11 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 
 		result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, openAITokenRefreshSkew)
 		if err != nil {
+			_, hasRequestRoute := openAIRequestProxyFromContext(ctx, account.ID)
+			if hasRequestRoute && (errors.Is(err, errOpenAIRequestProxyUnavailable) || infraerrors.Reason(err) == "OPENAI_PROXY_UNAVAILABLE") {
+				// A rejected request route must not fall back to the old token.
+				return "", err
+			}
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", err
 			}

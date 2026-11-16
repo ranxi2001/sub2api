@@ -23,6 +23,10 @@ func TestBPSWarmProjectionPreservesEligibilityWithoutLargePayloads(t *testing.T)
 	}{
 		{name: "managed"},
 		{name: "static", change: func(a *service.Account) { a.Extra[service.ExcelBPSProxySourceKey] = service.ExcelBPSProxySourceIPPool }},
+		{name: "request group", change: func(a *service.Account) {
+			a.Extra[service.ExcelBPSProxyModeKey] = service.ExcelBPSProxyModeRequest
+			a.Extra[service.ExcelBPSProxyIDsKey] = []int64{11, 22}
+		}},
 		{name: "free", change: func(a *service.Account) { a.Credentials["plan_type"] = " Free " }},
 		{name: "agent", change: func(a *service.Account) { a.Credentials["auth_mode"] = service.OpenAIAuthModeAgentIdentity }},
 		{name: "legacy_pat", change: func(a *service.Account) { a.Credentials["openai_auth_mode"] = "personal_access_token" }},
@@ -100,6 +104,8 @@ func TestBPSWarmProjectionPreservesEligibilityWithoutLargePayloads(t *testing.T)
 		require.Equal(t, full.IsExcelBPS403RecoveryPending(), got.IsExcelBPS403RecoveryPending())
 		require.Equal(t, full.IsExcelBPSMihomoEnabled(), got.IsExcelBPSMihomoEnabled())
 		require.Equal(t, full.ExcelBPSProxySource(), got.ExcelBPSProxySource())
+		require.Equal(t, full.ExcelBPSRequestProxyEnabled(), got.ExcelBPSRequestProxyEnabled())
+		require.Equal(t, full.ExcelBPSRequestProxyIDs(), got.ExcelBPSRequestProxyIDs())
 		require.Equal(t, full.IsShadow(), got.IsShadow())
 		if full.IsShadow() {
 			require.True(t, got.IsShadow())

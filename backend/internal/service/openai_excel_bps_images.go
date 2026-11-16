@@ -245,6 +245,22 @@ func (s *OpenAIGatewayService) forwardExcelBPSImages(ctx context.Context, c *gin
 	if err != nil {
 		return nil, false, err
 	}
+	if c != nil {
+		c.Set(openAIRequestProxyOpsKey, (*openAIRequestProxyRoute)(nil))
+	}
+	proxyCtx, releaseProxy, proxyErr := s.beginOpenAIRequestProxy(ctx, nil, account)
+	if proxyErr != nil {
+		if isExcelBPSClientCancellation(c, proxyErr) {
+			MarkOpsClientCancellation(c, false)
+			return nil, false, context.Canceled
+		}
+		return fail(http.StatusServiceUnavailable, "basispoints_proxy_unavailable", "No healthy BPS session proxy is available; retry later")
+	}
+	defer releaseProxy()
+	ctx = proxyCtx
+	if route, ok := openAIRequestProxyFromContext(ctx, account.ID); ok && c != nil {
+		c.Set(openAIRequestProxyOpsKey, route)
+	}
 	token, err := s.getExcelBPSAccessToken(ctx, account)
 	if err != nil {
 		return nil, false, err
@@ -273,6 +289,9 @@ func (s *OpenAIGatewayService) forwardExcelBPSImages(ctx context.Context, c *gin
 	}
 	if lease != nil {
 		defer lease.Release()
+	}
+	if account.ExcelBPSRequestProxyEnabled() {
+		resp.Body = ownExcelBPSRequestBody(ctx, resp.Body, lease)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

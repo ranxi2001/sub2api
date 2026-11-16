@@ -17,6 +17,8 @@ on:
       - 'backend/internal/service/openai_agent_message*'
       - '.github/scripts/assert-ws-readable.py'
       - '.github/scripts/test_assert_ws_readable.py'
+      - '.github/scripts/prepare-request-proxy-historical-tests.py'
+      - '.github/scripts/test_request_proxy_historical_tests.py'
       - '.github/scripts/exclude-later-400-red-fixtures.sh'
       - '.github/scripts/exclude-later-http2-red-fixtures.sh'
       - 'backend/internal/service/openai_gateway_passthrough.go'
@@ -39,11 +41,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s .github/scripts -p 'test_assert_ws_readable.py' -v 2>&1 | tee "$RUNNER_TEMP/ws-validator.log"
+          python3 -B -m unittest discover -s .github/scripts -p 'test_request_proxy_historical_tests.py' -v 2>&1 | tee "$RUNNER_TEMP/request-proxy-historical-validator.log"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ws-readable-validator-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}/ws-validator.log
+          path: |
+            ${{ runner.temp }}/ws-validator.log
+            ${{ runner.temp }}/request-proxy-historical-validator.log
           if-no-files-found: error
   transport:
     needs: validator
@@ -205,6 +210,32 @@ jobs:
               fi
             done < <(git diff --no-renames --name-only "$baseline" "$CANDIDATE_SHA" -- 'backend/**/*.go')
             git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
+            # BEGIN residual Redis test-support overlay
+            # The complete production baseline is proved above. Restore only
+            # this candidate test dependency, with an explicit blob manifest.
+            helper=backend/internal/testutil/redissession/store.go
+            test "$helper" = backend/internal/testutil/redissession/store.go
+            if git cat-file -e "$baseline:$helper" 2>/dev/null; then exit 1; fi
+            candidate_blob=$(git rev-parse "$CANDIDATE_SHA:$helper")
+            test "$(git cat-file -t "$candidate_blob")" = blob
+            for support_dir in backend backend/internal backend/internal/testutil backend/internal/testutil/redissession; do
+              test ! -L "$GITHUB_WORKSPACE/$support_dir"
+              test ! -L "$tested_tree/$support_dir"
+            done
+            test -f "$GITHUB_WORKSPACE/$helper"
+            test ! -L "$GITHUB_WORKSPACE/$helper"
+            source_blob=$(git hash-object "$GITHUB_WORKSPACE/$helper")
+            test "$source_blob" = "$candidate_blob"
+            test ! -e "$tested_tree/$helper"
+            test ! -L "$tested_tree/$helper"
+            mkdir -p -- "$(dirname -- "$tested_tree/$helper")"
+            git show "$CANDIDATE_SHA:$helper" > "$tested_tree/$helper"
+            restored_blob=$(git hash-object "$tested_tree/$helper")
+            test "$restored_blob" = "$candidate_blob"
+            git -C "$tested_tree" diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go' ":!$helper"
+            test "$(git -C "$tested_tree" diff --name-only "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go')" = "$helper"
+            printf 'path=%s baseline=%s baseline_blob=absent candidate=%s candidate_blob=%s source_blob=%s restored_blob=%s\n' "$helper" "$baseline" "$CANDIDATE_SHA" "$candidate_blob" "$source_blob" "$restored_blob" > "$RUNNER_TEMP/ws-evidence/residual-test-support.txt"
+            # END residual Redis test-support overlay
           fi
           git -C "$tested_tree" diff --exit-code "$CANDIDATE_SHA" -- 'backend/**/*_test.go'
           if [ "$PHASE" = RED ]; then
@@ -218,11 +249,11 @@ jobs:
             # PR855 route-evidence types and later production BPS search APIs
             # are absent in this baseline. Their unselected tests follow the
             # pinned historical APIs too; the selected ticket oracle stays current.
-            # The shared replay helper already handles the four UltraFast/group
-            # fixtures with source proofs. Do not require their candidate blobs
-            # again after that helper has restored or excluded them.
-            # BPS search is already excluded with blob/contract proofs by the
-            # shared helpers above, so do not inspect/remove it a second time.
+            # The replay helper already owns the four UltraFast group fixtures
+            # and the base BPS search fixtures. Do not apply them twice here.
+            # The separate search-business fixture still depends on the removed
+            # search helper, so this loop alone owns its historical adaptation.
+            # Never change the selected ticket oracle or candidate GREEN tests.
             for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go backend/internal/service/openai_ws_agent_recovery_test.go backend/internal/service/openai_excel_bps_search_business_test.go backend/internal/service/gemini_compat_response_format_test.go; do
               candidate_blob=$(git rev-parse "$CANDIDATE_SHA:$target")
               test "$(git hash-object "$tested_tree/$target")" = "$candidate_blob"
@@ -238,6 +269,10 @@ jobs:
                 printf 'path=%s baseline=%s candidate=%s candidate_blob=%s baseline_blob=absent actual=absent\n' "$target" "$baseline" "$CANDIDATE_SHA" "$candidate_blob" >> "$RUNNER_TEMP/ws-evidence/residual-service-fixtures.txt"
               fi
             done
+            # PR885 unit fixtures require the later request-proxy contract.
+            # Restore the existing warm fixture to its pinned historical blob.
+            # Keep the selected ticket oracle and the proved production baseline.
+            python3 .github/scripts/prepare-request-proxy-historical-tests.py "$baseline" "$tested_tree" "$CANDIDATE_SHA" "$RUNNER_TEMP/ws-evidence/request-proxy-historical-tests.json"
           fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_409_ws_ticket_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_payload.go backend/internal/service/openai_gateway_passthrough.go; do
             git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/residual-blobs.txt"
@@ -334,5 +369,6 @@ jobs:
         if: always()
         with:
           name: ws-readable-${{ matrix.phase }}-${{ env.CANDIDATE_SHA }}
+          # Includes the guarded request-proxy-historical-tests.json RED manifest.
           path: ${{ runner.temp }}/ws-evidence/
           if-no-files-found: error

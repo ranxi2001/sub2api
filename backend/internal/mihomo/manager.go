@@ -108,6 +108,7 @@ type Manager struct {
 	bpsProbe      func(context.Context, string) error // isolated tests only
 	bpsStaticMode bool                                // dedicated static (IP 管理) pool: no kernel, no listeners
 	bpsStatic     map[string]string                   // static node key -> upstream proxy URL; protected by bpsMu
+	bpsRequests   bpsRequestPool                      // account request leases; protected by bpsMu
 
 	astraGate            sync.RWMutex
 	astraLanes           chan int

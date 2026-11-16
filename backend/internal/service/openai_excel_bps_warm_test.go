@@ -39,6 +39,23 @@ func TestExcelBPSWarmTargetsUseConfiguredConcurrency(t *testing.T) {
 	require.Equal(t, excelBPSWarmMaxTarget, m)
 }
 
+func TestExcelBPSWarmRequestRecoveryDoesNotMutateAccount(t *testing.T) {
+	account := recoveryTestAccount(time.Now())
+	account.Concurrency = 6
+	account.Extra[ExcelBPSProxyModeKey] = ExcelBPSProxyModeRequest
+	account.Extra[ExcelBPSProxyIDsKey] = []int64{11, 22}
+	projection, recovery := effectiveExcelBPSWarmAccount(account)
+	require.True(t, recovery)
+	require.True(t, projection.ExcelBPSRequestProxyEnabled())
+	require.Equal(t, []int64{11, 22}, projection.ExcelBPSRequestProxyIDs())
+	require.Equal(t, 6, projection.Concurrency, "group projection must retain account settings")
+	managed, static := excelBPSWarmTargets([]Account{*account})
+	require.Zero(t, managed)
+	require.Equal(t, 1, static, "recovery target only needs one healthy exit")
+	require.False(t, account.IsExcelBPSEnabled(), "warming cannot re-enable the stored account")
+	require.Equal(t, 6, account.Concurrency)
+}
+
 type warmProjectionRepo struct {
 	AccountRepository
 	projectionCalls int

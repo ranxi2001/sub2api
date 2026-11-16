@@ -631,6 +631,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return admissionErr
 	}
 	account = latest
+	if account.OpenAIRequestProxyEnabled() {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Request proxy routing requires HTTP/SSE; WebSocket routing is unavailable", nil)
+	}
 	if account.IsSIWCEnabled() {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "SIWC accounts require HTTP/SSE", nil)
 	}

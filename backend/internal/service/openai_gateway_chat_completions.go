@@ -109,6 +109,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, admissionErr
 	}
 	account = latest
+	proxyCtx, releaseProxy, proxyErr := s.beginOpenAIRequestProxy(ctx, c, account)
+	if proxyErr != nil {
+		return nil, proxyErr
+	}
+	defer releaseProxy()
+	ctx = proxyCtx
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}

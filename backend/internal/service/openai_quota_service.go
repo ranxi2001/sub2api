@@ -571,6 +571,16 @@ func (s *OpenAIQuotaService) prepareUpstreamCall(ctx context.Context, accountID 
 		return "", "", "", false, infraerrors.New(http.StatusBadRequest, "OPENAI_QUOTA_MISSING_ACCOUNT_ID", "chatgpt_account_id is missing; please re-authorize this account")
 	}
 
+	requestProxy := account.OpenAIRequestProxyEnabled()
+	if requestProxy {
+		// Validate the saved group before token maintenance can issue network
+		// requests. Request mode must never use the legacy single/direct exit.
+		proxyURL, err = resolveOpenAIMaintenanceProxy(ctx, account, s.proxyRepo)
+		if err != nil {
+			return "", "", "", false, err
+		}
+	}
+
 	if !account.IsOpenAIAgentIdentity() {
 		if s.tokenProvider == nil {
 			return "", "", "", false, infraerrors.New(http.StatusInternalServerError, "OPENAI_QUOTA_NOT_CONFIGURED", "openai quota token provider is not configured")
@@ -590,7 +600,7 @@ func (s *OpenAIQuotaService) prepareUpstreamCall(ctx context.Context, accountID 
 	// instead of round-tripping the DB again. Fall back to proxyRepo only
 	// when Proxy isn't pre-populated (defensive — e.g. callers that built
 	// the Account by hand).
-	if account.ProxyID != nil {
+	if !requestProxy && account.ProxyID != nil {
 		switch {
 		case account.Proxy != nil:
 			proxyURL = account.Proxy.URL()

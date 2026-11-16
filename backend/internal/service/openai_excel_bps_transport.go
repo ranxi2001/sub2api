@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/mihomo"
@@ -70,6 +71,19 @@ func acquireExcelBPSProxy(ctx context.Context, scope string, excluded ...string)
 // excelBPSAcquireFor routes the managed session to the pool the account chose.
 // Both pools share binding/scoring semantics, so callers keep one acquire shape.
 func (s *OpenAIGatewayService) excelBPSAcquireFor(account *Account) excelBPSAcquire {
+	if account.ExcelBPSRequestProxyEnabled() {
+		ids := account.ExcelBPSRequestProxyIDs()
+		return func(ctx context.Context, scope string, excluded ...string) (string, excelBPSLease, error) {
+			if route, ok := openAIRequestProxyFromContext(ctx, account.ID); ok {
+				return pinnedExcelBPSAcquire(route.proxy, route.lease)(ctx, scope, excluded...)
+			}
+			lease, err := mihomo.AcquireBPSStaticRequestLease(ctx, account.ID, ids, excluded...)
+			if err != nil {
+				return "", nil, err
+			}
+			return lease.ProxyURL, lease, nil
+		}
+	}
 	if account.ExcelBPSProxySource() == ExcelBPSProxySourceIPPool {
 		return s.acquireExcelBPSIPPoolProxy
 	}
@@ -113,14 +127,51 @@ func (s *OpenAIGatewayService) refreshExcelBPSIPPool(ctx context.Context) {
 		logger.FromContext(ctx).Warn("excel_bps.ip_pool_refresh_failed", zap.Error(err))
 		return
 	}
-	urls := make([]string, 0, len(proxies))
+	records := make([]mihomo.BPSStaticProxy, 0, len(proxies))
 	for i := range proxies {
 		if proxies[i].IsExpired(now) {
 			continue
 		}
-		urls = append(urls, proxies[i].URL())
+		records = append(records, mihomo.BPSStaticProxy{ID: proxies[i].ID, Name: proxies[i].Name, URL: proxies[i].URL(), ExpiresAt: proxies[i].ExpiresAt})
 	}
-	mihomo.SetBPSStaticProxies(urls)
+	mihomo.SetBPSStaticProxyRecords(records)
+}
+
+// Wrap the final logical response, not individual upstream attempts: repairs,
+// search continuations and attachments must retain their original exit.
+func ownExcelBPSRequestBody(ctx context.Context, body io.ReadCloser, lease excelBPSLease) io.ReadCloser {
+	if body == nil || lease == nil {
+		return body
+	}
+	b := &excelBPSRequestBody{ReadCloser: body, lease: lease}
+	b.stop = context.AfterFunc(ctx, func() { b.closeBody(); b.finish() })
+	return b
+}
+
+type excelBPSRequestBody struct {
+	io.ReadCloser
+	lease    excelBPSLease
+	done     sync.Once
+	closed   sync.Once
+	closeErr error
+	stop     func() bool
+}
+
+func (b *excelBPSRequestBody) finish()    { b.done.Do(b.lease.Release) }
+func (b *excelBPSRequestBody) closeBody() { b.closed.Do(func() { b.closeErr = b.ReadCloser.Close() }) }
+func (b *excelBPSRequestBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil {
+		b.stop()
+		b.finish()
+	}
+	return n, err
+}
+func (b *excelBPSRequestBody) Close() error {
+	b.stop()
+	b.closeBody()
+	b.finish()
+	return b.closeErr
 }
 
 // Missing trace is not evidence of safety. Standard net/http emits GetConn
@@ -175,7 +226,7 @@ func (s *OpenAIGatewayService) doExcelBPSRequest(ctx context.Context, c *gin.Con
 // doExcelBPSRequestTo applies the same exit and no-replay rules to another BPS
 // endpoint; build must return a fresh request for each attempt.
 func (s *OpenAIGatewayService) doExcelBPSRequestTo(ctx context.Context, c *gin.Context, account *Account, scope, upstreamURL string, build func(context.Context) (*http.Request, error), acquire excelBPSAcquire) (*http.Response, excelBPSLease, string, error) {
-	managed := account.IsExcelBPSMihomoEnabled()
+	managed := account.IsExcelBPSMihomoEnabled() || account.ExcelBPSRequestProxyEnabled()
 	var excluded []string
 	proxy := ""
 	if account.Proxy != nil {

@@ -823,6 +823,11 @@ func (s *OpenAIOAuthReauthService) ClaimTaskWithEngines(ctx context.Context, wor
 		_ = s.repo.MarkFailed(ctx, record.ID, workerID, "configured re-login proxy source is invalid")
 		return nil, nil
 	}
+	requestProxyEnabled := account.OpenAIRequestProxyEnabled()
+	if requestProxyEnabled && (engine != OpenAIOAuthReauthEngineLocal || proxySource != OpenAIOAuthReauthProxySourceAccount) {
+		_ = s.repo.MarkFailed(ctx, record.ID, workerID, "request proxy routing requires local re-login with the account proxy source")
+		return nil, nil
+	}
 	proxyID := stored.ProxyID
 	proxyError := "configured re-login proxy is unavailable"
 	var proxyURL string
@@ -832,7 +837,11 @@ func (s *OpenAIOAuthReauthService) ClaimTaskWithEngines(ctx context.Context, wor
 		case OpenAIOAuthReauthProxySourceAccount:
 			proxyID = account.ProxyID
 			proxyError = "configured account proxy is unavailable"
-			proxyURL, proxyErr = s.reauthProxyURL(ctx, proxyID)
+			if requestProxyEnabled {
+				proxyURL, proxyErr = resolveOpenAIMaintenanceProxy(ctx, account, s.oauth.proxyRepo)
+			} else {
+				proxyURL, proxyErr = s.reauthProxyURL(ctx, proxyID)
+			}
 		case OpenAIOAuthReauthProxySourceManagedProxy:
 			proxyURL, proxyErr = s.reauthProxyURL(ctx, proxyID)
 		case OpenAIOAuthReauthProxySourceMihomo:
@@ -880,7 +889,7 @@ func (s *OpenAIOAuthReauthService) ClaimTaskWithEngines(ctx context.Context, wor
 		}
 		var auth *OpenAIAuthURLResult
 		var authErr error
-		if proxySource == OpenAIOAuthReauthProxySourceMihomo {
+		if requestProxyEnabled || proxySource == OpenAIOAuthReauthProxySourceMihomo {
 			auth, authErr = s.oauth.GenerateAuthURLWithProxyURL(ctx, proxyURL, "", PlatformOpenAI)
 		} else {
 			auth, authErr = s.oauth.GenerateAuthURL(ctx, proxyID, "", PlatformOpenAI)
@@ -986,6 +995,21 @@ func (s *OpenAIOAuthReauthService) SubmitCallback(ctx context.Context, taskID in
 	currentCredentialsHash, err := hashReauthCredentials(account.Credentials)
 	if err != nil || subtle.ConstantTimeCompare([]byte(currentCredentialsHash), []byte(record.ExpectedCredentialsHash)) != 1 {
 		return s.failCallback(ctx, taskID, "account credentials changed while re-login was running", errors.New("credential snapshot mismatch"))
+	}
+	if account.OpenAIRequestProxyEnabled() {
+		var session *openai.OAuthSession
+		var ok bool
+		if record.OAuthProfile == "siwc" {
+			session, ok = s.readSIWCSession(ctx, record.AuthSessionID, false)
+		} else if s.oauth.sessionStore != nil {
+			session, ok = s.oauth.sessionStore.Get(record.AuthSessionID)
+		}
+		if !ok || session == nil {
+			return s.failCallback(ctx, taskID, "authorization session is no longer available", errors.New("authorization session missing"))
+		}
+		if _, err := resolveOpenAIMaintenanceProxy(ctx, account, s.oauth.proxyRepo, session.ProxyURL); err != nil {
+			return s.failCallback(ctx, taskID, "authorization proxy is no longer in the available account proxy group", err)
+		}
 	}
 	if record.OAuthProfile == "siwc" {
 		if err := s.CompleteSIWCAuthorization(ctx, record.AccountID, record.AuthSessionID, callback, record); err != nil {

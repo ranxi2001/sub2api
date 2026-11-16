@@ -3,6 +3,7 @@ export default {
   "codex": "Codex (keep existing BPS / Prism settings)",
   "siwc": "SIWC API (Sign in with ChatGPT)",
   "protocolHint": "Switch after authorization and save the account to apply. SIWC uses your ChatGPT plan through the official Responses API. Codex credentials are retained separately.",
+  "proxyHint": "SIWC reuses the account proxy settings. When per-request routing is selected, it uses the saved proxy group; if none is available, requests stop without falling back to a direct connection. The account concurrency limit stays unchanged.",
   "bound": "SIWC bound (credentials present; availability not verified)",
   "unbound": "SIWC not bound",
   "automatic": "Authorize with saved password / 2FA",

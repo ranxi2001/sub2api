@@ -118,7 +118,12 @@ func (s *OpenAIOAuthReauthService) BeginSIWCAuthorization(ctx context.Context, i
 	if err != nil {
 		return nil, err
 	}
-	proxy, err := s.reauthProxyURL(ctx, account.ProxyID)
+	var proxy string
+	if account.OpenAIRequestProxyEnabled() {
+		proxy, err = resolveOpenAIMaintenanceProxy(ctx, account, s.oauth.proxyRepo)
+	} else {
+		proxy, err = s.reauthProxyURL(ctx, account.ProxyID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +217,17 @@ func (s *OpenAIOAuthReauthService) CompleteSIWCAuthorization(ctx context.Context
 	if clientID == "" || clientID == openai.SIWCDynamicClientID || q.Get("code") == "" {
 		return infraerrors.BadRequest("OPENAI_SIWC_REGISTRATION_INCOMPLETE", "SIWC callback requires code and issued client ID")
 	}
+	account, err := s.accountFor(ctx, id)
+	if err != nil {
+		return err
+	}
+	if account.OpenAIRequestProxyEnabled() {
+		// Keep the authorization attempt's exit fixed, but require that the
+		// saved exit is still an available member of the current selection.
+		if _, err = resolveOpenAIMaintenanceProxy(ctx, account, s.oauth.proxyRepo, session.ProxyURL); err != nil {
+			return err
+		}
+	}
 	// Consume before exchanging; failed exchanges need a fresh authorization.
 	consumed, valid := s.readSIWCSession(ctx, sessionID, true)
 	if !valid || consumed.State != session.State || consumed.SIWCAccountID != id {
@@ -230,7 +246,7 @@ func (s *OpenAIOAuthReauthService) CompleteSIWCAuthorization(ctx context.Context
 	if identity == nil || token.RefreshToken == "" {
 		return errors.New("SIWC credentials are incomplete")
 	}
-	account, err := s.accountFor(ctx, id)
+	account, err = s.accountFor(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -348,7 +364,13 @@ func (s *OpenAIOAuthReauthService) SIWCAccessToken(ctx context.Context, account 
 	if !ok {
 		return "", errors.New("SIWC token client is unavailable")
 	}
-	proxy, err := s.reauthProxyURL(refreshCtx, fresh.ProxyID)
+	var proxy string
+	_, hasRequestRoute := openAIRequestProxyFromContext(refreshCtx, fresh.ID)
+	if fresh.OpenAIRequestProxyEnabled() || hasRequestRoute {
+		proxy, err = resolveOpenAIMaintenanceProxy(refreshCtx, fresh, s.oauth.proxyRepo)
+	} else {
+		proxy, err = s.reauthProxyURL(refreshCtx, fresh.ProxyID)
+	}
 	if err != nil {
 		return "", err
 	}

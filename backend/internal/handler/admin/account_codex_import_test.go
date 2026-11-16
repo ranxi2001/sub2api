@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1164,6 +1165,39 @@ func TestImportCodexSessionsAdmissionSourceOnlyInitializesNewAccounts(t *testing
 		second, err := h.importCodexSessions(context.Background(), req, entries)
 		if err != nil || second.Skipped != 1 || len(svc.createdAccounts) != 1 || len(svc.updatedAccounts) != 0 {
 			t.Fatal("duplicate import reinitialized the account")
+		}
+	}
+}
+
+func TestImportCodexSessionsPreservesOpenAIProxyConfiguration(t *testing.T) {
+	for _, twoFA := range []bool{false, true} {
+		svc := newCodexImportMemoryAdminService(nil)
+		h := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		proxyID := int64(31)
+		req := CodexSessionImportRequest{ProxyID: &proxyID, InitializeOpenAITwoFA: twoFA, SkipDefaultGroupBind: boolPtr(true), Extra: map[string]any{service.OpenAIProxyModeKey: service.OpenAIProxyModeRequest, service.OpenAIProxyIDsKey: []int64{11, 22}}}
+		entries := []codexImportEntry{{Index: 1, Value: buildCodexRefreshImportValue(t, "proxy-workspace", "proxy-user", "fixture-refresh")}}
+		result, err := h.importCodexSessions(context.Background(), req, entries)
+		if err != nil || result.Created != 1 || result.Failed != 0 {
+			t.Fatalf("create import = %#v, %v", result, err)
+		}
+		created := svc.createdAccounts[0]
+		if created.ProxyID == nil || *created.ProxyID != proxyID {
+			t.Fatal("create lost original single proxy")
+		}
+		if created.Extra[service.OpenAIProxyModeKey] != service.OpenAIProxyModeRequest {
+			t.Fatal("create lost request mode")
+		}
+		account := &service.Account{Extra: created.Extra}
+		if !reflect.DeepEqual(account.OpenAIRequestProxyIDs(), []int64{11, 22}) {
+			t.Fatal("create lost selected group")
+		}
+		result, err = h.importCodexSessions(context.Background(), req, entries)
+		if err != nil || result.Updated != 1 || result.Failed != 0 {
+			t.Fatalf("update import = %#v, %v", result, err)
+		}
+		updated := svc.updatedAccounts[0].input
+		if updated.ProxyID == nil || *updated.ProxyID != proxyID || updated.Extra[service.OpenAIProxyModeKey] != service.OpenAIProxyModeRequest {
+			t.Fatal("update lost proxy configuration")
 		}
 	}
 }

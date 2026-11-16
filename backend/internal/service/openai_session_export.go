@@ -248,7 +248,19 @@ func (s *OpenAIOAuthReauthService) ClaimSessionExportTask(ctx context.Context, w
 				_ = s.sessionExportRepo.FinishSessionExportTask(ctx, record.ID, workerID, OpenAISessionExportStatusFailed, "totp_unavailable")
 				return nil, nil
 			}
-			proxyURL, err := s.reauthProxyURL(ctx, account.ProxyID)
+			var proxyURL string
+			if account.OpenAIRequestProxyEnabled() {
+				// The worker receives one fixed exit for its whole login flow.
+				// Explicit alternate sources cannot escape the selected account group.
+				source, sourceErr := normalizeReauthProxySource(config.ProxySource, config.ProxyID)
+				if sourceErr != nil || source != OpenAIOAuthReauthProxySourceAccount {
+					_ = s.sessionExportRepo.FinishSessionExportTask(ctx, record.ID, workerID, OpenAISessionExportStatusFailed, "proxy_unavailable")
+					return nil, nil
+				}
+				proxyURL, err = resolveOpenAIMaintenanceProxy(ctx, account, s.oauth.proxyRepo)
+			} else {
+				proxyURL, err = s.reauthProxyURL(ctx, account.ProxyID)
+			}
 			if err != nil {
 				_ = s.sessionExportRepo.FinishSessionExportTask(ctx, record.ID, workerID, OpenAISessionExportStatusFailed, "proxy_unavailable")
 				return nil, nil

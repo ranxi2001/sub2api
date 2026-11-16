@@ -237,10 +237,17 @@ func (s *OpenAIOAuthReauthService) ClaimTOTPRotation(ctx context.Context, worker
 	if err == nil {
 		source, sourceErr := normalizeReauthProxySource(cfg.ProxySource, cfg.ProxyID)
 		err = sourceErr
+		if err == nil && account.OpenAIRequestProxyEnabled() && source != OpenAIOAuthReauthProxySourceAccount {
+			err = errors.New("request proxy routing requires the account proxy source")
+		}
 		if err == nil {
 			switch source {
 			case OpenAIOAuthReauthProxySourceAccount:
-				claim.ProxyURL, err = s.reauthProxyURL(ctx, account.ProxyID)
+				if account.OpenAIRequestProxyEnabled() {
+					claim.ProxyURL, err = resolveOpenAIMaintenanceProxy(ctx, account, s.oauth.proxyRepo)
+				} else {
+					claim.ProxyURL, err = s.reauthProxyURL(ctx, account.ProxyID)
+				}
 			case OpenAIOAuthReauthProxySourceManagedProxy:
 				claim.ProxyURL, err = s.reauthProxyURL(ctx, cfg.ProxyID)
 			case OpenAIOAuthReauthProxySourceMihomo:

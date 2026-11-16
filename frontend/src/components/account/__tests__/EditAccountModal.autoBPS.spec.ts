@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { defaultQualityBPS } from '@/utils/qualityRulePatch'
 
@@ -77,9 +78,12 @@ function buildRule(patch: Record<string, unknown> = {}) {
 }
 
 function mountModal(account = buildOAuthAccount()) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
   return mount(EditAccountModal, {
     props: { show: true, account, proxies: [], groups: [] },
     global: {
+      plugins: [pinia],
       stubs: { BaseDialog: BaseDialogStub, Select: true, Icon: true, ProxySelector: true, GroupSelector: true, ModelWhitelistSelector: true }
     }
   })

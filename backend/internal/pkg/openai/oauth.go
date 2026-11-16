@@ -56,6 +56,7 @@ type OAuthSession struct {
 	SIWCHostID              string
 	SIWCPreviousGrant       string
 	SIWCExpectedCredentials map[string]any
+	RequestProxy            bool `json:"request_proxy,omitempty"`
 
 	State        string    `json:"state"`
 	CodeVerifier string    `json:"code_verifier"`

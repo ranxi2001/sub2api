@@ -514,8 +514,8 @@
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
     <NewAPIUpstreamConfigDialog v-if="authStore.isAdmin" :show="newAPIConfigAccount !== null" :account="newAPIConfigAccount" @close="newAPIConfigAccount = null" @saved="reload" />
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <CreateAccountModal :show="showCreate" :proxies="proxies" :proxies-loading="proxiesLoading" :proxies-load-error="proxiesLoadError" :groups="groups" @retry-proxies="loadProxyCatalog" @close="showCreate = false" @created="reload" />
+    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :proxies-loading="proxiesLoading" :proxies-load-error="proxiesLoadError" :groups="groups" @retry-proxies="loadProxyCatalog" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" @tested="reload" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
@@ -634,6 +634,25 @@ const loadConcurrencyUpgradeState = async () => {
 }
 
 const proxies = ref<AccountProxy[]>([])
+const proxiesLoading = ref(true)
+const proxiesLoadError = ref(false)
+let proxyCatalogPending = false
+const loadProxyCatalog = async () => {
+  if (proxyCatalogPending || accountViewDisposed) return
+  proxyCatalogPending = true
+  proxiesLoading.value = true
+  proxiesLoadError.value = false
+  try {
+    const result = await adminAPI.proxies.getAll()
+    if (!accountViewDisposed) proxies.value = result
+  } catch (error) {
+    if (!accountViewDisposed) proxiesLoadError.value = true
+    console.error('Failed to load proxies:', error)
+  } finally {
+    proxyCatalogPending = false
+    if (!accountViewDisposed) proxiesLoading.value = false
+  }
+}
 const groups = ref<AdminGroup[]>([])
 const groupsByID = computed(() => new Map(groups.value.map(group => [group.id, group])))
 const accountGroupsForRow = (account: Pick<AccountListItem, 'group_ids'>): AdminGroup[] => {
@@ -2915,18 +2934,13 @@ onMounted(async () => {
   load()
   void loadPerformanceErrorThreshold()
   loadUpstreamBillingProbeGlobalState()
-  const [proxiesResult, groupsResult] = await Promise.allSettled([
-    adminAPI.proxies.getAll(),
+  const [, groupsResult] = await Promise.allSettled([
+    loadProxyCatalog(),
     adminAPI.groups.getAll()
   ])
   // Catalog requests can finish after scope disposal; never reattach listeners
   // or resume the refresh interval for a page that has already been left.
   if (accountViewDisposed) return
-  if (proxiesResult.status === 'fulfilled') {
-    proxies.value = proxiesResult.value
-  } else {
-    console.error('Failed to load proxies:', proxiesResult.reason)
-  }
   if (groupsResult.status === 'fulfilled') {
     groups.value = groupsResult.value
   } else {

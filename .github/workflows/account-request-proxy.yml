@@ -1,0 +1,213 @@
+name: Account request proxy routing
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/account-request-proxy.yml'
+      - '.github/scripts/assert-account-proxy-config-switch.py'
+      - '.github/scripts/test_account_proxy_config_switch_evidence.py'
+permissions:
+  contents: read
+jobs:
+  routing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture dependency
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Config switch evidence validator self-tests
+        run: python3 -B -m unittest discover -s .github/scripts -p test_account_proxy_config_switch_evidence.py -v
+      - name: Account proxy leases, admission and HTTP transports
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          redis-server --bind 127.0.0.1 --port 16389 --save '' --appendonly no > "$RUNNER_TEMP/account-proxy-redis.log" 2>&1 &
+          redis_pid=$!
+          trap 'kill "$redis_pid"; wait "$redis_pid" || true' EXIT
+          for attempt in {1..50}; do
+            if redis-cli -h 127.0.0.1 -p 16389 ping | grep -qx PONG; then
+              break
+            fi
+            if ! kill -0 "$redis_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/account-proxy-redis.log"
+              exit 1
+            fi
+            sleep 0.1
+          done
+          redis-cli -h 127.0.0.1 -p 16389 ping | grep -qx PONG
+          export BPS_REQUEST_PROXY_REDIS_ADDR=127.0.0.1:16389
+          go test -race -json -p 2 -tags=unit,bps_request_integration \
+            ./internal/mihomo ./internal/service ./internal/handler ./internal/handler/admin ./internal/repository \
+            -run '^(TestIndependent885|TestExcelBPSImages|TestBPSRequest|TestOpenAIRequestProxy|TestExcelBPSRequestProxy|TestRemainingMaintenance|TestOpenAIOAuthReauthRequestProxy|TestOpenAIOAuthRequestProxy|TestOpenAIProxy|TestOpenAIMaintenance|TestOpenAITurnAdmission|TestSIWC|TestAccountDataBPSRequestProxy|TestAccountDataOpenAIProxy)' \
+            -count=1 -timeout=20m | tee "$RUNNER_TEMP/account-proxy.jsonl"
+          python3 - "$RUNNER_TEMP/account-proxy.jsonl" <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+
+          events = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines()]
+          required = {
+              "TestBPSRequestProxyAdmissionRetainsAccountConcurrency/production_cache_with_miniredis",
+              "TestBPSRequestProxyAdmissionRetainsAccountConcurrency/production_cache_with_real_redis",
+              "TestBPSRequestPoolDistributesConcurrentRequestsThroughSelectedProxies",
+              "TestIndependent885BPSRefreshAndInferenceSameExit",
+              "TestOpenAIRequestProxyFailureAttributesSelectedExit",
+              "TestExcelBPSImagesRequestRefreshAndFallbackShareExit",
+          }
+          for root in ("Forward", "Images", "SIWC", "OAuth"):
+              required.update("TestExcelBPSRequestProxyConfigSwitch" + root + "/" + mode for mode in ("single_B", "single_empty"))
+          required.update("TestExcelBPSRequestProxyConfigSwitchControls/images_" + images + "/" + control for images in ("false", "true") for control in ("refresh_error", "cancel"))
+          required.update("TestExcelBPSRequestProxyConfigSwitchSIWCControls/" + control for control in ("refresh_error", "refresh_cancel"))
+          required.update("TestExcelBPSRequestProxyConfigSwitchOAuthControls/" + control for control in ("request_refresh_error", "single_B_no_route_refresh_error", "single_empty_no_route_refresh_error"))
+          passed = {event.get("Test") for event in events if event.get("Action") == "pass"}
+          missing = required - passed
+          if missing:
+              raise SystemExit(f"Required routing evidence did not pass: {sorted(missing)}")
+          PYTHON
+      - name: Require all eight config switch cases to pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -p 2 -tags=unit,bps_request_integration ./internal/service -run '^TestExcelBPSRequestProxyConfigSwitch(Forward|Images|SIWC|OAuth)$' -count=1 -timeout=2m) > "$RUNNER_TEMP/config-switch-green.jsonl" 2>&1
+          python3 .github/scripts/assert-account-proxy-config-switch.py GREEN 0 "$RUNNER_TEMP/config-switch-green.jsonl"
+      - name: Preserve raw routing evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: account-proxy-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/account-proxy.jsonl
+            ${{ runner.temp }}/account-proxy-redis.log
+            ${{ runner.temp }}/config-switch-green.jsonl
+          if-no-files-found: error
+  config-switch-red:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Download dependencies before capturing strict JSON evidence
+        working-directory: backend
+        run: go mod download
+      - name: Restore exact production files before the config switch fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=017d54c819f1ca571a46a99138e0f73bfbb6cd23
+          candidate=$(git rev-parse HEAD)
+          manifest="$RUNNER_TEMP/config-switch-red-source.txt"
+          printf 'candidate=%s baseline=%s\n' "$candidate" "$baseline" > "$manifest"
+          for file in openai_excel_oauth.go openai_siwc.go openai_maintenance_proxy.go openai_oauth_service.go openai_token_provider.go; do
+            target="backend/internal/service/$file"
+            candidate_blob=$(git rev-parse "$candidate:$target")
+            test "$(git hash-object "$target")" = "$candidate_blob"
+            git show "$baseline:$target" > "$target"
+            baseline_blob=$(git rev-parse "$baseline:$target")
+            test "$(git hash-object "$target")" = "$baseline_blob"
+            printf 'path=%s candidate_blob=%s restored_baseline_blob=%s\n' "$target" "$candidate_blob" "$baseline_blob" >> "$manifest"
+          done
+          for file in pr885_config_switch_refresh_test.go pr885_siwc_config_switch_test.go pr885_oauth_config_switch_test.go; do
+            target="backend/internal/service/$file"
+            blob=$(git rev-parse "$candidate:$target")
+            test "$(git hash-object "$target")" = "$blob"
+            printf 'unchanged_candidate_fixture=%s blob=%s\n' "$target" "$blob" >> "$manifest"
+          done
+          expected=$(printf '%s\n' backend/internal/service/openai_excel_oauth.go backend/internal/service/openai_maintenance_proxy.go backend/internal/service/openai_oauth_service.go backend/internal/service/openai_siwc.go backend/internal/service/openai_token_provider.go)
+          test "$(git diff --name-only -- 'backend/**/*.go' ':!backend/**/*_test.go')" = "$expected"
+      - name: Require all eight config switch failures to be behavioral
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -p 2 -tags=unit,bps_request_integration ./internal/service -run '^TestExcelBPSRequestProxyConfigSwitch(Forward|Images|SIWC|OAuth)$' -count=1 -timeout=2m) > "$RUNNER_TEMP/config-switch-red.jsonl" 2>&1
+          result=$?
+          set -e
+          python3 .github/scripts/assert-account-proxy-config-switch.py RED "$result" "$RUNNER_TEMP/config-switch-red.jsonl"
+      - name: Preserve raw config switch RED evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: config-switch-red-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/config-switch-red.jsonl
+            ${{ runner.temp }}/config-switch-red-source.txt
+          if-no-files-found: error
+  refresh-oracle-red:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Restore exact production files before the refresh fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=0f5313e50705ef99dad2691edd1147d9f803a96c
+          for file in openai_excel_bps.go openai_excel_bps_images.go openai_excel_bps_transport.go openai_images_responses.go priority_error_rate.go; do
+            target="backend/internal/service/$file"
+            git show "$baseline:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          done
+      - name: Require the unchanged busy-exit oracle to fail behaviorally
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -p 2 -tags=unit,bps_request_integration ./internal/service -run '^TestIndependent885BPSRefreshAndInferenceSameExit$' -count=1 -timeout=60s) > "$RUNNER_TEMP/refresh-oracle-red.jsonl" 2>&1
+          result=$?
+          set -e
+          python3 - "$result" "$RUNNER_TEMP/refresh-oracle-red.jsonl" <<'PYTHON'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          text = Path(sys.argv[2]).read_text()
+          events = [json.loads(line) for line in text.splitlines() if line.startswith("{")]
+          name = "TestIndependent885BPSRefreshAndInferenceSameExit"
+          failures = {event.get("Test") for event in events if event.get("Action") == "fail" and event.get("Test")}
+          output = "".join(event.get("Output", "") for event in events)
+          observed = re.search(r"observed refresh_proxy=(\d+) inference_proxy=(\d+)", output)
+          if (sys.argv[1] != "1" or failures != {name} or not observed
+              or observed.group(1) == observed.group(2)
+              or "BPS request-triggered refresh must share the inference exit" not in output
+              or any(event.get("Action") in {"skip", "build-fail"} for event in events)
+              or any(marker in output for marker in ("[no tests to run]", "DATA RACE", "panic:"))):
+              raise SystemExit("RED must be the unchanged busy-exit assertion, not build/skip/panic/no-tests")
+          print(f"Behavioral RED verified: refresh={observed.group(1)}, inference={observed.group(2)}, exit=1")
+          PYTHON
+      - name: Preserve raw RED oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: refresh-oracle-red-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/refresh-oracle-red.jsonl
+          if-no-files-found: error

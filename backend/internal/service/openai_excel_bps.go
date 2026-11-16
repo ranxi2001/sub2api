@@ -447,6 +447,23 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		}
 		return fail(400, "basispoints_request_invalid", err.Error())
 	}
+	// Acquire the logical request exit before token lookup: an expired Excel
+	// grant must refresh through the same lease as attachments and generation.
+	if c != nil {
+		c.Set(openAIRequestProxyOpsKey, (*openAIRequestProxyRoute)(nil))
+	}
+	proxyCtx, releaseProxy, proxyErr := s.beginOpenAIRequestProxy(ctx, nil, account)
+	if proxyErr != nil {
+		if isExcelBPSClientCancellation(c, proxyErr) {
+			return clientCanceled()
+		}
+		return fail(503, "basispoints_proxy_unavailable", "No healthy BPS session proxy is available; retry later")
+	}
+	defer releaseProxy()
+	ctx = proxyCtx
+	if route, ok := openAIRequestProxyFromContext(ctx, account.ID); ok && c != nil {
+		c.Set(openAIRequestProxyOpsKey, route)
+	}
 	token, err := s.getExcelBPSAccessToken(ctx, account)
 	if err != nil {
 		if isExcelBPSClientCancellation(c, err) {
@@ -467,7 +484,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if account.Proxy != nil {
 		attachmentProxy = account.Proxy.URL()
 	}
-	if images != nil && images.HasImages() && account.IsExcelBPSMihomoEnabled() {
+	if images != nil && images.HasImages() && (account.IsExcelBPSMihomoEnabled() || account.ExcelBPSRequestProxyEnabled()) {
 		var lease excelBPSLease
 		// Pin the attachment upload and the Responses request to the same exit,
 		// whichever pool the account chose.
@@ -857,6 +874,9 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 
 	if len(compactOutput) > 0 {
 		converted = basispoints.WithCompactedWindow(requestCtx, converted, compactOutput, compactUsageWire)
+	}
+	if account.ExcelBPSRequestProxyEnabled() {
+		converted = ownExcelBPSRequestBody(ctx, converted, lease)
 	}
 	defer func() { _ = converted.Close() }()
 	// The bridge sees the body after group policy mapping. Keep the original

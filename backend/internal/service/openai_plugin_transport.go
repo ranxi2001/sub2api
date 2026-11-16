@@ -15,6 +15,27 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // doOpenAIUpstream 只在 OpenAI OAuth 能力绑定已启用时把真实请求交给插件。
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (result *http.Response, resultErr error) {
+	route, scoped := openAIRequestProxyFromContext(request.Context(), account.ID)
+	// A fresh admission snapshot may disable request routing after acquisition.
+	// Reject before send rather than bypassing the scope's cancellation/body fence.
+	if route != nil && !account.OpenAIRequestProxyEnabled() {
+		return nil, denyOpenAITurn("account_binding_changed")
+	}
+	if account.OpenAIRequestProxyEnabled() {
+		if !scoped {
+			return nil, errOpenAIRequestProxyUnavailable
+		}
+		var bindErr error
+		request, bindErr = route.bind(request)
+		if bindErr != nil {
+			return nil, bindErr
+		}
+		proxyURL = route.proxy
+		defer func() { route.track(result) }()
+		if s.codexTicketPinsEgress(request, account) || account.AuthConnectionID != "" {
+			return nil, errOpenAIRequestProxyUnavailable
+		}
+	}
 	if s.excelOAuthReauth != nil {
 		if err := s.excelOAuthReauth.validateAuthConnectionPolicy(request.Context(), account); err != nil {
 			return nil, err
@@ -139,8 +160,38 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	account *Account,
 	useTLSFallback bool,
 	body []byte,
-) (*http.Response, error) {
+) (result *http.Response, resultErr error) {
 	gateway := s.openaiGatewayService
+	if account.OpenAIRequestProxyEnabled() {
+		if account.AuthConnectionID != "" {
+			return nil, errOpenAIRequestProxyUnavailable
+		}
+		// Scope acquisition is independent of optional plugin/ticket services.
+		scopeService := gateway
+		if scopeService == nil {
+			scopeService = &OpenAIGatewayService{}
+		}
+		ctx, release, err := scopeService.beginOpenAIRequestProxy(request.Context(), nil, account)
+		if err != nil {
+			return nil, err
+		}
+		request = request.WithContext(ctx)
+		route, _ := openAIRequestProxyFromContext(ctx, account.ID)
+		request, err = route.bind(request)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		proxyURL = route.proxy
+		defer func() {
+			if resultErr != nil || result == nil || result.Body == nil {
+				release()
+				return
+			}
+			route.track(result)
+			result.Body = &openAIRequestProxyOwnedBody{ReadCloser: result.Body, finish: release}
+		}()
+	}
 	model := extractOpenAICodexTicketModel(body)
 	if gateway != nil && !IsAstraSourceAcquisition(request.Context()) && request.URL != nil && request.URL.String() == chatgptCodexAPIURL &&
 		isOpenAICodexTicketAccount(account, model) && gateway.openAICodexTicketEnabledContext(request.Context()) &&
@@ -153,7 +204,7 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		request = request.WithContext(context.WithValue(request.Context(), astraCandySkipObservationKey{}, true))
 		return gateway.doOpenAIUpstream(request, proxyURL, account)
 	}
-	if s.pluginManager != nil {
+	if s.pluginManager != nil && !account.OpenAIRequestProxyEnabled() {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			if options, ok := pelicanTestOptionsFromContext(request.Context()); ok && options.nativeOAuthTransport != nil && !IsAstraSourceAcquisition(request.Context()) {
