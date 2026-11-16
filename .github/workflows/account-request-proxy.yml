@@ -4,6 +4,8 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/account-request-proxy.yml'
+      - '.github/scripts/assert-account-proxy-config-switch.py'
+      - '.github/scripts/test_account_proxy_config_switch_evidence.py'
 permissions:
   contents: read
 jobs:
@@ -26,6 +28,8 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends redis-server
           fi
+      - name: Config switch evidence validator self-tests
+        run: python3 -B -m unittest discover -s .github/scripts -p test_account_proxy_config_switch_evidence.py -v
       - name: Account proxy leases, admission and HTTP transports
         working-directory: backend
         shell: bash
@@ -64,11 +68,22 @@ jobs:
               "TestOpenAIRequestProxyFailureAttributesSelectedExit",
               "TestExcelBPSImagesRequestRefreshAndFallbackShareExit",
           }
+          for root in ("Forward", "Images", "SIWC", "OAuth"):
+              required.update("TestExcelBPSRequestProxyConfigSwitch" + root + "/" + mode for mode in ("single_B", "single_empty"))
+          required.update("TestExcelBPSRequestProxyConfigSwitchControls/images_" + images + "/" + control for images in ("false", "true") for control in ("refresh_error", "cancel"))
+          required.update("TestExcelBPSRequestProxyConfigSwitchSIWCControls/" + control for control in ("refresh_error", "refresh_cancel"))
+          required.update("TestExcelBPSRequestProxyConfigSwitchOAuthControls/" + control for control in ("request_refresh_error", "single_B_no_route_refresh_error", "single_empty_no_route_refresh_error"))
           passed = {event.get("Test") for event in events if event.get("Action") == "pass"}
           missing = required - passed
           if missing:
               raise SystemExit(f"Required routing evidence did not pass: {sorted(missing)}")
           PYTHON
+      - name: Require all eight config switch cases to pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -p 2 -tags=unit,bps_request_integration ./internal/service -run '^TestExcelBPSRequestProxyConfigSwitch(Forward|Images|SIWC|OAuth)$' -count=1 -timeout=2m) > "$RUNNER_TEMP/config-switch-green.jsonl" 2>&1
+          python3 .github/scripts/assert-account-proxy-config-switch.py GREEN 0 "$RUNNER_TEMP/config-switch-green.jsonl"
       - name: Preserve raw routing evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -77,6 +92,66 @@ jobs:
           path: |
             ${{ runner.temp }}/account-proxy.jsonl
             ${{ runner.temp }}/account-proxy-redis.log
+            ${{ runner.temp }}/config-switch-green.jsonl
+          if-no-files-found: error
+  config-switch-red:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Download dependencies before capturing strict JSON evidence
+        working-directory: backend
+        run: go mod download
+      - name: Restore exact production files before the config switch fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline=017d54c819f1ca571a46a99138e0f73bfbb6cd23
+          candidate=$(git rev-parse HEAD)
+          manifest="$RUNNER_TEMP/config-switch-red-source.txt"
+          printf 'candidate=%s baseline=%s\n' "$candidate" "$baseline" > "$manifest"
+          for file in openai_excel_oauth.go openai_siwc.go openai_maintenance_proxy.go openai_oauth_service.go openai_token_provider.go; do
+            target="backend/internal/service/$file"
+            candidate_blob=$(git rev-parse "$candidate:$target")
+            test "$(git hash-object "$target")" = "$candidate_blob"
+            git show "$baseline:$target" > "$target"
+            baseline_blob=$(git rev-parse "$baseline:$target")
+            test "$(git hash-object "$target")" = "$baseline_blob"
+            printf 'path=%s candidate_blob=%s restored_baseline_blob=%s\n' "$target" "$candidate_blob" "$baseline_blob" >> "$manifest"
+          done
+          for file in pr885_config_switch_refresh_test.go pr885_siwc_config_switch_test.go pr885_oauth_config_switch_test.go; do
+            target="backend/internal/service/$file"
+            blob=$(git rev-parse "$candidate:$target")
+            test "$(git hash-object "$target")" = "$blob"
+            printf 'unchanged_candidate_fixture=%s blob=%s\n' "$target" "$blob" >> "$manifest"
+          done
+          expected=$(printf '%s\n' backend/internal/service/openai_excel_oauth.go backend/internal/service/openai_maintenance_proxy.go backend/internal/service/openai_oauth_service.go backend/internal/service/openai_siwc.go backend/internal/service/openai_token_provider.go)
+          test "$(git diff --name-only -- 'backend/**/*.go' ':!backend/**/*_test.go')" = "$expected"
+      - name: Require all eight config switch failures to be behavioral
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -p 2 -tags=unit,bps_request_integration ./internal/service -run '^TestExcelBPSRequestProxyConfigSwitch(Forward|Images|SIWC|OAuth)$' -count=1 -timeout=2m) > "$RUNNER_TEMP/config-switch-red.jsonl" 2>&1
+          result=$?
+          set -e
+          python3 .github/scripts/assert-account-proxy-config-switch.py RED "$result" "$RUNNER_TEMP/config-switch-red.jsonl"
+      - name: Preserve raw config switch RED evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: config-switch-red-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/config-switch-red.jsonl
+            ${{ runner.temp }}/config-switch-red-source.txt
           if-no-files-found: error
   refresh-oracle-red:
     runs-on: ubuntu-24.04
