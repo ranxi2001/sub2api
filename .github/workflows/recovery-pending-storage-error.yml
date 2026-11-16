@@ -1,0 +1,124 @@
+name: Recovery pending storage error
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai*'
+      - '.github/workflows/recovery-pending-storage-error.yml'
+      - '.github/scripts/pending-storage-error-evidence.py'
+      - '.github/scripts/assert-readable-continuation.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pending-storage-error:
+    name: Pending storage error RED then GREEN
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASELINE: dc3a5403be7053397c43c2ef4b1e4fff01536433
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Isolate exact old implementation with identical candidate fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/pending-storage-error-evidence"
+          red_dir="$RUNNER_TEMP/pending-storage-error-red"
+          mkdir -p "$evidence_dir"
+          echo "EVIDENCE=$evidence_dir" >> "$GITHUB_ENV"
+          echo "RED_ROOT=$red_dir" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags --depth=1 origin "$BASELINE"
+          git worktree add --detach "$red_dir" "$CANDIDATE"
+          target=backend/internal/service/openai_agent_message_delivery.go
+          git show "$BASELINE:$target" > "$red_dir/$target"
+          test "$(git hash-object "$red_dir/$target")" = "$(git rev-parse "$BASELINE:$target")"
+          test "$(git -C "$red_dir" diff --name-only)" = "$target"
+          for fixture in openai_agent_pending_storage_error_test.go openai_agent_pending_observation_test.go openai_ws_owner_conflict_test.go; do
+            path="backend/internal/service/$fixture"
+            test "$(git hash-object "$red_dir/$path")" = "$(git rev-parse "$CANDIDATE:$path")"
+          done
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          root = os.environ['RUNNER_TEMP'] + '/pending-storage-error-red'
+          target = 'backend/internal/service/openai_agent_message_delivery.go'
+          fixtures = ['backend/internal/service/' + name for name in (
+              'openai_agent_pending_storage_error_test.go', 'openai_agent_pending_observation_test.go',
+              'openai_ws_owner_conflict_test.go')]
+          manifest = {
+              'candidate': git('rev-parse', 'HEAD'), 'baseline': os.environ['BASELINE'],
+              'baseline_production_blob': git('rev-parse', os.environ['BASELINE'] + ':' + target),
+              'red_production_blob': git('hash-object', root + '/' + target),
+              'green_production_blob': git('rev-parse', 'HEAD:' + target),
+              'identical_candidate_fixtures': {path: git('hash-object', root + '/' + path) for path in fixtures},
+              'red_changed_paths': git('-C', root, 'diff', '--name-only').splitlines(),
+          }
+          destination = pathlib.Path(os.environ['RUNNER_TEMP']) / 'pending-storage-error-evidence'
+          (destination / 'source-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+      - name: Behavioral RED on old code
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RED_ROOT/backend" && go test -race -p=2 -json -tags=unit,inheritedmodel ./internal/service -run '^TestOpenAIAgentPendingStorageError$' -count=1 -timeout=3m) > "$EVIDENCE/red.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$EVIDENCE/red.exit"
+          cat "$EVIDENCE/red.jsonl"
+          python3 .github/scripts/pending-storage-error-evidence.py RED "$status" "$EVIDENCE/red.jsonl" | tee "$EVIDENCE/red-verdict.json"
+      - name: Behavioral GREEN with the same regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test -z "$(git status --porcelain)"
+          set +e
+          (cd backend && go test -race -p=2 -json -tags=unit,inheritedmodel ./internal/service -run '^TestOpenAIAgentPendingStorageError$' -count=1 -timeout=3m) > "$EVIDENCE/green.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$EVIDENCE/green.exit"
+          cat "$EVIDENCE/green.jsonl"
+          python3 .github/scripts/pending-storage-error-evidence.py GREEN "$status" "$EVIDENCE/green.jsonl" | tee "$EVIDENCE/green-verdict.json"
+      - name: Preserve original pending and tool-proof refusal guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s .github/scripts -p 'test_ws_inherited_model_evidence.py' -v > "$EVIDENCE/parser-tests.log" 2>&1
+          (cd backend && go test -race -p=2 -json -tags=unit,inheritedmodel ./internal/service -run '^TestOpenAIAgentPendingObservation$' -count=1 -timeout=3m) > "$EVIDENCE/pending-guards.jsonl" 2>&1
+          python3 .github/scripts/ws-inherited-model-evidence.py pending GREEN 0 "$EVIDENCE/pending-guards.jsonl" | tee "$EVIDENCE/pending-guards-verdict.json"
+          (cd backend && go test -race -p=2 -json -tags=unit,ownerconflict ./internal/service -run '^TestOpenAIToolProvenancePendingDeadline$' -count=1 -timeout=3m) > "$EVIDENCE/tool-guards.jsonl" 2>&1
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$EVIDENCE/tool-guards.jsonl"
+          python3 - <<'PY'
+          import json, os, pathlib
+          rows = [json.loads(line) for line in (pathlib.Path(os.environ['EVIDENCE']) / 'tool-guards.jsonl').read_text().splitlines() if line.startswith('{')]
+          for kind in ('function', 'custom'):
+              for case in ('pending_deadline', 'initial_deadline', 'initial_store_failure', 'initial_backend_deadline', 'pending_store_failure', 'pending_backend_deadline', 'pending_store_failure_at_deadline'):
+                  name = f'TestOpenAIToolProvenancePendingDeadline/{kind}/{case}'
+                  assert sum(row.get('Action') == 'pass' and row.get('Test') == name for row in rows) == 1, name
+          assert not any(row.get('Action') in ('fail', 'skip') for row in rows)
+          PY
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pending-storage-error-${{ env.CANDIDATE }}
+          path: ${{ runner.temp }}/pending-storage-error-evidence
+          if-no-files-found: error

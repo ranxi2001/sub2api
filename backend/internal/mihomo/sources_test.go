@@ -37,8 +37,21 @@ func cachedSource(nodeName string) subscriptionCache {
 
 func waitSourceOperation(t *testing.T, m *Manager) Status {
 	t.Helper()
-	require.Eventually(t, func() bool { return !m.Status().Busy }, time.Second*3, time.Millisecond*5)
-	return m.Status()
+	// Wait for the submitted operation itself. Repeated Status snapshots copy
+	// large proxy lists and compete with config generation on busy CI runners.
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("source operation did not complete within 30 seconds")
+	}
+	status := m.Status()
+	require.False(t, status.Busy)
+	return status
 }
 
 func TestSourceRemovalPreservesCachedPeersDynamicAndSharedNodes(t *testing.T) {
