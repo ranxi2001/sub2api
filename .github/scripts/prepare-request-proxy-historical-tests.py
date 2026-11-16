@@ -1,4 +1,4 @@
-"""Isolate twelve unrelated PR885 unit fixtures from one historical WS RED."""
+"""Isolate twelve PR885 fixtures and restore one existing historical WS fixture."""
 
 import json
 import os
@@ -30,6 +30,9 @@ ORACLES = (
     "backend/internal/handler/openai_409_ws_rebuild_test.go",
     "backend/internal/handler/openai_409_ws_oracle_test.go",
 )
+ADAPTED_FIXTURES = {
+    "backend/internal/service/openai_excel_bps_warm_test.go": "9dc2054fd0ab61d0465e1eb12ac060360bc80166",
+}
 
 
 def git(tree, *args):
@@ -122,12 +125,32 @@ def prepare(baseline, root, candidate, destination):
         blob, path = candidate_file(tree, candidate, relative)
         pending.append((relative, blob, path))
 
+    adaptations = []
+    for relative, expected_baseline_blob in ADAPTED_FIXTURES.items():
+        baseline_blob = entry(tree, baseline, relative)
+        if baseline_blob != expected_baseline_blob:
+            raise ValueError("unexpected adapted fixture baseline blob: " + relative)
+        candidate_blob, path = candidate_file(tree, candidate, relative)
+        historical = subprocess.run(
+            ["git", "-C", str(tree), "show", baseline + ":" + relative],
+            check=True, capture_output=True, timeout=30,
+        ).stdout
+        adaptations.append((relative, candidate_blob, baseline_blob, path, historical))
+
     # Preflight every path and blob before the first mutation. A later dirty
     # fixture cannot leave an earlier fixture removed on a rejected preparation.
     records = []
     for relative, blob, path in pending:
         path.unlink()
         records.append({"path": relative, "candidate_blob": blob, "baseline_blob": "absent", "actual": "absent"})
+    adapted_records = []
+    for relative, candidate_blob, baseline_blob, path, historical in adaptations:
+        path.write_bytes(historical)
+        actual_blob = git(tree, "hash-object", "--", str(path))
+        if actual_blob != baseline_blob:
+            raise ValueError("adapted fixture restoration mismatch: " + relative)
+        adapted_records.append({"path": relative, "candidate_blob": candidate_blob,
+                                "baseline_blob": baseline_blob, "actual_blob": actual_blob})
     result = {
         "baseline": baseline,
         "candidate": candidate,
@@ -135,6 +158,7 @@ def prepare(baseline, root, candidate, destination):
         "production_exception": {"path": REDIS_HELPER, "candidate_blob": helper_blob},
         "unchanged_oracles": oracles,
         "fixtures": records,
+        "adapted_fixtures": adapted_records,
     }
     with manifest.open("x") as stream:
         json.dump(result, stream, sort_keys=True, indent=2)

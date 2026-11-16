@@ -270,6 +270,7 @@ jobs:
               fi
             done
             # PR885 unit fixtures require the later request-proxy contract.
+            # Restore the existing warm fixture to its pinned historical blob.
             # Keep the selected ticket oracle and the proved production baseline.
             python3 .github/scripts/prepare-request-proxy-historical-tests.py "$baseline" "$tested_tree" "$CANDIDATE_SHA" "$RUNNER_TEMP/ws-evidence/request-proxy-historical-tests.json"
           fi

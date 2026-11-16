@@ -46,6 +46,10 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
         self.write(self.production, "package service // historical production\n")
         for path in HELPER.ORACLES:
             self.write(path, "package service // historical selected oracle\n")
+        adapted_paths = tuple(HELPER.ADAPTED_FIXTURES)
+        self.adapted_historical = b"package service // historical preserved fixture\n\n"
+        for path in adapted_paths:
+            self.write(path, self.adapted_historical.decode())
         if baseline_fixture:
             self.write(HELPER.FIXTURES[-1], "package service // preexisting fixture\n")
         if baseline_contract:
@@ -53,11 +57,17 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
         self.git("add", ".")
         self.git("commit", "-qm", "baseline")
         self.baseline = self.git("rev-parse", "HEAD")
+        adapted = {path: self.git("rev-parse", self.baseline + ":" + path) for path in adapted_paths}
+        adapted_patch = mock.patch.object(HELPER, "ADAPTED_FIXTURES", adapted)
+        adapted_patch.start()
+        self.addCleanup(adapted_patch.stop)
         self.write(self.production, "package service // candidate production\n")
         self.write(HELPER.CONTRACT, "package service\nconst OpenAIProxyModeKey = 1\nfunc OpenAIRequestProxyEnabled() {}\n")
         self.write(HELPER.REDIS_HELPER, "package redissession // explicit candidate support\n")
         for path in HELPER.FIXTURES:
             self.write(path, "package service // candidate fixture " + path + "\n")
+        for path in adapted_paths:
+            self.write(path, "package service // candidate extended fixture\n")
         for path in HELPER.ORACLES:
             self.write(path, "package service // candidate selected oracle " + path + "\n")
         self.git("add", ".")
@@ -78,6 +88,9 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
         self.assertEqual(12, len(HELPER.FIXTURES))
         self.assertEqual(12, len(set(HELPER.FIXTURES)))
         self.assertFalse(set(HELPER.FIXTURES) & set(HELPER.ORACLES))
+        self.assertEqual({"backend/internal/service/openai_excel_bps_warm_test.go":
+                          "9dc2054fd0ab61d0465e1eb12ac060360bc80166"}, HELPER.ADAPTED_FIXTURES)
+        self.assertFalse(set(HELPER.ADAPTED_FIXTURES) & (set(HELPER.FIXTURES) | set(HELPER.ORACLES)))
         root = SCRIPT.resolve().parents[2]
         workflow = (root / ".github/workflows/ws-readable-continuation.yml").read_text()
         self.assertIn("- '.github/scripts/prepare-request-proxy-historical-tests.py'", workflow)
@@ -89,18 +102,22 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
         self.assertRegex(residual, r"(?s)if \[ \"\$PHASE\" = RED \]; then.*" + re.escape(invocation) + r"\n          fi")
         self.assertIn("path: ${{ runner.temp }}/ws-evidence/", workflow)
         inline = re.search(r"for target in (backend/.*?); do", residual).group(1).split()
-        self.assertFalse(set(inline) & set(HELPER.FIXTURES), "one historical owner per fixture")
+        owned = set(HELPER.FIXTURES) | set(HELPER.ADAPTED_FIXTURES)
+        self.assertFalse(set(inline) & owned, "one historical owner per fixture")
         for script in (root / ".github/scripts").glob("*.sh"):
             source = script.read_text()
-            self.assertFalse(any(path in source for path in HELPER.FIXTURES), str(script))
+            self.assertFalse(any(path in source for path in owned), str(script))
 
-    def test_valid_preparation_changes_only_twelve_fixtures(self):
+    def test_valid_preparation_removes_twelve_and_restores_one_fixture(self):
         self.make_repository()
         before = {str(path.relative_to(self.tree)): path.read_bytes() for path in (self.tree / "backend").rglob("*.go")}
         result = self.run_helper()
         after = {str(path.relative_to(self.tree)): path.read_bytes() for path in (self.tree / "backend").rglob("*.go")}
         self.assertEqual(set(HELPER.FIXTURES), set(before) - set(after))
-        self.assertEqual({path: content for path, content in before.items() if path not in HELPER.FIXTURES}, after)
+        expected = {path: content for path, content in before.items() if path not in HELPER.FIXTURES}
+        for path in HELPER.ADAPTED_FIXTURES:
+            expected[path] = self.adapted_historical
+        self.assertEqual(expected, after)
         self.assertEqual(result, json.loads(self.manifest.read_text()))
         self.assertEqual(self.baseline, result["baseline"])
         self.assertEqual(self.candidate, result["candidate"])
@@ -111,6 +128,24 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
             self.assertEqual("absent", record["actual"])
         for path, blob in result["unchanged_oracles"].items():
             self.assertEqual(blob, self.git("hash-object", str(self.tree / path)))
+        self.assertEqual(1, len(result["adapted_fixtures"]))
+        for record in result["adapted_fixtures"]:
+            path = record["path"]
+            self.assertEqual(self.git("rev-parse", self.candidate + ":" + path), record["candidate_blob"])
+            self.assertEqual(HELPER.ADAPTED_FIXTURES[path], record["baseline_blob"])
+            self.assertEqual(record["baseline_blob"], self.git("hash-object", str(self.tree / path)))
+            self.assertEqual(record["baseline_blob"], record["actual_blob"])
+
+    def test_adapted_fixture_wrong_baseline_blob_rejected_before_mutation(self):
+        self.make_repository()
+        path = next(iter(HELPER.ADAPTED_FIXTURES))
+        before = (self.tree / path).read_bytes()
+        with mock.patch.object(HELPER, "ADAPTED_FIXTURES", {path: "0" * 40}):
+            with self.assertRaisesRegex(ValueError, "adapted fixture baseline blob"):
+                self.run_helper()
+        self.assertEqual(before, (self.tree / path).read_bytes())
+        self.assertTrue(all((self.tree / fixture).exists() for fixture in HELPER.FIXTURES))
+        self.assertFalse(self.manifest.exists())
 
     def test_dirty_last_fixture_is_rejected_before_any_removal(self):
         self.make_repository()
@@ -165,6 +200,7 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
             "missing-helper", "missing-fixture", "fixture-directory", "fixture-symlink", "parent-symlink",
             "helper-symlink", "root-symlink", "unexpected-contract", "unexpected-go-file", "ignored-go-file",
             "dirty-ticket", "manifest-existing", "manifest-symlink", "manifest-parent-symlink",
+            "dirty-adapted", "missing-adapted", "adapted-symlink",
         )
         for scenario in scenarios:
             with self.subTest(scenario=scenario):
@@ -212,6 +248,14 @@ class HistoricalProxyFixtureTests(unittest.TestCase):
                     self.write(".git/info/exclude", "unexpected.go\n")
                 elif scenario == "dirty-ticket":
                     self.write(HELPER.ORACLES[0], "unexpected ticket oracle mutation\n")
+                elif scenario == "dirty-adapted":
+                    self.write(next(iter(HELPER.ADAPTED_FIXTURES)), "dirty adapted fixture\n")
+                elif scenario == "missing-adapted":
+                    (self.tree / next(iter(HELPER.ADAPTED_FIXTURES))).unlink()
+                elif scenario == "adapted-symlink":
+                    adapted = self.tree / next(iter(HELPER.ADAPTED_FIXTURES))
+                    adapted.unlink()
+                    adapted.symlink_to(self.tree / self.production)
                 elif scenario == "manifest-existing":
                     self.manifest.write_text("existing evidence\n")
                 elif scenario == "manifest-symlink":
