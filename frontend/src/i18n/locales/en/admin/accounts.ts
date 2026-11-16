@@ -863,6 +863,7 @@ export default {
         bpsProxyRouting: 'BPS proxy routing',
     proxyModeSingle: 'Single proxy',
     proxyModeRequest: 'Multiple proxies (distribute by request)',
+    proxyRequestRisk: 'Using multiple IPs for one account may increase verification challenges, rate limits or account restrictions. Throughput is not guaranteed. Keep total concurrency controlled; switch back to a single proxy or disable the account when needed.',
     proxyGroup: 'Account proxy group (from IP management)',
     proxyRequestHint: 'For ordinary OpenAI OAuth and BPS. Use only selected proxies, preferring the exit with the fewest in-flight account requests, including within one session. The account concurrency limit is unchanged; unavailable proxies never fall back to a direct connection. Authorization and maintenance use the first usable selected proxy.',
     proxyRequired: 'Select at least one proxy for request distribution',

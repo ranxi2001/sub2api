@@ -17,7 +17,10 @@
     </div>
     <ProxySelector v-if="mode === 'single'" :model-value="singleProxyId" :proxies="proxies" :disabled="loading"
       @update:model-value="emit('update:singleProxyId', $event)" />
-    <BPSProxyRoutingSettings v-else mode="request" embedded :proxy-ids="proxyIds" :proxies="proxies"
+    <p v-if="mode === 'request'" class="text-sm text-amber-700 dark:text-amber-400" role="note" data-testid="openai-proxy-risk">
+      {{ t('admin.accounts.openai.proxyRequestRisk') }}
+    </p>
+    <BPSProxyRoutingSettings v-if="mode === 'request'" mode="request" embedded :proxy-ids="proxyIds" :proxies="proxies"
       :loading="loading" :load-error="loadError" :current-account-id="currentAccountId" :user-id="userId"
       @update:proxy-ids="emit('update:proxyIds', $event)" @retry="emit('retry')" />
   </div>
