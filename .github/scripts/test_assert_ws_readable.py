@@ -2,6 +2,11 @@
 
 import importlib.util
 import json
+import os
+import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -30,6 +35,106 @@ def evidence(phase, suite):
 
 def raw(events):
     return "".join(json.dumps(event) + "\n" for event in events)
+
+
+class ResidualFixtureOwnershipTest(unittest.TestCase):
+    repository = Path(__file__).resolve().parents[2]
+
+    def residual_step(self):
+        workflow = (self.repository / ".github/workflows/ws-readable-continuation.yml").read_text()
+        return workflow.split("      - name: Residual headers tools and ticket actual transport counterexamples\n", 1)[1].split("      - name:", 1)[0]
+
+    def inline_loop(self):
+        match = re.search(r"(?ms)^            for target in (backend/.*?); do\n.*?^            done$", self.residual_step())
+        self.assertIsNotNone(match)
+        return textwrap.dedent(match.group()), match.group(1).split()
+
+    def test_residual_fixtures_have_one_owner_in_shared_helper_chain(self):
+        _, inline = self.inline_loop()
+        self.assertEqual(len(inline), len(set(inline)))
+        pending = re.findall(r"\.github/scripts/([\w.-]+\.sh)", self.residual_step())
+        visited, shared = set(), set()
+        while pending:
+            name = pending.pop()
+            if name in visited:
+                continue
+            visited.add(name)
+            source = (self.repository / ".github/scripts" / name).read_text()
+            pending.extend(re.findall(r"\$script_dir/([\w.-]+\.sh)", source))
+            for pattern in re.findall(r"backend/[\w./*?-]+_test\.go", source):
+                shared.add(pattern)
+                shared.update(str(path.relative_to(self.repository)) for path in self.repository.glob(pattern))
+        self.assertGreaterEqual(len(visited), 7)
+        self.assertFalse(set(inline) & shared, "a strict candidate-blob check cannot follow another owner's overlay")
+        self.assertIn("backend/internal/service/openai_excel_bps_search_business_test.go", inline)
+        self.assertIn("backend/internal/service/openai_excel_bps_search_test.go", shared)
+        for selected in ("backend/internal/handler/openai_409_ws_rebuild_test.go", "backend/internal/service/openai_409_ws_ticket_test.go"):
+            self.assertNotIn(selected, inline)
+
+    def test_actual_shell_handoff_preserves_guards_and_rejects_duplicate_owner(self):
+        loop, inline = self.inline_loop()
+        replay = (self.repository / ".github/scripts/prepare-replay-red-fixtures.sh").read_text()
+        exclude = re.search(r"(?ms)^exclude_absent_fixture\(\) \{\n.*?^\}", replay).group()
+        group = exclude + "\ncontract=backend/internal/service/group.go\n" + replay.split("contract=backend/internal/service/group.go\n", 1)[1].split("\n# Older Account/search", 1)[0]
+        shared = re.search(r"for target in (.*?); do", group).group(1).split()
+        self.assertEqual(len(shared), 4)
+        duplicate = "backend/internal/service/admin_group_duplicate_test.go"
+        business = "backend/internal/service/openai_excel_bps_search_business_test.go"
+        absent = {business, "backend/internal/service/free_ultrafast_customer_cost_test.go"}
+        selected = {"backend/internal/handler/openai_409_ws_rebuild_test.go", "backend/internal/service/openai_409_ws_ticket_test.go"}
+        for scenario in ("valid", "duplicate", "dirty"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                tree = Path(directory)
+                env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+                env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+
+                def git(*args):
+                    return subprocess.run(["git", "-c", "user.name=CI fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.devnull, "-c", "init.templateDir=", *args], cwd=tree, env=env, check=True, capture_output=True, text=True, timeout=15).stdout.strip()
+
+                def write(path, content):
+                    target = tree / path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(content)
+
+                git("init", "-q")
+                contract = "backend/internal/service/group.go"
+                write(contract, "package service\n")
+                for path in set(inline + shared) | selected:
+                    if path not in absent:
+                        write(path, "baseline\n")
+                git("add", ".")
+                git("commit", "-qm", "baseline")
+                baseline = git("rev-parse", "HEAD")
+                for path in set(inline + shared) | selected:
+                    write(path, "candidate\n")
+                git("add", ".")
+                git("commit", "-qm", "candidate")
+                candidate = git("rev-parse", "HEAD")
+                evidence = tree / "evidence/ws-evidence"
+                evidence.mkdir(parents=True)
+                env.update(baseline=baseline, candidate=candidate, tree=str(tree), BASELINE_SHA=baseline, CANDIDATE_SHA=candidate, RUNNER_TEMP=str(evidence.parent), tested_tree=str(tree))
+                if scenario == "dirty":
+                    write(duplicate, "unexpected fixture mutation\n")
+                prepared = subprocess.run(["bash", "-c", "set -euo pipefail\n" + group], cwd=tree, env=env, capture_output=True, text=True, timeout=15)
+                if scenario == "dirty":
+                    self.assertNotEqual(prepared.returncode, 0, "candidate-blob checks must remain strict")
+                    continue
+                self.assertEqual(prepared.returncode, 0, prepared.stderr)
+                script = loop if scenario == "valid" else loop.replace("; do", " " + duplicate + "; do", 1)
+                result = subprocess.run(["bash", "-c", "set -euo pipefail\n" + script], cwd=tree, env=env, capture_output=True, text=True, timeout=15)
+                if scenario == "duplicate":
+                    self.assertNotEqual(result.returncode, 0, "the former double-owner sequence must reproduce its failure")
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len((evidence / "residual-service-fixtures.txt").read_text().splitlines()), len(inline))
+                for path in set(inline + shared):
+                    if path in absent:
+                        self.assertFalse((tree / path).exists())
+                    else:
+                        self.assertEqual((tree / path).read_text(), "baseline\n")
+                for path in selected:
+                    self.assertEqual((tree / path).read_text(), "candidate\n")
+                self.assertEqual((tree / contract).read_text(), "package service\n")
 
 
 class WSReadableEvidenceTest(unittest.TestCase):

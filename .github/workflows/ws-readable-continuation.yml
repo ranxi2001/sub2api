@@ -218,12 +218,12 @@ jobs:
             # PR855 route-evidence types and later production BPS search APIs
             # are absent in this baseline. Their unselected tests follow the
             # pinned historical APIs too; the selected ticket oracle stays current.
-            # Later UltraFast fields and the search-business helper dependency
-            # are absent too. Restore only these unrelated fixtures; never the
-            # selected ticket oracle or any candidate GREEN fixture.
-            # BPS search is already excluded with blob/contract proofs by the
-            # shared helpers above, so do not inspect/remove it a second time.
-            for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go backend/internal/service/openai_ws_agent_recovery_test.go backend/internal/service/admin_group_duplicate_test.go backend/internal/service/admin_service_group_test.go backend/internal/service/api_key_auth_cache_openai_fast_test.go backend/internal/service/free_ultrafast_customer_cost_test.go backend/internal/service/openai_excel_bps_search_business_test.go; do
+            # The replay helper already owns the four UltraFast group fixtures
+            # and the base BPS search fixtures. Do not apply them twice here.
+            # The separate search-business fixture still depends on the removed
+            # search helper, so this loop alone owns its historical adaptation.
+            # Never change the selected ticket oracle or candidate GREEN tests.
+            for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go backend/internal/service/openai_ws_agent_recovery_test.go backend/internal/service/openai_excel_bps_search_business_test.go; do
               candidate_blob=$(git rev-parse "$CANDIDATE_SHA:$target")
               test "$(git hash-object "$tested_tree/$target")" = "$candidate_blob"
               if git cat-file -e "$baseline:$target" 2>/dev/null; then
