@@ -17,6 +17,8 @@ on:
       - 'backend/internal/service/openai_agent_message*'
       - '.github/scripts/assert-ws-readable.py'
       - '.github/scripts/test_assert_ws_readable.py'
+      - '.github/scripts/prepare-request-proxy-historical-tests.py'
+      - '.github/scripts/test_request_proxy_historical_tests.py'
       - '.github/scripts/exclude-later-400-red-fixtures.sh'
       - '.github/scripts/exclude-later-http2-red-fixtures.sh'
       - 'backend/internal/service/openai_gateway_passthrough.go'
@@ -39,11 +41,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s .github/scripts -p 'test_assert_ws_readable.py' -v 2>&1 | tee "$RUNNER_TEMP/ws-validator.log"
+          python3 -B -m unittest discover -s .github/scripts -p 'test_request_proxy_historical_tests.py' -v 2>&1 | tee "$RUNNER_TEMP/request-proxy-historical-validator.log"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: ws-readable-validator-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}/ws-validator.log
+          path: |
+            ${{ runner.temp }}/ws-validator.log
+            ${{ runner.temp }}/request-proxy-historical-validator.log
           if-no-files-found: error
   transport:
     needs: validator
@@ -264,6 +269,9 @@ jobs:
                 printf 'path=%s baseline=%s candidate=%s candidate_blob=%s baseline_blob=absent actual=absent\n' "$target" "$baseline" "$CANDIDATE_SHA" "$candidate_blob" >> "$RUNNER_TEMP/ws-evidence/residual-service-fixtures.txt"
               fi
             done
+            # PR885 unit fixtures require the later request-proxy contract.
+            # Keep the selected ticket oracle and the proved production baseline.
+            python3 .github/scripts/prepare-request-proxy-historical-tests.py "$baseline" "$tested_tree" "$CANDIDATE_SHA" "$RUNNER_TEMP/ws-evidence/request-proxy-historical-tests.json"
           fi
           for target in backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/service/openai_409_ws_ticket_test.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_payload.go backend/internal/service/openai_gateway_passthrough.go; do
             git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/ws-evidence/residual-blobs.txt"
@@ -360,5 +368,6 @@ jobs:
         if: always()
         with:
           name: ws-readable-${{ matrix.phase }}-${{ env.CANDIDATE_SHA }}
+          # Includes the guarded request-proxy-historical-tests.json RED manifest.
           path: ${{ runner.temp }}/ws-evidence/
           if-no-files-found: error
