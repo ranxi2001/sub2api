@@ -276,6 +276,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
+	// responsesReq lives until billing after the stream; only its scalar
+	// fields are read from here on, so drop the body-sized input.
+	responsesReq.Input = nil
 
 	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
 		var reqBody map[string]any
