@@ -80,6 +80,12 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 				c.Next()
 			})
 			router.Use(middleware.RequestCapture(manager))
+			router.Use(func(c *gin.Context) {
+				if requestcapture.FromContext(c.Request.Context()) == nil {
+					t.Error("fixture capture session was not admitted")
+				}
+				c.Next()
+			})
 			router.GET("/v1/responses", h.handler.ResponsesWebSocket)
 			server := httptest.NewServer(router)
 			defer server.Close()
@@ -96,7 +102,9 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 			require.Eventually(t, func() bool { return manager.Stats().ActiveRequests == 0 }, 3*time.Second, 5*time.Millisecond)
 			records, e := manager.Records(ctx, task.ID, "", true, 10, 0)
 			require.NoError(t, e)
-			require.Len(t, records, 1, "FOLLOWUP_ERROR_CAPTURE_MISSING: only second failed turn must be retained")
+			taskState, taskErr := manager.Task(ctx, task.ID)
+			require.NoError(t, taskErr)
+			require.Len(t, records, 1, "FOLLOWUP_ERROR_CAPTURE_MISSING: only second failed turn must be retained; stats=%+v task=%+v", manager.Stats(), taskState)
 			record := records[0]
 			require.Equal(t, 2, record.Turn)
 			require.True(t, record.IsError)
