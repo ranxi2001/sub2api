@@ -567,7 +567,12 @@ export default {
       passwordCopied: '密码已复制',
       creating: '创建中...',
       updating: '更新中...',
+      liveUsageHint: '每分钟刷新当前页。并发为当前占用／上限；RPM 为现有用户级限流计数／上限，每个自然分钟重置，可能包含被限流请求。未设置用户 RPM 上限时不计数；不包含独立分组限额。',
+      liveConcurrency: '并发',
+      rpmNotCounted: '未计数',
+      liveUsageUnavailable: '暂不可用',
       columns: {
+        liveUsage: '并发 / RPM',
         user: '用户',
         id: 'ID',
         email: '邮箱',

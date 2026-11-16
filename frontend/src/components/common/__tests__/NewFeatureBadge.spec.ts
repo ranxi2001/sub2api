@@ -23,6 +23,7 @@ describe('NewFeatureBadge', () => {
 
 
   it.each([
+    ['user live load', NEW_FEATURE_NOTICES.userLiveLoad],
     ['Free UltraFast', NEW_FEATURE_NOTICES.groupFreeUltrafast],
     ['BPS account search', NEW_FEATURE_NOTICES.bpsAccountSearch],
     ['mature providers', NEW_FEATURE_NOTICES.matureProviders],

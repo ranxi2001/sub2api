@@ -54,6 +54,7 @@ export const NEW_FEATURE_NOTICES = {
   apiKeyUsageDateRange: 'api-key-usage-date-range-initial-announcement',
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   profitOperationsTimeRanges: 'profit-operations-time-ranges-initial-announcement',
+  userLiveLoad: 'user-live-load-initial-announcement',
   vipAutoCredit: 'vip-auto-credit-initial-announcement',
   vipAutoCreditEmail: 'vip-auto-credit-email',
   oauthInitialTOTPRotation429: 'oauth-initial-totp-rotation-on-429-initial-announcement',

@@ -113,6 +113,7 @@ export interface AdminUser extends User {
   // 管理侧权限开关，普通用户接口不返回。
   restrict_public_groups?: boolean
   // 当前并发数（仅管理员列表接口返回）
+  current_rpm?: number | null
   current_concurrency?: number
 }
 
