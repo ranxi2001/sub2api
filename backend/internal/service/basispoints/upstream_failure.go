@@ -12,12 +12,17 @@ type UpstreamFailure struct {
 	Code    string
 	Type    string
 	Message string
+	Search  *SearchFailure
 }
 
 func (f *UpstreamFailure) Error() string { return f.Message }
 
 func (f *UpstreamFailure) Details() map[string]any {
-	return object{"status": f.Status, "code": f.Code, "type": f.Type, "message": f.Message}
+	detail := object{"status": f.Status, "code": f.Code, "type": f.Type, "message": f.Message}
+	if f.Search != nil {
+		detail["search_diagnostic"] = f.Search.details()
+	}
+	return detail
 }
 
 // ParseUpstreamFailure recognizes failure terminals only. Unknown identifiers
@@ -79,8 +84,15 @@ func classifyUpstreamFailure(kind string, payload object) *UpstreamFailure {
 			errorType = "invalid_request_error"
 		}
 	}
-	return &UpstreamFailure{Status: status, Code: code, Type: errorType,
+	failure := &UpstreamFailure{Status: status, Code: code, Type: errorType,
 		Message: "Excel BPS upstream failure: " + code + "; request was not replayed"}
+	if code == "basispoints_search_failed" {
+		failure.Search = parseSearchFailure(detail["search_diagnostic"])
+		// The safe summary also survives compact keepalives and existing Ops
+		// consumers that retain only the normalized message.
+		failure.Message += "; " + failure.Search.Error()
+	}
+	return failure
 }
 
 func failureStatus(value any) int {
@@ -125,7 +137,17 @@ func failureIdentifierStatus(identifier string) int {
 
 // normalizeFailureEvent preserves response identity/output/usage after the
 // bridge has withheld tools, but replaces error details with safe identifiers.
-func normalizeFailureEvent(kind string, payload object) object {
+func (b *Bridge) normalizeFailureEvent(kind string, payload object) object {
+	if !b.searchDiagnostics && (kind == "error" || kind == "response.failed" || kind == "response.cancelled") {
+		// Only the local search runner can attest to a search HTTP response.
+		// A raw model terminal must not manufacture search status evidence.
+		response, _ := payload["response"].(object)
+		for _, value := range []any{response["error"], payload["error"], payload} {
+			if detail, ok := value.(object); ok {
+				delete(detail, "search_diagnostic")
+			}
+		}
+	}
 	failure := classifyUpstreamFailure(kind, payload)
 	if failure == nil {
 		return payload

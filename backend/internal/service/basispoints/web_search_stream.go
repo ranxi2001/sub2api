@@ -24,6 +24,7 @@ func (b *Bridge) StreamWithSearch(parent context.Context, upstream io.ReadCloser
 	upstream = &searchRoundBody{ReadCloser: upstream}
 	raw := &streamBody{PipeReader: reader, upstream: upstream, cancel: cancel}
 	final := *b
+	final.searchDiagnostics = true
 	final.tools = make(map[string]tool, len(b.tools))
 	for key, value := range b.tools {
 		if key != serverSearchTool {
@@ -68,7 +69,12 @@ func (b *Bridge) runWebSearch(ctx context.Context, upstream io.ReadCloser, write
 	}
 	// A search/model continuation failure cannot look like a successful HTTP 200.
 	// Keep observed model usage; upstream bodies and search queries are not errors.
-	response := object{"id": state.id, "model": state.model, "status": "failed", "output": []any{}, "usage": state.usage, "error": object{"code": "basispoints_search_failed", "message": err.Error()}}
+	failure := NewSearchFailure("unknown", "unknown", 0)
+	var known *SearchFailure
+	if errors.As(err, &known) {
+		failure = NewSearchFailure(known.phase, known.reason, known.upstreamStatus)
+	}
+	response := object{"id": state.id, "model": state.model, "status": "failed", "output": []any{}, "usage": state.usage, "error": object{"code": "basispoints_search_failed", "search_diagnostic": failure.details()}}
 	return state.emit("response.failed", object{"response": response})
 }
 
@@ -76,9 +82,10 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 	var prepared object
 	if err := decode(wire, &prepared); err != nil {
 		_ = upstream.Close()
-		return searchRequestError("invalid_continuation")
+		return NewSearchFailure("model_initial", "invalid_continuation", 0)
 	}
 	current := upstream
+	phase := "model_initial"
 	defer func() {
 		if current != nil {
 			_ = current.Close()
@@ -112,13 +119,13 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 			}
 		}
 		if err != nil {
-			return err
+			return searchFailureAt(err, phase, "read_failed")
 		}
 		if state.id == "" {
-			return searchRequestError("missing_response_id")
+			return NewSearchFailure(phase, "missing_response_id", 0)
 		}
 		if err = observed.validate(response); err != nil {
-			return err
+			return searchFailureAt(err, phase, "unknown")
 		}
 		output, _ := response["output"].([]any)
 		nativeSearch := []object{}
@@ -130,13 +137,13 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 		check.stagedReplays = nil
 		// Validate every tool before any search side effect. All IDs are request-wide.
 		if err = check.validateToolResponse(response); err != nil {
-			return err
+			return searchFailureAt(err, "tool_validation", "invalid_tool_response")
 		}
 		for i, rawItem := range output {
 			item, _ := rawItem.(object)
 			if id := text(item["id"]); id != "" {
 				if state.identities[id] {
-					return searchRequestError("duplicate_item_id")
+					return NewSearchFailure("tool_validation", "duplicate_item_id", 0)
 				}
 				state.identities[id] = true
 			}
@@ -145,12 +152,12 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 			}
 			callID := text(item["call_id"])
 			if callID == "" || state.callIDs[callID] {
-				return searchRequestError("duplicate_call_id")
+				return NewSearchFailure("tool_validation", "duplicate_call_id", 0)
 			}
 			state.callIDs[callID] = true
 			translated, translateErr := check.translateCall(item)
 			if translateErr != nil {
-				return translateErr
+				return searchFailureAt(translateErr, "tool_validation", "invalid_tool_response")
 			}
 			if text(translated["name"]) != serverSearchTool {
 				clientCalls++
@@ -158,28 +165,28 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 			}
 			var args object
 			if decode([]byte(text(translated["arguments"])), &args) != nil {
-				return searchRequestError("invalid_query")
+				return NewSearchFailure("tool_validation", "invalid_query", 0)
 			}
 			query := strings.TrimSpace(text(args["query"]))
 			if query == "" || len(query) > 4096 {
-				return searchRequestError("invalid_query")
+				return NewSearchFailure("tool_validation", "invalid_query", 0)
 			}
 			nativeSearch = append(nativeSearch, item)
 			searchIndexes = append(searchIndexes, i)
 			queries = append(queries, query)
 		}
 		if len(nativeSearch) > 1 {
-			return searchRequestError("parallel_search_unavailable")
+			return NewSearchFailure("tool_validation", "parallel_search_unavailable", 0)
 		}
 		if len(nativeSearch) > 0 && clientCalls > 0 {
-			return searchRequestError("mixed_tool_batch")
+			return NewSearchFailure("tool_validation", "mixed_tool_batch", 0)
 		}
 		if len(nativeSearch) == 0 {
 			if plan.Required && !state.completedSearch {
-				return searchRequestError("required_search_missing")
+				return NewSearchFailure("tool_validation", "required_search_missing", 0)
 			}
 			if plan.RequiredAny && !state.completedSearch && clientCalls == 0 {
-				return searchRequestError("required_tool_missing")
+				return NewSearchFailure("tool_validation", "required_tool_missing", 0)
 			}
 			state.output = append(state.output, output...)
 			response["output"], response["usage"], response["id"] = state.output, state.usage, state.id
@@ -192,7 +199,7 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 			return state.emit("response.completed", object{"response": response})
 		}
 		if search == nil || next == nil {
-			return searchRequestError("executor_unavailable")
+			return NewSearchFailure("tool_validation", "executor_unavailable", 0)
 		}
 		index := searchIndexes[0]
 		nativeOutput := append([]any(nil), output...)
@@ -231,7 +238,7 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 		result, searchErr := waitForWebSearch(searchCtx, search, queries[0])
 		cancel()
 		if searchErr != nil {
-			return searchErr
+			return searchFailureAt(searchErr, "search_http", "unknown")
 		}
 		state.completedSearch = true
 		public["status"] = "completed"
@@ -269,15 +276,16 @@ func (b *Bridge) searchRounds(ctx context.Context, upstream io.ReadCloser, wire 
 		}
 		snapshot, _ := json.Marshal(state.output)
 		if len(encoded) > 32<<20 || len(snapshot) > 32<<20 {
-			return searchRequestError("continuation_too_large")
+			return NewSearchFailure("model_continuation", "continuation_too_large", 0)
 		}
 		current, err = next(ctx, encoded)
 		if err != nil {
-			return err
+			return searchFailureAt(err, "model_continuation", "unknown")
 		}
 		if current == nil {
-			return searchRequestError("missing_continuation")
+			return NewSearchFailure("model_continuation", "missing_continuation", 0)
 		}
+		phase = "model_continuation"
 		current = &searchRoundBody{ReadCloser: current}
 	}
 }

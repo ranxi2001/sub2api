@@ -3,7 +3,6 @@ package basispoints
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"strings"
 )
@@ -35,9 +34,13 @@ func isWebSearch(kind string) bool {
 	return false
 }
 
-func searchRequestError(reason string) error {
-	return fmt.Errorf("basispoints web_search rejected; reason=%s", reason)
+type searchRequestRejection string
+
+func (r searchRequestRejection) Error() string {
+	return "basispoints web_search rejected; reason=" + string(r)
 }
+
+func searchRequestError(reason string) error { return searchRequestRejection(reason) }
 
 // NormalizeWebSearchRequest removes hosted declarations before catalog caching.
 // Disabled accounts retain the existing native routing/omission behavior.

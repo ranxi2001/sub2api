@@ -935,7 +935,12 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 				if upstreamFailure != nil {
 					// Preserve the actual HTTP status separately from the event's
 					// semantic status. An accepted generation is never replayed.
-					setOpsUpstreamError(c, resp.StatusCode, upstreamFailure.Message, "")
+					safeDetail := ""
+					if upstreamFailure.Search != nil {
+						raw, _ := json.Marshal(upstreamFailure.Details())
+						safeDetail = string(raw)
+					}
+					setOpsUpstreamError(c, resp.StatusCode, upstreamFailure.Message, safeDetail)
 					MarkOpsStreamErrorValue(c, OpsStreamError{
 						ErrType: upstreamFailure.Type, Code: upstreamFailure.Code, Message: upstreamFailure.Message,
 						IntendedStatus: upstreamFailure.Status, CountTowardsSLA: true, NonStream: !stream,
