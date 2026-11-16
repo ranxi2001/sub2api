@@ -243,6 +243,7 @@ describe('admin UsersView', () => {
     expect(listUsers).toHaveBeenCalledTimes(2)
     wrapper.unmount()
     vi.restoreAllMocks()
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     localStorage.setItem('user-hidden-columns', JSON.stringify(['live_usage']))
     const hidden = mountBulkDeleteView()
     await flushPromises()

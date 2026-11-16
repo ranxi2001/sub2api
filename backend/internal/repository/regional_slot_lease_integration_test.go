@@ -217,6 +217,18 @@ func TestRegionalSlotLeaseConcurrencyCacheAdapter(t *testing.T) {
 	count, err = primary.GetUserConcurrency(ctx, g.Resource.ID)
 	require.NoError(t, err)
 	require.Equal(t, 3, count)
+	// Unlimited statistics stay in the auxiliary Redis set; releasing them must
+	// not release an unrelated persistent regional reservation.
+	statsSlot, err := service.NewConcurrencyService(local).AcquireUserSlot(ctx, g.Resource.ID, 0)
+	require.NoError(t, err)
+	require.True(t, statsSlot.Acquired)
+	count, err = primary.GetUserConcurrency(ctx, g.Resource.ID)
+	require.NoError(t, err)
+	require.Equal(t, 4, count)
+	statsSlot.ReleaseFunc()
+	count, err = primary.GetUserConcurrency(ctx, g.Resource.ID)
+	require.NoError(t, err)
+	require.Equal(t, 3, count)
 	// Optional legacy acquisition implementations must not leak through the
 	// embedded auxiliary cache and bypass SQL. FIFO/Live now use SQL transactions.
 	_, fifo := local.(service.APIKeySlotQueueCache)

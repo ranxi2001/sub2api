@@ -88,7 +88,7 @@ export interface User {
   balance: number // User balance for API usage
   frozen_balance?: number // Balance currently held by async batch jobs
   concurrency: number // Allowed concurrent requests
-  rpm_limit?: number // User-level RPM cap (0 = unlimited); effective as fallback when group has no rpm_limit
+  rpm_limit?: number // User-level RPM cap (0 = unlimited, still counted); enforced alongside group limits
   status: 'active' | 'disabled' // Account status
   observer_group_ids?: number[] | null
   allowed_groups: number[] | null // Allowed group IDs (null = all non-exclusive groups)

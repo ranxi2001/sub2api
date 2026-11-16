@@ -14,6 +14,12 @@ describe('UserLiveUsageCell', () => {
     expect(over.text()).toContain('61 / 60')
     expect(over.find('.text-red-600').exists()).toBe(true)
   })
+  it('shows both zero limits as unlimited while retaining counts', async () => {
+    const wrapper = render(18, 0)
+    await wrapper.setProps({ user: { ...wrapper.props('user'), concurrency: 0, current_concurrency: 3 } })
+    expect(wrapper.text()).toMatch(/3\s*\/\s*∞/)
+    expect(wrapper.text()).toContain('18 / ∞')
+  })
   it('shows unlimited usage and keeps unavailable RPM distinct from zero', () => {
     expect(render(12, 0).text()).toContain('12 / ∞')
     expect(render(0, 0).text()).toContain('0 / ∞')
