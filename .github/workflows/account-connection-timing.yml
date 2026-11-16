@@ -85,7 +85,7 @@ jobs:
   frontend:
     needs: backend
     if: github.head_ref == 'feat/account-connection-timing'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}

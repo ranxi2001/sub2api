@@ -29,7 +29,7 @@ jobs:
         working-directory: backend
         run: go test -race -tags=unit ./internal/service ./internal/handler/admin ./cmd/server -run 'TestBalanceForecastRetired|TestProvideCleanup|TestResolveBalanceThreshold|TestNotificationEmail' -count=1 -v -timeout=10m
   ui:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -48,7 +48,8 @@ jobs:
       - run: pnpm --dir frontend exec vitest run src/views/admin/__tests__/SettingsView.spec.ts
       - name: Prepare baseline and isolated browser
         env:
-          SOURCE_BASE: ${{ github.event.pull_request.base.sha }}
+          # Parent of the forecast-removal commit; the PR base already lacks the control.
+          SOURCE_BASE: 4c660794b89279dcbf699275091340eb2c87959a
         run: |
           git worktree add --detach "$RUNNER_TEMP/forecast-before" "$SOURCE_BASE"
           pnpm --dir "$RUNNER_TEMP/forecast-before/frontend" install --frozen-lockfile
@@ -56,7 +57,7 @@ jobs:
           "$RUNNER_TEMP/forecast-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Render actual settings page before and after removal
         env:
-          SOURCE_BASE: ${{ github.event.pull_request.base.sha }}
+          SOURCE_BASE: 4c660794b89279dcbf699275091340eb2c87959a
           BASELINE_ROOT: ${{ runner.temp }}/forecast-before/frontend
           PLAYWRIGHT_ROOT: ${{ runner.temp }}/forecast-browser/node_modules/playwright
           SCREENSHOT_DIR: ${{ runner.temp }}/forecast-ui
