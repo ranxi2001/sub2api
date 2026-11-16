@@ -578,6 +578,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if account.IsOpenAIApiKey() && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
 		source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
 		previous := gjson.GetBytes(source, "previous_response_id").String()
+		// The ingress has already stripped invalid item IDs. Derive that one
+		// permitted normalization from the original frame, never from final wire.
+		normalizedSource, _, normalizationErr := sanitizeOpenAIResponsesInputItemIDs(source)
 		originalInput, historyInput := gjson.GetBytes(source, "input"), gjson.GetBytes(payload, "input")
 		if previous != "" && gjson.GetBytes(payload, "previous_response_id").String() == previous &&
 			gjson.GetBytes(source, "store").Type == gjson.False && !gjson.GetBytes(body, "previous_response_id").Exists() &&
@@ -591,7 +594,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 			if len(current) > 0 {
 				encoded, encodeErr := json.Marshal(tail)
-				if encodeErr == nil && openAIAgentRecoveryInputDigest(source) == openAIAgentRecoveryInputDigest(append(append([]byte(`{"input":`), encoded...), '}')) {
+				if encodeErr == nil && normalizationErr == nil && openAIAgentRecoveryInputDigest(normalizedSource) == openAIAgentRecoveryInputDigest(append(append([]byte(`{"input":`), encoded...), '}')) {
 					recovery := openAIWSAgentRecoveryFromContext(ctx)
 					if recovery == nil {
 						return nil, openAIAgentRecoveryError("wire_changed")
