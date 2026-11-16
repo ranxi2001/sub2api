@@ -8,6 +8,8 @@ on:
       - 'backend/internal/requestcapture/websocket.go'
       - 'backend/internal/handler/openai_ws_followup_capture_test.go'
       - 'backend/internal/requestcapture/followup_test_support.go'
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/service/openai_ws_history_diagnostics_test.go'
       - '.github/workflows/ws-followup-capture.yml'
 permissions:
   contents: read
@@ -64,6 +66,10 @@ jobs:
               assert code==0
               for name in names: assert any(r.get('Action')=='pass' and r.get('Test')==name for r in rows),name
           PY
+      - name: Restore refusal diagnostics contain no task or response identities
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        run: go test -race -tags=unit,followupcapture ./internal/service -run '^TestOpenAIWSUnsentHistoryDiagnostics$' -count=1 -timeout=2m
       - uses: actions/upload-artifact@v7
         if: always()
         with:
