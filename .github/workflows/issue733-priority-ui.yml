@@ -65,7 +65,7 @@ jobs:
       - run: pnpm --dir frontend install --frozen-lockfile
       - run: pnpm --dir frontend run build
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6

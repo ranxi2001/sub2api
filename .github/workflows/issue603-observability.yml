@@ -191,7 +191,7 @@ jobs:
           retention-days: 14
   ui:
     if: github.head_ref == 'feat/issue603-latency-observability'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       BASELINE: ec007920de042797299fc7cf2c034ad24c136462

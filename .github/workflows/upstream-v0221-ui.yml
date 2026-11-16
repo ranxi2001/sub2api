@@ -12,7 +12,7 @@ env:
 jobs:
   rendered:
     if: github.head_ref == 'cherry/upstream-v0.2.21' || github.ref_name == 'cherry/upstream-v0.2.21'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6

@@ -149,7 +149,7 @@ jobs:
 
   before-ui:
     if: github.sha == '59d409b49df3dd90815a054cb6dffdd405c06c3e'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -354,7 +354,7 @@ jobs:
 
   account-before:
     if: github.sha == 'a51c3e8d8e61c897a3a2aad9dd1cdc7d9b114c56'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -647,7 +647,7 @@ jobs:
           key: mature-go-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.job }}-${{ github.sha }}
 
   after-ui:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

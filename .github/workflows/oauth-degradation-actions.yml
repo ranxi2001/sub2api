@@ -256,7 +256,7 @@ jobs:
           name: oauth-degradation-integration-race-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/
   ui:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6

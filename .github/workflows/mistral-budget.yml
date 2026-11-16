@@ -24,7 +24,7 @@ jobs:
       - working-directory: backend
         run: go test -race -tags=unit ./internal/service -run '^(TestMistral|TestCNProviderBalanceCheckRunOnceProbesMistral|TestHandleUpstreamError_Mistral)' -count=1 -v -timeout=10m
   ui:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
