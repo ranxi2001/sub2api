@@ -2,6 +2,10 @@ name: OAuth degradation actions
 on:
   push:
     branches: [production, feat/oauth-degradation-actions-20261109, ci/oauth-workflow-mirror-recovery-20261111]
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/workflows/oauth-degradation-actions.yml'
 permissions:
   contents: read
 jobs:
