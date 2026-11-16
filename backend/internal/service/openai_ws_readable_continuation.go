@@ -103,6 +103,12 @@ type openAIWSUnsentOwnerProofKey struct{}
 // Carry the route check's observations through the handler's auth boundary.
 // Rebuild consumes this current-turn evidence once; it cannot leak to later turns.
 func WithOpenAIWSUnsentOwnerProof(ctx context.Context, err error) context.Context {
+	var recovered interface {
+		RecoveredWSContext(context.Context) context.Context
+	}
+	if errors.As(err, &recovered) {
+		ctx = recovered.RecoveredWSContext(ctx)
+	}
 	var unsent *openAIWSUnsentTurnError
 	if errors.As(err, &unsent) && unsent.completedSource != nil {
 		return context.WithValue(ctx, openAIWSUnsentOwnerProofKey{}, unsent.completedSource)

@@ -1,0 +1,77 @@
+name: WS unsent delta takeover
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_ws_readable_continuation.go'
+      - 'backend/internal/handler/openai_ws_unsent_delta_test.go'
+      - '.github/workflows/ws-unsent-delta.yml'
+permissions:
+  contents: read
+jobs:
+  takeover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Redis fixture dependency
+        run: |
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Exact baseline implementation for RED
+        if: matrix.phase == 'RED'
+        run: |
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_readable_continuation.go; do
+            git show "2927209f5492d8cb690b83a1964b2f093c19ad7a:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "2927209f5492d8cb690b83a1964b2f093c19ad7a:$target")"
+          done
+      - name: Same socket, account pause, result delta and next turn
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,unsentdelta ./internal/handler -run '^TestOpenAIWSUnsentDelta(Takeover|Fences)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/unsent-delta.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/unsent-delta.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/unsent-delta.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/unsent-delta.jsonl" <<'PY'
+          import json,sys
+          phase,status,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
+          rows=[json.loads(l) for l in open(path) if l.startswith('{')]
+          outcomes={r.get('Test'):r['Action'] for r in rows if r.get('Action') in ('pass','fail','skip') and r.get('Test')}
+          modes=('http_bridge','ctx_pool','shared','dedicated','passthrough')
+          expected={f'TestOpenAIWSUnsentDeltaTakeover/{m}/turn_{n}' for m in modes for n in (2,53)}
+          fences={f'TestOpenAIWSUnsentDeltaFences/{m}/{f}' for m in ('http_bridge','ctx_pool','passthrough') for f in ('unknown_pointer','unknown_call','terminal_excludes','beta_off')}
+          assert all(outcomes.get(n)=='pass' for n in fences),outcomes
+          if phase=='RED':
+              assert status!=0 and all(outcomes.get(n)=='fail' for n in expected),outcomes
+              for name in expected:
+                  assert 'UNSENT_DELTA_NOT_RESUMED' in ''.join(r.get('Output','') for r in rows if r.get('Test')==name),name
+          else:
+              assert status==0 and all(outcomes.get(n)=='pass' for n in expected),outcomes
+              assert not any(a in ('fail','skip') for a in outcomes.values()),outcomes
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unsent-delta-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/unsent-delta.jsonl
+          if-no-files-found: error

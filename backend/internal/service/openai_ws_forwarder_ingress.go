@@ -589,6 +589,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	agentRecovery := newOpenAIWSAgentRecovery(s, ctx, c)
 	ctx = context.WithValue(ctx, openAIWSAgentRecoveryKey{}, agentRecovery)
 	defer agentRecovery.abort()
+	defer func() {
+		if recovery, ok := any(agentRecovery).(interface{ restoreUnsentHistory(error) error }); ok {
+			returnErr = recovery.restoreUnsentHistory(returnErr)
+		}
+	}()
 	var meterCleanup func()
 	var meterErr error
 	ctx, hooks, meterCleanup, meterErr = s.wrapRegionalWSTurns(ctx, c, account, firstClientMessage, hooks)
