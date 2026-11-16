@@ -591,6 +591,17 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier:         2,
 		LongContextOutputMultiplier:        1.5,
 	}
+	for _, model := range []string{"gpt-6.2-astra", "gpt-6.2-astra-pro", "gpt-6.2-sol"} {
+		price := gpt62DefaultPricing(model)
+		s.fallbackPrices[model] = &ModelPricing{
+			InputPricePerToken:            price.InputCostPerToken,
+			OutputPricePerToken:           price.OutputCostPerToken,
+			CacheCreationPricePerToken:    price.CacheCreationInputTokenCost,
+			CacheCreation12hPricePerToken: price.CacheCreationInputTokenCost12h,
+			CacheCreationPriceExplicit:    true,
+			CacheReadPricePerToken:        price.CacheReadInputTokenCost,
+		}
+	}
 
 	// GPT-6 Sol/Luna official rates, 2026-09-22.
 	s.fallbackPrices["gpt-6.1-terra"] = &ModelPricing{
@@ -1278,7 +1289,7 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// OpenAI（GPT-5 / Codex 族）：仅匹配已知型号，避免未知 OpenAI 型号误计价。
 	if normalized := normalizeKnownOpenAICodexModel(modelLower); normalized != "" {
 		switch normalized {
-		case "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna":
+		case "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6.2-astra", "gpt-6.2-astra-pro", "gpt-6.2-sol":
 			return s.fallbackPrices[normalized]
 		case "gpt-6-astra":
 			return s.fallbackPrices["gpt-6-astra"]
@@ -1452,7 +1463,8 @@ func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*
 				InputPricePerTokenPriority:         litellmPricing.InputCostPerTokenPriority,
 				OutputPricePerToken:                litellmPricing.OutputCostPerToken,
 				OutputPricePerTokenPriority:        litellmPricing.OutputCostPerTokenPriority,
-				CacheCreationPriceExplicit:         (openai.IsGPT6SolOrLunaModelSpelling(model) || openai.IsGPT61SolModelSpelling(model) || openai.IsGPT61TerraModelSpelling(model)) && litellmPricing.CacheCreationInputTokenCostExplicit,
+				CacheCreationPriceExplicit:         (openai.IsGPT6SolOrLunaModelSpelling(model) || openai.IsGPT61SolModelSpelling(model) || openai.IsGPT61TerraModelSpelling(model) || normalizeOpenAIGPT62Model(model) != "") && litellmPricing.CacheCreationInputTokenCostExplicit,
+				CacheCreation12hPricePerToken:      litellmPricing.CacheCreationInputTokenCost12h,
 				CacheCreationPricePerToken:         litellmPricing.CacheCreationInputTokenCost,
 				CacheCreationPricePerTokenPriority: litellmPricing.CacheCreationInputTokenCostPriority,
 				CacheReadPricePerToken:             litellmPricing.CacheReadInputTokenCost,
