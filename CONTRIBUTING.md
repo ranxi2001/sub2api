@@ -215,6 +215,8 @@ pnpm --dir frontend run dev
 
 ### CI 工作流维护
 
+主 CI 按[改动范围与成功证据](.github/ci/README.md)选择 job；未变化部分不重复执行。纯文档或触发规则改动不跑应用全量检查，手动/tag/定时验证保留全量入口。
+
 主前端 CI 固定使用 GitHub 托管的 `ubuntu-latest`，通过 `NODE_OPTIONS=--max-old-space-size=6144` 为类型检查和关键测试提供 6 GiB Node 堆上限。`SUB2API_SUPPLEMENTARY_RUNNER` 仅用于发布辅助、Prism adapter 和前端安全检查，不再影响主前端任务的运行位置。
 
 主 CI、安全扫描、多机部署验收和 VIP 入账回归在 PR、`production` 推送及 `v*` tag 上运行，也支持手动触发；功能分支推送由 PR 检查覆盖，避免同一提交重复运行这些检查。新的 PR 提交会取消该 PR 旧提交的同名工作流，production/tag 验证不主动取消。

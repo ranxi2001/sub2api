@@ -1,7 +1,5 @@
 name: Account daily schedule regressions
 on:
-  push:
-    branches: ['feat/account-daily-schedule*']
   pull_request:
     paths:
       - '.github/workflows/account-daily-schedule.yml'

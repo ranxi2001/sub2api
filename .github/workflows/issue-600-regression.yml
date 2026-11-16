@@ -1,7 +1,6 @@
 name: Issue 600 WS client identity
 on:
-  push:
-    branches: [fix/issue600-ws-client-identity]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

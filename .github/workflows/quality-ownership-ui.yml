@@ -1,7 +1,6 @@
 name: Quality ownership offline UI
 on:
-  push:
-    branches: [fix/quality-template-switch-conflicts]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'frontend/src/components/admin/operations/QualityOwnershipReview.vue'

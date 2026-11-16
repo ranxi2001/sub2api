@@ -1,8 +1,7 @@
 name: Issue 765 image scheduler authorization
 
 on:
-  push:
-    branches: [fix/issue765-image-scheduler-20261110]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

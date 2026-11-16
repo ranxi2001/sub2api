@@ -1,7 +1,6 @@
 name: VIP collection production UI
 on:
-  push:
-    branches: [fix/vip-receipt-overlay-20261113]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

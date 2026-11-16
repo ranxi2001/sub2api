@@ -1,8 +1,7 @@
 name: Account performance HTTP error thresholds
 
 on:
-  push:
-    branches: [feat/account-performance-error-rate]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:
@@ -13,7 +12,6 @@ on:
       - 'frontend/src/components/account/AccountPerformance*'
       - 'frontend/src/components/account/__tests__/AccountPerformance*'
       - 'frontend/src/i18n/locales/*/accountPerformance.ts'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/api/__tests__/admin.accounts.performance.spec.ts'
       - '.github/workflows/account-performance-error-threshold.yml'
       - '.github/scripts/account-performance-cache-screenshot.mjs'

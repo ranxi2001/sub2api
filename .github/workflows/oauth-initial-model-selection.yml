@@ -1,7 +1,6 @@
 name: OAuth initial model selection
 on:
-  push:
-    branches: [feat/oauth-initial-model-selection]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/service/*model*'

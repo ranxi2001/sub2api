@@ -1,8 +1,9 @@
 name: Key risk PostgreSQL acceptance
 
 on:
+  workflow_dispatch:
   push:
-    branches: [production, review/pr717-merge-fixes]
+    branches: [production]
     paths:
       - 'backend/internal/keyrisk/**'
       - 'backend/migrations/*key_risk*.sql'

@@ -1,7 +1,6 @@
 name: Upstream account types rendered evidence
 on:
-  push:
-    branches: [feat/upstream-model-sync-account-types-20261109]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

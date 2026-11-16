@@ -1,7 +1,6 @@
 name: VIP credit email UI and production builds
 on:
-  push:
-    branches: [feat/vip-credit-email]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

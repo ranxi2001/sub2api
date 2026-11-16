@@ -1,7 +1,6 @@
 name: Issue618 EasyPay confirmation recovery
 on:
-  push:
-    branches: [fix/payment-confirmation-recovery-618]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

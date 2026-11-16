@@ -1,8 +1,7 @@
 name: Issue817 manual request fencing
 
 on:
-  push:
-    branches: [fix/issue817-ack-fencing-20261114]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/repository/account_quality.go'

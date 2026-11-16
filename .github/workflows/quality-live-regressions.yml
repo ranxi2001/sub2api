@@ -1,7 +1,6 @@
 name: Quality live regressions
 on:
-  push:
-    branches: [fix/quality-operations-live-regressions]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/service/quality*'

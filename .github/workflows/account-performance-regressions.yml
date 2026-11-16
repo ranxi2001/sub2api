@@ -1,8 +1,15 @@
 name: Account performance release regressions
 
 on:
+  workflow_dispatch:
   push:
-    branches: [production, fix/account-performance-release-2.19.2]
+    branches: [production]
+    paths:
+      - 'backend/internal/service/account_performance*'
+      - 'backend/internal/repository/account_performance*'
+      - 'backend/internal/service/regional_scheduler_sync.go'
+      - 'backend/internal/repository/regional_slot_authority.go'
+      - '.github/workflows/account-performance-regressions.yml'
   pull_request:
     paths:
       - 'backend/internal/service/account_performance*'

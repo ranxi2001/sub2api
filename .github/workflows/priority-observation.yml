@@ -1,7 +1,6 @@
 name: Priority observation regression
 on:
-  push:
-    branches: [fix/priority-observation-identity]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/service/priority*'

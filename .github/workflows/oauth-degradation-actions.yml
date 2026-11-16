@@ -1,10 +1,19 @@
 name: OAuth degradation actions
 on:
+  workflow_dispatch:
   push:
-    branches: [production, feat/oauth-degradation-actions-20261109, ci/oauth-workflow-mirror-recovery-20261111]
+    branches: [production]
+    paths:
+      - 'backend/internal/service/*oauth*'
+      - 'backend/internal/repository/*oauth*'
+      - 'backend/internal/repository/*timezone*'
+      - '.github/workflows/oauth-degradation-actions.yml'
   pull_request:
     branches: [production]
     paths:
+      - 'backend/internal/service/*oauth*'
+      - 'backend/internal/repository/*oauth*'
+      - 'backend/internal/repository/*timezone*'
       - '.github/workflows/oauth-degradation-actions.yml'
 permissions:
   contents: read
