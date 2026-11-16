@@ -56,7 +56,7 @@ func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
 	needs := openAI409HasProviderState(body)
 	for _, item := range input.Array() {
 		kind := item.Get("type").String()
-		if (kind != "" && kind != "message") || openAIWSHasOpaqueField(item, 0) {
+		if (kind != "" && kind != "message") || openAILossyHasOpaqueField(item, 0) {
 			needs = true
 		}
 	}
@@ -109,7 +109,7 @@ func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
 			record := map[string]json.RawMessage{}
 			for _, field := range []string{"type", "name", "call_id", "arguments", "input", "output", "status"} {
 				value := item.Get(field)
-				if value.Exists() && !openAIWSHasOpaqueField(value, 0) {
+				if value.Exists() && !openAILossyHasOpaqueField(value, 0) {
 					record[field] = json.RawMessage(value.Raw)
 				}
 			}
@@ -142,4 +142,21 @@ func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
 		}
 	}
 	return clean, true
+}
+
+// Keep the destructive policy self-contained: historical protocol regression
+// overlays restore managers that predate their local-history field scanner.
+func openAILossyHasOpaqueField(value gjson.Result, depth int) bool {
+	if depth > 64 {
+		return true
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return false
+	}
+	opaque := false
+	value.ForEach(func(key, child gjson.Result) bool {
+		opaque = key.String() == "encrypted_content" || openAILossyHasOpaqueField(child, depth+1)
+		return !opaque
+	})
+	return opaque
 }
