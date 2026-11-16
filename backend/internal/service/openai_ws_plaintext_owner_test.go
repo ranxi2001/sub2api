@@ -116,6 +116,12 @@ func TestOpenAIWSPlaintextBridgeProjectionGuards(t *testing.T) {
 				require.Empty(t, manager.request.previousResponseID)
 			} else {
 				require.Error(t, err, "changed projection must never authorize an upstream write")
+				if change != "owner" && change != "unproven" {
+					var recovery *OpenAIAgentRecoveryError
+					require.ErrorAs(t, err, &recovery)
+					require.Equal(t, "ws_projection_integrity", recovery.InternalSubreason())
+					require.Equal(t, "encrypted_agent_recovery_wire_changed", recovery.ClientCode())
+				}
 			}
 		})
 	}

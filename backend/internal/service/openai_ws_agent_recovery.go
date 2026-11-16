@@ -258,12 +258,12 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		// bridge payload and accidentally granting a transformed opaque item.
 		reader, err := req.GetBody()
 		if err != nil {
-			return openAIAgentRecoveryError("wire_changed")
+			return openAIWSWireRefusal(r.ctx, "ws_body_unreadable", source, payload)
 		}
 		actual, err := io.ReadAll(reader)
 		_ = reader.Close()
 		if err != nil {
-			return openAIAgentRecoveryError("wire_changed")
+			return openAIWSWireRefusal(r.ctx, "ws_body_unreadable", source, payload)
 		}
 		payload = actual
 	}
@@ -297,7 +297,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	if r.readable != nil {
 		if openAIAgentRecoveryInputDigest(source) != r.readableSource || openAI409ControlsDigest(source) != r.readableControls {
-			return openAIAgentRecoveryError("wire_changed")
+			return openAIWSWireRefusal(ctx, "ws_readable_source", source, payload)
 		}
 		ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, r.readable)
 		if mode == "http_bridge" && account.IsOpenAIApiKey() {
@@ -348,7 +348,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			gjson.GetBytes(source, "store").Type != gjson.False || gjson.GetBytes(payload, "previous_response_id").Exists() ||
 			proof.sourceInput != openAIAgentRecoveryInputDigest(source) || proof.sourceControls != openAI409ControlsDigest(source) || proof.input != openAIAgentRecoveryInputDigest(payload) ||
 			proof.controls != openAI409ControlsDigest(payload) {
-			return openAIAgentRecoveryError("wire_changed")
+			return openAIWSWireRefusal(ctx, "ws_projection_integrity", source, payload)
 		}
 		// Recheck the original pointer on the actual selected account before
 		// allowing its HTTP representation to omit that pointer.
@@ -374,7 +374,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	if !projected && !r.request.omittedHistory && previous != "" && (r.request.owner != nil || r.request.disableOwnerBinding || r.request.previousResponseID != "") &&
 		gjson.GetBytes(payload, "previous_response_id").String() != previous {
-		return openAIAgentRecoveryError("wire_changed")
+		return openAIWSWireRefusal(ctx, "ws_previous_removed", source, payload)
 	}
 	if err := r.service.checkOpenAIAgentRecoveryAccount(ctx, account); err != nil {
 		if r.request.hasCompletedMixedOwners() {
