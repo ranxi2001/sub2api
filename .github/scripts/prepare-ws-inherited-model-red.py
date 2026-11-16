@@ -1,4 +1,4 @@
-"""Materialize the entire pinned baseline plus one identical candidate test.
+"""Materialize the pinned baseline plus identical candidate handler/guard tests.
 
 No historical overlay helper or existing worktree is modified. All archived
 backend blobs (including dependencies and historical fixtures) are verified.
@@ -68,9 +68,12 @@ def prepare(destination, evidence):
                 or baseline_guards.split(GUARD_SOURCE_START, 1)[1]
                 != candidate_guards.split(GUARD_SOURCE_START, 1)[1]):
             raise ValueError("guard fixture changed; identical baseline/candidate guard tests required")
-    shutil.copyfile(FIXTURE, destination / FIXTURE)
-    if git("hash-object", str(destination / FIXTURE)).decode().strip() != fixture_blob:
-        raise ValueError("candidate test copy mismatch")
+    # Overlay both committed candidate fixtures so RED and GREEN run identical
+    # selected handler/guard assertions. Guard approval above remains pinned.
+    for path, blob in ((FIXTURE, fixture_blob), (GUARDS, guard_blob)):
+        shutil.copyfile(path, destination / path)
+        if git("hash-object", str(destination / path)).decode().strip() != blob:
+            raise ValueError("candidate test copy mismatch: " + path)
     manifest = {
         "baseline": BASELINE, "candidate": candidate,
         "baseline_tree": git("rev-parse", f"{BASELINE}^{{tree}}").decode().strip(),
@@ -80,7 +83,7 @@ def prepare(destination, evidence):
         "baseline_guard_fixture_blob": git("rev-parse", f"{BASELINE}:{GUARDS}").decode().strip(),
         "approved_guard_extension": GUARD_EXTENSION if candidate_guards != baseline_guards else None,
         "verified_baseline_backend_blobs": len(entries),
-        "production_changes_in_red": [], "candidate_test_overlays": [FIXTURE],
+        "production_changes_in_red": [], "candidate_test_overlays": [FIXTURE, GUARDS],
     }
     (evidence / "source-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (evidence / "baseline-backend-blobs.txt").write_text("".join(f"{blob} {path}\n" for path, blob in entries))

@@ -234,9 +234,11 @@ class SourcePreparationTests(unittest.TestCase):
                         if change in {"unchanged", "approved_extension"}:
                             PREPARE.prepare(destination, evidence)
                             manifest = json.loads((evidence / "source-manifest.json").read_text())
-                            self.assertEqual([PREPARE.FIXTURE], manifest["candidate_test_overlays"])
+                            self.assertEqual([PREPARE.FIXTURE, PREPARE.GUARDS], manifest["candidate_test_overlays"])
                             self.assertEqual([], manifest["production_changes_in_red"])
-                            self.assertEqual(git("show", baseline + ":" + PREPARE.GUARDS) + "\n", (destination / PREPARE.GUARDS).read_text())
+                            self.assertEqual(guard.read_bytes(), (destination / PREPARE.GUARDS).read_bytes())
+                            self.assertEqual(git("hash-object", str(guard)), manifest["guard_fixture_blob"])
+                            self.assertEqual(git("rev-parse", baseline + ":" + PREPARE.GUARDS), manifest["baseline_guard_fixture_blob"])
                             self.assertEqual(fixture.read_bytes(), (destination / PREPARE.FIXTURE).read_bytes())
                             self.assertEqual(extension if change == "approved_extension" else None, manifest["approved_guard_extension"])
                         else:
