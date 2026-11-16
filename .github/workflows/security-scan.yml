@@ -16,12 +16,35 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend-security: ${{ steps.select.outputs['backend-security'] }}
+      frontend-security: ${{ steps.select.outputs['frontend-security'] }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install selector dependency
+        run: python3 -m pip install PyYAML==6.0.3
+      - name: Select affected checks
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/ci/select_jobs.py security-scan.yml
+
   backend-security:
+    needs: changes
+    if: needs.changes.outputs['backend-security'] == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -46,6 +69,8 @@ jobs:
           govulncheck ./...
 
   frontend-security:
+    needs: changes
+    if: needs.changes.outputs['frontend-security'] == 'true'
     runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6

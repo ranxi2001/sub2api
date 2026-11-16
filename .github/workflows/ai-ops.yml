@@ -7,7 +7,6 @@ on:
       - 'frontend/src/api/admin/__tests__/aiOps*'
       - 'frontend/src/components/admin/operations/SmartOpsNav.vue'
       - 'frontend/src/i18n/locales/*/aiOps*'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/router/index.ts'
       - 'backend/internal/**/ai_ops*'
       - 'backend/internal/**/ops_ai*'

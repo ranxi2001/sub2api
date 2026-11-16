@@ -1,8 +1,7 @@
 name: Keys usage layout
 
 on:
-  push:
-    branches: [fix/keys-usage-layout-20261108]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'frontend/src/views/user/KeysView.vue'

@@ -1,7 +1,6 @@
 name: OAuth initial WS rendered evidence
 on:
-  push:
-    branches: [feat/oauth-initial-ws-settings-20261109, fix/debug-fallback-account-picker-20261111]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

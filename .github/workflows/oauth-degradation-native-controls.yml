@@ -1,8 +1,19 @@
 name: OAuth degradation native controls
 
 on:
+  workflow_dispatch:
   push:
-    branches: [production, fix/oauth-degradation-native-controls-20261110, ci/oauth-workflow-mirror-recovery-20261111]
+    branches: [production]
+    paths:
+      - 'backend/internal/service/*oauth*'
+      - 'backend/internal/service/account.go'
+      - 'backend/internal/service/openai_model*'
+      - 'backend/internal/repository/*oauth*'
+      - 'backend/internal/repository/account*'
+      - 'backend/internal/repository/*group*'
+      - 'backend/migrations/*oauth_degradation*'
+      - 'frontend/src/i18n/locales/*/autoConfig.ts'
+      - '.github/workflows/oauth-degradation-native-controls.yml'
   pull_request:
     branches: [production]
     paths:

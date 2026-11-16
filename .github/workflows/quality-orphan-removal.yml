@@ -1,7 +1,6 @@
 name: Quality orphan model removal
 on:
-  push:
-    branches: [fix/quality-orphan-isolation-release]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/**/quality*'

@@ -1,7 +1,6 @@
 name: Smart ops sidebar rendered evidence
 on:
-  push:
-    branches: [fix/smart-ops-default-six-20261109]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

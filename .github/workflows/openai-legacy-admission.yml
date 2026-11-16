@@ -1,14 +1,7 @@
 name: OpenAI legacy admission binding
 
 on:
-  push:
-    branches: [fix/pr756-legacy-admission-followup-20261110]
-    paths:
-      - 'backend/internal/service/openai_account_scheduler.go'
-      - 'backend/internal/service/openai_gateway_scheduling.go'
-      - 'backend/internal/service/openai_legacy_admission_rebind_test.go'
-      - 'backend/internal/repository/gateway_cache_legacy_admission_test.go'
-      - '.github/workflows/openai-legacy-admission.yml'
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

@@ -1,8 +1,6 @@
 name: Issue 578 offline regression
 
 on:
-  push:
-    branches: ['fix/issue-578-bps-usage-snapshot']
   pull_request:
     branches: [production]
     paths:

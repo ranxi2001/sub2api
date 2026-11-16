@@ -1,0 +1,64 @@
+{
+  "backend-ci.yml": {
+    "shell": [
+      "deploy/*.sh",
+      "deploy/tests/*.sh",
+      "deploy/docker-compose*",
+      "deploy/Dockerfile*",
+      "Dockerfile*",
+      ".dockerignore"
+    ],
+    "test": [
+      "backend/**",
+      "Makefile",
+      ".github/scripts/ci-ubuntu-mirrors.sh",
+      "deploy/tests/docker-compose-simple-mode-env-test.sh",
+      "deploy/tests/docker-compose-trusted-proxies-env-test.sh",
+      "deploy/docker-compose*"
+    ],
+    "frontend": [
+      "frontend/**",
+      "Makefile"
+    ],
+    "golangci-lint": [
+      "backend/**",
+      "Makefile",
+      ".github/scripts/ci-ubuntu-mirrors.sh"
+    ],
+    "release-helpers": [
+      ".github/release-tools/**",
+      ".goreleaser*",
+      "deploy/**"
+    ],
+    "prism-adapter": [
+      "prism-adapter/**"
+    ]
+  },
+  "security-scan.yml": {
+    "backend-security": [
+      "backend/**"
+    ],
+    "frontend-security": [
+      "frontend/package.json",
+      "frontend/pnpm-lock.yaml",
+      ".github/audit-exceptions.yml",
+      "tools/check_pnpm_audit_exceptions.py"
+    ]
+  },
+  "multihost-caddy.yml": {
+    "real-proxy-responses": [
+      "deploy/traffic/**"
+    ]
+  },
+  "multihost-fullapp.yml": {
+    "isolated-real-applications": [
+      "backend/**",
+      "deploy/traffic/**"
+    ]
+  },
+  "vip-auto-credit.yml": {
+    "postgres-repository": [
+      "backend/**"
+    ]
+  }
+}

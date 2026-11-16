@@ -1,8 +1,7 @@
 name: Issue817 quality quota regressions
 
 on:
-  push:
-    branches: [fix/issue817-quality-exhausted-filter]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/service/quality_quota*'

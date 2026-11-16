@@ -1,7 +1,6 @@
 name: Quality Jev exact-head regression
 on:
-  push:
-    branches: [feat/quality-jev-judge]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/service/quality_judge*'

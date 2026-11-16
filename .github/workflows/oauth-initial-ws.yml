@@ -9,7 +9,6 @@ on:
       - 'frontend/src/api/admin/autoConfig.ts'
       - 'frontend/src/views/admin/AutoConfigView.vue'
       - 'frontend/src/views/admin/__tests__/AutoConfigView.spec.ts'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/i18n/locales/*/autoConfig.ts'
       - '.github/workflows/oauth-initial-ws.yml'
   workflow_dispatch:

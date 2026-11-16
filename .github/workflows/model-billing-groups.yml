@@ -1,7 +1,6 @@
 name: Model billing group scope
 on:
-  push:
-    branches: [feat/model-multiplier-group-scope]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/service/model_billing*'

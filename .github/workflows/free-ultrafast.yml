@@ -3,12 +3,26 @@ on:
   pull_request:
     branches: [production]
     paths:
-      - 'backend/**'
+      - 'backend/go.*'
+      - 'backend/ent/**'
+      - 'backend/migrations/**'
+      - 'backend/internal/service/*billing*'
+      - 'backend/internal/service/*pricing*'
+      - 'backend/internal/service/*group*'
+      - 'backend/internal/service/*usage*'
+      - 'backend/internal/service/customer_cost*'
+      - 'backend/internal/service/*free*fast*'
+      - 'backend/internal/handler/dto/**'
+      - 'backend/internal/handler/admin/*usage*'
+      - 'backend/internal/handler/admin/*group*'
+      - 'backend/internal/repository/*usage*'
+      - 'backend/internal/repository/*group*'
+      - 'backend/internal/repository/*free*fast*'
+      - 'backend/internal/pkg/usagelog/**'
       - 'frontend/src/views/admin/GroupsView.vue'
       - 'frontend/src/views/admin/__tests__/GroupsView.freeUltrafast.spec.ts'
       - 'frontend/src/utils/customerCostDetails.ts'
       - 'frontend/src/utils/__tests__/customerCostDetails.ultrafast.spec.ts'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - '.github/workflows/free-ultrafast.yml'
       - '.github/scripts/free-ultrafast-browser.mjs'
   workflow_dispatch:

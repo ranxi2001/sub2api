@@ -1,7 +1,6 @@
 name: Issue733 priority reading UI
 on:
-  push:
-    branches: [fix/issue733-priority-ui]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/service/priority_latency_series*'

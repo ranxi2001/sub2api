@@ -1,8 +1,7 @@
 name: Issue817 quota skip pending 5xx
 
 on:
-  push:
-    branches: [fix/issue817-quota-skip-followup-20261113]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/repository/quality_template_quota.go'

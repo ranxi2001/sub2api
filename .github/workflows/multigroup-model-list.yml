@@ -1,8 +1,7 @@
 name: Multi-group model catalogue
 
 on:
-  push:
-    branches: [fix/multigroup-model-list-union]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

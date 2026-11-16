@@ -5,7 +5,6 @@ on:
     paths:
       - 'frontend/src/components/account/**'
       - 'frontend/src/stores/newFeatureNotices.ts'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - '.github/fixtures/pr838-ui/**'
       - '.github/scripts/pr838-ui-*.mjs'
       - '.github/workflows/pr838-ui-acceptance.yml'

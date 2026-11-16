@@ -14,9 +14,31 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      real-proxy-responses: ${{ steps.select.outputs['real-proxy-responses'] }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install selector dependency
+        run: python3 -m pip install PyYAML==6.0.3
+      - name: Select affected checks
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/ci/select_jobs.py multihost-caddy.yml
+
   real-proxy-responses:
+    needs: changes
+    if: needs.changes.outputs['real-proxy-responses'] == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:

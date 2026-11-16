@@ -1,7 +1,5 @@
 name: Upstream channel entities regression
 on:
-  push:
-    branches: [feat/profit-url-channel-remarks]
   pull_request:
     paths:
       - '**/upstream_channels*'

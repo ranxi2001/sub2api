@@ -1,7 +1,6 @@
 name: Image header timeout acceptance
 on:
-  push:
-    branches: [review/pr714-merge-fixes]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

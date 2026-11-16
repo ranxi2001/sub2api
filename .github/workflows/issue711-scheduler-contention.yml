@@ -1,8 +1,7 @@
 name: Issue711 scheduler contention
 
 on:
-  push:
-    branches: [fix/scheduler-snapshot-lock-contention]
+  workflow_dispatch:
   pull_request:
     branches: [production]
     paths:

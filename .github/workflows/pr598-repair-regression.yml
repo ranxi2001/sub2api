@@ -1,8 +1,7 @@
 name: PR598 repair regression
 
 on:
-  push:
-    branches: [feat/priority-scheduling-latency-sticky]
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/internal/service/priority*'

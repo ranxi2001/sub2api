@@ -10,8 +10,6 @@ on:
       - 'backend/internal/handler/admin/setting*'
       - 'backend/internal/handler/dto/settings.go'
       - 'frontend/src/components/settings/EncryptedHistory400Settings.vue'
-      - 'frontend/src/components/common/__tests__/NewFeatureBadge.spec.ts'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/views/admin/SettingsView.vue'
       - 'frontend/src/views/admin/__tests__/SettingsView.spec.ts'
       - 'frontend/src/api/admin/settings.ts'

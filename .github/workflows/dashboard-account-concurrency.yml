@@ -13,8 +13,6 @@ on:
       - 'frontend/src/views/admin/DashboardView.vue'
       - 'frontend/src/views/admin/__tests__/DashboardView.spec.ts'
       - 'frontend/src/components/common/NewFeatureBadge.vue'
-      - 'frontend/src/components/common/__tests__/NewFeatureBadge.spec.ts'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/i18n/locales/*/admin/overview.ts'
 
 permissions:

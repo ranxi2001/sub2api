@@ -1,0 +1,27 @@
+name: CI selection rules
+on:
+  pull_request:
+    paths:
+      - '.github/ci/**'
+      - '.github/workflows/**'
+  push:
+    branches: [production]
+    paths:
+      - '.github/ci/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-selection-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  selection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - run: python3 -m pip install PyYAML==6.0.3
+      - run: python3 -m unittest discover -s .github/ci -p 'test_*.py' -v
