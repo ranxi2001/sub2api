@@ -78,6 +78,23 @@ if ! git -C "$tree" grep -q 'FreeOpenAIUltrafast' "$baseline" -- "$contract"; th
   done
 fi
 
+# PR882 expanded TOTP rotation independently of the replay oracle. When the
+# entire production tree is historical, use its matching TOTP test as well.
+# Candidate GREEN tests and selected replay assertions remain untouched.
+contract=backend/internal/service/openai_totp_rotation.go
+target=backend/internal/service/openai_totp_rotation_test.go
+if git -C "$tree" cat-file -e "$baseline:$contract" 2>/dev/null &&
+   ! git -C "$tree" grep -q 'PreviousCiphertext' "$baseline" -- "$contract"; then
+  expected_contract=$(git -C "$tree" rev-parse "$baseline:$contract")
+  test "$(git -C "$tree" hash-object "$contract")" = "$expected_contract"
+  candidate_blob=$(git -C "$tree" rev-parse "$candidate:$target")
+  test "$(git -C "$tree" hash-object "$target")" = "$candidate_blob"
+  expected=$(git -C "$tree" rev-parse "$baseline:$target")
+  git -C "$tree" show "$baseline:$target" > "$tree/$target"
+  test "$(git -C "$tree" hash-object "$target")" = "$expected"
+  printf 'historical TOTP fixture path=%s candidate_blob=%s baseline_blob=%s contract_blob=%s\n' "$target" "$candidate_blob" "$expected" "$expected_contract"
+fi
+
 # Older Account/search contracts cannot compile the unrelated new search
 # fixture in a service-package RED. Preserve the exact historical Account leaf;
 # only exclude the test when its baseline absence and candidate blob are proven.
