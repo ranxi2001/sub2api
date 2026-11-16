@@ -26,19 +26,19 @@ func (s *OpenAIGatewayService) PrepareOpenAIAgentReplayBody(body []byte) ([]byte
 	return normalizeOpenAIReplayMetadata(body)
 }
 
-// OAuth forces stateless reasoning even when the client omits store or sends
-// true. Derive only that account's finite metadata projection from the frozen
-// source, before timezone/namespace/OAuth builders. API-key store:true is intact.
+// Derive the selected account's native input from the immutable source before
+// other builders run. OAuth stateless metadata and administrator-enabled manual
+// timezone normalization are the only permitted projections here.
 func (s *OpenAIGatewayService) prepareOpenAIAgentOAuthReplay(ctx context.Context, account *Account, body []byte) (context.Context, []byte, error) {
 	r := openAIAgentRecoveryFromContext(ctx)
-	if r == nil || !r.disableOwnerBinding || !r.preservesHistory() || r.omittedHistory || account == nil || !account.UsesOpenAICodexProtocol() {
+	if r == nil || !r.disableOwnerBinding || !r.preservesHistory() || r.omittedHistory || account == nil || !account.IsOpenAI() {
 		return ctx, body, nil
 	}
 	if len(r.replaySource) == 0 || openAIAgentRecoveryInputDigest(body) != r.inputDigest ||
 		openAI409ControlsDigest(body) != openAI409ControlsDigest(r.replaySource) {
 		return ctx, nil, openAIAgentRecoveryRefusal(ctx, "input_integrity")
 	}
-	projected, err := projectOpenAIOAuthReasoningMetadata(r.replaySource)
+	projected, err := s.projectOpenAIAgentAccountReplay(ctx, account, r.replaySource, "http")
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -46,10 +46,30 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentOAuthReplay(ctx context.Context
 	if err != nil {
 		return ctx, nil, err
 	}
+	if tools := gjson.GetBytes(projected, "tools"); tools.Exists() {
+		next, err = sjson.SetRawBytes(next, "tools", []byte(tools.Raw))
+		if err != nil {
+			return ctx, nil, err
+		}
+	}
 	private := *r
-	private.nativeOAuthInput = openAIAgentRecoveryInputDigest(projected)
-	private.nativeOAuthPrepared = true
+	private.nativeInputDigest = openAIAgentRecoveryInputDigest(projected)
+	private.nativeReplayPrepared = true
+	private.nativeAccountID = account.ID
 	return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, &private), next, nil
+}
+
+func (s *OpenAIGatewayService) projectOpenAIAgentAccountReplay(ctx context.Context, account *Account, source []byte, transport string) ([]byte, error) {
+	projected := append([]byte(nil), source...)
+	if account.UsesOpenAICodexProtocol() {
+		var err error
+		projected, err = projectOpenAIOAuthReasoningMetadata(projected)
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Auto mode retains its existing transport-boundary body preservation.
+	return s.normalizeRequestTimezone(ctx, account, projected, transport), nil
 }
 
 // Match the existing OAuth stateless reasoning contract without its general
