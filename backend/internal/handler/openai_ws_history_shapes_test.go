@@ -15,3 +15,11 @@ func TestOpenAIWSReadableHistoryShapeTakeover(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAIWSClientHistoryTakeover(t *testing.T) {
+	for _, mode := range readableWSModes {
+		t.Run(mode, func(t *testing.T) {
+			runUnsentDeltaWithPolicy(t, mode, 7, "", `,{"type":"function_call","call_id":"fixture-old-client-call","name":"fixture_old_effect","arguments":"{}","status":"completed"},{"type":"function_call_output","call_id":"fixture-old-client-call","output":"client reports effect already applied"}`, true)
+		})
+	}
+}

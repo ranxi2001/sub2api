@@ -129,7 +129,15 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 // Provider state and mixed completed producers cannot be forwarded as one new
 // account's conversation. Rebuild before selection, after all item fences were
 // read. A healthy single producer without pointers retains ordinary routing.
-func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.Context, c *gin.Context, body []byte, session, model string) (context.Context, []byte, bool, error) {
+func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.Context, c *gin.Context, body []byte, session, model string) (nextCtx context.Context, nextBody []byte, changed bool, resultErr error) {
+	defer func() {
+		if _, ws := ctx.Value(openAIWSAgentRecoveryRetryKey{}).(*atomic.Bool); ws && resultErr != nil {
+			if next, clean, ok := s.restartOpenAIWSClientReadableHistory(ctx, c, body, session, model, resultErr); ok {
+				nextCtx, nextBody, changed, resultErr = next, clean, true, nil
+			}
+		}
+	}()
+
 	r := openAIAgentRecoveryFromContext(ctx)
 	if r == nil {
 		return ctx, body, false, nil

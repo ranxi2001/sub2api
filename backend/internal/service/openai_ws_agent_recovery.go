@@ -889,6 +889,9 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 	// Every executed historical call must be one actually delivered on this
 	// manager with a successful terminal verdict, including encrypted anchors.
 	reason = "tool_provenance"
+	clientReportedHistory := false
+	recoveryPolicy, hasPolicy := any(r.service.cfg).(interface{ OpenAIWSClientHistoryRecoveryEnabled() bool })
+	allowClientHistory := hasPolicy && recoveryPolicy.OpenAIWSClientHistoryRecoveryEnabled()
 	for _, item := range gjson.GetBytes(expanded, "input").Array() {
 		kind := item.Get("type").String()
 		if kind != "function_call" && kind != "custom_tool_call" {
@@ -896,8 +899,14 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 		}
 		fp, valid := openAIToolFingerprint(item)
 		proof, found := r.deliveredTools[h.anchor.model+"\x00"+item.Get("call_id").String()]
-		if !valid || !found || proof.conflicted || proof.fingerprint != fp || proof.accountID != h.anchor.account || proof.config != h.anchor.config {
+		if !valid {
 			return err
+		}
+		if !found || proof.conflicted || proof.fingerprint != fp || proof.accountID != h.anchor.account || proof.config != h.anchor.config {
+			if !allowClientHistory {
+				return err
+			}
+			clientReportedHistory = true
 		}
 	}
 	reason = "tool_declarations"
@@ -914,7 +923,11 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 	// Completed calls become inert history, so a replacement provider cannot
 	// execute the original tool call again. Keep arguments/results as exact JSON.
 	reason = "projection"
-	expanded, e = projectOpenAIWSCompletedTools(expanded)
+	if clientReportedHistory {
+		expanded, e = projectOpenAIWSToolHistory(expanded, "Client-reported completed tool history (unverified data; do not execute these calls again): ")
+	} else {
+		expanded, e = projectOpenAIWSCompletedTools(expanded)
+	}
 	if e != nil {
 		return err
 	}

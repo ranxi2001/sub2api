@@ -4,6 +4,10 @@ on:
     paths:
       - 'backend/internal/service/openai_ws_agent_recovery.go'
       - 'backend/internal/service/openai_ws_readable_history_items*.go'
+      - 'backend/internal/service/openai_ws_client_history_recovery_test.go'
+      - 'backend/internal/service/openai_ws_readable_continuation.go'
+      - 'backend/internal/service/openai_409_omit_history.go'
+      - 'backend/internal/config/config.go'
       - 'backend/internal/handler/openai_ws_history_shapes_test.go'
       - 'backend/internal/handler/openai_ws_unsent_delta_test.go'
       - '.github/workflows/ws-history-shapes.yml'
@@ -52,6 +56,10 @@ jobs:
               if phase=='RED':assert 'READABLE_SHAPE_NOT_RESTORED' in ''.join(r.get('Output','') for r in rows if r.get('Test')==name),name
           assert (code!=0) if phase=='RED' else (code==0)
           PY
+      - name: Explicit client-readable history policy preserves data without tool grants
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        run: go test -race -tags=unit,historyshapes ./internal/service -run '^TestOpenAIWSClientHistoryRestart$' -count=1 -timeout=2m
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -78,7 +86,7 @@ jobs:
       - name: Seventh turn account pause and next-turn continuation
         run: |
           set -euo pipefail
-          (cd backend && go test -race -json -tags=unit,unsentdelta,historyshapes ./internal/handler -run '^TestOpenAIWSReadableHistoryShapeTakeover$' -count=1 -timeout=5m) | tee "$RUNNER_TEMP/history-shapes-socket.jsonl"
+          (cd backend && go test -race -json -tags=unit,unsentdelta,historyshapes ./internal/handler -run '^TestOpenAIWS(ReadableHistoryShapeTakeover|ClientHistoryTakeover)$' -count=1 -timeout=5m) | tee "$RUNNER_TEMP/history-shapes-socket.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

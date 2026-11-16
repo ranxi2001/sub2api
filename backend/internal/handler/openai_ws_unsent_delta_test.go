@@ -39,6 +39,9 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 	runUnsentDeltaWithInput(t, mode, switchTurn, fence, "")
 }
 func runUnsentDeltaWithInput(t *testing.T, mode string, switchTurn int, fence, extraInput string) {
+	runUnsentDeltaWithPolicy(t, mode, switchTurn, fence, extraInput, false)
+}
+func runUnsentDeltaWithPolicy(t *testing.T, mode string, switchTurn int, fence, extraInput string, clientHistory bool) {
 	t.Helper()
 	var mu sync.Mutex
 	var frames [][]byte
@@ -106,6 +109,7 @@ func runUnsentDeltaWithInput(t *testing.T, mode string, switchTurn int, fence, e
 			a.Credentials["api_key"] = "fixture-A"
 			a.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
 			a.Extra["codex_fingerprint_mode"] = "off"
+			cfg.Gateway.OpenAIWS.ClientHistoryRecoveryEnabled = clientHistory
 			cfg.Gateway.MaxAccountSwitches = 2
 			cfg.Gateway.Scheduling.OpenAITurnAdmissionCacheTTLSeconds = 0
 			cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 20

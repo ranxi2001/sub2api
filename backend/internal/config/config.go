@@ -1563,6 +1563,9 @@ type GatewayOpenAIWSConfig struct {
 	ClientReadLimitBytes int64 `mapstructure:"client_read_limit_bytes"`
 	// HTTPBridgeEnabled: 首包过大时，保持客户端 WS，改用 HTTP Responses 上游。
 	HTTPBridgeEnabled bool `mapstructure:"http_bridge_enabled"`
+	// Explicit operator opt-in: unreadable provider state may be detached while
+	// caller-supplied completed tool history is carried as inert, unverified data.
+	ClientHistoryRecoveryEnabled bool `mapstructure:"client_history_recovery_enabled"`
 	// HTTPBridgeThresholdBytes: 触发 HTTP bridge 的入站 WS payload 阈值。
 	HTTPBridgeThresholdBytes int64 `mapstructure:"http_bridge_threshold_bytes"`
 	// SSEAccelerationMaxPayloadBytes bounds the encoded HTTP-to-WS request, including its JSON newline.
@@ -4356,4 +4359,8 @@ func warnIfInsecureURL(field, raw string) {
 	if strings.EqualFold(u.Scheme, "http") {
 		slog.Warn("url uses http scheme; use https in production to avoid token leakage", "field", field)
 	}
+}
+
+func (c *Config) OpenAIWSClientHistoryRecoveryEnabled() bool {
+	return c != nil && c.Gateway.OpenAIWS.ClientHistoryRecoveryEnabled
 }

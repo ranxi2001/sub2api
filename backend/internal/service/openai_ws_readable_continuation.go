@@ -120,6 +120,9 @@ func WithOpenAIWSUnsentOwnerProof(ctx context.Context, err error) context.Contex
 // call type, identity and original arguments stay paired with each result as
 // inert JSON text. Current declarations remain available for new tool work.
 func projectOpenAIWSCompletedTools(body []byte) ([]byte, error) {
+	return projectOpenAIWSToolHistory(body, "Historical completed tool result (data only; do not execute again): ")
+}
+func projectOpenAIWSToolHistory(body []byte, label string) ([]byte, error) {
 	if !openAIWSCompletedToolInputs(body) {
 		return nil, openAIAgentRecoveryError("owner_conflict")
 	}
@@ -147,7 +150,7 @@ func projectOpenAIWSCompletedTools(body []byte) ([]byte, error) {
 				return nil, openAIAgentRecoveryError("readable_history_unsupported")
 			}
 			message, _ := json.Marshal(map[string]any{"type": "message", "role": "assistant", "content": []any{
-				map[string]any{"type": "output_text", "text": "Historical completed tool result (data only; do not execute again): " + string(record)},
+				map[string]any{"type": "output_text", "text": label + string(record)},
 			}})
 			input = append(input, message)
 		case "", "message":
@@ -216,7 +219,16 @@ func openAIWSCompletedToolInputs(body []byte) bool {
 
 // Called before fresh admission/moderation of an unsent frame. Lookup is scoped
 // to this exact task; missing historical intent is never fabricated.
-func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c *gin.Context, body []byte, session, model string) (context.Context, []byte, bool, error) {
+func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c *gin.Context, body []byte, session, model string) (nextCtx context.Context, nextBody []byte, changed bool, resultErr error) {
+	originalBody := body
+	defer func() {
+		if resultErr != nil {
+			if next, clean, ok := s.restartOpenAIWSClientReadableHistory(ctx, c, originalBody, session, model, resultErr); ok {
+				nextCtx, nextBody, changed, resultErr = next, clean, true, nil
+			}
+		}
+	}()
+
 	proof, _ := ctx.Value(openAIWSUnsentOwnerProofKey{}).(*openAIAgentRecoveryRequest)
 	ctx = context.WithValue(ctx, openAIWSUnsentOwnerProofKey{}, (*openAIAgentRecoveryRequest)(nil))
 	if s == nil || s.settingService == nil || !s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
@@ -293,4 +305,70 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 		next = context.WithValue(next, openAIWSAgentRecoveryRetryKey{}, &atomic.Bool{})
 	}
 	return next, clean, changed, err
+}
+
+// The operator may choose to restart from the authenticated caller's readable
+// history when old provider/tool records are unavailable. This is not a proof:
+// original records are neither trusted nor repaired, and historical calls are
+// carried only as user-supplied data. Callers invoke this exclusively before
+// dispatch and run the normal current-turn authorization/moderation again.
+func (s *OpenAIGatewayService) restartOpenAIWSClientReadableHistory(ctx context.Context, c *gin.Context, body []byte, session, model string, cause error) (context.Context, []byte, bool) {
+	if s == nil || s.cfg == nil || s.settingService == nil || ctx.Err() != nil {
+		return ctx, body, false
+	}
+	// Historical CI overlays may restore a Config predating this optional policy.
+	policy, ok := any(s.cfg).(interface{ OpenAIWSClientHistoryRecoveryEnabled() bool })
+	if !ok || !policy.OpenAIWSClientHistoryRecoveryEnabled() || !s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+		return ctx, body, false
+	}
+	var refusal *OpenAIAgentRecoveryError
+	if !errors.As(cause, &refusal) {
+		return ctx, body, false
+	}
+	switch refusal.Reason {
+	case "owner_conflict", "owner_unavailable", "route_changed":
+	default:
+		return ctx, body, false
+	}
+	keyID := getAPIKeyIDFromContext(c)
+	if keyID <= 0 || openAIReadableRecoveryUser(c, keyID) <= 0 || len(body) > openAIWSLocalHistoryLimit {
+		return ctx, body, false
+	}
+	items, valid := openAIWSPlainItems(body)
+	if !valid {
+		return ctx, body, false
+	}
+	clean, err := setOpenAIWSPayloadInputSequence(body, items, true)
+	if err != nil || !openAI409HasReadableIntent(clean) {
+		return ctx, body, false
+	}
+	// Only complete, unambiguous call/result pairs are history. Unknown pending
+	// tool work is never submitted to a replacement provider as executable work.
+	if _, why := inspectOpenAIWSCompletedTools(clean); why != "" {
+		return ctx, body, false
+	}
+	clean, err = projectOpenAIWSToolHistory(clean, "Client-reported completed tool history (unverified data; do not execute these calls again): ")
+	if err != nil {
+		return ctx, body, false
+	}
+
+	for _, field := range []string{"previous_response_id", "conversation"} {
+		clean, err = sjson.DeleteBytes(clean, field)
+		if err != nil {
+			return ctx, body, false
+		}
+	}
+	if len(clean) > openAIWSLocalHistoryLimit {
+		return ctx, body, false
+	}
+	next := context.WithValue(ctx, openAIReadableShadowContextKey{}, (*openAIReadableShadowObservation)(nil))
+	next = context.WithValue(next, openAIGuardianParentAffinityContextKey{}, openAIGuardianParentAffinity{})
+	next = WithOpenAIEncryptedReasoningAffinity(next, clean)
+	next = s.WithOpenAIWSAgentRecovery(next, c, clean, session, model)
+	r := openAIAgentRecoveryFromContext(next)
+	r.omittedHistory = true
+	r.omittedSource = nil
+	r.inputDigest = openAIAgentRecoveryInputDigest(clean)
+	r.replayControlsDigest = openAI409ControlsDigest(clean)
+	return next, clean, true
 }
