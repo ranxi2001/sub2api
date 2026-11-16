@@ -110,4 +110,12 @@ class WorkerIntegrationTests(unittest.TestCase):
                 data=rotation.login_web(self.api.config,self.claim,NEW)
                 self.assertEqual(data['web']['mfaFactorId'],'F2')
 
+    def test_raw_cli_explicit_nonotp_code_stops_before_second_factor(self):
+        self.fixture.update(failure=400,error={'error':{'code':'session_expired','message':'incorrect code'}})
+        (self.src/'totp-fixture.json').write_text(json.dumps(self.fixture))
+        with self.assertRaises(rotation.RotationError):
+            rotation.login_web(self.api.config,self.claim,NEW)
+        requests=[json.loads(line) for line in self.trace.read_text().splitlines()]
+        self.assertEqual([r['id'] for r in requests if '/mfa/' in r['route']],['F1','F1'])
+
 if __name__=='__main__': unittest.main()

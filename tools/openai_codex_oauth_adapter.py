@@ -16,7 +16,7 @@ except ImportError:
     from openai_excel_oauth_adapter import replace_exact
 
 PINNED_PROTOCOL_BLOB = 'ff2db2507e401c29fa78705e44f5b40a3108a8c6'
-BOUND_PROTOCOL_BLOB = 'ffcbb56992f0e34a90821586c63d9bbe27c890d9'
+BOUND_PROTOCOL_BLOB = '7d5143da87e36ad79c2d050003df99319736b866'
 STAGES = frozenset(('starting', 'web_login', 'password_accepted', 'mfa_challenge',
                    'mfa_accepted', 'web_redirect', 'oauth_authorize', 'session_select',
                    'workspace_select', 'callback_validation', 'token_exchange', 'oauth_output', 'completed'))

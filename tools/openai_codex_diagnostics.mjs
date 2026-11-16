@@ -84,7 +84,7 @@ export function isTotpRejectionResponse(result) {
   const error = payload?.error;
   const code = typeof error === 'string' ? error : error?.code;
   if (['invalid_otp','incorrect_otp','wrong_otp','invalid_totp','incorrect_totp','wrong_totp','invalid_code','incorrect_code','wrong_code'].includes(code)) return true;
-  return code === undefined && typeof error?.message === 'string' && /^(?:invalid|incorrect|wrong)[ _-](?:totp|otp|code)$/i.test(error.message);
+  return false; // Descriptive text alone is not structured OTP rejection evidence.
 }
 
 export function observeProtocolResponse(result, fallback = 'protocol_error') {

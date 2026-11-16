@@ -13,7 +13,7 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'totp-protocol-'));
 let source = await fs.readFile(sourcePath, 'utf8');
 assert.equal(source.split('run().catch((error) => {').length, 2);
 source = source.replace('run().catch((error) => {', 'Promise.resolve().catch((error) => {');
-await fs.writeFile(path.join(root, 'protocol.mjs'), source + '\nexport {completeTotpMfaIfNeeded, generateTotp, loginChatgptWeb};\n');
+await fs.writeFile(path.join(root, 'protocol.mjs'), source + '\nexport {ProtocolClient, completeTotpMfaIfNeeded, generateTotp, loginChatgptWeb};\n');
 await fs.writeFile(path.join(root, 'tls-transport.mjs'), `export const browserIdentityForTlsProfile=()=>({}); export const shouldUseTlsTransport=()=>false; export class TlsFingerprintTransport { constructor(){throw Error('network forbidden')} }`);
 process.env.NODE_ENV = 'test';
 process.env.TOSUB2_TEST_SENTINEL_TOKEN = 'synthetic';
@@ -22,15 +22,18 @@ process.on('exit', () => {});
 const S1='JBSWY3DPEHPK3PXP', S2='GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
 function fixture(ids, secret, bound='', failure='') {
   const calls=[];
-  const client={async getJson(method,url,{json}) {
+  const reply=(status,payload)=>({res:{status},text:typeof payload==='string'?payload:JSON.stringify(payload)});
+  const client={getJson:protocol.ProtocolClient.prototype.getJson,async request(method,url,{json}) {
     const route=new URL(url).pathname;
     calls.push([route,json.id]);
-    if(route.endsWith('/issue_challenge')) return {data:{}};
+    if(route.endsWith('/issue_challenge')) return reply(200,{});
     assert.ok(route.endsWith('/mfa/verify'));
-    if(failure==='ambiguous-success') return {data:{page:{type:'mfa_challenge'}}};
-    if(failure) throw Error(failure);
-    if(json.code !== protocol.generateTotp(json.id==='F1'?S1:S2)) throw Error('HTTP 400 invalid_otp');
-    return {data:{continue_url:'https://auth.openai.com/done'}};
+    if(failure==='ambiguous-success') return reply(200,{page:{type:'mfa_challenge'}});
+    if(typeof failure==='object') return reply(failure.status,failure.payload);
+    if(failure==='connection reset') throw Error(failure);
+    if(failure) return reply(Number(failure.split(' ')[1]),{error:{code:'invalid_otp'}});
+    if(json.code !== protocol.generateTotp(json.id==='F1'?S1:S2)) return reply(400,{error:{code:'invalid_otp'}});
+    return reply(200,{continue_url:'https://auth.openai.com/done'});
   }};
   const options={authBase:'https://auth.openai.com',rl:{question(){throw Error('unexpected manual prompt')}},deviceId:'synthetic',
     payload:{page:{type:'mfa_challenge'},'oai-client-auth-session':{mfa_factors:ids.map(id=>({id,factor_type:'totp'}))}},
@@ -81,5 +84,16 @@ test('HTTP 200 with another MFA challenge is not binding evidence',async()=>{
  await assert.rejects(protocol.completeTotpMfaIfNeeded(f.client,f.options),/TOTP_VERIFICATION_UNCONFIRMED/);
  assert.equal(f.client.totpFactorId,undefined);
  assert.equal(f.calls.length,2);
+});
+for (const [name,payload] of [
+ ['explicit session code overrides OTP-like message',{error:{code:'session_expired',message:'incorrect code'}}],
+ ['explicit auth code overrides OTP-like message',{error:{code:'authorization_denied',message:'invalid totp'}}],
+ ['message alone is not a structured rejection',{error:{message:'incorrect code'}}],
+ ['duplicate code is ambiguous','{"error":{"code":"session_expired","code":"invalid_otp","message":"incorrect code"}}'],
+]) test(`raw HTTP boundary stops: ${name}`,async()=>{
+ const f=fixture(['F1','F2'],S2,'',{status:400,payload});
+ await assert.rejects(protocol.completeTotpMfaIfNeeded(f.client,f.options));
+ assert.deepEqual(f.calls.map(x=>x[1]),['F1','F1']);
+ assert.equal(f.client.totpFactorId,undefined);
 });
 test.after(async()=>{delete process.env.CHATGPT_TOTP_FACTOR_ID;await fs.rm(root,{recursive:true,force:true});});

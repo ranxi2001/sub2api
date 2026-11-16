@@ -1,19 +1,44 @@
 --- a/src/protocol-login.mjs
 +++ b/src/protocol-login.mjs
-@@ -1090,6 +1090,7 @@
-     emailVerified: true,
-     loginMethod,
-     mfaVerified: mfaRequired,
+@@ -269,0 +270,3 @@
++    if (method === "POST" && new URL(url).pathname === "/api/accounts/mfa/verify" && isExplicitTotpRejection(result)) {
++      throw new TotpRejectionError("TOTP_CHALLENGE_REJECTED");
++    }
+@@ -1092,0 +1096 @@
 +    mfaFactorId: client.totpFactorId || null,
-   };
- }
- 
-@@ -1133,52 +1134,45 @@
- }
- 
- async function completeTotpMfaIfNeeded(client, { authBase, rl, deviceId, payload, totpSecret, referer }) {
+@@ -1134,0 +1139,29 @@
++class TotpRejectionError extends Error {}
++
++function isExplicitTotpRejection(result) {
++  if (![400, 401].includes(result?.res?.status)) return false;
++  const raw = result?.text;
++  if (typeof raw !== "string" || Buffer.byteLength(raw) > 32768) return false;
++  try {
++    const payload = JSON.parse(raw);
++    // Duplicate keys make even a known code ambiguous. Reject before using it.
++    const tokens = raw.match(/"(?:[^"\\]|\\.)*"|[{}[\]:,]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/g) || [];
++    const stack = [];
++    for (let i = 0; i < tokens.length; i++) {
++      const token = tokens[i];
++      if (token === "{") stack.push(new Set());
++      else if (token === "[") stack.push(null);
++      else if (token === "}" || token === "]") stack.pop();
++      else if (token.startsWith('"') && tokens[i + 1] === ":") {
++        const keys = stack.at(-1), key = JSON.parse(token);
++        if (!keys || keys.has(key)) return false;
++        keys.add(key);
++      }
++      if (stack.length > 32) return false;
++    }
++    const error = payload?.error;
++    const code = typeof error === "string" ? error : error?.code;
++    return ["invalid_otp", "incorrect_otp", "wrong_otp", "invalid_totp", "incorrect_totp", "wrong_totp", "invalid_code", "incorrect_code", "wrong_code"].includes(code);
++  } catch { return false; }
++}
++
+@@ -1135,0 +1169 @@
 +  delete client.totpFactorId;
-   if (!isMfaChallengePayload(payload)) return payload;
+@@ -1137,3 +1171,6 @@
 -  const factor = pickTotpFactor(payload);
 -  if (!factor?.id) throw new Error("2FA is required, but the response does not contain a TOTP factor ID");
 -
@@ -23,7 +48,7 @@
 +    ...(Array.isArray(session.mfa_factors) ? session.mfa_factors : []),
 +  ].filter(f => f?.factor_type === "totp" && typeof f.id === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(f.id))
 +    .map(f => [f.id, f])).values()];
-   console.log("[mfa] TOTP 2FA challenge reached.");
+@@ -1141,17 +1178,13 @@
 -  await authJsonStep(client, authBase, "POST", "/api/accounts/mfa/issue_challenge", {
 -    type: "totp",
 -    id: factor.id,
@@ -54,13 +79,13 @@
 +    }, { referer });
 +    const code = generateTotp(totpSecret);
 +    const sentinelHeaders = await createSentinelHeaders(client, {authBase, deviceId, flow: "password_verify"});
-     try {
+@@ -1159,5 +1191,0 @@
 -      const sentinelHeaders = await createSentinelHeaders(client, {
 -        authBase,
 -        deviceId,
 -        flow: "password_verify",
 -      });
-       const { data } = await authJsonStep(client, authBase, "POST", "/api/accounts/mfa/verify", {
+@@ -1165,4 +1193,6 @@
 -        type: "totp",
 -        id: factor.id,
 -        code,
@@ -71,9 +96,7 @@
 +        throw new Error("TOTP_VERIFICATION_UNCONFIRMED");
 +      }
 +      client.totpFactorId = factor.id;
-       console.log("[ok] 2FA verification accepted");
-       return data;
-     } catch (error) {
+@@ -1172,10 +1202,6 @@
 -      if (!isRejectedTotpError(error)) throw error;
 -      console.log(
 -        generatedFromSecret
@@ -84,12 +107,9 @@
 -      code = await askTotpOtp(rl);
 -    }
 -  }
-+      // Only an explicit 400/401 OTP rejection permits trying another ID.
-+      // In particular a 429/5xx body mentioning an OTP is not a rejection.
-+      if (!/HTTP (?:400|401)\b/.test(String(error?.message || "")) || !isRejectedTotpError(error)) throw error;
++      // Only the raw HTTP boundary can establish an explicit OTP rejection.
++      // Never infer it from exception prose or a provider's descriptive message.
++      if (!(error instanceof TotpRejectionError)) throw error;
 +    }
 +  }
 +  throw new Error("TOTP_REJECTED: The code generated from the configured 2FA key was rejected");
- }
- 
- function isRejectedPasswordError(error) {

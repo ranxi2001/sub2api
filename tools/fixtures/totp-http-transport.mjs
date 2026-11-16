@@ -22,7 +22,7 @@ export class TlsFingerprintTransport {
     if(route==='POST /api/accounts/password/verify') return Response.json({page:{type:'mfa_challenge'},'oai-client-auth-session':{mfa_factors:fixture.factors.map(id=>({id,factor_type:'totp'}))}});
     if(route==='POST /api/accounts/mfa/issue_challenge') return Response.json({});
     if(route==='POST /api/accounts/mfa/verify') {
-      if(fixture.failure) return Response.json({error:'invalid_otp'},{status:fixture.failure});
+      if(fixture.failure) return Response.json(fixture.error || {error:'invalid_otp'},{status:fixture.failure});
       if(body.code!==fixture.codes[body.id]) return Response.json({error:'invalid_otp'},{status:400});
       return Response.json({continue_url:'https://chatgpt.com/auth-complete'});
     }
