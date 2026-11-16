@@ -239,6 +239,8 @@ func TestExcelBPSSearchBusinessThroughForward(t *testing.T) {
 				}
 				require.Equal(t, "completed", response.Get("status").String())
 				require.Equal(t, "resp_business", response.Get("id").String())
+				require.Equal(t, int64(30), response.Get("usage.input_tokens").Int())
+				require.Equal(t, int64(6), response.Get("usage.output_tokens").Int())
 				output := response.Get("output").Array()
 				require.Len(t, output, 3)
 				for _, item := range output[:2] {
@@ -251,6 +253,7 @@ func TestExcelBPSSearchBusinessThroughForward(t *testing.T) {
 				citation := output[2].Get("content.0.annotations.0")
 				require.Equal(t, "url_citation", citation.Get("type").String())
 				require.Equal(t, "https://example.invalid/source", citation.Get("url").String())
+				require.Equal(t, "Synthetic source", citation.Get("title").String())
 				require.Equal(t, int64(2), citation.Get("start_index").Int())
 				require.Equal(t, int64(len([]rune(issue871BusinessAnswer))), citation.Get("end_index").Int())
 				require.NotContains(t, rec.Body.String(), "__sub2api_web_search")
