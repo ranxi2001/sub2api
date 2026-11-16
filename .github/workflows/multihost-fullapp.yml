@@ -2,7 +2,15 @@ name: Multi-host full application bootstrap
 
 on:
   push:
+    branches: [production]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
+
+# PR updates replace older runs; other events keep a separate group per commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
