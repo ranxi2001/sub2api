@@ -402,7 +402,8 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	}
 
 	var proxyURL string
-	if account.OpenAIRequestProxyEnabled() {
+	_, hasRequestRoute := openAIRequestProxyFromContext(ctx, account.ID)
+	if account.OpenAIRequestProxyEnabled() || hasRequestRoute {
 		var err error
 		proxyURL, err = resolveOpenAIMaintenanceProxy(ctx, account, s.proxyRepo)
 		if err != nil {
