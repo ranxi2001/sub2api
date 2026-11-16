@@ -12,6 +12,7 @@ type CustomerCostDetails struct {
 	CacheCostDetails  []CustomerCacheCostDetail `json:"cache_cost_details,omitempty"`
 	Version           int                       `json:"version"`
 	FreeFast          bool                      `json:"free_fast"`
+	FreeUltrafast     bool                      `json:"free_ultrafast,omitempty"`
 	InputCost         float64                   `json:"input_cost"`
 	OutputCost        float64                   `json:"output_cost"`
 	ImageInputCost    float64                   `json:"image_input_cost"`

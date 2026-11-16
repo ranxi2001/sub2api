@@ -53,7 +53,7 @@ const baseGroup = {
   peak_rate_enabled: false, peak_start: '', peak_end: '', peak_rate_multiplier: 1,
   claude_code_only: false, fallback_group_id: null, fallback_group_id_on_invalid_request: null,
   allow_messages_dispatch: false, require_oauth_only: false, require_privacy_set: false,
-  force_openai_fast: false, free_openai_fast: false, stream_only: true,
+  force_openai_fast: false, free_openai_fast: false, free_openai_ultrafast: false, stream_only: true,
   model_routing: null, model_routing_enabled: false, mcp_xml_inject: true, supported_model_scopes: [],
   account_count: 1, active_account_count: 1, rate_limited_account_count: 0, sort_order: 10,
   created_at: '2026-09-24T00:00:00Z', updated_at: '2026-09-24T00:00:00Z'

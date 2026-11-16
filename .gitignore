@@ -246,3 +246,6 @@ tools/local-worker/
 !/.github/scripts/free-fast-cost-evidence.py
 !/.github/scripts/test_free_fast_cost_evidence.py
 /.github/scripts/__pycache__/
+
+!docs/free-ultrafast-billing.md
+!/.github/scripts/free-ultrafast-browser.mjs
