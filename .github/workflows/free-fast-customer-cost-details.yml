@@ -100,6 +100,7 @@ jobs:
           # gateway while overlaying the historical cache-price producer, so
           # this RED remains a cache-price assertion rather than a missing-field
           # compilation failure. Candidate UltraFast runs in its own workflow.
+          git fetch --no-tags --depth=1 origin 2927209f5492d8cb690b83a1964b2f093c19ad7a
           git show 2927209f5492d8cb690b83a1964b2f093c19ad7a:backend/internal/service/openai_gateway_usage.go > backend/internal/service/openai_gateway_usage.go
           baseline=6826ea7c13459f0fb8080b0753da4b8ae73dd383
           git fetch --no-tags --depth=1 origin "$baseline"
