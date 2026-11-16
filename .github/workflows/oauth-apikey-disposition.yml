@@ -43,7 +43,7 @@ jobs:
         env:
           ACCOUNT_TIMER_TEST_DSN: postgres://timer_fixture:timer_fixture@127.0.0.1:5432/schedulable_timer_fixture?sslmode=disable
         run: |
-          go test -tags=unit ./internal/service -run '^TestOAuth(APIKeyDisposition|AutoConfig)' -count=1
+          go test -tags=unit ./internal/service -run '^(TestOAuth(APIKeyDisposition|AutoConfig)|TestAccountReadableSnapshot_DenylistTripwire)' -count=1
           go test -race -tags=integration ./internal/accounttimer -count=1 -v
           go test -tags=integration ./internal/repository -run '^TestOAuth(APIKeyDisposition|InitialQuality)' -count=1 -v
   disposition-ui:
