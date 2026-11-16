@@ -16,7 +16,7 @@ permissions:
   contents: read
 jobs:
   disposition:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     services:
       postgres:
@@ -46,6 +46,14 @@ jobs:
           go test -tags=unit ./internal/service -run '^TestOAuth(APIKeyDisposition|AutoConfig)' -count=1
           go test -race -tags=integration ./internal/accounttimer -count=1 -v
           go test -tags=integration ./internal/repository -run '^TestOAuth(APIKeyDisposition|InitialQuality)' -count=1 -v
+  disposition-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
         with:
           version: 9
