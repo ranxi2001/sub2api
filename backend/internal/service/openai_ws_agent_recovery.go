@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -643,15 +644,14 @@ const openAIWSLocalHistoryLimit = 8 << 20
 var openAIWSLocalHistoryBytes atomic.Int64
 
 type openAIWSLocalHistory struct {
-	outputBytes  int
-	tools        json.RawMessage
-	instructions json.RawMessage
-	committed    []json.RawMessage
-	pending      []json.RawMessage
-	output       openAIWSLocalOutput
-	anchor       openAIWSBridgeResponseAnchor
-	clientModel  string
-	ready        bool
+	outputBytes int
+	tools       json.RawMessage
+	committed   []json.RawMessage
+	pending     []json.RawMessage
+	output      openAIWSLocalOutput
+	anchor      openAIWSBridgeResponseAnchor
+	clientModel string
+	ready       bool
 }
 
 type openAIWSRestoredUnsentError struct{ *openAIWSUnsentTurnError }
@@ -766,14 +766,13 @@ func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
 	}
 	if previous == "" {
 		r.localHistory.tools = nil
-		r.localHistory.instructions = nil
 	}
-	for field, dst := range map[string]*json.RawMessage{"tools": &r.localHistory.tools, "instructions": &r.localHistory.instructions} {
-		if value := gjson.GetBytes(source, field); value.Exists() {
-			*dst = append(json.RawMessage(nil), value.Raw...)
-		}
+	// Tools retain the socket's declarations. Instructions apply only to the
+	// current frame, including when omitted, and must never enter this history.
+	if value := gjson.GetBytes(source, "tools"); value.Exists() {
+		r.localHistory.tools = append(json.RawMessage(nil), value.Raw...)
 	}
-	if len(r.localHistory.tools)+len(r.localHistory.instructions) > openAIWSLocalHistoryLimit {
+	if len(r.localHistory.tools) > openAIWSLocalHistoryLimit {
 		r.localHistory = openAIWSLocalHistory{}
 		return
 	}
@@ -789,7 +788,7 @@ func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
 func (r *openAIWSAgentRecovery) commitLocalHistory(completed bool) {
 	defer r.accountLocalHistory()
 	h := &r.localHistory
-	if !completed || h.pending == nil {
+	if !completed || h.pending == nil || strings.TrimSpace(r.completedBridge.response) == "" {
 		h.ready = false
 		h.committed = nil
 		return
@@ -844,7 +843,11 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 		return err
 	}
 	source := unsent.body
-	if len(source) > openAIWSLocalHistoryLimit || gjson.GetBytes(source, "previous_response_id").String() != h.anchor.response || gjson.GetBytes(source, "conversation").Exists() {
+	previous := gjson.GetBytes(source, "previous_response_id")
+	// Two blank IDs describe no continuation. Only the client's explicit
+	// pointer to a delivered, completed response may attach another turn.
+	if len(source) > openAIWSLocalHistoryLimit || previous.Type != gjson.String || strings.TrimSpace(previous.String()) == "" ||
+		strings.TrimSpace(h.anchor.response) == "" || previous.String() != h.anchor.response || gjson.GetBytes(source, "conversation").Exists() {
 		return err
 	}
 	if unsent.model != "" && unsent.model != h.clientModel {
@@ -886,12 +889,10 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 			return err
 		}
 	}
-	for field, value := range map[string]json.RawMessage{"tools": h.tools, "instructions": h.instructions} {
-		if !gjson.GetBytes(expanded, field).Exists() && len(value) > 0 {
-			expanded, e = sjson.SetRawBytes(expanded, field, value)
-			if e != nil {
-				return err
-			}
+	if !gjson.GetBytes(expanded, "tools").Exists() && len(h.tools) > 0 {
+		expanded, e = sjson.SetRawBytes(expanded, "tools", h.tools)
+		if e != nil {
+			return err
 		}
 	}
 	if !openAI409HasReadableIntent(expanded) {
@@ -917,7 +918,7 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 // optional restoration path. It never rejects normal forwarding or drops bytes.
 func (r *openAIWSAgentRecovery) accountLocalHistory() {
 	h := &r.localHistory
-	wanted := int64(len(h.tools) + len(h.instructions) + 3*h.outputBytes)
+	wanted := int64(len(h.tools) + 3*h.outputBytes)
 	for _, set := range [][]json.RawMessage{h.pending, h.committed} {
 		for _, v := range set {
 			wanted += int64(len(v))

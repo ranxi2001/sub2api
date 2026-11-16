@@ -40,7 +40,7 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 	var mu sync.Mutex
 	var frames [][]byte
 	var owners []string
-	response := func(body []byte, auth string) []byte {
+	response := func(body []byte, auth string) [][]byte {
 		mu.Lock()
 		defer mu.Unlock()
 		frames = append(frames, append([]byte(nil), body...))
@@ -50,10 +50,14 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 		if n == switchTurn-1 {
 			output = `[{"type":"function_call","call_id":"call_takeover_once","name":"fixture","arguments":"{\"n\":9007199254740993}","status":"completed"}]`
 		}
+		var events [][]byte
 		if n == switchTurn-1 && fence == "terminal_excludes" {
-			output = `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"no tool delivered"}]}]`
+			// Deliver the real call first. The nonempty terminal is authoritative
+			// and excludes that call even though the client already received it.
+			events = append(events, []byte(`{"type":"response.output_item.done","item":`+gjson.Get(output, "0").Raw+`}`))
+			output = `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fixture terminal excludes delivered tool"}]}]`
 		}
-		return []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_delta_%d","model":"gpt-5.1","status":"completed","output":%s,"usage":{"input_tokens":5,"output_tokens":3}}}`, n, output))
+		return append(events, []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_delta_%d","model":"gpt-5.1","status":"completed","output":%s,"usage":{"input_tokens":5,"output_tokens":3}}}`, n, output)))
 	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
@@ -63,7 +67,9 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 				return
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprintf(w, "data: %s\n\n", response(body, r.Header.Get("Authorization")))
+			for _, event := range response(body, r.Header.Get("Authorization")) {
+				fmt.Fprintf(w, "data: %s\n\n", event)
+			}
 			return
 		}
 		conn, e := coderws.Accept(w, r, nil)
@@ -77,8 +83,10 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 			if e != nil {
 				return
 			}
-			if conn.Write(r.Context(), coderws.MessageText, response(body, r.Header.Get("Authorization"))) != nil {
-				return
+			for _, event := range response(body, r.Header.Get("Authorization")) {
+				if conn.Write(r.Context(), coderws.MessageText, event) != nil {
+					return
+				}
 			}
 		}
 	}))
@@ -130,20 +138,50 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 	issue715WSSend(t, h.clientConn, create(`[{"role":"user","content":"Perform fixture exactly once and retain the task"},{"type":"reasoning","encrypted_content":"fixture-history-state","summary":[{"type":"summary_text","text":"fixture readable progress"}]}]`, ""))
 	executions := 0
 	consume := func(raw []byte) {
-		for _, item := range gjson.GetBytes(raw, "response.output").Array() {
+		items := gjson.GetBytes(raw, "response.output").Array()
+		if gjson.GetBytes(raw, "type").String() == "response.output_item.done" {
+			items = append(items, gjson.GetBytes(raw, "item"))
+		}
+		for _, item := range items {
 			if item.Get("type").String() == "function_call" {
 				require.Equal(t, "call_takeover_once", item.Get("call_id").String())
 				executions++
 			}
 		}
 	}
-	first := issue715WSRead(t, h.clientConn)
+	excludedToolDeliveries := 0
+	readTurn := func() []byte {
+		if fence != "terminal_excludes" {
+			return issue715WSRead(t, h.clientConn)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		for {
+			_, event, err := h.clientConn.Read(ctx)
+			require.NoError(t, err)
+			kind := gjson.GetBytes(event, "type").String()
+			if kind == "response.output_item.done" && gjson.GetBytes(event, "item.type").String() == "function_call" {
+				require.Equal(t, "call_takeover_once", gjson.GetBytes(event, "item.call_id").String())
+				excludedToolDeliveries++
+				consume(event)
+			}
+			if kind == "response.completed" || kind == "response.failed" || kind == "error" {
+				return event
+			}
+		}
+	}
+	first := readTurn()
 	consume(first)
 	awaitUsage()
 	require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
+	if fence == "terminal_excludes" {
+		require.Equal(t, 1, excludedToolDeliveries, "terminal exclusion must follow actual tool item delivery to the client")
+		require.Equal(t, 1, executions)
+		require.NotContains(t, string(first), "call_takeover_once", "the nonempty terminal must exclude the delivered call")
+	}
 	for n := 2; n < switchTurn; n++ {
 		issue715WSSend(t, h.clientConn, create(fmt.Sprintf(`[{"role":"user","content":"fixture next %d"}]`, n), fmt.Sprintf("resp_delta_%d", n-1)))
-		round := issue715WSRead(t, h.clientConn)
+		round := readTurn()
 		consume(round)
 		awaitUsage()
 		require.Equal(t, "response.completed", gjson.GetBytes(round, "type").String())
