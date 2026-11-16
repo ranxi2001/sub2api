@@ -113,7 +113,11 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 			a.Credentials["api_key"] = "fixture-A"
 			a.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
 			a.Extra["codex_fingerprint_mode"] = "off"
-			cfg.Gateway.OpenAIWS.ClientHistoryRecoveryEnabled = clientHistory
+			if clientHistory {
+				setClientHistory := reflect.ValueOf(&cfg.Gateway.OpenAIWS).Elem().FieldByName("ClientHistoryRecoveryEnabled")
+				require.True(t, setClientHistory.IsValid())
+				setClientHistory.SetBool(true)
+			}
 			// Optional interface keeps historical test overlays buildable.
 			if lossy {
 				setLossy := reflect.ValueOf(&cfg.Gateway.OpenAIWS).Elem().FieldByName("LossyHistoryRestartEnabled")

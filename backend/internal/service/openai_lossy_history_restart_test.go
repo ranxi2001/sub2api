@@ -4,10 +4,11 @@ package service
 
 import (
 	"context"
+	"testing"
+
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
-	"testing"
 )
 
 func TestOpenAILossyHistoryRestart(t *testing.T) {
@@ -24,7 +25,7 @@ func TestOpenAILossyHistoryRestart(t *testing.T) {
 			SetOpenAIWSRecoveryPrincipal(c, 715, 715)
 			ctx := manager.ctx
 			if !ws {
-				ctx = context.WithValue(ctx, openAIWSAgentRecoveryRetryKey{}, nil)
+				ctx = context.Background()
 			}
 			next, clean, changed, err := svc.PrepareOpenAI409ReadableContinuation(ctx, c, []byte(body), "fixture-session", "gpt-6-astra")
 			require.NoError(t, err)
