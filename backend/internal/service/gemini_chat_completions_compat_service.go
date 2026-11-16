@@ -113,6 +113,12 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	geminiReq = applyGeminiCompatThinkingConfig(geminiReq, claudeBody, mappedModel, clientStream)
 	geminiReq, err = applyGeminiChatResponseFormat(geminiReq, responseFormat, mappedModel)
 	if err != nil {
+		// 排队心跳可能已提交 SSE 响应头，此时使用流内错误，不能追加裸 JSON。
+		if c.Writer.Written() && strings.HasPrefix(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+			_, _ = io.WriteString(c.Writer, buildChatStreamErrorSSE("invalid_response_format", err.Error())+"data: [DONE]\n\n")
+			c.Writer.Flush()
+			return nil, err
+		}
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 

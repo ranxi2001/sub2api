@@ -165,6 +165,34 @@ func TestGeminiForwardAsChatCompletions_ResponseFormatRejectedBeforeUpstream(t *
 	}
 }
 
+func TestGeminiForwardAsChatCompletions_ResponseFormatRejectedAfterQueuePing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &queuedHTTPUpstreamStub{}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	body := []byte(`{"model":"gemini-4-argon","stream":true,"response_format":{"type":"json_schema","json_schema":{"name":"grade"}},"messages":[{"role":"user","content":"hi"}]}`)
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/chat/completions", body)
+	c.Header("Content-Type", "text/event-stream")
+	_, err := io.WriteString(c.Writer, "data: {\"type\":\"ping\"}\n\n")
+	require.NoError(t, err)
+	c.Writer.Flush()
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, geminiCompatThinkingTestAccount(), body)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusOK, recorder.Code, "already committed queue status cannot change")
+	require.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
+	frames := strings.Split(strings.TrimSpace(recorder.Body.String()), "\n\n")
+	require.Len(t, frames, 3)
+	require.True(t, strings.HasPrefix(frames[1], "data: "))
+	payload := strings.TrimPrefix(frames[1], "data: ")
+	require.True(t, json.Valid([]byte(payload)))
+	require.Equal(t, "invalid_request_error", gjson.Get(payload, "error.type").String())
+	require.Equal(t, "invalid_response_format", gjson.Get(payload, "error.code").String())
+	require.Contains(t, gjson.Get(payload, "error.message").String(), "response_format.json_schema.schema")
+	require.Equal(t, "data: [DONE]", frames[2])
+	require.Empty(t, upstream.requestBodies)
+}
+
 func TestGeminiForwardAsChatCompletions_CodeAssistKeepsResponseSchemaBytes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
