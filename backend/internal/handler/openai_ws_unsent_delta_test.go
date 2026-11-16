@@ -106,6 +106,13 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 			*repo = accounts
 		})
 	defer issue600Finish(t, h, headers)
+	awaitUsage := func() {
+		select {
+		case <-h.usageLogs:
+		case <-time.After(5 * time.Second):
+			t.Fatal("completed fixture turn did not settle usage")
+		}
+	}
 	create := func(input, previous string) string {
 		b := map[string]any{"type": "response.create", "model": "gpt-5.1", "store": true, "input": json.RawMessage(input)}
 		if previous != "" {
@@ -128,11 +135,13 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 	}
 	first := issue715WSRead(t, h.clientConn)
 	consume(first)
+	awaitUsage()
 	require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
 	for n := 2; n < switchTurn; n++ {
 		issue715WSSend(t, h.clientConn, create(fmt.Sprintf(`[{"role":"user","content":"fixture next %d"}]`, n), fmt.Sprintf("resp_delta_%d", n-1)))
 		round := issue715WSRead(t, h.clientConn)
 		consume(round)
+		awaitUsage()
 		require.Equal(t, "response.completed", gjson.GetBytes(round, "type").String())
 	}
 	accounts.disable(1)
@@ -162,6 +171,7 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 		logReadableWSRecoveryDetails(t, h)
 	}
 	require.Equal(t, "response.completed", gjson.GetBytes(result, "type").String(), "UNSENT_DELTA_NOT_RESUMED: %s", result)
+	awaitUsage()
 	mu.Lock()
 	sent := append([][]byte(nil), frames...)
 	selected := append([]string(nil), owners...)
@@ -187,6 +197,7 @@ func runUnsentDelta(t *testing.T, mode string, switchTurn int, fence string) {
 	issue715WSSend(t, h.clientConn, create(`[{"role":"user","content":"fixture final followup"}]`, fmt.Sprintf("resp_delta_%d", switchTurn)))
 	round := issue715WSRead(t, h.clientConn)
 	consume(round)
+	awaitUsage()
 	require.Equal(t, "response.completed", gjson.GetBytes(round, "type").String())
 	mu.Lock()
 	defer mu.Unlock()
