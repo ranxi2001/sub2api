@@ -3,6 +3,8 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -14,6 +16,26 @@ import (
 )
 
 const issue892Environment = "<environment_context>\n<cwd>/fixture</cwd>\n<timezone>Asia/Singapore</timezone>\n</environment_context>"
+
+func issue892PrepareHTTP(t *testing.T, svc *OpenAIGatewayService, ctx context.Context, account *Account, source []byte) (context.Context, []byte, error) {
+	t.Helper()
+	// Older unrelated RED overlays predate this method. Keep them compilable;
+	// this regression requires the method whenever it is actually executed.
+	preparer, ok := any(svc).(interface {
+		prepareOpenAIAgentOAuthReplay(context.Context, *Account, []byte) (context.Context, []byte, error)
+	})
+	require.True(t, ok)
+	return preparer.prepareOpenAIAgentOAuthReplay(ctx, account, source)
+}
+
+func issue892PrepareWS(t *testing.T, manager *openAIWSAgentRecovery, account *Account, source []byte) ([]byte, error) {
+	t.Helper()
+	preparer, ok := any(manager).(interface {
+		prepareReadable(*Account, []byte) ([]byte, error)
+	})
+	require.True(t, ok)
+	return preparer.prepareReadable(account, source)
+}
 
 func issue892FrozenSource(t *testing.T) []byte {
 	t.Helper()
@@ -54,9 +76,9 @@ func TestIssue892FrozenAccountTimezoneProjection(t *testing.T) {
 					var payload []byte
 					var err error
 					if transport == "http" {
-						ctx, payload, err = svc.prepareOpenAIAgentOAuthReplay(ctx, account, source)
+						ctx, payload, err = issue892PrepareHTTP(t, svc, ctx, account, source)
 					} else {
-						payload, err = manager.prepareReadable(account, source)
+						payload, err = issue892PrepareWS(t, manager, account, source)
 					}
 					require.NoError(t, err)
 					require.Equal(t, original, source, "account preparation must preserve the original bytes")
@@ -90,7 +112,7 @@ func TestIssue892FrozenAccountTimezoneProjection(t *testing.T) {
 					if mutation == "source" {
 						source = append([]byte(nil), payload...)
 						if transport == "http" {
-							_, _, err = svc.prepareOpenAIAgentOAuthReplay(ctx, account, source)
+							_, _, err = issue892PrepareHTTP(t, svc, ctx, account, source)
 							require.Error(t, err, "a prepared body cannot replace the original source")
 							return
 						}
@@ -127,13 +149,95 @@ func TestIssue892AccountReselectionUsesOriginalSource(t *testing.T) {
 	for _, zone := range []string{"America/Los_Angeles", "Asia/Tokyo", "Asia/Singapore"} {
 		account.ID++
 		account.Extra = map[string]any{openAIRequestTimezoneExtraKey: zone}
-		next, body, err := svc.prepareOpenAIAgentOAuthReplay(ctx, account, source)
+		next, body, err := issue892PrepareHTTP(t, svc, ctx, account, source)
 		require.NoError(t, err)
 		require.Equal(t, openAIAgentRecoveryInputDigest(issue892Expected(t, source, zone)), openAIAgentRecoveryInputDigest(body))
-		require.Equal(t, source, openAIAgentRecoveryFromContext(next).replaySource)
-		body, err = manager.prepareReadable(account, source)
+		require.Equal(t, openAIAgentRecoveryInputDigest(source), openAIAgentRecoveryFromContext(next).inputDigest)
+		body, err = issue892PrepareWS(t, manager, account, source)
 		require.NoError(t, err)
 		require.Equal(t, openAIAgentRecoveryInputDigest(issue892Expected(t, source, zone)), openAIAgentRecoveryInputDigest(body))
 	}
 	require.Equal(t, "9007199254740993", gjson.GetBytes(source, "input.2.sequence").Raw)
+}
+
+func TestIssue892TimezonePolicyControlsProjection(t *testing.T) {
+	for _, mode := range []string{"disabled", "auto", "manual", "aligned"} {
+		t.Run(mode, func(t *testing.T) {
+			svc := timezoneAutoService(mode != "disabled", mode == "auto", nil)
+			svc.cfg = &config.Config{}
+			svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+			manager, c, account := issue715WSManager(t, svc, context.Background())
+			defer manager.abort()
+			timezone := "America/Los_Angeles"
+			if mode == "aligned" {
+				timezone = "Asia/Singapore"
+			}
+			account.Extra = map[string]any{openAIRequestTimezoneExtraKey: timezone}
+			source := issue892FrozenSource(t)
+			ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, source, "fixture-session", "gpt-6-astra")
+			_, body, err := issue892PrepareHTTP(t, svc, ctx, account, source)
+			require.NoError(t, err)
+			want := source
+			if mode == "manual" {
+				want = issue892Expected(t, source, timezone)
+			}
+			require.Equal(t, openAIAgentRecoveryInputDigest(want), openAIAgentRecoveryInputDigest(body))
+			body, err = issue892PrepareWS(t, manager, account, source)
+			require.NoError(t, err)
+			require.Equal(t, openAIAgentRecoveryInputDigest(want), openAIAgentRecoveryInputDigest(body))
+		})
+	}
+}
+
+func TestIssue892ManualTimezone400Recovery(t *testing.T) {
+	for _, mode := range []string{"enabled", "disabled", "ordinary400", "SSE"} {
+		t.Run(mode, func(t *testing.T) {
+			response := func(status int, body string) *http.Response {
+				return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
+			}
+			failure := response(http.StatusBadRequest, history400Failure)
+			if mode == "ordinary400" {
+				failure = response(http.StatusBadRequest, `{"error":{"code":"invalid_request_error","message":"fixture rejection"}}`)
+			}
+			if mode == "SSE" {
+				failure = newStreamLineageSSEResponse(encryptedSSERetryEvent(encryptedSSERetryFailure))
+			}
+			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{failure, response(http.StatusOK, `{"id":"resp_fixture892","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)}}
+			svc := newStreamLineageHTTPService(upstream)
+			svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+			svc.settingService = NewSettingService(&history400SettingsRepo{values: map[string]string{
+				SettingKeyOpenAIRequestTimezoneEnabled:         "true",
+				SettingKeyOpenAIRequestTimezoneAuto:            "false",
+				SettingKeyOpenAI400OmitEncryptedHistoryEnabled: fmt.Sprint(mode != "disabled"),
+			}}, svc.cfg)
+			input := "[" + gjson.Get(issue715OpaqueBody, "input.0").Raw + "," + strings.TrimPrefix(history400Input, "[")
+			body, err := sjson.SetBytes(history400Body(input, mode == "SSE"), "input.-1", map[string]any{"role": "user", "content": issue892Environment})
+			require.NoError(t, err)
+			c, rec := newStreamLineageTestContext("fixture892-400")
+			c.Set("api_key", &APIKey{ID: 7, AllowLongContext: true})
+			ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, body, "fixture892-400", "gpt-5.1")
+			c.Request = c.Request.WithContext(ctx)
+			account := newStreamLineageHTTPAccount()
+			account.Extra = map[string]any{openAIRequestTimezoneExtraKey: "America/Los_Angeles"}
+			_, err = svc.Forward(ctx, c, account, body)
+			if mode == "enabled" {
+				require.NoError(t, err, rec.Body.String())
+				require.Equal(t, 2, upstream.callCount, "one authorized same-account HTTP 400 recovery")
+				for _, path := range []string{"input.3", "input.4", "input.5", "input.6"} {
+					require.JSONEq(t, gjson.GetBytes(upstream.bodies[0], path).Raw, gjson.GetBytes(upstream.bodies[1], path).Raw)
+				}
+				require.Equal(t, upstream.reqs[0].URL.String(), upstream.reqs[1].URL.String())
+				require.Equal(t, upstream.reqs[0].Header.Get("Authorization"), upstream.reqs[1].Header.Get("Authorization"))
+				require.NotContains(t, string(upstream.bodies[1]), "AAAA-fixture-1111")
+				_, replayed, prepareErr := issue892PrepareHTTP(t, svc, c.Request.Context(), account, upstream.bodies[1])
+				require.NoError(t, prepareErr)
+				require.Equal(t, upstream.bodies[1], replayed, "an authorized 400 omission must not restore the original ciphertext")
+			} else {
+				require.Error(t, err)
+				require.Equal(t, 1, upstream.callCount, "400 recovery must not expand to disabled, arbitrary 400 or SSE failures")
+			}
+			require.Contains(t, gjson.GetBytes(upstream.bodies[0], "input.6.content").String(), "America/Los_Angeles")
+			require.Contains(t, string(body), "Asia/Singapore")
+		})
+	}
 }

@@ -11,6 +11,7 @@ if grep -q 'requireCompletedOwners' "$tree/$contract"; then
 fi
 
 for target in \
+  backend/internal/service/openai_400_omit_history.go \
   backend/internal/service/openai_409_omit_history.go \
   backend/internal/service/openai_lossy_history_restart.go \
   backend/internal/service/openai_tool_provenance.go \

@@ -31,7 +31,7 @@ func (s *OpenAIGatewayService) PrepareOpenAIAgentReplayBody(body []byte) ([]byte
 // timezone normalization are the only permitted projections here.
 func (s *OpenAIGatewayService) prepareOpenAIAgentOAuthReplay(ctx context.Context, account *Account, body []byte) (context.Context, []byte, error) {
 	r := openAIAgentRecoveryFromContext(ctx)
-	if r == nil || !r.disableOwnerBinding || !r.preservesHistory() || r.omittedHistory || account == nil || !account.IsOpenAI() {
+	if r == nil || !r.disableOwnerBinding || !r.preservesHistory() || r.omittedHistory || r.omitted400History || account == nil || !account.IsOpenAI() {
 		return ctx, body, nil
 	}
 	if len(r.replaySource) == 0 || openAIAgentRecoveryInputDigest(body) != r.inputDigest ||
