@@ -294,7 +294,8 @@ func (s *OpenAIOAuthReauthService) FinishTOTPRotation(ctx context.Context, task 
 		code = ""
 	} else {
 		switch code {
-		case "login_failed", "identity_mismatch", "enrollment_failed", "activation_unconfirmed", "verification_failed", "worker_failed":
+		case "login_failed", "identity_mismatch", "enrollment_failed", "activation_unconfirmed", "verification_failed", "worker_failed",
+			"new_accepted_old_valid", "old_accepted_new_valid":
 		default:
 			code = "worker_failed"
 		}

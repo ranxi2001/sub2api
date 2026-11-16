@@ -65,10 +65,26 @@ class RotationTests(unittest.TestCase):
         self.api.totp_finish.assert_called_once_with(7, False, 'activation_unconfirmed')
         self.login.assert_not_called()
 
-    def test_old_secret_still_works_never_reports_success(self):
+    def test_two_valid_factors_preserve_candidate_with_specific_diagnostic(self):
         self.login.side_effect = [{}, {}]
         self.run_rotation()
+        self.api.totp_finish.assert_called_once_with(7, False, 'new_accepted_old_valid')
+        self.assertEqual(self.journal.save.call_args.args[1], NEW)
+        self.assertEqual(self.session.request.call_count, 2)
+        self.assertEqual([call.args[2] for call in self.login.call_args_list], [NEW, OLD])
+
+    def test_candidate_rejected_remains_verification_failed(self):
+        self.login.side_effect = [None]
+        self.run_rotation()
         self.api.totp_finish.assert_called_once_with(7, False, 'verification_failed')
+        self.assertEqual(self.login.call_count, 1)
+
+    def test_old_recovery_distinguishes_two_valid_factors(self):
+        self.claim.update(action='verify_old', candidate_secret=NEW)
+        self.login.side_effect = [{}, {}]
+        self.run_rotation()
+        self.api.totp_finish.assert_called_once_with(7, False, 'old_accepted_new_valid')
+        self.session.request.assert_not_called()
 
     def test_network_error_is_not_evidence_old_secret_was_rejected(self):
         self.login.side_effect = [{}, RotationError('login_failed')]

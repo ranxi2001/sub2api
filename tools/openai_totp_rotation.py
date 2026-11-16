@@ -170,7 +170,10 @@ def verify_pair(config, claim, candidate, action, login):
     if rejected:
         time.sleep(31 - time.time() % 30)
     if rejected and login(config, claim, rejected) is not None:
-        raise RotationError('verification_failed')
+        # Enrollment adds a factor; it does not revoke the previous one. Keep
+        # recovery available until factor binding can establish provenance,
+        # but do not misreport a successfully verified secret as invalid.
+        raise RotationError('old_accepted_new_valid' if action == 'verify_old' else 'new_accepted_old_valid')
 
 
 def rotate(api, claim, *, session_factory=WebSession, login=login_web, journal_factory=Journal):
@@ -213,7 +216,10 @@ def rotate(api, claim, *, session_factory=WebSession, login=login_web, journal_f
         stage = 'verification_failed'
         verify_pair(api.config, claim, candidate, action, login)
         api.totp_finish(task, True)
-    except Exception:
+    except Exception as exc:
+        if stage == 'verification_failed' and isinstance(exc, RotationError) and exc.code in (
+                'new_accepted_old_valid', 'old_accepted_new_valid'):
+            stage = exc.code
         # Never expose network bodies, login traces, candidates, passwords, or exceptions.
         try:
             api.totp_finish(task, False, stage)

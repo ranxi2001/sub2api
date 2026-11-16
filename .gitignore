@@ -135,6 +135,7 @@ deploy/docker-compose.override.yml
 vite.config.js
 user-traffic-pending/
 docs/*
+!docs/openai-totp-factor-recovery.md
 !docs/ai-ops-codex.md
 !docs/reauth-identity-validation.md
 !docs/openai-context-limit-errors.md

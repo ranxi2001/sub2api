@@ -12,8 +12,9 @@ import (
 
 type rotationTestRepo struct {
 	*reauthTestRepo
-	rotation  *OpenAITOTPRotation
-	candidate string
+	rotation   *OpenAITOTPRotation
+	candidate  string
+	finishCode string
 }
 
 func (r *rotationTestRepo) GetTOTPRotation(context.Context, int64) (*OpenAITOTPRotation, error) {
@@ -29,7 +30,8 @@ func (r *rotationTestRepo) TransitionTOTPRotation(_ context.Context, _ int64, _ 
 	r.candidate = candidate
 	return nil
 }
-func (r *rotationTestRepo) FinishTOTPRotation(context.Context, int64, string, bool, string) error {
+func (r *rotationTestRepo) FinishTOTPRotation(_ context.Context, _ int64, _ string, _ bool, code string) error {
+	r.finishCode = code
 	return nil
 }
 func (r *rotationTestRepo) RetryTOTPRotation(context.Context, int64, int64, string) error { return nil }
@@ -117,4 +119,17 @@ func TestTOTPRotationRequiresCapableWorker(t *testing.T) {
 	repo.rotation.State = "queued"
 	_, err = svc.CreateTOTPRotation(context.Background(), 42)
 	require.NoError(t, err)
+}
+
+func TestTOTPRotationFinishPreservesSafeMultiFactorDiagnostics(t *testing.T) {
+	for _, code := range []string{"new_accepted_old_valid", "old_accepted_new_valid", "verification_failed"} {
+		t.Run(code, func(t *testing.T) {
+			svc, repo := newRotationService(t)
+			require.NoError(t, svc.FinishTOTPRotation(context.Background(), 7, "worker", false, code))
+			require.Equal(t, code, repo.finishCode)
+		})
+	}
+	svc, repo := newRotationService(t)
+	require.NoError(t, svc.FinishTOTPRotation(context.Background(), 7, "worker", false, "untrusted-secret-body"))
+	require.Equal(t, "worker_failed", repo.finishCode)
 }
