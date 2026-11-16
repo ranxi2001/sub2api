@@ -41,4 +41,4 @@
 
 主 CI 同时移除已合并分支的 `issue854-behavior`、`pelican-round-evidence`、`pr612-regressions`、`pr612-regressions-red` 以及质量模板、用户启用和 Issue854 的条件步骤；VIP 入账工作流也清除旧分支的两段 RED 步骤和 `source-format` job，保留 PostgreSQL GREEN 回归。原定义可从上述归档基线的 `.github/workflows/backend-ci.yml` 查阅。
 
-需要重跑历史验收时，在任务分支恢复所需文件到 `.github/workflows/`，先核对固定 SHA、分支条件、工具链、runner 和脚本路径。归档文件保留当时配置，不保证在新代码上直接可运行。常规回归优先并入主 CI；确需专用工作流时按相关路径触发，临时 RED/GREEN、截图或试用构建在任务完成后归档。
+上述 32 个入口已在 GitHub 登记为停用，历史运行记录保留。需要重跑历史验收时，在任务分支恢复所需文件到 `.github/workflows/`，先核对固定 SHA、分支条件、工具链、runner 和脚本路径，再按任务范围重新启用对应工作流。归档文件保留当时配置，不保证在新代码上直接可运行。常规回归优先并入主 CI；确需专用工作流时按相关路径触发，临时 RED/GREEN、截图或试用构建在任务完成后归档。

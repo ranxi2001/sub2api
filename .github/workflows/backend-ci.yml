@@ -100,7 +100,9 @@ jobs:
         run: make test-integration
 
   frontend:
-    runs-on: ${{ vars.SUB2API_SUPPLEMENTARY_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v6
         with:

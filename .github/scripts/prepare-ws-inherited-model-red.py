@@ -1,4 +1,4 @@
-"""Materialize the entire pinned baseline plus one identical candidate test.
+"""Materialize the pinned baseline plus identical candidate handler/guard tests.
 
 No historical overlay helper or existing worktree is modified. All archived
 backend blobs (including dependencies and historical fixtures) are verified.
@@ -47,22 +47,28 @@ def prepare(destination, evidence):
         raise ValueError("baseline backend blob mismatch")
     if (destination / FIXTURE).exists():
         raise ValueError("fixture unexpectedly exists in pinned baseline")
-    fixture_blob = git("rev-parse", f"{candidate}:{FIXTURE}").decode().strip()
-    if git("hash-object", FIXTURE).decode().strip() != fixture_blob:
-        raise ValueError("dirty candidate fixture")
-    if Path(GUARDS).read_bytes() != (destination / GUARDS).read_bytes():
-        raise ValueError("guard fixture changed; identical baseline/candidate guard tests required")
-    shutil.copyfile(FIXTURE, destination / FIXTURE)
-    if git("hash-object", str(destination / FIXTURE)).decode().strip() != fixture_blob:
-        raise ValueError("candidate test copy mismatch")
+    # Guard files may acquire independent tests after the pinned baseline.
+    # Overlay the committed candidate tests in both cases, just as for the
+    # handler oracle. Every production/dependency blob above remains historical;
+    # the selected guard assertions and the evidence validator remain intact.
+    fixture_blobs = {}
+    for path in (FIXTURE, GUARDS):
+        blob = git("rev-parse", f"{candidate}:{path}").decode().strip()
+        if git("hash-object", path).decode().strip() != blob:
+            raise ValueError("dirty candidate fixture: " + path)
+        shutil.copyfile(path, destination / path)
+        if git("hash-object", str(destination / path)).decode().strip() != blob:
+            raise ValueError("candidate test copy mismatch: " + path)
+        fixture_blobs[path] = blob
     manifest = {
         "baseline": BASELINE, "candidate": candidate,
         "baseline_tree": git("rev-parse", f"{BASELINE}^{{tree}}").decode().strip(),
         "baseline_backend_tree": git("rev-parse", f"{BASELINE}:backend").decode().strip(),
-        "candidate_fixture_blob": fixture_blob, "fixture": FIXTURE,
-        "guard_fixture_blob": git("hash-object", GUARDS).decode().strip(),
+        "candidate_fixture_blob": fixture_blobs[FIXTURE], "fixture": FIXTURE,
+        "guard_fixture_blob": fixture_blobs[GUARDS],
+        "baseline_guard_fixture_blob": git("rev-parse", f"{BASELINE}:{GUARDS}").decode().strip(),
         "verified_baseline_backend_blobs": len(entries),
-        "production_changes_in_red": [], "candidate_test_overlays": [FIXTURE],
+        "production_changes_in_red": [], "candidate_test_overlays": [FIXTURE, GUARDS],
     }
     (evidence / "source-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (evidence / "baseline-backend-blobs.txt").write_text("".join(f"{blob} {path}\n" for path, blob in entries))
