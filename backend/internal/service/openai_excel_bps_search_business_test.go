@@ -21,7 +21,8 @@ const issue871BusinessQuery = "synthetic \"search\"\n第二行"
 const issue871BusinessResult = `{"output":"Synthetic result","results":[{"url":"https://example.invalid/source","title":"Synthetic source"}]}`
 const issue871BusinessAnswer = "见 https://example.invalid/source"
 
-func issue871BusinessCall(form string, round int) map[string]any {
+func issue871BusinessCall(t *testing.T, form string, round int) map[string]any {
+	t.Helper()
 	query, _ := json.Marshal(map[string]any{"query": issue871BusinessQuery})
 	call := issue871Call(fmt.Sprintf("fc_search_%d", round), fmt.Sprintf("call_search_%d", round), "__sub2api_web_search")
 	if strings.HasPrefix(form, "direct") {
@@ -32,7 +33,9 @@ func issue871BusinessCall(form string, round int) map[string]any {
 		call["arguments"] = string(args)
 	}
 	if strings.HasSuffix(form, "_prefixed") {
-		call["name"] = "functions." + call["name"].(string)
+		name, ok := call["name"].(string)
+		require.True(t, ok, "search fixture tool name must be a string")
+		call["name"] = "functions." + name
 	}
 	return call
 }
@@ -48,6 +51,7 @@ type issue871BusinessSupplier struct {
 	proxies  []string
 	form     string
 	failure  string
+	calls    [2]map[string]any
 }
 
 func (s *issue871BusinessSupplier) send(req *http.Request, proxy string) (*http.Response, error) {
@@ -63,7 +67,7 @@ func (s *issue871BusinessSupplier) send(req *http.Request, proxy string) (*http.
 	s.proxies = append(s.proxies, proxy)
 	n := len(s.bodies)
 	if n == 1 {
-		call := issue871BusinessCall(s.form, 0)
+		call := s.calls[0]
 		if s.failure == "invalid_arguments" {
 			call["arguments"] = `{"query":123}`
 		}
@@ -107,18 +111,22 @@ func (s *issue871BusinessSupplier) send(req *http.Request, proxy string) (*http.
 	case "continuation_eof":
 		return issue871HTTP(200, ""), nil
 	case "repeated_call":
-		call := issue871BusinessCall(s.form, 1)
+		call := s.calls[1]
 		call["call_id"] = "call_search_0"
 		return issue871Round("resp_repeat", call), nil
 	}
 	if n == 3 {
-		return issue871Round("resp_second_search", issue871BusinessCall(s.form, 1)), nil
+		return issue871Round("resp_second_search", s.calls[1]), nil
 	}
 	return issue871Round("resp_answer", map[string]any{"type": "message", "id": "msg_answer", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": issue871BusinessAnswer}}}), nil
 }
 
 func issue871BusinessForward(t *testing.T, supplier *issue871BusinessSupplier, mode string) (*OpenAIGatewayService, *Account, *gin.Context, *httptest.ResponseRecorder, *OpenAIForwardResult, error) {
 	t.Helper()
+	// Build and assert fixtures on the test goroutine before Forward starts.
+	for round := range supplier.calls {
+		supplier.calls[round] = issue871BusinessCall(t, supplier.form, round)
+	}
 	svc := openAIClientToolsTestService(nil)
 	svc.httpUpstream = &bpsTestUpstream{send: supplier.send}
 	account := excelAccount()
@@ -219,7 +227,7 @@ func TestExcelBPSSearchBusinessThroughForward(t *testing.T) {
 						require.JSONEq(t, gjson.Get(issue871BusinessResult, "results").Raw, data.Get("results").Raw)
 						require.Equal(t, "Synthetic result", data.Get("output").String())
 						if strings.HasPrefix(form, "wrapped") {
-							exact, marshalErr := json.Marshal(issue871BusinessCall(form, round))
+							exact, marshalErr := json.Marshal(issue871BusinessCall(t, form, round))
 							require.NoError(t, marshalErr)
 							require.JSONEq(t, string(exact), call.Raw, "genuine native calls must remain verbatim")
 						}
