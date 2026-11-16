@@ -809,7 +809,7 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 		return err
 	}
 	scope := openAIAgentRecoveryFromContext(r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, source, r.session, h.anchor.model))
-	if scope.userID != h.anchor.user || scope.keyID != h.anchor.key || scope.groupID != h.anchor.group || scope.session != h.anchor.session || scope.lookupErr != nil || scope.conflict || scope.disallowLearning {
+	if scope.userID <= 0 || scope.keyID <= 0 || scope.userID != h.anchor.user || scope.keyID != h.anchor.key || scope.groupID != h.anchor.group || scope.session != h.anchor.session || scope.lookupErr != nil || scope.conflict || scope.disallowLearning {
 		return err
 	}
 	delta, ok := openAIWSPlainItems(source)
