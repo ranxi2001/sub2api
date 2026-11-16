@@ -44,7 +44,7 @@ def encode(rows):
 
 class EvidenceTests(unittest.TestCase):
     def test_complete_contracts(self):
-        for suite in ("handler", "guards"):
+        for suite in ("handler", "guards", "guards_with_client_model"):
             for phase in ("RED", "GREEN"):
                 with self.subTest(suite=suite, phase=phase):
                     status = int(suite == "handler" and phase == "RED")

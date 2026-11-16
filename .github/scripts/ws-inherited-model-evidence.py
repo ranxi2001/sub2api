@@ -31,7 +31,7 @@ def contract(suite):
         fences = {f"{FENCES}/{kind}/{case}" for kind in KINDS for case in NEGATIVES}
         red = {name for name in good if name.endswith("/inherited") or name.endswith("/mapped_inherited")}
         return "handler", roots | parents | good | fences, red, good, fences
-    if suite == "guards":
+    if suite in {"guards", "guards_with_client_model"}:
         cases = {
             "TestOpenAIToolProvenanceDeliveryAndScope": (
                 "completed", "early_only", "write_failed", "terminal_excludes", "duplicate",
@@ -40,6 +40,11 @@ def contract(suite):
                 "none", "pending", "failed", "conflicted", "missing", "changed", "input", "tools", "call_proof",
             ),
         }
+        if suite == "guards_with_client_model":
+            cases["TestOpenAIWSRecoveryEffectiveClientModel"] = (
+                "no_ws_preflight", "inherited", "explicit_switch", "inherited_after_switch",
+                "explicit_overrides_preflight", "separate_connection",
+            )
         tests = set(cases) | {f"{root}/{case}" for root, leaves in cases.items() for case in leaves}
         return "service", tests, set(), set(), set()
     raise ValueError("unknown suite")

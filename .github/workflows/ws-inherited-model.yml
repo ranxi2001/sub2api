@@ -77,13 +77,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          suite=guards
+          pattern='^Test(OpenAIToolProvenanceDeliveryAndScope|OpenAIWSMixedOwnerFinalSendFences)$'
+          if [ "$PHASE" = GREEN ]; then
+            suite=guards_with_client_model
+            pattern='^Test(OpenAIToolProvenanceDeliveryAndScope|OpenAIWSMixedOwnerFinalSendFences|OpenAIWSRecoveryEffectiveClientModel)$'
+          fi
           set +e
-          (cd "$TEST_ROOT/backend" && go test -race -p=2 -json -tags=unit,ownerconflict ./internal/service -run '^Test(OpenAIToolProvenanceDeliveryAndScope|OpenAIWSMixedOwnerFinalSendFences)$' -count=1 -timeout=5m) > "$EVIDENCE/guards.jsonl" 2>&1
+          (cd "$TEST_ROOT/backend" && go test -race -p=2 -json -tags=unit,ownerconflict,inheritedmodel ./internal/service -run "$pattern" -count=1 -timeout=5m) > "$EVIDENCE/guards.jsonl" 2>&1
           status=$?
           set -e
           printf '%s\n' "$status" > "$EVIDENCE/guards.exit"
           cat "$EVIDENCE/guards.jsonl"
-          python3 .github/scripts/ws-inherited-model-evidence.py guards "$PHASE" "$status" "$EVIDENCE/guards.jsonl" | tee "$EVIDENCE/guards-verdict.json"
+          python3 .github/scripts/ws-inherited-model-evidence.py "$suite" "$PHASE" "$status" "$EVIDENCE/guards.jsonl" | tee "$EVIDENCE/guards-verdict.json"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
