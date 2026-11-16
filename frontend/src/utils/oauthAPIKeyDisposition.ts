@@ -9,7 +9,7 @@ export interface OAuthAPIKeyDispositionConfig {
   timezone: string
 }
 export function oauthAPIKeyDispositionPayload(value?: Partial<OAuthAPIKeyDispositionConfig>): OAuthAPIKeyDispositionConfig {
-  return { enabled: false, scope: 'accounts', account_ids: [], group_ids: [], action: 'pause', delay_minutes: 5, pause_minutes: 180, timezone: 'Asia/Shanghai', ...value }
+  return { enabled: false, scope: 'accounts', action: 'pause', delay_minutes: 5, pause_minutes: 180, timezone: 'Asia/Shanghai', ...value, account_ids: [...(value?.account_ids ?? [])], group_ids: [...(value?.group_ids ?? [])] }
 }
 export function oauthAPIKeyDispositionError(p: OAuthAPIKeyDispositionConfig): string | null {
   if (!p.enabled) return null

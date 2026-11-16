@@ -73,3 +73,10 @@ it('keeps A dismissed, shares B dismissal, reloads B and leaves future C visible
  expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
  expect(new Set(Object.values(NEW_FEATURE_NOTICES)).size).toBe(Object.values(NEW_FEATURE_NOTICES).length)
 })
+
+it('normalizes empty account/group arrays from legacy JSON without sharing draft arrays', () => {
+ const source = oauthAPIKeyDispositionPayload({ account_ids: [7], group_ids: [5] })
+ const copy = oauthAPIKeyDispositionPayload(source)
+ copy.account_ids.push(8); expect(source.account_ids).toEqual([7])
+ expect(oauthAPIKeyDispositionPayload(JSON.parse('{"account_ids":null,"group_ids":null}')).account_ids).toEqual([])
+})
