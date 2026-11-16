@@ -13,6 +13,10 @@ from pathlib import Path
 BASELINE = "da526bfbab47efd40549cab98f1069f9b2b45b9f"
 FIXTURE = "backend/internal/handler/openai_ws_inherited_model_test.go"
 GUARDS = "backend/internal/service/openai_ws_owner_conflict_test.go"
+# This upstream commit only prepends the independent pending-deadline fixture.
+# Keep its full blob pinned; arbitrary changes to the candidate guards still fail.
+GUARD_EXTENSION = "9dc66846a16609fb75b59a643563fae3284944cf"
+GUARD_SOURCE_START = b"// Calls are learned only from the real response observer and successful write\n"
 
 
 def git(*args, **kwargs):
@@ -50,8 +54,20 @@ def prepare(destination, evidence):
     fixture_blob = git("rev-parse", f"{candidate}:{FIXTURE}").decode().strip()
     if git("hash-object", FIXTURE).decode().strip() != fixture_blob:
         raise ValueError("dirty candidate fixture")
-    if Path(GUARDS).read_bytes() != (destination / GUARDS).read_bytes():
-        raise ValueError("guard fixture changed; identical baseline/candidate guard tests required")
+    guard_blob = git("rev-parse", f"{candidate}:{GUARDS}").decode().strip()
+    if git("hash-object", GUARDS).decode().strip() != guard_blob:
+        raise ValueError("dirty candidate guard fixture")
+    baseline_guards = (destination / GUARDS).read_bytes()
+    candidate_guards = Path(GUARDS).read_bytes()
+    if candidate_guards != baseline_guards:
+        approved_guards = git("show", f"{GUARD_EXTENSION}:{GUARDS}")
+        if candidate_guards != approved_guards:
+            raise ValueError("guard fixture changed outside the pinned upstream extension")
+        if (baseline_guards.count(GUARD_SOURCE_START) != 1
+                or candidate_guards.count(GUARD_SOURCE_START) != 1
+                or baseline_guards.split(GUARD_SOURCE_START, 1)[1]
+                != candidate_guards.split(GUARD_SOURCE_START, 1)[1]):
+            raise ValueError("guard fixture changed; identical baseline/candidate guard tests required")
     shutil.copyfile(FIXTURE, destination / FIXTURE)
     if git("hash-object", str(destination / FIXTURE)).decode().strip() != fixture_blob:
         raise ValueError("candidate test copy mismatch")
@@ -60,7 +76,9 @@ def prepare(destination, evidence):
         "baseline_tree": git("rev-parse", f"{BASELINE}^{{tree}}").decode().strip(),
         "baseline_backend_tree": git("rev-parse", f"{BASELINE}:backend").decode().strip(),
         "candidate_fixture_blob": fixture_blob, "fixture": FIXTURE,
-        "guard_fixture_blob": git("hash-object", GUARDS).decode().strip(),
+        "guard_fixture_blob": guard_blob,
+        "baseline_guard_fixture_blob": git("rev-parse", f"{BASELINE}:{GUARDS}").decode().strip(),
+        "approved_guard_extension": GUARD_EXTENSION if candidate_guards != baseline_guards else None,
         "verified_baseline_backend_blobs": len(entries),
         "production_changes_in_red": [], "candidate_test_overlays": [FIXTURE],
     }
