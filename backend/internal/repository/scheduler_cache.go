@@ -1689,6 +1689,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		service.ExcelBPS403TargetGroupIDKey,
 		"openai_excel_bps_mihomo",
 		"openai_excel_bps_models",
+		"openai_passthrough_model_filter",
 		"codex_fingerprint_mode",
 		"codex_fingerprint_seed",
 		service.OpenAICodexSkipHarvestExtraKey,
