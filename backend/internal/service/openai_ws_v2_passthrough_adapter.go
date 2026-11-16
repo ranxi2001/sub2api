@@ -619,6 +619,9 @@ func (c *openAIWSClientFrameConn) ReadFrame(ctx context.Context) (coderws.Messag
 			// original order ahead of anything still in the channel.
 			if frame, ok := c.reader.popWaitFrame(); ok {
 				c.reader.lastReadAt.Store(&frame.receivedAt)
+				capture := requestcapture.FromContext(ctx)
+				capture.SetProtocol("websocket")
+				capture.ClientFrame(frame.payload)
 				return frame.messageType, frame.payload, nil
 			}
 			if timeout == nil && c.waitingForNextTurn.Load() && c.interTurnIdleTimeout > 0 {
@@ -637,6 +640,9 @@ func (c *openAIWSClientFrameConn) ReadFrame(ctx context.Context) (coderws.Messag
 				return 0, nil, c.reader.err
 			case frame := <-c.reader.frames:
 				c.reader.lastReadAt.Store(&frame.receivedAt)
+				capture := requestcapture.FromContext(ctx)
+				capture.SetProtocol("websocket")
+				capture.ClientFrame(frame.payload)
 				return frame.messageType, frame.payload, nil
 			case <-c.interTurnStarted:
 			case <-timeout:
@@ -697,6 +703,9 @@ func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderw
 		if c.restoreToolNames != nil {
 			payload = c.restoreToolNames(payload)
 		}
+	}
+	if c.controlCtx != nil {
+		ctx = requestcapture.WithSession(ctx, requestcapture.FromContext(c.controlCtx))
 	}
 	return c.agentRecovery.write(payload, func() error {
 		return WriteCapturedWSClient(ctx, c.conn, msgType, payload)

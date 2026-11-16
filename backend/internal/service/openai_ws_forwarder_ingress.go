@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
+	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -468,6 +469,9 @@ func (r *openAIWSIngressReader) read(ctx context.Context) (coderws.MessageType, 
 		// Frames preserved during a key wait keep their original order.
 		if frame, ok := r.popWaitFrame(); ok {
 			r.lastReadAt.Store(&frame.receivedAt)
+			capture := requestcapture.FromContext(ctx)
+			capture.SetProtocol("websocket")
+			capture.ClientFrame(frame.payload)
 			return frame.messageType, frame.payload, nil
 		}
 		select {
@@ -482,6 +486,9 @@ func (r *openAIWSIngressReader) read(ctx context.Context) (coderws.MessageType, 
 			return 0, nil, r.err
 		case frame := <-r.frames:
 			r.lastReadAt.Store(&frame.receivedAt)
+			capture := requestcapture.FromContext(ctx)
+			capture.SetProtocol("websocket")
+			capture.ClientFrame(frame.payload)
 			return frame.messageType, frame.payload, nil
 		}
 	}
@@ -1137,6 +1144,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
 			if eventBytes != nil {
 				writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
+				writeCtx = requestcapture.WithSession(writeCtx, requestcapture.FromContext(c.Request.Context()))
 				_ = WriteCapturedWSClient(writeCtx, clientConn, coderws.MessageText, eventBytes)
 				cancel()
 			}
@@ -1183,6 +1191,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	writeClientMessage := func(message []byte) error {
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
+		writeCtx = requestcapture.WithSession(writeCtx, requestcapture.FromContext(c.Request.Context()))
 		defer cancel()
 		message = restoreCodexToolNamesFromContext(c, message)
 		return agentRecovery.write(message, func() error {

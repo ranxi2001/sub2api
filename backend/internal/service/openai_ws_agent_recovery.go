@@ -471,7 +471,7 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 	if r.localHistory.pending != nil {
 		r.localHistory.outputBytes += len(payload)
 		if r.localHistory.outputBytes > openAIWSLocalHistoryLimit {
-			r.localHistory = openAIWSLocalHistory{}
+			r.localHistory = openAIWSLocalHistory{diagnostic: "output_limit"}
 			r.accountLocalHistory()
 		} else {
 			r.localHistory.output.AddEvent(event, payload)
@@ -644,6 +644,7 @@ const openAIWSLocalHistoryLimit = 8 << 20
 var openAIWSLocalHistoryBytes atomic.Int64
 
 type openAIWSLocalHistory struct {
+	diagnostic  string // Fixed enum only; never retains caller content.
 	outputBytes int
 	tools       json.RawMessage
 	committed   []json.RawMessage
@@ -740,15 +741,21 @@ func openAIWSHistoryCopy(items []json.RawMessage) ([]json.RawMessage, bool) {
 }
 func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
 	defer r.accountLocalHistory()
+	previousDiagnostic := r.localHistory.diagnostic
 	r.localHistory.pending = nil
 	r.localHistory.outputBytes = 0
 	r.localHistory.output = openAIWSLocalOutput{}
+	r.localHistory.diagnostic = "staging"
 	if r.service.settingService == nil || !r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(r.ctx) {
-		r.localHistory = openAIWSLocalHistory{}
+		r.localHistory = openAIWSLocalHistory{diagnostic: "disabled"}
 		return
 	}
 	items, ok := openAIWSPlainItems(source)
 	if !ok || gjson.GetBytes(source, "conversation").Exists() {
+		r.localHistory.diagnostic = "source_unsupported"
+		if gjson.GetBytes(source, "conversation").Exists() {
+			r.localHistory.diagnostic = "conversation_reference"
+		}
 		r.localHistory.ready = false
 		return
 	}
@@ -756,6 +763,11 @@ func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
 	if previous != "" {
 		anchor := r.localHistory.anchor
 		if !r.localHistory.ready || previous != anchor.response || r.request.keyID != anchor.key || r.request.userID != anchor.user || r.request.groupID != anchor.group || r.request.session != anchor.session || r.request.model != anchor.model {
+			if r.localHistory.ready || previousDiagnostic == "" {
+				r.localHistory.diagnostic = "prior_anchor_mismatch"
+			} else {
+				r.localHistory.diagnostic = previousDiagnostic
+			}
 			r.localHistory.ready = false
 			return
 		}
@@ -773,13 +785,14 @@ func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
 		r.localHistory.tools = append(json.RawMessage(nil), value.Raw...)
 	}
 	if len(r.localHistory.tools) > openAIWSLocalHistoryLimit {
-		r.localHistory = openAIWSLocalHistory{}
+		r.localHistory = openAIWSLocalHistory{diagnostic: "tools_limit"}
 		return
 	}
 	r.localHistory.pending, ok = openAIWSHistoryCopy(items)
 	r.localHistory.ready = false
 	if !ok {
 		r.localHistory.pending = nil
+		r.localHistory.diagnostic = "input_limit"
 	}
 	if model := gjson.GetBytes(source, "model").String(); model != "" {
 		r.localHistory.clientModel = model
@@ -791,6 +804,11 @@ func (r *openAIWSAgentRecovery) commitLocalHistory(completed bool) {
 	if !completed || h.pending == nil || strings.TrimSpace(r.completedBridge.response) == "" {
 		h.ready = false
 		h.committed = nil
+		if !completed {
+			h.diagnostic = "not_completed"
+		} else if h.pending != nil {
+			h.diagnostic = "response_anchor_missing"
+		}
 		return
 	}
 	output := h.output.items
@@ -804,19 +822,23 @@ func (r *openAIWSAgentRecovery) commitLocalHistory(completed bool) {
 	if e != nil {
 		h.ready = false
 		h.committed = nil
+		h.diagnostic = "serialize_failed"
 		return
 	}
 	normalized, ok := openAIWSPlainItems(append(append([]byte(`{"input":`), encoded...), '}'))
 	if !ok {
 		h.ready = false
 		h.committed = nil
+		h.diagnostic = "output_unsupported"
 		return
 	}
 	output = normalized
 	all := combineOpenAIWSReplayItems(h.pending, output)
 	h.committed, ok = openAIWSHistoryCopy(all)
 	h.ready = ok
+	h.diagnostic = "history_limit"
 	if ok {
+		h.diagnostic = "ready"
 		h.anchor = r.completedBridge
 	}
 	h.pending = nil
@@ -833,15 +855,32 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 	}
 	var unsent *openAIWSUnsentTurnError
 	var admission *OpenAITurnAdmissionError
-	if !errors.As(err, &unsent) || unsent.keepAccount || !errors.As(err, &admission) {
+	if !errors.As(err, &unsent) {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	h := &r.localHistory
+	reason := "history_unready"
+	restored := false
+	defer func() {
+		if !restored {
+			logger.FromContext(r.ctx).Warn("openai.ws_unsent_history_restore_skipped",
+				zap.String("restore_reason", reason), zap.String("history_state", h.diagnostic),
+				zap.Int("turn", unsent.turn), zap.Int("history_items", len(h.committed)),
+				zap.Int64("history_bytes", r.historyReserved), zap.Bool("history_ready", h.ready),
+				zap.Bool("delivery_pending", r.finish != nil),
+				zap.Bool("source_previous_present", gjson.GetBytes(unsent.body, "previous_response_id").String() != ""))
+		}
+	}()
+	if unsent.keepAccount || !errors.As(err, &admission) {
+		reason = "not_admission"
+		return err
+	}
 	if !h.ready || r.finish != nil || r.service.settingService == nil || !r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(r.ctx) {
 		return err
 	}
+	reason = "response_anchor"
 	source := unsent.body
 	previous := gjson.GetBytes(source, "previous_response_id")
 	// Two blank IDs describe no continuation. Only the client's explicit
@@ -850,13 +889,16 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 		strings.TrimSpace(h.anchor.response) == "" || previous.String() != h.anchor.response || gjson.GetBytes(source, "conversation").Exists() {
 		return err
 	}
+	reason = "client_model"
 	if unsent.model != "" && unsent.model != h.clientModel {
 		return err
 	}
+	reason = "principal_or_owner"
 	scope := openAIAgentRecoveryFromContext(r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, source, r.session, h.anchor.model))
 	if scope.userID <= 0 || scope.keyID <= 0 || scope.userID != h.anchor.user || scope.keyID != h.anchor.key || scope.groupID != h.anchor.group || scope.session != h.anchor.session || scope.lookupErr != nil || scope.conflict || scope.disallowLearning {
 		return err
 	}
+	reason = "current_input_unsupported"
 	delta, ok := openAIWSPlainItems(source)
 	if !ok {
 		return err
@@ -865,19 +907,23 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 	if !openAIWSRawItemsHasPrefix(delta, h.committed) {
 		all = combineOpenAIWSReplayItems(h.committed, delta)
 	}
+	reason = "history_limit"
 	all, ok = openAIWSHistoryCopy(all)
 	if !ok {
 		return err
 	}
+	reason = "serialization"
 	expanded, e := setOpenAIWSPayloadInputSequence(source, all, true)
 	if e != nil {
 		return err
 	}
+	reason = "tool_pairing"
 	if _, why := inspectOpenAIWSCompletedTools(expanded); why != "" {
 		return err
 	}
 	// Every executed historical call must be one actually delivered on this
 	// manager with a successful terminal verdict, including encrypted anchors.
+	reason = "tool_provenance"
 	for _, item := range gjson.GetBytes(expanded, "input").Array() {
 		kind := item.Get("type").String()
 		if kind != "function_call" && kind != "custom_tool_call" {
@@ -889,17 +935,20 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 			return err
 		}
 	}
+	reason = "tool_declarations"
 	if !gjson.GetBytes(expanded, "tools").Exists() && len(h.tools) > 0 {
 		expanded, e = sjson.SetRawBytes(expanded, "tools", h.tools)
 		if e != nil {
 			return err
 		}
 	}
+	reason = "readable_intent"
 	if !openAI409HasReadableIntent(expanded) {
 		return err
 	}
 	// Completed calls become inert history, so a replacement provider cannot
 	// execute the original tool call again. Keep arguments/results as exact JSON.
+	reason = "projection"
 	expanded, e = projectOpenAIWSCompletedTools(expanded)
 	if e != nil {
 		return err
@@ -908,6 +957,7 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 	if e != nil || len(expanded) > openAIWSLocalHistoryLimit {
 		return err
 	}
+	restored = true
 	copy := *unsent
 	copy.body = expanded
 	h.ready = false // proof consumed once; no reuse after any downstream failure
@@ -929,7 +979,7 @@ func (r *openAIWSAgentRecovery) accountLocalHistory() {
 		for {
 			old := openAIWSLocalHistoryBytes.Load()
 			if old+delta > 128<<20 {
-				r.localHistory = openAIWSLocalHistory{}
+				r.localHistory = openAIWSLocalHistory{diagnostic: "budget_limit"}
 				openAIWSLocalHistoryBytes.Add(-r.historyReserved)
 				r.historyReserved = 0
 				return
