@@ -4,17 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
@@ -63,6 +67,8 @@ type openAIWSAgentRecovery struct {
 	completedBridge                  openAIWSBridgeResponseAnchor
 	deliveredTools                   map[string]openAIWSDeliveredTool
 	pendingTools                     map[string]openAIWSDeliveredTool
+	localHistory                     openAIWSLocalHistory
+	historyReserved                  int64
 }
 
 func newOpenAIWSAgentRecovery(s *OpenAIGatewayService, ctx context.Context, c *gin.Context) *openAIWSAgentRecovery {
@@ -89,6 +95,7 @@ func (r *openAIWSAgentRecovery) abort() {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer func() { r.localHistory = openAIWSLocalHistory{}; r.accountLocalHistory() }()
 	if r.finish != nil {
 		r.finish(false)
 		r.finish = nil
@@ -407,6 +414,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		return err
 	}
 	r.finish = finish
+	r.stageLocalHistory(source)
 	if r.request.owner != nil || len(r.request.items) > 0 || r.request.omittedHistory ||
 		(r.service.settingService != nil && r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx)) {
 		// In automatic continuation mode, even a plaintext initial generation
@@ -459,6 +467,16 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		r.finish(false)
 		r.finish = nil
 		return err
+	}
+	if r.localHistory.pending != nil {
+		r.localHistory.outputBytes += len(payload)
+		if r.localHistory.outputBytes > openAIWSLocalHistoryLimit {
+			r.localHistory = openAIWSLocalHistory{}
+			r.accountLocalHistory()
+		} else {
+			r.localHistory.output.AddEvent(event, payload)
+			r.accountLocalHistory()
+		}
 	}
 	toolItems := gjson.GetBytes(payload, "response.output").Array()
 	if event == "response.output_item.done" {
@@ -555,6 +573,7 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 				r.known[request.itemKey(item)] = true
 			}
 		}
+		r.commitLocalHistory(completed)
 		r.finish = nil
 	}
 	return nil
@@ -588,7 +607,26 @@ func openAIWSWireRefusal(ctx context.Context, stage string, source, payload []by
 			storeKind = "other"
 		}
 	}
+	sanitized, idsChanged, sanitizeErr := sanitizeOpenAIResponsesInputItemIDs(source)
+	tailMatchesSource, tailMatchesIDs := false, false
+	if sourceInput.IsArray() && wireInput.IsArray() {
+		original, wire := sourceInput.Array(), wireInput.Array()
+		if len(original) > 0 && len(wire) >= len(original) {
+			var tail []json.RawMessage
+			for _, item := range wire[len(wire)-len(original):] {
+				tail = append(tail, json.RawMessage(item.Raw))
+			}
+			encoded, e := json.Marshal(tail)
+			if e == nil {
+				tailBody := append(append([]byte(`{"input":`), encoded...), '}')
+				tailMatchesSource = openAIAgentRecoveryInputDigest(source) == openAIAgentRecoveryInputDigest(tailBody)
+				tailMatchesIDs = sanitizeErr == nil && openAIAgentRecoveryInputDigest(sanitized) == openAIAgentRecoveryInputDigest(tailBody)
+			}
+		}
+	}
 	logger.FromContext(ctx).Warn("openai.encrypted_history_409_refused", zap.String("stage", stage),
+		zap.Bool("source_ids_normalized", idsChanged), zap.Bool("tail_matches_source", tailMatchesSource), zap.Bool("tail_matches_normalized_ids", tailMatchesIDs),
+		zap.Int("source_agent_items", len(openAIAgentRecoveryItemDigests(source))), zap.Int("wire_agent_items", len(openAIAgentRecoveryItemDigests(payload))),
 		zap.String("source_input_kind", inputKind), zap.String("source_store", storeKind),
 		zap.Int("source_input_items", len(sourceInput.Array())), zap.Int("wire_input_items", len(wireInput.Array())),
 		zap.Bool("source_previous_present", gjson.GetBytes(source, "previous_response_id").String() != ""),
@@ -597,4 +635,365 @@ func openAIWSWireRefusal(ctx context.Context, stage string, source, payload []by
 		zap.Bool("input_changed", openAIAgentRecoveryInputDigest(source) != openAIAgentRecoveryInputDigest(payload)),
 		zap.Bool("controls_changed", openAI409ControlsDigest(source) != openAI409ControlsDigest(payload)))
 	return openAIRecoveryDiagnosticError("wire_changed", stage, openAIAgentRecoveryFromContext(ctx))
+}
+
+// Bounded, manager-local plaintext history for an explicitly unsent next turn.
+// It expires with the socket/forwarding attempt, never enters Redis or logs.
+const openAIWSLocalHistoryLimit = 8 << 20
+
+var openAIWSLocalHistoryBytes atomic.Int64
+
+type openAIWSLocalHistory struct {
+	outputBytes int
+	tools       json.RawMessage
+	committed   []json.RawMessage
+	pending     []json.RawMessage
+	output      openAIWSLocalOutput
+	anchor      openAIWSBridgeResponseAnchor
+	clientModel string
+	ready       bool
+}
+
+type openAIWSRestoredUnsentError struct{ *openAIWSUnsentTurnError }
+
+func (e *openAIWSRestoredUnsentError) Unwrap() error { return e.openAIWSUnsentTurnError }
+func (e *openAIWSRestoredUnsentError) RecoveredWSContext(ctx context.Context) context.Context {
+	return WithRecoveredContextPrivacy(ctx)
+}
+
+func openAIWSPlainItems(body []byte) ([]json.RawMessage, bool) {
+	if len(body) > openAIWSLocalHistoryLimit {
+		return nil, false
+	}
+	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
+		return nil, false
+	}
+	// Historical reasoning can contain a readable summary plus provider state.
+	// Apply the existing explicit Beta representation, preserving supplied text
+	// and marking unavailable state. Tool data and current agent envelopes are
+	// still rejected below; this never fabricates a task from ciphertext.
+	hasReasoning := false
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		hasReasoning = hasReasoning || item.Get("type").String() == "reasoning"
+	}
+	if hasReasoning {
+		var e error
+		body, e = prepareOpenAI409ReadableReplay(body)
+		if e != nil || len(body) > openAIWSLocalHistoryLimit {
+			return nil, false
+		}
+	}
+	input := gjson.GetBytes(body, "input")
+	var items []json.RawMessage
+	if input.Type == gjson.String {
+		raw, _ := json.Marshal(map[string]any{"type": "message", "role": "user", "content": input.String()})
+		items = []json.RawMessage{raw}
+	} else if input.IsArray() {
+		for _, item := range input.Array() {
+			items = append(items, json.RawMessage(item.Raw))
+		}
+	} else {
+		return nil, false
+	}
+	size := 0
+	for _, raw := range items {
+		size += len(raw)
+		if size > openAIWSLocalHistoryLimit || !openAIWSPlainItem(raw) {
+			return nil, false
+		}
+	}
+	return items, true
+}
+func openAIWSPlainItem(raw []byte) bool {
+	item := gjson.ParseBytes(raw)
+	if !item.IsObject() || openAIWSHasOpaqueField(item, 0) {
+		return false
+	}
+	switch item.Get("type").String() {
+	case "", "message":
+		if role := item.Get("role").String(); role != "user" && role != "assistant" && role != "system" && role != "developer" {
+			return false
+		}
+		return openAIReadableShadowTextOnly(item.Get("content"))
+	case "function_call", "custom_tool_call":
+		_, ok := openAIToolFingerprint(item)
+		return ok
+	case "function_call_output", "custom_tool_call_output":
+		return item.Get("call_id").Type == gjson.String && item.Get("call_id").String() != "" && openAIReadableShadowTextOnly(item.Get("output"))
+	default:
+		return false
+	}
+}
+func openAIWSHistoryCopy(items []json.RawMessage) ([]json.RawMessage, bool) {
+	size := 0
+	for _, v := range items {
+		size += len(v)
+		if size > openAIWSLocalHistoryLimit {
+			return nil, false
+		}
+	}
+	out := make([]json.RawMessage, len(items))
+	for i, v := range items {
+		out[i] = append(json.RawMessage(nil), v...)
+	}
+	return out, true
+}
+func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
+	defer r.accountLocalHistory()
+	r.localHistory.pending = nil
+	r.localHistory.outputBytes = 0
+	r.localHistory.output = openAIWSLocalOutput{}
+	if r.service.settingService == nil || !r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(r.ctx) {
+		r.localHistory = openAIWSLocalHistory{}
+		return
+	}
+	items, ok := openAIWSPlainItems(source)
+	if !ok || gjson.GetBytes(source, "conversation").Exists() {
+		r.localHistory.ready = false
+		return
+	}
+	previous := gjson.GetBytes(source, "previous_response_id").String()
+	if previous != "" {
+		anchor := r.localHistory.anchor
+		if !r.localHistory.ready || previous != anchor.response || r.request.keyID != anchor.key || r.request.userID != anchor.user || r.request.groupID != anchor.group || r.request.session != anchor.session || r.request.model != anchor.model {
+			r.localHistory.ready = false
+			return
+		}
+		// Accept either a delta or the exact complete prefix; never drop existing messages.
+		if !openAIWSRawItemsHasPrefix(items, r.localHistory.committed) {
+			items = combineOpenAIWSReplayItems(r.localHistory.committed, items)
+		}
+	}
+	if previous == "" {
+		r.localHistory.tools = nil
+	}
+	// Tools retain the socket's declarations. Instructions apply only to the
+	// current frame, including when omitted, and must never enter this history.
+	if value := gjson.GetBytes(source, "tools"); value.Exists() {
+		r.localHistory.tools = append(json.RawMessage(nil), value.Raw...)
+	}
+	if len(r.localHistory.tools) > openAIWSLocalHistoryLimit {
+		r.localHistory = openAIWSLocalHistory{}
+		return
+	}
+	r.localHistory.pending, ok = openAIWSHistoryCopy(items)
+	r.localHistory.ready = false
+	if !ok {
+		r.localHistory.pending = nil
+	}
+	if model := gjson.GetBytes(source, "model").String(); model != "" {
+		r.localHistory.clientModel = model
+	}
+}
+func (r *openAIWSAgentRecovery) commitLocalHistory(completed bool) {
+	defer r.accountLocalHistory()
+	h := &r.localHistory
+	if !completed || h.pending == nil || strings.TrimSpace(r.completedBridge.response) == "" {
+		h.ready = false
+		h.committed = nil
+		return
+	}
+	output := h.output.items
+	if h.output.final != nil {
+		output = h.output.final
+	}
+	if output == nil {
+		output = []json.RawMessage{}
+	}
+	encoded, e := json.Marshal(output)
+	if e != nil {
+		h.ready = false
+		h.committed = nil
+		return
+	}
+	normalized, ok := openAIWSPlainItems(append(append([]byte(`{"input":`), encoded...), '}'))
+	if !ok {
+		h.ready = false
+		h.committed = nil
+		return
+	}
+	output = normalized
+	all := combineOpenAIWSReplayItems(h.pending, output)
+	h.committed, ok = openAIWSHistoryCopy(all)
+	h.ready = ok
+	if ok {
+		h.anchor = r.completedBridge
+	}
+	h.pending = nil
+	h.outputBytes = 0
+	h.output = openAIWSLocalOutput{}
+}
+
+// Called at the outer proxy return boundary, after transport goroutines stop.
+// Only the typed not-written admission error grants permission to attach prior
+// delivered context. Every current auth/moderation/long-context gate runs again.
+func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
+	if r == nil {
+		return err
+	}
+	var unsent *openAIWSUnsentTurnError
+	var admission *OpenAITurnAdmissionError
+	if !errors.As(err, &unsent) || unsent.keepAccount || !errors.As(err, &admission) {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := &r.localHistory
+	if !h.ready || r.finish != nil || r.service.settingService == nil || !r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(r.ctx) {
+		return err
+	}
+	source := unsent.body
+	previous := gjson.GetBytes(source, "previous_response_id")
+	// Two blank IDs describe no continuation. Only the client's explicit
+	// pointer to a delivered, completed response may attach another turn.
+	if len(source) > openAIWSLocalHistoryLimit || previous.Type != gjson.String || strings.TrimSpace(previous.String()) == "" ||
+		strings.TrimSpace(h.anchor.response) == "" || previous.String() != h.anchor.response || gjson.GetBytes(source, "conversation").Exists() {
+		return err
+	}
+	if unsent.model != "" && unsent.model != h.clientModel {
+		return err
+	}
+	scope := openAIAgentRecoveryFromContext(r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, source, r.session, h.anchor.model))
+	if scope.userID <= 0 || scope.keyID <= 0 || scope.userID != h.anchor.user || scope.keyID != h.anchor.key || scope.groupID != h.anchor.group || scope.session != h.anchor.session || scope.lookupErr != nil || scope.conflict || scope.disallowLearning {
+		return err
+	}
+	delta, ok := openAIWSPlainItems(source)
+	if !ok {
+		return err
+	}
+	all := delta
+	if !openAIWSRawItemsHasPrefix(delta, h.committed) {
+		all = combineOpenAIWSReplayItems(h.committed, delta)
+	}
+	all, ok = openAIWSHistoryCopy(all)
+	if !ok {
+		return err
+	}
+	expanded, e := setOpenAIWSPayloadInputSequence(source, all, true)
+	if e != nil {
+		return err
+	}
+	if _, why := inspectOpenAIWSCompletedTools(expanded); why != "" {
+		return err
+	}
+	// Every executed historical call must be one actually delivered on this
+	// manager with a successful terminal verdict, including encrypted anchors.
+	for _, item := range gjson.GetBytes(expanded, "input").Array() {
+		kind := item.Get("type").String()
+		if kind != "function_call" && kind != "custom_tool_call" {
+			continue
+		}
+		fp, valid := openAIToolFingerprint(item)
+		proof, found := r.deliveredTools[h.anchor.model+"\x00"+item.Get("call_id").String()]
+		if !valid || !found || proof.conflicted || proof.fingerprint != fp || proof.accountID != h.anchor.account || proof.config != h.anchor.config {
+			return err
+		}
+	}
+	if !gjson.GetBytes(expanded, "tools").Exists() && len(h.tools) > 0 {
+		expanded, e = sjson.SetRawBytes(expanded, "tools", h.tools)
+		if e != nil {
+			return err
+		}
+	}
+	if !openAI409HasReadableIntent(expanded) {
+		return err
+	}
+	// Completed calls become inert history, so a replacement provider cannot
+	// execute the original tool call again. Keep arguments/results as exact JSON.
+	expanded, e = projectOpenAIWSCompletedTools(expanded)
+	if e != nil {
+		return err
+	}
+	expanded, e = sjson.DeleteBytes(expanded, "previous_response_id")
+	if e != nil || len(expanded) > openAIWSLocalHistoryLimit {
+		return err
+	}
+	copy := *unsent
+	copy.body = expanded
+	h.ready = false // proof consumed once; no reuse after any downstream failure
+	return &openAIWSRestoredUnsentError{&copy}
+}
+
+// Budget retained context across all sockets; exhaustion only disables this
+// optional restoration path. It never rejects normal forwarding or drops bytes.
+func (r *openAIWSAgentRecovery) accountLocalHistory() {
+	h := &r.localHistory
+	wanted := int64(len(h.tools) + 3*h.outputBytes)
+	for _, set := range [][]json.RawMessage{h.pending, h.committed} {
+		for _, v := range set {
+			wanted += int64(len(v))
+		}
+	}
+	delta := wanted - r.historyReserved
+	if delta > 0 {
+		for {
+			old := openAIWSLocalHistoryBytes.Load()
+			if old+delta > 128<<20 {
+				r.localHistory = openAIWSLocalHistory{}
+				openAIWSLocalHistoryBytes.Add(-r.historyReserved)
+				r.historyReserved = 0
+				return
+			}
+			if openAIWSLocalHistoryBytes.CompareAndSwap(old, old+delta) {
+				break
+			}
+		}
+	} else {
+		openAIWSLocalHistoryBytes.Add(delta)
+	}
+	r.historyReserved = wanted
+}
+
+func openAIWSHasOpaqueField(value gjson.Result, depth int) bool {
+	if depth > 64 {
+		return true
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return false
+	}
+	opaque := false
+	value.ForEach(func(key, child gjson.Result) bool {
+		opaque = key.String() == "encrypted_content" || openAIWSHasOpaqueField(child, depth+1)
+		return !opaque
+	})
+	return opaque
+}
+
+// Kept with the manager: protocol regression baselines may restore an older
+// bridge collector, while this socket history still needs terminal authority.
+type openAIWSLocalOutput struct {
+	items, final []json.RawMessage
+	seen         map[string]bool
+}
+
+func (o *openAIWSLocalOutput) AddEvent(event string, payload []byte) {
+	var items []gjson.Result
+	if event == "response.output_item.done" {
+		items = []gjson.Result{gjson.GetBytes(payload, "item")}
+	}
+	if (event == "response.completed" || event == "response.done") && openAIAgentCompletedResponse(payload, true) {
+		items = gjson.GetBytes(payload, "response.output").Array()
+		if len(items) > 0 {
+			o.final = []json.RawMessage{}
+			for _, v := range items {
+				o.final = append(o.final, append(json.RawMessage(nil), v.Raw...))
+			}
+		}
+	}
+	for _, v := range items {
+		key := v.Get("id").String()
+		if key == "" {
+			key = v.Get("call_id").String()
+		}
+		if key == "" {
+			key = v.Raw
+		}
+		if o.seen == nil {
+			o.seen = map[string]bool{}
+		}
+		if !o.seen[key] {
+			o.seen[key] = true
+			o.items = append(o.items, append(json.RawMessage(nil), v.Raw...))
+		}
+	}
 }

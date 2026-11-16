@@ -1,0 +1,168 @@
+name: WS unsent delta takeover
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_ws_readable_continuation.go'
+      - 'backend/internal/service/openai_ws_http_bridge.go'
+      - 'backend/internal/handler/openai_ws_unsent_delta_test.go'
+      - 'backend/internal/service/openai_ws_unsent_delta_test.go'
+      - '.github/workflows/ws-unsent-delta.yml'
+permissions:
+  contents: read
+jobs:
+  takeover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Redis fixture dependency
+        run: |
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Exact baseline implementation for RED
+        if: matrix.phase == 'RED'
+        run: |
+          for target in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_ws_http_bridge.go; do
+            git show "2927209f5492d8cb690b83a1964b2f093c19ad7a:$target" > "$target"
+            test "$(git hash-object "$target")" = "$(git rev-parse "2927209f5492d8cb690b83a1964b2f093c19ad7a:$target")"
+          done
+      - name: Same socket, account pause, result delta and next turn
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,unsentdelta ./internal/handler -run '^TestOpenAIWS(UnsentDelta(Takeover|Fences)|BridgeNormalizedDeltaID)$' -count=1 -timeout=5m) > "$RUNNER_TEMP/unsent-delta.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/unsent-delta.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/unsent-delta.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/unsent-delta.jsonl" <<'PY'
+          import json,sys
+          phase,status,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
+          rows=[json.loads(l) for l in open(path) if l.startswith('{')]
+          outcomes={r.get('Test'):r['Action'] for r in rows if r.get('Action') in ('pass','fail','skip') and r.get('Test')}
+          modes=('http_bridge','ctx_pool','shared','dedicated','passthrough')
+          expected={f'TestOpenAIWSUnsentDeltaTakeover/{m}/turn_{n}' for m in modes for n in (2,53)}
+          normalized={f'TestOpenAIWSBridgeNormalizedDeltaID/{id}' for id in ('foreign-provider-id','ctc_original_output')}
+          expected |= normalized
+          fences={f'TestOpenAIWSUnsentDeltaFences/{m}/{f}' for m in ('http_bridge','ctx_pool','passthrough') for f in ('unknown_pointer','unknown_call','terminal_excludes','beta_off')}
+          assert all(outcomes.get(n)=='pass' for n in fences),outcomes
+          if phase=='RED':
+              assert status!=0 and all(outcomes.get(n)=='fail' for n in expected),outcomes
+              for name in expected:
+                  assert ('NORMALIZED_DELTA_REFUSED' if name in normalized else 'UNSENT_DELTA_NOT_RESUMED') in ''.join(r.get('Output','') for r in rows if r.get('Test')==name),name
+          else:
+              assert status==0 and all(outcomes.get(n)=='pass' for n in expected),outcomes
+              assert not any(a in ('fail','skip') for a in outcomes.values()),outcomes
+          PY
+      - name: GREEN delivery scope and memory release
+        if: matrix.phase == 'GREEN'
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit,unsentdelta ./internal/service -run '^TestOpenAIWSUnsentDeltaDeliveryScope$' -count=1 -timeout=2m) | tee "$RUNNER_TEMP/unsent-delta-guards.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unsent-delta-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/unsent-delta*.jsonl
+          if-no-files-found: error
+  repair877:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact reviewed PR877 implementation for repair RED
+        if: matrix.phase == 'RED'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep all current tests. Replace only the implementation containing
+          # the two reviewed faults; the original takeover RED stays separate.
+          baseline=4b13c785786ff1d623bc23203991dac405494567
+          target=backend/internal/service/openai_ws_agent_recovery.go
+          git show "$baseline:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+      - name: Named instruction and continuation-anchor repair evidence
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,unsentdelta ./internal/service -run '^TestOpenAIWSUnsentDelta(Instructions|ContinuationAnchor|DeliveryScope)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/unsent-delta-repair877.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/unsent-delta-repair877.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/unsent-delta-repair877.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/unsent-delta-repair877.jsonl" <<'PY'
+          import json,sys
+          from collections import Counter
+          phase,status,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
+          rows=[]
+          for line in open(path):
+              try: rows.append(json.loads(line))
+              except ValueError: pass
+          package='github.com/Wei-Shaw/sub2api/internal/service'
+          instructions='TestOpenAIWSUnsentDeltaInstructions'
+          anchor='TestOpenAIWSUnsentDeltaContinuationAnchor'
+          delivery='TestOpenAIWSUnsentDeltaDeliveryScope'
+          roots={instructions,anchor,delivery}
+          leaves={instructions+'/'+s for s in ('omitted_after_omitted_turn','omitted_after_explicit_turn','current_null','current_explicit','current_empty')}
+          leaves.update(anchor+'/'+s for s in ('missing_anchor_independent_task','empty_anchor_independent_task','null_anchor_independent_task','valid_anchor_independent_task','valid_anchor_empty_previous','valid_anchor_null_previous','valid_anchor_blank_previous','valid_anchor_wrong_previous','completed_matching_anchor'))
+          leaves.update(delivery+'/'+s for s in ('valid','pending','failed_write','terminal_excludes','unknown_call','changed_call','wrong_pointer','wrong_key','wrong_model','sent_error','oversize'))
+          markers={instructions+'/'+s:'STALE_INSTRUCTIONS_RESTORED' for s in ('omitted_after_omitted_turn','omitted_after_explicit_turn')}
+          markers.update({anchor+'/'+s:'INDEPENDENT_TASK_ATTACHED' for s in ('missing_anchor_independent_task','empty_anchor_independent_task','null_anchor_independent_task')})
+          assert phase in ('RED','GREEN'),phase
+          failures=set(markers)|{instructions,anchor,None} if phase=='RED' else set()
+          counts=Counter((r.get('Action'),r.get('Test')) for r in rows if r.get('Package')==package)
+          assert status==(1 if phase=='RED' else 0),status
+          assert all(r.get('Package')==package for r in rows),rows
+          assert {r.get('Test') for r in rows if r.get('Action')=='run'}==leaves|roots,rows
+          assert {r.get('Test') for r in rows if r.get('Action')=='fail'}==failures,rows
+          assert not any(r.get('Action')=='skip' for r in rows),rows
+          for name in leaves|roots|{None}:
+              assert name is None or counts['run',name]==1,(name,counts)
+              expected='fail' if name in failures else 'pass'
+              assert counts[expected,name]==1 and counts['pass',name]+counts['fail',name]==1,(name,counts)
+          if phase=='RED':
+              for name,marker in markers.items():
+                  output=''.join(r.get('Output','') for r in rows if r.get('Test')==name)
+                  assert marker in output,(name,output)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unsent-delta-repair877-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/unsent-delta-repair877.jsonl
+          if-no-files-found: error
