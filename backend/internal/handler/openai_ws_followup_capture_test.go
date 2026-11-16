@@ -59,7 +59,11 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 				}
 			}))
 			defer upstream.Close()
-			h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, upstream.URL, http.Header{}, map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false"}, nil, nil, func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, _ *service.AccountRepository) {
+			h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, upstream.URL, http.Header{}, map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false"}, nil, func(key *service.APIKey) {
+				// This fixture tests an upstream follow-up rejection. Opaque
+				// response pointers require permission even with tiny local input.
+				key.AllowLongContext = true
+			}, func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, _ *service.AccountRepository) {
 				a.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
 				cfg.Gateway.OpenAIWS.IngressInterTurnIdleTimeoutSeconds = 15
 			})
@@ -101,6 +105,8 @@ func TestOpenAIWSFollowupErrorCapture(t *testing.T) {
 			issue715WSSend(t, conn, second)
 			terminal := issue715WSRead(t, conn)
 			require.Equal(t, "response.failed", gjson.GetBytes(terminal, "type").String())
+			require.Equal(t, "fixture second turn rejected", gjson.GetBytes(terminal, "response.error.message").String(), "fixture must reach the fake upstream: %s", terminal)
+			require.Equal(t, int64(2), calls.Load())
 			_ = conn.CloseNow()
 			require.Eventually(t, func() bool { return manager.Stats().ActiveRequests == 0 }, 3*time.Second, 5*time.Millisecond)
 			records, e := manager.Records(ctx, task.ID, "", true, 10, 0)
