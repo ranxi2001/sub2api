@@ -1,0 +1,78 @@
+name: WS followup error capture
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_ws_v2_passthrough_adapter.go'
+      - 'backend/internal/service/openai_ws_request_capture.go'
+      - 'backend/internal/requestcapture/websocket.go'
+      - 'backend/internal/handler/openai_ws_followup_capture_test.go'
+      - 'backend/internal/requestcapture/followup_test_support.go'
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/service/openai_ws_history_diagnostics_test.go'
+      - '.github/workflows/ws-followup-capture.yml'
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Restore original readers
+        if: matrix.phase == 'RED'
+        run: |
+          for file in backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_request_capture.go backend/internal/requestcapture/websocket.go; do
+            git show "2927209f5492d8cb690b83a1964b2f093c19ad7a:$file" > "$file"
+          done
+      - name: Successful first turn followed by captured error
+        env:
+          PHASE: ${{ matrix.phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,plaintextowner,followupcapture ./internal/handler -run '^TestOpenAIWSFollowupErrorCapture$' -count=1 -timeout=3m) > "$RUNNER_TEMP/ws-followup-capture.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/ws-followup-capture.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/ws-followup-capture.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/ws-followup-capture.jsonl" <<'PY'
+          import json,sys
+          phase,code,path=sys.argv[1],int(sys.argv[2]),sys.argv[3]
+          rows=[json.loads(l) for l in open(path) if l.startswith('{')]
+          names={'TestOpenAIWSFollowupErrorCapture/'+m for m in ('http_bridge','ctx_pool','shared','dedicated','passthrough')}
+          if phase=='RED':
+              assert code!=0
+              for name in names:
+                  assert any(r.get('Action')=='fail' and r.get('Test')==name for r in rows),name
+                  # Old passthrough captures the upstream failure into turn 1;
+                  # the other modes discard turn 2 after the first terminal.
+                  marker = 'FOLLOWUP_ERROR_CAPTURE_WRONG_TURN' if name.endswith('/passthrough') else 'FOLLOWUP_ERROR_CAPTURE_MISSING'
+                  assert marker in ''.join(r.get('Output','') for r in rows if r.get('Test')==name),name
+          else:
+              assert code==0
+              for name in names: assert any(r.get('Action')=='pass' and r.get('Test')==name for r in rows),name
+          PY
+      - name: Restore refusal diagnostics contain no task or response identities
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        run: go test -race -tags=unit,followupcapture ./internal/service -run '^TestOpenAIWSUnsentHistoryDiagnostics$' -count=1 -timeout=2m
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ws-followup-capture-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/ws-followup-capture.jsonl
+          if-no-files-found: error
