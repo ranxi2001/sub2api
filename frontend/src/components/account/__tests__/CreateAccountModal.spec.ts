@@ -499,6 +499,23 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     }))
   })
 
+  it('offers the cache TTL billing-from-request switch only for Anthropic API-key accounts', async () => {
+    const wrapper = mountModal()
+    expect(wrapper.find('[data-testid="cache-ttl-billing-from-request-toggle"]').exists()).toBe(false)
+    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    const toggle = wrapper.get('[data-testid="cache-ttl-billing-from-request-toggle"]')
+    expect(toggle.classes()).not.toContain('bg-primary-600')
+    await toggle.trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Relay with TTL billing')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      platform: 'anthropic', type: 'apikey',
+      extra: expect.objectContaining({ cache_ttl_billing_from_request: true })
+    }))
+  })
+
   it('saves extra image models only for OpenAI API-key accounts', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

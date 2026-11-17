@@ -715,6 +715,9 @@ type ForwardResult struct {
 	// lowers it to UpstreamResponseServiceTier when the upstream reports a
 	// cheaper tier (see ResolveBillingServiceTier).
 	ServiceTier *string
+	// RequestedCacheTTL 记录客户端请求里的缓存 TTL（"5m" / "1h"），仅在账号开启
+	// cache_ttl_billing_from_request 时由 Forward 填写，供计费按请求档位归类缓存写入。
+	RequestedCacheTTL string
 
 	// 图片生成计费字段（图片生成模型使用）
 	ImageCount int // 生成的图片数量
