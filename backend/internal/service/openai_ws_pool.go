@@ -92,17 +92,21 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
-	timezoneMode        string
-	timezoneHeaders     [3]string
-	anchorScope         string
-	betaFeatures        string
-	codexInstallationID string
-	sessionIDHyphen     string
-	sessionIDUnderscore string
-	threadID            string
-	clientRequestID     string
-	codexWindowID       string
-	proxyURL            string
+	// API-key gateways may bind these identities to the socket at upgrade.
+	// Fingerprint settings control generated identities, not whether an
+	// already sent identity can be silently replaced on a pooled socket.
+	apiKeySessionHeaders [6]string
+	timezoneMode         string
+	timezoneHeaders      [3]string
+	anchorScope          string
+	betaFeatures         string
+	codexInstallationID  string
+	sessionIDHyphen      string
+	sessionIDUnderscore  string
+	threadID             string
+	clientRequestID      string
+	codexWindowID        string
+	proxyURL             string
 }
 
 type openAIWSConnLease struct {
@@ -2444,6 +2448,11 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 	key := openAIWSHandshakeCompatibilityKey{
 		betaFeatures:    normalizeOpenAIWSBetaFeatures(headers),
 		timezoneHeaders: [3]string{headers.Get("Oai-Client-Timezone"), headers.Get("X-Openai-Timezone"), headers.Get("X-Timezone")},
+	}
+	if account != nil && account.Type == AccountTypeAPIKey {
+		for i, name := range [...]string{"session-id", "session_id", "thread-id", "thread_id", "conversation_id", "conversation-id"} {
+			key.apiKeySessionHeaders[i] = normalizeOpenAIWSStableIdentityHeader(headers, name)
+		}
 	}
 	mode := activeCodexFingerprintMode(account)
 	if mode == codexFingerprintOff {
