@@ -5,6 +5,7 @@ on:
     paths:
       - 'backend/internal/service/openai_lossy*.go'
       - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_account_scheduler.go'
       - 'backend/internal/service/openai_409_omit_history.go'
       - '.github/workflows/lossy-recovery-protocol.yml'
   push:
@@ -12,6 +13,7 @@ on:
     paths:
       - 'backend/internal/service/openai_lossy*.go'
       - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_account_scheduler.go'
       - 'backend/internal/service/openai_409_omit_history.go'
       - '.github/workflows/lossy-recovery-protocol.yml'
   workflow_dispatch:
