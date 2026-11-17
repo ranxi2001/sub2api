@@ -90,15 +90,30 @@ const formOpen = ref(false), editID = ref<number | null>(null), saving = ref(fal
 const defaults = (): ProviderInput => ({ refresh_interval_seconds: 0, name: '', site_type: 'sub2api', base_url: '', notes: '', cost_multiplier: null, low_balance_threshold: null, suppress_low_balance_alert: false, auth_mode: 'token', account: '', user_id: '' })
 const draft = ref<ProviderInput>(defaults()), credential = ref(''), refreshToken = ref(''), cost = ref<string | number>(''), threshold = ref<string | number>('')
 let controller: AbortController | undefined, generation = 0, alive = true
+const refreshed = new Set<number>()
 function amount(p: MatureProvider, field: typeof metrics[number]) {
   const value = p.metrics[field]
   return value == null || !Number.isFinite(value) ? t('matureProviders.unknown') : `${p.metrics.currency || t('matureProviders.currencyUnknown')} ${value.toLocaleString(undefined, { maximumFractionDigits: 6 })}`
 }
 function lowBalance(p: MatureProvider) { return p.status === 'connected' && !p.suppress_low_balance_alert && p.low_balance_threshold != null && p.metrics.balance != null && p.metrics.balance < p.low_balance_threshold }
 function message(e: unknown) { return t((e as { status?: number })?.status === 409 ? 'matureProviders.conflict' : 'matureProviders.failed') }
+async function refreshVisible(items: MatureProvider[], current: number) {
+  if (formOpen.value || current !== generation) return
+  const pending = items.filter(p => p.has_credential && !refreshed.has(p.id))
+  if (!pending.length) return
+  for (const provider of pending) {
+    refreshed.add(provider.id)
+    if (!alive || formOpen.value || current !== generation) return
+    try { await refreshProvider(provider) } catch { /* keep the last saved card */ }
+  }
+  if (alive && !formOpen.value && current === generation) await load()
+}
 async function load() {
   controller?.abort(); controller = new AbortController(); const current = ++generation; loading.value = true
-  try { const result = await listProviders({ search: query.value, status: status.value, page: page.value, page_size: pageSize }, controller.signal); if (alive && current === generation) { providers.value = result.items; total.value = result.total } }
+  try {
+    const result = await listProviders({ search: query.value, status: status.value, page: page.value, page_size: pageSize }, controller.signal)
+    if (alive && current === generation) { providers.value = result.items; total.value = result.total; await refreshVisible(result.items, current) }
+  }
   catch (e) { if (alive && current === generation) error.value = message(e) }
   finally { if (alive && current === generation) loading.value = false }
 }

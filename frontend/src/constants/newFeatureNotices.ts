@@ -56,6 +56,7 @@ export const NEW_FEATURE_NOTICES = {
   apiKeyLongContext: 'api-key-long-context-control-initial-announcement',
   apiKeyContextTokenLimit: 'api-key-context-token-limit-initial-announcement',
   apiKeyUsageDateRange: 'api-key-usage-date-range-initial-announcement',
+  providerProfit: 'profit-operations-provider-reconciliation',
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   profitOperationsTimeRanges: 'profit-operations-time-ranges-initial-announcement',
   userLiveLoad: 'user-live-load-initial-announcement',
@@ -77,4 +78,5 @@ export const NEW_FEATURE_NOTICES = {
   bpsAccountSearch: 'bps-account-search-initial-announcement',
   bpsAccountMultiProxy: 'bps-account-multi-proxy-request-routing',
   openaiAccountMultiProxy: '2026-11-16-openai-account-multi-proxy',
+  cacheTtlBillingFromRequest: 'anthropic-apikey-cache-ttl-billing-from-request-initial-announcement',
 } as const

@@ -98,6 +98,13 @@ describe('SmartOpsNav', () => {
     reloaded.unmount()
   })
 
+  it('uses the provider reconciliation notice on the existing profit entry', async () => {
+    const wrapper = await mountAt('/admin/profit-operations')
+    await wrapper.get('a[href="/admin/profit-operations"] + [data-testid="new-feature-badge"]').trigger('click')
+    expect(useNewFeatureNoticeStore().isDismissed(41, NEW_FEATURE_NOTICES.providerProfit)).toBe(true)
+    wrapper.unmount()
+  })
+
   it('shares quality rest dismissal across navigation entries without dismissing other features', async () => {
     const first = await mountAt('/admin/account-quality')
     const second = await mountAt('/admin/auto-config')

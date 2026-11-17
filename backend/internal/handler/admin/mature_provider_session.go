@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -157,6 +159,7 @@ func (r *providerRemote) requestData(ctx context.Context, method, path string, b
 	}
 	defer func() { _ = res.Body.Close() }()
 	operation := providerOperation(path)
+	retryAfter := providerRetryAfter(res)
 	decoder := json.NewDecoder(io.LimitReader(res.Body, providerKeyResponseLimit))
 	decoder.UseNumber()
 	var envelope map[string]any
@@ -165,7 +168,7 @@ func (r *providerRemote) requestData(ctx context.Context, method, path string, b
 		case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
 			return nil, nil, errProviderAuthentication
 		case res.StatusCode < 200 || res.StatusCode >= 300:
-			return nil, nil, &providerRemoteError{operation: operation, status: res.StatusCode}
+			return nil, nil, &providerRemoteError{operation: operation, status: res.StatusCode, retryAfter: retryAfter}
 		default:
 			return nil, nil, errProviderResponse
 		}
@@ -191,12 +194,12 @@ func (r *providerRemote) requestData(ctx context.Context, method, path string, b
 	}
 	if failed {
 		if message == "" && (res.StatusCode < 200 || res.StatusCode >= 300) {
-			return nil, nil, &providerRemoteError{operation: operation, status: res.StatusCode}
+			return nil, nil, &providerRemoteError{operation: operation, status: res.StatusCode, retryAfter: retryAfter}
 		}
 		if message == "" {
 			message = "request failed"
 		}
-		return nil, nil, &providerAPIError{status: res.StatusCode, message: message}
+		return nil, nil, &providerAPIError{status: res.StatusCode, message: message, retryAfter: retryAfter}
 	}
 	return envelope["data"], envelope, nil
 }
@@ -222,4 +225,38 @@ func providerOperation(path string) string {
 		return path[:index]
 	}
 	return path
+}
+
+// providerRetryAfter reads a positive Retry-After. A missing, zero, negative,
+// or unparsable value means the caller should use its own backoff. The header
+// is a delay, not a credential.
+func providerRetryAfter(res *http.Response) time.Duration {
+	if res == nil || res.StatusCode != http.StatusTooManyRequests {
+		return 0
+	}
+	raw := strings.TrimSpace(res.Header.Get("Retry-After"))
+	if raw == "" {
+		return 0
+	}
+	if secs, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		if secs > int64(24*time.Hour/time.Second) {
+			secs = int64(24 * time.Hour / time.Second)
+		}
+		return time.Duration(secs) * time.Second
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
+		return 0
+	}
+	d := time.Until(when)
+	if d <= 0 {
+		return 0
+	}
+	if d > 24*time.Hour {
+		return 24 * time.Hour
+	}
+	return d
 }

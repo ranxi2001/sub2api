@@ -18,10 +18,64 @@ on:
       - '.github/workflows/upstream-channel-entities-regression.yml'
       - '.github/scripts/upstream-channel-entities-screenshot.mjs'
   workflow_dispatch:
+    inputs:
+      bills_only:
+        description: Run only the provider bill acceptance tests
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
+  provider-bills:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify checkout and toolchain
+        id: provenance
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          go version
+      - name: Service rules and mock upstream bill sync
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/profit-unit.log"
+          go test -count=1 -v -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^Test(ProfitOperations|ProviderProfit|HandEnteredAPIKey|ImportedSub2APIUsage|UpstreamRequestIDFromHeaders|UsageUpstreamRequestIDPtr)' | tee "$log"
+          for name in ProviderProfitSiteKey ProfitOperationsCostMultiplierSourcesAndIndependentValidation HandEnteredAPIKeyReadsDirectUsageIdentifier ProviderProfitSyncExactUsageWithoutWalletProof ProviderProfitSyncRejectsBeforeAuthentication ProviderProfitSyncRejectsPartialAndInvalidResponses ProviderProfitSyncLargeBillWithLateDuplicates ProviderProfitSyncLargeBillLateFailure ProviderProfitBackgroundJobSurvivesDisconnect ProviderProfitJobsStopAndRedact ProviderProfitBatchesRecheckRevisionAndReuseLogin ProviderProfitSyncRejectsChangedSession ProviderProfitSyncEvidenceBudget ProfitOperationsRoutesRequireExistingAdministratorAuthentication ProfitOperationsRoutesDenyScopedObserverManagement; do
+            grep -Fq -- "--- PASS: Test$name (" "$log"
+          done
+          if grep -q -- '--- SKIP:' "$log"; then exit 1; fi
+      - name: Historical ownership, bill matching and profit in migrated PostgreSQL
+        if: ${{ !cancelled() && steps.provenance.outcome == 'success' }}
+        working-directory: backend
+        shell: bash
+        env:
+          CI: 'true'
+          SUB2API_TEST_POSTGRES_DSN: ''
+          SUB2API_TEST_REDIS_URL: ''
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/profit-postgres.log"
+          suite=0
+          go test -count=1 -v -tags=integration ./internal/repository -run '^Test(ProviderProfit|ProfitOperations)' | tee "$log" || suite=$?
+          for name in ReportRegisterSiteAfterUsage BillForHistoricalHandEnteredAccount BillCannotOverrideManualDecisionOrImport ReportPartialThenSettledWithSharedWallet ReportZeroBillAndZeroIncome IndependentOriginAndHistoricalAliases ChargesRequireUniqueImportedEvidence ChargesFreezeOwnershipAndPromoteOnlyMatchingDebit ChargesLargeWindowAtomicReplay; do
+            grep -F -- "--- PASS: TestProviderProfit$name (" "$log"
+          done
+          if grep -q -- '--- SKIP:' "$log"; then exit 1; fi
+          exit "$suite"
   postgres:
+    if: ${{ !inputs.bills_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -137,6 +191,7 @@ jobs:
             ${{ runner.temp }}/entity-*.log
             ${{ runner.temp }}/entity-cohort-provenance.json
   frontend:
+    if: ${{ !inputs.bills_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:

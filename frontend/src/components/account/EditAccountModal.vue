@@ -2760,6 +2760,40 @@
         </div>
       </div>
 
+      <!-- Anthropic API Key 按请求 TTL 计费开关 -->
+      <div
+        v-if="editingAccount?.platform === 'anthropic' && editingAccount?.type === 'apikey'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="flex items-center gap-2">
+              <label class="input-label mb-0">{{ t('admin.accounts.anthropic.cacheTtlBillingFromRequest') }}</label>
+              <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.cacheTtlBillingFromRequest" :user-id="authStore.user?.id" />
+            </div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.anthropic.cacheTtlBillingFromRequestDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="cache-ttl-billing-from-request-toggle"
+            @click="cacheTtlBillingFromRequestEnabled = !cacheTtlBillingFromRequestEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              cacheTtlBillingFromRequestEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                cacheTtlBillingFromRequestEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <!-- Anthropic API Key 抹除 Claude Code 身份开关 -->
       <div
         v-if="editingAccount?.platform === 'anthropic' && editingAccount?.type === 'apikey'"
@@ -4772,6 +4806,7 @@ const codexImageToolMode = ref<CodexImageToolMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
 const anthropicPassthroughEnabled = ref(false)
 const anthropicStripClaudeCodeIdentityEnabled = ref(false)
+const cacheTtlBillingFromRequestEnabled = ref(false)
 const anthropicMimicClaudeCodeEnabled = ref(false)
 const anthropicMimicClaudeCodeDeductTokens = ref(false)
 // 「模拟 Claude Code」与「抹除 Claude Code 身份」互斥：打开一个就关掉另一个
@@ -5344,6 +5379,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   anthropicStripClaudeCodeIdentityEnabled.value = false
+  cacheTtlBillingFromRequestEnabled.value = false
   anthropicMimicClaudeCodeEnabled.value = false
   anthropicMimicClaudeCodeDeductTokens.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5453,6 +5489,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (newAccount.platform === 'anthropic' && newAccount.type === 'apikey') {
     anthropicPassthroughEnabled.value = extra?.anthropic_passthrough === true
     anthropicStripClaudeCodeIdentityEnabled.value = extra?.anthropic_strip_claude_code_identity === true
+    cacheTtlBillingFromRequestEnabled.value = extra?.cache_ttl_billing_from_request === true
     anthropicMimicClaudeCodeEnabled.value =
       extra?.anthropic_mimic_claude_code === true && !anthropicStripClaudeCodeIdentityEnabled.value
     anthropicMimicClaudeCodeDeductTokens.value =
@@ -7077,6 +7114,11 @@ const handleSubmit = async () => {
         newExtra.anthropic_strip_claude_code_identity = true
       } else {
         delete newExtra.anthropic_strip_claude_code_identity
+      }
+      if (cacheTtlBillingFromRequestEnabled.value) {
+        newExtra.cache_ttl_billing_from_request = true
+      } else {
+        delete newExtra.cache_ttl_billing_from_request
       }
       if (anthropicMimicClaudeCodeEnabled.value) {
         newExtra.anthropic_mimic_claude_code = true

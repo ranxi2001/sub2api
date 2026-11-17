@@ -30,6 +30,10 @@ func (h *ChannelHandler) ProfitOperations(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	// Refresh (or reuse) each linked provider's wallet for this window before
+	// the report subtracts it. A probe failure does not hide unbound estimates.
+	force := c.Query("refresh_spend") == "1" || c.Query("refresh_spend") == "true"
+	h.refreshBoundProviderSpend(c.Request.Context(), f.From, f.Until, force)
 	started := time.Now()
 	out, err := h.channelService.ProfitOperations(c.Request.Context(), f)
 	if err != nil {

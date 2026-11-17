@@ -21,12 +21,33 @@ func TestProfitOperationsCostMultiplierSourcesAndIndependentValidation(t *testin
 	}
 	now := time.Now()
 	f := UpstreamOperationsFilter{From: now.Add(-time.Hour), Until: now, Dimension: "upstream", ModelScope: "public", Sort: "estimated_profit", Direction: "desc", Page: 1, PageSize: 20}
-	require.NoError(t, ValidateProfitOperationsFilter(f))
-	require.Error(t, ValidateUpstreamOperationsFilter(f), "financial sorting is confined to profit API")
+	for _, sort := range []string{"estimated_profit", "upstream_cost", "gross_profit", "gross_margin"} {
+		f.Sort = sort
+		require.NoError(t, ValidateProfitOperationsFilter(f), sort)
+		require.Error(t, ValidateUpstreamOperationsFilter(f), "financial sorting is confined to profit API")
+	}
 	f.Sort = "name;DROP TABLE usage_logs"
 	require.Error(t, ValidateProfitOperationsFilter(f))
 }
 func profitPtr(v float64) *float64 { return &v }
+
+func TestProfitWindowUsesChannelConsumptionDayOnly(t *testing.T) {
+	loc := ProfitConsumptionLocation()
+	now := time.Date(2026, 11, 17, 15, 4, 0, 0, loc)
+	start, end := ProfitConsumptionDay(now)
+	require.True(t, start.Equal(time.Date(2026, 11, 17, 0, 0, 0, 0, loc)))
+	require.True(t, end.Equal(start.AddDate(0, 0, 1)))
+	require.True(t, ProfitWindowUsesWalletToday(start, now, now))
+	require.True(t, ProfitWindowUsesWalletToday(start, end, now), "a full consumption day is that day")
+	require.True(t, ProfitWindowUsesWalletToday(start, now.Add(-ProfitWalletTodaySkew), now))
+	require.False(t, ProfitWindowUsesWalletToday(start, now.Add(-ProfitWalletTodaySkew-time.Nanosecond), now), "an earlier cutoff is not the whole day so far")
+	require.False(t, ProfitWindowUsesWalletToday(start.Add(time.Hour), now, now))
+	require.False(t, ProfitWindowUsesWalletToday(start.AddDate(0, 0, -1), start, now))
+	require.False(t, ProfitWindowUsesWalletToday(start.AddDate(0, 0, -7), start, now))
+	require.False(t, ProfitWindowUsesWalletToday(start, end.Add(time.Nanosecond), now))
+	utcMidnight := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	require.False(t, ProfitWindowUsesWalletToday(utcMidnight, now, now), "UTC midnight is not the Asia/Shanghai consumption day")
+}
 
 func TestProfitOperationsCalendarMonthWindow(t *testing.T) {
 	// October has 31 days plus a repeated hour in a UTC+2 to UTC+1 transition.

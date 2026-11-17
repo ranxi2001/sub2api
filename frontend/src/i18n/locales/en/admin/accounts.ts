@@ -1154,6 +1154,9 @@ export default {
         apiKeyPassthrough: 'Auto passthrough (auth only)',
         apiKeyPassthroughDesc:
           'Only applies to Anthropic API Key accounts. When enabled, messages/count_tokens are forwarded in passthrough mode with auth replacement only, while billing/concurrency/audit and safety filtering are preserved. Disable to roll back immediately.',
+        cacheTtlBillingFromRequest: 'Bill cache writes by requested TTL',
+        cacheTtlBillingFromRequestDesc:
+          'Only applies to Anthropic API Key accounts, for relays whose upstream rewrites the cache TTL. When enabled, cache writes are billed by the client cache_control.ttl: if any breakpoint explicitly requests 1h, all cache writes of that request bill as 1h (mixed TTLs are not split per breakpoint); an omitted ttl or 5m-only request bills as 5m. Request and response bodies are not modified. Disable it if the upstream stops settling at the 5m rate, or 5m requests may be billed below cost.',
         stripClaudeCodeIdentity: 'Strip Claude Code identity',
         stripClaudeCodeIdentityDesc:
           'Only applies to Anthropic API Key accounts. When enabled, forwarding and connectivity tests automatically strip Claude Code / Agent SDK client signals (rewriting claude-cli User-Agent, removing claude-code/oauth betas, stripping x-anthropic-billing-header blocks and official CLI/SDK identity banners from system, and removing metadata.user_id) so official API keys restricted from Claude Code (such as sk-ant-usr-* credit keys) are not rejected with a low credit balance error.',

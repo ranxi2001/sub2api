@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 )
 
@@ -141,6 +142,9 @@ func providerPublicError(err error) string {
 type providerRemoteError struct {
 	operation string
 	status    int
+	// retryAfter is set only for HTTP 429 when the upstream sent a positive
+	// Retry-After. It is a duration, never a credential or response body.
+	retryAfter time.Duration
 }
 
 func (e *providerRemoteError) Error() string {
@@ -303,7 +307,7 @@ func (r *providerRemote) request(ctx context.Context, method, path string, body 
 			return nil, errProviderAuthentication
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
-			return nil, &providerRemoteError{operation: path, status: res.StatusCode}
+			return nil, &providerRemoteError{operation: path, status: res.StatusCode, retryAfter: providerRetryAfter(res)}
 		}
 		return nil, errProviderResponse
 	}
@@ -318,7 +322,7 @@ func (r *providerRemote) request(ctx context.Context, method, path string, body 
 		return nil, errProviderAuthentication
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, &providerRemoteError{operation: path, status: res.StatusCode}
+		return nil, &providerRemoteError{operation: path, status: res.StatusCode, retryAfter: providerRetryAfter(res)}
 	}
 	if success, ok := envelope["success"].(bool); ok && !success {
 		return nil, errProviderAuthentication
@@ -376,6 +380,16 @@ func divide(value *float64, factor float64) *float64 {
 	return &converted
 }
 
+// providerSpendWindow is the half-open interval a profit read wants priced.
+// The zero value keeps the channel-operations today probe unchanged.
+type providerSpendWindow struct {
+	From, Until time.Time
+}
+
+func (w providerSpendWindow) active() bool {
+	return !w.From.IsZero() && w.Until.After(w.From)
+}
+
 // providerProbe is what one balance probe learned about a provider account.
 type providerProbe struct {
 	metrics providerMetrics
@@ -383,6 +397,11 @@ type providerProbe struct {
 	secret string
 	// userID is the account ID that New API reports in /api/user/self.
 	userID string
+	// spend is the wallet amount for the requested window. It is not written
+	// into today_spend unless the window is the current consumption day.
+	spend         *float64
+	spendCurrency string
+	spendSource   string
 }
 
 func probeProviderWithClient(ctx context.Context, provider providerRecord, secret string, client *http.Client) (providerMetrics, error) {
@@ -391,6 +410,107 @@ func probeProviderWithClient(ctx context.Context, provider providerRecord, secre
 }
 
 func probeProviderAccount(ctx context.Context, provider providerRecord, secret string, client *http.Client) (providerProbe, error) {
+	return probeProviderAccountWindow(ctx, provider, secret, client, providerSpendWindow{})
+}
+
+func probeProviderSpend(ctx context.Context, provider providerRecord, secret string, client *http.Client, from, until time.Time) (providerProbe, error) {
+	return probeProviderAccountWindow(ctx, provider, secret, client, providerSpendWindow{From: from, Until: until})
+}
+
+func providerRecordID(provider providerRecord) int64 {
+	id, err := strconv.ParseInt(provider.ID, 10, 64)
+	if err != nil || id < 1 {
+		return 0
+	}
+	return id
+}
+
+// spendGet reads one wallet endpoint. A 429 uses the profit-sync backoff.
+// A refresh token is exchanged at most once for this call, matching the
+// channel-operations probe.
+func (r *providerRemote) spendGet(ctx context.Context, providerID int64, path string, renew func() error) (map[string]any, error) {
+	var data map[string]any
+	renewed := false
+	err := profitRetry(ctx, providerID, "wallet_spend", func() error {
+		var err error
+		data, err = r.request(ctx, http.MethodGet, path, nil)
+		if errors.Is(err, errProviderAuthentication) && renew != nil && !renewed {
+			renewed = true
+			if err = renew(); err != nil {
+				return err
+			}
+			data, err = r.request(ctx, http.MethodGet, path, nil)
+		}
+		return err
+	})
+	return data, err
+}
+
+func newAPIStatPath(from, until time.Time) string {
+	end := until.Unix()
+	if end <= from.Unix() {
+		end = from.Unix() + 1
+	}
+	return fmt.Sprintf("/api/log/self/stat?type=2&start_timestamp=%d&end_timestamp=%d", from.Unix(), end)
+}
+
+// sumSnapshotActualCost totals period actual_cost from snapshot-v2. Trend is
+// preferred. Model rows are used only when trend is absent or has no
+// actual_cost. List-price cost is never substituted.
+func sumSnapshotActualCost(data map[string]any) (*float64, error) {
+	if sum, ok := seriesActualCost(data["trend"]); ok {
+		return &sum, nil
+	}
+	if sum, ok := seriesActualCost(data["models"]); ok {
+		return &sum, nil
+	}
+	return nil, errProviderResponse
+}
+
+func seriesActualCost(raw any) (float64, bool) {
+	rows, ok := raw.([]any)
+	if !ok {
+		return 0, false
+	}
+	var sum float64
+	for _, row := range rows {
+		item, ok := row.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		if _, present := item["actual_cost"]; !present {
+			return 0, false
+		}
+		value, ok := number(item["actual_cost"])
+		if !ok || value < 0 || value >= 1e12 {
+			return 0, false
+		}
+		sum += value
+	}
+	return sum, true
+}
+
+func sub2APIWindowSpend(ctx context.Context, r *providerRemote, providerID int64, renew func() error, from, until time.Time) (*float64, error) {
+	start, end, ok := service.ProfitSnapshotDates(from, until)
+	if !ok {
+		return nil, errProviderResponse
+	}
+	query := url.Values{}
+	query.Set("start_date", start)
+	query.Set("end_date", end)
+	query.Set("timezone", "Asia/Shanghai")
+	query.Set("granularity", "day")
+	query.Set("include_trend", "true")
+	query.Set("include_model_stats", "true")
+	query.Set("include_group_stats", "false")
+	data, err := r.spendGet(ctx, providerID, "/api/v1/usage/dashboard/snapshot-v2?"+query.Encode(), renew)
+	if err != nil {
+		return nil, err
+	}
+	return sumSnapshotActualCost(data)
+}
+
+func probeProviderAccountWindow(ctx context.Context, provider providerRecord, secret string, client *http.Client, window providerSpendWindow) (providerProbe, error) {
 	r := providerRemote{client: client, base: provider.BaseURL}
 	var rotatedSecret string
 	switch provider.SiteType {
@@ -460,22 +580,32 @@ func probeProviderAccount(ctx context.Context, provider providerRecord, secret s
 		if err != nil {
 			return providerProbe{secret: rotatedSecret}, err
 		}
-		stats, err := r.request(ctx, http.MethodGet, "/api/v1/usage/dashboard/stats", nil)
-		if errors.Is(err, errProviderAuthentication) && credential.RefreshToken != "" {
-			if err = renew(); err == nil {
-				stats, err = r.request(ctx, http.MethodGet, "/api/v1/usage/dashboard/stats", nil)
-			}
+		providerID := providerRecordID(provider)
+		var renewSpend func() error
+		if credential.RefreshToken != "" {
+			renewSpend = renew
 		}
+		balance := providerMetrics{
+			Balance:       providerBalanceField(profile, "balance"),
+			TotalRecharge: field(profile, "total_recharged"),
+			Currency:      "USD",
+		}
+		// A historical window uses the dated user snapshot. It must not replace
+		// the today card, which still comes from dashboard/stats.
+		if window.active() && !service.ProfitWindowUsesWalletToday(window.From, window.Until, time.Now()) {
+			spend, err := sub2APIWindowSpend(ctx, &r, providerID, renewSpend, window.From, window.Until)
+			if err != nil {
+				return providerProbe{metrics: balance, secret: rotatedSecret}, err
+			}
+			return providerProbe{metrics: balance, secret: rotatedSecret, spend: spend, spendCurrency: "USD", spendSource: "sub2api_snapshot_v2"}, nil
+		}
+		stats, err := r.spendGet(ctx, providerID, "/api/v1/usage/dashboard/stats", renewSpend)
 		if err != nil {
 			return providerProbe{secret: rotatedSecret}, err
 		}
-		return providerProbe{metrics: providerMetrics{
-			Balance:       providerBalanceField(profile, "balance"),
-			TodaySpend:    field(stats, "today_actual_cost", "today_cost"),
-			TotalRecharge: field(profile, "total_recharged"),
-			TotalSpend:    field(stats, "total_actual_cost", "total_cost"),
-			Currency:      "USD",
-		}, secret: rotatedSecret}, nil
+		balance.TodaySpend = field(stats, "today_actual_cost", "today_cost")
+		balance.TotalSpend = field(stats, "total_actual_cost", "total_cost")
+		return providerProbe{metrics: balance, secret: rotatedSecret, spend: balance.TodaySpend, spendCurrency: "USD", spendSource: "sub2api_dashboard_stats"}, nil
 	case "newapi":
 		// The probe signs in exactly as the key operations do.
 		if err := newAPISignIn(ctx, &r, provider, secret); err != nil {
@@ -519,13 +649,26 @@ func probeProviderAccount(ctx context.Context, provider providerRecord, secret s
 		metrics.TotalSpend = divide(metrics.TotalSpend, 1/quotaScale)
 		location, _ := time.LoadLocation("Asia/Shanghai")
 		now := time.Now().In(location)
-		start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location).Unix()
-		path := fmt.Sprintf("/api/log/self/stat?type=2&start_timestamp=%d&end_timestamp=%d", start, now.Add(time.Second).Unix())
-		if daily, err := r.request(ctx, http.MethodGet, path, nil); err == nil {
-			metrics.TodaySpend = divide(field(daily, "quota"), quotaPerUnit/quotaScale)
+		statFrom := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location)
+		statUntil := now.Add(time.Second)
+		explicit := window.active()
+		if explicit {
+			statFrom, statUntil = window.From, window.Until
+		}
+		daily, statErr := r.spendGet(ctx, providerRecordID(provider), newAPIStatPath(statFrom, statUntil), nil)
+		if explicit && statErr != nil {
+			return providerProbe{metrics: metrics, secret: rotatedSecret, userID: newAPIAccountID(profile)}, statErr
+		}
+		if statErr == nil {
+			spend := divide(field(daily, "quota"), quotaPerUnit/quotaScale)
+			if !explicit || service.ProfitWindowUsesWalletToday(window.From, window.Until, time.Now()) {
+				metrics.TodaySpend = spend
+			}
+			return providerProbe{metrics: metrics, secret: rotatedSecret, userID: newAPIAccountID(profile), spend: spend, spendCurrency: metrics.Currency, spendSource: "newapi_log_stat"}, nil
 		}
 		// New API self/profile has no canonical cumulative recharge field.
 		// Leave it unknown instead of presenting quota + spend as payments.
+		// A today-card probe still succeeds when the daily stat is unavailable.
 		return providerProbe{metrics: metrics, userID: newAPIAccountID(profile)}, nil
 	default:
 		return providerProbe{secret: rotatedSecret}, errors.New("unsupported provider type")
