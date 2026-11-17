@@ -176,6 +176,7 @@ func newOpenAIWSLocalAdmissionCloseError(reason string) error {
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 	var recovery *service.OpenAIAgentRecoveryError
 	return err != nil &&
+		!openAIWSIngressEndedByClient(err) &&
 		!errors.As(err, &recovery) &&
 		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
 		!errors.Is(err, errOpenAIWSLocalAdmissionRejected) &&
@@ -226,10 +227,19 @@ func openAIWSIngressEndedByClient(err error) bool {
 	if errors.As(err, &closeErr) && closeErr.StatusCode() == coderws.StatusNormalClosure {
 		return true
 	}
-	if coderws.CloseStatus(err) == coderws.StatusNormalClosure {
+	if errors.Is(err, context.Canceled) {
 		return true
 	}
-	return errors.Is(err, context.Canceled)
+	// A peer's 1000 is only a transport handshake. An upstream read/write
+	// failure still belongs to the provider; a completed turn returns nil.
+	var turnErr interface{ OpenAIWSIngressStage() string }
+	if errors.As(err, &turnErr) {
+		switch turnErr.OpenAIWSIngressStage() {
+		case "read_upstream", "write_upstream":
+			return false
+		}
+	}
+	return coderws.CloseStatus(err) == coderws.StatusNormalClosure
 }
 
 // admitOpenAIWSTurn acquires one WebSocket turn's key reservation and user

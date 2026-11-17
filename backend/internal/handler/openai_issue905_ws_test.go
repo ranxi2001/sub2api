@@ -54,6 +54,14 @@ func TestIssue905WSReviewRepair(t *testing.T) {
 	})
 }
 
+func TestIssue905WSUpstreamCloseAttribution(t *testing.T) {
+	for _, outcome := range []string{"close_only", "completed_normal", "completed"} {
+		t.Run(outcome, func(t *testing.T) {
+			runIssue905WSFollowup(t, outcome, false, coderws.StatusNormalClosure, true)
+		})
+	}
+}
+
 func runIssue905WSFollowup(t *testing.T, outcome string, pointer bool, status coderws.StatusCode, captureLogs bool) {
 	t.Helper()
 	var logPath string
@@ -190,7 +198,7 @@ func runIssue905WSFollowup(t *testing.T, outcome string, pointer bool, status co
 			if outcome == "completed_normal" {
 				continue // Read the provider's normal close after terminal delivery.
 			}
-			_ = h.clientConn.CloseNow()
+			require.NoError(t, h.clientConn.Close(coderws.StatusNormalClosure, ""))
 			break
 		}
 		delivered++
@@ -237,22 +245,21 @@ func runIssue905WSFollowup(t *testing.T, outcome string, pointer bool, status co
 		require.NotContains(t, logs, "fixture-private-close-canary", "ISSUE906_PRIVATE_CLOSE_REASON_LOGGED")
 		require.Contains(t, logs, "relay_trace")
 		require.Contains(t, logs, "stage=read_upstream_failed")
+		if outcome == "completed" || outcome == "completed_normal" {
+			require.NotContains(t, logs, "relay_failed")
+			require.NotContains(t, logs, "openai.websocket_proxy_failed")
+		}
 		if outcome == "close_only" || outcome == "unknown_close" {
 			require.Contains(t, logs, "relay_failed")
-			if status == coderws.StatusNormalClosure {
-				require.Contains(t, logs, "openai.websocket_ingress_closed_normally")
-			} else {
-				require.Contains(t, logs, "openai.websocket_proxy_failed")
-			}
+			require.Contains(t, logs, "openai.websocket_proxy_failed", "ISSUE906_UPSTREAM_CLOSE_MISCLASSIFIED")
+			require.NotContains(t, logs, "openai.websocket_ingress_closed_normally")
 			require.Contains(t, logs, fmt.Sprintf("status=%d", status))
 			expectedReason := "upstream_websocket_closed"
 			if outcome == "close_only" {
 				expectedReason = code
 			}
 			require.Contains(t, logs, "reason="+expectedReason)
-			if status != coderws.StatusNormalClosure {
-				require.Contains(t, logs, `"close_reason":"`+expectedReason+`"`)
-			}
+			require.Contains(t, logs, `"close_reason":"`+expectedReason+`"`)
 		}
 	}
 	for len(opsErrorLogQueue) > 0 {

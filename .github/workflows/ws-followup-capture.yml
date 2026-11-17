@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_ws_forwarder.go'
+      - 'backend/internal/handler/openai_ws_client_close_attribution_test.go'
       - 'backend/internal/service/openai_ws_v2_passthrough_adapter.go'
       - 'backend/internal/service/openai_ws_request_capture.go'
       - 'backend/internal/service/openai_ws_upstream_close.go'
@@ -221,6 +223,51 @@ jobs:
                             'ISSUE906_UNFINISHED_CLOSE_MISSING')
                   output = ''.join(r.get('Output', '') for r in rows if r.get('Test') == name)
                   assert marker in output, (marker, name)
+          if phase == 'GREEN':
+              assert not any(r.get('Action') == 'fail' for r in rows)
+          PY
+      - name: Source attribution oracle against prior handler and candidate
+        shell: bash
+        env:
+          PHASE: ${{ matrix.phase }}
+          PRIOR_SHA: 64872b526a176f5036b5ca1aac61a59c97c1c58e
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/issue906-close"
+          target=backend/internal/handler/openai_gateway_handler.go
+          # This disposable CI checkout restores only the prior handler. Keep
+          # candidate tests and the stage accessor so the defect is isolated.
+          if [ "$PHASE" = RED ]; then
+            git show "$PRIOR_SHA:$target" > "$target"
+          fi
+          git hash-object "$target" backend/internal/service/openai_ws_forwarder.go > "$evidence/attribution-production-blobs.txt"
+          set +e
+          (cd backend && go test -race -json -tags=unit,issue905 ./internal/handler -run '^(TestIssue905WSUpstreamCloseAttribution|TestOpenAIWSIngressSourceAttribution)$' -count=1 -timeout=3m) > "$evidence/attribution.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$evidence/attribution.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$evidence/attribution.jsonl"
+          python3 - "$PHASE" "$result" "$evidence/attribution.jsonl" <<'PY'
+          import json, sys
+          phase, result, path = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          rows = [json.loads(line) for line in open(path) if line.startswith('{')]
+          actions = {(r.get('Action'), r.get('Test')) for r in rows}
+          root = 'TestOpenAIWSIngressSourceAttribution/'
+          markers = {root+name: 'ISSUE906_UPSTREAM_HEALTH_REPORT_SKIPPED'
+                     for name in ('upstream_read_1000', 'upstream_write_1000')}
+          markers.update({root+name: 'ISSUE906_CLIENT_CLOSE_REPORTED'
+                          for name in ('client_read_1000', 'client_read_canceled', 'gateway_normal', 'gateway_canceled')})
+          markers['TestIssue905WSUpstreamCloseAttribution/close_only'] = 'ISSUE906_UPSTREAM_CLOSE_MISCLASSIFIED'
+          controls = {root+'completed_then_close'} | {
+              'TestIssue905WSUpstreamCloseAttribution/'+outcome for outcome in ('completed_normal', 'completed')}
+          assert result == (1 if phase == 'RED' else 0), result
+          for name in set(markers) | controls:
+              assert ('run', name) in actions, name
+              action = 'fail' if phase == 'RED' and name in markers else 'pass'
+              assert (action, name) in actions, (action, name)
+              if action == 'fail':
+                  output = ''.join(r.get('Output', '') for r in rows if r.get('Test') == name)
+                  assert markers[name] in output, (markers[name], name)
           if phase == 'GREEN':
               assert not any(r.get('Action') == 'fail' for r in rows)
           PY
