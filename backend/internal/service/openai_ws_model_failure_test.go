@@ -68,9 +68,11 @@ func TestIssue907WSModelFailurePolicy(t *testing.T) {
 		repo := &modelNotFoundAccountRepoStub{}
 		s := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
 		a := wsSSETestAccount()
+		a.Type = AccountTypeAPIKey
 		a.Credentials["custom_error_codes_enabled"] = true
 		a.Credentials["custom_error_codes"] = []any{float64(429)}
-		require.False(t, s.handleOpenAIWSErrorEventTransientFailure(context.Background(), a, "gpt-5.4", nil, []byte(issue907Error)))
+		payload := []byte(`{"type":"error","status":404,"error":{"code":"model_not_found","message":"model not found"}}`)
+		require.False(t, s.handleOpenAIWSErrorEventTransientFailure(context.Background(), a, "gpt-5.4", nil, payload))
 		require.Empty(t, repo.modelRateLimitCalls)
 	})
 }

@@ -23,7 +23,12 @@ func openAIWSModelFailureStatus(account *Account, payload []byte) int {
 		}
 	}
 	if status == 0 {
-		code, errType, _ := parseOpenAIWSErrorEventFields(payload)
+		prefix := "error"
+		if event == "response.failed" && gjson.GetBytes(payload, "response.error").IsObject() {
+			prefix = "response.error"
+		}
+		code := strings.TrimSpace(gjson.GetBytes(payload, prefix+".code").String())
+		errType := strings.TrimSpace(gjson.GetBytes(payload, prefix+".type").String())
 		status = openAIWSErrorHTTPStatusFromRaw(code, errType)
 		if strings.EqualFold(code, "model_not_found") {
 			status = http.StatusNotFound
