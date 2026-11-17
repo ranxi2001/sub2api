@@ -5,6 +5,8 @@ on:
       - 'backend/internal/service/openai*'
       - 'backend/internal/handler/openai*'
       - '.github/workflows/ws-inherited-model.yml'
+      - '.github/scripts/prepare-discovery-red-compat.py'
+      - '.github/scripts/test_discovery_red_compat.py'
       - '.github/scripts/*ws-inherited-model*'
       - '.github/scripts/test_ws_inherited_model_evidence.py'
       - '.github/scripts/assert-readable-continuation.py'
@@ -125,18 +127,21 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Restore only the pinned pending-wait implementation for RED
+      - name: Pinned pending-wait implementation with layout-only RED compatibility
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE"
           git diff --exit-code
           git fetch --no-tags --depth=1 origin "$PENDING_BASELINE"
+          python3 -B -m unittest discover -s .github/scripts -p 'test_discovery_red_compat.py' -v > "$EVIDENCE/compatibility-tests.log" 2>&1
           target=backend/internal/service/openai_agent_message_delivery.go
           fixture=backend/internal/service/openai_agent_pending_observation_test.go
           if [ "$PHASE" = RED ]; then
             git show "$PENDING_BASELINE:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "$PENDING_BASELINE:$target")"
+            test "$(git diff --name-only)" = "$target"
+            python3 .github/scripts/prepare-discovery-red-compat.py "$PENDING_BASELINE" . "$CANDIDATE" --target delivery --fixture "$fixture" --manifest "$EVIDENCE/discovery-compatibility.json"
             test "$(git diff --name-only)" = "$target"
           fi
           test "$(git hash-object "$fixture")" = "$(git rev-parse "$CANDIDATE:$fixture")"
@@ -149,6 +154,7 @@ jobs:
           result = {
               'candidate': git('rev-parse', 'HEAD'), 'baseline': os.environ['PENDING_BASELINE'],
               'phase': os.environ['PHASE'], 'test_blob': git('hash-object', fixture),
+              'compatibility_manifest': 'discovery-compatibility.json' if os.environ['PHASE'] == 'RED' else None,
               'old_production_blob': git('rev-parse', os.environ['PENDING_BASELINE'] + ':' + target),
               'actual_production_blob': git('hash-object', target),
               'candidate_production_blob': git('rev-parse', 'HEAD:' + target),

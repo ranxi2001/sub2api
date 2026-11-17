@@ -2,6 +2,8 @@ name: WS unsent delta takeover
 on:
   pull_request:
     paths:
+      - '.github/scripts/prepare-discovery-red-compat.py'
+      - '.github/scripts/test_discovery_red_compat.py'
       - 'backend/internal/service/openai_ws_agent_recovery.go'
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_ws_readable_continuation.go'
@@ -42,6 +44,7 @@ jobs:
             git show "2927209f5492d8cb690b83a1964b2f093c19ad7a:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "2927209f5492d8cb690b83a1964b2f093c19ad7a:$target")"
           done
+          python3 .github/scripts/prepare-discovery-red-compat.py 2927209f5492d8cb690b83a1964b2f093c19ad7a . HEAD --target ws --fixture backend/internal/handler/openai_ws_unsent_delta_test.go --manifest "$RUNNER_TEMP/unsent-delta-compatibility.json"
       - name: Same socket, account pause, result delta and next turn
         env:
           PHASE: ${{ matrix.phase }}
@@ -83,7 +86,9 @@ jobs:
         if: always()
         with:
           name: unsent-delta-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/unsent-delta*.jsonl
+          path: |
+            ${{ runner.temp }}/unsent-delta*.jsonl
+            ${{ runner.temp }}/unsent-delta-compatibility.json
           if-no-files-found: error
   repair877:
     runs-on: ubuntu-24.04
@@ -113,6 +118,7 @@ jobs:
           target=backend/internal/service/openai_ws_agent_recovery.go
           git show "$baseline:$target" > "$target"
           test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
+          python3 .github/scripts/prepare-discovery-red-compat.py "$baseline" . HEAD --target ws --fixture backend/internal/service/openai_ws_unsent_delta_test.go --manifest "$RUNNER_TEMP/unsent-delta-repair877-compatibility.json"
       - name: Named instruction and continuation-anchor repair evidence
         env:
           PHASE: ${{ matrix.phase }}
@@ -164,5 +170,7 @@ jobs:
         if: always()
         with:
           name: unsent-delta-repair877-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/unsent-delta-repair877.jsonl
+          path: |
+            ${{ runner.temp }}/unsent-delta-repair877.jsonl
+            ${{ runner.temp }}/unsent-delta-repair877-compatibility.json
           if-no-files-found: error
