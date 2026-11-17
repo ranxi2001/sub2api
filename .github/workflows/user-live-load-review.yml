@@ -55,7 +55,7 @@ jobs:
         working-directory: backend
         run: |
           set -o pipefail
-          go test -race -tags=unit ./internal/handler/admin ./internal/repository ./internal/service -run '^(TestUserLiveLoad|TestUnlimitedUser|TestAcquireUserSlot_)' -count=1 -v -timeout=10m 2>&1 | tee "$USER_LIVE_LOAD_EVIDENCE/unit.log"
+          go test -race -tags=unit ./internal/handler/admin ./internal/repository ./internal/service -run '^(TestUserLiveLoad|TestUnlimitedUser|TestAcquireUserSlot_|TestCreateLiveCall|TestAcquireLiveLeaseForIdentity)' -count=1 -v -timeout=10m 2>&1 | tee "$USER_LIVE_LOAD_EVIDENCE/unit.log"
           test "$(find "$USER_LIVE_LOAD_CONTRACT_DIR" -name '*.json' | wc -l)" -eq 8
       - name: Real PostgreSQL and Redis primary and local Live lifecycle
         working-directory: backend

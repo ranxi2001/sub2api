@@ -90,6 +90,7 @@ func TestUserLiveLoadRegionalUnlimitedLifecycle(t *testing.T) {
 			ok, err = c.MigrateLiveLeaseAccount(ctx, next)
 			require.NoError(t, err)
 			require.True(t, ok)
+			require.ErrorIs(t, c.ReleaseLiveLease(ctx, r.AccountID, id, id, r.LeaseID), slots.ErrConflict)
 			assertUserLiveLoad(t, c, id, 1)
 			require.NoError(t, c.ReleaseLiveLeaseAccount(ctx, next.AccountID, r.LeaseID))
 			assertUserLiveLoad(t, c, id, 1)

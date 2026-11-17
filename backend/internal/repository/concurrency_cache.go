@@ -1736,6 +1736,8 @@ func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users
 	type userCmds struct {
 		id             int64
 		maxConcurrency int
+		pruneCmd       *redis.IntCmd
+		pruneLiveCmd   *redis.IntCmd
 		zcardCmd       *redis.IntCmd
 		liveCmd        *redis.IntCmd
 		countCmd       *redis.Cmd
@@ -1746,11 +1748,11 @@ func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users
 		slotKey := userSlotKeyPrefix + strconv.FormatInt(u.ID, 10)
 		liveKey := liveUserSlotKeyPrefix + strconv.FormatInt(u.ID, 10)
 		waitKey := waitQueueKeyPrefix + strconv.FormatInt(u.ID, 10)
-		pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
-		pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10))
 		uc := userCmds{
 			id:             u.ID,
 			maxConcurrency: u.MaxConcurrency,
+			pruneCmd:       pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10)),
+			pruneLiveCmd:   pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10)),
 			liveCmd:        pipe.ZCard(ctx, liveKey),
 			getCmd:         pipe.Get(ctx, waitKey),
 		}
@@ -1773,6 +1775,13 @@ func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users
 
 	loadMap := make(map[int64]*service.UserLoadInfo, len(users))
 	for _, uc := range cmds {
+		// Exec reports only the first command error. An earlier missing wait
+		// GET can mask a later WRONGTYPE/ACL error, including pruning failures.
+		for _, cmd := range []*redis.IntCmd{uc.pruneCmd, uc.pruneLiveCmd, uc.zcardCmd, uc.liveCmd} {
+			if cmd != nil && cmd.Err() != nil {
+				return nil, fmt.Errorf("user %d load command: %w", uc.id, cmd.Err())
+			}
+		}
 		var currentConcurrency int
 		if uc.countCmd != nil {
 			currentConcurrency, err = uc.countCmd.Int()
@@ -1783,9 +1792,9 @@ func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users
 		} else {
 			currentConcurrency = int(uc.zcardCmd.Val() + uc.liveCmd.Val())
 		}
-		waitingCount := 0
-		if v, err := uc.getCmd.Int(); err == nil {
-			waitingCount = v
+		waitingCount, waitErr := uc.getCmd.Int()
+		if waitErr != nil && !errors.Is(waitErr, redis.Nil) {
+			return nil, fmt.Errorf("user %d waiting count: %w", uc.id, waitErr)
 		}
 		loadRate := 0
 		if uc.maxConcurrency > 0 {

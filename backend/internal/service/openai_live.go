@@ -153,15 +153,16 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	// released for a failover selection). The Key and user members are never
 	// released or re-queued between attempts.
 	type liveJointLease struct {
-		leaseID   string
-		accountID int64
+		leaseID        string
+		accountID      int64
+		ownerAccountID int64 // last transferred identity, retained after account-only release
 	}
 	var joint liveJointLease
 	releaseJoint := func() {
 		if joint.leaseID == "" {
 			return
 		}
-		s.releaseLiveLease(joint.accountID, identity.UserID, identity.APIKeyID, joint.leaseID)
+		s.releaseLiveLease(joint.ownerAccountID, identity.UserID, identity.APIKeyID, joint.leaseID)
 		joint = liveJointLease{}
 	}
 
@@ -235,7 +236,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 				}
 				return nil, ErrLiveConcurrencyFull
 			}
-			joint = liveJointLease{leaseID: leaseID, accountID: account.ID}
+			joint = liveJointLease{leaseID: leaseID, accountID: account.ID, ownerAccountID: account.ID}
 		} else {
 			// Retried SDP: keep the joint Key/user members and migrate only the
 			// account member to the newly selected account. The new ordinary
@@ -266,6 +267,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 				return nil, ErrLiveConcurrencyFull
 			}
 			joint.accountID = account.ID
+			joint.ownerAccountID = account.ID
 		}
 		leaseID := joint.leaseID
 
