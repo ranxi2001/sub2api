@@ -143,7 +143,7 @@ func TestUsageLogRepositoryGetAllGroupUsageSummaryTailStartsAtExpiredBefore(t *t
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock := newSQLMock(t)
 			repo := newUsageLogRepositoryWithSQL(nil, db)
-			useGroupUsageRepositoryTestTimezone(t, "America/New_York")
+			repo.configuredTimezone = useGroupUsageRepositoryTestTimezone(t, "America/New_York")
 
 			mock.ExpectQuery(`(?s)COUNT\(\*\).*MAX\(expired_before\).*usage_group_rollup_state.*WHERE id = 1`).
 				WillReturnRows(tc.rows)

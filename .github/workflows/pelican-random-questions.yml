@@ -124,7 +124,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker build --build-arg COMMIT="$APP_SHA" --tag "pelican-app-base:$APP_SHA" app
+          docker build --build-arg COMMIT="$APP_SHA" \
+            --build-arg GOPROXY=https://proxy.golang.org,direct \
+            --build-arg GOSUMDB=sum.golang.org \
+            --tag "pelican-app-base:$APP_SHA" app
           docker build --target runner --tag "pelican-runner:$HARNESS_SHA" \
             --file harness/.github/fixtures/pelican-question-e2e/Dockerfile harness/.github
           docker build --target app --build-arg "APP_IMAGE=pelican-app-base:$APP_SHA" \
