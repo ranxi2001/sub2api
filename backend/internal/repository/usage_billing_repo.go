@@ -80,9 +80,15 @@ func insertUsageBillingQuote(ctx context.Context, tx *sql.Tx, cmd *service.Usage
 	// of the quote (and independently of AccountQuotaCost's upstream cost basis).
 	quoted := strconv.FormatFloat(*cmd.QuotedActualCost, 'f', -1, 64)
 	canonical := max(cmd.BalanceCost, cmd.SubscriptionCost, cmd.APIKeyQuotaCost, cmd.APIKeyRateLimitCost)
+	// Both callers have already applied the normalized command's effects in tx.
+	// Quota-only, subscription and legacy quotes carry no wallet-debit evidence.
+	var payer, debit any
+	if cmd.BalanceCost > 0 {
+		payer, debit = cmd.UserID, cmd.BalanceCost
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO usage_billing_quotes
-		(request_id,api_key_id,request_fingerprint,quoted_actual_cost,canonical_actual_cost,quote_encoding_version)
-		VALUES($1,$2,$3,$4::numeric,$5,1)`, cmd.RequestID, cmd.APIKeyID, cmd.RequestFingerprint, quoted, canonical)
+		(request_id,api_key_id,request_fingerprint,quoted_actual_cost,canonical_actual_cost,quote_encoding_version,debited_user_id,wallet_debit)
+		VALUES($1,$2,$3,$4::numeric,$5,1,$6,$7)`, cmd.RequestID, cmd.APIKeyID, cmd.RequestFingerprint, quoted, canonical, payer, debit)
 	return err
 }
 

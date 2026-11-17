@@ -29,6 +29,7 @@ func TestClientRequestIDGeneratesAndExposesID(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NotEmpty(t, w.Body.String())
 	require.Equal(t, w.Body.String(), w.Header().Get(clientRequestIDHeader))
+	require.Equal(t, "client:"+w.Body.String(), w.Header().Get("X-Sub2api-Usage-Id"))
 }
 
 func TestClientRequestIDBoundsExistingContextID(t *testing.T) {
@@ -46,6 +47,7 @@ func TestClientRequestIDBoundsExistingContextID(t *testing.T) {
 	require.Len(t, w.Body.String(), 36)
 	require.NotEqual(t, strings.Repeat("x", maxPersistentRequestIDBytes), w.Body.String())
 	require.Equal(t, w.Body.String(), w.Header().Get(clientRequestIDHeader))
+	require.Equal(t, "client:"+w.Body.String(), w.Header().Get("X-Sub2api-Usage-Id"))
 }
 
 func TestClientRequestIDPreservesExistingContextID(t *testing.T) {

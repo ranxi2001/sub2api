@@ -134,6 +134,7 @@ func RegisterUserRoutes(
 		usage.Use(panelRateLimiter.Heavy())
 		{
 			usage.GET("", h.Usage.List)
+			usage.POST("/settled-debits", h.Usage.SettledDebits)
 			usage.GET("/traffic", h.Usage.Traffic)
 			usage.GET("/traffic/keys", h.Usage.TrafficKeys)
 			usage.GET("/errors", h.Usage.ListErrors)

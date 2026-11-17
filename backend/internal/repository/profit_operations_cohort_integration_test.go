@@ -47,7 +47,6 @@ func TestProfitOperationsMixedCohortMissingAccountDrilldown(t *testing.T) {
 	var user, key int64
 	require.NoError(t, db.QueryRow(`INSERT INTO users(email,password_hash) VALUES('mixed-cohort@test.invalid','fixture') RETURNING id`).Scan(&user))
 	require.NoError(t, db.QueryRow(`INSERT INTO api_keys(user_id,key,name) VALUES($1,'mixed-cohort-key','fixture') RETURNING id`, user).Scan(&key))
-	now := time.Now().UTC().Truncate(time.Second)
 	sharedURL := "https://shared.example:8443/Tenant/v1"
 	otherURL := "https://shared.example:8443/Other/v1"
 	type sample struct {
@@ -68,7 +67,7 @@ func TestProfitOperationsMixedCohortMissingAccountDrilldown(t *testing.T) {
 	insertUsage := func(account int64, count int, standard, income float64) {
 		t.Helper()
 		for i := 0; i < count; i++ {
-			_, e := db.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,created_at) VALUES($1,$2,$3,$4,'mixed-cohort-model',$5,$6,$7)`, user, key, account, fmt.Sprintf("mixed-%d-%d", account, i), standard, income, now.Add(-time.Minute))
+			_, e := db.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,created_at) VALUES($1,$2,$3,$4,'mixed-cohort-model',$5,$6,clock_timestamp())`, user, key, account, fmt.Sprintf("mixed-%d-%d", account, i), standard, income)
 			require.NoError(t, e)
 		}
 	}
@@ -105,6 +104,9 @@ func TestProfitOperationsMixedCohortMissingAccountDrilldown(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM accounts WHERE id=$1`, missingAccount).Scan(&missingCount))
 	require.Zero(t, missingCount)
 	insertUsage(missingAccount, 2, 7, 6)
+	var now time.Time
+	require.NoError(t, db.QueryRow(`SELECT clock_timestamp() + interval '1 second'`).Scan(&now))
+	now = now.UTC()
 	var before string
 	require.NoError(t, db.QueryRow(`SELECT jsonb_agg(to_jsonb(u) ORDER BY id)::text FROM usage_logs u`).Scan(&before))
 
@@ -124,7 +126,7 @@ func TestProfitOperationsMixedCohortMissingAccountDrilldown(t *testing.T) {
 	}
 	read := func(upstream, dimension string, account, channel int64, page, size int) usage {
 		t.Helper()
-		q := url.Values{"from": {now.Add(-time.Hour).Format(time.RFC3339)}, "until": {now.Format(time.RFC3339)}, "upstream": {upstream}, "dimension": {dimension}, "account_id": {fmt.Sprint(account)}, "channel_id": {fmt.Sprint(channel)}, "page": {fmt.Sprint(page)}, "page_size": {fmt.Sprint(size)}, "sort": {"name"}, "direction": {"asc"}}
+		q := url.Values{"from": {now.Add(-2 * time.Hour).Format(time.RFC3339)}, "until": {now.Format(time.RFC3339)}, "upstream": {upstream}, "dimension": {dimension}, "account_id": {fmt.Sprint(account)}, "channel_id": {fmt.Sprint(channel)}, "page": {fmt.Sprint(page)}, "page_size": {fmt.Sprint(size)}, "sort": {"name"}, "direction": {"asc"}}
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest("GET", "/profit-operations/snapshot?"+q.Encode(), nil))
 		require.Equal(t, 200, w.Code, w.Body.String())

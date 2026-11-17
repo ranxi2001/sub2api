@@ -33,6 +33,25 @@ func TestUsageBillingQuoteKeepsRawQuoteAndExactMoneyDelta(t *testing.T) {
 	require.Equal(t, "0.00007813", quota)
 	require.Equal(t, "0.000078125", quote)
 	require.Equal(t, "0.00007813", charged)
+
+	insertUsage := func(request string) (id int64) {
+		t.Helper()
+		require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,actual_cost) VALUES($1,$2,$3,$4,'fixture',$5) RETURNING id`, user.ID, key.ID, account.ID, request, raw).Scan(&id))
+		return
+	}
+	id := insertUsage(cmd.RequestID)
+	// A positive Simple Mode/API-key quota quote is NOT a wallet debit.
+	quotaOnly := &service.UsageBillingCommand{RequestID: uuid.NewString(), UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, APIKeyQuotaCost: raw, QuotedActualCost: &raw}
+	_, err := repo.Apply(ctx, quotaOnly)
+	require.NoError(t, err)
+	ids := []int64{id, insertUsage(quotaOnly.RequestID), insertUsage("historic-unproven")}
+	reader := &usageLogRepository{sql: db}
+	debits, err := reader.ReadUsageSettledDebits(ctx, user.ID, ids)
+	require.NoError(t, err)
+	require.Equal(t, []service.UsageSettledDebit{{UsageID: id, UserID: user.ID, APIKeyID: key.ID, RequestID: cmd.RequestID, Amount: "0.00007813", Currency: "USD"}}, debits)
+	other, err := reader.ReadUsageSettledDebits(ctx, user.ID+1, ids)
+	require.NoError(t, err)
+	require.Empty(t, other)
 }
 
 func TestUsageBillingRawQuoteBoundarySurvivesStorageWithoutDoubleRounding(t *testing.T) {

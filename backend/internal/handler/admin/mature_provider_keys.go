@@ -23,6 +23,13 @@ func (h *AccountHandler) SetMatureProviderCatalog(catalog *ChannelHandler) {
 }
 
 func (h *ChannelHandler) withMatureProviderSession(ctx context.Context, id, revision int64, run func(context.Context, *providerSession) error) error {
+	return h.withProviderBatchSession(ctx, id, revision, nil, run)
+}
+
+// A password-authenticated bill scan can span many short transactions. Keep only
+// its dashboard access token between them, never a password or refresh token.
+// The caller verifies the provider's identity epoch and revision on every batch.
+func (h *ChannelHandler) withProviderBatchSession(ctx context.Context, id, revision int64, login *providerToken, run func(context.Context, *providerSession) error) error {
 	r, err := h.channelService.MatureProviderRepository()
 	if err != nil {
 		return err
@@ -42,9 +49,16 @@ func (h *ChannelHandler) withMatureProviderSession(ctx context.Context, id, revi
 		}
 		defer client.CloseIdleConnections()
 		session := &providerSession{record: providerProtocolRecord(p), secret: secret, remote: providerRemote{client: client, base: p.BaseURL}}
-		e = session.authenticate(operationCtx)
+		if login != nil && p.SiteType == "sub2api" && p.AuthMode == "password" && login.AccessToken != "" {
+			session.remote.token, session.remote.tokenType = login.AccessToken, login.TokenType
+		} else {
+			e = session.authenticate(operationCtx)
+		}
 		if e == nil {
 			e = run(operationCtx, session)
+		}
+		if e == nil && login != nil && p.SiteType == "sub2api" && p.AuthMode == "password" {
+			login.AccessToken, login.TokenType = session.remote.token, session.remote.tokenType
 		}
 		if session.rotated != "" {
 			rotated, encryptErr := h.providerEncryptor.Encrypt(session.rotated)
@@ -197,7 +211,7 @@ func (h *ChannelHandler) resolveMatureProviderKey(ctx context.Context, id int64,
 			base += "/v1"
 		}
 		credentials = map[string]any{"api_key": key.secret, "base_url": base}
-		provenance = map[string]any{"provider_id": id, "provider_name": s.record.Name, "site_type": s.record.SiteType, "key_id": key.ID, "key_name": key.Name, "group_id": key.GroupID, "group_name": key.GroupName, "group_multiplier": key.GroupMultiplier}
+		provenance = map[string]any{"provider_id": id, "provider_revision": s.record.Revision, "provider_name": s.record.Name, "site_type": s.record.SiteType, "key_id": key.ID, "key_name": key.Name, "group_id": key.GroupID, "group_name": key.GroupName, "group_multiplier": key.GroupMultiplier}
 		return nil
 	})
 	return credentials, provenance, err

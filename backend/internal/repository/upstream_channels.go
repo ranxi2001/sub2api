@@ -112,6 +112,10 @@ func (r *channelRepository) DeleteUpstreamChannel(ctx context.Context, id int64,
 			return service.ErrUpstreamChannelConflict
 		}
 		_, e = tx.ExecContext(ctx, `DELETE FROM upstream_channels WHERE id=$1 AND revision=$2`, id, rev)
+		// An active provider link also owns its channel, even with no manual members.
+		if isProviderProfitForeignKeyViolation(e) {
+			return service.ErrUpstreamChannelConflict
+		}
 		return e
 	})
 }

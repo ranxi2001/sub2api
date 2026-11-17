@@ -74,6 +74,9 @@ func TestMatureProviderImportPreservesCanonicalData(t *testing.T) {
 	}
 	before := snapshot()
 	p := decode(request("POST", "/providers", `{"name":"Fixture","site_type":"sub2api","base_url":"https://provider.example.invalid","auth_mode":"token","access_token":"synthetic-dashboard"}`))
+	// The import must carry the revision read by the authenticated session, not 1.
+	var revision int64
+	require.NoError(t, db.QueryRow(`UPDATE mature_providers SET revision=revision+1 WHERE id=$1 RETURNING revision`, p["id"]).Scan(&revision))
 	w := request("POST", "/accounts", fmt.Sprintf(`{"name":"Imported account","platform":"openai","type":"apikey","provider_id":%.0f,"provider_key_id":"5","credentials":{"openai_api_mode":"responses"},"extra":{"cost_multiplier":0.25}}`, p["id"]))
 	created := decode(w)
 	require.NotContains(t, w.Body.String(), "sk-synthetic-import-secret")
@@ -81,9 +84,18 @@ func TestMatureProviderImportPreservesCanonicalData(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT credentials::text,extra::text FROM accounts WHERE id=$1`, created["id"]).Scan(&credentials, &extra))
 	require.Contains(t, credentials, "sk-synthetic-import-secret")
 	require.Contains(t, credentials, "https://provider.example.invalid")
-	require.Contains(t, extra, "provider_binding")
+	var source struct {
+		Binding struct {
+			Revision int64 `json:"provider_revision"`
+		} `json:"provider_binding"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(extra), &source))
+	require.Equal(t, revision, source.Binding.Revision)
+	var importedKey string
+	require.NoError(t, db.QueryRow(`SELECT key_id FROM provider_profit_account_at($1,clock_timestamp()) WHERE provider_id=$2`, created["id"], p["id"]).Scan(&importedKey))
+	require.Equal(t, "5", importedKey)
 	require.JSONEq(t, before, snapshot(), "provider import must preserve existing channels, accounts and balances")
-	decode(request("DELETE", fmt.Sprintf("/providers/%.0f", p["id"]), fmt.Sprintf(`{"revision":%.0f,"confirm":true}`, p["revision"])))
+	decode(request("DELETE", fmt.Sprintf("/providers/%.0f", p["id"]), fmt.Sprintf(`{"revision":%d,"confirm":true}`, revision)))
 	var retained string
 	require.NoError(t, db.QueryRow(`SELECT credentials::text FROM accounts WHERE id=$1`, created["id"]).Scan(&retained))
 	require.Equal(t, credentials, retained)

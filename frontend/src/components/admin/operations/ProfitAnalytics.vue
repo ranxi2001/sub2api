@@ -1,9 +1,9 @@
 <template>
   <AppLayout>
     <div class="min-w-0 space-y-5">
-      <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load">{{ t('profitOps.refresh') }}</button></header>
+      <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><div class="flex flex-wrap gap-2"><button class="btn btn-secondary" data-testid="refresh-wallet" :disabled="loading" @click="load(true)">{{ t('profitOps.refreshWallet') }}</button><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load()">{{ t('profitOps.refresh') }}</button></div></header>
       <SmartOpsNav />
-      <UpstreamChannelManager @changed="load" />
+      <UpstreamChannelManager @changed="load"><ProfitProviders v-if="auth.isAdmin" @changed="load" /></UpstreamChannelManager>
       <p class="rounded-xl bg-primary-50 p-4 text-sm leading-6 dark:bg-dark-800">{{ t('profitOps.attribution') }}</p>
       <details class="card p-4" open><summary class="font-semibold">{{ t('profitOps.method') }}</summary><p class="mt-3 text-sm leading-6">{{ t('profitOps.formula') }}</p><p class="mt-2 text-sm leading-6">{{ t('profitOps.incomeNote') }}</p><p class="mt-2 text-sm leading-6">{{ t('profitOps.unknownNote') }}</p></details>
       <form data-testid="profit-filters" class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="apply">
@@ -11,7 +11,7 @@
         <label>{{ t('profitOps.until') }}<input v-model="until" type="datetime-local" class="input w-full" required /></label>
         <label>{{ t('profitOps.account') }}<input v-model.number="draft.account_id" type="number" min="0" class="input w-full" /></label>
         <label>{{ t('profitOps.group') }}<input v-model.number="draft.group_id" type="number" min="0" class="input w-full" /></label>
-        <label>{{ t('profitOps.upstream') }}<input v-model="draft.upstream" maxlength="2048" class="input w-full" /></label>
+        <label>{{ t('profitOps.upstream') }}<input v-model="draft.upstream" maxlength="2048" class="input w-full" @input="draft.channel_id = 0" /></label>
         <label>{{ t('profitOps.model') }}<input v-model="draft.model" data-testid="model-filter" maxlength="200" class="input w-full" /></label>
         <label>{{ t('profitOps.modelScope') }}<select v-model="draft.model_scope" data-testid="model-scope" class="input w-full"><option value="public">{{ t('profitOps.public') }}</option><option value="recorded">{{ t('profitOps.recorded') }}</option><option value="upstream">{{ t('profitOps.upstreamModel') }}</option></select></label>
         <label>{{ t('profitOps.dimension') }}<select v-model="draft.dimension" class="input w-full"><option value="upstream">{{ t('profitOps.upstream') }}</option><option value="account">{{ t('profitOps.account') }}</option><option value="model">{{ t('profitOps.model') }}</option></select></label>
@@ -28,20 +28,33 @@
       </form>
       <p v-if="error" role="alert" class="text-red-600">{{ error }}</p><p v-if="loading" role="status">{{ t('profitOps.loading') }}</p>
       <template v-if="snapshot && !error">
-        <p class="break-words text-xs text-gray-500" data-testid="applied-scope">{{ snapshot.scope.from }} ≤ t &lt; {{ snapshot.scope.until }} · <span v-if="applied.channel_id" data-testid="profit-current-channel">{{ t('profitOps.entityScope') }} #{{ applied.channel_id }} · </span>{{ snapshot.currency }} · {{ t('profitOps.queried') }} {{ snapshot.queried_at }}</p>
+        <p class="break-words text-xs text-gray-500" data-testid="applied-scope">{{ snapshot.scope.from }} ≤ t &lt; {{ snapshot.scope.until }} · <span v-if="applied.channel_id" data-testid="profit-current-channel">{{ t('profitOps.entityScope') }} #{{ applied.channel_id }} · </span>{{ snapshot.currency }} · {{ t('profitOps.queried') }} {{ snapshot.queried_at }}<span v-if="snapshot.usage.wallet_synced_at" data-testid="wallet-synced"> · {{ t('profitOps.walletSynced', { time: synced(snapshot.usage.wallet_synced_at) }) }}</span></p>
         <section class="card space-y-3 p-4"><h2 class="font-semibold">{{ t('profitOps.discovery') }}</h2><p class="text-xs text-gray-500">{{ t('profitOps.discoveryNote') }}</p><div class="flex flex-wrap gap-2"><button v-for="c in snapshot.usage.catalog" :key="c.key" class="btn btn-secondary max-w-full break-all" @click="selectUpstream(c.key,c.channel_id || 0)">{{ c.name }} · {{ c.accounts }}</button></div><p class="text-xs">{{ applied.page }} · {{ snapshot.usage.catalog_total }}</p></section>
         <section v-if="applied.channel_id || applied.upstream || applied.account_id" class="card space-y-3 p-4"><h2 class="font-semibold">{{ t('profitOps.currentMembers') }}</h2><p class="text-xs text-gray-500">{{ t('profitOps.memberNote') }}</p><div class="flex flex-wrap gap-2"><button v-for="a in snapshot.usage.members" :key="a.id" class="btn btn-secondary" data-testid="member-drill" @click="selectAccount(a.id)">{{ a.name }} #{{ a.id }} · {{ a.cost_basis }} × {{ number(a.multiplier,4) }}</button></div><p class="text-xs">{{ applied.page }} · {{ snapshot.usage.member_total }}</p></section>
         <section class="card space-y-4 p-4" data-testid="profit-summary">
           <h2 class="font-semibold">{{ t('profitOps.summary') }}</h2>
-          <dl class="grid gap-4 sm:grid-cols-3 lg:grid-cols-6"><div v-for="key in amountKeys" :key="key"><dt class="text-sm text-gray-500">{{ t(`profitOps.${key}`) }}</dt><dd class="mt-1 break-words text-lg font-semibold">{{ key === 'requests' ? snapshot.usage.summary.requests : formatMetric(snapshot.usage.summary, key) }}</dd></div></dl>
-          <p class="text-sm">{{ t('profitOps.coverage') }} {{ snapshot.usage.summary.cost_covered_requests }} / {{ snapshot.usage.summary.requests }} · {{ t('profitOps.unknownCost') }} {{ snapshot.usage.summary.unknown_cost_requests }} · {{ t('profitOps.unknownUpstream') }} {{ snapshot.usage.summary.unknown_upstream_requests }}</p>
-          <p class="text-xs leading-6 text-gray-500">{{ t('profitOps.savedMultiplier') }} {{ snapshot.usage.summary.saved_multiplier_requests }} · {{ t('profitOps.defaultMultiplier') }} {{ snapshot.usage.summary.default_multiplier_requests }} · {{ t('profitOps.savedBase') }} {{ snapshot.usage.summary.saved_stats_base_requests }} · {{ t('profitOps.fallbackBase') }} {{ snapshot.usage.summary.standard_base_fallback_requests }} · {{ t('profitOps.subscription') }} {{ snapshot.usage.summary.subscription_requests }} · {{ t('profitOps.deleted') }} {{ snapshot.usage.summary.deleted_account_requests }}</p>
+          <dl class="grid gap-4 sm:grid-cols-3 lg:grid-cols-6"><div v-for="key in amountKeys" :key="key"><dt class="text-sm text-gray-500">{{ metricLabel(key, snapshot.usage.summary) }}</dt><dd :data-field="key" class="mt-1 break-words text-lg font-semibold tabular-nums">{{ formatMetric(snapshot.usage.summary, key) }}</dd></div></dl>
+          <p class="text-sm" data-testid="cost-source">{{ t('profitOps.costSource') }} · {{ sourceLabel(snapshot.usage.summary) }}</p>
+          <p class="text-xs leading-6 text-gray-500">{{ t('profitOps.subscription') }} {{ snapshot.usage.summary.subscription_requests }} · {{ t('profitOps.deleted') }} {{ snapshot.usage.summary.deleted_account_requests }} · {{ t('profitOps.unknownUpstream') }} {{ snapshot.usage.summary.unknown_upstream_requests }}</p>
           <p class="text-xs text-gray-500">{{ t('profitOps.unknownIncome') }} {{ snapshot.usage.summary.unknown_income_requests }} · {{ t('profitOps.unknownStandard') }} {{ snapshot.usage.summary.unknown_standard_requests }} · {{ t('profitOps.unmeteredZero') }} {{ snapshot.usage.summary.unmetered_zero_records }}<br />{{ t('profitOps.configUpdated') }} {{ snapshot.usage.summary.oldest_config_updated_at || '—' }} → {{ snapshot.usage.summary.latest_config_updated_at || '—' }}</p>
         </section>
         <section class="card space-y-4 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t('profitOps.compare') }} · {{ t(`profitOps.${applied.dimension}`) }}</h2><button class="btn btn-secondary" @click="overview">{{ t('profitOps.overview') }}</button></div>
           <p v-if="!snapshot.usage.rows.length">{{ t('profitOps.empty') }}</p>
-          <div v-else class="overflow-x-auto"><table class="w-full min-w-[1000px] text-left text-sm"><thead><tr><th class="p-2">{{ t(`profitOps.${applied.dimension}`) }}</th><th v-for="key in amountKeys" :key="key" class="p-2">{{ t(`profitOps.${key}`) }}</th><th>{{ t('profitOps.coverage') }}</th><th>P50 / P90 / P95 (ms)</th><th>{{ t('profitOps.duration') }}</th></tr></thead><tbody><tr v-for="row in snapshot.usage.rows" :key="row.key" class="border-t dark:border-dark-700"><td class="max-w-80 break-all p-2"><button v-if="applied.dimension !== 'model'" class="text-primary-600 underline" data-testid="drill-row" @click="drill(row)">{{ row.name }}</button><span v-else>{{ row.name }}</span><span v-if="applied.dimension === 'upstream'" class="block text-xs text-gray-500">{{ t(`upstreamEntities.${row.assignment || (row.key.startsWith('unknown:') ? 'unbound_unknown' : 'unbound_url')}`) }}<span v-if="row.channel_id"> #{{ row.channel_id }} · {{ row.channel_code }} · {{ row.channel_remark }}</span></span></td><td v-for="key in amountKeys" :key="key" class="p-2">{{ key === 'requests' ? row.requests : formatMetric(row,key) }}</td><td>{{ row.cost_covered_requests }} / {{ row.requests }}</td><td>{{ number(row.p50_ms, 0) }} / {{ number(row.p90_ms, 0) }} / {{ number(row.p95_ms, 0) }}<span class="block text-xs">{{ t('profitOps.samples') }} {{ row.samples }} / {{ t('profitOps.unknown') }} {{ row.unknown_samples }}</span></td><td>{{ number(row.duration_p90_ms,0) }}</td></tr></tbody></table></div>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full min-w-[1000px] text-left text-sm" data-testid="profit-drilldown">
+              <thead><tr><th scope="col" class="p-2">{{ t(`profitOps.${applied.dimension}`) }}</th><th v-for="key in amountKeys" :key="key" scope="col" class="p-2">{{ metricLabel(key, snapshot.usage.summary) }}</th><th scope="col" class="p-2">{{ t('profitOps.costSource') }}</th><th scope="col">P50 / P90 / P95 (ms)</th><th scope="col">{{ t('profitOps.duration') }}</th></tr></thead>
+              <tbody><tr v-for="row in snapshot.usage.rows" :key="row.key" class="border-t dark:border-dark-700">
+                <th scope="row" class="max-w-80 break-all p-2 font-normal">
+                  <button v-if="applied.dimension !== 'model'" class="text-primary-600 underline" data-testid="drill-row" @click="drill(row)">{{ row.name }}</button><span v-else>{{ row.name }}</span>
+                  <span v-if="applied.dimension === 'upstream'" class="block text-xs text-gray-500">{{ t(`upstreamEntities.${row.assignment || (row.key.startsWith('unknown:') ? 'unbound_unknown' : 'unbound_url')}`) }}<span v-if="row.channel_id"> #{{ row.channel_id }} · {{ row.channel_code }} · {{ row.channel_remark }}</span></span>
+                </th>
+                <td v-for="key in amountKeys" :key="key" class="whitespace-nowrap p-2 tabular-nums"><span v-if="metricLabel(key, row) !== metricLabel(key, snapshot.usage.summary)" class="block text-xs text-gray-500">{{ metricLabel(key, row) }}</span><span :data-field="key">{{ formatMetric(row, key) }}</span></td>
+                <td class="p-2"><span data-testid="cost-source">{{ sourceLabel(row) }}</span></td>
+                <td>{{ number(row.p50_ms, 0) }} / {{ number(row.p90_ms, 0) }} / {{ number(row.p95_ms, 0) }}<span class="block text-xs">{{ t('profitOps.samples') }} {{ row.samples }} / {{ t('profitOps.unknown') }} {{ row.unknown_samples }}</span></td><td>{{ number(row.duration_p90_ms,0) }}</td>
+              </tr></tbody>
+            </table>
+          </div>
           <p class="text-xs text-gray-500">{{ t('profitOps.latencyNote') }}</p>
           <div class="flex flex-wrap items-center gap-3"><button class="btn btn-secondary" :disabled="loading || applied.page <= 1" @click="page(-1)">{{ t('profitOps.previous') }}</button><span>{{ applied.page }} · {{ snapshot.usage.total }}</span><button class="btn btn-secondary" data-testid="operations-next" :disabled="loading || applied.page * applied.page_size >= Math.max(snapshot.usage.total, snapshot.usage.catalog_total || 0, snapshot.quality.data?.total || 0, applied.channel_id || applied.upstream || applied.account_id ? snapshot.usage.member_total || 0 : 0)" @click="page(1)">{{ t('profitOps.next') }}</button></div>
         </section>
@@ -62,10 +75,14 @@ import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { useAuthStore } from '@/stores/auth'
 import SmartOpsNav from './SmartOpsNav.vue'
 import UpstreamChannelManager from './UpstreamChannelManager.vue'
+import ProfitProviders from './ProfitProviders.vue'
 import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
 const { t } = useI18n()
 const auth = useAuthStore()
-const amountKeys = ['requests','standard_charge','request_income','estimated_cost','estimated_profit','margin'] as const
+const amountKeys = ['requests','standard_charge','request_income','upstream_cost','gross_profit','gross_margin'] as const
+type Metric = typeof amountKeys[number]
+const estimateLabels = { upstream_cost: 'estimated_cost', gross_profit: 'estimated_profit', gross_margin: 'margin' } as const
+function isCostMetric(key: Metric): key is keyof typeof estimateLabels { return key in estimateLabels }
 const sortKeys = [...amountKeys, 'name']
 const timePresets = ['today', 'yesterday', 'thisWeek', 'lastWeek', 'last24h', 'last48h', 'thisMonth', 'lastMonth'] as const
 const at = new Date(), start = new Date(at)
@@ -77,10 +94,42 @@ const draft=ref<OperationsQuery>({...initial}), applied=ref<OperationsQuery>({..
 const snapshot=ref<OperationsSnapshot|null>(null), loading=ref(false), error=ref('')
 let request=0, alive=true, controller: AbortController|undefined
 function number(v: number|null|undefined, decimals=6) { return v==null || !Number.isFinite(v) ? t('profitOps.unknown') : v.toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals}) }
-function formatMetric(m:ProfitMetrics,key:typeof amountKeys[number]) { return key==='margin' ? (m.margin==null || !Number.isFinite(m.margin) ? t('profitOps.unknown') : `${(m.margin*100).toFixed(2)}%`) : number(m[key]) }
-async function load() {
+function metricLabel(key: Metric, m: ProfitMetrics) {
+ return t(`profitOps.${m.requests > 0 && m.supplier_requests === 0 && isCostMetric(key) ? estimateLabels[key] : key}`)
+}
+function estimateText(m: ProfitMetrics) {
+ const unbound = m.requests - m.supplier_requests
+ return t('profitOps.estimateCoverage', { estimates: m.estimated_requests, unbound })
+}
+function walletText(m: ProfitMetrics) {
+ return t(m.cost_source === 'wallet_window' || m.wallet_basis === 'wallet_window' ? 'profitOps.walletWindow' : 'profitOps.walletToday')
+}
+function sourceLabel(m: ProfitMetrics) {
+ if (m.requests === 0) return '—'
+ const estimate = m.supplier_requests < m.requests ? estimateText(m) : ''
+ switch (m.cost_source) {
+  case 'wallet_today':
+  case 'wallet_window': return walletText(m)
+  case 'mixed': return [walletText(m), estimate].filter(Boolean).join(' · ')
+  case 'wallet_unavailable': return m.wallet_error ? `${t('profitOps.walletUnavailable')} · ${m.wallet_error}` : t('profitOps.walletUnavailable')
+  case 'wallet_not_split': return t('profitOps.walletNotSplit')
+  case 'wallet_currency': return t('profitOps.walletCurrency', { currency: m.wallet_currency || t('profitOps.unknown') })
+  case 'estimate': return estimate || estimateText(m)
+  default: return m.supplier_requests === 0 ? (estimate || estimateText(m)) : t('profitOps.unknown')
+ }
+}
+function synced(value: string) {
+ const parsed = new Date(value)
+ return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : value
+}
+function formatMetric(m: ProfitMetrics, key: Metric) {
+ if (isCostMetric(key) && (m.cost_source === 'wallet_unavailable' || m.cost_source === 'wallet_not_split' || m.cost_source === 'wallet_currency')) return t('profitOps.amountUnavailable')
+ if (key === 'gross_margin') return m.gross_margin == null || !Number.isFinite(m.gross_margin) ? t('profitOps.unknown') : `${(m.gross_margin * 100).toFixed(2)}%`
+ return number(m[key], key === 'requests' ? 0 : 6)
+}
+async function load(forceWallet = false) {
  const id=++request; controller?.abort(); controller=new AbortController(); loading.value=true; error.value=''; snapshot.value=null
- try { const next=await readProfitOperations({...applied.value},controller.signal); if(alive && request===id) snapshot.value=next }
+ try { const next=await readProfitOperations({...applied.value},controller.signal,forceWallet); if(alive && request===id) snapshot.value=next }
  catch (cause) {
   if(alive && request===id) {
    const failure=cause as { status?: number; reason?: string; code?: string } | null
@@ -131,6 +180,6 @@ function drill(row:OperationsRow){if(applied.value.dimension==='upstream'){const
 function selectUpstream(key:string,channelID=0){applied.value={...applied.value,upstream:channelID?'':key,channel_id:channelID,account_id:0,dimension:'account',page:1};draft.value={...applied.value};void load()}
 function selectAccount(id:number){applied.value={...applied.value,account_id:id,dimension:'model',page:1};draft.value={...applied.value};void load()}
 function overview(){applied.value={...applied.value,upstream:'',channel_id:0,account_id:0,dimension:'upstream',page:1};draft.value={...applied.value};void load()}
-onMounted(load)
+onMounted(() => { void load() })
 onBeforeUnmount(()=>{alive=false;request++;controller?.abort()})
 </script>

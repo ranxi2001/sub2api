@@ -11,8 +11,8 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 41 } }) }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@/api/admin/profitOperations', () => ({ readProfitOperations: vi.fn() }))
-const fixture = () => ({ scope: { from: '2026-10-27T00:00:00Z', until: '2026-10-28T00:00:00Z', dimension: 'upstream' }, queried_at: '2026-10-28T00:00:00Z', attribution: 'current_config_estimate', currency: 'USD', usage: { summary: { requests: 3, standard_charge: 12, request_income: 4, estimated_cost: 3, estimated_profit: 1, margin: .25, unknown_cost_requests: 0, cost_covered_requests: 3, unknown_upstream_requests: 1, default_multiplier_requests: 1 }, rows: [{ key: 'https://relay.example:8443/tenant/v1', name: 'https://relay.example:8443/tenant/v1', requests: 3, request_income: 4, estimated_cost: 3, estimated_profit: 1, margin: .25 }], total: 21, accounts: [] }, quality: { status: 'ready', data: { summary: { rounds: 0 }, rows: [], total: 0 } }, errors: { status: 'ready', data: { records: 0, upstream_5xx: 0, rows: [] } } }) as unknown as OperationsSnapshot
+vi.mock('@/api/admin/profitOperations', () => ({ readProfitOperations: vi.fn(), listProfitProviders: () => Promise.resolve({items: [], total: 0, page: 1, page_size: 20}) }))
+const fixture = () => ({ scope: { from: '2026-10-27T00:00:00Z', until: '2026-10-28T00:00:00Z', dimension: 'upstream' }, queried_at: '2026-10-28T00:00:00Z', attribution: 'current_config_estimate', currency: 'USD', usage: { summary: { requests: 3, standard_charge: 12, request_income: 4, upstream_cost: 3, gross_profit: 1, gross_margin: .25, supplier_requests: 0, bill_requests: 0, estimated_requests: 3, unknown_cost_requests: 0, cost_covered_requests: 3, unknown_upstream_requests: 1, default_multiplier_requests: 1 }, rows: [{ key: 'https://relay.example:8443/tenant/v1', name: 'https://relay.example:8443/tenant/v1', requests: 3, request_income: 4, upstream_cost: 3, gross_profit: 1, gross_margin: .25, supplier_requests: 0, bill_requests: 0, estimated_requests: 3 }], total: 21, accounts: [] }, quality: { status: 'ready', data: { summary: { rounds: 0 }, rows: [], total: 0 } }, errors: { status: 'ready', data: { records: 0, upstream_5xx: 0, rows: [] } } }) as unknown as OperationsSnapshot
 beforeEach(() => { setActivePinia(createPinia()); localStorage.clear(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(2026, 10, 5, 17, 18, 42)); vi.resetAllMocks(); vi.mocked(readProfitOperations).mockResolvedValue(fixture()) })
 afterEach(() => vi.useRealTimers())
 describe('independent profit operations', () => {
@@ -21,7 +21,7 @@ describe('independent profit operations', () => {
   expect(w.text()).toContain('profitOps.title'); expect(w.text()).toContain('profitOps.formula'); expect(w.text()).toContain('profitOps.attribution')
   expect(w.find('[data-testid="profit-filters"]').exists()).toBe(true)
   expect(w.get('[data-testid="profit-summary"]').text()).toContain('25.00%')
-  expect(readProfitOperations).toHaveBeenCalledWith(expect.objectContaining({ dimension: 'upstream', page: 1 }), expect.anything())
+  expect(readProfitOperations).toHaveBeenCalledWith(expect.objectContaining({ dimension: 'upstream', page: 1 }), expect.anything(), false)
   const q = vi.mocked(readProfitOperations).mock.calls[0]![0]
   expect(q.from).toBe(new Date(2026, 10, 5, 0, 0, 0).toISOString())
   expect(q.until).toBe(new Date(2026, 10, 5, 17, 18, 42).toISOString())
@@ -31,16 +31,16 @@ describe('independent profit operations', () => {
  it('drills from URL to account to model and keeps a frozen half-open range when paging', async () => {
   const w = mount(ProfitOperationsView); await flushPromises(); const original = { ...vi.mocked(readProfitOperations).mock.calls[0]![0] }
   await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
-  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, from: original.from, until: original.until }), expect.anything())
+  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, from: original.from, until: original.until }), expect.anything(), false)
   await w.get('[data-testid="drill-row"]').trigger('click'); await flushPromises()
-  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ upstream: 'https://relay.example:8443/tenant/v1', dimension: 'account', page: 1, account_id: 0 }), expect.anything())
+  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ upstream: 'https://relay.example:8443/tenant/v1', dimension: 'account', page: 1, account_id: 0 }), expect.anything(), false)
   w.unmount()
  })
  it('never renders query failure as a successful zero, and shows null margin as unknown', async () => {
   vi.mocked(readProfitOperations).mockRejectedValueOnce(new Error('synthetic failure'))
   const w = mount(ProfitOperationsView); await flushPromises()
   expect(w.find('[role="alert"]').exists()).toBe(true); expect(w.find('[data-testid="profit-summary"]').exists()).toBe(false)
-  const next = fixture(); next.usage.summary.margin = null; next.usage.summary.estimated_cost = null; next.usage.summary.estimated_profit = null
+  const next = fixture(); next.usage.summary.gross_margin = null; next.usage.summary.upstream_cost = null; next.usage.summary.gross_profit = null
   vi.mocked(readProfitOperations).mockResolvedValue(next)
   await w.get('[data-testid="refresh-operations"]').trigger('click'); await flushPromises()
   expect(w.get('[data-testid="profit-summary"]').text()).toContain('profitOps.unknown')
@@ -83,9 +83,9 @@ describe('independent profit operations', () => {
   const w = mount(ProfitOperationsView); await flushPromises()
   await w.get('[data-testid="model-filter"]').setValue('vendor-model')
   await w.get('[data-testid="model-scope"]').setValue('upstream')
-  await w.get('[data-testid="sort-filter"]').setValue('estimated_profit')
+  await w.get('[data-testid="sort-filter"]').setValue('gross_profit')
   await w.get('[data-testid="profit-filters"]').trigger('submit'); await flushPromises()
-  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'vendor-model', model_scope: 'upstream', sort: 'estimated_profit', page: 1 }), expect.anything())
+  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'vendor-model', model_scope: 'upstream', sort: 'gross_profit', page: 1 }), expect.anything(), false)
   w.unmount()
  })
 })
@@ -117,7 +117,7 @@ it('applies today at click time after crossing midnight, retaining filters and r
  expect(inputs[1]!.element).toHaveProperty('value', '2026-11-06T00:18')
  vi.setSystemTime(new Date(2026, 10, 6, 1))
  await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything(), false)
  w.unmount()
 })
 
@@ -146,18 +146,18 @@ it.each([
  await numeric[1]!.setValue(7)
  await w.get('[data-testid="model-filter"]').setValue('fixture-model')
  await w.get('[data-testid="model-scope"]').setValue('upstream')
- await w.get('[data-testid="sort-filter"]').setValue('estimated_profit')
+ await w.get('[data-testid="sort-filter"]').setValue('gross_profit')
  vi.setSystemTime(new Date(2026, 10, 8, 15, 8, 42))
  await w.get(`[data-testid="${preset}-filter"]`).trigger('click'); await flushPromises()
  const range = vi.mocked(readProfitOperations).mock.lastCall![0]
- expect(range).toMatchObject({ from: start.toISOString(), until: end.toISOString(), account_id: 42, group_id: 7, model: 'fixture-model', model_scope: 'upstream', sort: 'estimated_profit', page: 1 })
+ expect(range).toMatchObject({ from: start.toISOString(), until: end.toISOString(), account_id: 42, group_id: 7, model: 'fixture-model', model_scope: 'upstream', sort: 'gross_profit', page: 1 })
  const local = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
  const inputs = w.findAll('input[type="datetime-local"]')
  expect(inputs[0]!.element).toHaveProperty('value', local(start))
  expect(inputs[1]!.element).toHaveProperty('value', local(end))
  vi.setSystemTime(new Date(2026, 10, 9, 1))
  await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything(), false)
  w.unmount()
 })
 
@@ -174,11 +174,11 @@ it.each([
  vi.setSystemTime(now)
  const w = mount(ProfitOperationsView); await flushPromises()
  await w.get(`[data-testid="${preset}-filter"]`).trigger('click'); await flushPromises()
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString(), page: 1 }), expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString(), page: 1 }), expect.anything(), false)
  // Reapplying the displayed month must also accept the repeated DST hour.
  await w.get('[data-testid="profit-filters"]').trigger('submit'); await flushPromises()
  expect(w.find('[role="alert"]').exists()).toBe(false)
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString() }), expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString() }), expect.anything(), false)
  w.unmount()
 })
 
