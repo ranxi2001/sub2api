@@ -41,6 +41,9 @@ func TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire(t *testing.T) {
 	ctx = context.WithValue(ctx, openAIWSAgentRecoveryKey{}, manager)
 	prepared, err := manager.prepareReadable(account, clean)
 	require.NoError(t, err)
+	// Ingress carries the pre-projection frame separately from the bridge body.
+	// Keep the real begin gate active and prove against the same frozen source.
+	ctx = context.WithValue(ctx, openAIWSAgentSourceKey{}, append([]byte(nil), clean...))
 	var events [][]byte
 	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(ctx, c, account, "fixture-token", prepared, len(prepared), "gpt-5.1", "", "", "", "", 1,
 		func(event []byte) error { events = append(events, append([]byte(nil), event...)); return nil })
