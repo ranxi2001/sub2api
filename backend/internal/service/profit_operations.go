@@ -16,6 +16,11 @@ import (
 // sends the browser's current time, which is slightly earlier than the server.
 const ProfitWalletTodaySkew = 5 * time.Minute
 
+// ProfitSpendFreshness is how recently a window snapshot must have been
+// observed before a profit read skips another upstream probe for that same
+// [from, until). A manual refresh ignores it.
+const ProfitSpendFreshness = 2 * time.Minute
+
 const profitOperationsQueryTimeout = 5 * time.Minute
 
 type ProfitOperationsSnapshot struct {
@@ -93,6 +98,47 @@ func ProfitWindowUsesWalletToday(from, until, now time.Time) bool {
 		return true
 	}
 	return !until.Before(now.Add(-ProfitWalletTodaySkew))
+}
+
+// ProfitSnapshotDates maps a half-open window onto the inclusive Asia/Shanghai
+// calendar dates accepted by Sub2API's dated usage API. end_date is the
+// calendar date of the last instant inside the window. The upstream API then
+// treats that date as a whole local day, so a partial day is not narrower
+// than the calendar day that contains it.
+func ProfitSnapshotDates(from, until time.Time) (startDate, endDate string, ok bool) {
+	if !until.After(from) {
+		return "", "", false
+	}
+	loc := ProfitConsumptionLocation()
+	start := from.In(loc)
+	last := until.Add(-time.Nanosecond).In(loc)
+	if last.Before(start) {
+		return "", "", false
+	}
+	return start.Format(time.DateOnly), last.Format(time.DateOnly), true
+}
+
+// ProviderSpendTarget is one linked provider whose wallet can be probed.
+type ProviderSpendTarget struct {
+	ID       int64
+	Revision int64
+}
+
+// ProviderSpendSnapshot is one successful window reading. Amount may include
+// spend that did not come from this site.
+type ProviderSpendSnapshot struct {
+	ProviderID       int64
+	From, Until      time.Time
+	Amount           *float64
+	Currency, Source string
+}
+
+// ProviderSpendStore persists window spend separately from today's card.
+type ProviderSpendStore interface {
+	ListProviderSpendTargets(context.Context) ([]ProviderSpendTarget, error)
+	ProviderSpendFresh(context.Context, int64, time.Time, time.Time, time.Duration) (bool, error)
+	SaveProviderSpend(context.Context, ProviderSpendSnapshot) error
+	RecordProviderSpendError(context.Context, int64, time.Time, time.Time, string) error
 }
 
 func (s *ChannelService) ProfitOperations(ctx context.Context, f UpstreamOperationsFilter) (*ProfitOperationsSnapshot, error) {

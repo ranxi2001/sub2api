@@ -132,15 +132,37 @@ it('keeps a billed zero and zero gross profit distinct from undefined margin at 
   expect(field(row, 'upstream_cost')).toBe('0.000000'); expect(field(row, 'gross_profit')).toBe('0.000000'); expect(field(row, 'gross_margin')).toBe(enProfit.unknown); w.unmount()
 })
 
-it('stays local when the date changes and never offers bill sync', async () => {
+it('reloads the selected window without offering per-request bill sync', async () => {
   const w = open('zh'); await flushPromises()
   expect(post).not.toHaveBeenCalled()
   expect(w.find('[data-testid="sync-bill"]').exists()).toBe(false)
   expect(w.text()).not.toContain('尚未匹配账单')
   expect(w.text()).toContain(zhProfit.walletToday)
+  expect(w.text()).toContain(zhProfit.refreshWallet)
   await w.get('[data-testid="yesterday-filter"]').trigger('click'); await flushPromises()
   expect(post).not.toHaveBeenCalled()
   expect(get.mock.calls.some(([url]) => String(url).includes('/profit-charges/'))).toBe(false)
+  const calls = get.mock.calls.filter(([url]) => url === snapshotRoute).length
+  await w.get('[data-testid="refresh-wallet"]').trigger('click'); await flushPromises()
+  expect(scope()).toMatchObject({ refresh_spend: 1 })
+  expect(get.mock.calls.filter(([url]) => url === snapshotRoute).length).toBe(calls + 1)
+  expect(post).not.toHaveBeenCalled()
+  w.unmount()
+})
+
+it('shows a matching window snapshot, including yesterday, and the last successful read', async () => {
+  snapshot = q => {
+    const data = readSnapshot(q)
+    for (const target of [data.usage.summary, ...data.usage.rows]) Object.assign(target, { cost_source: 'wallet_window', wallet_basis: 'wallet_window', upstream_cost: 12, gross_profit: 88, gross_margin: 0.88 })
+    data.usage.wallet_synced_at = '2026-11-16T16:00:00Z'
+    return data
+  }
+  const w = open('zh'); await flushPromises()
+  const row = w.get('[data-testid="profit-drilldown"] tbody tr')
+  expect(row.get('[data-testid="cost-source"]').text()).toContain(zhProfit.walletWindow)
+  expect(field(row, 'upstream_cost')).toBe('12.000000')
+  expect(w.get('[data-testid="wallet-synced"]').text()).toContain('上游消费最近成功读取')
+  expect(w.find('[data-testid="sync-bill"]').exists()).toBe(false)
   w.unmount()
 })
 

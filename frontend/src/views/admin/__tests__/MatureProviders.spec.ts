@@ -47,4 +47,13 @@ describe('mature provider operations', () => {
     expect((w.get('[data-testid="provider-name"]').element as HTMLInputElement).value).toBe('My unsaved change')
     w.unmount()
   })
+  it('refreshes saved provider metrics once when channel operations opens', async () => {
+    api.get.mockResolvedValue({ data: { items: [{ ...provider, has_credential: true }], total: 1, page: 1, page_size: 20 } })
+    api.post.mockResolvedValue({ data: { ...provider, has_credential: true, revision: 4 } })
+    const w = mount(UpstreamChannelOperationsView, { global: { stubs: { NewFeatureBadge: true } } })
+    await flushPromises(); await flushPromises()
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(api.post).toHaveBeenCalledWith('/admin/providers/7/refresh', { revision: 3 })
+    w.unmount()
+  })
 })

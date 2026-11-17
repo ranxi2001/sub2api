@@ -359,6 +359,88 @@ func TestProviderProfitReportUsesChannelTodaySpend(t *testing.T) {
 	check(ordered.Summary, map[string]string{"requests": "3", "request_income": "120", "upstream_cost": "66", "gross_profit": "54", "gross_margin": "0.45", "cost_source": `"mixed"`})
 }
 
+func TestProviderProfitWindowSnapshotDoesNotReplaceTodaySpend(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	at := f.now()
+	start, _ := service.ProfitConsumptionDay(at)
+	yesterdayFrom := start.AddDate(0, 0, -1)
+	f.usageWithIncome(f.account, "yesterday-window", yesterdayFrom.Add(time.Hour), 40)
+	f.exec(`UPDATE mature_providers SET metrics='{"today_spend":60,"currency":"USD"}',observed_at=$2 WHERE id=$1`, f.pid, at)
+	f.exec(`INSERT INTO provider_spend_snapshots(provider_id,window_from,window_until,amount,currency,observed_at,source) VALUES($1,$2,$3,15,'USD',$4,'sub2api_snapshot_v2')`, f.pid, yesterdayFrom, start, at)
+	q := service.UpstreamOperationsFilter{From: yesterdayFrom, Until: start, Dimension: "upstream", ModelScope: "public", Sort: "name", Direction: "asc", Page: 1, PageSize: 20}
+	s, err := f.r.ReadProfitOperations(context.Background(), q)
+	require.NoError(t, err)
+	var result struct {
+		Summary map[string]json.RawMessage `json:"summary"`
+		Rows    []map[string]json.RawMessage
+	}
+	require.NoError(t, json.Unmarshal(s.Usage, &result))
+	require.JSONEq(t, "15", string(result.Summary["upstream_cost"]))
+	require.JSONEq(t, `"wallet_window"`, string(result.Summary["cost_source"]))
+	require.Len(t, result.Rows, 1)
+	require.JSONEq(t, `"wallet_window"`, string(result.Rows[0]["cost_source"]))
+	var todaySpend float64
+	require.NoError(t, f.db.QueryRow(`SELECT (metrics->>'today_spend')::float8 FROM mature_providers WHERE id=$1`, f.pid).Scan(&todaySpend))
+	require.Equal(t, 60.0, todaySpend)
+	f.exec(`DELETE FROM provider_spend_snapshots WHERE provider_id=$1`, f.pid)
+	s, err = f.r.ReadProfitOperations(context.Background(), q)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(s.Usage, &result))
+	require.JSONEq(t, "null", string(result.Summary["upstream_cost"]))
+	require.JSONEq(t, `"wallet_unavailable"`, string(result.Summary["cost_source"]))
+}
+
+func TestProviderProfitUniqueSiteClaimsAfterUnlinkAndOAuthUsesBinding(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	const site = profitChargeBase
+	urlAccount := f.id(`INSERT INTO accounts(name,type,platform,credentials,extra) VALUES('url key','apikey','openai',jsonb_build_object('base_url',$1::text,'api_key','fixture-only'),'{"cost_multiplier":0.5}') RETURNING id`, site+"/v1")
+	other := f.id(`INSERT INTO upstream_channels(name,code) VALUES('Somewhere else','somewhere-else') RETURNING id`)
+	f.exec(`INSERT INTO upstream_channel_bindings(account_id,channel_id,revision) VALUES($1,$2,1)`, urlAccount, other)
+	f.exec(`UPDATE upstream_channel_bindings SET channel_id=NULL, revision=2 WHERE account_id=$1`, urlAccount)
+	explicit := f.id(`INSERT INTO accounts(name,type,platform,credentials,extra) VALUES('kept elsewhere','apikey','openai',jsonb_build_object('base_url',$1::text,'api_key','fixture-only'),'{"cost_multiplier":0.5}') RETURNING id`, site+"/v1")
+	f.exec(`INSERT INTO upstream_channel_bindings(account_id,channel_id,revision) VALUES($1,$2,1)`, explicit, other)
+	tenant := f.id(`INSERT INTO accounts(name,type,platform,credentials,extra) VALUES('tenant path','apikey','openai',jsonb_build_object('base_url',$1::text,'api_key','fixture-only'),'{"cost_multiplier":0.5}') RETURNING id`, site+"/tenant/v1")
+	oauth := f.id(`INSERT INTO accounts(name,type,platform,credentials,extra) VALUES('dynamic oauth','oauth','gemini','{}'::jsonb,jsonb_build_object('provider_binding',jsonb_build_object('provider_id',$1::bigint,'key_id','oauth-key'))) RETURNING id`, f.pid)
+	at := f.now()
+	f.usageWithIncome(urlAccount, nil, at, 10)
+	f.usageWithIncome(explicit, nil, at, 20)
+	f.usageWithIncome(tenant, nil, at, 5)
+	f.usageWithIncome(oauth, nil, at, 7)
+	q := service.UpstreamOperationsFilter{From: at, Until: at.Add(time.Second), Dimension: "upstream", ModelScope: "public", Sort: "name", Direction: "asc", Page: 1, PageSize: 20}
+	s, err := f.r.ReadProfitOperations(context.Background(), q)
+	require.NoError(t, err)
+	var result struct {
+		Rows []map[string]json.RawMessage `json:"rows"`
+	}
+	require.NoError(t, json.Unmarshal(s.Usage, &result))
+	rows := map[string]map[string]json.RawMessage{}
+	for _, row := range result.Rows {
+		var key string
+		require.NoError(t, json.Unmarshal(row["key"], &key))
+		rows[key] = row
+	}
+	providerKey := fmt.Sprintf("channel:%d", f.channel)
+	require.Contains(t, rows, providerKey)
+	require.JSONEq(t, `"provider_url"`, string(rows[providerKey]["assignment"]))
+	require.JSONEq(t, "2", string(rows[providerKey]["requests"]), "unlinked URL and oauth binding share the provider channel")
+	require.Contains(t, rows, fmt.Sprintf("channel:%d", other))
+	require.JSONEq(t, "1", string(rows[fmt.Sprintf("channel:%d", other)]["requests"]))
+	require.NotContains(t, rows, site+"/v1")
+	require.Contains(t, rows, site+"/tenant/v1")
+	duplicate := f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('same site','sub2api',$1) RETURNING id`, site)
+	require.NotZero(t, duplicate)
+	s, err = f.r.ReadProfitOperations(context.Background(), q)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(s.Usage, &result))
+	rows = map[string]map[string]json.RawMessage{}
+	for _, row := range result.Rows {
+		var key string
+		require.NoError(t, json.Unmarshal(row["key"], &key))
+		rows[key] = row
+	}
+	require.Contains(t, rows, site+"/v1", "two providers sharing a site key must not auto-merge the unlinked URL")
+}
+
 func TestProviderProfitLegacyIncomeUnchangedByFirstLink(t *testing.T) {
 	f := newProfitChargeFixture(t)
 	channel := f.id(`INSERT INTO upstream_channels(name,code) VALUES('Legacy channel','legacy-fixture') RETURNING id`)

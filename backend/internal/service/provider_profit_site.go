@@ -9,6 +9,41 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 )
 
+// ProfitOAuthDynamicKey is the operations identity for an account whose
+// upstream address is chosen at request time. It has no stable host, so profit
+// grouping must not invent one.
+const ProfitOAuthDynamicKey = "unknown:oauth_dynamic_endpoint"
+
+// ProfitURLMayClaim reports whether a unique site-key match may own this
+// account. An explicit bind, including one to a different channel, and a
+// resolved provider import both win. A manual unlink (no channel) falls back
+// to the unique site. With no recorded decision, a competing import origin
+// still blocks the claim.
+func ProfitURLMayClaim(recordedAssignment, originHash, siteOrigin string) bool {
+	switch recordedAssignment {
+	case "manual_unlinked":
+		return true
+	case "":
+		return originHash == "" || originHash == siteOrigin
+	default:
+		return false
+	}
+}
+
+// ProfitOAuthMayClaim is true when an oauth/dynamic account has no channel yet
+// and may use a provider import or provider_binding. It is never a host match.
+func ProfitOAuthMayClaim(key, recordedAssignment string) bool {
+	if key != ProfitOAuthDynamicKey {
+		return false
+	}
+	switch recordedAssignment {
+	case "", "manual_unlinked":
+		return true
+	default:
+		return false
+	}
+}
+
 // ProviderProfitSiteKey identifies a dashboard origin or its literal /v1 API
 // base for profit accounting only. Never resolve a host, use this as a network
 // destination, or drop a tenant path in order to make an account match.

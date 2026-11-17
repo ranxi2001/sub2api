@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="min-w-0 space-y-5">
-      <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load">{{ t('profitOps.refresh') }}</button></header>
+      <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><div class="flex flex-wrap gap-2"><button class="btn btn-secondary" data-testid="refresh-wallet" :disabled="loading" @click="load(true)">{{ t('profitOps.refreshWallet') }}</button><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load()">{{ t('profitOps.refresh') }}</button></div></header>
       <SmartOpsNav />
       <UpstreamChannelManager @changed="load"><ProfitProviders v-if="auth.isAdmin" @changed="load" /></UpstreamChannelManager>
       <p class="rounded-xl bg-primary-50 p-4 text-sm leading-6 dark:bg-dark-800">{{ t('profitOps.attribution') }}</p>
@@ -28,7 +28,7 @@
       </form>
       <p v-if="error" role="alert" class="text-red-600">{{ error }}</p><p v-if="loading" role="status">{{ t('profitOps.loading') }}</p>
       <template v-if="snapshot && !error">
-        <p class="break-words text-xs text-gray-500" data-testid="applied-scope">{{ snapshot.scope.from }} ≤ t &lt; {{ snapshot.scope.until }} · <span v-if="applied.channel_id" data-testid="profit-current-channel">{{ t('profitOps.entityScope') }} #{{ applied.channel_id }} · </span>{{ snapshot.currency }} · {{ t('profitOps.queried') }} {{ snapshot.queried_at }}</p>
+        <p class="break-words text-xs text-gray-500" data-testid="applied-scope">{{ snapshot.scope.from }} ≤ t &lt; {{ snapshot.scope.until }} · <span v-if="applied.channel_id" data-testid="profit-current-channel">{{ t('profitOps.entityScope') }} #{{ applied.channel_id }} · </span>{{ snapshot.currency }} · {{ t('profitOps.queried') }} {{ snapshot.queried_at }}<span v-if="snapshot.usage.wallet_synced_at" data-testid="wallet-synced"> · {{ t('profitOps.walletSynced', { time: synced(snapshot.usage.wallet_synced_at) }) }}</span></p>
         <section class="card space-y-3 p-4"><h2 class="font-semibold">{{ t('profitOps.discovery') }}</h2><p class="text-xs text-gray-500">{{ t('profitOps.discoveryNote') }}</p><div class="flex flex-wrap gap-2"><button v-for="c in snapshot.usage.catalog" :key="c.key" class="btn btn-secondary max-w-full break-all" @click="selectUpstream(c.key,c.channel_id || 0)">{{ c.name }} · {{ c.accounts }}</button></div><p class="text-xs">{{ applied.page }} · {{ snapshot.usage.catalog_total }}</p></section>
         <section v-if="applied.channel_id || applied.upstream || applied.account_id" class="card space-y-3 p-4"><h2 class="font-semibold">{{ t('profitOps.currentMembers') }}</h2><p class="text-xs text-gray-500">{{ t('profitOps.memberNote') }}</p><div class="flex flex-wrap gap-2"><button v-for="a in snapshot.usage.members" :key="a.id" class="btn btn-secondary" data-testid="member-drill" @click="selectAccount(a.id)">{{ a.name }} #{{ a.id }} · {{ a.cost_basis }} × {{ number(a.multiplier,4) }}</button></div><p class="text-xs">{{ applied.page }} · {{ snapshot.usage.member_total }}</p></section>
         <section class="card space-y-4 p-4" data-testid="profit-summary">
@@ -101,27 +101,35 @@ function estimateText(m: ProfitMetrics) {
  const unbound = m.requests - m.supplier_requests
  return t('profitOps.estimateCoverage', { estimates: m.estimated_requests, unbound })
 }
+function walletText(m: ProfitMetrics) {
+ return t(m.cost_source === 'wallet_window' || m.wallet_basis === 'wallet_window' ? 'profitOps.walletWindow' : 'profitOps.walletToday')
+}
 function sourceLabel(m: ProfitMetrics) {
  if (m.requests === 0) return '—'
  const estimate = m.supplier_requests < m.requests ? estimateText(m) : ''
  switch (m.cost_source) {
-  case 'wallet_today': return t('profitOps.walletToday')
-  case 'mixed': return [t('profitOps.walletToday'), estimate].filter(Boolean).join(' · ')
-  case 'wallet_unavailable': return t('profitOps.walletUnavailable')
+  case 'wallet_today':
+  case 'wallet_window': return walletText(m)
+  case 'mixed': return [walletText(m), estimate].filter(Boolean).join(' · ')
+  case 'wallet_unavailable': return m.wallet_error ? `${t('profitOps.walletUnavailable')} · ${m.wallet_error}` : t('profitOps.walletUnavailable')
   case 'wallet_not_split': return t('profitOps.walletNotSplit')
   case 'wallet_currency': return t('profitOps.walletCurrency', { currency: m.wallet_currency || t('profitOps.unknown') })
   case 'estimate': return estimate || estimateText(m)
   default: return m.supplier_requests === 0 ? (estimate || estimateText(m)) : t('profitOps.unknown')
  }
 }
+function synced(value: string) {
+ const parsed = new Date(value)
+ return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : value
+}
 function formatMetric(m: ProfitMetrics, key: Metric) {
  if (isCostMetric(key) && (m.cost_source === 'wallet_unavailable' || m.cost_source === 'wallet_not_split' || m.cost_source === 'wallet_currency')) return t('profitOps.amountUnavailable')
  if (key === 'gross_margin') return m.gross_margin == null || !Number.isFinite(m.gross_margin) ? t('profitOps.unknown') : `${(m.gross_margin * 100).toFixed(2)}%`
  return number(m[key], key === 'requests' ? 0 : 6)
 }
-async function load() {
+async function load(forceWallet = false) {
  const id=++request; controller?.abort(); controller=new AbortController(); loading.value=true; error.value=''; snapshot.value=null
- try { const next=await readProfitOperations({...applied.value},controller.signal); if(alive && request===id) snapshot.value=next }
+ try { const next=await readProfitOperations({...applied.value},controller.signal,forceWallet); if(alive && request===id) snapshot.value=next }
  catch (cause) {
   if(alive && request===id) {
    const failure=cause as { status?: number; reason?: string; code?: string } | null
