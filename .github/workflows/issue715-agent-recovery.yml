@@ -4,6 +4,8 @@ on:
   pull_request:
     branches: [production]
     paths:
+      - '.github/scripts/prepare-discovery-red-compat.py'
+      - '.github/scripts/test_discovery_red_compat.py'
       - '.github/workflows/issue715-agent-recovery.yml'
       - 'backend/internal/service/openai_*'
       - 'backend/internal/handler/openai_*'
@@ -436,6 +438,7 @@ jobs:
           actual_overlay=$(git hash-object "$target")
           echo "baseline=$original path=$target original_blob=$expected expected_overlay=$expected_overlay tested_overlay=$actual_overlay"
           test "$expected_overlay" = "$actual_overlay"
+          python3 .github/scripts/prepare-discovery-red-compat.py "$original" . HEAD --target ws --fixture backend/internal/service/openai_ws_agent_recovery_test.go --manifest "$RUNNER_TEMP/issue715-ws-wire-compatibility.json"
           for retained in backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_plaintext_projection.go; do
             expected_retained=$(git rev-parse "HEAD:$retained")
             actual_retained=$(git hash-object "$retained")
@@ -467,6 +470,14 @@ jobs:
           if grep -Eq 'build failed|no tests to run|undefined:|panic:|--- SKIP:' "$RUNNER_TEMP/issue715-ws-wire-red.log"; then exit 1; fi
           grep -q -- '--- FAIL: TestIssue715WSBridgeValidatesBuiltPayload' "$RUNNER_TEMP/issue715-ws-wire-red.log"
           grep -q 'bridge must validate actual built HTTP body before granting opaque task admission' "$RUNNER_TEMP/issue715-ws-wire-red.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue715-ws-wire-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/issue715-ws-wire-red.log
+            ${{ runner.temp }}/issue715-ws-wire-compatibility.json
+          if-no-files-found: error
 
   ws-real-redis:
     runs-on: ubuntu-latest

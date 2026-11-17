@@ -24,6 +24,8 @@ import (
 )
 
 type readableWSOracle struct {
+	option               httpRebuildFixtureOptions
+	t                    *testing.T
 	mu                   sync.Mutex
 	frames               [][]byte
 	identities           []string
@@ -48,6 +50,9 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		u.httpSends++
 	}
 	n := len(u.frames)
+	if u.option.provider != nil {
+		u.option.provider(u.t, body, r.Header, n)
+	}
 	if u.scenario == "native_namespace" && (!ws || !reflect.DeepEqual(gjson.GetBytes(body, "tools").Value(), gjson.Parse(httpRebuildJSON(readableWSNativeNamespaceTools())).Value())) {
 		u.validationFailures++
 		return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_native_namespace_changed"}}}`)
@@ -84,6 +89,9 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 			return nil
 		}
 		validTools := httpRebuildToolsAvailable(body)
+		if u.option.toolsAvailable != nil {
+			validTools = u.option.toolsAvailable(body)
+		}
 		if customTools {
 			validTools = readableWSCustomToolsAvailable(body, logicalTurn == 3 && u.scenario != "bridge_model_cross_scope")
 		}
@@ -92,7 +100,7 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		}
 		valid := r.Header.Get("Authorization") == "Bearer fixture-readable-ws-B" &&
 			strings.Contains(string(body), httpRebuildTask) && validTools &&
-			readableWSCompletedResult(body, "apply_patch", httpRebuildPatch, logicalTurn == 3 && u.scenario != "bridge_model_cross_scope") &&
+			readableWSCompletedResult(body, "apply_patch", httpRebuildPatch, (logicalTurn == 3 && u.scenario != "bridge_model_cross_scope") || u.option.wsDelta, u.option.discovery) &&
 			!strings.Contains(string(body), "fixture-opaque-A") &&
 			!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
 		if u.scenario == "bridge_model" {
@@ -109,21 +117,34 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 			return nil
 		}
 		output = []json.RawMessage{json.RawMessage(httpRebuildAgentB), json.RawMessage(httpRebuildCall("run_tests", "call_ws_verify", map[string]any{"path": "sum.go"}))}
-		if logicalTurn == 3 && readableWSCompletedResult(body, "run_tests", httpRebuildCheck, u.scenario != "bridge_model_cross_scope") {
+		if logicalTurn == 3 && readableWSCompletedResult(body, "run_tests", httpRebuildCheck, u.scenario != "bridge_model_cross_scope", u.option.discovery) {
 			output = []json.RawMessage{json.RawMessage(httpRebuildJSON(map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "ws-coding-task-complete"}}}))}
 		} else if logicalTurn > 2 {
 			return []byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"fixture_duplicate_or_missing_tool"}}}`)
 		}
 	}
+	if u.option.output != nil {
+		output = u.option.output(n, output)
+	}
 	return []byte(httpRebuildJSON(map[string]any{"type": "response.completed", "response": map[string]any{"id": fmt.Sprintf("resp_readable_ws_%d", n), "status": "completed", "model": gjson.GetBytes(body, "model").String(), "error": nil, "output": output, "usage": map[string]int{"input_tokens": 5, "output_tokens": 3}}}))
 }
 
-func readableWSCompletedResult(body []byte, name, output string, projected bool) bool {
+func readableWSCompletedResult(body []byte, name, output string, projected bool, discovery ...bool) bool {
 	if !projected {
 		return httpRebuildToolPair(body, name, output)
 	}
 	count := 0
 	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if len(discovery) > 0 && discovery[0] {
+			// The discovery oracle separately verifies this exact native/lowered
+			// pair and its complete catalog; executable effects must be inert.
+			searchID := gjson.GetBytes(body, `input.#(name==tool_search).call_id`).String()
+			kind := item.Get("type").String()
+			if kind == "tool_search_call" || kind == "tool_search_output" ||
+				(searchID != "" && item.Get("call_id").String() == searchID) {
+				continue
+			}
+		}
 		if strings.Contains(item.Get("type").String(), "call") {
 			return false
 		}

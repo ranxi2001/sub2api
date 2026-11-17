@@ -6,6 +6,7 @@ on:
       - 'backend/internal/handler/openai_409*'
       - '.github/workflows/http-recovery-native-controls.yml'
       - '.github/scripts/http-recovery-native-controls.py'
+      - '.github/scripts/prepare-usage-sort-red-fixture.sh'
 permissions:
   contents: read
 jobs:
@@ -51,6 +52,7 @@ jobs:
                 fi ;;
             esac
           done
+          bash .github/scripts/prepare-usage-sort-red-fixture.sh "$baseline" . "${{ github.event.pull_request.head.sha }}"
       - name: Authenticated HTTP task continuation
         env:
           PHASE: ${{ matrix.phase }}

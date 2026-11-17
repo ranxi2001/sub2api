@@ -197,10 +197,14 @@ func TestOpenAI409WSInitialWithoutPointer(t *testing.T) {
 }
 
 func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent ...service.OpsRepository) {
+	runReadableWSContinuationWithOptions(t, mode, scenario, httpRebuildFixtureOptions{}, persistent...)
+}
+
+func runReadableWSContinuationWithOptions(t *testing.T, mode, scenario string, option httpRebuildFixtureOptions, persistent ...service.OpsRepository) {
 	t.Helper()
 	clients := issue805Redis(t)
 	probe := clients()
-	oracle := &readableWSOracle{scenario: scenario}
+	oracle := &readableWSOracle{scenario: scenario, option: option, t: t}
 	provider := oracle.server(t)
 	defer provider.Close()
 	headers := http.Header{"Session_id": {"fixture-readable-ws-session"}, "Thread-Id": {"fixture-readable-ws-thread"}}
@@ -269,6 +273,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 		repository.NewGatewayCache(clients()), func(key *service.APIKey) { key.AllowLongContext = true }, configureHandler, authSetup,
 		func(a *service.Account, cfg *config.Config, upstream *service.HTTPUpstream, repo *service.AccountRepository) {
 			a.ID, a.Priority = 1, 0
+			setHTTPRebuildLossyPolicy(t, cfg, option.lossy)
 			a.Credentials["api_key"] = "fixture-readable-ws-A"
 			a.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
 			a.Extra["codex_fingerprint_mode"] = "off"
@@ -331,6 +336,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 		if previous != "" {
 			body["previous_response_id"] = previous
 		}
+		if option.request != nil {
+			option.request(body, previous != "")
+		}
 		return httpRebuildJSON(body)
 	}
 	if scenario == "bridge_model" {
@@ -348,7 +356,7 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 	issue715WSSend(t, h.clientConn, create(history, ""))
 	first := gjson.GetBytes(issue715WSRead(t, h.clientConn), "response")
 	require.Equal(t, "completed", first.Get("status").String())
-	tools := &httpRebuildTools{}
+	tools := &httpRebuildTools{additional: option.additionalTool}
 	for _, item := range first.Get("output").Array() {
 		history = append(history, item.Raw)
 	}
@@ -522,11 +530,58 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 			}
 		}
 	}
-	issue715WSSend(t, h.clientConn, create(history, previous))
+	proofSnapshot := func() map[string]string {
+		if !option.discovery {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for {
+			keys, err := probe.Keys(ctx, "openai_tool_provenance:*").Result()
+			require.NoError(t, err)
+			values := make(map[string]string, len(keys))
+			settled := len(keys) > 0
+			for _, key := range keys {
+				values[key], err = probe.Get(ctx, key).Result()
+				require.NoError(t, err)
+				settled = settled && json.Valid([]byte(values[key])) && gjson.Get(values[key], "discovery.pending").String() == ""
+			}
+			if settled {
+				return values
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal("completed generation must settle its delivered tool proofs")
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	proofsBeforeSecond := proofSnapshot()
+	secondHistory := history
+	if option.wsDelta {
+		secondHistory = nil
+		for _, item := range history {
+			kind := gjson.Get(item, "type").String()
+			if kind == "function_call_output" || kind == "custom_tool_call_output" || kind == "tool_search_output" {
+				secondHistory = append(secondHistory, item)
+			}
+		}
+	}
+	issue715WSSend(t, h.clientConn, create(secondHistory, previous))
 	secondRaw, readErr := readTerminal()
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
+	if option.wsRefuseTurn == 2 {
+		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
+		require.NotContains(t, string(secondRaw), "response.completed", "DISCOVERY_FORGED_PAIR_ACCEPTED")
+		require.Equal(t, 1, sends, "forged discovery must not dispatch B")
+		require.Equal(t, owners, issue805Owners(t, probe))
+		require.Equal(t, proofsBeforeSecond, proofSnapshot())
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		return
+	}
 	if scenario == "bridge_model_cross_scope" {
 		require.NoError(t, readErr)
 		require.Equal(t, "error", gjson.GetBytes(secondRaw, "type").String())
@@ -703,13 +758,58 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 		history = append(history, item.Raw)
 	}
 	history = append(history, tools.execute(t, second)...)
+	var ownersBeforeFinal map[string]string
+	if option.discovery {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for {
+			keys, err := probe.Keys(ctx, "openai_agent_owner:*").Result()
+			require.NoError(t, err)
+			ownersBeforeFinal = make(map[string]string, len(keys))
+			completedB := 0
+			for _, key := range keys {
+				raw, err := probe.Get(ctx, key).Result()
+				require.NoError(t, err)
+				ownersBeforeFinal[key] = raw
+				if issue805CompletedOwner(raw, 2) {
+					completedB++
+				}
+			}
+			if len(ownersBeforeFinal) == 2 && completedB == 1 {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal("B delivery must commit before submitting its tool results")
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	proofsBeforeFinal := proofSnapshot()
 	issue715WSSend(t, h.clientConn, create(history, second.Get("id").String()))
 	final, err := readTerminal()
+	if option.wsRefuseTurn == 3 {
+		require.NotErrorIs(t, err, context.DeadlineExceeded)
+		require.NotContains(t, string(final), "response.completed", "DISCOVERY_CHANGED_CATALOG_ACCEPTED")
+		oracle.mu.Lock()
+		finalSends := len(oracle.frames)
+		oracle.mu.Unlock()
+		require.Equal(t, 2, finalSends, "changed catalog must refuse before another generation")
+		require.Equal(t, ownersBeforeFinal, issue805Owners(t, probe))
+		require.Equal(t, proofsBeforeFinal, proofSnapshot())
+		require.Equal(t, 1, tools.patches)
+		require.Equal(t, 1, tools.verifications)
+		return
+	}
 	if identityCase {
 		oracle.mu.Lock()
 		finalSends := len(oracle.frames)
 		oracle.mu.Unlock()
-		if !assert.Equal(t, 3, finalSends, "WS_REVIEW_CLIENT_IDENTITY_LOST: close=%v terminal=%s", err, final) {
+		message := "WS_REVIEW_CLIENT_IDENTITY_LOST: close=%v terminal=%s"
+		if option.discovery {
+			message = "LOSSY_DISCOVERY_NEXT_TURN_REFUSED: close=%v terminal=%s"
+		}
+		if !assert.Equal(t, 3, finalSends, message, err, final) {
 			// The historical identity defect also mutates upgrade headers. Check
 			// teardown on the normal stack, before FailNow unwinds deferred calls.
 			finished = true
@@ -717,8 +817,8 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 			return
 		}
 	}
-	require.NoError(t, err)
-	require.Equal(t, "response.completed", gjson.GetBytes(final, "type").String(), string(final))
+	require.NoError(t, err, "LOSSY_DISCOVERY_NEXT_TURN_REFUSED: submitted results must reach a completed terminal")
+	require.Equal(t, "response.completed", gjson.GetBytes(final, "type").String(), "LOSSY_DISCOVERY_NEXT_TURN_REFUSED: %s", final)
 	require.Contains(t, string(final), "ws-coding-task-complete")
 	if customTools {
 		require.NotContains(t, string(final), "custom_tool_call")
@@ -783,5 +883,9 @@ func runReadableWSContinuation(t *testing.T, mode, scenario string, persistent .
 	}
 	for key, raw := range owners {
 		require.Equal(t, raw, issue805Owners(t, probe)[key], "A owner is never overwritten")
+	}
+	if option.discovery {
+		require.Equal(t, ownersBeforeFinal, issue805Owners(t, probe), "completed A and B producer records must remain byte-identical")
+		require.Zero(t, oracle.validationFailures)
 	}
 }

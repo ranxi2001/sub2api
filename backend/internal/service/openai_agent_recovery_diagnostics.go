@@ -44,7 +44,7 @@ func inspectOpenAIWSCompletedTools(body []byte) (openAIRecoveryToolCounts, strin
 	for _, item := range gjson.GetBytes(body, "input").Array() {
 		kind, id := item.Get("type").String(), item.Get("call_id").String()
 		switch kind {
-		case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output":
+		case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output", "tool_search_call", "tool_search_output":
 			if id == "" || item.Get("call_id").Type != gjson.String {
 				d.invalid++
 			}
@@ -56,7 +56,9 @@ func inspectOpenAIWSCompletedTools(body []byte) (openAIRecoveryToolCounts, strin
 				if results[id] != "" {
 					d.duplicate++
 				}
-				if !item.Get("output").Exists() || item.Get("output").Type == gjson.Null {
+				// Discovery can carry callable schemas instead of a text result.
+				hasOutput := item.Get("output").Exists() && item.Get("output").Type != gjson.Null
+				if !hasOutput && (kind != "tool_search_output" || !item.Get("tools").IsArray()) {
 					d.invalid++
 				}
 				results[id] = kind
@@ -66,6 +68,9 @@ func inspectOpenAIWSCompletedTools(body []byte) (openAIRecoveryToolCounts, strin
 					d.duplicate++
 				}
 				calls[id] = kind + "_output"
+				if kind == "tool_search_call" {
+					calls[id] = "tool_search_output"
+				}
 			}
 		}
 	}

@@ -7,6 +7,8 @@ on:
       - 'backend/internal/service/openai*'
       - '.github/workflows/recovery-pending-storage-error.yml'
       - '.github/scripts/pending-storage-error-evidence.py'
+      - '.github/scripts/prepare-discovery-red-compat.py'
+      - '.github/scripts/test_discovery_red_compat.py'
       - '.github/scripts/assert-readable-continuation.py'
   workflow_dispatch:
 
@@ -53,6 +55,8 @@ jobs:
             path="backend/internal/service/$fixture"
             test "$(git hash-object "$red_dir/$path")" = "$(git rev-parse "$CANDIDATE:$path")"
           done
+          python3 .github/scripts/prepare-discovery-red-compat.py "$BASELINE" "$red_dir" "$CANDIDATE" --target delivery --fixture backend/internal/service/openai_agent_pending_storage_error_test.go --fixture backend/internal/service/openai_agent_pending_observation_test.go --fixture backend/internal/service/openai_ws_owner_conflict_test.go --manifest "$evidence_dir/discovery-compatibility.json"
+          test "$(git -C "$red_dir" diff --name-only)" = "$target"
           python3 - <<'PY'
           import json, os, pathlib, subprocess
           def git(*args):
@@ -64,6 +68,7 @@ jobs:
               'openai_ws_owner_conflict_test.go')]
           manifest = {
               'candidate': git('rev-parse', 'HEAD'), 'baseline': os.environ['BASELINE'],
+              'compatibility_manifest': 'discovery-compatibility.json',
               'baseline_production_blob': git('rev-parse', os.environ['BASELINE'] + ':' + target),
               'red_production_blob': git('hash-object', root + '/' + target),
               'green_production_blob': git('rev-parse', 'HEAD:' + target),

@@ -1,0 +1,248 @@
+name: Lossy recovery protocol
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_lossy*.go'
+      - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_agent_message_delivery.go'
+      - 'backend/internal/service/openai_tool_provenance.go'
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/repository/gateway_cache_tool_provenance.go'
+      - 'backend/internal/repository/gateway_cache_discovery_provenance_test.go'
+      - 'backend/internal/service/openai_agent_recovery_diagnostics.go'
+      - 'backend/internal/service/openai_responses_namespace.go'
+      - 'backend/internal/service/openai_account_scheduler.go'
+      - 'backend/internal/service/openai_409_omit_history.go'
+      - 'backend/internal/handler/openai_lossy_protocol_test.go'
+      - 'backend/internal/handler/openai_409_*test.go'
+      - '.github/scripts/*lossy-protocol*'
+      - '.github/scripts/test_assert_lossy_protocol.py'
+      - '.github/scripts/assert-lossy-compaction-guard.py'
+      - '.github/workflows/lossy-recovery-protocol.yml'
+  push:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai_lossy*.go'
+      - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_agent_message_delivery.go'
+      - 'backend/internal/service/openai_tool_provenance.go'
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/repository/gateway_cache_tool_provenance.go'
+      - 'backend/internal/repository/gateway_cache_discovery_provenance_test.go'
+      - 'backend/internal/service/openai_agent_recovery_diagnostics.go'
+      - 'backend/internal/service/openai_responses_namespace.go'
+      - 'backend/internal/service/openai_account_scheduler.go'
+      - 'backend/internal/service/openai_409_omit_history.go'
+      - 'backend/internal/handler/openai_lossy_protocol_test.go'
+      - 'backend/internal/handler/openai_409_*test.go'
+      - '.github/scripts/*lossy-protocol*'
+      - '.github/scripts/test_assert_lossy_protocol.py'
+      - '.github/scripts/assert-lossy-compaction-guard.py'
+      - '.github/workflows/lossy-recovery-protocol.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lossy-recovery-protocol-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis for real HTTP recovery fixtures
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Compaction admission and structured tool history
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service ./internal/handler -run '^Test(OpenAILossyProtocol|OpenAIAgentRecoveryCompaction|WithoutOpenAIRemoteCompaction)' -count=1 -timeout=8m | tee "$RUNNER_TEMP/lossy-protocol.jsonl"
+          python3 - "$RUNNER_TEMP/lossy-protocol.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          passed = {row.get('Test') for row in rows if row.get('Action') == 'pass'}
+          for name in ('PreservesAgentInput', 'CompactionPreservesContext', 'OwnerlessCompactionRefused', 'WebSocketDeltaPreservesHistory', 'BetaToolStateWire', 'BetaDiscoveryHTTPBridgeWire', 'BetaToolLoop', 'BetaWSBridgeToolLoop', 'CompletedDiscoveryProjection', 'DiscoveryProofFences', 'DiscoveryNetworkFences', 'DiscoveryDeltaLoop', 'DiscoveryNamespaceProjection'):
+              assert 'TestOpenAILossyProtocol' + name in passed, name
+          assert not any(row.get('Action') == 'skip' for row in rows)
+          PY
+          python3 ../.github/scripts/assert-lossy-protocol.py GREEN 0 "$RUNNER_TEMP/lossy-protocol.jsonl" loops
+          python3 ../.github/scripts/assert-lossy-protocol.py GREEN 0 "$RUNNER_TEMP/lossy-protocol.jsonl" projection
+          python3 ../.github/scripts/assert-lossy-protocol.py GREEN 0 "$RUNNER_TEMP/lossy-protocol.jsonl" discovery
+          python3 ../.github/scripts/assert-lossy-protocol.py GREEN 0 "$RUNNER_TEMP/lossy-protocol.jsonl" namespace
+      - name: Discovery receipt concurrent CAS and expiration
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/repository -run '^TestOpenAIDiscoveryProofCAS$' -count=1 -timeout=3m | tee "$RUNNER_TEMP/lossy-discovery-cas.jsonl"
+          python3 ../.github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/lossy-discovery-cas.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: lossy-protocol-tests-${{ env.EXPECTED_HEAD_SHA }}
+          path: |
+            ${{ runner.temp }}/lossy-protocol.jsonl
+            ${{ runner.temp }}/lossy-discovery-cas.jsonl
+
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Assemble pinned v2.21.6 with identical candidate oracles
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/lossy-baseline-evidence"
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          python3 -B -m unittest discover -s .github/scripts -p 'test_assert_lossy_protocol.py' -v
+          bash .github/scripts/prepare-lossy-protocol-baseline.sh "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/lossy-baseline" | tee "$RUNNER_TEMP/lossy-baseline-evidence/source-manifest.txt"
+      - name: Named HTTP and WS tool-loop RED with lossy=false controls
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RUNNER_TEMP/lossy-baseline/backend" && go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/handler -run '^TestOpenAILossyProtocolBeta(WSBridge)?ToolLoop$' -count=1 -timeout=8m) > "$RUNNER_TEMP/lossy-baseline-evidence/loops.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/lossy-baseline-evidence/loops.jsonl"
+          python3 .github/scripts/assert-lossy-protocol.py RED "$result" "$RUNNER_TEMP/lossy-baseline-evidence/loops.jsonl" loops
+      - name: Named completed discovery projection RED
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RUNNER_TEMP/lossy-baseline/backend" && go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service -run '^TestOpenAILossyProtocolCompletedDiscoveryProjection$' -count=1 -timeout=3m) > "$RUNNER_TEMP/lossy-baseline-evidence/projection.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/lossy-baseline-evidence/projection.jsonl"
+          python3 .github/scripts/assert-lossy-protocol.py RED "$result" "$RUNNER_TEMP/lossy-baseline-evidence/projection.jsonl" projection
+      - name: Native API-key namespace RED and corrected bridge controls on 35294
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          baseline=35294a17b60acbf5559099402e281819b185e28e
+          bash .github/scripts/prepare-lossy-protocol-baseline.sh "$EXPECTED_HEAD_SHA" "$RUNNER_TEMP/lossy-namespace-red" "$baseline" > "$RUNNER_TEMP/lossy-baseline-evidence/namespace-source.txt"
+          cat "$RUNNER_TEMP/lossy-baseline-evidence/namespace-source.txt"
+          set +e
+          (cd "$RUNNER_TEMP/lossy-namespace-red/backend" && go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service ./internal/handler -run '^TestOpenAILossyProtocol(Beta(WSBridge)?ToolLoop|BetaDiscoveryHTTPBridgeWire|DiscoveryNamespaceProjection)$' -count=1 -timeout=8m) > "$RUNNER_TEMP/lossy-baseline-evidence/namespace.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/lossy-baseline-evidence/namespace.jsonl"
+          python3 .github/scripts/assert-lossy-protocol.py RED "$result" "$RUNNER_TEMP/lossy-baseline-evidence/namespace.jsonl" namespace
+      - name: Discovery provenance RED on reviewed blocked 378b152
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          blocked=378b152b3c3d2cb177ada6780096cd3f8f5e7aae
+          git worktree add --detach "$RUNNER_TEMP/discovery-proof-red" "$blocked"
+          target=backend/internal/service/openai_lossy_protocol_test.go
+          git show "$EXPECTED_HEAD_SHA:$target" > "$RUNNER_TEMP/discovery-proof-red/$target"
+          test "$(git hash-object "$RUNNER_TEMP/discovery-proof-red/$target")" = "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")"
+          git -C "$RUNNER_TEMP/discovery-proof-red" diff --exit-code "$blocked" -- . ':!**/*_test.go'
+          printf 'baseline=%s candidate=%s oracle=%s blob=%s\n' "$blocked" "$EXPECTED_HEAD_SHA" "$target" "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")" > "$RUNNER_TEMP/lossy-baseline-evidence/discovery-source.txt"
+          set +e
+          (cd "$RUNNER_TEMP/discovery-proof-red/backend" && go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service -run '^TestOpenAILossyProtocolDiscoveryProofFences$/(forged_pair|call|call_metadata|result_metadata|schema_after_completion|metadata_after_completion|failed_receipt|pending_receipt)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/lossy-baseline-evidence/discovery-proof.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/lossy-baseline-evidence/discovery-proof.jsonl"
+          python3 .github/scripts/assert-lossy-protocol.py RED "$result" "$RUNNER_TEMP/lossy-baseline-evidence/discovery-proof.jsonl" discovery
+      - name: Independent ownerless compaction guard counterexample
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RUNNER_TEMP/lossy-baseline/backend" && go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service -run '^TestOpenAILossyProtocolOwnerlessCompactionRefused$' -count=1 -timeout=3m) > "$RUNNER_TEMP/lossy-baseline-evidence/compaction.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/lossy-baseline-evidence/compaction.jsonl"
+          python3 .github/scripts/assert-lossy-compaction-guard.py "$result" "$RUNNER_TEMP/lossy-baseline-evidence/compaction.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: lossy-protocol-baseline-${{ env.EXPECTED_HEAD_SHA }}
+          path: ${{ runner.temp }}/lossy-baseline-evidence/
+          if-no-files-found: error
+
+  artifact:
+    needs: [regression, baseline]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Frontend validation and embedded assets
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run check:i18n
+          pnpm exec vue-tsc -b
+          pnpm exec vite build
+      - name: Build immutable Linux amd64 artifact
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          mkdir -p ../artifacts
+          version=$(cat cmd/server/VERSION)
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embed -trimpath -ldflags "-s -w -X main.Version=$version -X main.Commit=$EXPECTED_HEAD_SHA -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildType=hotfix" -o ../artifacts/sub2api ./cmd/server
+          cd ../artifacts
+          sha256sum sub2api > SHA256SUMS
+          printf '%s\n' "$EXPECTED_HEAD_SHA" > SOURCE_COMMIT
+          git -C .. rev-parse HEAD^{tree} > SOURCE_TREE
+          printf 'linux/amd64\n' > ARCHITECTURE
+          ./sub2api --version > VERSION.txt 2>&1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: recovery-protocol-linux-amd64-${{ env.EXPECTED_HEAD_SHA }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14

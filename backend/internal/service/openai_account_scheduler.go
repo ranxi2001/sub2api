@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -423,6 +425,13 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	req OpenAIAccountScheduleRequest,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	recovery := openAIAgentRecoveryFromContext(ctx)
+	// Preserve the public refusal and admission policy, while allowing operators
+	// to identify the exact owner check without capturing conversation state.
+	ownerUnavailable := func(stage string, ownerID int64) error {
+		logger.FromContext(ctx).Warn("openai.agent_owner_selection_refused",
+			zap.String("stage", stage), zap.Int64("owner_account_id", ownerID))
+		return openAIAgentRecoveryError("owner_unavailable")
+	}
 	if recovery != nil && recovery.lookupErr != nil {
 		return nil, decision, recovery.lookupErr
 	}
@@ -432,7 +441,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	if recovery != nil && recovery.owner != nil {
 		if req.Platform != PlatformOpenAI || req.SessionHash != recovery.session ||
 			derefGroupID(req.GroupID) != recovery.groupID || req.RequestedModel != recovery.model {
-			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+			return nil, decision, ownerUnavailable("request_scope", recovery.owner.accountID)
 		}
 	}
 	if recovery.ownerBindingRequired() {
@@ -449,7 +458,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		var pointerErr error
 		pointerOwner, pointerErr = s.service.getOpenAIWSStateStore().GetResponseAccount(ctx, recovery.groupID, recovery.previousResponseID)
 		if pointerErr != nil || pointerOwner <= 0 || req.PreviousResponseID != recovery.previousResponseID {
-			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+			return nil, decision, ownerUnavailable("response_pointer", pointerOwner)
 		}
 		req.StickyAccountID = pointerOwner
 		req.StickyWeighted = false
@@ -627,12 +636,12 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			ownerID = recovery.owner.accountID
 		}
 		if req.GuardianParentAccountID > 0 && req.GuardianParentAccountID != ownerID {
-			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+			return nil, decision, ownerUnavailable("guardian_owner", ownerID)
 		}
 		if previousResponseID != "" {
 			previousOwner, readErr := s.service.getOpenAIWSStateStore().GetResponseAccount(ctx, derefGroupID(req.GroupID), previousResponseID)
 			if readErr != nil || previousOwner != ownerID {
-				return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+				return nil, decision, ownerUnavailable("response_owner", ownerID)
 			}
 		}
 		selection, _, err = s.selectBySessionHash(ctx, req)
@@ -640,7 +649,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			return nil, decision, err
 		}
 		if selection == nil || selection.Account == nil {
-			return nil, decision, openAIAgentRecoveryError("owner_unavailable")
+			return nil, decision, ownerUnavailable("owner_selection", ownerID)
 		}
 		// Reject a changed producer route before entering Forward. This also
 		// gives the explicit history-omission policy a pre-send refusal to handle.

@@ -14,9 +14,9 @@ import (
 func TestOpenAILossyHistoryRestart(t *testing.T) {
 	for _, ws := range []bool{false, true} {
 		for _, body := range []string{
-			`{"model":"gpt-6-astra","instructions":"current control","tools":[{"type":"function","name":"new_work"}],"previous_response_id":"resp_foreign","input":[{"role":"user","content":"current task"},{"type":"agent_message","encrypted_content":"fixture-cipher"},{"type":"function_call_output","call_id":"orphan","output":"already done"}]}`,
-			`{"model":"gpt-6-astra","conversation":"foreign","input":[{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
-			`{"model":"gpt-6-astra","input":[{"type":"compaction","encrypted_content":"fixture-cipher","summary":"readable summary"},{"type":"function_call","call_id":"pending","name":"effect","arguments":"{\"n\":9007199254740993}","status":"in_progress"}]}`,
+			`{"model":"gpt-6-astra","instructions":"current control","tools":[],"input":[{"role":"user","content":"current task"},{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
+			`{"model":"gpt-6-astra","input":[{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
+			`{"model":"gpt-6-astra","input":[{"type":"compaction","encrypted_content":"fixture-cipher","summary":"readable summary"}]}`,
 		} {
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAIWS.LossyHistoryRestartEnabled = true
@@ -24,9 +24,16 @@ func TestOpenAILossyHistoryRestart(t *testing.T) {
 			manager, c, _ := issue715WSManager(t, svc, context.Background())
 			SetOpenAIWSRecoveryPrincipal(c, 715, 715)
 			ctx := manager.ctx
-			if !ws {
-				ctx = context.Background()
+			if ws {
+				next, clean, changed := svc.PrepareOpenAILossyHistoryRestart(ctx, c, []byte(body), "fixture-session", "gpt-6-astra")
+				require.False(t, changed, "WS may inherit tool state absent from this frame")
+				require.Equal(t, body, string(clean))
+				require.Equal(t, ctx, next)
+				manager.abort()
+				continue
 			}
+			ctx = context.Background()
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 			next, clean, changed, err := svc.PrepareOpenAI409ReadableContinuation(ctx, c, []byte(body), "fixture-session", "gpt-6-astra")
 			if gjson.Get(body, "previous_response_id").Exists() {
 				require.True(t, svc.CanDiscardOpenAI409ResponsePointer(ctx, []byte(body), 715, "resp_foreign"))

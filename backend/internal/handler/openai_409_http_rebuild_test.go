@@ -191,6 +191,7 @@ func httpRebuildToolPair(body []byte, name, output string) bool {
 // A bounded client-side coding tool loop: one in-memory source edit and one
 // AST-based verification. No external command, repository edit or real effect.
 type httpRebuildTools struct {
+	additional    func(*testing.T, gjson.Result) (string, bool)
 	source        string
 	patches       int
 	verifications int
@@ -200,6 +201,12 @@ func (tools *httpRebuildTools) execute(t *testing.T, response gjson.Result) []st
 	t.Helper()
 	var results []string
 	for _, call := range response.Get("output").Array() {
+		if tools.additional != nil {
+			if result, handled := tools.additional(t, call); handled {
+				results = append(results, result)
+				continue
+			}
+		}
 		if call.Get("type").String() != "function_call" {
 			continue
 		}
@@ -478,7 +485,27 @@ func httpRebuildOwnerKey(t *testing.T, h *OpenAIGatewayHandler, agent string) st
 	return "openai_agent_owner:v1:" + hex.EncodeToString(key[:])
 }
 
+// Older recovery workflows compile this shared fixture against configuration
+// APIs predating lossy recovery. A requested true value must exist; default
+// false remains compatible without changing any selected historical oracle.
+func setHTTPRebuildLossyPolicy(t *testing.T, cfg *config.Config, enabled bool) {
+	t.Helper()
+	field := reflect.ValueOf(&cfg.Gateway.OpenAIWS).Elem().FieldByName("LossyHistoryRestartEnabled")
+	if !field.IsValid() {
+		require.False(t, enabled, "requested lossy policy is absent from this baseline")
+		return
+	}
+	field.SetBool(enabled)
+	require.Equal(t, enabled, field.Bool())
+}
+
 type httpRebuildFixtureOptions struct {
+	wsRefuseTurn   int
+	wsDelta        bool
+	lossy          bool
+	discovery      bool
+	output         func(int, []json.RawMessage) []json.RawMessage
+	additionalTool func(*testing.T, gjson.Result) (string, bool)
 	extraAccounts  []service.Account
 	afterFirst     func([]service.Account)
 	refuseCode     string
@@ -593,6 +620,9 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 				}))}
 			}
 		}
+		if option.output != nil {
+			output = option.output(n, output)
+		}
 		payload := httpRebuildJSON(map[string]any{"id": id, "conversation": map[string]any{"id": conversation}, "status": "completed", "error": nil, "model": "gpt-5.1", "output": output, "usage": map[string]int{"input_tokens": 5, "output_tokens": 3}})
 		if gjson.GetBytes(body, "stream").Bool() {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -627,6 +657,7 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 	usage := &readable409UsageRepo{}
 	h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, transport, repository.NewGatewayCache(clients()), settings, usage, accounts...)
 	h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	setHTTPRebuildLossyPolicy(t, h.cfg, option.lossy)
 	if option.gateway != nil {
 		option.gateway(h, accounts, transport, repository.NewGatewayCache(clients()), settings, usage)
 	}
@@ -768,7 +799,7 @@ func runHTTPRebuildFixture(t *testing.T, accountType string, stream bool, pointe
 		require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", initialWire[0].url)
 		require.Equal(t, "fixture-chatgpt-A", initialWire[0].header.Get("ChatGPT-Account-ID"))
 	}
-	tools := &httpRebuildTools{}
+	tools := &httpRebuildTools{additional: option.additionalTool}
 	for _, item := range first.Get("output").Array() {
 		history = append(history, item.Raw)
 	}

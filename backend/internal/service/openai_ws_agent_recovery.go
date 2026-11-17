@@ -372,7 +372,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		}
 		for _, item := range gjson.GetBytes(proof.history, "input").Array() {
 			kind := item.Get("type").String()
-			if kind != "function_call" && kind != "custom_tool_call" {
+			if kind != "function_call" && kind != "custom_tool_call" && kind != "tool_search_call" {
 				continue
 			}
 			fingerprint, valid := openAIToolFingerprint(item)
@@ -380,6 +380,21 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			if !valid || !found || observed.conflicted || observed.fingerprint != fingerprint || observed.accountID != account.ID || observed.config != openAIAgentRecoveryConfig(account, r.request.model) {
 				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r.request)
 			}
+		}
+		handoff := &openAIWSDiscoveryHandoff{scope: *r.request, input: openAIAgentRecoveryInputDigest(proof.history), controls: openAI409ControlsDigest(proof.history), proofs: make(map[string]openAIToolProofSnapshot)}
+		for _, item := range gjson.GetBytes(proof.history, "input").Array() {
+			if item.Get("type").String() != "tool_search_call" {
+				continue
+			}
+			key := r.request.toolKey(item.Get("call_id").String())
+			raw, err := r.service.toolProofGet(ctx, key)
+			if err != nil {
+				return err
+			}
+			handoff.proofs[key] = openAIToolProofSnapshot{raw: raw}
+		}
+		if err := r.service.verifyOpenAIToolInputProofs(context.WithValue(ctx, openAIWSDiscoveryHandoffKey{}, handoff), r.request, proof.history, true); err != nil {
+			return err
 		}
 		r.request.previousResponseID = ""
 		projected = true
@@ -487,7 +502,7 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 	}
 	for _, item := range toolItems {
 		kind := item.Get("type").String()
-		if kind != "function_call" && kind != "custom_tool_call" {
+		if kind != "function_call" && kind != "custom_tool_call" && kind != "tool_search_call" {
 			continue
 		}
 		if r.pendingTools == nil {
@@ -659,11 +674,21 @@ type openAIWSLocalHistory struct {
 	ready        bool
 }
 
-type openAIWSRestoredUnsentError struct{ *openAIWSUnsentTurnError }
+type openAIWSDiscoveryHandoffKey struct{}
+type openAIWSDiscoveryHandoff struct {
+	proofs          map[string]openAIToolProofSnapshot
+	scope           openAIAgentRecoveryRequest
+	input, controls [32]byte
+}
+
+type openAIWSRestoredUnsentError struct {
+	*openAIWSUnsentTurnError
+	discovery *openAIWSDiscoveryHandoff
+}
 
 func (e *openAIWSRestoredUnsentError) Unwrap() error { return e.openAIWSUnsentTurnError }
 func (e *openAIWSRestoredUnsentError) RecoveredWSContext(ctx context.Context) context.Context {
-	return WithRecoveredContextPrivacy(ctx)
+	return context.WithValue(WithRecoveredContextPrivacy(ctx), openAIWSDiscoveryHandoffKey{}, e.discovery)
 }
 
 func openAIWSPlainItems(body []byte) ([]json.RawMessage, bool) {
@@ -681,8 +706,11 @@ func openAIWSPlainItem(raw []byte) bool {
 			return false
 		}
 		return openAIReadableShadowTextOnly(item.Get("content"))
-	case "function_call", "custom_tool_call":
+	case "function_call", "custom_tool_call", "tool_search_call":
 		_, ok := openAIToolFingerprint(item)
+		return ok
+	case "tool_search_output":
+		_, ok := openAIDiscoveryFingerprint(item, true)
 		return ok
 	case "function_call_output", "custom_tool_call_output":
 		return item.Get("call_id").Type == gjson.String && item.Get("call_id").String() != "" && openAIReadableShadowTextOnly(item.Get("output"))
@@ -897,7 +925,7 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 	allowClientHistory := hasPolicy && recoveryPolicy.OpenAIWSClientHistoryRecoveryEnabled()
 	for _, item := range gjson.GetBytes(expanded, "input").Array() {
 		kind := item.Get("type").String()
-		if kind != "function_call" && kind != "custom_tool_call" {
+		if kind != "function_call" && kind != "custom_tool_call" && kind != "tool_search_call" {
 			continue
 		}
 		fp, valid := openAIToolFingerprint(item)
@@ -906,11 +934,28 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 			return err
 		}
 		if !found || proof.conflicted || proof.fingerprint != fp || proof.accountID != h.anchor.account || proof.config != h.anchor.config {
-			if !allowClientHistory {
+			if !allowClientHistory || kind == "tool_search_call" {
 				return err
 			}
 			clientReportedHistory = true
 		}
+	}
+	// Local history has removed opaque bytes, but its delivered discovery
+	// proof still binds the original encrypted/shadow epochs. Carry only this
+	// exact source/scope snapshot through the unsent handoff, then recheck it.
+	discovery := &openAIWSDiscoveryHandoff{proofs: make(map[string]openAIToolProofSnapshot), scope: *scope}
+	for _, item := range gjson.GetBytes(expanded, "input").Array() {
+		if item.Get("type").String() != "tool_search_call" {
+			continue
+		}
+		key := scope.toolKey(item.Get("call_id").String())
+		raw, readErr := r.service.toolProofGet(r.ctx, key)
+		var proof openAIToolProof
+		fp, valid := openAIToolFingerprint(item)
+		if readErr != nil || json.Unmarshal([]byte(raw), &proof) != nil || !valid || proof.Call != fp || r.service.checkToolProof(r.ctx, proof) != nil {
+			return err
+		}
+		discovery.proofs[key] = openAIToolProofSnapshot{raw: raw, proof: proof}
 	}
 	reason = "tool_declarations"
 	if !gjson.GetBytes(expanded, "tools").Exists() && len(h.tools) > 0 {
@@ -942,7 +987,8 @@ func (r *openAIWSAgentRecovery) restoreUnsentHistory(err error) error {
 	copy := *unsent
 	copy.body = expanded
 	h.ready = false // proof consumed once; no reuse after any downstream failure
-	return &openAIWSRestoredUnsentError{&copy}
+	discovery.input, discovery.controls = openAIAgentRecoveryInputDigest(expanded), openAI409ControlsDigest(expanded)
+	return &openAIWSRestoredUnsentError{openAIWSUnsentTurnError: &copy, discovery: discovery}
 }
 
 // Budget retained context across all sockets; exhaustion only disables this
@@ -1198,6 +1244,11 @@ func (s *OpenAIGatewayService) restartOpenAIWSClientReadableHistory(ctx context.
 	keyID := getAPIKeyIDFromContext(c)
 	if keyID <= 0 || openAIReadableRecoveryUser(c, keyID) <= 0 || len(body) > openAIWSLocalHistoryLimit {
 		return ctx, body, false
+	}
+	for _, item := range gjson.GetBytes(body, "input").Array() {
+		if kind := item.Get("type").String(); kind == "tool_search_call" || kind == "tool_search_output" {
+			return ctx, body, false
+		}
 	}
 	items, valid := openAIWSPlainItems(body)
 	if !valid {
