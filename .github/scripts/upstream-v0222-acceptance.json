@@ -1106,6 +1106,16 @@
         "name": "TestUsageCleanupRepositoryDeleteUsageLogsBatchQueryError",
         "package": "internal/repository",
         "mode": "unit"
+      },
+      {
+        "name": "TestUsageLogRepositoryGetAllGroupUsageSummaryMidnightDSTGap",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryCleanupUsageLogsMidnightDSTGap",
+        "package": "internal/repository",
+        "mode": "unit"
       }
     ],
     "frontend": []

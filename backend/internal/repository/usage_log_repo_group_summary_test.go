@@ -157,3 +157,31 @@ func TestUsageLogRepositoryGetAllGroupUsageSummaryTailStartsAtExpiredBefore(t *t
 		})
 	}
 }
+
+func TestUsageLogRepositoryGetAllGroupUsageSummaryMidnightDSTGap(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		today     time.Time
+		yesterday time.Time
+		date      string
+	}{
+		{"gap day", time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC), time.Date(2026, 9, 5, 4, 0, 0, 0, time.UTC), "2026-09-05"},
+		{"day after gap", time.Date(2026, 9, 7, 3, 0, 0, 0, time.UTC), time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC), "2026-09-06"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			repo := newUsageLogRepositoryWithSQL(nil, db)
+			repo.configuredTimezone = useGroupUsageRepositoryTestTimezone(t, "America/Santiago")
+			tailStart := time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC)
+			mock.ExpectQuery(`(?s)COUNT\(\*\).*usage_group_rollup_state.*WHERE id = 1`).
+				WillReturnRows(sqlmock.NewRows([]string{"count", "closed_before", "retained_from", "timezone_name", "expired_before"}).
+					AddRow(1, "2026-09-06", time.Date(2026, 9, 1, 4, 0, 0, 0, time.UTC), "America/Santiago", time.Unix(0, 0).UTC()))
+			mock.ExpectQuery(`(?s)usage_group_daily_rollups.*FROM usage_logs ul\s+WHERE ul\.created_at >= \$7`).
+				WithArgs(tc.today, tc.yesterday, tc.date, true, "2026-09-01", "2026-09-06", tailStart).
+				WillReturnRows(sqlmock.NewRows([]string{"group_id", "total_cost", "today_cost", "yesterday_cost"}))
+			_, err := repo.GetAllGroupUsageSummary(context.Background(), tc.today.Add(8*time.Hour))
+			require.NoError(t, err)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}

@@ -145,6 +145,8 @@ jobs:
           test "$result" -ne 0
           ! grep -Eq -- 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|WARNING: DATA RACE|--- SKIP:' evidence/retention-red.log
           grep -F -- '--- FAIL: TestDashboardAggregationRepositoryCleanupUsageLogsExpiresWholeDaysBeforeDeleting' evidence/retention-red.log
+          grep -F -- '--- FAIL: TestDashboardAggregationRepositoryCleanupUsageLogsMidnightDSTGap' evidence/retention-red.log
+          grep -F -- '--- FAIL: TestUsageLogRepositoryGetAllGroupUsageSummaryMidnightDSTGap' evidence/retention-red.log
           grep -F 'arguments do not match' evidence/retention-red.log
           grep -F -- '--- PASS: TestUsageLogRepositoryGetAllGroupUsageSummaryTailStartsAtExpiredBefore' evidence/retention-red.log
       - name: Exact head isolated clocks and all repository timezone unit assertions

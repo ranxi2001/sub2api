@@ -676,3 +676,20 @@ func setGroupUsageRollupTestTimezone(t *testing.T) configuredTimezone {
 	t.Helper()
 	return useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
 }
+
+func TestDashboardAggregationRepositoryCleanupUsageLogsMidnightDSTGap(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := newDashboardAggregationRepositoryWithSQL(db)
+	repo.configuredTimezone = useGroupUsageRepositoryTestTimezone(t, "America/Santiago")
+	// Local 00:00 is skipped: September 6 starts at 01:00 -03, not September 5 23:00 -04.
+	cutoff := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	alignedCutoff := time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC)
+	repo.clock = func() time.Time { return time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC) }
+	mock.ExpectExec(groupRollupExpireExec).WithArgs(alignedCutoff).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT EXISTS`).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec(`(?s)SELECT tableoid, ctid.*DELETE FROM usage_logs`).
+		WithArgs(alignedCutoff, usageLogsCleanupBatchSize).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectGroupRollupPrecheck(mock, "2026-09-08", "America/Santiago", true)
+	require.NoError(t, repo.CleanupUsageLogs(context.Background(), cutoff))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
