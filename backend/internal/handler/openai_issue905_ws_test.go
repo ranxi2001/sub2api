@@ -91,7 +91,7 @@ func TestIssue905WSFollowup(t *testing.T) {
 						key.Status, key.AllowLongContext = service.StatusActive, true
 						key.User.Concurrency = 1
 						key.Group = &service.Group{ID: *key.GroupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
-						return service.NewAPIKeyService(&wsRevalidationKeyRepoStub{current: key}, nil, nil, nil, nil, nil, nil, cfg)
+						return service.NewAPIKeyService(&wsRevalidationKeyRepoStub{current: key}, nil, nil, nil, nil, nil, cfg)
 					})
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
