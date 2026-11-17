@@ -22,6 +22,20 @@ type OpenAIToolProvenanceCache interface {
 	FinishOpenAIToolProvenance(context.Context, string, string, string, bool, time.Duration) error
 }
 
+// Discovery results are client-authored, but may only answer a delivered call.
+// CAS binds the first submitted catalog at the final send gate; a successful
+// downstream terminal commits its receipt. Missing/failed receipts cannot rebind.
+type OpenAIDiscoveryProvenanceCache interface {
+	CompareAndSwapOpenAIToolProvenance(context.Context, string, string, string, time.Duration) (bool, error)
+}
+
+type openAIDiscoveryReceipt struct {
+	Digest   string           `json:"digest"`
+	Pending  string           `json:"pending,omitempty"`
+	Failed   bool             `json:"failed,omitempty"`
+	Accepted *openAIToolProof `json:"accepted,omitempty"`
+}
+
 type openAIToolAnchor struct {
 	Owner    string `json:"owner"`
 	EpochKey string `json:"epoch_key,omitempty"`
@@ -29,6 +43,7 @@ type openAIToolAnchor struct {
 }
 
 type openAIToolProof struct {
+	Discovery       *openAIDiscoveryReceipt     `json:"discovery,omitempty"`
 	Version         int                         `json:"version"`
 	Call            string                      `json:"call"`
 	Producer        string                      `json:"producer"`
@@ -46,8 +61,9 @@ type openAIToolObservation struct {
 }
 
 type openAIToolProofSnapshot struct {
-	raw   string
-	proof openAIToolProof
+	raw             string
+	proof           openAIToolProof
+	discoveryDigest string
 }
 
 type openAIToolLocalRecord struct {
@@ -70,6 +86,9 @@ func (r *openAIAgentRecoveryRequest) toolKey(id string) string {
 
 func openAIToolFingerprint(item gjson.Result) (string, bool) {
 	kind := item.Get("type").String()
+	if kind == "tool_search_call" {
+		return openAIDiscoveryFingerprint(item, false)
+	}
 	if kind != "function_call" && kind != "custom_tool_call" {
 		return "", false
 	}
@@ -250,6 +269,17 @@ func (s *OpenAIGatewayService) toolInputAnchors(ctx context.Context, r *openAIAg
 			anchors[encoded] = anchor
 		}
 	}
+	for _, snapshot := range r.toolProofs {
+		if snapshot.discoveryDigest == "" {
+			continue
+		}
+		for key, anchor := range snapshot.proof.Anchors {
+			if old, exists := anchors[key]; exists && old != anchor {
+				return nil, false
+			}
+			anchors[key] = anchor
+		}
+	}
 	if len(anchors) > 64 {
 		return nil, false
 	}
@@ -332,7 +362,7 @@ func (d *openAIAgentRecoveryDelivery) observeTools(body []byte, nested bool) {
 	seen := make(map[string]bool)
 	for _, item := range items {
 		kind := item.Get("type").String()
-		if kind != "function_call" && kind != "custom_tool_call" {
+		if kind != "function_call" && kind != "custom_tool_call" && kind != "tool_search_call" {
 			continue
 		}
 		id := item.Get("call_id")
@@ -370,7 +400,7 @@ func (d *openAIAgentRecoveryDelivery) observeTools(body []byte, nested bool) {
 }
 
 func (d *openAIAgentRecoveryDelivery) finishTools(ctx context.Context, completed bool) {
-	if len(d.tools) == 0 {
+	if len(d.tools) == 0 && len(d.discoveryBindings) == 0 {
 		return
 	}
 	anchors := make(map[string]openAIToolAnchor)
@@ -390,6 +420,22 @@ func (d *openAIAgentRecoveryDelivery) finishTools(ctx context.Context, completed
 	valid := completed && d.toolTerminal && !d.toolInvalid && d.toolAnchorsValid && d.service.checkToolAnchors(ctx, anchors) == nil
 	if d.request.shadowObservation != nil && d.service.checkOpenAIReadableShadowObservation(ctx, d.request.shadowObservation) != nil {
 		valid = false
+	}
+	for key, snapshot := range d.discoveryBindings {
+		proof := snapshot.proof
+		receipt := *proof.Discovery
+		receipt.Pending, receipt.Failed = "", true
+		if valid {
+			receipt.Failed = false
+			receipt.Accepted = &openAIToolProof{Version: 1, Call: receipt.Digest, Producer: encodeOpenAIAgentRecoveryBinding(d.binding), Delivery: openAIToolHash(d.pending), Anchors: anchors}
+			if shadow := d.request.shadowObservation; shadow != nil {
+				receipt.Accepted.ShadowPrincipal, receipt.Accepted.ShadowTask = shadow.principal, shadow.task
+				receipt.Accepted.ShadowDigest, receipt.Accepted.ShadowEpoch = openAIToolHash(shadow.raw), shadow.epoch
+			}
+		}
+		proof.Discovery = &receipt
+		raw, _ := json.Marshal(proof)
+		_, _ = d.service.compareAndSwapToolProof(ctx, key, snapshot.raw, string(raw))
 	}
 	for key, call := range d.tools {
 		proof := openAIToolProof{Version: 1, Call: call.fingerprint, Producer: encodeOpenAIAgentRecoveryBinding(d.binding), Delivery: openAIToolHash(d.pending), Anchors: anchors}
@@ -431,6 +477,20 @@ func (s *OpenAIGatewayService) checkToolProof(ctx context.Context, proof openAIT
 }
 
 func (s *OpenAIGatewayService) verifyOpenAIToolInputs(ctx context.Context, r *openAIAgentRecoveryRequest, body []byte) error {
+	return s.verifyOpenAIToolInputProofs(ctx, r, body, false)
+}
+
+func (s *OpenAIGatewayService) verifyOpenAIToolInputProofs(ctx context.Context, r *openAIAgentRecoveryRequest, body []byte, discoveryOnly bool) error {
+	if discoveryOnly {
+		hasDiscovery := false
+		for _, item := range gjson.GetBytes(body, "input").Array() {
+			kind := item.Get("type").String()
+			hasDiscovery = hasDiscovery || kind == "tool_search_call" || kind == "tool_search_output"
+		}
+		if !hasDiscovery {
+			return nil
+		}
+	}
 	if _, reason := inspectOpenAIWSCompletedTools(body); reason != "" {
 		return openAIRecoveryDiagnosticError("owner_conflict", reason, r)
 	}
@@ -445,7 +505,10 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputs(ctx context.Context, r *op
 	}
 	for _, item := range gjson.GetBytes(body, "input").Array() {
 		kind := item.Get("type").String()
-		if kind != "function_call" && kind != "custom_tool_call" {
+		if discoveryOnly && kind != "tool_search_call" {
+			continue
+		}
+		if kind != "function_call" && kind != "custom_tool_call" && kind != "tool_search_call" {
 			continue
 		}
 		fingerprint, ok := openAIToolFingerprint(item)
@@ -454,7 +517,7 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputs(ctx context.Context, r *op
 		}
 		key := r.toolKey(item.Get("call_id").String())
 		raw, err := s.toolProofGet(ctx, key)
-		for err == nil && strings.HasPrefix(raw, "pending:") {
+		for err == nil && (strings.HasPrefix(raw, "pending:") || gjson.Get(raw, "discovery.pending").String() != "") {
 			timer := time.NewTimer(5 * time.Millisecond)
 			select {
 			case <-ctx.Done():
@@ -477,8 +540,13 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputs(ctx context.Context, r *op
 		if len(raw) > OpenAIToolProvenanceMaxBytes || json.Unmarshal([]byte(raw), &proof) != nil || proof.Call != fingerprint {
 			return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r)
 		}
+		handoffValid := false
+		if h, ok := ctx.Value(openAIWSDiscoveryHandoffKey{}).(*openAIWSDiscoveryHandoff); ok && h != nil && kind == "tool_search_call" {
+			handoffValid = h.input == openAIAgentRecoveryInputDigest(body) && h.controls == openAI409ControlsDigest(body) &&
+				h.scope.userID == r.userID && h.scope.keyID == r.keyID && h.scope.groupID == r.groupID && h.scope.model == r.model && h.scope.session == r.session && h.proofs[key].raw == raw
+		}
 		for anchor := range proof.Anchors {
-			if !available[anchor] {
+			if !available[anchor] && !handoffValid {
 				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_task_changed", r)
 			}
 		}
@@ -488,7 +556,21 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputs(ctx context.Context, r *op
 		if r.toolProofs == nil {
 			r.toolProofs = make(map[string]openAIToolProofSnapshot)
 		}
-		r.toolProofs[key] = openAIToolProofSnapshot{raw: raw, proof: proof}
+		snapshot := openAIToolProofSnapshot{raw: raw, proof: proof}
+		if kind == "tool_search_call" {
+			for _, result := range gjson.GetBytes(body, "input").Array() {
+				if result.Get("type").String() == "tool_search_output" && result.Get("call_id").String() == item.Get("call_id").String() {
+					snapshot.discoveryDigest, ok = openAIDiscoveryFingerprint(result, true)
+				}
+			}
+			if !ok || snapshot.discoveryDigest == "" {
+				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_changed", r)
+			}
+			if err := s.checkDiscoveryReceipt(ctx, proof, snapshot.discoveryDigest); err != nil {
+				return withOpenAIRecoveryDiagnostics(err, r, "tool_provenance_changed")
+			}
+		}
+		r.toolProofs[key] = snapshot
 	}
 	return nil
 }
@@ -507,6 +589,109 @@ func (s *OpenAIGatewayService) recheckOpenAIToolProofs(ctx context.Context, r *o
 		if err := s.checkToolProof(ctx, snapshot.proof); err != nil {
 			return withOpenAIRecoveryDiagnostics(err, r, "tool_provenance_changed")
 		}
+		if snapshot.discoveryDigest != "" {
+			if err := s.checkDiscoveryReceipt(ctx, snapshot.proof, snapshot.discoveryDigest); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// Discovery is schema-bearing protocol, not free-form replay metadata. Bind
+// every supported field (including nested schema/extensions), excluding only
+// provider item IDs and completed status. Never use float64 for schema numbers.
+func openAIDiscoveryFingerprint(item gjson.Result, result bool) (string, bool) {
+	want := "tool_search_call"
+	if result {
+		want = "tool_search_output"
+	}
+	if !item.IsObject() || item.Get("type").String() != want || item.Get("call_id").Type != gjson.String || strings.TrimSpace(item.Get("call_id").String()) == "" ||
+		(item.Get("status").Exists() && item.Get("status").String() != "completed") || openAIWSHasOpaqueField(item, 0) {
+		return "", false
+	}
+	valid := true
+	item.ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "type", "call_id", "status", "id":
+			valid = value.Type == gjson.String
+		case "execution":
+			valid = value.Type == gjson.String && (value.String() == "client" || value.String() == "server")
+		case "arguments":
+			valid = !result && value.IsObject()
+		case "tools":
+			valid = result && value.IsArray()
+		case "output":
+			valid = result && value.Type != gjson.Null
+		default:
+			valid = false
+		}
+		return valid
+	})
+	if !valid || (!result && !item.Get("arguments").IsObject()) || (result && !item.Get("tools").IsArray() && !item.Get("output").Exists()) {
+		return "", false
+	}
+	var fields map[string]any
+	if decodeOpenAIJSONUseNumber([]byte(item.Raw), &fields) != nil {
+		return "", false
+	}
+	delete(fields, "id")
+	delete(fields, "status")
+	return openAIToolHash(fields), true
+}
+
+func (s *OpenAIGatewayService) checkDiscoveryReceipt(ctx context.Context, proof openAIToolProof, digest string) error {
+	if proof.Discovery == nil {
+		// First result of this actually delivered call; final send CAS binds it.
+		return nil
+	}
+	r := proof.Discovery
+	if r.Digest != digest || r.Pending != "" || r.Failed || r.Accepted == nil || r.Accepted.Discovery != nil || r.Accepted.Call != digest {
+		return openAIAgentRecoveryError("owner_conflict")
+	}
+	return s.checkToolProof(ctx, *r.Accepted)
+}
+
+func (s *OpenAIGatewayService) compareAndSwapToolProof(ctx context.Context, key, old, next string) (bool, error) {
+	if len(next) > OpenAIToolProvenanceMaxBytes {
+		return false, openAIAgentRecoveryError("store_unavailable")
+	}
+	if cache, ok := s.cache.(OpenAIDiscoveryProvenanceCache); ok {
+		return cache.CompareAndSwapOpenAIToolProvenance(ctx, key, old, next, OpenAIReadableShadowTTL)
+	}
+	if s.cache != nil {
+		return false, openAIAgentRecoveryError("store_unavailable")
+	}
+	s.agentMessageRecovery.mu.Lock()
+	defer s.agentMessageRecovery.mu.Unlock()
+	record, found := s.agentMessageRecovery.toolProofs[key]
+	if !found || time.Now().After(record.until) || record.raw != old {
+		return false, nil
+	}
+	record.raw = next
+	s.agentMessageRecovery.toolProofs[key] = record
+	return true, nil
+}
+
+func (d *openAIAgentRecoveryDelivery) bindDiscoveryResults() error {
+	for key, snapshot := range d.request.toolProofs {
+		if snapshot.discoveryDigest == "" || snapshot.proof.Discovery != nil {
+			continue
+		}
+		proof := snapshot.proof
+		proof.Discovery = &openAIDiscoveryReceipt{Digest: snapshot.discoveryDigest, Pending: d.pending}
+		raw, _ := json.Marshal(proof)
+		bound, err := d.service.compareAndSwapToolProof(d.ctx, key, snapshot.raw, string(raw))
+		if err != nil {
+			return openAIAgentRecoveryError("store_unavailable")
+		}
+		if !bound {
+			return openAIAgentRecoveryError("owner_conflict")
+		}
+		if d.discoveryBindings == nil {
+			d.discoveryBindings = make(map[string]openAIToolProofSnapshot)
+		}
+		d.discoveryBindings[key] = openAIToolProofSnapshot{raw: string(raw), proof: proof}
 	}
 	return nil
 }

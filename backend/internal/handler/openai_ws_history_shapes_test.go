@@ -26,8 +26,11 @@ func TestOpenAIWSClientHistoryTakeover(t *testing.T) {
 
 func TestOpenAIWSLossyHistoryTakeover(t *testing.T) {
 	for _, mode := range readableWSModes {
-		t.Run(mode, func(t *testing.T) {
-			runUnsentDeltaWithLossyPolicy(t, mode, 7, "", `,{"type":"agent_message","encrypted_content":"fixture-unreadable-task"},{"type":"function_call_output","call_id":"orphan","output":"fixture old result"}`, false, true)
+		t.Run(mode+"/verified_tool", func(t *testing.T) {
+			runUnsentDeltaWithLossyPolicy(t, mode, 7, "", "", false, true)
+		})
+		t.Run(mode+"/unknown_tool_refused", func(t *testing.T) {
+			runUnsentDeltaWithLossyPolicy(t, mode, 7, "unknown_call", "", false, true)
 		})
 	}
 }

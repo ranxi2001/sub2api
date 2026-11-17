@@ -34,6 +34,15 @@ exclude_absent_fixture() {
   test ! -e "$tree/$target"
 }
 
+# Full historical overlays restore the old APIKeyListFilters as well. Preserve
+# the later usage tests in selective overlays and every candidate GREEN; only
+# the exact old contract can justify excluding this independent fixture.
+usage_contract=backend/internal/service/api_key.go
+if ! git -C "$tree" grep -q 'UsageStartTime' "$baseline" -- "$usage_contract" &&
+   test "$(git -C "$tree" hash-object "$usage_contract")" = "$(git -C "$tree" rev-parse "$baseline:$usage_contract")"; then
+  bash "$(dirname "${BASH_SOURCE[0]}")/prepare-usage-sort-red-fixture.sh" "$baseline" "$tree" "$candidate"
+fi
+
 # Full old-source overlays remove the unit-only OAuth dial seam alongside
 # later production files. This separate, later Issue842 matrix is not selected
 # by the historical 409/805/shadow regressions. Its own focused RED retains it.

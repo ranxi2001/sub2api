@@ -2,6 +2,8 @@ name: WS readable history shapes
 on:
   pull_request:
     paths:
+      - '.github/scripts/prepare-discovery-red-compat.py'
+      - '.github/scripts/test_discovery_red_compat.py'
       - 'backend/internal/service/openai_ws_agent_recovery.go'
       - 'backend/internal/service/openai_lossy_history_restart*.go'
       - 'backend/internal/service/openai_ws_readable_history_items*.go'
@@ -34,7 +36,13 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Pinned original history builder
         if: matrix.phase == 'RED'
-        run: git show 58628d98b9e0781c1b8e3df6259ab487a1490f70:backend/internal/service/openai_ws_agent_recovery.go > backend/internal/service/openai_ws_agent_recovery.go
+        run: |
+          set -euo pipefail
+          baseline=58628d98b9e0781c1b8e3df6259ab487a1490f70
+          target=backend/internal/service/openai_ws_agent_recovery.go
+          test "$(git hash-object "$target")" = "$(git rev-parse "HEAD:$target")"
+          git show "$baseline:$target" > "$target"
+          python3 .github/scripts/prepare-discovery-red-compat.py "$baseline" . HEAD --target ws --fixture backend/internal/service/openai_ws_readable_history_items_test.go --manifest "$RUNNER_TEMP/history-shapes-compatibility.json"
       - name: Delivered tool delta and readable historical inputs
         env:
           PHASE: ${{ matrix.phase }}
@@ -65,7 +73,9 @@ jobs:
         if: always()
         with:
           name: ws-history-shapes-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/history-shapes.jsonl
+          path: |
+            ${{ runner.temp }}/history-shapes.jsonl
+            ${{ runner.temp }}/history-shapes-compatibility.json
   socket:
     runs-on: ubuntu-24.04
     timeout-minutes: 25

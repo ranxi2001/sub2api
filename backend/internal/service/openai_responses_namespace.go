@@ -78,7 +78,7 @@ func shouldStripOpenAIResponsesInputNamespaces(account *Account, transport OpenA
 //   - compact 端点的 schema 不含该字段，携带即 400 `Unknown parameter:
 //     input[N].namespace`（issue #4761 正文），故 compact 一律清理。
 //   - API Key 出口默认按标准 Responses API 处理并清理该字段；但当请求本身声明
-//     namespace 工具时（包括 Responses Lite 的 input[].additional_tools），上游显然
+//     namespace 工具时（包括 additional_tools 和已完成 tool_search_output.tools），上游显然
 //     使用了 namespace 扩展，此时必须保留调用项上的 namespace，否则声明与历史
 //     调用会失配并触发 Missing namespace。
 //   - 摊平模式下调用项已被改写成平名，残留 namespace 指向的声明已不存在，一律清理。
@@ -125,17 +125,25 @@ func hasOpenAIResponsesNamespaceToolDeclaration(body []byte) bool {
 		return true
 	}
 
-	// Responses Lite moves private namespace declarations out of top-level
-	// tools and into an input.additional_tools carrier. API-key requests are
-	// intentionally not rewritten by normalizeOpenAIResponsesLiteTools, so the
-	// declaration can arrive here only in this form.
+	// Responses Lite and tool discovery carry declarations inside input.
+	// Recognize those catalogs before stripping call metadata; neither this
+	// representation check nor preserving a namespace grants recovery proof.
 	input := root.Get("input")
 	if !input.IsArray() {
 		return false
 	}
 	found := false
 	input.ForEach(func(_, item gjson.Result) bool {
-		if !strings.EqualFold(strings.TrimSpace(item.Get("type").String()), "additional_tools") {
+		switch strings.ToLower(strings.TrimSpace(item.Get("type").String())) {
+		case "additional_tools":
+		case "tool_search_output":
+			// A discovered catalog declares callable namespace tools too. This
+			// only preserves their wire representation; recovery still requires
+			// the delivered search proof and immutable catalog receipt.
+			if status := item.Get("status"); status.Exists() && status.String() != "completed" {
+				return true
+			}
+		default:
 			return true
 		}
 		if hasNamespaceTool(item.Get("tools")) {

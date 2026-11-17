@@ -2,6 +2,8 @@ name: WS plaintext response ownership
 on:
   pull_request:
     paths:
+      - '.github/scripts/prepare-discovery-red-compat.py'
+      - '.github/scripts/test_discovery_red_compat.py'
       - 'backend/internal/service/openai_ws_agent_recovery.go'
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_ws_http_bridge.go'
@@ -45,6 +47,7 @@ jobs:
             git show "b9feadf7dd6228a4117e360821d9994b7cc54897:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "b9feadf7dd6228a4117e360821d9994b7cc54897:$target")"
           done
+          python3 .github/scripts/prepare-discovery-red-compat.py b9feadf7dd6228a4117e360821d9994b7cc54897 . HEAD --target ws --fixture backend/internal/service/openai_ws_plaintext_owner_test.go --fixture backend/internal/handler/openai_ws_plaintext_owner_test.go --manifest "$RUNNER_TEMP/plaintext-owner-compatibility.json"
       - name: Actual delta continuation and delivery boundaries
         env:
           PHASE: ${{ matrix.phase }}
@@ -93,7 +96,9 @@ jobs:
         if: always()
         with:
           name: plaintext-owner-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/plaintext-*.jsonl
+          path: |
+            ${{ runner.temp }}/plaintext-*.jsonl
+            ${{ runner.temp }}/plaintext-owner-compatibility.json
           if-no-files-found: error
   repair870:
     runs-on: ubuntu-latest
@@ -134,6 +139,7 @@ jobs:
             git show "$baseline:$target" > "$target"
             test "$(git hash-object "$target")" = "$(git rev-parse "$baseline:$target")"
           done
+          python3 .github/scripts/prepare-discovery-red-compat.py "$baseline" . HEAD --target ws --fixture backend/internal/handler/openai_ws_plaintext_owner_test.go --manifest "$RUNNER_TEMP/plaintext-repair870-compatibility.json"
       - name: Exact later-turn HTTP wire behavior
         env:
           PHASE: ${{ matrix.phase }}
@@ -180,5 +186,7 @@ jobs:
         if: always()
         with:
           name: plaintext-repair870-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/plaintext-repair870.jsonl
+          path: |
+            ${{ runner.temp }}/plaintext-repair870.jsonl
+            ${{ runner.temp }}/plaintext-repair870-compatibility.json
           if-no-files-found: error

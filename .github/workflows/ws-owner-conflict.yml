@@ -6,6 +6,7 @@ on:
     paths:
       - backend/internal/handler/openai*go
       - backend/internal/service/openai*go
+      - .github/scripts/prepare-usage-sort-red-fixture.sh
       - .github/workflows/ws-owner-conflict.yml
       - .github/scripts/ws-owner-conflict-evidence.py
       - .github/scripts/test_ws_owner_conflict_evidence.py
@@ -58,6 +59,7 @@ jobs:
             esac
           done
           bash .github/scripts/prepare-free-fast-red-fixtures.sh "$BASELINE" "$RUNNER_TEMP/ws-owner-red" "$CANDIDATE"
+          bash .github/scripts/prepare-usage-sort-red-fixture.sh "$BASELINE" "$RUNNER_TEMP/ws-owner-red" "$CANDIDATE"
           set +e
           (cd "$RUNNER_TEMP/ws-owner-red/backend" && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerContinuation$/turn_2$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-owner-evidence/red.jsonl" 2>&1
           status=$?
