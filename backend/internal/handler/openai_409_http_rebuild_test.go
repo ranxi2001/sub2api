@@ -500,6 +500,8 @@ func setHTTPRebuildLossyPolicy(t *testing.T, cfg *config.Config, enabled bool) {
 }
 
 type httpRebuildFixtureOptions struct {
+	wsRefuseTurn   int
+	wsDelta        bool
 	lossy          bool
 	discovery      bool
 	output         func(int, []json.RawMessage) []json.RawMessage

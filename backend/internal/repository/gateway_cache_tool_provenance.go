@@ -89,3 +89,27 @@ func (c *gatewayCache) FinishOpenAIToolProvenance(ctx context.Context, scope, to
 }
 
 var _ service.OpenAIToolProvenanceCache = (*gatewayCache)(nil)
+
+// Bind a discovery receipt to an existing delivered-call record atomically.
+// Missing/expired/changed records never create a fresh catalog grant.
+var compareAndSwapOpenAIToolProvenance = redis.NewScript(`
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl <= 0 then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'PX', ttl)
+return 1
+`)
+
+func (c *gatewayCache) CompareAndSwapOpenAIToolProvenance(ctx context.Context, scope, old, next string, ttl time.Duration) (bool, error) {
+	key, _, err := openAIToolProvenanceKeys(scope)
+	if err != nil {
+		return false, err
+	}
+	if old == "" || next == "" || len(next) > service.OpenAIToolProvenanceMaxBytes || ttl <= 0 {
+		return false, errors.New("invalid discovery provenance update")
+	}
+	updated, err := compareAndSwapOpenAIToolProvenance.Run(ctx, c.rdb, []string{key}, old, next).Int()
+	return updated == 1, err
+}
+
+var _ service.OpenAIDiscoveryProvenanceCache = (*gatewayCache)(nil)

@@ -542,6 +542,11 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	}
 	s.prepareOpenAIReadableShadow(ctx, request, body)
 	delivery := newOpenAIAgentRecoveryDelivery(s, ctx, request, binding)
+	// Reserve only after all immutable-source, final-wire and owner gates.
+	if err := delivery.bindDiscoveryResults(); err != nil {
+		delivery.finish(false)
+		return noop, err
+	}
 	request.delivery = delivery
 	return func(completed bool) {
 		delivery.finish(completed && ctx.Err() == nil)

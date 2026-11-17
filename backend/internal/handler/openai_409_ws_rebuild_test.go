@@ -530,11 +530,58 @@ func runReadableWSContinuationWithOptions(t *testing.T, mode, scenario string, o
 			}
 		}
 	}
-	issue715WSSend(t, h.clientConn, create(history, previous))
+	proofSnapshot := func() map[string]string {
+		if !option.discovery {
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for {
+			keys, err := probe.Keys(ctx, "openai_tool_provenance:*").Result()
+			require.NoError(t, err)
+			values := make(map[string]string, len(keys))
+			settled := len(keys) > 0
+			for _, key := range keys {
+				values[key], err = probe.Get(ctx, key).Result()
+				require.NoError(t, err)
+				settled = settled && json.Valid([]byte(values[key])) && gjson.Get(values[key], "discovery.pending").String() == ""
+			}
+			if settled {
+				return values
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal("completed generation must settle its delivered tool proofs")
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	proofsBeforeSecond := proofSnapshot()
+	secondHistory := history
+	if option.wsDelta {
+		secondHistory = nil
+		for _, item := range history {
+			kind := gjson.Get(item, "type").String()
+			if kind == "function_call_output" || kind == "custom_tool_call_output" || kind == "tool_search_output" {
+				secondHistory = append(secondHistory, item)
+			}
+		}
+	}
+	issue715WSSend(t, h.clientConn, create(secondHistory, previous))
 	secondRaw, readErr := readTerminal()
 	oracle.mu.Lock()
 	sends := len(oracle.frames)
 	oracle.mu.Unlock()
+	if option.wsRefuseTurn == 2 {
+		require.NotErrorIs(t, readErr, context.DeadlineExceeded)
+		require.NotContains(t, string(secondRaw), "response.completed", "DISCOVERY_FORGED_PAIR_ACCEPTED")
+		require.Equal(t, 1, sends, "forged discovery must not dispatch B")
+		require.Equal(t, owners, issue805Owners(t, probe))
+		require.Equal(t, proofsBeforeSecond, proofSnapshot())
+		require.Equal(t, 1, tools.patches)
+		require.Zero(t, tools.verifications)
+		return
+	}
 	if scenario == "bridge_model_cross_scope" {
 		require.NoError(t, readErr)
 		require.Equal(t, "error", gjson.GetBytes(secondRaw, "type").String())
@@ -738,8 +785,22 @@ func runReadableWSContinuationWithOptions(t *testing.T, mode, scenario string, o
 			}
 		}
 	}
+	proofsBeforeFinal := proofSnapshot()
 	issue715WSSend(t, h.clientConn, create(history, second.Get("id").String()))
 	final, err := readTerminal()
+	if option.wsRefuseTurn == 3 {
+		require.NotErrorIs(t, err, context.DeadlineExceeded)
+		require.NotContains(t, string(final), "response.completed", "DISCOVERY_CHANGED_CATALOG_ACCEPTED")
+		oracle.mu.Lock()
+		finalSends := len(oracle.frames)
+		oracle.mu.Unlock()
+		require.Equal(t, 2, finalSends, "changed catalog must refuse before another generation")
+		require.Equal(t, ownersBeforeFinal, issue805Owners(t, probe))
+		require.Equal(t, proofsBeforeFinal, proofSnapshot())
+		require.Equal(t, 1, tools.patches)
+		require.Equal(t, 1, tools.verifications)
+		return
+	}
 	if identityCase {
 		oracle.mu.Lock()
 		finalSends := len(oracle.frames)

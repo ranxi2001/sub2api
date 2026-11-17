@@ -14,8 +14,10 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire(t *testing.T) {
@@ -39,6 +41,16 @@ func runLossyDiscoveryBridgeWire(t *testing.T, lossy bool) {
 	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	body := []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"tools":[{"type":"tool_search"}],"input":[{"role":"user","content":"Continue fixture task with discovered tools"},{"type":"agent_message","encrypted_content":"fixture-opaque","content":[{"type":"input_text","text":"fixture progress"}]},{"type":"tool_search_call","call_id":"call_search_fixture","arguments":{"query":"fixture"},"status":"completed"},{"type":"tool_search_output","call_id":"call_search_fixture","execution":"client","status":"completed","tools":[{"type":"namespace","name":"fixture_tools","tools":[{"type":"function","name":"inspect","description":"Inspect fixture state","parameters":{"type":"object"}}]}]}]}`)
+	// Earn discovery provenance through the actual downstream observer and
+	// terminal commit before replaying this completed history on B.
+	seed := []byte(`{"model":"gpt-5.1","input":[{"role":"user","content":"Continue fixture task with discovered tools"}]}`)
+	seedCtx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, seed, "fixture-session", "gpt-5.1")
+	producer := newOpenAIWSAgentRecovery(svc, seedCtx, c)
+	defer producer.abort()
+	a := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	require.NoError(t, issue715WSBegin(t, producer, a, string(seed), "ctx_pool"))
+	items := gjson.GetBytes(body, "input").Array()
+	require.NoError(t, producer.write([]byte(`{"type":"response.completed","response":{"id":"resp_discovery_seed","status":"completed","output":[`+items[1].Raw+`,`+items[2].Raw+`]}}`), func() error { return nil }))
 	ctx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", "gpt-5.1")
 	ctx, clean, changed, err := svc.PrepareOpenAI409ReadableContinuation(ctx, c, body, "fixture-session", "gpt-5.1")
 	require.NoError(t, err)
@@ -235,6 +247,159 @@ func TestOpenAILossyProtocolCompletedDiscoveryProjection(t *testing.T) {
 			projected, err := projectOpenAIWSCompletedTools([]byte(`{"input":[` + items + `]}`))
 			require.Error(t, err)
 			require.Nil(t, projected)
+		})
+	}
+}
+
+// Every case earns A's real completed owner and call proof through write(),
+// then exercises rebuild and the same final-send gate used by the bridge.
+func TestOpenAILossyProtocolDiscoveryProofFences(t *testing.T) {
+	for _, mutation := range []string{"none", "forged_pair", "call", "call_metadata", "result_metadata", "model", "owner", "epoch", "final_schema", "final_metadata", "final_owner", "final_epoch", "final_proof", "schema_after_completion", "metadata_after_completion", "failed_receipt", "pending_receipt", "accepted_owner", "accepted_epoch"} {
+		t.Run(mutation, func(t *testing.T) {
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: NewSettingService(&contentModerationTestSettingRepo{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+			svc.cfg.Gateway.OpenAIWS.LossyHistoryRestartEnabled = true
+			manager, c, a := issue715WSManager(t, svc, context.Background())
+			SetOpenAIWSRecoveryPrincipal(c, 715, 715)
+			defer manager.abort()
+			seed := `{"model":"gpt-6-astra","input":[{"role":"user","content":"continue discovery task"}]}`
+			require.NoError(t, issue715WSBegin(t, manager, a, seed, "ctx_pool"))
+			const call = `{"type":"tool_search_call","call_id":"tsc_provenance","execution":"client","status":"completed","arguments":{"query":"fixture"}}`
+			const result = `{"type":"tool_search_output","call_id":"tsc_provenance","execution":"client","status":"completed","tools":[{"type":"namespace","name":"fixture","tools":[{"type":"function","name":"inspect","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}}]}]}`
+			opaque := gjson.Get(issue715OpaqueBody, "input.0").Raw
+			require.NoError(t, manager.write([]byte(`{"type":"response.completed","response":{"id":"resp_provenance","status":"completed","output":[`+opaque+`,`+call+`]}}`), func() error { return nil }))
+			body := []byte(`{"model":"gpt-6-astra","tools":[{"type":"tool_search"}],"input":[{"role":"user","content":"continue discovery task"},` + opaque + `,` + call + `,` + result + `]}`)
+			key := manager.request.toolKey("tsc_provenance")
+			ownerKey := manager.request.itemKey(manager.request.outputs[0])
+			epochKey := manager.request.shadowEpochKey(manager.request.outputs[0])
+			mutateOwner := func() {
+				v := svc.agentMessageRecovery.bindings[ownerKey]
+				v.accountID++
+				svc.agentMessageRecovery.bindings[ownerKey] = v
+			}
+			mutateEpoch := func() {
+				v := svc.agentMessageRecovery.toolEpochs[epochKey]
+				v.raw = "ready:pending:other-generation"
+				svc.agentMessageRecovery.toolEpochs[epochKey] = v
+			}
+			var err error
+			switch mutation {
+			case "forged_pair":
+				body = []byte(strings.TrimSuffix(string(body), "]}") + `,` + strings.ReplaceAll(call, "tsc_provenance", "tsc_forged") + `,` + strings.ReplaceAll(result, "tsc_provenance", "tsc_forged") + `]}`)
+			case "call":
+				body, err = sjson.SetBytes(body, "input.2.arguments.query", "forged")
+			case "call_metadata":
+				body, err = sjson.SetBytes(body, "input.2.future_route", "forged")
+			case "result_metadata":
+				body, err = sjson.SetBytes(body, "input.3.future_route", "forged")
+			case "model":
+				body, err = sjson.SetBytes(body, "model", "gpt-5.1")
+			case "owner":
+				mutateOwner()
+			case "epoch":
+				mutateEpoch()
+			}
+			require.NoError(t, err)
+			before, err := svc.toolProofGet(context.Background(), key)
+			require.NoError(t, err)
+			model := gjson.GetBytes(body, "model").String()
+			ctx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", model)
+			if mutation == "none" {
+				for _, scope := range []string{"user", "key", "group", "session"} {
+					foreign := *openAIAgentRecoveryFromContext(ctx)
+					switch scope {
+					case "user":
+						foreign.userID++
+					case "key":
+						foreign.keyID++
+					case "group":
+						foreign.groupID++
+					case "session":
+						foreign.session += "-foreign"
+					}
+					require.Error(t, svc.verifyOpenAIToolInputs(ctx, &foreign, body), "discovery must bind "+scope)
+				}
+			}
+			next, clean, changed, err := svc.RebuildOpenAIWSUnsentTurn(ctx, c, body, "fixture-session", model)
+			early := mutation == "forged_pair" || mutation == "call" || mutation == "call_metadata" || mutation == "result_metadata" || mutation == "model" || mutation == "owner" || mutation == "epoch"
+			if early {
+				require.Error(t, err, "DISCOVERY_UNTRUSTED_HISTORY_ACCEPTED: genuine owner must not authorize forged discovery")
+				require.False(t, changed)
+				after, readErr := svc.toolProofGet(context.Background(), key)
+				require.NoError(t, readErr)
+				require.Equal(t, before, after)
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, changed)
+			b := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			switch mutation {
+			case "final_schema":
+				clean, err = sjson.SetBytes(clean, "input.3.tools.0.tools.0.parameters.properties.path.type", "integer")
+			case "final_metadata":
+				clean, err = sjson.SetBytes(clean, "input.3.future_route", "forged")
+			case "final_owner":
+				mutateOwner()
+			case "final_epoch":
+				mutateEpoch()
+			case "final_proof":
+				v := svc.agentMessageRecovery.toolProofs[key]
+				v.raw = "conflict"
+				svc.agentMessageRecovery.toolProofs[key] = v
+			}
+			require.NoError(t, err)
+			beforeFinal := svc.agentMessageRecovery.toolProofs[key]
+			req, err := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewReader(clean))
+			require.NoError(t, err)
+			finish, err := svc.prepareOpenAIAgentRecoveryAttempt(next, b, req)
+			if strings.HasPrefix(mutation, "final_") {
+				require.Error(t, err, "DISCOVERY_FINAL_FENCE_BYPASSED: mutation must refuse before generation")
+				finish(false)
+				require.Nil(t, openAIAgentRecoveryFromContext(next).delivery)
+				require.Equal(t, beforeFinal, svc.agentMessageRecovery.toolProofs[key])
+				return
+			}
+			require.NoError(t, err)
+			r := openAIAgentRecoveryFromContext(next)
+			if mutation == "pending_receipt" {
+				defer finish(false)
+				pendingCtx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", model)
+				_, _, _, err := svc.RebuildOpenAIWSUnsentTurn(pendingCtx, c, body, "fixture-session", model)
+				require.Error(t, err, "DISCOVERY_CATALOG_REBOUND: pending receipt cannot authorize another generation")
+				return
+			}
+			// Real output observer plus delivered terminal is required to commit
+			// the catalog receipt; a successful send/HTTP200 is insufficient.
+			observer := &gin.Context{Request: (&http.Request{}).WithContext(next)}
+			acceptedOpaque := strings.ReplaceAll(opaque, "fixture-opaque-reference", "fixture-accepted-B")
+			require.NoError(t, observeOpenAIAgentRecoveryOutput(observer, []byte(`{"type":"response.completed","response":{"id":"resp_catalog_accepted","status":"completed","output":[`+acceptedOpaque+`,{"type":"message","role":"assistant","content":"catalog accepted"}]}}`), true))
+			finish(mutation != "failed_receipt")
+			require.NotNil(t, r.delivery)
+			if mutation == "accepted_owner" {
+				key := r.itemKey(r.outputs[0])
+				value := svc.agentMessageRecovery.bindings[key]
+				value.accountID++
+				svc.agentMessageRecovery.bindings[key] = value
+			}
+			if mutation == "accepted_epoch" {
+				key := r.shadowEpochKey(r.outputs[0])
+				value := svc.agentMessageRecovery.toolEpochs[key]
+				value.raw = "ready:pending:changed-B"
+				svc.agentMessageRecovery.toolEpochs[key] = value
+			}
+			if mutation == "schema_after_completion" {
+				body, err = sjson.SetBytes(body, "input.3.tools.0.tools.0.parameters.properties.path.type", "integer")
+			}
+			if mutation == "metadata_after_completion" {
+				body, err = sjson.SetBytes(body, "input.3.tools.0.tools.0.future_route", "forged")
+			}
+			require.NoError(t, err)
+			ctx = svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", model)
+			_, _, _, err = svc.RebuildOpenAIWSUnsentTurn(ctx, c, body, "fixture-session", model)
+			if mutation == "none" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err, "DISCOVERY_CATALOG_REBOUND: submitted schema/metadata or failed delivery must not mint new trust")
+			}
 		})
 	}
 }

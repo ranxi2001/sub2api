@@ -67,6 +67,21 @@ class EvidenceGateTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check("RED", transcript("RED"), status=2)
 
+    def test_discovery_blocker_requires_each_named_business_red(self):
+        package = "github.com/Wei-Shaw/sub2api/internal/service"
+        rows = []
+        for case in sorted(gate.DISCOVERY_RED):
+            name = f"{gate.DISCOVERY}/{case}"
+            rows.extend([{"Package": package, "Test": name, "Action": "run"},
+                         {"Package": package, "Test": name, "Action": "output", "Output": "DISCOVERY_UNTRUSTED_HISTORY_ACCEPTED"},
+                         {"Package": package, "Test": name, "Action": "fail"}])
+        rows.append({"Package": package, "Action": "fail"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            gate.validate("RED", 1, "\n".join(map(json.dumps, rows)), "discovery")
+        rows[1]["Output"] = "unrelated assertion"
+        with self.assertRaises(ValueError), contextlib.redirect_stdout(io.StringIO()):
+            gate.validate("RED", 1, "\n".join(map(json.dumps, rows)), "discovery")
+
 
 if __name__ == "__main__":
     unittest.main()

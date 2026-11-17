@@ -100,7 +100,7 @@ func (u *readableWSOracle) response(r *http.Request, body []byte, ws bool) []byt
 		}
 		valid := r.Header.Get("Authorization") == "Bearer fixture-readable-ws-B" &&
 			strings.Contains(string(body), httpRebuildTask) && validTools &&
-			readableWSCompletedResult(body, "apply_patch", httpRebuildPatch, logicalTurn == 3 && u.scenario != "bridge_model_cross_scope", u.option.discovery) &&
+			readableWSCompletedResult(body, "apply_patch", httpRebuildPatch, (logicalTurn == 3 && u.scenario != "bridge_model_cross_scope") || u.option.wsDelta, u.option.discovery) &&
 			!strings.Contains(string(body), "fixture-opaque-A") &&
 			!gjson.GetBytes(body, "previous_response_id").Exists() && !gjson.GetBytes(body, "conversation").Exists()
 		if u.scenario == "bridge_model" {

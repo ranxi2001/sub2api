@@ -11,16 +11,21 @@ spec.loader.exec_module(common)
 HTTP = "TestOpenAILossyProtocolBetaToolLoop"
 WS = "TestOpenAILossyProtocolBetaWSBridgeToolLoop"
 PROJECTION = "TestOpenAILossyProtocolCompletedDiscoveryProjection"
+DISCOVERY = "TestOpenAILossyProtocolDiscoveryProofFences"
+DISCOVERY_RED = {"forged_pair", "call", "call_metadata", "result_metadata", "schema_after_completion", "metadata_after_completion", "failed_receipt", "pending_receipt"}
+DISCOVERY_GREEN = DISCOVERY_RED | {"none", "model", "owner", "epoch", "final_schema", "final_metadata", "final_owner", "final_epoch", "final_proof", "accepted_owner", "accepted_epoch"}
 
 
 def validate(phase, status, raw, suite):
     common.check_clean(raw)
     rows = [json.loads(line) for line in raw.splitlines() if line.startswith("{")]
-    package = "github.com/Wei-Shaw/sub2api/internal/" + ("service" if suite == "projection" else "handler")
+    package = "github.com/Wei-Shaw/sub2api/internal/" + ("service" if suite in {"projection", "discovery"} else "handler")
     rows = [row for row in rows if row.get("Package") == package]
     counts = Counter((row.get("Action"), row.get("Test")) for row in rows)
     if suite == "projection":
         leaves = {PROJECTION}
+    elif suite == "discovery":
+        leaves = {f"{DISCOVERY}/{name}" for name in (DISCOVERY_RED if phase == "RED" else DISCOVERY_GREEN)}
     elif suite == "loops":
         leaves = {f"{HTTP}/lossy={lossy}/{account}/stream={stream}"
                   for lossy in ("false", "true") for account in ("apikey", "oauth") for stream in ("false", "true")}
@@ -32,7 +37,7 @@ def validate(phase, status, raw, suite):
     for name in sorted(leaves):
         if counts["run", name] != 1 or counts["pass", name] + counts["fail", name] != 1:
             raise ValueError(f"missing/repeated named execution: {name}")
-        red = phase == "RED" and (suite == "projection" or name.startswith(WS) or "/lossy=true/" in name)
+        red = phase == "RED" and (suite in {"projection", "discovery"} or name.startswith(WS) or "/lossy=true/" in name)
         outcome = "fail" if red else "pass"
         if counts[outcome, name] != 1:
             raise ValueError(f"expected {outcome}: {name}")
@@ -41,9 +46,19 @@ def validate(phase, status, raw, suite):
             output = "".join(row.get("Output", "") for row in rows if row.get("Test") == name)
             markers = ("LOSSY_DISCOVERY_PROJECTION_REFUSED",) if suite == "projection" else (
                 "LOSSY_TOOL_PROTOCOL_LOST", "LOSSY_DISCOVERY_NEXT_TURN_REFUSED")
+            if suite == "discovery":
+                markers = ("DISCOVERY_UNTRUSTED_HISTORY_ACCEPTED", "DISCOVERY_CATALOG_REBOUND")
             if not any(marker in output for marker in markers):
                 raise ValueError(f"missing tool behavior assertion: {name}")
         print(f"{phase} {outcome}: {name}")
+    if phase == "GREEN" and suite == "discovery":
+        all_rows = [json.loads(line) for line in raw.splitlines() if line.startswith("{")]
+        handler = "github.com/Wei-Shaw/sub2api/internal/handler"
+        passed = Counter(row.get("Test") for row in all_rows if row.get("Package") == handler and row.get("Action") == "pass")
+        for account in ("apikey", "oauth"):
+            for case in ("forged_pair", "call_metadata", "result_metadata", "schema_after_completion", "metadata_after_completion"):
+                assert passed[f"TestOpenAILossyProtocolDiscoveryNetworkFences/{account}/{case}"] == 1
+            assert passed[f"TestOpenAILossyProtocolDiscoveryDeltaLoop/{account}"] == 1
     expected_status = 1 if expected_failed else 0
     if status != expected_status or counts["fail" if expected_failed else "pass", None] != 1:
         raise ValueError("unexpected exit/package terminal")

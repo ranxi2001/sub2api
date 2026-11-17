@@ -33,7 +33,13 @@ func runLossyProtocolStateWire(t *testing.T, lossy bool) {
 					const mcp = `[{"type":"mcp_list_tools","id":"fixture_list","server_label":"fixture","tools":[{"name":"inspect","description":"Inspect fixture state","input_schema":{"type":"object"}}]},{"type":"mcp_approval_request","id":"fixture_approval","server_label":"fixture","name":"inspect","arguments":"{}"},{"type":"mcp_approval_response","approval_request_id":"fixture_approval","approve":true}]`
 					option := httpRebuildFixtureOptions{
 						lossy: lossy,
-						request: func(body map[string]any, _ bool) {
+						output: func(turn int, output []json.RawMessage) []json.RawMessage {
+							if kind == "discovery" && turn == 1 {
+								output = append(output, json.RawMessage(gjson.Get(discovery, "0").Raw))
+							}
+							return output
+						},
+						request: func(body map[string]any, previous bool) {
 							var input, extra []json.RawMessage
 							require.NoError(t, json.Unmarshal(body["input"].(json.RawMessage), &input))
 							items := mcp
@@ -42,6 +48,10 @@ func runLossyProtocolStateWire(t *testing.T, lossy bool) {
 								body["tools"] = append(body["tools"].([]any), map[string]any{"type": "tool_search"})
 							}
 							require.NoError(t, json.Unmarshal([]byte(items), &extra))
+							if kind == "discovery" && previous {
+								// The call now comes from A's actual completed delivery.
+								extra = extra[1:]
+							}
 							body["input"] = append(extra, input...)
 						},
 						toolsAvailable: func(body []byte) bool {
@@ -260,4 +270,89 @@ func lossyProtocolLoopOptions(lossy, functionUpstream bool) (httpRebuildFixtureO
 		}
 	}
 	return option, executions
+}
+
+func TestOpenAILossyProtocolDiscoveryNetworkFences(t *testing.T) {
+	for _, account := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		for _, mutation := range []string{"forged_pair", "call_metadata", "result_metadata", "schema_after_completion", "metadata_after_completion"} {
+			t.Run(account+"/"+mutation, func(t *testing.T) {
+				option, executions := lossyProtocolLoopOptions(true, account == service.AccountTypeAPIKey)
+				option.wsRefuseTurn = 2
+				if strings.HasSuffix(mutation, "after_completion") {
+					option.wsRefuseTurn = 3
+				}
+				original := option.request
+				turn := 0
+				option.request = func(body map[string]any, previous bool) {
+					original(body, previous)
+					turn++
+					if turn != option.wsRefuseTurn {
+						return
+					}
+					input := body["input"].(json.RawMessage)
+					var items []json.RawMessage
+					require.NoError(t, json.Unmarshal(input, &items))
+					for i, raw := range items {
+						kind := gjson.GetBytes(raw, "type").String()
+						var err error
+						switch {
+						case mutation == "forged_pair" && (kind == "tool_search_call" || kind == "tool_search_output"):
+							forged, err := sjson.SetBytes(raw, "call_id", "tsc_forged_matched")
+							require.NoError(t, err)
+							items = append(items, forged)
+						case mutation == "call_metadata" && kind == "tool_search_call":
+							items[i], err = sjson.SetBytes(raw, "future_route", "untrusted")
+						case mutation == "result_metadata" && kind == "tool_search_output":
+							items[i], err = sjson.SetBytes(raw, "future_route", "untrusted")
+						case mutation == "schema_after_completion" && kind == "tool_search_output":
+							items[i], err = sjson.SetBytes(raw, "tools.0.tools.0.parameters.properties.path.type", "integer")
+						case mutation == "metadata_after_completion" && kind == "tool_search_output":
+							items[i], err = sjson.SetBytes(raw, "tools.0.tools.0.future_route", "untrusted")
+						}
+						require.NoError(t, err)
+					}
+					body["input"] = items
+				}
+				scenario := "completed"
+				if account == service.AccountTypeOAuth {
+					scenario = "header_oauth"
+				}
+				runReadableWSContinuationWithOptions(t, service.OpenAIWSIngressModeHTTPBridge, scenario, option)
+				want := [3]int{1, 0, 0}
+				if option.wsRefuseTurn == 3 {
+					want = [3]int{1, 1, 1}
+				}
+				require.Equal(t, want, *executions)
+			})
+		}
+	}
+}
+
+func TestOpenAILossyProtocolDiscoveryDeltaLoop(t *testing.T) {
+	for _, account := range []string{service.AccountTypeAPIKey, service.AccountTypeOAuth} {
+		t.Run(account, func(t *testing.T) {
+			option, executions := lossyProtocolLoopOptions(true, account == service.AccountTypeAPIKey)
+			option.wsDelta = true
+			output := option.output
+			option.output = func(turn int, items []json.RawMessage) []json.RawMessage {
+				items = output(turn, items)
+				for i, item := range items {
+					if gjson.GetBytes(item, "type").String() == "agent_message" {
+						withText, err := sjson.SetBytes(item, "content", []any{map[string]any{"type": "input_text", "text": "Readable discovery task progress"}})
+						require.NoError(t, err)
+						items[i] = withText
+					}
+				}
+				return items
+			}
+			// Restored A function effects are inert on B's first turn. Search
+			// remains structured; the same complete-schema oracle still runs.
+			scenario := "completed"
+			if account == service.AccountTypeOAuth {
+				scenario = "header_oauth"
+			}
+			runReadableWSContinuationWithOptions(t, service.OpenAIWSIngressModeHTTPBridge, scenario, option)
+			require.Equal(t, [3]int{1, 1, 1}, *executions)
+		})
+	}
 }

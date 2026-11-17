@@ -87,6 +87,12 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 		if err := s.verifyOpenAIToolInputs(ctx, r, body); err != nil {
 			return ctx, body, false, err
 		}
+	} else {
+		// HTTP discovery recovery needs the same actually delivered call and
+		// catalog receipt. Ordinary function/custom HTTP behavior is unchanged.
+		if err := s.verifyOpenAIToolInputProofs(ctx, r, body, true); err != nil {
+			return ctx, body, false, err
+		}
 	}
 	clean, changed := omitOpenAIHistoricalCiphertext(body)
 	if ctx.Err() != nil {

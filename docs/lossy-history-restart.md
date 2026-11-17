@@ -19,3 +19,5 @@ gateway:
 新建跨供应商 Agent 任务建议使用 Classic V1 的客户端目录与配置；已有 V2 密文任务不能靠配置还原。该模式是针对 Sub2API 原生 WS/HTTP 的有损兼容处理，不是 CC-Switch 原生 WS 支持，也不代表全部上游错误都能消除。
 
 WS 混合已完成 producer 历史的恢复仍保留 function/custom 调用的可信交付、归属与 epoch 校验，已完成副作用作为带原类型、call_id 和结果的惰性记录传递。已完成的 tool_search call/output 保留结构和发现的完整 schema，供后续新调用使用；孤立、重复、类型不匹配或未完成的发现记录拒绝续接。保留发现目录不会创建函数或 custom 工具的执行来源证明。MCP 仅保留协议状态，不代表网关执行外部工具。
+
+恢复中的 discovery call 还必须有实际下游完整交付的作用域证明。客户端第一次返回的 catalog 是该已交付 call 的结果，不是外部工具执行事实；网关在原始 input/controls 与最终 wire 校验后，把完整 catalog 摘要以 CAS 一次性绑定到同一 call 证明。只有后续下游完成才提交 receipt，包含生产者、delivery 与 owner/shadow epoch。以后改变 schema/metadata，或使用未知、失效、未完成交付的 call 均拒绝恢复。连接内增量历史也要重查相同证明；显式“客户端自报历史”降级不能绕过 discovery 证明。

@@ -32,6 +32,7 @@ type OpenAIAgentRecoveryEpochCache interface {
 }
 
 type openAIAgentRecoveryDelivery struct {
+	discoveryBindings                                        map[string]openAIToolProofSnapshot
 	toolFinal                                                map[string]bool
 	service                                                  *OpenAIGatewayService
 	ctx                                                      context.Context

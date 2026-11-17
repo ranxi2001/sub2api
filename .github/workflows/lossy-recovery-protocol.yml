@@ -5,6 +5,11 @@ on:
     paths:
       - 'backend/internal/service/openai_lossy*.go'
       - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_agent_message_delivery.go'
+      - 'backend/internal/service/openai_tool_provenance.go'
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/repository/gateway_cache_tool_provenance.go'
+      - 'backend/internal/repository/gateway_cache_discovery_provenance_test.go'
       - 'backend/internal/service/openai_agent_recovery_diagnostics.go'
       - 'backend/internal/service/openai_account_scheduler.go'
       - 'backend/internal/service/openai_409_omit_history.go'
@@ -19,6 +24,11 @@ on:
     paths:
       - 'backend/internal/service/openai_lossy*.go'
       - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_agent_message_delivery.go'
+      - 'backend/internal/service/openai_tool_provenance.go'
+      - 'backend/internal/service/openai_ws_agent_recovery.go'
+      - 'backend/internal/repository/gateway_cache_tool_provenance.go'
+      - 'backend/internal/repository/gateway_cache_discovery_provenance_test.go'
       - 'backend/internal/service/openai_agent_recovery_diagnostics.go'
       - 'backend/internal/service/openai_account_scheduler.go'
       - 'backend/internal/service/openai_409_omit_history.go'
@@ -70,17 +80,26 @@ jobs:
           import json, sys
           rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
           passed = {row.get('Test') for row in rows if row.get('Action') == 'pass'}
-          for name in ('PreservesAgentInput', 'CompactionPreservesContext', 'OwnerlessCompactionRefused', 'WebSocketDeltaPreservesHistory', 'BetaToolStateWire', 'BetaDiscoveryHTTPBridgeWire', 'BetaToolLoop', 'BetaWSBridgeToolLoop', 'CompletedDiscoveryProjection'):
+          for name in ('PreservesAgentInput', 'CompactionPreservesContext', 'OwnerlessCompactionRefused', 'WebSocketDeltaPreservesHistory', 'BetaToolStateWire', 'BetaDiscoveryHTTPBridgeWire', 'BetaToolLoop', 'BetaWSBridgeToolLoop', 'CompletedDiscoveryProjection', 'DiscoveryProofFences', 'DiscoveryNetworkFences', 'DiscoveryDeltaLoop'):
               assert 'TestOpenAILossyProtocol' + name in passed, name
           assert not any(row.get('Action') == 'skip' for row in rows)
           PY
           python3 ../.github/scripts/assert-lossy-protocol.py GREEN 0 "$RUNNER_TEMP/lossy-protocol.jsonl" loops
           python3 ../.github/scripts/assert-lossy-protocol.py GREEN 0 "$RUNNER_TEMP/lossy-protocol.jsonl" projection
+          python3 ../.github/scripts/assert-lossy-protocol.py GREEN 0 "$RUNNER_TEMP/lossy-protocol.jsonl" discovery
+      - name: Discovery receipt concurrent CAS and expiration
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/repository -run '^TestOpenAIDiscoveryProofCAS$' -count=1 -timeout=3m | tee "$RUNNER_TEMP/lossy-discovery-cas.jsonl"
+          python3 ../.github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/lossy-discovery-cas.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: lossy-protocol-tests-${{ env.EXPECTED_HEAD_SHA }}
-          path: ${{ runner.temp }}/lossy-protocol.jsonl
+          path: |
+            ${{ runner.temp }}/lossy-protocol.jsonl
+            ${{ runner.temp }}/lossy-discovery-cas.jsonl
 
   baseline:
     runs-on: ubuntu-latest
@@ -126,6 +145,23 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/lossy-baseline-evidence/projection.jsonl"
           python3 .github/scripts/assert-lossy-protocol.py RED "$result" "$RUNNER_TEMP/lossy-baseline-evidence/projection.jsonl" projection
+      - name: Discovery provenance RED on reviewed blocked 378b152
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          blocked=378b152b3c3d2cb177ada6780096cd3f8f5e7aae
+          git worktree add --detach "$RUNNER_TEMP/discovery-proof-red" "$blocked"
+          target=backend/internal/service/openai_lossy_protocol_test.go
+          git show "$EXPECTED_HEAD_SHA:$target" > "$RUNNER_TEMP/discovery-proof-red/$target"
+          test "$(git hash-object "$RUNNER_TEMP/discovery-proof-red/$target")" = "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")"
+          git -C "$RUNNER_TEMP/discovery-proof-red" diff --exit-code "$blocked" -- . ':!**/*_test.go'
+          printf 'baseline=%s candidate=%s oracle=%s blob=%s\n' "$blocked" "$EXPECTED_HEAD_SHA" "$target" "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")" > "$RUNNER_TEMP/lossy-baseline-evidence/discovery-source.txt"
+          set +e
+          (cd "$RUNNER_TEMP/discovery-proof-red/backend" && go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service -run '^TestOpenAILossyProtocolDiscoveryProofFences$/(forged_pair|call|call_metadata|result_metadata|schema_after_completion|metadata_after_completion|failed_receipt|pending_receipt)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/lossy-baseline-evidence/discovery-proof.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/lossy-baseline-evidence/discovery-proof.jsonl"
+          python3 .github/scripts/assert-lossy-protocol.py RED "$result" "$RUNNER_TEMP/lossy-baseline-evidence/discovery-proof.jsonl" discovery
       - name: Independent ownerless compaction guard counterexample
         if: ${{ !cancelled() }}
         run: |
