@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -69,7 +70,14 @@ func (s *OpenAIGatewayService) projectOpenAIAgentAccountReplay(ctx context.Conte
 		}
 	}
 	// Auto mode retains its existing transport-boundary body preservation.
-	return s.normalizeRequestTimezone(ctx, account, projected, transport), nil
+	projected = s.normalizeRequestTimezone(ctx, account, projected, transport)
+	// An opaque item's readable envelope is part of its protected identity,
+	// even when role=user makes it eligible for the general timezone builder.
+	// Refuse that projection; never authorize it by replacing the item proof.
+	if !slices.Equal(openAIAgentRecoveryItemDigests(source), openAIAgentRecoveryItemDigests(projected)) {
+		return nil, openAIAgentRecoveryRefusal(ctx, "input_integrity")
+	}
+	return projected, nil
 }
 
 // Match the existing OAuth stateless reasoning contract without its general

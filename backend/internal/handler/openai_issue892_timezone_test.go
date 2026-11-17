@@ -5,9 +5,13 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
 	coderws "github.com/coder/websocket"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -61,6 +66,7 @@ func TestIssue892HTTPManualTimezone(t *testing.T) {
 						accounts[i].Credentials = map[string]any{"api_key": []string{"fixture-ws-one", "fixture-ws-two"}[i], "access_token": []string{"fixture-ws-one", "fixture-ws-two"}[i], "base_url": srv.URL}
 						accounts[i].Extra = map[string]any{"openai_request_timezone": []string{"America/Los_Angeles", "Asia/Tokyo"}[i], "codex_fingerprint_mode": "off"}
 					}
+					accounts[1].Schedulable = false
 					newNode := func(disabled bool) *OpenAIGatewayHandler {
 						settings := service.NewSettingService(&issue842Settings{values: issue892Settings()}, cfg)
 						h := newOpenAIResponsesFailoverTestHandlerWithSettings(t, transport, repository.NewGatewayCache(clients()), settings, accounts...)
@@ -83,6 +89,7 @@ func TestIssue892HTTPManualTimezone(t *testing.T) {
 					selected, timezone := "Bearer fixture-ws-one", "America/Los_Angeles"
 					if owner == "other" {
 						accounts[0].Schedulable = false
+						accounts[1].Schedulable = true
 						selected, timezone = "Bearer fixture-ws-two", "Asia/Tokyo"
 					}
 					body, want := issue892History(t, stream, timezone)
@@ -209,6 +216,250 @@ func TestIssue892WSManualTimezone(t *testing.T) {
 						require.Equal(t, raw, issue805Owners(t, clients())[key])
 					}
 				})
+			}
+		}
+	}
+}
+
+type issue892LateFenceCache struct {
+	service.GatewayCache
+	issue715WSDeliveryCache
+	client *redis.Client
+	fence  string
+	reads  atomic.Int64
+}
+
+func (c *issue892LateFenceCache) GetOpenAIAgentRecovery(ctx context.Context, key string) (string, error) {
+	if c.reads.Add(1) == 2 {
+		value := "failed"
+		if c.fence == "pending" {
+			value = `pending:fixture-late892:[1,1,"` + strings.Repeat("a", 64) + `","` + strings.Repeat("b", 64) + `"]`
+		}
+		if err := c.client.Set(ctx, "openai_agent_owner:v1:"+key, value, time.Minute).Err(); err != nil {
+			return "", err
+		}
+	}
+	return c.issue715WSDeliveryCache.GetOpenAIAgentRecovery(ctx, key)
+}
+
+func TestIssue892OpaqueEnvironmentAdapters(t *testing.T) {
+	for _, kind := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
+		for _, mode := range []string{"http", service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeHTTPBridge} {
+			for _, scenario := range []string{"mismatch", "aligned", "pending", "failed"} {
+				t.Run(kind+"/"+mode+"/"+scenario, func(t *testing.T) {
+					clients := issue805Redis(t)
+					baseCache := repository.NewGatewayCache(clients())
+					var cache service.GatewayCache = baseCache
+					if scenario == "pending" || scenario == "failed" {
+						cache = &issue892LateFenceCache{GatewayCache: baseCache, issue715WSDeliveryCache: baseCache, client: clients(), fence: scenario}
+					}
+					u := &issue805Oracle{}
+					srv := u.server(t)
+					stream := mode != "http"
+					body, want := issue892History(t, stream, "America/Los_Angeles")
+					environment := strings.Replace(issue892EnvironmentForAdapter, "Asia/Singapore", "America/Los_Angeles", 1)
+					if scenario == "mismatch" {
+						environment = issue892EnvironmentForAdapter
+					}
+					var err error
+					for _, target := range []*string{&body, &want} {
+						*target, err = sjson.Set(*target, "input.0.role", "user")
+						require.NoError(t, err)
+						*target, err = sjson.Set(*target, "input.0.content.0.text", environment)
+						require.NoError(t, err)
+					}
+					if mode == "http" {
+						target, parseErr := url.Parse(srv.URL)
+						require.NoError(t, parseErr)
+						cfg := &config.Config{RunMode: config.RunModeSimple}
+						cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+						account := issue715AccountsOfType(kind)[0]
+						account.Credentials = map[string]any{"api_key": "fixture-ws-one", "access_token": "fixture-ws-one", "base_url": srv.URL}
+						account.Extra = map[string]any{"openai_request_timezone": "America/Los_Angeles", "codex_fingerprint_mode": "off"}
+						transport := &issue842Transport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
+						settings := service.NewSettingService(&issue842Settings{values: issue892Settings()}, cfg)
+						h := newOpenAIResponsesFailoverTestHandlerWithSettings(t, transport, cache, settings, account)
+						h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+						issue805Policy(t, h.cfg, true)
+						answer := issue758Request(t, h, body)
+						if scenario == "aligned" {
+							require.Equal(t, http.StatusOK, answer.Code, answer.Body.String())
+							issue758CompletedResponse(t, answer.Body.String(), false)
+						} else {
+							require.Equal(t, http.StatusConflict, answer.Code, answer.Body.String())
+							if scenario == "mismatch" {
+								require.Contains(t, answer.Body.String(), "encrypted_agent_recovery_wire_changed")
+							} else {
+								require.Contains(t, []string{"encrypted_agent_recovery_owner_conflict", "encrypted_agent_recovery_owner_unavailable", "encrypted_agent_recovery_delivery_pending"}, gjson.Get(answer.Body.String(), "error.code").String())
+							}
+						}
+					} else {
+						h := issue892WSNode(t, kind, mode, srv.URL, cache, true, false)
+						body, err = sjson.Set(body, "type", "response.create")
+						require.NoError(t, err)
+						issue715WSSend(t, h.clientConn, body)
+						if scenario == "aligned" {
+							require.Equal(t, "response.completed", gjson.GetBytes(issue715WSRead(t, h.clientConn), "type").String())
+						} else {
+							code := "encrypted_agent_recovery_wire_changed"
+							if scenario == "pending" {
+								code = "encrypted_agent_recovery_delivery_pending"
+							} else if scenario == "failed" {
+								code = "encrypted_agent_recovery_owner_unavailable"
+							}
+							issue805WSRefusal(t, h.clientConn, code)
+						}
+						issue600Finish(t, h, http.Header{"Session_id": {"fixture-ws715-session"}, "Thread-Id": {"fixture-ws715-thread"}})
+					}
+					u.mu.Lock()
+					defer u.mu.Unlock()
+					if scenario == "aligned" {
+						require.Len(t, u.frames, 1, "an intact first-seen opaque envelope reaches the selected adapter once")
+						require.JSONEq(t, gjson.Get(want, "input").Raw, gjson.GetBytes(u.frames[0], "input").Raw)
+						require.JSONEq(t, gjson.Get(body, "input.0").Raw, gjson.GetBytes(u.frames[0], "input.0").Raw)
+						require.Equal(t, "9007199254740993", gjson.GetBytes(u.frames[0], "input.1.sequence").Raw)
+						require.Len(t, issue805Owners(t, clients()), 1, "the new opaque output must complete transactional delivery")
+					} else {
+						require.Empty(t, u.frames, "changed opaque envelopes and new delivery fences must stop before physical send")
+					}
+				})
+			}
+		}
+	}
+}
+
+const issue892EnvironmentForAdapter = "<environment_context>\n<timezone>Asia/Singapore</timezone>\n</environment_context>"
+
+// The four scenario classes reproduce the reported matrix dimensions using
+// public synthetic inputs: two unknown opaque shapes, a completed same owner,
+// and an explicit HTTP 400 on two historical encrypted reasoning items.
+// Baseline: 40 successes, 8 raw 400s, 16 local timezone 409s. Candidate: the
+// same 8 raw 400s remain; the 16 local timezone refusals must reach upstream.
+func TestIssue892HTTP64SwitchMatrix(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		for _, beta := range []bool{false, true} {
+			for _, recovery400 := range []bool{false, true} {
+				for _, stream := range []bool{false, true} {
+					for _, scenario := range []string{"unknown_top", "unknown_part", "same", "reasoning400"} {
+						t.Run(fmt.Sprintf("optout=%t/beta=%t/recovery400=%t/stream=%t/%s", disabled, beta, recovery400, stream, scenario), func(t *testing.T) {
+							clients := issue805Redis(t)
+							var mu sync.Mutex
+							var bodies [][]byte
+							var identities []string
+							srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+								body, err := io.ReadAll(r.Body)
+								if err != nil {
+									t.Error(err)
+									return
+								}
+								mu.Lock()
+								bodies = append(bodies, body)
+								identities = append(identities, r.Header.Get("Authorization"))
+								n := len(bodies)
+								mu.Unlock()
+								w.Header().Set("Content-Type", "application/json")
+								if scenario == "reasoning400" && strings.Contains(string(body), "AAAA-fixture-1111") {
+									w.WriteHeader(http.StatusBadRequest)
+									_, _ = io.WriteString(w, `{"error":{"code":"invalid_encrypted_content","message":"The encrypted content could not be verified."}}`)
+									return
+								}
+								output := `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fixture matrix completed"}]}]`
+								if scenario == "same" && n == 1 {
+									output = "[" + issue715Agent + "]"
+								}
+								response := fmt.Sprintf(`{"id":"resp_matrix892_%d","status":"completed","error":null,"model":"gpt-5.1","output":%s,"usage":{"input_tokens":5,"output_tokens":3}}`, n, output)
+								if gjson.GetBytes(body, "stream").Bool() {
+									w.Header().Set("Content-Type", "text/event-stream")
+									_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":%s}\n\ndata: [DONE]\n\n", response)
+								} else {
+									_, _ = io.WriteString(w, response)
+								}
+							}))
+							defer srv.Close()
+							target, err := url.Parse(srv.URL)
+							require.NoError(t, err)
+							cfg := &config.Config{RunMode: config.RunModeSimple}
+							cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+							account := issue715Accounts()[0]
+							account.Credentials = map[string]any{"access_token": "fixture-matrix892", "base_url": srv.URL}
+							account.Extra = map[string]any{"openai_request_timezone": "America/Los_Angeles", "codex_fingerprint_mode": "off"}
+							newNode := func(optout, omission bool) *OpenAIGatewayHandler {
+								values := issue892Settings()
+								values[service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled] = fmt.Sprint(omission)
+								values[service.SettingKeyOpenAI400OmitEncryptedHistoryEnabled] = fmt.Sprint(recovery400)
+								settings := service.NewSettingService(&issue842Settings{beta: omission, values: values}, cfg)
+								transport := &issue842Transport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
+								h := newOpenAIResponsesFailoverTestHandlerWithSettings(t, transport, repository.NewGatewayCache(clients()), settings, account)
+								h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+								issue805Policy(t, h.cfg, optout)
+								return h
+							}
+							offset := 0
+							if scenario == "same" {
+								first := issue758Request(t, newNode(false, false), strings.Replace(issue715Body(false, stream), issue715Agent+",", "", 1))
+								require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+								issue758CompletedResponse(t, first.Body.String(), stream)
+								offset = 1
+							}
+							original := issue805Owners(t, clients())
+							require.Len(t, original, offset)
+							body, want := issue892History(t, stream, "America/Los_Angeles")
+							if scenario == "unknown_top" {
+								for _, text := range []*string{&body, &want} {
+									*text, err = sjson.SetRaw(*text, "input.0", `{"type":"agent_message","author":"/fixture","recipient":"/fixture/worker","encrypted_content":"fixture-matrix892-top"}`)
+									require.NoError(t, err)
+								}
+							}
+							if scenario == "reasoning400" {
+								input := `[{"type":"reasoning","encrypted_content":"AAAA-fixture-1111","summary":[{"type":"summary_text","text":"visible reasoning one"}]},{"type":"reasoning","encrypted_content":"BBBB-fixture-2222","summary":[{"type":"summary_text","text":"visible reasoning two"}]},{"type":"function_call","name":"inspect","call_id":"call_fixture","arguments":"{\"sequence\":9007199254740993}"},{"type":"function_call_output","call_id":"call_fixture","output":"already completed"},{"role":"user","content":"Explain recorded result","sequence":9007199254740993}]`
+								body = fmt.Sprintf(`{"model":"gpt-5.1","store":false,"stream":%t,"input":%s}`, stream, input)
+								body, err = sjson.Set(body, "input.-1", map[string]any{"role": "user", "content": issue892EnvironmentForAdapter})
+								require.NoError(t, err)
+								want, err = sjson.Set(body, "input.5.content", strings.Replace(issue892EnvironmentForAdapter, "Asia/Singapore", "America/Los_Angeles", 1))
+								require.NoError(t, err)
+							}
+							answer := issue758Request(t, newNode(disabled, beta), body)
+							status, sends := http.StatusOK, 1
+							if scenario == "reasoning400" {
+								if recovery400 {
+									sends = 2
+								} else {
+									status = http.StatusBadRequest
+								}
+							}
+							require.Equal(t, status, answer.Code, "Issue892 64-case matrix must preserve switch semantics: %s", answer.Body.String())
+							if status == http.StatusOK {
+								issue758CompletedResponse(t, answer.Body.String(), stream)
+							}
+							mu.Lock()
+							defer mu.Unlock()
+							require.Len(t, bodies, offset+sends)
+							for _, id := range identities {
+								require.Equal(t, "Bearer fixture-matrix892", id)
+							}
+							if scenario == "reasoning400" {
+								for _, payload := range bodies[offset:] {
+									for _, path := range []string{"input.2", "input.3", "input.4", "input.5"} {
+										require.JSONEq(t, gjson.Get(want, path).Raw, gjson.GetBytes(payload, path).Raw)
+									}
+									require.Equal(t, "9007199254740993", gjson.GetBytes(payload, "input.4.sequence").Raw)
+								}
+								if recovery400 {
+									require.NotContains(t, string(bodies[offset+1]), "AAAA-fixture-1111")
+									require.NotContains(t, string(bodies[offset+1]), "BBBB-fixture-2222")
+								}
+							} else if beta && scenario != "same" {
+								require.NotContains(t, string(bodies[offset]), "fixture-task-reference-715")
+								require.NotContains(t, string(bodies[offset]), "fixture-matrix892-top")
+								require.Equal(t, "9007199254740993", gjson.GetBytes(bodies[offset], "input.1.sequence").Raw)
+							} else {
+								require.JSONEq(t, gjson.Get(want, "input").Raw, gjson.GetBytes(bodies[offset], "input").Raw)
+								require.Equal(t, "9007199254740993", gjson.GetBytes(bodies[offset], "input.1.sequence").Raw)
+							}
+							require.Equal(t, original, issue805Owners(t, clients()), "matrix requests cannot republish consumed ownership")
+						})
+					}
+				}
 			}
 		}
 	}

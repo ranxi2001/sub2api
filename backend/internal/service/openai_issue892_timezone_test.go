@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -189,6 +190,159 @@ func TestIssue892TimezonePolicyControlsProjection(t *testing.T) {
 	}
 }
 
+func TestIssue892OpaqueEnvironmentProjectionRefused(t *testing.T) {
+	for _, kind := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		for _, transport := range []string{"http", "ws"} {
+			t.Run(kind+"/"+transport, func(t *testing.T) {
+				svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: timezoneEnabledSettings()}
+				svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+				manager, c, account := issue715WSManager(t, svc, context.Background())
+				defer manager.abort()
+				account.Type, account.Extra = kind, map[string]any{openAIRequestTimezoneExtraKey: "America/Los_Angeles"}
+				source, err := sjson.SetBytes(issue892FrozenSource(t), "input.0.role", "user")
+				require.NoError(t, err)
+				source, err = sjson.SetBytes(source, "input.0.content", []any{map[string]any{"type": "input_text", "text": issue892Environment}})
+				require.NoError(t, err)
+				original := append([]byte(nil), source...)
+				ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, source, "fixture-session", "gpt-6-astra")
+				if transport == "http" {
+					_, _, err = issue892PrepareHTTP(t, svc, ctx, account, source)
+				} else {
+					_, err = issue892PrepareWS(t, manager, account, source)
+				}
+				var refusal *OpenAIAgentRecoveryError
+				require.ErrorAs(t, err, &refusal, "Issue895 F1 projection must refuse a changed opaque envelope")
+				require.Equal(t, "wire_changed", refusal.Reason)
+				require.Equal(t, original, source)
+			})
+		}
+	}
+}
+
+func TestIssue892ActualSendOpaqueIntegrityAndDelivery(t *testing.T) {
+	for _, transport := range []string{"http", "ws"} {
+		for _, mutation := range []string{"intact", "envelope", "drop"} {
+			t.Run(transport+"/"+mutation, func(t *testing.T) {
+				svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: timezoneEnabledSettings()}
+				svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+				manager, c, account := issue715WSManager(t, svc, context.Background())
+				defer manager.abort()
+				account.Extra = map[string]any{openAIRequestTimezoneExtraKey: "America/Los_Angeles"}
+				source := issue892FrozenSource(t)
+				ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, source, "fixture-session", "gpt-6-astra")
+				var payload []byte
+				var err error
+				if transport == "http" {
+					ctx, payload, err = issue892PrepareHTTP(t, svc, ctx, account, source)
+				} else {
+					payload, err = issue892PrepareWS(t, manager, account, source)
+				}
+				require.NoError(t, err)
+				switch mutation {
+				case "envelope":
+					payload, err = sjson.SetBytes(payload, "input.0.content", "changed opaque envelope")
+				case "drop":
+					payload, err = sjson.DeleteBytes(payload, "input.0")
+				}
+				require.NoError(t, err)
+				// Model the former permissive input projection. The independent
+				// original item proof must still reject it at the actual send gate.
+				// No item digest is replaced, including for an unknown owner.
+				var finish func(bool)
+				if transport == "http" {
+					openAIAgentRecoveryFromContext(ctx).nativeInputDigest = openAIAgentRecoveryInputDigest(payload)
+					req, requestErr := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewReader(payload))
+					require.NoError(t, requestErr)
+					finish, err = svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
+					defer finish(false)
+				} else {
+					manager.protected.inputDigest = openAIAgentRecoveryInputDigest(payload)
+					err = manager.beginSocket(account, source, payload, "wss://native.example/v1/responses", http.Header{"Authorization": {"Bearer fixture"}}, "ctx_pool")
+				}
+				if mutation != "intact" {
+					var refusal *OpenAIAgentRecoveryError
+					require.ErrorAs(t, err, &refusal, "Issue895 F1 actual send must reject a changed opaque item even if input projection matched")
+					require.Equal(t, "wire_changed", refusal.Reason)
+					return
+				}
+				require.NoError(t, err)
+				request := openAIAgentRecoveryFromContext(ctx)
+				if transport == "ws" {
+					request = manager.request
+				}
+				require.Nil(t, request.owner, "exercise a first-seen opaque item")
+				require.NotNil(t, request.delivery, "an intact unknown owner must retain its delivery fence")
+				output := []byte(`{"type":"response.completed","response":{"id":"resp_fixture892_delivery","status":"completed","output":[{"type":"agent_message","encrypted_content":"fixture-new-output892"}]}}`)
+				assertReserved := func() error {
+					require.Len(t, request.delivery.keys, 1, "reserve the new opaque output before client exposure")
+					for key := range request.delivery.keys {
+						svc.agentMessageRecovery.mu.Lock()
+						binding := svc.agentMessageRecovery.bindings[key]
+						svc.agentMessageRecovery.mu.Unlock()
+						require.NotEmpty(t, binding.pending, "client write must observe a pending reservation")
+					}
+					return nil
+				}
+				if transport == "http" {
+					c.Request = c.Request.WithContext(ctx)
+					require.NoError(t, observeOpenAIAgentRecoveryOutput(c, output, true))
+					require.NoError(t, assertReserved())
+					finish(true)
+				} else {
+					require.NoError(t, manager.write(output, assertReserved))
+				}
+			})
+		}
+	}
+}
+
+func TestIssue892PreparedUnknownOwnerRechecksFences(t *testing.T) {
+	for _, transport := range []string{"http", "ws"} {
+		for _, fence := range []string{"pending", "failed"} {
+			t.Run(transport+"/"+fence, func(t *testing.T) {
+				svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: timezoneEnabledSettings()}
+				svc.cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+				manager, c, account := issue715WSManager(t, svc, context.Background())
+				defer manager.abort()
+				account.Extra = map[string]any{openAIRequestTimezoneExtraKey: "America/Los_Angeles"}
+				source := issue892FrozenSource(t)
+				ctx := svc.WithOpenAIAgentMessageRecovery(context.Background(), c, source, "fixture-session", "gpt-6-astra")
+				var payload []byte
+				var err error
+				if transport == "http" {
+					ctx, payload, err = issue892PrepareHTTP(t, svc, ctx, account, source)
+				} else {
+					payload, err = issue892PrepareWS(t, manager, account, source)
+				}
+				require.NoError(t, err)
+				request := openAIAgentRecoveryFromContext(ctx)
+				require.Nil(t, request.owner)
+				require.Len(t, request.keys, 1)
+				late := openAIAgentRecoveryBinding{accountID: account.ID, expiresAt: time.Now().Add(time.Minute), failed: fence == "failed"}
+				if fence == "pending" {
+					late.pending = "fixture-late-owner892"
+				}
+				svc.agentMessageRecovery.mu.Lock()
+				svc.agentMessageRecovery.bindings = map[[32]byte]openAIAgentRecoveryBinding{request.keys[0]: late}
+				svc.agentMessageRecovery.mu.Unlock()
+				if transport == "http" {
+					req, requestErr := http.NewRequest(http.MethodPost, "https://native.example/v1/responses", bytes.NewReader(payload))
+					require.NoError(t, requestErr)
+					finish, attemptErr := svc.prepareOpenAIAgentRecoveryAttempt(ctx, account, req)
+					defer finish(false)
+					err = attemptErr
+				} else {
+					err = manager.beginSocket(account, source, payload, "wss://native.example/v1/responses", http.Header{"Authorization": {"Bearer fixture"}}, "ctx_pool")
+				}
+				var refusal *OpenAIAgentRecoveryError
+				require.ErrorAs(t, err, &refusal, "a fence appearing after preparation must prevent the actual send")
+				require.Contains(t, []string{"owner_conflict", "owner_unavailable", "delivery_pending"}, refusal.Reason)
+				require.Nil(t, request.delivery)
+			})
+		}
+	}
+}
+
 func TestIssue892ManualTimezone400Recovery(t *testing.T) {
 	for _, mode := range []string{"enabled", "disabled", "ordinary400", "SSE"} {
 		t.Run(mode, func(t *testing.T) {
@@ -229,9 +383,14 @@ func TestIssue892ManualTimezone400Recovery(t *testing.T) {
 				require.Equal(t, upstream.reqs[0].URL.String(), upstream.reqs[1].URL.String())
 				require.Equal(t, upstream.reqs[0].Header.Get("Authorization"), upstream.reqs[1].Header.Get("Authorization"))
 				require.NotContains(t, string(upstream.bodies[1]), "AAAA-fixture-1111")
-				_, replayed, prepareErr := issue892PrepareHTTP(t, svc, c.Request.Context(), account, upstream.bodies[1])
+				retryCtx := upstream.reqs[1].Context()
+				require.True(t, openAIAgentRecoveryFromContext(retryCtx).omitted400History)
+				_, replayed, prepareErr := issue892PrepareHTTP(t, svc, retryCtx, account, upstream.bodies[1])
 				require.NoError(t, prepareErr)
 				require.Equal(t, upstream.bodies[1], replayed, "an authorized 400 omission must not restore the original ciphertext")
+				require.Same(t, openAIAgentRecoveryFromContext(ctx), openAIAgentRecoveryFromContext(c.Request.Context()), "Forward restores the original recovery after returning")
+				_, _, prepareErr = issue892PrepareHTTP(t, svc, c.Request.Context(), account, upstream.bodies[1])
+				require.Error(t, prepareErr, "the original context cannot authorize a body with omitted ciphertext")
 			} else {
 				require.Error(t, err)
 				require.Equal(t, 1, upstream.callCount, "400 recovery must not expand to disabled, arbitrary 400 or SSE failures")

@@ -72,10 +72,16 @@ jobs:
           import json, sys
           events = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
           passed = {(e.get('Package', '').rsplit('/', 1)[-1], e.get('Test')) for e in events if e.get('Action') == 'pass'}
-          for name in ('FrozenAccountTimezoneProjection', 'AccountReselectionUsesOriginalSource', 'TimezonePolicyControlsProjection', 'ManualTimezone400Recovery'):
+          for name in ('FrozenAccountTimezoneProjection', 'AccountReselectionUsesOriginalSource', 'TimezonePolicyControlsProjection', 'ManualTimezone400Recovery', 'OpaqueEnvironmentProjectionRefused', 'ActualSendOpaqueIntegrityAndDelivery', 'PreparedUnknownOwnerRechecksFences'):
               assert ('service', 'TestIssue892' + name) in passed, name
-          for name in ('HTTPManualTimezone', 'WSManualTimezone'):
+          for name in ('HTTPManualTimezone', 'WSManualTimezone', 'OpaqueEnvironmentAdapters', 'HTTP64SwitchMatrix'):
               assert ('handler', 'TestIssue892' + name) in passed, name
+          import itertools
+          for optout, beta, recovery, stream, scenario in itertools.product(('false', 'true'), ('false', 'true'), ('false', 'true'), ('false', 'true'), ('unknown_top', 'unknown_part', 'same', 'reasoning400')):
+              name = f'TestIssue892HTTP64SwitchMatrix/optout={optout}/beta={beta}/recovery400={recovery}/stream={stream}/{scenario}'
+              assert ('handler', name) in passed, name
+          for kind, mode, scenario in itertools.product(('oauth', 'apikey'), ('http', 'ctx_pool', 'passthrough', 'http_bridge'), ('mismatch', 'aligned', 'pending', 'failed')):
+              assert ('handler', f'TestIssue892OpaqueEnvironmentAdapters/{kind}/{mode}/{scenario}') in passed
           PY
           test -z "$(git status --porcelain)"
       - name: Frozen production behavioral RED with identical new tests
@@ -100,7 +106,7 @@ jobs:
           git diff --exit-code
           git status --porcelain > "$RUNNER_TEMP/issue892/red-status.txt"
           set +e
-          (cd backend && go test -mod=readonly -json -tags=unit ./internal/handler -run '^TestIssue892(HTTP|WS)ManualTimezone$' -count=1 -timeout=6m) > "$RUNNER_TEMP/issue892/red.jsonl" 2>&1
+          (cd backend && go test -mod=readonly -json -tags=unit ./internal/handler -run '^TestIssue892((HTTP|WS)ManualTimezone|HTTP64SwitchMatrix)$' -count=1 -timeout=6m) > "$RUNNER_TEMP/issue892/red.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue892/red.jsonl"
@@ -119,8 +125,56 @@ jobs:
               require_red(f'TestIssue892HTTPManualTimezone/{kind}/stream={stream}/owner={owner}', 'Issue892 manual timezone full history must reach selected account once')
           for kind, mode, owner in itertools.product(('oauth', 'apikey'), ('ctx_pool', 'passthrough', 'http_bridge'), ('unknown', 'same', 'other')):
               require_red(f'TestIssue892WSManualTimezone/{kind}/{mode}/owner={owner}', 'Issue892 WS manual timezone full history must reach selected account once', websocket=True)
+          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
+          corrected = 0
+          for optout, beta, recovery, stream, scenario in itertools.product(('false', 'true'), ('false', 'true'), ('false', 'true'), ('false', 'true'), ('unknown_top', 'unknown_part', 'same', 'reasoning400')):
+              name = f'TestIssue892HTTP64SwitchMatrix/optout={optout}/beta={beta}/recovery400={recovery}/stream={stream}/{scenario}'
+              if optout == 'true' and (scenario == 'same' or (scenario.startswith('unknown_') and beta == 'false')):
+                  require_red(name, 'Issue892 64-case matrix must preserve switch semantics')
+                  corrected += 1
+              else:
+                  assert name in passed, f'matrix control failed on baseline: {name}'
+          assert corrected == 16
           PY
           git diff --exit-code
+      - name: Review F1 behavioral RED at the independently reviewed head
+        shell: bash
+        run: |
+          set -euo pipefail
+          reviewed=0fd8d600532bd759b2c33526db4773c615e1bc58
+          git worktree add --detach "$RUNNER_TEMP/issue895-review-red" "$reviewed"
+          cd "$RUNNER_TEMP/issue895-review-red"
+          test "$(git rev-parse HEAD)" = "$reviewed"
+          target=backend/internal/service/openai_issue892_timezone_test.go
+          git show "$EXPECTED_HEAD_SHA:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue892/review-red-source.txt"
+          git diff --exit-code -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          set +e
+          (cd backend && go test -mod=readonly -json -tags=unit ./internal/service -run '^TestIssue892(OpaqueEnvironmentProjectionRefused|ActualSendOpaqueIntegrityAndDelivery|PreparedUnknownOwnerRechecksFences|ManualTimezone400Recovery)$' -count=1 -timeout=2m) > "$RUNNER_TEMP/issue892/review-red.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue892/review-red.jsonl"
+          test "$result" -ne 0
+          if grep -Eiq 'build failed|no tests to run|undefined:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|"Action":"skip"|context deadline exceeded' "$RUNNER_TEMP/issue892/review-red.jsonl"; then exit 1; fi
+          python3 - "$RUNNER_TEMP/issue892/review-red.jsonl" <<'PY'
+          import itertools, json, sys
+          events = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          failed = {e.get('Test') for e in events if e.get('Action') == 'fail'}
+          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
+          for kind, mode in itertools.product(('oauth', 'apikey'), ('http', 'ws')):
+              name = f'TestIssue892OpaqueEnvironmentProjectionRefused/{kind}/{mode}'
+              assert name in failed, name
+              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
+              assert 'Issue895 F1 projection must refuse a changed opaque envelope' in output, name
+          for mode, mutation in itertools.product(('http', 'ws'), ('envelope', 'drop')):
+              name = f'TestIssue892ActualSendOpaqueIntegrityAndDelivery/{mode}/{mutation}'
+              assert name in failed, name
+              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
+              assert 'Issue895 F1 actual send must reject a changed opaque item' in output, name
+          for name in ('PreparedUnknownOwnerRechecksFences', 'ManualTimezone400Recovery'):
+              assert 'TestIssue892' + name in passed, name
+          PY
       - uses: actions/upload-artifact@v7
         if: always()
         with:

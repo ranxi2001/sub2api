@@ -516,14 +516,14 @@ func (s *OpenAIGatewayService) prepareOpenAIAgentRecoveryAttempt(ctx context.Con
 	}
 	items := openAIAgentRecoveryItemDigests(body)
 	if len(items) != len(request.items) {
-		if request.owner != nil {
+		if request.owner != nil || request.preservesHistory() {
 			return noop, openAIAgentRecoveryError("wire_changed")
 		}
 		return noop, nil
 	}
 	for i := range items {
 		if items[i] != request.items[i] {
-			if request.owner != nil {
+			if request.owner != nil || request.preservesHistory() {
 				return noop, openAIAgentRecoveryError("wire_changed")
 			}
 			return noop, nil
