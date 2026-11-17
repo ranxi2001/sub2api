@@ -23,6 +23,9 @@ export async function list(
     group_id?: number | string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
+    start_date?: string
+    end_date?: string
+    timezone?: string
   },
   options?: {
     signal?: AbortSignal
