@@ -3,15 +3,15 @@ package repository
 import (
 	"context"
 	"errors"
-	"github.com/Wei-Shaw/sub2api/internal/regional/control"
 	"net"
 	"net/http"
+	"slices"
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/regional/control"
 	"github.com/Wei-Shaw/sub2api/internal/regional/slots"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/lib/pq"
 )
 
 // regionalConcurrencyCache keeps admission, FIFO, and Live ownership in SQL.
@@ -208,37 +208,24 @@ func (c *regionalConcurrencyCache) GetUsersLoadBatch(ctx context.Context, users 
 	if len(users) == 0 {
 		return map[int64]*service.UserLoadInfo{}, nil
 	}
-	ids := make([]int64, len(users))
-	for i, u := range users {
-		ids[i] = u.ID
-	}
-	// Unlimited users have statistics in Redis, not budget slots. Their durable
-	// Live owner is the existing handoff row, including across account migration.
-	// Keep Limited=false in liveMembers: statistics must not acquire authority.
-	rows, err := c.database().QueryContext(ctx, `SELECT (identity->>'UserID')::bigint, identity->>'UserRequestID'
-FROM regional_live_handoffs WHERE region_id=$1 AND state='active'
-AND (identity->>'UserMax')::int=0 AND (identity->>'UserID')::bigint=ANY($2::bigint[])`, c.region(), pq.Array(ids))
+	before, err := c.userLiveLoadSnapshot(ctx, users)
 	if err != nil {
 		return nil, err
 	}
 	liveCounts := make(map[int64]int)
 	excluded := make(map[int64][]string)
-	for rows.Next() {
-		var id int64
-		var source string
-		if err = rows.Scan(&id, &source); err != nil {
-			_ = rows.Close()
-			return nil, err
+	for _, row := range before {
+		if row.State == "active" {
+			if !row.Fresh {
+				return nil, errors.New("regional Live user statistics freshness unavailable")
+			}
+			liveCounts[row.UserID]++
 		}
-		liveCounts[id]++
-		if source != "" {
-			excluded[id] = append(excluded[id], source)
+		// Closed/aborted handoffs also exclude their retired source, including
+		// when Redis cleanup failed or is still queued behind the SQL commit.
+		if row.Source != "" {
+			excluded[row.UserID] = append(excluded[row.UserID], row.Source)
 		}
-	}
-	err = rows.Err()
-	_ = rows.Close()
-	if err != nil {
-		return nil, err
 	}
 	var out map[int64]*service.UserLoadInfo
 	if len(excluded) > 0 {
@@ -268,6 +255,15 @@ AND (identity->>'UserMax')::int=0 AND (identity->>'UserID')::bigint=ANY($2::bigi
 		if u.MaxConcurrency > 0 {
 			out[u.ID].LoadRate = (n + out[u.ID].WaitingCount) * 100 / u.MaxConcurrency
 		}
+	}
+	// Detect inserts, migration, refresh, close and abort across Redis sampling.
+	// A changed/expired proof is unknown, never an authoritative zero/double count.
+	after, err := c.userLiveLoadSnapshot(ctx, users)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Equal(before, after) {
+		return nil, errors.New("regional Live user statistics changed during sampling")
 	}
 	return out, nil
 }

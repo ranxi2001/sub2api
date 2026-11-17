@@ -30,10 +30,8 @@ jobs:
     timeout-minutes: 45
     env:
       NODE_OPTIONS: --max-old-space-size=6144
-      USER_LIVE_LOAD_CONTRACT_DIR: ${{ runner.temp }}/user-live-evidence/contracts
       USER_LIVE_LOAD_BASE: 321f11c1a4d23302961c223ac030fd09e3f9e6e8
       USER_LIVE_LOAD_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-      USER_LIVE_LOAD_EVIDENCE: ${{ runner.temp }}/user-live-evidence
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,10 +40,12 @@ jobs:
           persist-credentials: false
       - name: Freeze source identities and retain untouched before tree
         run: |
-          mkdir -p "$USER_LIVE_LOAD_EVIDENCE"
+          review_evidence="$RUNNER_TEMP/user-live-evidence"
+          mkdir -p "$review_evidence"
+          printf 'USER_LIVE_LOAD_EVIDENCE=%s\nUSER_LIVE_LOAD_CONTRACT_DIR=%s/contracts\n' "$review_evidence" "$review_evidence" >> "$GITHUB_ENV"
           test "$(git rev-parse HEAD)" = "$USER_LIVE_LOAD_HEAD"
-          git rev-parse HEAD > "$USER_LIVE_LOAD_EVIDENCE/head.txt"
-          git rev-parse "$USER_LIVE_LOAD_BASE" > "$USER_LIVE_LOAD_EVIDENCE/base.txt"
+          git rev-parse HEAD > "$review_evidence/head.txt"
+          git rev-parse "$USER_LIVE_LOAD_BASE" > "$review_evidence/base.txt"
           git worktree add --detach "$RUNNER_TEMP/user-live-before" "$USER_LIVE_LOAD_BASE"
       - uses: actions/setup-go@v6
         with:

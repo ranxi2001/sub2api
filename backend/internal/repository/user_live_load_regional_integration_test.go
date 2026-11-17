@@ -145,7 +145,8 @@ func TestUserLiveLoadRegionalFailureCancellationAndFailOpen(t *testing.T) {
 			require.ErrorIs(t, err, service.ErrLiveLeaseTransferFenced)
 			// A failed tracking write must not prevent SQL Live admission, and a
 			// failed read must report unavailable rather than manufacture zero.
-			base := c.ConcurrencyCache.(*concurrencyCache)
+			base, baseOK := c.ConcurrencyCache.(*concurrencyCache)
+			require.True(t, baseOK)
 			require.NoError(t, base.rdb.Close())
 			untracked, err := svc.AcquireUserSlot(ctx, id, 0)
 			require.NoError(t, err)

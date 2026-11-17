@@ -1755,7 +1755,7 @@ func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users
 			getCmd:         pipe.Get(ctx, waitKey),
 		}
 		if sources := excluded[u.ID]; len(sources) > 0 {
-			args := make([]interface{}, 0, len(sources))
+			args := make([]any, 0, len(sources))
 			for _, source := range sources {
 				args = append(args, source)
 			}

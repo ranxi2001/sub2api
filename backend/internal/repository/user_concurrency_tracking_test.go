@@ -73,7 +73,8 @@ func TestUserLiveLoadRedisExcludesOnlyHeldSources(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	cache := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	cache, ok := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	require.True(t, ok)
 	ctx := context.Background()
 	for _, source := range []string{"ordinary", "transferred"} {
 		require.NoError(t, cache.TrackUserSlot(ctx, 42, source))
