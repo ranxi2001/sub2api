@@ -176,6 +176,7 @@ func newOpenAIWSLocalAdmissionCloseError(reason string) error {
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 	var recovery *service.OpenAIAgentRecoveryError
 	return err != nil &&
+		!errors.Is(err, service.ErrOpenAIWSUnsupportedWarmup) &&
 		!openAIWSIngressEndedByClient(err) &&
 		!errors.As(err, &recovery) &&
 		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
