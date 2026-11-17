@@ -68,7 +68,8 @@ jobs:
       SUB2API_UPGRADE_TEST_POSTGRES_URL: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
       HARVEST_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
       SUB2API_EXPERIMENT_TEST_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
-      SCOPED_ADMIN_TEST_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
+      # These fixtures append a per-test search_path using lib/pq keyword syntax.
+      SCOPED_ADMIN_TEST_DSN: 'host=127.0.0.1 port=15432 user=fixture password=fixture dbname=sub2api_test sslmode=disable'
       TRAFFIC_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
       MATURE_UPGRADE_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
       MATURE_PRODUCTION_MIGRATIONS: '${{ github.workspace }}/mature-baseline/backend/migrations'
