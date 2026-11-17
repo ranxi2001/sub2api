@@ -4,7 +4,9 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
@@ -21,15 +23,26 @@ type userGroupDeniedModelsFixture struct {
 
 func newUserGroupDeniedModelsFixture(t *testing.T) *userGroupDeniedModelsFixture {
 	t.Helper()
-	tx := testEntTx(t)
-	client := tx.Client()
-	group := mustCreateGroup(t, client, &service.Group{Name: "denied-models-group"})
-	userA := mustCreateUser(t, client, &service.User{Email: "denied-a@example.com"})
-	userB := mustCreateUser(t, client, &service.User{Email: "denied-b@example.com"})
+	// Rate/RPM synchronization owns a real SQL transaction. Use the public
+	// constructor and committed, uniquely named rows, then clean up only those
+	// rows; an outer ent transaction cannot stand in for the repository's DB.
+	client := testEntClient(t)
+	suffix := time.Now().UnixNano()
+	group := mustCreateGroup(t, client, &service.Group{Name: fmt.Sprintf("denied-models-%d", suffix)})
+	userA := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("denied-a-%d@example.invalid", suffix)})
+	userB := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("denied-b-%d@example.invalid", suffix)})
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, err := integrationDB.ExecContext(ctx, "DELETE FROM user_group_rate_multipliers WHERE group_id=$1", group.ID)
+		require.NoError(t, err)
+		require.NoError(t, client.Group.DeleteOneID(group.ID).Exec(ctx))
+		require.NoError(t, client.User.DeleteOneID(userA.ID).Exec(ctx))
+		require.NoError(t, client.User.DeleteOneID(userB.ID).Exec(ctx))
+	})
 	return &userGroupDeniedModelsFixture{
 		ctx:     context.Background(),
-		repo:    &userGroupRateRepository{sql: tx},
-		tx:      tx,
+		repo:    NewUserGroupRateRepository(integrationDB).(*userGroupRateRepository),
+		tx:      integrationDB,
 		groupID: group.ID,
 		userA:   userA.ID,
 		userB:   userB.ID,
