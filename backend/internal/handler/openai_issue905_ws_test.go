@@ -244,10 +244,14 @@ func runIssue905WSFollowup(t *testing.T, outcome string, pointer bool, status co
 		// error, close_reason and all relay trace fields, not just Ops bodies.
 		require.NotContains(t, logs, "fixture-private-close-canary", "ISSUE906_PRIVATE_CLOSE_REASON_LOGGED")
 		require.Contains(t, logs, "relay_trace")
-		require.Contains(t, logs, "stage=read_upstream_failed")
 		if outcome == "completed" || outcome == "completed_normal" {
+			require.Contains(t, logs, "relay_completed")
+			require.Contains(t, logs, "terminal_event=response.completed")
+			require.Contains(t, logs, `"msg":"openai.websocket_ingress_closed"`)
 			require.NotContains(t, logs, "relay_failed")
 			require.NotContains(t, logs, "openai.websocket_proxy_failed")
+		} else {
+			require.Contains(t, logs, "stage=read_upstream_fail direction=upstream_to_client")
 		}
 		if outcome == "close_only" || outcome == "unknown_close" {
 			require.Contains(t, logs, "relay_failed")

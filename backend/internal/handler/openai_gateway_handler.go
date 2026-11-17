@@ -4406,6 +4406,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), false, nil, err)
 			}
 			closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
+			var upstreamClose coderws.CloseError
+			if errors.As(err, &upstreamClose) {
+				closeReason = openaiwsv2.CloseReasonForLog(upstreamClose.Reason)
+			}
 			proxyFailedFields := []zap.Field{
 				zap.Int64("account_id", account.ID),
 				zap.String("error", openaiwsv2.ErrorStringForLog(err)),
@@ -5845,7 +5849,9 @@ func summarizeWSCloseErrorForLog(err error) (string, string) {
 	closeReason := "-"
 	var closeErr coderws.CloseError
 	if errors.As(err, &closeErr) {
-		closeReason = openaiwsv2.CloseReasonForLog(closeErr.Reason)
+		if reason := strings.TrimSpace(closeErr.Reason); reason != "" {
+			closeReason = reason
+		}
 	}
 	return closeStatus, closeReason
 }
