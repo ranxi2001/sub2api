@@ -251,7 +251,7 @@ func TestIssue892OpaqueEnvironmentAdapters(t *testing.T) {
 					baseCache := repository.NewGatewayCache(clients())
 					var cache service.GatewayCache = baseCache
 					if scenario == "pending" || scenario == "failed" {
-						cache = &issue892LateFenceCache{GatewayCache: baseCache, issue715WSDeliveryCache: baseCache, client: clients(), fence: scenario}
+						cache = &issue892LateFenceCache{GatewayCache: baseCache, issue715WSDeliveryCache: baseCache.(issue715WSDeliveryCache), client: clients(), fence: scenario}
 					}
 					u := &issue805Oracle{}
 					srv := u.server(t)
@@ -456,7 +456,15 @@ func TestIssue892HTTP64SwitchMatrix(t *testing.T) {
 								require.JSONEq(t, gjson.Get(want, "input").Raw, gjson.GetBytes(bodies[offset], "input").Raw)
 								require.Equal(t, "9007199254740993", gjson.GetBytes(bodies[offset], "input.1.sequence").Raw)
 							}
-							require.Equal(t, original, issue805Owners(t, clients()), "matrix requests cannot republish consumed ownership")
+							owners := issue805Owners(t, clients())
+							if !disabled && !beta && strings.HasPrefix(scenario, "unknown_") {
+								require.Len(t, owners, 1, "strict mode retains its existing successful consumption learning")
+								for _, raw := range owners {
+									require.True(t, issue805CompletedOwner(raw, 1))
+								}
+							} else {
+								require.Equal(t, original, owners, "opt-out and omission cannot republish consumed ownership")
+							}
 						})
 					}
 				}

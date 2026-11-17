@@ -62,7 +62,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/issue892"
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue892/candidate.txt"
           bash -n .github/scripts/prepare-ws-owner-red-fixtures.sh
-          gofmt -d backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_issue892_timezone_test.go backend/internal/handler/openai_issue892_timezone_test.go > "$RUNNER_TEMP/issue892/format.patch"
+          gofmt -d backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_issue892_timezone_test.go backend/internal/handler/openai_issue892_timezone_test.go backend/internal/handler/openai_issue842_boundaries_test.go > "$RUNNER_TEMP/issue892/format.patch"
           cat "$RUNNER_TEMP/issue892/format.patch"
           test ! -s "$RUNNER_TEMP/issue892/format.patch"
           cd backend
