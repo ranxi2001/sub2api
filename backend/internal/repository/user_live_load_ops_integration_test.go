@@ -1,6 +1,6 @@
 //go:build integration
 
-package repository
+package repository_test
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 
 	adminhandler "github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -48,8 +49,8 @@ func TestUserLiveLoadRegionalOpsHandlerNeverPublishesUnknownAsIdle(t *testing.T)
 			t.Run(fmt.Sprintf("local=%t/%s", local, mode), func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				c := userLiveLoadRegionalCache(t, local)
-				r, slot := userLiveLoadUnlimitedRequest(t, c)
+				c := repository.NewUserLiveLoadTestCache(t, local)
+				r, slot := repository.NewUserLiveLoadTestRequest(t, c)
 				defer slot.ReleaseFunc()
 				other, err := service.NewConcurrencyService(c).AcquireUserSlot(ctx, r.UserID+1, 0)
 				require.NoError(t, err)
@@ -60,11 +61,11 @@ func TestUserLiveLoadRegionalOpsHandlerNeverPublishesUnknownAsIdle(t *testing.T)
 					require.True(t, ok)
 					slot.ReleaseFunc()
 					if mode == "expired" {
-						_, err = c.database().Exec(`UPDATE regional_live_handoffs SET identity=jsonb_set(identity,
-'{_user_stats_expires_at}',to_jsonb(extract(epoch FROM clock_timestamp())-1)) WHERE region_id=$1 AND lease_id=$2`, c.region(), r.LeaseID)
+						_, err = c.Database().Exec(`UPDATE regional_live_handoffs SET identity=jsonb_set(identity,
+'{_user_stats_expires_at}',to_jsonb(extract(epoch FROM clock_timestamp())-1)) WHERE region_id=$1 AND lease_id=$2`, c.Region(), r.LeaseID)
 					} else if mode == "missing" {
-						_, err = c.database().Exec(`UPDATE regional_live_handoffs SET identity=identity-'_user_stats_expires_at'
-WHERE region_id=$1 AND lease_id=$2`, c.region(), r.LeaseID)
+						_, err = c.Database().Exec(`UPDATE regional_live_handoffs SET identity=identity-'_user_stats_expires_at'
+WHERE region_id=$1 AND lease_id=$2`, c.Region(), r.LeaseID)
 					}
 					require.NoError(t, err)
 				}
@@ -88,24 +89,21 @@ WHERE region_id=$1 AND lease_id=$2`, c.region(), r.LeaseID)
 				recorder := httptest.NewRecorder()
 				request := httptest.NewRequest(http.MethodGet, "/user-concurrency", nil).WithContext(ctx)
 				if mode == "changed" {
-					base, ok := c.ConcurrencyCache.(*concurrencyCache)
-					require.True(t, ok)
-					hook := &userLiveLoadPauseHook{started: make(chan struct{}), resume: make(chan struct{})}
-					base.rdb.AddHook(hook)
+					started, resume := c.PauseNextPipeline(t)
 					done := make(chan struct{})
 					go func() { router.ServeHTTP(recorder, request); close(done) }()
 					select {
-					case <-hook.started:
+					case <-started:
 					case <-ctx.Done():
 						t.Fatal("Ops handler did not reach the real Redis pipeline")
 					}
 					next := r
 					next.AccountID++
 					next.ReplacedAccountID = r.AccountID
-					ok, err = c.MigrateLiveLeaseAccount(ctx, next)
+					ok, err := c.MigrateLiveLeaseAccount(ctx, next)
 					require.NoError(t, err)
 					require.True(t, ok)
-					close(hook.resume)
+					close(resume)
 					<-done
 				} else {
 					router.ServeHTTP(recorder, request)
