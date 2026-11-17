@@ -110,7 +110,7 @@ func TestUltrafastResponseToCost(t *testing.T) {
 			fallbackLongContext         bool
 			catalogLongContext          bool
 		}{
-			{"gpt-5.6-sol", 5e-6, 30e-6, .5e-6, 6.25e-6, 6, false, true},
+			{"gpt-5.6-sol", 4e-6, 20e-6, .4e-6, 5e-6, 6, false, true},
 			{"gpt-5.6-terra", 2e-6, 12e-6, .2e-6, 2.5e-6, 6, false, true},
 			{"gpt-6-astra", 10e-6, 50e-6, 1e-6, 12.5e-6, 6, true, true},
 			{"gpt-6-sol", 2e-6, 10e-6, .2e-6, 2.5e-6, 6, true, true},
