@@ -200,10 +200,11 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-  # Preserve the existing check name. A failed/cancelled shard must fail the gate.
+  # Preserve the existing check name and reject unsuccessful selected suites.
+  # An obsolete cancelled workflow must not queue this gate and block its successor.
   test:
     needs: [changes, unit-test, integration-test]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

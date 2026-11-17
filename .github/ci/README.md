@@ -21,7 +21,7 @@ python3 -m unittest discover -s .github/ci -p 'test_*.py' -v
 
 ## Go 测试并行与耗时报告
 
-后端选择器分别决定 `unit-test` 和 `integration-test`。单元测试在四个 GitHub 托管 runner 上按 package 分片，集成测试在独立 runner 同时执行；`test` 保留为汇总检查，任何应运行的分片失败、取消或跳过都会失败。复用单元测试证据要求四个分片全部成功，且源码、辅助脚本、分片权重和 job 定义一致；手动/tag 仍强制全量。
+后端选择器分别决定 `unit-test` 和 `integration-test`。单元测试在四个 GitHub 托管 runner 上按 package 分片，集成测试在独立 runner 同时执行；`test` 保留为汇总检查，任何应运行的分片失败、取消或跳过都会失败。复用单元测试证据要求四个分片全部成功，且源码、辅助脚本、分片权重和 job 定义一致；手动/tag 仍强制全量。整个旧 workflow 被新 head 取消时，汇总 job 也取消，避免 always() 任务在队列中阻塞后续运行；取消状态不算通过。
 
 `.github/ci/go_tests.py` 从 `go list -tags=unit ./...` 动态发现全部包，再按 `go-test-weights.json` 的历史耗时从重到轻分配。新包按 1 秒估算并自动纳入；无测试包也保留。权重仅影响分配，不筛选测试。初始权重来自 [2026-11-17 的成功运行](https://github.com/ranxi2001/sub2api/actions/runs/44150112506)，其中 handler 581.520 秒、service 363.216 秒。包内用例尚未进一步拆分，因此单个重包仍可能决定单元测试关键路径。
 

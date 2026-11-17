@@ -79,7 +79,9 @@ class GoTestRunnerTests(unittest.TestCase):
 
     def test_gate_rejects_failed_cancelled_or_missing_selected_suites(self):
         workflow = yaml.safe_load((runner.ROOT / '.github/workflows/backend-ci.yml').read_text())
-        gate = workflow['jobs']['test']['steps'][0]['run']
+        gate_job = workflow['jobs']['test']
+        self.assertEqual(gate_job['if'], '${{ !cancelled() }}')
+        gate = gate_job['steps'][0]['run']
         base = {'CHANGES_RESULT': 'success', 'UNIT_SELECTED': 'true', 'UNIT_RESULT': 'success',
                 'INTEGRATION_SELECTED': 'true', 'INTEGRATION_RESULT': 'success'}
         def run(updates):
