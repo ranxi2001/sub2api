@@ -99,8 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm --dir frontend run build 2>&1 | tee evidence/frontend-build.log
-          mkdir -p backend/internal/web/dist
-          cp -a frontend/dist/. backend/internal/web/dist/
+          test -s backend/internal/web/dist/index.html
       - name: Embedded HTML cache and nonce contract
         if: ${{ !cancelled() && steps.frontend-build.outcome == 'success' }}
         run: python3 .github/scripts/upstream-v0222-acceptance.py embed
