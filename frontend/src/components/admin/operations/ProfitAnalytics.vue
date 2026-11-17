@@ -50,14 +50,7 @@
                   <span v-if="applied.dimension === 'upstream'" class="block text-xs text-gray-500">{{ t(`upstreamEntities.${row.assignment || (row.key.startsWith('unknown:') ? 'unbound_unknown' : 'unbound_url')}`) }}<span v-if="row.channel_id"> #{{ row.channel_id }} · {{ row.channel_code }} · {{ row.channel_remark }}</span></span>
                 </th>
                 <td v-for="key in amountKeys" :key="key" class="whitespace-nowrap p-2 tabular-nums"><span v-if="metricLabel(key, row) !== metricLabel(key, snapshot.usage.summary)" class="block text-xs text-gray-500">{{ metricLabel(key, row) }}</span><span :data-field="key">{{ formatMetric(row, key) }}</span></td>
-                <td class="p-2"><span data-testid="cost-source">{{ sourceLabel(row) }}</span>
-                  <template v-if="canSync(row)">
-                    <button type="button" class="block text-primary-600 underline" data-testid="sync-bill" :title="t('profitOps.syncWindow')" :disabled="syncState(row)?.busy" @click="sync(row)">{{ t(syncState(row)?.message === 'syncDisconnected' ? 'profitOps.syncCheck' : 'profitOps.syncCharges') }}</button>
-                    <p v-if="syncState(row)" :role="syncState(row)?.error ? 'alert' : 'status'" class="mt-1 text-xs" :class="{ 'text-red-600': syncState(row)?.error }">{{ syncText(row) }}</p>
-                    <p class="mt-1 text-xs text-gray-500" data-testid="bills-freshness">{{ billsFreshness(row) }}</p>
-                  </template>
-                  <span v-else-if="row.provider_site_type === 'newapi' && row.bill_requests < row.supplier_requests" class="block text-xs text-gray-500">{{ t('profitOps.syncUnsupported') }}</span>
-                </td>
+                <td class="p-2"><span data-testid="cost-source">{{ sourceLabel(row) }}</span></td>
                 <td>{{ number(row.p50_ms, 0) }} / {{ number(row.p90_ms, 0) }} / {{ number(row.p95_ms, 0) }}<span class="block text-xs">{{ t('profitOps.samples') }} {{ row.samples }} / {{ t('profitOps.unknown') }} {{ row.unknown_samples }}</span></td><td>{{ number(row.duration_p90_ms,0) }}</td>
               </tr></tbody>
             </table>
@@ -84,7 +77,6 @@ import SmartOpsNav from './SmartOpsNav.vue'
 import UpstreamChannelManager from './UpstreamChannelManager.vue'
 import ProfitProviders from './ProfitProviders.vue'
 import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
-import { useProfitSync } from '@/composables/useProfitSync'
 const { t } = useI18n()
 const auth = useAuthStore()
 const amountKeys = ['requests','standard_charge','request_income','upstream_cost','gross_profit','gross_margin'] as const
@@ -105,42 +97,27 @@ function number(v: number|null|undefined, decimals=6) { return v==null || !Numbe
 function metricLabel(key: Metric, m: ProfitMetrics) {
  return t(`profitOps.${m.requests > 0 && m.supplier_requests === 0 && isCostMetric(key) ? estimateLabels[key] : key}`)
 }
+function estimateText(m: ProfitMetrics) {
+ const unbound = m.requests - m.supplier_requests
+ return t('profitOps.estimateCoverage', { estimates: m.estimated_requests, unbound })
+}
 function sourceLabel(m: ProfitMetrics) {
  if (m.requests === 0) return '—'
- const { requests, supplier_requests: supplier, bill_requests: bills, estimated_requests: estimates } = m
- if (![requests, supplier, bills, estimates].every(n => Number.isSafeInteger(n) && n >= 0) || bills > supplier || supplier > requests || estimates > requests - supplier) return t('profitOps.unknown')
- const parts: string[] = []
- if (supplier) parts.push(t(`profitOps.${bills === supplier ? 'billed' : bills === 0 ? 'awaitingBills' : 'partialBills'}`, { bills, supplier }))
- if (supplier < requests) parts.push(t('profitOps.estimateCoverage', { estimates, unbound: requests - supplier }))
- return parts.join(' · ')
+ const estimate = m.supplier_requests < m.requests ? estimateText(m) : ''
+ switch (m.cost_source) {
+  case 'wallet_today': return t('profitOps.walletToday')
+  case 'mixed': return [t('profitOps.walletToday'), estimate].filter(Boolean).join(' · ')
+  case 'wallet_unavailable': return t('profitOps.walletUnavailable')
+  case 'wallet_not_split': return t('profitOps.walletNotSplit')
+  case 'wallet_currency': return t('profitOps.walletCurrency', { currency: m.wallet_currency || t('profitOps.unknown') })
+  case 'estimate': return estimate || estimateText(m)
+  default: return m.supplier_requests === 0 ? (estimate || estimateText(m)) : t('profitOps.unknown')
+ }
 }
 function formatMetric(m: ProfitMetrics, key: Metric) {
- if (isCostMetric(key) && m.bill_requests < m.supplier_requests) return t(`profitOps.${m.bill_requests === 0 ? 'pending' : 'incomplete'}`)
+ if (isCostMetric(key) && (m.cost_source === 'wallet_unavailable' || m.cost_source === 'wallet_not_split' || m.cost_source === 'wallet_currency')) return t('profitOps.amountUnavailable')
  if (key === 'gross_margin') return m.gross_margin == null || !Number.isFinite(m.gross_margin) ? t('profitOps.unknown') : `${(m.gross_margin * 100).toFixed(2)}%`
  return number(m[key], key === 'requests' ? 0 : 6)
-}
-const billSync = useProfitSync(auth.isAdmin ? auth.user?.id : undefined, dates => {
- if (applied.value.from === dates.from && applied.value.until === dates.until) void load()
-})
-function canSync(row: OperationsRow) {
- return auth.isAdmin && applied.value.dimension === 'upstream' && Number.isSafeInteger(row.provider_id) && Number(row.provider_id) > 0 && row.provider_site_type === 'sub2api'
-}
-function syncState(row: OperationsRow) { return billSync.state(row.provider_id, applied.value) }
-function syncText(row: OperationsRow) {
- const job = syncState(row)
- return job ? t(`profitOps.${job.message}`, { provider: row.name, from: job.from, until: job.until, matched: job.matched, unmatched: job.unmatched }) : ''
-}
-function billsFreshness(row: OperationsRow) {
- const raw = row.bills_synced_at
- if (typeof raw === 'string' && raw) {
-  const at = new Date(raw)
-  if (Number.isFinite(at.getTime())) return t('profitOps.savedBills', { time: at.toLocaleString() })
- }
- if (row.bill_requests > 0) return t('profitOps.savedBillsUntimed')
- return t('profitOps.noSavedBills')
-}
-function sync(row: OperationsRow) {
- if (canSync(row) && row.provider_id) void billSync.sync(row.provider_id, applied.value)
 }
 async function load() {
  const id=++request; controller?.abort(); controller=new AbortController(); loading.value=true; error.value=''; snapshot.value=null
@@ -195,13 +172,6 @@ function drill(row:OperationsRow){if(applied.value.dimension==='upstream'){const
 function selectUpstream(key:string,channelID=0){applied.value={...applied.value,upstream:channelID?'':key,channel_id:channelID,account_id:0,dimension:'account',page:1};draft.value={...applied.value};void load()}
 function selectAccount(id:number){applied.value={...applied.value,account_id:id,dimension:'model',page:1};draft.value={...applied.value};void load()}
 function overview(){applied.value={...applied.value,upstream:'',channel_id:0,account_id:0,dimension:'upstream',page:1};draft.value={...applied.value};void load()}
-onMounted(() => {
- const dates = billSync.restore()
- if (dates) {
-  applied.value = { ...applied.value, ...dates }; draft.value = { ...applied.value }
-  from.value = local(new Date(dates.from)); until.value = local(new Date(dates.until))
- }
- void load()
-})
+onMounted(() => { void load() })
 onBeforeUnmount(()=>{alive=false;request++;controller?.abort()})
 </script>

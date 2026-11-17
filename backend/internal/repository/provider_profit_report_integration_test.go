@@ -76,12 +76,14 @@ func TestProviderProfitReportPartialThenSettledWithSharedWallet(t *testing.T) {
 	f.counts(w, 1, 1, a, external)
 	mainMetrics("1", "32", "null", "null", "null")
 	f.counts(w, 2, 0, a, b, external)
-	mainMetrics("2", "45", "45", "55", "0.55")
+	// Matched bills stay visible as reported_usage_cost. They do not price this window:
+	// it is not the channel-operations consumption day, so today's wallet spend is not applied either.
+	mainMetrics("2", "45", "null", "null", "null")
 	check("30", "null", "null", 1)
 	b.SettledAmount = &ten
 	f.counts(w, 2, 0, a, b, external)
 	check("40", "40", "60", 2)
-	mainMetrics("2", "45", "45", "55", "0.55")
+	mainMetrics("2", "45", "null", "null", "null")
 	newChannel := f.id(`INSERT INTO upstream_channels(name,code) VALUES('New location','new-location') RETURNING id`)
 	_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: 1, ChannelID: newChannel, Confirm: true})
 	require.NoError(t, err)
@@ -99,7 +101,7 @@ func TestProviderProfitReportZeroBillAndZeroIncome(t *testing.T) {
 	bill.Amount = "0"
 	f.counts(w, 1, 0, bill)
 	s := f.report(f.channel, w)
-	for k, v := range map[string]string{"bill_requests": "1", "upstream_cost": "0", "gross_profit": "0", "gross_margin": "null"} {
+	for k, v := range map[string]string{"bill_requests": "1", "upstream_cost": "null", "gross_profit": "null", "gross_margin": "null", "cost_source": `"wallet_unavailable"`} {
 		require.JSONEq(t, v, string(s[k]), k)
 	}
 }
@@ -167,14 +169,14 @@ func TestProviderProfitReportRegisterSiteAfterUsage(t *testing.T) {
 	require.Equal(t, 1, out.Matched)
 	s, rows = read()
 	require.Len(t, rows, 2)
-	check(rows[key], map[string]string{"assignment": `"provider_url"`, "supplier_requests": "1", "bill_requests": "1", "upstream_cost": "34", "gross_profit": "46", "gross_margin": "0.575"})
+	check(rows[key], map[string]string{"assignment": `"provider_url"`, "supplier_requests": "1", "bill_requests": "1", "upstream_cost": "null", "gross_profit": "null", "gross_margin": "null", "cost_source": `"wallet_unavailable"`})
 	require.NotEqual(t, "null", string(rows[key]["bills_synced_at"]))
 	f.exec(`DELETE FROM provider_profit_sync_runs WHERE provider_id=$1`, pid)
 	_, rows = read()
 	require.NotEqual(t, "null", string(rows[key]["bills_synced_at"]), "saved charges keep a freshness time without a new upstream pull")
-	check(rows[key], map[string]string{"bill_requests": "1", "upstream_cost": "34"})
-	check(rows[fmt.Sprintf("channel:%d", other)], map[string]string{"supplier_requests": "0", "estimated_requests": "1", "upstream_cost": "6", "gross_profit": "14", "gross_margin": "0.7"})
-	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "40", "gross_profit": "60", "gross_margin": "0.6"})
+	check(rows[key], map[string]string{"bill_requests": "1", "upstream_cost": "null"})
+	check(rows[fmt.Sprintf("channel:%d", other)], map[string]string{"supplier_requests": "0", "estimated_requests": "1", "upstream_cost": "6", "gross_profit": "14", "gross_margin": "0.7", "cost_source": `"estimate"`})
+	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "null", "gross_profit": "null", "gross_margin": "null", "cost_source": `"wallet_unavailable"`})
 }
 
 func TestProviderProfitIndependentOriginAndHistoricalAliases(t *testing.T) {
@@ -219,6 +221,142 @@ func TestProviderProfitIndependentOriginAndHistoricalAliases(t *testing.T) {
 	require.Equal(t, service.ProviderProfitSyncResult{Matched: 1}, out)
 	require.EqualValues(t, 2, f.id(`SELECT count(DISTINCT origin_hash) FROM provider_profit_charges WHERE upstream_usage_id=200 AND settled_amount=4`))
 	require.Zero(t, f.id(`SELECT count(*) FROM provider_profit_charges WHERE upstream_usage_id IN (201,202)`), "neither the alias nor the unversioned import can disambiguate a debit")
+}
+
+func TestProviderProfitReportUsesChannelTodaySpend(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	second := f.imported(f.pid, 12)
+	at := f.now()
+	start, end := service.ProfitConsumptionDay(at)
+	require.False(t, at.Before(start))
+	require.True(t, at.Before(end))
+	f.usageWithIncome(f.account, "receipt-a", at, 65)
+	f.usageWithIncome(second, "receipt-b", at, 35)
+	yesterday := start.Add(-12 * time.Hour)
+	f.usageWithIncome(f.account, "yesterday-only", yesterday, 80)
+	f.exec(`UPDATE mature_providers SET metrics='{"today_spend":60,"total_spend":90,"currency":"USD"}',observed_at=$2 WHERE id=$1`, f.pid, at)
+	read := func(q service.UpstreamOperationsFilter) (map[string]json.RawMessage, map[string]map[string]json.RawMessage) {
+		t.Helper()
+		queryNow := time.Now()
+		dayStart, dayEnd := service.ProfitConsumptionDay(queryNow)
+		if q.From.Equal(dayStart) && !q.Until.Equal(dayEnd) {
+			q.Until = queryNow
+		}
+		if q.Until.IsZero() {
+			q.Until = queryNow
+		}
+		if !q.Until.After(q.From) {
+			q.Until = q.From.Add(time.Millisecond)
+		}
+		if q.ModelScope == "" {
+			q.ModelScope = "public"
+		}
+		if q.Sort == "" {
+			q.Sort = "name"
+		}
+		if q.Direction == "" {
+			q.Direction = "asc"
+		}
+		if q.Page == 0 {
+			q.Page = 1
+		}
+		if q.PageSize == 0 {
+			q.PageSize = 20
+		}
+		if q.Dimension == "" {
+			q.Dimension = "upstream"
+		}
+		s, err := f.r.ReadProfitOperations(context.Background(), q)
+		require.NoError(t, err)
+		var result struct {
+			Summary map[string]json.RawMessage
+			Rows    []map[string]json.RawMessage
+		}
+		require.NoError(t, json.Unmarshal(s.Usage, &result))
+		rows := map[string]map[string]json.RawMessage{}
+		for _, row := range result.Rows {
+			var key string
+			require.NoError(t, json.Unmarshal(row["key"], &key))
+			rows[key] = row
+		}
+		return result.Summary, rows
+	}
+	check := func(data map[string]json.RawMessage, want map[string]string) {
+		t.Helper()
+		for k, v := range want {
+			require.JSONEq(t, v, string(data[k]), k)
+		}
+	}
+	today := service.UpstreamOperationsFilter{From: start, Until: time.Now()}
+	if !today.Until.After(at) {
+		today.Until = at.Add(time.Millisecond)
+	}
+	key := fmt.Sprintf("channel:%d", f.channel)
+	s, rows := read(today)
+	require.Len(t, rows, 1)
+	check(rows[key], map[string]string{"requests": "2", "request_income": "100", "supplier_requests": "2", "bill_requests": "0", "upstream_cost": "60", "gross_profit": "40", "gross_margin": "0.4", "cost_source": `"wallet_today"`, "wallet_currency": `"USD"`})
+	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "60", "gross_profit": "40", "gross_margin": "0.4", "cost_source": `"wallet_today"`})
+	a := profitRemote(110, 11, "receipt-a", at)
+	b := profitRemote(120, 12, "receipt-b", at)
+	a.Amount, b.Amount = "32", "13"
+	f.counts(service.ProviderProfitWindow{From: at, Until: at.Add(time.Microsecond)}, 2, 0, a, b)
+	s, rows = read(today)
+	check(rows[key], map[string]string{"bill_requests": "2", "reported_usage_cost": "45", "upstream_cost": "60", "gross_profit": "40", "gross_margin": "0.4"})
+	check(s, map[string]string{"upstream_cost": "60", "gross_profit": "40"})
+	accountQuery := today
+	accountQuery.Dimension = "account"
+	s, rows = read(accountQuery)
+	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "60", "gross_profit": "40", "cost_source": `"wallet_today"`})
+	require.Len(t, rows, 2)
+	for _, row := range rows {
+		check(row, map[string]string{"upstream_cost": "null", "gross_profit": "null", "gross_margin": "null", "cost_source": `"wallet_not_split"`})
+		require.NotEqual(t, "30", string(row["upstream_cost"]))
+		require.NotEqual(t, "60", string(row["upstream_cost"]))
+	}
+	modelQuery := today
+	modelQuery.Model = "fixture-model"
+	s, _ = read(modelQuery)
+	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "null", "gross_profit": "null", "cost_source": `"wallet_not_split"`})
+	groupQuery := today
+	groupQuery.GroupID = 424242
+	s, _ = read(groupQuery)
+	check(s, map[string]string{"requests": "0", "upstream_cost": "0"})
+	yest := service.UpstreamOperationsFilter{From: start.AddDate(0, 0, -1), Until: start}
+	s, rows = read(yest)
+	check(s, map[string]string{"requests": "1", "request_income": "80", "upstream_cost": "null", "gross_profit": "null", "cost_source": `"wallet_unavailable"`})
+	check(rows[key], map[string]string{"upstream_cost": "null", "cost_source": `"wallet_unavailable"`})
+	f.exec(`UPDATE mature_providers SET observed_at=$2 WHERE id=$1`, f.pid, start.Add(-time.Second))
+	s, _ = read(today)
+	check(s, map[string]string{"upstream_cost": "null", "gross_profit": "null", "cost_source": `"wallet_unavailable"`})
+	f.exec(`UPDATE mature_providers SET metrics='{"today_spend":60,"currency":"CNY"}',observed_at=$2 WHERE id=$1`, f.pid, at)
+	s, rows = read(today)
+	check(s, map[string]string{"upstream_cost": "null", "gross_profit": "null", "cost_source": `"wallet_currency"`})
+	check(rows[key], map[string]string{"cost_source": `"wallet_currency"`, "wallet_currency": `"CNY"`, "upstream_cost": "null"})
+	f.exec(`UPDATE mature_providers SET metrics='{"today_spend":0,"currency":"USD"}',observed_at=$2,site_type='newapi' WHERE id=$1`, f.pid, at)
+	s, rows = read(today)
+	check(rows[key], map[string]string{"upstream_cost": "0", "gross_profit": "100", "gross_margin": "1", "cost_source": `"wallet_today"`})
+	check(s, map[string]string{"upstream_cost": "0", "gross_profit": "100", "gross_margin": "1"})
+	f.exec(`UPDATE mature_providers SET metrics='{"today_spend":60,"currency":"USD"}',observed_at=$2,site_type='sub2api' WHERE id=$1`, f.pid, at)
+	manual := f.id(`INSERT INTO accounts(name,type,platform,credentials,extra) VALUES('manual key','apikey','openai',jsonb_build_object('base_url','https://manual.invalid/v1','api_key','fixture-only'),'{"cost_multiplier":0.5}') RETURNING id`)
+	other := f.id(`INSERT INTO upstream_channels(name,code) VALUES('Manual only','manual-only') RETURNING id`)
+	f.exec(`INSERT INTO upstream_channel_bindings(account_id,channel_id,revision) VALUES($1,$2,1)`, manual, other)
+	f.usageWithIncome(manual, nil, f.now(), 20)
+	snap, err := f.r.ReadProfitOperations(context.Background(), service.UpstreamOperationsFilter{From: start, Until: time.Now(), Dimension: "upstream", ModelScope: "public", Sort: "upstream_cost", Direction: "desc", Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	var ordered struct {
+		Summary map[string]json.RawMessage   `json:"summary"`
+		Rows    []map[string]json.RawMessage `json:"rows"`
+	}
+	require.NoError(t, json.Unmarshal(snap.Usage, &ordered))
+	require.Len(t, ordered.Rows, 2)
+	var firstKey, secondKey string
+	require.NoError(t, json.Unmarshal(ordered.Rows[0]["key"], &firstKey))
+	require.NoError(t, json.Unmarshal(ordered.Rows[1]["key"], &secondKey))
+	require.Equal(t, key, firstKey)
+	require.Equal(t, fmt.Sprintf("channel:%d", other), secondKey)
+	check(ordered.Rows[0], map[string]string{"upstream_cost": "60", "cost_source": `"wallet_today"`})
+	check(ordered.Rows[1], map[string]string{"supplier_requests": "0", "upstream_cost": "6", "gross_profit": "14", "cost_source": `"estimate"`})
+	check(ordered.Summary, map[string]string{"requests": "3", "request_income": "120", "upstream_cost": "66", "gross_profit": "54", "gross_margin": "0.45", "cost_source": `"mixed"`})
 }
 
 func TestProviderProfitLegacyIncomeUnchangedByFirstLink(t *testing.T) {

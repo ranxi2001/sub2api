@@ -150,6 +150,9 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
  COALESCE('channel:'||owner.channel_id::text,c.url_key,'unknown:account_missing') AS upstream_key,
  CASE WHEN e.channel_id IS NOT NULL OR h.channel_id IS NOT NULL THEN 'historical_channel' WHEN legacy.channel_id IS NOT NULL THEN 'legacy_channel_estimate' WHEN owner.channel_id IS NOT NULL THEN 'provider_url' ELSE COALESCE(c.url_attribution,'account_missing') END AS attribution,
  c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,c.multiplier,owner.channel_id AS explicit_channel_id,ch.name AS channel_name,ch.code AS channel_code,ch.remark AS channel_remark,ch.revision AS channel_revision,pl.provider_id,p.site_type AS provider_site_type,
+ CASE WHEN jsonb_typeof(p.metrics->'today_spend')='number' THEN (p.metrics->>'today_spend')::numeric END AS wallet_spend,
+ CASE WHEN p.metrics->>'currency' IN ('USD','CNY','quota_units') THEN p.metrics->>'currency' ELSE '' END AS wallet_currency,
+ p.observed_at AS wallet_observed_at,
  COALESCE(h.assignment,CASE WHEN legacy.channel_id IS NOT NULL THEN 'explicit' WHEN owner.channel_id IS NOT NULL THEN 'provider_url' WHEN c.url_key IS NULL OR c.url_key LIKE 'unknown:%' THEN 'unbound_unknown' ELSE 'unbound_url' END) AS assignment,
  e.amount AS upstream_reported,e.settled_amount AS upstream_debit,COALESCE(c.cost_basis,'account_missing') AS cost_basis,
  COALESCE(NULLIF(u.requested_model,''),u.model) AS public_model,
@@ -176,10 +179,19 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
  CASE WHEN duration_ms>0 AND (actual_cost>0 OR total_cost>0 OR account_stats_cost>0 OR input_tokens>0 OR output_tokens>0 OR cache_read_tokens>0 OR cache_creation_tokens>0) THEN duration_ms END AS measured_duration
  FROM scoped
 ), priced AS (
- -- Choose the accounting method by channel, never by receipt availability.
- -- A supplier's missing bill is NULL, even if this account has a multiplier.
- SELECT *,CASE WHEN provider_id IS NOT NULL THEN upstream_reported ELSE estimated END AS effective_cost FROM bases
+ -- Bound channels do not take a per-request bill. Their report cost is the
+ -- channel-level wallet snapshot, applied only to the matching day. Unbound
+ -- channels keep the multiplier estimate. A missing estimate stays NULL.
+ SELECT *,CASE WHEN provider_id IS NULL THEN estimated END AS effective_cost FROM bases
 )`
+
+// One stored today_spend per provider, never a sum across that provider's requests.
+const profitWalletColumns = `,
+ COALESCE(count(provider_id)=count(*) AND count(*)>0 AND count(DISTINCT provider_id)=1 AND max(wallet_spend) IS NOT NULL AND max(wallet_observed_at)>=$12::timestamptz AND max(wallet_observed_at)<$13::timestamptz AND max(NULLIF(wallet_currency,''))='USD', false) AS wallet_usd_ok,
+ COALESCE(count(provider_id)=count(*) AND count(*)>0 AND count(DISTINCT provider_id)=1 AND max(wallet_spend) IS NOT NULL AND max(wallet_observed_at)>=$12::timestamptz AND max(wallet_observed_at)<$13::timestamptz AND COALESCE(max(NULLIF(wallet_currency,'')),'')<>'' AND max(NULLIF(wallet_currency,''))<>'USD', false) AS wallet_other_currency,
+ CASE WHEN count(DISTINCT provider_id)=1 AND count(provider_id)=count(*) THEN max(wallet_spend) END AS wallet_spend,
+ CASE WHEN count(DISTINCT provider_id)=1 AND count(provider_id)=count(*) THEN NULLIF(max(NULLIF(wallet_currency,'')),'') END AS wallet_currency,
+ CASE WHEN count(DISTINCT provider_id)=1 AND count(provider_id)=count(*) THEN max(wallet_observed_at) END AS wallet_observed_at`
 
 var profitOperationsAggregate = `count(*) AS requests,
  CASE WHEN count(*)=0 THEN 0 WHEN count(standard)=count(*) THEN sum(standard) END AS standard_charge,
@@ -246,11 +258,17 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
 		dimension = `CASE $8 WHEN 'public' THEN public_model WHEN 'recorded' THEN model WHEN 'upstream' THEN COALESCE(upstream_model,'(unknown upstream model)') END`
 		name = dimension
 	}
-	// Freshness only. Join after grouping so provider_id in the aggregates stays
-	// unambiguous, and cost still comes from matched request bills.
+	// Saved-bill freshness stays on the row for diagnostics. It does not price the report.
+	now := time.Now()
+	dayStart, dayEnd := service.ProfitConsumptionDay(now)
+	applyWallet := service.ProfitWindowUsesWalletToday(f.From, f.Until, now)
+	subset := f.AccountID != 0 || f.GroupID != 0 || strings.TrimSpace(f.Model) != ""
+	upstreamDimension := f.Dimension == "upstream"
+	queryArgs := append(append([]any{}, args...), dayStart, dayEnd, applyWallet, subset, applyWallet && !subset && upstreamDimension, upstreamDimension)
 	syncFrom := ""
+	billJoin := ""
+	billField := ""
 	order := f.Sort + " " + f.Direction + " NULLS LAST,key ASC"
-	rowQuery := `SELECT * FROM buckets ORDER BY ` + order
 	if channelFields != "" {
 		syncFrom = `, bill_sync AS (
  SELECT provider_id, max(mark_at) AS bills_synced_at FROM (
@@ -260,12 +278,33 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
   SELECT provider_id, captured_at FROM provider_profit_charges
   WHERE local_created_at >= $1 AND local_created_at < $2
  ) marks GROUP BY provider_id)`
-		rowQuery = `SELECT buckets.*, bill_sync.bills_synced_at FROM buckets LEFT JOIN bill_sync ON bill_sync.provider_id = buckets.provider_id ORDER BY ` + order
+		billJoin = ` LEFT JOIN bill_sync ON bill_sync.provider_id = g.provider_id`
+		billField = `,'bills_synced_at',to_jsonb(bill_sync.bills_synced_at)`
 	}
+	costSource := `CASE WHEN g.supplier_requests=0 THEN 'estimate' WHEN $16::bool AND g.wallet_usd_ok THEN 'wallet_today' WHEN $16::bool AND g.wallet_other_currency THEN 'wallet_currency' WHEN NOT $16::bool AND ($15::bool OR NOT $17::bool) THEN 'wallet_not_split' ELSE 'wallet_unavailable' END`
 	// Sort and direction are strictly validated before SQL construction.
-	query := profitOperationsBase + syncFrom + `, buckets AS (SELECT ` + dimension + ` AS key,` + name + ` AS name,` + profitOperationsAggregate + channelFields + ` FROM priced GROUP BY ` + dimension + `), summary AS (SELECT ` + profitOperationsAggregate + ` FROM priced)
- SELECT jsonb_build_object('summary',(SELECT to_jsonb(s) FROM summary s),'total',(SELECT count(*) FROM buckets),
- 'rows',COALESCE((SELECT jsonb_agg(to_jsonb(b)) FROM (` + rowQuery + ` LIMIT $9 OFFSET $10)b),'[]'::jsonb),
+	// Rank after the wallet override so upstream_cost sorts by the displayed amount.
+	rowInner := `SELECT (to_jsonb(g) || jsonb_build_object(
+ 'upstream_cost',CASE WHEN $16::bool AND g.wallet_usd_ok THEN to_jsonb(g.wallet_spend) ELSE to_jsonb(g.upstream_cost) END,
+ 'gross_profit',CASE WHEN $16::bool AND g.wallet_usd_ok AND g.request_income IS NOT NULL THEN to_jsonb(g.request_income-g.wallet_spend) ELSE to_jsonb(g.gross_profit) END,
+ 'gross_margin',CASE WHEN $16::bool AND g.wallet_usd_ok AND g.request_income>0 THEN to_jsonb((g.request_income-g.wallet_spend)/g.request_income) ELSE to_jsonb(g.gross_margin) END,
+ 'cost_source',to_jsonb(` + costSource + `),'wallet_currency',to_jsonb(g.wallet_currency),'wallet_observed_at',to_jsonb(g.wallet_observed_at)` + billField + `)) AS merged,
+ g.requests,g.standard_charge,g.request_income,g.estimated_cost,g.estimated_profit,g.margin,
+ CASE WHEN $16::bool AND g.wallet_usd_ok THEN g.wallet_spend ELSE g.upstream_cost END AS upstream_cost,
+ CASE WHEN $16::bool AND g.wallet_usd_ok AND g.request_income IS NOT NULL THEN g.request_income-g.wallet_spend ELSE g.gross_profit END AS gross_profit,
+ CASE WHEN $16::bool AND g.wallet_usd_ok AND g.request_income>0 THEN (g.request_income-g.wallet_spend)/g.request_income ELSE g.gross_margin END AS gross_margin,
+ g.name,g.key FROM grouped g` + billJoin
+	rowQuery := `SELECT merged, row_number() OVER (ORDER BY ` + order + `) AS ord FROM (` + rowInner + `) ordered ORDER BY ord`
+	query := profitOperationsBase + syncFrom + `, grouped AS (SELECT ` + dimension + ` AS key,` + name + ` AS name,` + profitOperationsAggregate + channelFields + profitWalletColumns + ` FROM priced GROUP BY ` + dimension + `), summary AS (SELECT ` + profitOperationsAggregate + ` FROM priced), channel_roll AS (
+ SELECT COALESCE(explicit_channel_id,0) AS roll_channel,count(*) AS requests,count(provider_id) AS supplier_requests,count(effective_cost) AS estimate_rows,sum(effective_cost) AS estimate_sum` + profitWalletColumns + ` FROM priced GROUP BY COALESCE(explicit_channel_id,0)), wallet_total AS (
+ SELECT COALESCE(sum(requests),0) AS requests,COALESCE(bool_or(supplier_requests>0 AND NOT wallet_usd_ok),false) AS blocked,COALESCE(bool_or(supplier_requests>0 AND wallet_other_currency),false) AS other_currency,COALESCE(bool_or(supplier_requests=0 AND estimate_rows IS DISTINCT FROM requests),false) AS estimate_incomplete,COALESCE(sum(wallet_spend) FILTER (WHERE supplier_requests>0 AND wallet_usd_ok),0) AS wallet_sum,COALESCE(sum(estimate_sum) FILTER (WHERE supplier_requests=0 AND estimate_rows=requests),0) AS estimate_sum FROM channel_roll)
+ SELECT jsonb_build_object('summary',(SELECT to_jsonb(s) || jsonb_build_object(
+ 'cost_source',to_jsonb(CASE WHEN COALESCE(s.supplier_requests,0)=0 THEN 'estimate' WHEN NOT $14::bool THEN 'wallet_unavailable' WHEN $15::bool THEN 'wallet_not_split' WHEN w.blocked AND w.other_currency THEN 'wallet_currency' WHEN w.blocked OR w.estimate_incomplete THEN 'wallet_unavailable' WHEN s.supplier_requests<s.requests THEN 'mixed' ELSE 'wallet_today' END),
+ 'upstream_cost',CASE WHEN $14::bool AND NOT $15::bool THEN CASE WHEN w.requests=0 THEN to_jsonb(0::numeric) WHEN w.blocked OR w.estimate_incomplete THEN 'null'::jsonb ELSE to_jsonb(w.wallet_sum+w.estimate_sum) END ELSE to_jsonb(s.upstream_cost) END,
+ 'gross_profit',CASE WHEN $14::bool AND NOT $15::bool THEN CASE WHEN w.requests=0 THEN to_jsonb(0::numeric) WHEN NOT (w.blocked OR w.estimate_incomplete) AND s.request_income IS NOT NULL THEN to_jsonb(s.request_income-(w.wallet_sum+w.estimate_sum)) ELSE 'null'::jsonb END ELSE to_jsonb(s.gross_profit) END,
+ 'gross_margin',CASE WHEN $14::bool AND NOT $15::bool THEN CASE WHEN NOT (w.blocked OR w.estimate_incomplete) AND w.requests>0 AND s.request_income>0 THEN to_jsonb((s.request_income-(w.wallet_sum+w.estimate_sum))/s.request_income) ELSE 'null'::jsonb END ELSE to_jsonb(s.gross_margin) END
+ ) FROM summary s CROSS JOIN wallet_total w),'total',(SELECT count(*) FROM grouped),
+ 'rows',COALESCE((SELECT jsonb_agg(merged ORDER BY ord) FROM (` + rowQuery + ` LIMIT $9 OFFSET $10) page),'[]'::jsonb),
  'accounts',COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM (SELECT id,name,key,attribution,updated_at,deleted,multiplier,cost_basis,url_key,channel_id,channel_name,channel_code,channel_remark,channel_revision,assignment FROM accounts_config WHERE id IN (SELECT account_id FROM scoped) OR ($5::bigint>0 AND id IN (SELECT id FROM cohort)) ORDER BY id LIMIT 100)c),'[]'::jsonb),
  'members',COALESCE((SELECT jsonb_agg(to_jsonb(m)) FROM (SELECT id,name,key,attribution,updated_at,deleted,multiplier,cost_basis,url_key,channel_id,channel_name,channel_code,channel_remark,channel_revision,assignment,schedulable,concurrency,status FROM cohort c WHERE ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6)) ORDER BY id LIMIT $9 OFFSET $10)m),'[]'::jsonb),
  'member_total',(SELECT count(*) FROM cohort c WHERE ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
@@ -273,12 +312,12 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
  'capacity',(SELECT jsonb_build_object('accounts',count(*),'schedulable',count(*) FILTER(WHERE schedulable AND status='active'),'configured_concurrency',COALESCE(sum(concurrency),0)) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'catalog_total',(SELECT count(DISTINCT key) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'account_details_limit',100,'historical_upstream_snapshot_requests',(SELECT count(*) FROM scoped WHERE attribution='historical_channel'),'historical_cost_multiplier_snapshot_requests',0,
- 'cost_formula','supplier channel: matched upstream usage bill; unbound channel: usage_logs.total_cost * current extra.cost_multiplier (default 0.1)',
+ 'cost_formula','bound channel: stored channel-operations today_spend for the Asia/Shanghai consumption day only, not split by account or model; unbound channel: usage_logs.total_cost * current extra.cost_multiplier (default 0.1)',
  'income_source','persisted usage_logs.actual_cost; subscription usage valuation, not cash receipts; no guarantee of debit in simple mode',
  'standard_source','persisted usage_logs.total_cost; historical model/cache/per-request pricing is not recalculated',
  'account_rate_multiplier_used',false,'error_rate',NULL)`
-	out := &service.ProfitOperationsSnapshot{UpstreamOperationsSnapshot: service.UpstreamOperationsSnapshot{Scope: f, QueriedAt: time.Now().UTC(), Attribution: "historical_channel_then_current_provider_url; supplier_uses_request_bills_only; unbound_uses_estimates"}, Currency: "USD billing units (no per-row currency snapshot)"}
-	if err = tx.QueryRowContext(ctx, query, args...).Scan(&out.Usage); err != nil {
+	out := &service.ProfitOperationsSnapshot{UpstreamOperationsSnapshot: service.UpstreamOperationsSnapshot{Scope: f, QueriedAt: time.Now().UTC(), Attribution: "historical_channel_then_current_provider_url; supplier_uses_channel_today_spend; unbound_uses_estimates"}, Currency: "USD billing units; bound cost uses the channel-operations today_spend currency and only USD is subtracted"}
+	if err = tx.QueryRowContext(ctx, query, queryArgs...).Scan(&out.Usage); err != nil {
 		return nil, fmt.Errorf("read upstream usage: %w", err)
 	}
 	profitErrors := strings.Replace(upstreamOperationsErrors, upstreamOperationsCohort, profitOperationsCohort, 1)
