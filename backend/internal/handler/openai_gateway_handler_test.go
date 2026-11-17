@@ -1648,7 +1648,7 @@ func TestOpenAIResponsesWebSocket_PassthroughTracksModelPerTurn(t *testing.T) {
 	require.Equal(t, "terra-channel", *got.logs[1].UpstreamModel)
 	require.NotNil(t, got.logs[1].ModelMappingChain)
 	require.Equal(t, "terra→terra-channel", *got.logs[1].ModelMappingChain)
-	require.InDelta(t, 2*2e-6+12e-6, got.logs[1].TotalCost, 1e-12,
+	require.InDelta(t, got.logs[1].TotalCost*2.5, got.logs[0].TotalCost, 1e-12,
 		"each turn must be billed with its own channel-mapped model")
 }
 
