@@ -1206,7 +1206,17 @@ var ProviderSet = wire.NewSet(
 
 // ProvideUsageBillingRepository 以按用户合并结算的通道作为各服务使用的计费仓储。
 func ProvideUsageBillingRepository(lanes *UsageBillingLaneCombiner) UsageBillingRepository {
+	if durable, ok := lanes.repo.(DurableUsageBillingRepository); ok {
+		return &durableUsageBillingLanes{UsageBillingLaneCombiner: lanes, DurableUsageBillingRepository: durable}
+	}
 	return lanes
+}
+
+// Staged delivery keeps its transactional journal and cache acknowledgement.
+// Direct Apply users still use lanes; journal application is not batched.
+type durableUsageBillingLanes struct {
+	*UsageBillingLaneCombiner
+	DurableUsageBillingRepository
 }
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。

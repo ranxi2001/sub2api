@@ -356,7 +356,7 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 // 同一 bucket、同一组 (active, 修订号) 的并发加载合并为一次；加载时精简记录原文未变、
 // 且预解析结果对应当前运行时模型映射版本的账号沿用已解码的母本。
 // last_used 读取结果在条目内复用 schedulerLastUsedCacheMaxAge。
-// 返回的切片与其中的账号由本次调用独占，可以修改账号的顶层字段；map、切片底层数组与指针指向的值与其它调用共享，不得原地修改。
+// 返回账号使用 fork 的独立深拷贝，允许选号路径修改嵌套配置；加载与解码仍按 bucket 合并。
 func (c *schedulerCache) GetSnapshotValues(ctx context.Context, bucket service.SchedulerBucket) ([]service.Account, bool, error) {
 	entry, err := c.snapshotEntry(ctx, bucket)
 	if err != nil {
@@ -368,6 +368,10 @@ func (c *schedulerCache) GetSnapshotValues(ctx context.Context, bucket service.S
 	accounts, err := c.snapshotAccountsFromEntry(ctx, entry)
 	if err != nil {
 		return nil, false, err
+	}
+	if accounts == nil {
+		c.dropSnapshotEntry(bucket.String())
+		return nil, false, nil
 	}
 	return accounts, true, nil
 }
@@ -576,13 +580,27 @@ func (e *schedulerSnapshotEntry) masterIndex() map[string]int {
 
 // snapshotAccountsFromEntry 为本次调用一次性分配一组母本副本，并套用 last_used。
 func (c *schedulerCache) snapshotAccountsFromEntry(ctx context.Context, entry *schedulerSnapshotEntry) ([]service.Account, error) {
+	for start := 0; start < len(entry.accounts); start += c.mgetChunkSize {
+		end := min(start+c.mgetChunkSize, len(entry.accounts))
+		keys := make([]string, 0, end-start)
+		for _, account := range entry.accounts[start:end] {
+			keys = append(keys, schedulerAccountMetaKey(strconv.FormatInt(account.ID, 10)))
+		}
+		n, err := c.rdb.Exists(ctx, keys...).Result()
+		if err != nil {
+			return nil, err
+		}
+		if n != int64(len(keys)) {
+			return nil, nil
+		}
+	}
 	lastUsed, err := c.entryLastUsed(ctx, entry)
 	if err != nil {
 		return nil, err
 	}
 	accounts := make([]service.Account, len(entry.accounts))
 	for i, master := range entry.accounts {
-		accounts[i] = *master
+		accounts[i] = master.CopySchedulerSnapshot()
 		if lastUsed[i] != nil {
 			accounts[i].LastUsedAt = lastUsed[i]
 		}

@@ -280,15 +280,18 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return cached, useMixed, nil
+			return schedulableAccountValues(cached), useMixed, nil
 		}
 	}
 
+	if s.cache != nil && !s.writesSnapshots() {
+		return nil, useMixed, ErrSchedulerCacheNotReady
+	}
 	accounts, err := s.loadFallbackAccounts(ctx, bucket, useMixed)
 	if err != nil {
 		return nil, useMixed, err
 	}
-	return accounts, useMixed, nil
+	return schedulableAccountValues(accounts), useMixed, nil
 }
 
 // readSnapshotAccounts 读取 bucket 快照；缓存实现能直接返回值切片时直接使用该切片。
@@ -327,7 +330,9 @@ func (s *SchedulerSnapshotService) loadFallbackAccounts(ctx context.Context, buc
 			return nil, nil
 		}
 		accounts := make([]Account, len(shared))
-		copy(accounts, shared)
+		for i := range shared {
+			accounts[i] = shared[i].CopySchedulerSnapshot()
+		}
 		return accounts, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -1970,4 +1975,14 @@ func (l *fallbackLimiter) Allow() bool {
 	}
 	l.count++
 	return true
+}
+
+func schedulableAccountValues(accounts []Account) []Account {
+	out := make([]Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account.IsSchedulable() {
+			out = append(out, account)
+		}
+	}
+	return out
 }
