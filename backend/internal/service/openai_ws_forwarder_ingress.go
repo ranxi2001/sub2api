@@ -1540,7 +1540,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
 				observedResult := result
-				if result != nil && result.wsLocalWarmup {
+				if warmupHandled {
 					observedResult = nil
 				}
 				hooks.AfterTurn(turn, observedResult, bridgeErr)
@@ -1593,10 +1593,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				turnState = bridgeTurnState
 			}
 			responseID := strings.TrimSpace(result.RequestID)
-			if smartStrict && !result.wsLocalWarmup {
+			if smartStrict && !warmupHandled {
 				smartSession.LastResponse = responseID
 			}
-			if responseID != "" && stateStore != nil && !result.wsLocalWarmup {
+			if responseID != "" && stateStore != nil && !warmupHandled {
 				ttl := s.openAIWSResponseStickyTTL()
 				logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
 			}

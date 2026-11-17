@@ -60,7 +60,7 @@ func (w *openAIWSHTTPWarmup) accept(source []byte, model string, turn int, write
 			return nil, true, NewOpenAIWSClientCloseError(coderws.StatusNormalClosure, "client disconnected during local warmup", err)
 		}
 	}
-	return &OpenAIForwardResult{RequestID: w.responseID, Model: model, Stream: true, OpenAIWSMode: true, wsLocalWarmup: true}, true, nil
+	return &OpenAIForwardResult{RequestID: w.responseID, Model: model, Stream: true, OpenAIWSMode: true}, true, nil
 }
 
 // Resolve only the private warmup anchor returned on this socket. Unknown
