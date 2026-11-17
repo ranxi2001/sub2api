@@ -1,0 +1,106 @@
+name: Upstream v0.2.22 dynamic acceptance
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/scripts/upstream-v0222-acceptance.*'
+      - '.github/workflows/upstream-v0222-acceptance.yml'
+permissions:
+  contents: read
+concurrency:
+  group: v0222-acceptance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  GOMAXPROCS: '2'
+  GOFLAGS: '-p=2'
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+  TZ: UTC
+jobs:
+  backend:
+    name: Feature assertions (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [unit, integration]
+    env:
+      EVIDENCE_DIR: ${{ github.workspace }}/evidence/${{ matrix.mode }}
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Feature-specific execution with test event evidence
+        run: python3 .github/scripts/upstream-v0222-acceptance.py '${{ matrix.mode }}'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: upstream-v0222-${{ matrix.mode }}-${{ env.EXPECTED_HEAD_SHA }}
+          path: evidence/
+          if-no-files-found: error
+  frontend-embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+      EVIDENCE_DIR: ${{ github.workspace }}/evidence/embed
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Feature components and all new feature notice IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          git rev-parse HEAD > evidence/frontend-head.txt
+          mapfile -t specs < <(python3 .github/scripts/upstream-v0222-acceptance.py frontend-list)
+          pnpm --dir frontend exec vitest run "${specs[@]}" --maxWorkers=1 --minWorkers=1 --no-file-parallelism --reporter=default --reporter=json --outputFile="$GITHUB_WORKSPACE/evidence/frontend.json" 2>&1 | tee evidence/frontend.log
+      - name: Build actual frontend for production embedding
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend run build 2>&1 | tee evidence/frontend-build.log
+          mkdir -p backend/internal/web/dist
+          cp -a frontend/dist/. backend/internal/web/dist/
+      - name: Embedded HTML cache and nonce contract
+        run: python3 .github/scripts/upstream-v0222-acceptance.py embed
+      - name: Production embed binary and build identity
+        run: |
+          set -euo pipefail
+          cd backend
+          CGO_ENABLED=0 go build -tags embed -trimpath -ldflags="-X main.Commit=$EXPECTED_HEAD_SHA" -o "$RUNNER_TEMP/sub2api-v0222" ./cmd/server
+          "$RUNNER_TEMP/sub2api-v0222" -version | tee ../evidence/embed-version.txt
+          sha256sum "$RUNNER_TEMP/sub2api-v0222" > ../evidence/embed-binary-sha256.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: upstream-v0222-frontend-embed-${{ env.EXPECTED_HEAD_SHA }}
+          path: evidence/
+          if-no-files-found: error

@@ -19,7 +19,7 @@ import (
 func TestGroupUsageRollupSyncDoesNotBlockUsageWritesDuringBuild(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	tz := useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
 	db := openGroupUsageRollupSchemaDB(t, schema, "Asia/Shanghai")
 	todayStart := time.Date(2026, 8, 13, 16, 0, 0, 0, time.UTC)
@@ -49,6 +49,7 @@ func TestGroupUsageRollupSyncDoesNotBlockUsageWritesDuringBuild(t *testing.T) {
 	require.NoError(t, err)
 
 	repo := newDashboardAggregationRepositoryWithSQL(db)
+	repo.configuredTimezone = tz
 	syncDone := make(chan error, 1)
 	go func() { syncDone <- repo.SyncGroupUsageRollups(ctx, todayStart) }()
 	waitForBlockedGroupUsageRollupStatement(t, ctx, "DELETE FROM usage_group_daily_rollups")
@@ -84,7 +85,7 @@ func TestGroupUsageRollupSyncDoesNotBlockUsageWritesDuringBuild(t *testing.T) {
 	require.False(t, state.buildDirtyFrom.Valid)
 	requireGroupUsageRollupsMatchUsageLogs(t, ctx, db, "Asia/Shanghai", state.retainedFrom, todayStart)
 
-	summary := groupUsageSummaryByGroup(t, ctx, db, todayStart)
+	summary := groupUsageSummaryByGroup(t, ctx, db, todayStart, tz)
 	require.InDelta(t, 41, summary[10][0], 1e-9)
 	require.InDelta(t, 32, summary[10][1], 1e-9)
 	require.InDelta(t, 8, summary[10][2], 1e-9)
@@ -98,7 +99,7 @@ func TestGroupUsageRollupSyncDoesNotBlockUsageWritesDuringBuild(t *testing.T) {
 func TestGroupUsageRollupRetentionCleanupKeepsPublishedWatermark(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	tz := useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
 	db := openGroupUsageRollupSchemaDB(t, schema, "Asia/Shanghai")
 	todayStart := time.Date(2026, 8, 9, 16, 0, 0, 0, time.UTC)
@@ -115,6 +116,7 @@ func TestGroupUsageRollupRetentionCleanupKeepsPublishedWatermark(t *testing.T) {
 	`)
 
 	repo := newDashboardAggregationRepositoryWithSQL(db)
+	repo.configuredTimezone = tz
 	repo.clock = func() time.Time { return todayStart.Add(10 * time.Hour) }
 	require.NoError(t, repo.SyncGroupUsageRollups(ctx, todayStart))
 	require.Equal(t, "2026-08-10", readGroupUsageRollupTestState(t, ctx, db).closedBefore)
@@ -143,7 +145,7 @@ func TestGroupUsageRollupRetentionCleanupKeepsPublishedWatermark(t *testing.T) {
 	require.Equal(t, []int64{2, 3, 4, 5}, remaining)
 
 	requireGroupUsageRollupsMatchUsageLogs(t, ctx, db, "Asia/Shanghai", alignedCutoff, todayStart)
-	summary := groupUsageSummaryByGroup(t, ctx, db, todayStart)
+	summary := groupUsageSummaryByGroup(t, ctx, db, todayStart, tz)
 	require.InDelta(t, 22, summary[10][0], 1e-9)
 	require.InDelta(t, 16, summary[10][1], 1e-9)
 	require.InDelta(t, 8, summary[20][0], 1e-9)
@@ -153,12 +155,12 @@ func TestGroupUsageRollupRetentionCleanupKeepsPublishedWatermark(t *testing.T) {
 		VALUES (6, 1, 10, 100, TIMESTAMPTZ '2026-08-01 12:00:00+08')
 	`)
 	require.Equal(t, "2026-08-10", readGroupUsageRollupTestState(t, ctx, db).closedBefore)
-	summary = groupUsageSummaryByGroup(t, ctx, db, todayStart)
+	summary = groupUsageSummaryByGroup(t, ctx, db, todayStart, tz)
 	require.InDelta(t, 22, summary[10][0], 1e-9)
 
 	execGroupUsageRollupSQL(t, ctx, db, `DELETE FROM usage_logs WHERE id = 4`)
 	require.Equal(t, "2026-08-05", readGroupUsageRollupTestState(t, ctx, db).closedBefore)
-	summary = groupUsageSummaryByGroup(t, ctx, db, todayStart)
+	summary = groupUsageSummaryByGroup(t, ctx, db, todayStart, tz)
 	require.InDelta(t, 0, summary[20][0], 1e-9)
 	require.InDelta(t, 22, summary[10][0], 1e-9)
 }
@@ -312,7 +314,7 @@ func TestGroupUsageRollupBuildKeyShareDoesNotBlockLateWrites(t *testing.T) {
 func TestGroupUsageRollupSyncSkipsWhileAnotherBuildHoldsLock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	tz := useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
 	db := openGroupUsageRollupSchemaDB(t, schema, "Asia/Shanghai")
 	todayStart := time.Date(2026, 8, 13, 16, 0, 0, 0, time.UTC)
@@ -326,6 +328,7 @@ func TestGroupUsageRollupSyncSkipsWhileAnotherBuildHoldsLock(t *testing.T) {
 	defer func() { _, _ = holder.ExecContext(context.Background(), groupUsageRollupBuildUnlockSQL) }()
 
 	repo := newDashboardAggregationRepositoryWithSQL(db)
+	repo.configuredTimezone = tz
 	require.NoError(t, repo.SyncGroupUsageRollups(ctx, todayStart))
 	state := readGroupUsageRollupTestState(t, ctx, db)
 	require.Equal(t, "1970-01-01", state.closedBefore)
@@ -336,7 +339,7 @@ func TestGroupUsageRollupSyncSkipsWhileAnotherBuildHoldsLock(t *testing.T) {
 func TestGroupUsageRollupSyncRecoversFromInterruptedBuild(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	tz := useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
 	db := openGroupUsageRollupSchemaDB(t, schema, "Asia/Shanghai")
 	todayStart := time.Date(2026, 8, 13, 16, 0, 0, 0, time.UTC)
@@ -361,6 +364,7 @@ func TestGroupUsageRollupSyncRecoversFromInterruptedBuild(t *testing.T) {
 	`)
 
 	repo := newDashboardAggregationRepositoryWithSQL(db)
+	repo.configuredTimezone = tz
 	require.NoError(t, repo.SyncGroupUsageRollups(ctx, todayStart))
 
 	state := readGroupUsageRollupTestState(t, ctx, db)
@@ -483,9 +487,11 @@ func collectGroupUsageRollupBuckets(t *testing.T, ctx context.Context, db *sql.D
 }
 
 // groupUsageSummaryByGroup 返回 group_id → [total, today, yesterday]。
-func groupUsageSummaryByGroup(t *testing.T, ctx context.Context, db *sql.DB, todayStart time.Time) map[int64][3]float64 {
+func groupUsageSummaryByGroup(t *testing.T, ctx context.Context, db *sql.DB, todayStart time.Time, tz configuredTimezone) map[int64][3]float64 {
 	t.Helper()
-	result, err := newUsageLogRepositoryWithSQL(nil, db).GetAllGroupUsageSummary(ctx, todayStart)
+	repo := newUsageLogRepositoryWithSQL(nil, db)
+	repo.configuredTimezone = tz
+	result, err := repo.GetAllGroupUsageSummary(ctx, todayStart)
 	require.NoError(t, err)
 	summary := make(map[int64][3]float64, len(result))
 	for _, row := range result {
@@ -564,7 +570,7 @@ func TestGroupUsageRollupInvalidateAtStartsFromExpiredFloor(t *testing.T) {
 func TestGroupUsageRollupSyncKeepsPreviousDayBucketAcrossMidnightDSTGap(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	useGroupUsageRepositoryTestTimezone(t, "America/Santiago")
+	tz := useGroupUsageRepositoryTestTimezone(t, "America/Santiago")
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
 	db := openGroupUsageRollupSchemaDB(t, schema, "America/Santiago")
 	santiago, err := time.LoadLocation("America/Santiago")
@@ -589,6 +595,7 @@ func TestGroupUsageRollupSyncKeepsPreviousDayBucketAcrossMidnightDSTGap(t *testi
 	`)
 
 	repo := newDashboardAggregationRepositoryWithSQL(db)
+	repo.configuredTimezone = tz
 	require.NoError(t, repo.SyncGroupUsageRollups(ctx, todayStart))
 
 	state := readGroupUsageRollupTestState(t, ctx, db)
@@ -607,7 +614,7 @@ func TestGroupUsageRollupSyncKeepsPreviousDayBucketAcrossMidnightDSTGap(t *testi
 func TestGroupUsageRollupRetentionCleanupSkipsPartitionDropOnLockTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
+	tz := useGroupUsageRepositoryTestTimezone(t, "Asia/Shanghai")
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, true)
 	db := openGroupUsageRollupSchemaDB(t, schema, "Asia/Shanghai")
 	todayStart := time.Date(2026, 8, 9, 16, 0, 0, 0, time.UTC)
@@ -623,6 +630,7 @@ func TestGroupUsageRollupRetentionCleanupSkipsPartitionDropOnLockTimeout(t *test
 			(3, 1, 10, 4, TIMESTAMPTZ '2026-08-05 10:00:00+08');
 	`)
 	repo := newDashboardAggregationRepositoryWithSQL(db)
+	repo.configuredTimezone = tz
 	repo.clock = func() time.Time { return todayStart.Add(10 * time.Hour) }
 	require.NoError(t, repo.SyncGroupUsageRollups(ctx, todayStart))
 
@@ -647,6 +655,6 @@ func TestGroupUsageRollupRetentionCleanupSkipsPartitionDropOnLockTimeout(t *test
 	state := readGroupUsageRollupTestState(t, ctx, db)
 	require.Equal(t, "2026-08-10", state.closedBefore)
 	requireGroupUsageRollupsMatchUsageLogs(t, ctx, db, "Asia/Shanghai", state.retainedFrom, todayStart)
-	summary := groupUsageSummaryByGroup(t, ctx, db, todayStart)
+	summary := groupUsageSummaryByGroup(t, ctx, db, todayStart, tz)
 	require.InDelta(t, 6, summary[10][0], 1e-9)
 }
