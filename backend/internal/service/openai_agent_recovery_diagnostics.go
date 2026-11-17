@@ -58,7 +58,7 @@ func inspectOpenAIWSCompletedTools(body []byte) (openAIRecoveryToolCounts, strin
 				}
 				// Discovery can carry callable schemas instead of a text result.
 				hasOutput := item.Get("output").Exists() && item.Get("output").Type != gjson.Null
-				if !hasOutput && !(kind == "tool_search_output" && item.Get("tools").IsArray()) {
+				if !hasOutput && (kind != "tool_search_output" || !item.Get("tools").IsArray()) {
 					d.invalid++
 				}
 				results[id] = kind
