@@ -26,7 +26,14 @@ func openAIWSWarmupRefusal() error {
 // A non-generating empty prefill has no provider response/owner to publish.
 // Acknowledge it locally and retain only its bounded, same-socket defaults.
 func (w *openAIWSHTTPWarmup) accept(source []byte, model string, turn int, write func([]byte) error) (*OpenAIForwardResult, bool, error) {
-	if gjson.GetBytes(source, "generate").Type != gjson.False {
+	generate := gjson.GetBytes(source, "generate")
+	if !generate.Exists() {
+		return nil, false, nil
+	}
+	if !openAIEncryptedJSONUnambiguous(source) || (generate.Type != gjson.True && generate.Type != gjson.False) {
+		return nil, true, openAIWSWarmupRefusal()
+	}
+	if generate.Type == gjson.True {
 		return nil, false, nil
 	}
 	input := gjson.GetBytes(source, "input")

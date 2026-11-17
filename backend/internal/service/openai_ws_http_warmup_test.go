@@ -13,6 +13,8 @@ import (
 
 func TestHTTPBridgeWarmupGuards(t *testing.T) {
 	for _, raw := range []string{
+		`{"generate":true,"generate":false,"input":[]}`,
+		`{"generate":"false","input":[]}`,
 		`{"generate":false,"input":[{"role":"user","content":"must not generate"}]}`,
 		`{"generate":false,"input":[],"previous_response_id":"resp_foreign"}`,
 		`{"generate":false,"input":[],"conversation":"conv_foreign"}`,
