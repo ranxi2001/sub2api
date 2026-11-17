@@ -13,6 +13,8 @@ import (
 // This local protocol refusal must never count against the upstream account.
 var ErrOpenAIWSUnsupportedWarmup = errors.New("unsupported websocket HTTP bridge warmup")
 
+const openAIWSHTTPWarmupLimit = 8 << 20
+
 type openAIWSHTTPWarmup struct {
 	responseID string
 	defaults   []byte
@@ -37,7 +39,7 @@ func (w *openAIWSHTTPWarmup) accept(source []byte, model string, turn int, write
 		return nil, false, nil
 	}
 	input := gjson.GetBytes(source, "input")
-	if turn != 1 || len(source) > openAIWSLocalHistoryLimit || !openAIEncryptedJSONUnambiguous(source) ||
+	if turn != 1 || len(source) > openAIWSHTTPWarmupLimit || !openAIEncryptedJSONUnambiguous(source) ||
 		!input.IsArray() || len(input.Array()) != 0 || gjson.GetBytes(source, "previous_response_id").Exists() ||
 		gjson.GetBytes(source, "conversation").Exists() || gjson.GetBytes(source, "prompt").Exists() {
 		return nil, true, openAIWSWarmupRefusal()
