@@ -280,7 +280,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return schedulableAccountValues(cached), useMixed, nil
+			return cached, useMixed, nil
 		}
 	}
 
@@ -297,18 +297,22 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 // readSnapshotAccounts 读取 bucket 快照；缓存实现能直接返回值切片时直接使用该切片。
 func (s *SchedulerSnapshotService) readSnapshotAccounts(ctx context.Context, bucket SchedulerBucket) ([]Account, bool, error) {
 	if reader, ok := s.cache.(schedulerSnapshotValuesReader); ok {
-		return reader.GetSnapshotValues(ctx, bucket)
+		accounts, hit, err := reader.GetSnapshotValues(ctx, bucket)
+		if err != nil || !hit {
+			return nil, false, err
+		}
+		return compactSchedulableAccounts(accounts), true, nil
 	}
 	cached, hit, err := s.cache.GetSnapshot(ctx, bucket)
 	if err != nil || !hit {
 		return nil, false, err
 	}
-	return derefAccounts(cached), true, nil
+	return derefSchedulableAccounts(cached), true, nil
 }
 
 // loadFallbackAccounts 回源数据库读取 bucket 的账号，取得发布令牌时尽力回写快照。
 // 同一 bucket 的并发回源合并为一次：合并回源与回写不随单个调用方取消，各调用方按自身 ctx 等待结果，
-// 并各自得到一份独占的切片；账号的 map、切片底层数组与指针指向的值在调用方之间共享，不得原地修改。
+// 并各自得到深拷贝的账号快照，避免调用方修改嵌套配置影响其他请求。
 func (s *SchedulerSnapshotService) loadFallbackAccounts(ctx context.Context, bucket SchedulerBucket, useMixed bool) ([]Account, error) {
 	loadCtx := context.WithoutCancel(ctx)
 	results := s.fallbackLoads.DoChan(bucket.String(), func() (result any, err error) {
@@ -1977,6 +1981,20 @@ func (l *fallbackLimiter) Allow() bool {
 	return true
 }
 
+func derefAccounts(accounts []*Account) []Account {
+	if len(accounts) == 0 {
+		return []Account{}
+	}
+	out := make([]Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		out = append(out, *account)
+	}
+	return out
+}
+
 func schedulableAccountValues(accounts []Account) []Account {
 	out := make([]Account, 0, len(accounts))
 	for _, account := range accounts {
@@ -1984,5 +2002,16 @@ func schedulableAccountValues(accounts []Account) []Account {
 			out = append(out, account)
 		}
 	}
+	return out
+}
+
+func compactSchedulableAccounts(accounts []Account) []Account {
+	out := accounts[:0]
+	for i := range accounts {
+		if accounts[i].IsSchedulable() {
+			out = append(out, accounts[i])
+		}
+	}
+	clear(accounts[len(out):])
 	return out
 }

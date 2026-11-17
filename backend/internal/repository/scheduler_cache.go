@@ -506,7 +506,9 @@ func (c *schedulerCache) loadSnapshotEntry(ctx context.Context, bucket service.S
 		keys = append(keys, schedulerAccountMetaKey(id))
 		lastUsedKeys = append(lastUsedKeys, schedulerLastUsedKey(id))
 	}
-	values, _, err := c.mgetSnapshotFields(ctx, keys, lastUsedKeys)
+	generation := c.lastUsedGeneration.Load()
+	fetchedAt := c.now()
+	values, lastUsedRaw, err := c.mgetSnapshotFields(ctx, keys, lastUsedKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -550,6 +552,17 @@ func (c *schedulerCache) loadSnapshotEntry(ctx context.Context, bucket service.S
 		payloads:     payloads,
 		lastUsedKeys: lastUsedKeys,
 	}
+	lastUsed := make([]*time.Time, len(masters))
+	for i, raw := range lastUsedRaw {
+		value, err := parseSchedulerLastUsed(raw)
+		if err != nil {
+			return nil, err
+		}
+		if value != nil && (masters[i].LastUsedAt == nil || value.After(*masters[i].LastUsedAt)) {
+			lastUsed[i] = value
+		}
+	}
+	entry.lastUsed.Store(&schedulerLastUsedValues{fetchedAt: fetchedAt, generation: generation, values: lastUsed})
 	c.storeSnapshotEntry(bucketKey, entry)
 	return entry, nil
 }
@@ -580,8 +593,12 @@ func (e *schedulerSnapshotEntry) masterIndex() map[string]int {
 
 // snapshotAccountsFromEntry 为本次调用一次性分配一组母本副本，并套用 last_used。
 func (c *schedulerCache) snapshotAccountsFromEntry(ctx context.Context, entry *schedulerSnapshotEntry) ([]service.Account, error) {
-	for start := 0; start < len(entry.accounts); start += c.mgetChunkSize {
-		end := min(start+c.mgetChunkSize, len(entry.accounts))
+	chunkSize := c.mgetChunkSize
+	if chunkSize <= 0 {
+		chunkSize = defaultSchedulerSnapshotMGetChunkSize
+	}
+	for start := 0; start < len(entry.accounts); start += chunkSize {
+		end := min(start+chunkSize, len(entry.accounts))
 		keys := make([]string, 0, end-start)
 		for _, account := range entry.accounts[start:end] {
 			keys = append(keys, schedulerAccountMetaKey(strconv.FormatInt(account.ID, 10)))
@@ -602,7 +619,8 @@ func (c *schedulerCache) snapshotAccountsFromEntry(ctx context.Context, entry *s
 	for i, master := range entry.accounts {
 		accounts[i] = master.CopySchedulerSnapshot()
 		if lastUsed[i] != nil {
-			accounts[i].LastUsedAt = lastUsed[i]
+			value := *lastUsed[i]
+			accounts[i].LastUsedAt = &value
 		}
 	}
 	return accounts, nil

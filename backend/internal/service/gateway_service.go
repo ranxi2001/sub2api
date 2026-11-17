@@ -1567,7 +1567,7 @@ func availableModelsFromAccounts(accounts []Account, groupID *int64, platform st
 			hasInitialSelection = true
 			hasAnyMapping = true // an empty selection is an authoritative empty catalog
 		}
-		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() && !acc.hasOAuthInitialModelSelection() {
+		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() && !acc.IsOpenAIPassthroughModelFilterEnabled() && !acc.hasOAuthInitialModelSelection() {
 			mapping = nil
 		}
 		for model := range mapping {

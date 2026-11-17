@@ -1219,6 +1219,16 @@ type durableUsageBillingLanes struct {
 	DurableUsageBillingRepository
 }
 
+// Preserve retry rotation so a failed cache invalidation cannot starve later receipts.
+func (r *durableUsageBillingLanes) DeferUsageBillingCache(ctx context.Context, key UsageBillingEventKey) error {
+	if retry, ok := r.DurableUsageBillingRepository.(interface {
+		DeferUsageBillingCache(context.Context, UsageBillingEventKey) error
+	}); ok {
+		return retry.DeferUsageBillingCache(ctx, key)
+	}
+	return nil
+}
+
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {
 	svc := NewUserPlatformQuotaUsageFlusher(cfg, cache, quotaRepo, tw)

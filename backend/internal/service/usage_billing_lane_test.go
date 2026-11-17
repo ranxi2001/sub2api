@@ -614,3 +614,37 @@ func TestUsageBillingLane_FallbackPanicOnlyFailsThatRequest(t *testing.T) {
 	require.NoError(t, results["q1"].err)
 	require.True(t, results["q1"].res.Applied)
 }
+
+// The provider must retain the journal and its failed-cache retry rotation.
+type durableLaneTestRepo struct {
+	*laneTestRepo
+	DurableUsageBillingRepository
+	recovery *recoveryCacheRepo
+}
+
+func (r *durableLaneTestRepo) DeferUsageBillingCache(ctx context.Context, key UsageBillingEventKey) error {
+	return r.recovery.DeferUsageBillingCache(ctx, key)
+}
+
+func TestUsageBillingProviderPreservesDurableRecoveryAndDirectApply(t *testing.T) {
+	recovery := &recoveryCacheRepo{seen: map[string]bool{}}
+	direct := newLaneTestRepo()
+	underlying := &durableLaneTestRepo{laneTestRepo: direct, DurableUsageBillingRepository: recovery, recovery: recovery}
+	lanes := newLaneTestCombiner(underlying, 16)
+	t.Cleanup(lanes.Stop)
+	repo := ProvideUsageBillingRepository(lanes)
+	durable, ok := repo.(DurableUsageBillingRepository)
+	require.True(t, ok, "billing wrapper must not hide durable delivery")
+	cache := &BillingCacheService{cache: &recoveryCacheFailure{}}
+	for attempt := 0; attempt < 2; attempt++ {
+		require.Error(t, recoverUsageBillingBatch(context.Background(), durable, cache, nil))
+	}
+	require.Equal(t, []string{"second", "second"}, recovery.acked)
+	require.Equal(t, []string{"first", "first"}, recovery.deferred)
+	require.Len(t, recovery.seen, 2)
+	require.Empty(t, direct.applyCalls, "journal recovery must not replay an Apply charge")
+	result, err := repo.Apply(context.Background(), laneTestCommand(7, "direct", 1))
+	require.NoError(t, err)
+	require.True(t, result.Applied)
+	require.Equal(t, []string{"direct"}, direct.applyCalls)
+}

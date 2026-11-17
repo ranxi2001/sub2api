@@ -116,3 +116,7 @@
 | `926d3cd86d8b104d59c1dfd474863d9a0223c953` | `3838cfe47892dce901b510a529fa5b627e975266` | test(billing): 将 Ultrafast 门控与计费一致性用例移入 unit 标签文件 |
 | `43c1ca01483c4e21b2dd62bd1168cf374436b9ca` | `6e280d03f36883d0a34e23f32aa89796e8361158` | fix(billing): 为硅基流动 Qwen3-Embedding 系列补兜底定价 |
 | `796455c1c9f57241c82115e78dcb67938609af4d` | `5e4e39cea6156e4bc736e1a2d117bccb71357e9f` | fix(billing): 为硅基流动 Qwen3-Reranker 系列补兜底定价 |
+
+## 合并提交的独有变更复核
+
+`git show --remerge-diff` 检出 `7f3fe5bfde146f940aaad88e89f6e8944e1f5ceb` 含调度配置池与合并加载的额外整合：缓存读取按当前时间筛选、回源发布完整池及两项回归。PR 审查追加 fix 补齐该差异，保留 fork 深拷贝与撤销检查；不重复重放整个 merge。其余范围内 merge 的 remerge diff 为空。

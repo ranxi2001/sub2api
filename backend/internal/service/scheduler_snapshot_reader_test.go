@@ -67,7 +67,7 @@ func TestSchedulerSnapshotReaderUsesHitsAndFailsClosedOnMissOrFailure(t *testing
 		err      error
 		success  bool
 	}{
-		{name: "hit", hit: true, accounts: []*Account{{ID: 1}}, success: true},
+		{name: "hit", hit: true, accounts: []*Account{{ID: 1, Status: StatusActive, Schedulable: true}}, success: true},
 		{name: "miss"},
 		{name: "cache_error", err: errors.New("cache unavailable")},
 	} {
@@ -113,7 +113,7 @@ func TestSchedulerSnapshotReaderPreservesRequestAccountFeedback(t *testing.T) {
 }
 
 func TestSchedulerSnapshotReaderRequiresAllRequestedAccountDetails(t *testing.T) {
-	cache := &snapshotReaderCache{accounts: []*Account{{ID: 1}}}
+	cache := &snapshotReaderCache{accounts: []*Account{{ID: 1, Status: StatusActive, Schedulable: true}}}
 	svc := NewSchedulerSnapshotService(cache, nil, nil, nil, snapshotReaderConfig())
 	defer svc.Stop()
 	accounts, err := svc.GetAccounts(context.Background(), []int64{1, 2})

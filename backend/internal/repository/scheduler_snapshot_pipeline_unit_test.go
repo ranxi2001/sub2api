@@ -53,7 +53,7 @@ func TestSchedulerSnapshotPipelinesBoundedFieldsAndFreshLastUsed(t *testing.T) {
 		require.Equal(t, accounts[i].ID, account.ID)
 	}
 	require.Equal(t, latest, *result[2].LastUsedAt)
-	require.Equal(t, 1, hook.direct)  // membership ZRANGE
+	require.Equal(t, 3, hook.direct)  // membership ZRANGE + two bounded metadata existence checks
 	require.Len(t, hook.pipelines, 3) // control pair + two bounded field pairs
 	for _, pair := range hook.pipelines[1:] {
 		require.Len(t, pair, 2)

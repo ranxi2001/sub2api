@@ -237,14 +237,22 @@ func TestSchedulerCacheSnapshotMemoRepeatReadsFetchTagsAndExpiredLastUsed(t *tes
 	recorder.reset()
 	second := memoRead(t, cache, bucket)
 	require.Equal(t, []string{
-		"mget " + schedulerBucketKey(schedulerReadyPrefix, bucket),
+		"get " + schedulerBucketKey(schedulerReadyPrefix, bucket),
+		"get " + schedulerBucketKey(schedulerActivePrefix, bucket),
+		"get " + schedulerAccountMetaRevisionKey,
+		"get " + memoAnthropicRevisionKey,
+		"exists " + schedulerAccountMetaKey("1"),
 	}, recorder.recorded(), "last_used read within its max age is reused")
 
 	clock.Advance(schedulerLastUsedCacheMaxAge)
 	recorder.reset()
 	memoRead(t, cache, bucket)
 	require.Equal(t, []string{
-		"mget " + schedulerBucketKey(schedulerReadyPrefix, bucket),
+		"get " + schedulerBucketKey(schedulerReadyPrefix, bucket),
+		"get " + schedulerBucketKey(schedulerActivePrefix, bucket),
+		"get " + schedulerAccountMetaRevisionKey,
+		"get " + memoAnthropicRevisionKey,
+		"exists " + schedulerAccountMetaKey("1"),
 		"mget " + schedulerLastUsedKey("1"),
 	}, recorder.recorded())
 
@@ -284,6 +292,13 @@ func TestSchedulerCacheSnapshotMemoLastUsedIsFreshAndCopiesAreIndependent(t *tes
 	require.Zero(t, recorder.countPrefix("zrange "), "last_used updates must not invalidate the decoded snapshot")
 	require.Equal(t, latest, *second[0].LastUsedAt)
 	require.Equal(t, embedded, *first[0].LastUsedAt, "an earlier result must not observe later reads")
+
+	// A caller must not mutate cached last_used or nested model mappings.
+	*second[0].LastUsedAt = embedded.Add(24 * time.Hour)
+	second[0].Credentials["model_mapping"].(map[string]any)["claude-sonnet"] = "poisoned"
+	independent := memoRead(t, cache, bucket)
+	require.Equal(t, latest, *independent[0].LastUsedAt)
+	require.Equal(t, "sonnet-a", independent[0].GetMappedModel("claude-sonnet"))
 
 	// 修改返回对象的顶层字段只影响本次结果。
 	second[0].Schedulable = false
@@ -706,7 +721,11 @@ func TestSchedulerCacheSnapshotMemoPlatformRevisionScopesInvalidation(t *testing
 	recorder.reset()
 	memoRead(t, cache, geminiSingle)
 	require.Equal(t, []string{
-		"mget " + schedulerBucketKey(schedulerReadyPrefix, geminiSingle),
+		"get " + schedulerBucketKey(schedulerReadyPrefix, geminiSingle),
+		"get " + schedulerBucketKey(schedulerActivePrefix, geminiSingle),
+		"get " + schedulerAccountMetaRevisionKey,
+		"get " + schedulerAccountMetaRevisionKeyForPlatform(service.PlatformGemini),
+		"exists " + schedulerAccountMetaKey("211"),
 	}, recorder.recorded(), "an Anthropic account write must not invalidate a Gemini bucket")
 
 	gemini.Name = "gemini-renamed"
@@ -964,7 +983,7 @@ func TestSchedulerCacheSnapshotMemoConcurrentLoadsAreCoalesced(t *testing.T) {
 			results <- err
 		}()
 	}
-	readyKey := "mget " + schedulerBucketKey(schedulerReadyPrefix, bucket)
+	readyKey := "get " + schedulerBucketKey(schedulerReadyPrefix, bucket)
 	require.Eventually(t, func() bool { return recorder.countPrefix(readyKey) == readers }, time.Second, time.Millisecond)
 	close(hook.release)
 	for i := 0; i < readers; i++ {
@@ -1096,7 +1115,7 @@ func TestSchedulerCacheSnapshotMemoLastUsedWriteInvalidatesLocalCache(t *testing
 	require.Zero(t, recorder.countPrefix("zrange "))
 }
 
-func TestSchedulerCacheSnapshotMemoChunkedMGetUsesOnePipeline(t *testing.T) {
+func TestSchedulerCacheSnapshotMemoChunkedMGetUsesBoundedPipelines(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -1115,9 +1134,10 @@ func TestSchedulerCacheSnapshotMemoChunkedMGetUsesOnePipeline(t *testing.T) {
 	got := memoRead(t, cache, bucket)
 	require.Equal(t, []int64{161, 162, 163, 164, 165}, memoIDs(got))
 	batches := recorder.pipelineBatches()
-	require.Len(t, batches, 2, "metadata and last_used each travel in one pipeline")
-	for _, batch := range batches {
-		require.Len(t, batch, 3)
+	require.Len(t, batches, 4, "control tags plus three bounded metadata/last_used pairs")
+	require.Len(t, batches[0], 4)
+	for _, batch := range batches[1:] {
+		require.Len(t, batch, 2)
 	}
 	require.Equal(t, 3, recorder.countPrefix("mget "+schedulerAccountMetaPrefix))
 }

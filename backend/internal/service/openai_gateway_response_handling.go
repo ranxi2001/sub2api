@@ -946,7 +946,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventInProgress = false
 				writeKeepaliveDirect("\n")
 				if !clientDisconnected {
-					flusher.Flush()
+					if err := FlushGatewayResponse(w); err != nil {
+						clientDisconnected = true
+						return
+					}
 					lastDownstreamWriteAt = time.Now()
 				}
 				return

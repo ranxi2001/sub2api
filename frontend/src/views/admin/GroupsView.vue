@@ -1669,7 +1669,7 @@
           <div class="flex items-center justify-between gap-4 mt-4">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.forceUltrafast") }}
-              <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.groupForceUltrafast" :user-id="authStore.user?.id" />
+              <NewFeatureBadge v-if="authStore.user?.id != null" :notice-id="NEW_FEATURE_NOTICES.groupForceUltrafast" :user-id="authStore.user?.id" />
             </label>
             <Toggle
               data-testid="create-force-openai-ultrafast"
@@ -3412,7 +3412,7 @@
           <div class="flex items-center justify-between gap-4 mt-4">
             <label class="text-sm text-gray-600 dark:text-gray-400">
               {{ t("admin.groups.openaiFast.forceUltrafast") }}
-              <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.groupForceUltrafast" :user-id="authStore.user?.id" />
+              <NewFeatureBadge v-if="authStore.user?.id != null" :notice-id="NEW_FEATURE_NOTICES.groupForceUltrafast" :user-id="authStore.user?.id" />
             </label>
             <Toggle
               data-testid="edit-force-openai-ultrafast"
