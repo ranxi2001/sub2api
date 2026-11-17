@@ -100,17 +100,19 @@ func TestIssue905WSFollowup(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
 				require.Equal(t, "call_fixture_once", gjson.GetBytes(first, "response.output.0.call_id").String())
-				// Client executes the delivered fixture exactly once, then submits its result.
+				// Submit the synthetic result for the call actually delivered above.
 				require.NoError(t, h.clientConn.Write(ctx, coderws.MessageText, []byte(second)))
+				completed := false
 				for {
 					_, raw, err := h.clientConn.Read(ctx)
 					if err != nil {
-						require.NotEqual(t, coderws.StatusNormalClosure, coderws.CloseStatus(err))
+						require.Equal(t, coderws.StatusInternalError, coderws.CloseStatus(err))
 						break
 					}
 					if outcome == "completed" {
 						require.Equal(t, "response.completed", gjson.GetBytes(raw, "type").String())
 						require.Equal(t, "fixture receipt accepted", gjson.GetBytes(raw, "response.output.0.content.0.text").String())
+						completed = true
 						_ = h.clientConn.CloseNow()
 						break
 					}
@@ -132,6 +134,7 @@ func TestIssue905WSFollowup(t *testing.T) {
 					flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
 				}
 				if outcome == "completed" {
+					require.True(t, completed, "second turn must actually complete")
 					require.Empty(t, repo.entries)
 					return
 				}
