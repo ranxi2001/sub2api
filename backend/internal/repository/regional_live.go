@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/regional/slots"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -39,7 +40,8 @@ func (c *regionalConcurrencyCache) lockLive(ctx context.Context, tx *sql.Tx, r s
 	var data []byte
 	err = tx.QueryRowContext(ctx, "SELECT identity,state FROM regional_live_handoffs WHERE region_id=$1 AND lease_id=$2 FOR UPDATE", c.region(), r.LeaseID).Scan(&data, &state)
 	if errors.Is(err, sql.ErrNoRows) {
-		_, err = tx.ExecContext(ctx, "INSERT INTO regional_live_handoffs(region_id,lease_id,identity,state) VALUES($1,$2,$3,'active')", c.region(), r.LeaseID, string(raw))
+		_, err = tx.ExecContext(ctx, `INSERT INTO regional_live_handoffs(region_id,lease_id,identity,state)
+VALUES($1,$2,$3::jsonb || jsonb_build_object('_user_stats_expires_at',extract(epoch FROM clock_timestamp())+$4),'active')`, c.region(), r.LeaseID, string(raw), liveLeaseTTLSeconds)
 		old = r
 		state = "new"
 	} else if err == nil {
@@ -180,7 +182,11 @@ func (c *regionalConcurrencyCache) transferLive(ctx context.Context, r service.L
 	if err != nil {
 		return false, err
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE regional_live_handoffs SET identity=$3 WHERE region_id=$1 AND lease_id=$2", c.region(), r.LeaseID, string(raw)); err != nil {
+	// Preserve the original statistics deadline on migration. A retry or a new
+	// account must not revive expired statistics or manufacture a new proof.
+	if _, err = tx.ExecContext(ctx, `UPDATE regional_live_handoffs SET identity=$3::jsonb ||
+jsonb_build_object('_user_stats_expires_at',identity->'_user_stats_expires_at')
+WHERE region_id=$1 AND lease_id=$2`, c.region(), r.LeaseID, string(raw)); err != nil {
 		return false, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -235,7 +241,14 @@ func (c *regionalConcurrencyCache) RefreshLiveLease(ctx context.Context, a, u, k
 	if err = json.Unmarshal(raw, &r); err != nil {
 		return false, err
 	}
-	return state == "active" && r.AccountID == a && r.UserID == u && r.APIKeyID == k, nil
+	held := state == "active" && r.AccountID == a && r.UserID == u && r.APIKeyID == k
+	if held && r.UserMax == 0 {
+		// This auxiliary proof never changes the existing SQL admission/refresh
+		// outcome. Missing/expired proof stays unknown until the lease is closed.
+		// State and account identity fence a refresh delayed behind close/migrate.
+		_ = c.refreshUserLiveLoadProof(ctx, r)
+	}
+	return held, nil
 }
 func (c *regionalConcurrencyCache) finishLive(ctx context.Context, r service.LiveLeaseTransferRequest, abort bool, accountOnly bool) error {
 	tx, err := c.database().BeginTx(ctx, nil)
@@ -250,8 +263,22 @@ func (c *regionalConcurrencyCache) finishLive(ctx context.Context, r service.Liv
 	if old.UserID != r.UserID || old.APIKeyID != r.APIKeyID {
 		return slots.ErrConflict
 	}
+	commit := func() error {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		// The handoff owns unlimited-user statistics too. Retire any remaining
+		// ordinary source on close/abort, even if the SDP handler has not returned.
+		// Auxiliary failures never change admission or a successful SQL release.
+		if !accountOnly && old.UserMax == 0 && old.UserRequestID != "" {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			defer cancel()
+			_ = c.ReleaseTrackedUserSlot(cleanupCtx, old.UserID, old.UserRequestID)
+		}
+		return nil
+	}
 	if state == "closed" || state == "aborted" {
-		return tx.Commit()
+		return commit()
 	}
 	if accountOnly && old.AccountID != r.AccountID {
 		return slots.ErrConflict
@@ -284,7 +311,7 @@ func (c *regionalConcurrencyCache) finishLive(ctx context.Context, r service.Liv
 			return err
 		}
 	}
-	return tx.Commit()
+	return commit()
 }
 func (c *regionalConcurrencyCache) AbortLiveLeaseTransfer(ctx context.Context, r service.LiveLeaseTransferRequest) error {
 	return c.finishLive(ctx, r, true, false)

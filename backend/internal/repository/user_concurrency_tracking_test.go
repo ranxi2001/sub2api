@@ -68,3 +68,26 @@ func TestUnlimitedUserLiveTransferCountsExactlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, count)
 }
+
+func TestUserLiveLoadRedisExcludesOnlyHeldSources(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cache, ok := NewConcurrencyCache(client, 15, 900).(*concurrencyCache)
+	require.True(t, ok)
+	ctx := context.Background()
+	for _, source := range []string{"ordinary", "transferred"} {
+		require.NoError(t, cache.TrackUserSlot(ctx, 42, source))
+	}
+	users := []service.UserWithConcurrency{{ID: 42}}
+	loads, err := cache.getUsersLoadBatchExcluding(ctx, users, map[int64][]string{42: {"transferred", "transferred", "absent"}})
+	require.NoError(t, err)
+	require.Equal(t, 1, loads[42].CurrentConcurrency)
+	require.NoError(t, cache.ReleaseTrackedUserSlot(ctx, 42, "transferred"))
+	loads, err = cache.getUsersLoadBatchExcluding(ctx, users, map[int64][]string{42: {"transferred"}})
+	require.NoError(t, err)
+	require.Equal(t, 1, loads[42].CurrentConcurrency)
+	loads, err = cache.GetUsersLoadBatch(ctx, users)
+	require.NoError(t, err)
+	require.Equal(t, 1, loads[42].CurrentConcurrency)
+}

@@ -134,6 +134,18 @@ var (
 		return redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
 	`)
 
+	// Regional SQL handoffs own these statistics sources. Count/exclude them
+	// atomically on one key, preserving the batch reader's Cluster compatibility.
+	countUserSlotsExcludingScript = redis.NewScript(`
+		local count = redis.call('ZCARD', KEYS[1])
+		local seen = {}
+		for i = 1, #ARGV do
+			if not seen[ARGV[i]] and redis.call('ZSCORE', KEYS[1], ARGV[i]) ~= false then count = count - 1 end
+			seen[ARGV[i]] = true
+		end
+		return count
+	`)
+
 	acquireLiveLeaseScript = redis.NewScript(`
 		redis.replicate_commands()
 		local accountRegular = KEYS[1]
@@ -1704,6 +1716,10 @@ func (c *concurrencyCache) GetAccountsLoadBatch(ctx context.Context, accounts []
 }
 
 func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
+	return c.getUsersLoadBatchExcluding(ctx, users, nil)
+}
+
+func (c *concurrencyCache) getUsersLoadBatchExcluding(ctx context.Context, users []service.UserWithConcurrency, excluded map[int64][]string) (map[int64]*service.UserLoadInfo, error) {
 	if len(users) == 0 {
 		return map[int64]*service.UserLoadInfo{}, nil
 	}
@@ -1720,8 +1736,11 @@ func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []servic
 	type userCmds struct {
 		id             int64
 		maxConcurrency int
+		pruneCmd       *redis.IntCmd
+		pruneLiveCmd   *redis.IntCmd
 		zcardCmd       *redis.IntCmd
 		liveCmd        *redis.IntCmd
+		countCmd       *redis.Cmd
 		getCmd         *redis.StringCmd
 	}
 	cmds := make([]userCmds, 0, len(users))
@@ -1729,14 +1748,23 @@ func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []servic
 		slotKey := userSlotKeyPrefix + strconv.FormatInt(u.ID, 10)
 		liveKey := liveUserSlotKeyPrefix + strconv.FormatInt(u.ID, 10)
 		waitKey := waitQueueKeyPrefix + strconv.FormatInt(u.ID, 10)
-		pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10))
-		pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10))
 		uc := userCmds{
 			id:             u.ID,
 			maxConcurrency: u.MaxConcurrency,
-			zcardCmd:       pipe.ZCard(ctx, slotKey),
+			pruneCmd:       pipe.ZRemRangeByScore(ctx, slotKey, "-inf", strconv.FormatInt(cutoffTime, 10)),
+			pruneLiveCmd:   pipe.ZRemRangeByScore(ctx, liveKey, "-inf", strconv.FormatInt(now.Unix()-liveLeaseTTLSeconds, 10)),
 			liveCmd:        pipe.ZCard(ctx, liveKey),
 			getCmd:         pipe.Get(ctx, waitKey),
+		}
+		if sources := excluded[u.ID]; len(sources) > 0 {
+			args := make([]any, 0, len(sources))
+			for _, source := range sources {
+				args = append(args, source)
+			}
+			// EVAL works on a cold script cache when queued in a pipeline.
+			uc.countCmd = countUserSlotsExcludingScript.Eval(ctx, pipe, []string{slotKey}, args...)
+		} else {
+			uc.zcardCmd = pipe.ZCard(ctx, slotKey)
 		}
 		cmds = append(cmds, uc)
 	}
@@ -1747,10 +1775,26 @@ func (c *concurrencyCache) GetUsersLoadBatch(ctx context.Context, users []servic
 
 	loadMap := make(map[int64]*service.UserLoadInfo, len(users))
 	for _, uc := range cmds {
-		currentConcurrency := int(uc.zcardCmd.Val() + uc.liveCmd.Val())
-		waitingCount := 0
-		if v, err := uc.getCmd.Int(); err == nil {
-			waitingCount = v
+		// Exec reports only the first command error. An earlier missing wait
+		// GET can mask a later WRONGTYPE/ACL error, including pruning failures.
+		for _, cmd := range []*redis.IntCmd{uc.pruneCmd, uc.pruneLiveCmd, uc.zcardCmd, uc.liveCmd} {
+			if cmd != nil && cmd.Err() != nil {
+				return nil, fmt.Errorf("user %d load command: %w", uc.id, cmd.Err())
+			}
+		}
+		var currentConcurrency int
+		if uc.countCmd != nil {
+			currentConcurrency, err = uc.countCmd.Int()
+			if err != nil {
+				return nil, err
+			}
+			currentConcurrency += int(uc.liveCmd.Val())
+		} else {
+			currentConcurrency = int(uc.zcardCmd.Val() + uc.liveCmd.Val())
+		}
+		waitingCount, waitErr := uc.getCmd.Int()
+		if waitErr != nil && !errors.Is(waitErr, redis.Nil) {
+			return nil, fmt.Errorf("user %d waiting count: %w", uc.id, waitErr)
 		}
 		loadRate := 0
 		if uc.maxConcurrency > 0 {

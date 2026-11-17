@@ -585,7 +585,12 @@
             </span>
           </template>
           <template #cell-live_usage="{ row }">
-            <UserLiveUsageCell :user="row" />
+            <div class="flex items-start gap-1">
+              <UserLiveUsageCell :user="row" />
+              <span class="md:hidden">
+                <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.userLiveLoad" :user-id="creditAuth.user?.id" compact />
+              </span>
+            </div>
           </template>
 
           <template #cell-concurrency="{ row }">

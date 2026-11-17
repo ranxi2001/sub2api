@@ -1,0 +1,98 @@
+name: User Live load review follow-up
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/repository/*concurrency*'
+      - 'backend/internal/repository/*regional*live*'
+      - 'backend/internal/repository/user_live_load*'
+      - 'backend/internal/handler/admin/user*'
+      - 'backend/internal/service/ops_concurrency.go'
+      - 'frontend/src/components/user/UserLiveUsageCell.vue'
+      - 'frontend/src/components/user/__tests__/UserLiveUsageCell.spec.ts'
+      - 'frontend/src/views/admin/UsersView.vue'
+      - 'frontend/src/views/admin/__tests__/UsersView.spec.ts'
+      - 'frontend/src/types/index.ts'
+      - '.github/scripts/user-live-load-review-capture.mjs'
+      - '.github/workflows/user-live-load-review.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: user-live-load-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regressions-and-evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+      USER_LIVE_LOAD_BASE: 321f11c1a4d23302961c223ac030fd09e3f9e6e8
+      USER_LIVE_LOAD_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Freeze source identities and retain untouched before tree
+        run: |
+          review_evidence="$RUNNER_TEMP/user-live-evidence"
+          mkdir -p "$review_evidence"
+          printf 'USER_LIVE_LOAD_EVIDENCE=%s\nUSER_LIVE_LOAD_CONTRACT_DIR=%s/contracts\n' "$review_evidence" "$review_evidence" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD)" = "$USER_LIVE_LOAD_HEAD"
+          git rev-parse HEAD > "$review_evidence/head.txt"
+          git rev-parse "$USER_LIVE_LOAD_BASE" > "$review_evidence/base.txt"
+          git worktree add --detach "$RUNNER_TEMP/user-live-before" "$USER_LIVE_LOAD_BASE"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Handler serialization, unlimited tracking, and retained admission regressions
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -race -tags=unit ./internal/handler/admin ./internal/repository ./internal/service -run '^(TestUserLiveLoad|TestUnlimitedUser|TestAcquireUserSlot_|TestCreateLiveCall|TestAcquireLiveLeaseForIdentity)' -count=1 -v -timeout=10m 2>&1 | tee "$USER_LIVE_LOAD_EVIDENCE/unit.log"
+          test "$(find "$USER_LIVE_LOAD_CONTRACT_DIR" -name '*.json' | wc -l)" -eq 8
+      - name: Real PostgreSQL and Redis primary and local Live lifecycle
+        working-directory: backend
+        env:
+          CI: 'true'
+        run: |
+          set -o pipefail
+          go test -race -tags=integration ./internal/repository -run '^(TestUserLiveLoadRegional|TestRegionalAdmissionLiveExactTransferMigrationAndAbort)' -count=1 -v -timeout=12m 2>&1 | tee "$USER_LIVE_LOAD_EVIDENCE/integration.log"
+          if grep -q -- '--- SKIP:' "$USER_LIVE_LOAD_EVIDENCE/integration.log"; then exit 1; fi
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Actual handler JSON through real UsersView and DataTable
+        run: |
+          set -o pipefail
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/UsersView.spec.ts src/components/user/__tests__/UserLiveUsageCell.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts 2>&1 | tee "$USER_LIVE_LOAD_EVIDENCE/frontend.log"
+      - name: Typecheck the response contract
+        run: pnpm --dir frontend run typecheck
+      - name: Prepare isolated capture browser on the remote runner
+        run: |
+          npm install --prefix "$RUNNER_TEMP/user-live-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/user-live-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Capture before first, then head with real CSS and shared dismissal
+        env:
+          USER_LIVE_LOAD_BEFORE_DIR: ${{ runner.temp }}/user-live-before
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/user-live-browser/node_modules/playwright
+        run: node .github/scripts/user-live-load-review-capture.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: user-live-load-review-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/user-live-evidence
+          if-no-files-found: error

@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 
 import type { AdminUser } from '@/types'
 import UsersView from '../UsersView.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
 
 enableAutoUnmount(afterEach)
 
@@ -137,14 +141,14 @@ const BulkEditUserModalStub = {
   `
 }
 
-const mountBulkDeleteView = () => mount(UsersView, {
+const mountBulkDeleteView = (realLiveTable = false) => mount(UsersView, {
   global: {
     stubs: {
       AppLayout: { template: '<div><slot /></div>' },
       TablePageLayout: {
         template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
       },
-      DataTable: DataTableStub,
+      DataTable: realLiveTable ? false : DataTableStub,
       Pagination: PaginationStub,
       ConfirmDialog: {
         props: ['show', 'message'],
@@ -159,7 +163,7 @@ const mountBulkDeleteView = () => mount(UsersView, {
       GroupBadge: true,
       Select: true,
       UserAttributesConfigModal: true,
-      UserConcurrencyCell: true,
+      UserConcurrencyCell: realLiveTable ? false : true,
       UserCreateModal: true,
       UserEditModal: true,
       BulkEditUserModal: true,
@@ -167,7 +171,7 @@ const mountBulkDeleteView = () => mount(UsersView, {
       UserApiKeysModal: true,
       UserAllowedGroupsModal: true,
       UserAutoCreditModal: { props: ['show', 'user'], template: '<div v-if="show" data-test="credit-dialog">{{ user.id }}</div>' },
-      NewFeatureBadge: { props: ['noticeId'], template: '<span :data-notice="noticeId" />' },
+      NewFeatureBadge: realLiveTable ? false : { props: ['noticeId'], template: '<span :data-notice="noticeId" />' },
       UserBalanceModal: true,
       UserBalanceHistoryModal: true,
       GroupReplaceModal: true,
@@ -219,6 +223,49 @@ describe('admin UsersView', () => {
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
+
+  it.each([true, false])('uses the real DataTable and shared notice on desktop=%s', async (desktop) => {
+    const media = window.matchMedia('(min-width: 768px)')
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ ...media, matches: desktop })
+    listUsers.mockResolvedValue({ items: [createAdminUser(), createAdminUser({ id: 43 })], total: 2, pages: 1 })
+    const notices = useNewFeatureNoticeStore()
+    notices.dismiss(1, NEW_FEATURE_NOTICES.vipAutoCredit)
+    const wrapper = mountBulkDeleteView(true)
+    await flushPromises()
+    const badges = wrapper.findAllComponents({ name: 'NewFeatureBadge' })
+      .filter(badge => badge.props('noticeId') === NEW_FEATURE_NOTICES.userLiveLoad)
+    expect(badges.length).toBe(desktop ? 3 : 2) // desktop also mounts CSS-hidden cell badges
+    expect(wrapper.find('thead').exists()).toBe(desktop)
+    expect(badges[0].find('button').exists()).toBe(true)
+    await badges[0].get('button').trigger('click')
+    expect(badges.every(badge => !badge.find('button').exists())).toBe(true)
+    wrapper.unmount()
+    setActivePinia(createPinia())
+    expect(useNewFeatureNoticeStore().isDismissed(1, NEW_FEATURE_NOTICES.userLiveLoad)).toBe(true)
+    const reloaded = mountBulkDeleteView(true)
+    await flushPromises()
+    expect(reloaded.findAllComponents({ name: 'NewFeatureBadge' })
+      .filter(badge => badge.props('noticeId') === NEW_FEATURE_NOTICES.userLiveLoad)
+      .every(badge => !badge.find('button').exists())).toBe(true)
+  })
+
+  // The focused remote workflow supplies actual Go handler JSON. Ordinary unit
+  // runs retain the existing synthetic fixtures; they do not claim this seam.
+  const contractDir = process.env.USER_LIVE_LOAD_CONTRACT_DIR
+  if (contractDir) {
+    const contracts = readdirSync(contractDir).filter(name => name.endsWith('.json'))
+    it.each(contracts)('renders actual handler serialization: %s', async (name) => {
+      const payload = JSON.parse(readFileSync(join(contractDir, name), 'utf8'))
+      listUsers.mockResolvedValue(payload.data)
+      const wrapper = mountBulkDeleteView(true)
+      await flushPromises()
+      const cell = wrapper.getComponent({ name: 'UserLiveUsageCell' })
+      const available = name === 'real-zero.json' || name === 'active.json'
+      expect(cell.findComponent({ name: 'UserConcurrencyCell' }).exists()).toBe(available)
+      if (!available) expect(cell.text()).toContain('—')
+      else expect(cell.text()).toMatch(name === 'active.json' ? /3\s*\/\s*∞/ : /0\s*\/\s*∞/)
+    })
+  }
 
   it('shows the limiter column by default and distinguishes missing RPM from zero', async () => {
     listUsers.mockResolvedValueOnce({ items: [createAdminUser({ current_rpm: 0, rpm_limit: 60 })], total: 1, pages: 1 })
