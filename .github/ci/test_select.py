@@ -97,6 +97,28 @@ class SelectionTests(unittest.TestCase):
         self.write('backend/a.go', 'package newer\n')
         self.assertTrue(self.select(self.save(), Evidence())['backend'][0])
 
+    def test_matrix_reuse_requires_every_shard_and_identical_matrix(self):
+        p = self.root / '.github/workflows/main.yml'
+        workflow = yaml.safe_load(p.read_text())
+        workflow['jobs']['backend']['strategy'] = {'fail-fast': False, 'matrix': {'shard': [0, 1, 2, 3]}}
+        p.write_text(yaml.safe_dump(workflow))
+        self.write('backend/a.go', 'package updated\n')
+        previous = self.save()
+        self.write('docs/notes.md', 'unrelated')
+        head = self.save()
+        class Evidence:
+            def candidates(self, *args):
+                return [{'id': 42, 'head_sha': previous}]
+            def successful_jobs(self, run_id):
+                return {f'backend ({i})' for i in range(4)}
+        self.assertFalse(self.select(head, Evidence())['backend'][0])
+        for missing in range(4):
+            with patch.object(Evidence, 'successful_jobs', return_value={f'backend ({i})' for i in range(4) if i != missing}):
+                self.assertTrue(self.select(head, Evidence())['backend'][0])
+        workflow['jobs']['backend']['strategy']['matrix']['shard'].append(4)
+        p.write_text(yaml.safe_dump(workflow))
+        self.assertTrue(self.select(self.save(), Evidence())['backend'][0])
+
     def test_api_failure_runs_affected_checks(self):
         self.write('backend/a.go', 'package updated\n')
         class Broken:
