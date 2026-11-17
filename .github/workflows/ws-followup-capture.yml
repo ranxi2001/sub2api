@@ -5,6 +5,11 @@ on:
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_ws_v2_passthrough_adapter.go'
       - 'backend/internal/service/openai_ws_request_capture.go'
+      - 'backend/internal/service/openai_ws_upstream_close.go'
+      - 'backend/internal/service/openai_ws_forwarder_support.go'
+      - 'backend/internal/service/ops_upstream_context.go'
+      - 'backend/internal/handler/ops_error_logger.go'
+      - 'backend/internal/handler/openai_issue905_ws_test.go'
       - 'backend/internal/requestcapture/websocket.go'
       - 'backend/internal/handler/openai_ws_followup_capture_test.go'
       - 'backend/internal/requestcapture/followup_test_support.go'
@@ -75,4 +80,57 @@ jobs:
         with:
           name: ws-followup-capture-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/ws-followup-capture.jsonl
+          if-no-files-found: error
+
+  upstream-close:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Two-turn upstream refusal regression and base comparison
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/issue905-base" "$BASE_SHA"
+          cp backend/internal/handler/openai_issue905_ws_test.go "$RUNNER_TEMP/issue905-base/backend/internal/handler/"
+          set +e
+          (cd "$RUNNER_TEMP/issue905-base/backend" && go test -json -tags=unit ./internal/handler -run '^TestIssue905WSFollowup$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue905-base.jsonl" 2>&1
+          base_result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue905-base.jsonl"
+          python3 - "$base_result" "$RUNNER_TEMP/issue905-base.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[2]) if line.startswith('{')]
+          assert int(sys.argv[1]) != 0, 'base must reproduce the attribution defect'
+          for pointer in ('false', 'true'):
+              assert any(r.get('Test') == 'TestIssue905WSFollowup/completed/pointer='+pointer and r.get('Action') == 'pass' for r in rows), 'baseline success control missing'
+              name = 'TestIssue905WSFollowup/error_event/pointer='+pointer
+              assert any(r.get('Test') == name and r.get('Action') == 'fail' for r in rows), name
+              assert 'ISSUE905_UPSTREAM_SOURCE_LOST' in ''.join(r.get('Output','') for r in rows if r.get('Test') == name), name
+          PY
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestIssue905WSFollowup$' -count=1 -timeout=3m) | tee "$RUNNER_TEMP/issue905-head.jsonl"
+          python3 - "$RUNNER_TEMP/issue905-head.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          for outcome in ('completed', 'error_event', 'close_only', 'unknown_close'):
+              for pointer in ('false', 'true'):
+                  name = 'TestIssue905WSFollowup/'+outcome+'/pointer='+pointer
+                  assert any(r.get('Test') == name and r.get('Action') == 'pass' for r in rows), name
+          assert not any(r.get('Action') in ('skip', 'fail') for r in rows)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue905-upstream-close-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue905-*.jsonl
           if-no-files-found: error
