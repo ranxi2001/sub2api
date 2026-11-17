@@ -162,7 +162,7 @@ func TestHTTPBridgeWarmupLive(t *testing.T) {
 		return nil
 	}
 	tools := json.RawMessage(`[{"type":"function","name":"fixture_echo","description":"Return a fixed synthetic receipt; no external action","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false},"strict":true}]`)
-	if !send(map[string]any{"type": "response.create", "generate": false, "input": []any{}, "model": "gpt-6-astra", "store": false, "tools": tools, "max_output_tokens": 256}) {
+	if !send(map[string]any{"type": "response.create", "generate": false, "input": []any{}, "model": "gpt-6-astra", "store": false, "tools": tools, "max_output_tokens": 256, "prompt_cache_key": session, "parallel_tool_calls": true, "client_metadata": map[string]string{"session_id": session, "thread_id": session}}) {
 		return
 	}
 	warm := read("warmup")
@@ -185,16 +185,18 @@ func TestHTTPBridgeWarmupLive(t *testing.T) {
 		return
 	}
 	callID := ""
+	callCount := 0
 	for _, item := range gjson.GetBytes(first, "response.output").Array() {
 		if item.Get("type").String() == "function_call" && item.Get("name").String() == "fixture_echo" {
 			callID = item.Get("call_id").String()
+			callCount++
 		}
 	}
-	if callID == "" {
+	if callID == "" || callCount != 1 {
 		report["outcome"] = "missing_tool_call"
 		return
 	}
-	if !send(map[string]any{"type": "response.create", "model": "gpt-6-astra", "store": false, "max_output_tokens": 256, "tool_choice": "none", "previous_response_id": gjson.GetBytes(first, "response.id").String(), "input": []any{map[string]string{"type": "function_call_output", "call_id": callID, "output": "fixture receipt: ping"}}}) {
+	if !send(map[string]any{"type": "response.create", "model": "gpt-6-astra", "store": false, "max_output_tokens": 256, "prompt_cache_key": session, "client_metadata": map[string]string{"session_id": session, "thread_id": session}, "tool_choice": "none", "previous_response_id": gjson.GetBytes(first, "response.id").String(), "input": []any{map[string]string{"type": "function_call_output", "call_id": callID, "output": "fixture receipt: ping"}}}) {
 		return
 	}
 	final := read("turn2")
