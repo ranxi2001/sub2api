@@ -26,16 +26,17 @@ CONTROLS = (
 
 
 def expected_results():
-    leaves = {**dict.fromkeys(CONTROLS, "pass"), **dict.fromkeys(MARKERS, "fail")}
-    expected = dict(leaves)
-    for leaf, result in leaves.items():
-        parts = leaf.split("/")
-        for end in range(1, len(parts)):
-            parent = "/".join(parts[:end])
-            if result == "fail" or parent not in expected:
-                expected[parent] = result
-    expected[None] = "fail"  # Package failure is derived from the eight leaves.
-    return expected
+    # Each fixture calls t.Run once with a slash-containing name. Those slash
+    # prefixes are filters, not separately created intermediate test events.
+    return {
+        **dict.fromkeys(CONTROLS, "pass"),
+        **dict.fromkeys(MARKERS, "fail"),
+        PROJECTION: "fail",
+        ACTUAL: "fail",
+        FENCES: "pass",
+        RECOVERY: "pass",
+        None: "fail",
+    }
 
 
 def validate(code, raw):
