@@ -2045,9 +2045,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			// Captured before this frame is written. The terminal handler below runs
 			// after the write, and the failure frame itself must not count as output.
 			turnOutputStarted := wroteDownstream
+			modelUnavailable := false
 			if eventType == "error" {
 				eventCtx := openAIWSForwardStreamPhaseContext(openAI429LeaseObservation(ctx, lease), turnOutputStarted, upstreamMessage)
-				s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
+				modelUnavailable = s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
+				if modelUnavailable && turn == 1 && !wroteDownstream && openAIWSModelFailureCanReplay(ctx, payload) {
+					lease.MarkBroken()
+					return nil, s.newOpenAIWSModelFailoverError(account, upstreamMessage)
+				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
 				statusCode := openAIWSRejectedFieldRetryHTTPStatus(upstreamMessage)
 				if !smartStrict && OpenAIWSAgentRecoveryCanRetry(ctx) && !wroteDownstream && statusCode == http.StatusBadRequest && rejectedFieldRetryState != nil {
@@ -2213,6 +2218,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					wroteDownstream = true
 					markOpenAIWSClientVisibleFailure(c, eventType, upstreamMessage)
 				}
+			}
+			if modelUnavailable {
+				lease.MarkBroken()
+				return nil, NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater,
+					"model unavailable on this account; reconnect with complete context",
+					errors.New("upstream websocket model unavailable"))
 			}
 			if isTerminalEvent {
 				terminalEvent := s.handleOpenAIWSTerminalTransientFailure(openAIWSForwardStreamPhaseContext(openAI429LeaseObservation(ctx, lease), turnOutputStarted, upstreamMessage), account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)

@@ -358,12 +358,15 @@ func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx contex
 	return terminalEvent
 }
 
-func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) {
+func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 	if eventType != "error" {
-		return
+		return false
 	}
 	s.rateLimitService.observeQualityStatus(ctx, account, openAIStreamFailureStatus(payload, extractOpenAISSEErrorMessage(payload)))
+	if s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload) {
+		return true
+	}
 	status := openAIWSPayloadTransientStatus(payload)
 	if status != 0 {
 		if status == http.StatusTooManyRequests {
@@ -372,6 +375,7 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 		}
 		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, payload, canonicalModel)
 	}
+	return false
 }
 
 // handleOpenAIWSFailureAccountSideEffects applies both structured credential
@@ -381,6 +385,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx conte
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
 	s.rateLimitService.observeQualityStatus(ctx, account, status)
+	if s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload) {
+		return true
+	}
 	switch status {
 	case http.StatusUnauthorized, http.StatusTooManyRequests, 529:
 		s.handleOpenAIStreamTerminalAccountSideEffectsWithContext(ctx, account, payload, message, headers, canonicalModel)

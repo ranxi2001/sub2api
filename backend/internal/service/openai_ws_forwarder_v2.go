@@ -959,7 +959,11 @@ readLoop:
 				flushBufferedStreamEvents("error_event")
 			}
 			eventCtx := openAIWSForwardStreamPhaseContext(openAI429LeaseObservation(ctx, lease), wsOutputStarted, message)
-			s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), message)
+			modelUnavailable := s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), message)
+			if modelUnavailable && !wroteDownstream && openAIWSModelFailureCanReplay(ctx, payloadAsJSONBytes(payload)) {
+				lease.MarkBroken()
+				return nil, s.newOpenAIWSModelFailoverError(account, message)
+			}
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
 			s.persistOpenAIWSRateLimitSignal(eventCtx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
 			errMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(errMsgRaw))

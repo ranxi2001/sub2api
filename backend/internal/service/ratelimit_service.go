@@ -2888,6 +2888,13 @@ func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Acc
 	if account == nil || modelKey == "" {
 		return modelKey
 	}
+	// The OpenAI gateway supplies the already-mapped scheduling model. Preserve
+	// it just as custom model rules do; alias chains must not cool a second model.
+	if account.Platform == PlatformOpenAI {
+		if canonical := tempUnschedulableModel(ctx, nil); canonical != "" {
+			return canonical
+		}
+	}
 	if account.Platform == PlatformAntigravity {
 		if resolved := strings.TrimSpace(resolveFinalAntigravityModelKey(ctx, account, modelKey)); resolved != "" {
 			return resolved
