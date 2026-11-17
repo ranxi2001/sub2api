@@ -24,9 +24,16 @@ func TestOpenAILossyHistoryRestart(t *testing.T) {
 			manager, c, _ := issue715WSManager(t, svc, context.Background())
 			SetOpenAIWSRecoveryPrincipal(c, 715, 715)
 			ctx := manager.ctx
-			if !ws {
-				ctx = context.Background()
+			if ws {
+				next, clean, changed := svc.PrepareOpenAILossyHistoryRestart(ctx, c, []byte(body), "fixture-session", "gpt-6-astra")
+				require.False(t, changed, "WS may inherit tool state absent from this frame")
+				require.Equal(t, body, string(clean))
+				require.Equal(t, ctx, next)
+				manager.abort()
+				continue
 			}
+			ctx = context.Background()
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 			next, clean, changed, err := svc.PrepareOpenAI409ReadableContinuation(ctx, c, []byte(body), "fixture-session", "gpt-6-astra")
 			if gjson.Get(body, "previous_response_id").Exists() {
 				require.True(t, svc.CanDiscardOpenAI409ResponsePointer(ctx, []byte(body), 715, "resp_foreign"))

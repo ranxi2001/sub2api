@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +25,12 @@ func (s *OpenAIGatewayService) PrepareOpenAILossyHistoryRestart(ctx context.Cont
 	if s == nil {
 		return ctx, body, false
 	}
+	// A WS frame can inherit tools without repeating tools or a response ID.
+	// Admission runs before the bridge resolves that state, so a frame-local
+	// text predicate cannot authorize discarding a socket's task history.
+	if ctx.Value(openAIWSAgentRecoveryRetryKey{}) != nil || GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		return ctx, body, false
+	}
 	policy, ok := any(s.cfg).(interface{ OpenAILossyHistoryRestartEnabled() bool })
 	if !ok || !policy.OpenAILossyHistoryRestartEnabled() || ctx.Err() != nil || c == nil ||
 		isOpenAINativeCompactionV2(c) || isOpenAIResponsesCompactPath(c) ||
@@ -41,9 +46,6 @@ func (s *OpenAIGatewayService) PrepareOpenAILossyHistoryRestart(ctx context.Cont
 	next = context.WithValue(next, openAIGuardianParentAffinityContextKey{}, openAIGuardianParentAffinity{})
 	next = WithOpenAIEncryptedReasoningAffinity(next, clean)
 	next = s.WithOpenAIAgentMessageRecovery(next, c, clean, session, model)
-	if _, ws := ctx.Value(openAIWSAgentRecoveryRetryKey{}).(*atomic.Bool); ws {
-		next = context.WithValue(next, openAIWSAgentRecoveryRetryKey{}, &atomic.Bool{})
-	}
 	r := openAIAgentRecoveryFromContext(next)
 	r.omittedHistory, r.omittedSource = true, nil
 	r.inputDigest, r.replayControlsDigest = openAIAgentRecoveryInputDigest(clean), openAI409ControlsDigest(clean)

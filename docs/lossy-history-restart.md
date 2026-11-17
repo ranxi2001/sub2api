@@ -8,7 +8,7 @@ gateway:
     lossy_history_restart_enabled: true
 ```
 
-还需已有管理设置 `openai_409_omit_encrypted_history_enabled=true`。默认关闭，HTTP Responses 与 WS 共用；不改变普通新文本请求。
+还需已有管理设置 `openai_409_omit_encrypted_history_enabled=true`。默认关闭，仅用于满足下述条件的 HTTP Responses 请求；不改变普通新文本请求。WS 全部跳过有损转换，因为后续帧可能省略工具声明和响应指针，并在转发时才继承前一轮工具；不能按当前帧看似纯文本就丢弃会话状态。
 
 此策略只用于没有工具协议状态的文本请求。带有工具声明（包括 additional_tools）、工具调用／结果、tool_search 或 MCP 工具发现结果、MCP 审批记录、compaction_trigger 以及未知输入类型 的请求不进入有损转换，继续使用原有的配对、归属和发送校验。带有 previous_response_id 或 conversation 的增量请求也交给原恢复路径解析，因为缺少本轮工具声明不代表没有继承的工具与任务。无法安全续接时返回明确错误，需要客户端重建会话，不再把工具记录伪装成 user 文本。原生 remote compaction v2 和 /responses/compact 也不进入此策略，压缩输入与归属上下文保持原状。
 

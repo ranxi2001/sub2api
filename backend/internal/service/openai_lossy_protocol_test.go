@@ -7,11 +7,37 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAILossyProtocolWebSocketDeltaPreservesHistory(t *testing.T) {
+	for _, marker := range []string{"transport", "recovery_context"} {
+		t.Run(marker, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIWS.LossyHistoryRestartEnabled = true
+			svc := &OpenAIGatewayService{cfg: cfg, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+			ctx := context.Background()
+			if marker == "transport" {
+				SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+			} else {
+				ctx = context.WithValue(ctx, openAIWSAgentRecoveryRetryKey{}, &atomic.Bool{})
+			}
+			// No tools or previous_response_id: the socket's inherited controls
+			// are resolved later than this gate. Do not flatten this frame.
+			body := []byte(`{"input":[{"type":"agent_message","encrypted_content":"fixture-opaque","content":[{"type":"input_text","text":"fixture task"}]}]}`)
+			next, clean, changed := svc.PrepareOpenAILossyHistoryRestart(ctx, c, body, "fixture-session", "fixture-model")
+			require.False(t, changed)
+			require.Equal(t, body, clean)
+			require.Equal(t, ctx, next)
+		})
+	}
+}
 
 func TestOpenAILossyProtocolPreservesAgentInput(t *testing.T) {
 	for name, body := range map[string]string{

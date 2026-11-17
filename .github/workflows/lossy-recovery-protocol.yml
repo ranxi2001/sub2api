@@ -49,7 +49,7 @@ jobs:
           import json, sys
           rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
           passed = {row.get('Test') for row in rows if row.get('Action') == 'pass'}
-          for name in ('PreservesAgentInput', 'CompactionPreservesContext', 'OwnerlessCompactionRefused'):
+          for name in ('PreservesAgentInput', 'CompactionPreservesContext', 'OwnerlessCompactionRefused', 'WebSocketDeltaPreservesHistory'):
               assert 'TestOpenAILossyProtocol' + name in passed, name
           assert not any(row.get('Action') == 'skip' for row in rows)
           PY
