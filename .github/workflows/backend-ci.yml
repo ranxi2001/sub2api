@@ -87,15 +87,25 @@ jobs:
           cache: false
       - name: Verify Go version
         run: go version | grep -q 'go1.27.4'
+      - name: Resolve Go cache paths and bootstrap key
+        id: go-cache
+        run: |
+          echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          version="$(go env GOVERSION)"
+          arch="$(node -p process.arch)"
+          echo "bootstrap=setup-go-${RUNNER_OS}-${arch}-${ImageOS}-go-${version#go}-" >> "$GITHUB_OUTPUT"
       - name: Restore Go module and build caches
         uses: actions/cache@v4
         with:
           path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-tests-v1-${{ runner.os }}-${{ runner.arch }}-unit-${{ matrix.shard }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ env.EXPECTED_HEAD_SHA }}
+            ${{ steps.go-cache.outputs.modules }}
+            ${{ steps.go-cache.outputs.build }}
+          key: go-tests-v2-${{ runner.os }}-${{ runner.arch }}-unit-${{ matrix.shard }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ env.EXPECTED_HEAD_SHA }}
           restore-keys: |
-            go-tests-v1-${{ runner.os }}-${{ runner.arch }}-unit-${{ matrix.shard }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+            go-tests-v2-${{ runner.os }}-${{ runner.arch }}-unit-${{ matrix.shard }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+            ${{ steps.go-cache.outputs.bootstrap }}${{ hashFiles('backend/go.sum') }}
+            ${{ steps.go-cache.outputs.bootstrap }}
       - name: Install Redis for isolated snapshot adapter checks
         run: |
           bash .github/scripts/ci-ubuntu-mirrors.sh
@@ -105,7 +115,7 @@ jobs:
           fi
           redis-server --version
       - name: Unit tests with timings
-        run: python3 .github/ci/go_tests.py unit --shard ${{ matrix.shard }} --total 4 --output "$RUNNER_TEMP/go-test-results"
+        run: python3 .github/ci/go_tests.py unit --shard ${{ matrix.shard }} --total ${{ strategy.job-total }} --output "$RUNNER_TEMP/go-test-results"
       - name: Upload unit test timings
         if: always()
         uses: actions/upload-artifact@v4
@@ -154,15 +164,25 @@ jobs:
           cache: false
       - name: Verify Go version
         run: go version | grep -q 'go1.27.4'
+      - name: Resolve Go cache paths and bootstrap key
+        id: go-cache
+        run: |
+          echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          version="$(go env GOVERSION)"
+          arch="$(node -p process.arch)"
+          echo "bootstrap=setup-go-${RUNNER_OS}-${arch}-${ImageOS}-go-${version#go}-" >> "$GITHUB_OUTPUT"
       - name: Restore Go module and build caches
         uses: actions/cache@v4
         with:
           path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-tests-v1-${{ runner.os }}-${{ runner.arch }}-integration-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ env.EXPECTED_HEAD_SHA }}
+            ${{ steps.go-cache.outputs.modules }}
+            ${{ steps.go-cache.outputs.build }}
+          key: go-tests-v2-${{ runner.os }}-${{ runner.arch }}-integration-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ env.EXPECTED_HEAD_SHA }}
           restore-keys: |
-            go-tests-v1-${{ runner.os }}-${{ runner.arch }}-integration-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+            go-tests-v2-${{ runner.os }}-${{ runner.arch }}-integration-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+            ${{ steps.go-cache.outputs.bootstrap }}${{ hashFiles('backend/go.sum') }}
+            ${{ steps.go-cache.outputs.bootstrap }}
       - name: Integration tests with timings
         env:
           PROMPT_AUDIT_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/shadow_audit?sslmode=disable'

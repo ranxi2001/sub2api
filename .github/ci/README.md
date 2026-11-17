@@ -27,7 +27,7 @@ python3 -m unittest discover -s .github/ci -p 'test_*.py' -v
 
 运行仍经过 backend Makefile：`test-unit-packages` 接收包列表，嵌套收款模块的 `test-collection` 在第 0 片执行一次；默认 `make test-unit` 仍包含两者。单元测试保留 Go 测试结果缓存。集成测试保留 PostgreSQL/Redis、Docker testcontainers 和 `GOFLAGS=-p=1`，增加 `-count=1` 确保外部服务检查实际执行。原先单独运行的 `TestUsageTrendAggregateTimezone` 已包含在完整集成套件内，不再重复启动仓库集成环境。每个单元分片安装 redis-server，避免快照适配器检查因工具缺失而跳过。
 
-缓存按 OS、架构、go.mod/go.sum、suite/分片与源码 SHA 分隔，按同一依赖和分片前缀恢复最近的编译缓存；各分片不竞争同一写入 key。相同 key 的成功重跑可直接命中。独立 runner 会增加总资源和冷启动开销；这里不变更 Runner 账户配额，也不使用生产服务器编译。
+缓存按 OS、架构、go.mod/go.sum、suite/分片与源码 SHA 分隔，按同一依赖和分片前缀恢复最近的编译缓存；各分片不竞争同一写入 key。相同 key 的成功重跑可直接命中。分片缓存未命中时，使用与 setup-go 相同的绝对路径和键格式，按当前 Go 版本/runner 镜像回退读取 production 已有的共享缓存（先匹配 go.sum，再匹配版本前缀），只向分片 key 写入；避免新 PR 因无法读取其他 PR 的专属缓存而完全冷启动。独立 runner 会增加总资源和冷启动开销；这里不变更 Runner 账户配额，也不使用生产服务器编译。
 
 每个 job 输出 summary 和保留 14 天的 `go-unit-<shard>-<attempt>` / `go-integration-<attempt>` artifact：
 
