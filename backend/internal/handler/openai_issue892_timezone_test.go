@@ -438,6 +438,12 @@ func TestIssue892HTTP64SwitchMatrix(t *testing.T) {
 								require.Equal(t, "Bearer fixture-matrix892", id)
 							}
 							if scenario == "reasoning400" {
+								// Reasoning-only history follows the existing OAuth call-ID
+								// normalization on both sends. Keep call/output association exact.
+								for _, path := range []string{"input.2.call_id", "input.3.call_id"} {
+									want, err = sjson.Set(want, path, "fc_fixture")
+									require.NoError(t, err)
+								}
 								for _, payload := range bodies[offset:] {
 									for _, path := range []string{"input.2", "input.3", "input.4", "input.5"} {
 										require.JSONEq(t, gjson.Get(want, path).Raw, gjson.GetBytes(payload, path).Raw)

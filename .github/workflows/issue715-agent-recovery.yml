@@ -406,7 +406,7 @@ jobs:
           # Manager fields and readable-payload methods live together. Restore
           # both transport callers with that manager; retain candidate tests and
           # standalone admission/principal helpers required by current HTTP.
-          trap 'git restore --source=HEAD -- "$target" "$caller" "$passthrough" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "$target" "$caller" "$passthrough" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go backend/internal/service/openai_issue892_timezone_test.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "$target" "$caller" "$passthrough"
           expected=$(git rev-parse "$original:$target")
           actual=$(git hash-object "$target")
@@ -442,6 +442,20 @@ jobs:
             echo "retained_candidate path=$retained expected_blob=$expected_retained tested_blob=$actual_retained"
             test "$expected_retained" = "$actual_retained"
           done
+          # The later timezone proof fixture requires manager.protected, which
+          # this historical manager does not have. Exclude only this untouched
+          # non-target fixture; keep the selected wire regression unchanged.
+          fixture=backend/internal/service/openai_issue892_timezone_test.go
+          if test -f "$fixture"; then
+            if git cat-file -e "$original:$fixture" 2>/dev/null; then
+              echo "refusing to remove a historical fixture" >&2
+              exit 1
+            fi
+            expected_fixture=$(git rev-parse "HEAD:$fixture")
+            test "$(git hash-object "$fixture")" = "$expected_fixture"
+            printf 'excluded later fixture path=%s candidate_blob=%s baseline=%s\n' "$fixture" "$expected_fixture" "$original"
+            rm -- "$fixture"
+          fi
           git diff --exit-code HEAD -- backend/internal/service/openai_ws_agent_recovery_test.go
           set +e
           (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715WSBridgeValidatesBuiltPayload$' -count=1 -v -timeout=5m) > "$RUNNER_TEMP/issue715-ws-wire-red.log" 2>&1
