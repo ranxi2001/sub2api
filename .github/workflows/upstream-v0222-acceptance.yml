@@ -102,6 +102,18 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Fixed v2.22.0 bridge warmup and continuation regression
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          (cd backend && go test -race -json -tags=unit,bridgewarmup ./internal/handler ./internal/service -run '^Test(HTTPBridgeWarmup|OpenAIWSHTTPBridge|ProxyOpenAIWSHTTPBridge|PrepareOpenAIWSHTTPBridge)' -count=1 -timeout=5m) | tee evidence/http-bridge-regression.jsonl
+          python3 - <<'PYTEST'
+          import json
+          rows=[json.loads(line) for line in open('evidence/http-bridge-regression.jsonl') if line.startswith('{')]
+          assert not any(r.get('Action') in ('fail','skip','build-fail') for r in rows)
+          for name in ('TestHTTPBridgeWarmupThenToolContinuation','TestHTTPBridgeWarmupGuards','TestHTTPBridgeWarmupDefaultsAndForeignPointer'):
+              assert any(r.get('Test')==name and r.get('Action')=='pass' for r in rows),name
+          PYTEST
       - run: pnpm --dir frontend install --frozen-lockfile
       - name: Feature components and all new feature notice IDs
         shell: bash
@@ -130,6 +142,7 @@ jobs:
           CGO_ENABLED=0 go build -tags embed -trimpath -ldflags="-X main.Commit=$EXPECTED_HEAD_SHA" -o "$RUNNER_TEMP/sub2api-v0222" ./cmd/server
           "$RUNNER_TEMP/sub2api-v0222" -version | tee ../evidence/embed-version.txt
           sha256sum "$RUNNER_TEMP/sub2api-v0222" > ../evidence/embed-binary-sha256.txt
+          cp "$RUNNER_TEMP/sub2api-v0222" ../evidence/sub2api
       - uses: actions/upload-artifact@v7
         if: always()
         with:
