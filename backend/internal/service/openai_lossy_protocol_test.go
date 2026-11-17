@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,14 @@ import (
 )
 
 func TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire(t *testing.T) {
+	for _, lossy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("lossy=%t", lossy), func(t *testing.T) { runLossyDiscoveryBridgeWire(t, lossy) })
+	}
+}
+
+func runLossyDiscoveryBridgeWire(t *testing.T, lossy bool) {
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	cfg.Gateway.OpenAIWS.LossyHistoryRestartEnabled = lossy
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -193,7 +201,40 @@ func TestOpenAILossyProtocolOwnerlessCompactionRefused(t *testing.T) {
 			require.ErrorAs(t, attemptErr, &refusal)
 			require.Equal(t, "owner_unavailable", refusal.Reason)
 			complete(false)
-		})
+		}, "LOSSY_OWNERLESS_COMPACTION_GUARD")
 		require.Nil(t, r.delivery, "a refused compaction must not reserve or publish delivery")
+	}
+}
+
+// The mixed-owner projection runs on the third turn of the real WS loop.
+// Discovery must stay structured so it can still declare callable tools, while
+// completed effects remain inert and unknown/pending results cannot be replayed.
+func TestOpenAILossyProtocolCompletedDiscoveryProjection(t *testing.T) {
+	const call = `{"type":"tool_search_call","call_id":"tsc_projection","arguments":{"query":"fixture"},"status":"completed"}`
+	const output = `{"type":"tool_search_output","call_id":"tsc_projection","status":"completed","tools":[{"type":"namespace","name":"fixture","tools":[{"type":"function","name":"inspect","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}}]}]}`
+	const effect = `{"type":"custom_tool_call","name":"exec","call_id":"ctc_effect","input":"read fixture","status":"completed"},{"type":"custom_tool_call_output","call_id":"ctc_effect","output":"already applied"}`
+	body := []byte(`{"input":[` + call + `,` + output + `,` + effect + `]}`)
+	clean, err := projectOpenAIWSCompletedTools(body)
+	require.NoError(t, err, "LOSSY_DISCOVERY_PROJECTION_REFUSED: completed catalog must survive mixed-owner continuation")
+	require.JSONEq(t, call, gjson.GetBytes(clean, "input.0").Raw)
+	require.JSONEq(t, output, gjson.GetBytes(clean, "input.1").Raw)
+	require.Equal(t, "message", gjson.GetBytes(clean, "input.2.type").String())
+	require.Contains(t, gjson.GetBytes(clean, "input.2.content.0.text").String(), "already applied")
+	require.False(t, gjson.GetBytes(clean, `input.#(type==custom_tool_call)`).Exists())
+	for name, items := range map[string]string{
+		"orphan":           output,
+		"missing_result":   call,
+		"wrong_id":         call + `,` + strings.ReplaceAll(output, "tsc_projection", "tsc_other"),
+		"wrong_type":       call + `,{"type":"function_call_output","call_id":"tsc_projection","output":"wrong type"}`,
+		"duplicate":        call + `,` + output + `,` + output,
+		"pending":          strings.Replace(call, "completed", "in_progress", 1) + `,` + output,
+		"uncertain_result": call + `,` + strings.Replace(output, "completed", "in_progress", 1),
+		"missing_catalog":  call + `,{"type":"tool_search_output","call_id":"tsc_projection"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			projected, err := projectOpenAIWSCompletedTools([]byte(`{"input":[` + items + `]}`))
+			require.Error(t, err)
+			require.Nil(t, projected)
+		})
 	}
 }

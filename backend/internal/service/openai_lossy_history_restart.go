@@ -268,6 +268,11 @@ func projectOpenAIWSToolHistory(body []byte, label string) ([]byte, error) {
 				map[string]any{"type": "output_text", "text": label + string(record)},
 			}})
 			input = append(input, message)
+		case "tool_search_call", "tool_search_output":
+			// Completed discovery is protocol state: the next turn still needs
+			// its callable schemas. The pairing/status gate above validates it;
+			// retaining it grants no function/custom-call execution provenance.
+			input = append(input, json.RawMessage(item.Raw))
 		case "", "message":
 			input = append(input, json.RawMessage(item.Raw))
 		default:
