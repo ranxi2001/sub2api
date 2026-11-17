@@ -67,6 +67,9 @@ func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
 		}
 	}
 	input := gjson.GetBytes(body, "input")
+	if input.Type != gjson.String && !input.IsArray() {
+		return body, false
+	}
 	needs := false
 	for _, item := range input.Array() {
 		if !openAILossyTextHistoryItem(item) {
@@ -154,7 +157,11 @@ func openAILossyTextHistoryItem(item gjson.Result) bool {
 	if !item.IsObject() {
 		return false
 	}
-	kind := item.Get("type").String()
+	kindValue := item.Get("type")
+	if kindValue.Exists() && kindValue.Type != gjson.String {
+		return false
+	}
+	kind := kindValue.String()
 	switch kind {
 	case "", "message", "reasoning", "agent_message", "compaction", "compaction_summary":
 	default:

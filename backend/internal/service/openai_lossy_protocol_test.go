@@ -36,6 +36,8 @@ func TestOpenAILossyProtocolPreservesAgentInput(t *testing.T) {
 		"media":                 `{"input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.invalid/fixture.png"}]},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
 		"text_metadata":         `{"input":[{"role":"user","content":[{"type":"input_text","text":"fixture","future_state":{}}]},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
 		"envelope_metadata":     `{"input":[{"type":"agent_message","encrypted_content":"fixture-opaque","recipient":"functions.exec"}]}`,
+		"null_type":             `{"input":[{"type":null,"role":"user","content":"fixture"},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"object_input":          `{"input":{"role":"user","content":"fixture","encrypted_content":"fixture-opaque"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			original := []byte(body)
@@ -44,6 +46,16 @@ func TestOpenAILossyProtocolPreservesAgentInput(t *testing.T) {
 			// large numeric arguments and malformed records for the normal gate.
 			require.False(t, changed)
 			require.Equal(t, original, result)
+			cfg := &config.Config{}
+			cfg.Gateway.OpenAIWS.LossyHistoryRestartEnabled = true
+			svc := &OpenAIGatewayService{cfg: cfg, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+			c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+			ctx := context.Background()
+			next, prepared, changed := svc.PrepareOpenAILossyHistoryRestart(ctx, c, original, "fixture-session", "fixture-model")
+			require.False(t, changed)
+			require.Equal(t, original, prepared)
+			require.Equal(t, ctx, next, "declining text recovery must not replace the original request context")
 		})
 	}
 }
