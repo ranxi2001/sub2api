@@ -670,6 +670,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	if err := prepareVertexAuthModeUpdate(account, input); err != nil {
+		return nil, err
+	}
 	if input.Platform != "" && input.Platform != account.Platform {
 		account, err = s.prepareAccountPlatformChange(ctx, account, input)
 		if err != nil {

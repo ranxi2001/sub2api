@@ -39,7 +39,7 @@ func AccountPlatformPortableExtra(extra map[string]any) map[string]any {
 func portablePlatformCredentials(account *Account) map[string]any {
 	keys := []string{"api_key", "base_url"}
 	if account.Type == AccountTypeServiceAccount {
-		keys = []string{"api_key", "service_account_json", "service_account", "private_key", "project_id", "client_email", "location", "vertex_location", "tier_id"}
+		keys = []string{"auth_mode", "api_key", "service_account_json", "service_account", "private_key", "project_id", "client_email", "location", "vertex_location", "tier_id"}
 	}
 	out := make(map[string]any)
 	for _, key := range keys {
@@ -48,6 +48,39 @@ func portablePlatformCredentials(account *Account) map[string]any {
 		}
 	}
 	return out
+}
+
+// The editor receives redacted credentials. An omitted auth_mode must retain
+// the stored mode, including when other credential settings are being replaced.
+// Validate it before platform preparation or any account/group writes.
+func prepareVertexAuthModeUpdate(current *Account, input *UpdateAccountInput) error {
+	if current.Type != AccountTypeServiceAccount || (current.Platform != PlatformGemini && current.Platform != PlatformAnthropic) {
+		return nil
+	}
+	mode, explicit := input.Credentials["auth_mode"]
+	if !explicit {
+		var exists bool
+		mode, exists = current.Credentials["auth_mode"]
+		if !exists {
+			return nil // Legacy Service Account JSON credentials have no marker.
+		}
+	}
+	authMode, ok := mode.(string)
+	if !ok || (strings.TrimSpace(authMode) != vertexAuthModeAPIKey && strings.TrimSpace(authMode) != "service_account") {
+		return infraerrors.BadRequest("INVALID_VERTEX_AUTH_MODE", "unsupported Vertex authentication mode")
+	}
+	platform := current.Platform
+	if input.Platform != "" {
+		platform = input.Platform
+	}
+	if strings.TrimSpace(authMode) == vertexAuthModeAPIKey && platform != PlatformGemini {
+		return infraerrors.BadRequest("ACCOUNT_PLATFORM_BOUND", "Vertex API key authentication is only supported on Gemini; Anthropic requires Service Account JSON")
+	}
+	if !explicit && len(input.Credentials) > 0 {
+		input.Credentials = maps.Clone(input.Credentials)
+		input.Credentials["auth_mode"] = mode
+	}
+	return nil
 }
 
 func (s *adminServiceImpl) prepareAccountPlatformChange(ctx context.Context, current *Account, input *UpdateAccountInput) (*Account, error) {

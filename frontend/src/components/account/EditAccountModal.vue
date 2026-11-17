@@ -3965,9 +3965,12 @@ const platformChanged = computed(() => editingAccount.value?.platform !== props.
 const platformOptions = computed(() => {
   const source = props.account
   if (!source) return []
+  const authMode = source.credentials?.auth_mode
+  const portableServiceAccount = authMode === undefined ||
+    (typeof authMode === 'string' && authMode.trim() === 'service_account')
   const candidates = source.parent_account_id != null ? [] : listPlatforms().filter(spec =>
     source.type === 'apikey' ? spec.id !== 'antigravity' :
-      source.type === 'service_account' && ['anthropic', 'gemini'].includes(source.platform) && ['anthropic', 'gemini'].includes(spec.id)
+      source.type === 'service_account' && portableServiceAccount && ['anthropic', 'gemini'].includes(source.platform) && ['anthropic', 'gemini'].includes(spec.id)
   )
   if (!candidates.some(spec => spec.id === source.platform)) {
     return [{ value: source.platform, label: platformDisplayName(source.platform) }]
@@ -5747,12 +5750,17 @@ const changePlatform = (platform: unknown) => {
   const common = { ...form }
   const pauseOnExpiry = autoPauseOnExpired.value
   const currentCost = costMultiplier.value
+  const currentApiKey = editApiKey.value
+  const currentBaseUrl = editBaseUrl.value
   const next = platform === source.platform ? source : platformAccountDraft(source, platform, selectableGroups.value)
-  if (platform !== source.platform && source.type === 'apikey' && editBaseUrl.value.trim()) {
-    next.credentials = { ...next.credentials, base_url: editBaseUrl.value.trim() }
-  }
   editingAccount.value = next
   syncFormFromAccount(next)
+  if (source.type === 'apikey') {
+    // These are portable edits owned by this dialog, including on switch-back.
+    // Keep them outside the persisted prop; reopening still resets the draft.
+    editApiKey.value = currentApiKey
+    editBaseUrl.value = currentBaseUrl
+  }
   const compatibleGroups = form.group_ids
   Object.assign(form, common, { group_ids: compatibleGroups })
   autoPauseOnExpired.value = pauseOnExpiry
