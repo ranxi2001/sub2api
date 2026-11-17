@@ -69,17 +69,10 @@ func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
 	input := gjson.GetBytes(body, "input")
 	needs := false
 	for _, item := range input.Array() {
-		if !item.IsObject() {
+		if !openAILossyTextHistoryItem(item) {
 			return body, false
 		}
 		kind := item.Get("type").String()
-		// Discovery, approval and future protocol items need not use a _call
-		// suffix. Only known history envelopes may be projected to text.
-		switch kind {
-		case "", "message", "reasoning", "agent_message", "compaction", "compaction_summary":
-		default:
-			return body, false
-		}
 		if (kind != "" && kind != "message") || openAILossyHasOpaqueField(item, 0) {
 			needs = true
 		}
@@ -153,6 +146,69 @@ func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
 		}
 	}
 	return clean, true
+}
+
+// Unknown envelopes, roles and content parts may carry tool state. Leave them
+// intact for the ordinary protocol path rather than interpreting them as text.
+func openAILossyTextHistoryItem(item gjson.Result) bool {
+	if !item.IsObject() {
+		return false
+	}
+	kind := item.Get("type").String()
+	switch kind {
+	case "", "message", "reasoning", "agent_message", "compaction", "compaction_summary":
+	default:
+		return false
+	}
+	role := item.Get("role")
+	if kind == "" || kind == "message" || role.Exists() {
+		switch role.String() {
+		case "user", "assistant", "system", "developer":
+		default:
+			return false
+		}
+	}
+	supported := true
+	item.ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "type", "id", "status", "role", "encrypted_content":
+			supported = value.Type == gjson.String || value.Type == gjson.Null
+		case "content", "summary":
+			supported = openAILossyTextContent(value)
+		default:
+			supported = false
+		}
+		return supported
+	})
+	return supported
+}
+
+func openAILossyTextContent(value gjson.Result) bool {
+	if value.Type == gjson.String || value.Type == gjson.Null {
+		return true
+	}
+	if !value.IsArray() {
+		return false
+	}
+	for _, part := range value.Array() {
+		if !part.IsObject() || part.Get("text").Type != gjson.String {
+			return false
+		}
+		switch part.Get("type").String() {
+		case "input_text", "output_text", "text", "summary_text":
+		default:
+			return false
+		}
+		supported := true
+		part.ForEach(func(key, _ gjson.Result) bool {
+			supported = key.String() == "type" || key.String() == "text"
+			return supported
+		})
+		if !supported {
+			return false
+		}
+	}
+	return true
 }
 
 // Keep the destructive policy self-contained: historical protocol regression

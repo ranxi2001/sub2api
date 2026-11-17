@@ -30,6 +30,12 @@ func TestOpenAILossyProtocolPreservesAgentInput(t *testing.T) {
 		"mcp_approval_response": `{"input":[{"type":"mcp_approval_response","approval_request_id":"approval_fixture","approve":true}]}`,
 		"unknown_item":          `{"input":[{"type":"future_tool_catalog","tools":[{"name":"exec"}]},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
 		"malformed_item":        `{"input":[null,{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"nested_tool":           `{"input":[{"role":"assistant","content":[{"type":"tool_search_output","tools":[{"name":"exec"}]}]},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"tool_role":             `{"input":[{"role":"tool","content":"fixture result"},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"missing_role":          `{"input":[{"type":"message","content":"fixture result"},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"media":                 `{"input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.invalid/fixture.png"}]},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"text_metadata":         `{"input":[{"role":"user","content":[{"type":"input_text","text":"fixture","future_state":{}}]},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"envelope_metadata":     `{"input":[{"type":"agent_message","encrypted_content":"fixture-opaque","recipient":"functions.exec"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			original := []byte(body)
