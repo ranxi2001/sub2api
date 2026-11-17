@@ -10,7 +10,7 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 
-def transcript(phase):
+def transcript(phase, suite="loops"):
     package = "github.com/Wei-Shaw/sub2api/internal/handler"
     rows = []
     for root in (gate.HTTP, gate.WS):
@@ -18,9 +18,10 @@ def transcript(phase):
             for account in ("apikey", "oauth"):
                 for stream in (("false", "true") if root == gate.HTTP else (None,)):
                     name = f"{root}/lossy={lossy}/{account}" + (f"/stream={stream}" if stream else "")
-                    fail = phase == "RED" and (root == gate.WS or lossy == "true")
+                    fail = phase == "RED" and ((root == gate.HTTP and account == "apikey") if suite == "namespace" else (root == gate.WS or lossy == "true" or account == "apikey"))
+                    marker = "LOSSY_DISCOVERY_NAMESPACE_LOST" if suite == "namespace" or (root == gate.HTTP and account == "apikey" and lossy == "false") else "LOSSY_TOOL_PROTOCOL_LOST"
                     rows += [{"Package": package, "Test": name, "Action": "run"},
-                             {"Package": package, "Test": name, "Action": "output", "Output": "LOSSY_TOOL_PROTOCOL_LOST" if fail else "completed"},
+                             {"Package": package, "Test": name, "Action": "output", "Output": marker if fail else "completed"},
                              {"Package": package, "Test": name, "Action": "fail" if fail else "pass"}]
     rows.append({"Package": package, "Action": "fail" if phase == "RED" else "pass"})
     return rows
@@ -38,7 +39,8 @@ class EvidenceGateTest(unittest.TestCase):
 
     def test_false_control_must_pass(self):
         rows = transcript("RED")
-        rows[2]["Action"] = "fail"
+        control = next(row for row in rows if row.get("Action") == "pass" and "/lossy=false/oauth/" in row.get("Test", ""))
+        control["Action"] = "fail"
         with self.assertRaises(ValueError):
             self.check("RED", rows)
 
@@ -81,6 +83,32 @@ class EvidenceGateTest(unittest.TestCase):
         rows[1]["Output"] = "unrelated assertion"
         with self.assertRaises(ValueError), contextlib.redirect_stdout(io.StringIO()):
             gate.validate("RED", 1, "\n".join(map(json.dumps, rows)), "discovery")
+
+    def test_namespace_red_requires_api_key_failures_and_oauth_ws_bridge_controls(self):
+        for phase in ("RED", "GREEN"):
+            rows = transcript(phase, "namespace")
+            service = "github.com/Wei-Shaw/sub2api/internal/service"
+            names = {f"TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire/lossy={value}" for value in ("false", "true")}
+            names |= {f"TestOpenAILossyProtocolDiscoveryNamespaceProjection/{case}" for case in ("completed", "status_omitted", "pending", "failed", "null_status", "unknown_carrier", "compact")}
+            for name in names:
+                fail = phase == "RED" and name.split("/")[-1] in ("completed", "status_omitted")
+                rows.extend([{"Package": service, "Test": name, "Action": "run"},
+                             {"Package": service, "Test": name, "Action": "output", "Output": "LOSSY_DISCOVERY_NAMESPACE_LOST" if fail else "complete"},
+                             {"Package": service, "Test": name, "Action": "fail" if fail else "pass"}])
+            rows.append({"Package": service, "Action": "fail" if phase == "RED" else "pass"})
+            with contextlib.redirect_stdout(io.StringIO()):
+                gate.validate(phase, 1 if phase == "RED" else 0, "\n".join(map(json.dumps, rows)), "namespace")
+            bridge = next(row for row in rows if row.get("Action") == "pass" and "BetaDiscoveryHTTPBridgeWire/" in row.get("Test", ""))
+            bridge["Action"] = "fail"
+            with self.assertRaises(ValueError), contextlib.redirect_stdout(io.StringIO()):
+                gate.validate(phase, 1, "\n".join(map(json.dumps, rows)), "namespace")
+
+    def test_namespace_failure_cannot_be_an_unrelated_assertion(self):
+        rows = transcript("RED")
+        row = next(row for row in rows if row.get("Output") == "LOSSY_DISCOVERY_NAMESPACE_LOST")
+        row["Output"] = "unrelated runtime assertion"
+        with self.assertRaises(ValueError):
+            self.check("RED", rows)
 
 
 if __name__ == "__main__":

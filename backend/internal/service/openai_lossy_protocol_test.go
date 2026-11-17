@@ -51,10 +51,24 @@ func runLossyDiscoveryBridgeWire(t *testing.T, lossy bool) {
 	require.NoError(t, issue715WSBegin(t, producer, a, string(seed), "ctx_pool"))
 	items := gjson.GetBytes(body, "input").Array()
 	require.NoError(t, producer.write([]byte(`{"type":"response.completed","response":{"id":"resp_discovery_seed","status":"completed","output":[`+items[1].Raw+`,`+items[2].Raw+`]}}`), func() error { return nil }))
+	// A is now a known, successfully delivered owner. Without a response
+	// pointer the preselection gate correctly keeps that producer's route.
+	// Continue from A's actual response, as the real socket/HTTP loop does.
+	owner, err := svc.getOpenAIWSStateStore().GetResponseAccount(context.Background(), 715, "resp_discovery_seed")
+	require.NoError(t, err)
+	require.Equal(t, a.ID, owner)
+	body, err = sjson.SetBytes(body, "previous_response_id", "resp_discovery_seed")
+	require.NoError(t, err)
 	ctx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", "gpt-5.1")
+	original := openAIAgentRecoveryFromContext(ctx)
+	require.NotNil(t, original.owner)
+	require.Equal(t, a.ID, original.owner.accountID)
 	ctx, clean, changed, err := svc.PrepareOpenAI409ReadableContinuation(ctx, c, body, "fixture-session", "gpt-5.1")
 	require.NoError(t, err)
 	require.True(t, changed, "exercise Beta history rebuild, not just ordinary bridge adaptation")
+	require.False(t, gjson.GetBytes(clean, "previous_response_id").Exists(), "the completed A pointer must detach before B")
+	require.Same(t, original, openAIAgentRecoveryFromContext(ctx).omittedSource)
+	require.NotEmpty(t, openAIAgentRecoveryFromContext(ctx).toolProofs, "the actually delivered search call must be verified")
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{715}}
 	manager := newOpenAIWSAgentRecovery(svc, ctx, c)
 	defer manager.abort()
@@ -66,7 +80,12 @@ func runLossyDiscoveryBridgeWire(t *testing.T, lossy bool) {
 	ctx = context.WithValue(ctx, openAIWSAgentSourceKey{}, append([]byte(nil), clean...))
 	var events [][]byte
 	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(ctx, c, account, "fixture-token", prepared, len(prepared), "gpt-5.1", "", "", "", "", 1,
-		func(event []byte) error { events = append(events, append([]byte(nil), event...)); return nil })
+		func(event []byte) error {
+			return manager.write(event, func() error {
+				events = append(events, append([]byte(nil), event...))
+				return nil
+			})
+		})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotContains(t, string(upstream.lastBody), "fixture-opaque")
@@ -84,6 +103,9 @@ func runLossyDiscoveryBridgeWire(t *testing.T, lossy bool) {
 	require.Equal(t, "inspect", call.Get("name").String())
 	require.Equal(t, "call_inspect_fixture", call.Get("call_id").String())
 	require.JSONEq(t, "{}", call.Get("arguments").String())
+	owner, err = svc.getOpenAIWSStateStore().GetResponseAccount(context.Background(), 715, "resp_discovery_seed")
+	require.NoError(t, err)
+	require.Equal(t, a.ID, owner, "B must not rewrite A's delivered response owner")
 }
 
 func TestOpenAILossyProtocolWebSocketDeltaPreservesHistory(t *testing.T) {
@@ -400,6 +422,50 @@ func TestOpenAILossyProtocolDiscoveryProofFences(t *testing.T) {
 			} else {
 				require.Error(t, err, "DISCOVERY_CATALOG_REBOUND: submitted schema/metadata or failed delivery must not mint new trust")
 			}
+		})
+	}
+}
+
+// API-key native HTTP uses the same normalizer before freezing the readable
+// projection and again in Forward. Discovery declarations must keep call
+// namespaces without turning message metadata or compact input into tool state.
+func TestOpenAILossyProtocolDiscoveryNamespaceProjection(t *testing.T) {
+	const catalog = `[{"type":"namespace","name":"fixture_tools","tools":[{"type":"function","name":"inspect","parameters":{"type":"object","properties":{"path":{"type":"string"},"limit":{"type":"integer","enum":[9007199254740993]}},"required":["path","limit"],"additionalProperties":false}}]}]`
+	for _, tc := range []struct {
+		name, status, kind string
+		compact, keep      bool
+	}{
+		{"completed", `,"status":"completed"`, "tool_search_output", false, true},
+		{"status_omitted", "", "tool_search_output", false, true},
+		{"pending", `,"status":"in_progress"`, "tool_search_output", false, false},
+		{"failed", `,"status":"failed"`, "tool_search_output", false, false},
+		{"null_status", `,"status":null`, "tool_search_output", false, false},
+		{"unknown_carrier", `,"status":"completed"`, "future_tool_catalog", false, false},
+		{"compact", `,"status":"completed"`, "tool_search_output", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"tools":[{"type":"tool_search"}],"input":[{"type":"tool_search_call","call_id":"tsc_namespace","arguments":{"query":"fixture"}},` +
+				`{"type":"` + tc.kind + `","call_id":"tsc_namespace","tools":` + catalog + tc.status + `},` +
+				`{"type":"function_call","namespace":"fixture_tools","name":"inspect","call_id":"fc_inspect","arguments":"{\"path\":\"sum.go\",\"limit\":9007199254740993}"},` +
+				`{"type":"function_call_output","call_id":"fc_inspect","output":"done"},` +
+				`{"type":"message","role":"user","namespace":"residual","content":"continue"}]}`)
+			original := append([]byte(nil), body...)
+			c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+			prepared, err := normalizeOpenAIResponsesNamespaces(c, account, body, OpenAIUpstreamTransportHTTPSSE, false, tc.compact)
+			require.NoError(t, err)
+			require.Equal(t, tc.keep, gjson.GetBytes(prepared, "input.2.namespace").Exists(), "LOSSY_DISCOVERY_NAMESPACE_LOST: discovery schema must resolve its native call")
+			if tc.keep {
+				require.Equal(t, "fixture_tools", gjson.GetBytes(prepared, "input.2.namespace").String())
+			}
+			require.Equal(t, catalog, gjson.GetBytes(prepared, "input.1.tools").Raw)
+			require.Equal(t, gjson.GetBytes(body, "input.2.arguments").Raw, gjson.GetBytes(prepared, "input.2.arguments").Raw)
+			require.Equal(t, "fc_inspect", gjson.GetBytes(prepared, "input.3.call_id").String())
+			require.False(t, gjson.GetBytes(prepared, "input.4.namespace").Exists())
+			again, err := normalizeOpenAIResponsesNamespaces(c, account, prepared, OpenAIUpstreamTransportHTTPSSE, false, tc.compact)
+			require.NoError(t, err)
+			require.Equal(t, prepared, again, "actual builder must match the immutable pre-builder projection")
+			require.Equal(t, original, body)
 		})
 	}
 }

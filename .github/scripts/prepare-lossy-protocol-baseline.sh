@@ -2,7 +2,7 @@
 # A complete pinned production tree plus byte-identical candidate oracles.
 # No candidate production code or unrelated candidate fixtures enter this RED.
 set -euo pipefail
-baseline=321f11c1a4d23302961c223ac030fd09e3f9e6e8
+baseline=$(git rev-parse "${3:-321f11c1a4d23302961c223ac030fd09e3f9e6e8}^{commit}")
 candidate=$(git rev-parse "$1^{commit}")
 tree="$2"
 test ! -e "$tree"
@@ -22,7 +22,7 @@ for target in \
 done
 # Includes every production path and dependency, not just the defect files.
 git -C "$tree" diff --exit-code "$baseline" -- . ':!**/*_test.go'
-for target in backend/internal/service/openai_lossy_history_restart.go backend/internal/service/openai_agent_recovery_diagnostics.go backend/internal/service/openai_agent_message_recovery.go; do
+for target in backend/internal/service/openai_lossy_history_restart.go backend/internal/service/openai_agent_recovery_diagnostics.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_responses_namespace.go; do
   expected=$(git rev-parse "$baseline:$target")
   actual=$(git hash-object "$tree/$target")
   test "$expected" = "$actual"

@@ -26,7 +26,7 @@ def validate(phase, status, raw, suite):
         leaves = {PROJECTION}
     elif suite == "discovery":
         leaves = {f"{DISCOVERY}/{name}" for name in (DISCOVERY_RED if phase == "RED" else DISCOVERY_GREEN)}
-    elif suite == "loops":
+    elif suite in {"loops", "namespace"}:
         leaves = {f"{HTTP}/lossy={lossy}/{account}/stream={stream}"
                   for lossy in ("false", "true") for account in ("apikey", "oauth") for stream in ("false", "true")}
         leaves |= {f"{WS}/lossy={lossy}/{account}"
@@ -37,7 +37,13 @@ def validate(phase, status, raw, suite):
     for name in sorted(leaves):
         if counts["run", name] != 1 or counts["pass", name] + counts["fail", name] != 1:
             raise ValueError(f"missing/repeated named execution: {name}")
-        red = phase == "RED" and (suite in {"projection", "discovery"} or name.startswith(WS) or "/lossy=true/" in name)
+        if suite == "namespace":
+            red = phase == "RED" and name.startswith(HTTP) and "/apikey/" in name
+        else:
+            # v2.21.6 also predates the API-key discovery-namespace repair.
+            # Its lossy=false API-key leaves must fail that exact assertion;
+            # OAuth lossy=false remains the historical passing control.
+            red = phase == "RED" and (suite in {"projection", "discovery"} or name.startswith(WS) or "/lossy=true/" in name or "/apikey/" in name)
         outcome = "fail" if red else "pass"
         if counts[outcome, name] != 1:
             raise ValueError(f"expected {outcome}: {name}")
@@ -48,6 +54,8 @@ def validate(phase, status, raw, suite):
                 "LOSSY_TOOL_PROTOCOL_LOST", "LOSSY_DISCOVERY_NEXT_TURN_REFUSED")
             if suite == "discovery":
                 markers = ("DISCOVERY_UNTRUSTED_HISTORY_ACCEPTED", "DISCOVERY_CATALOG_REBOUND")
+            if suite == "namespace" or (suite == "loops" and name.startswith(HTTP) and "/lossy=false/apikey/" in name):
+                markers = ("LOSSY_DISCOVERY_NAMESPACE_LOST",)
             if not any(marker in output for marker in markers):
                 raise ValueError(f"missing tool behavior assertion: {name}")
         print(f"{phase} {outcome}: {name}")
@@ -59,6 +67,29 @@ def validate(phase, status, raw, suite):
             for case in ("forged_pair", "call_metadata", "result_metadata", "schema_after_completion", "metadata_after_completion"):
                 assert passed[f"TestOpenAILossyProtocolDiscoveryNetworkFences/{account}/{case}"] == 1
             assert passed[f"TestOpenAILossyProtocolDiscoveryDeltaLoop/{account}"] == 1
+    if suite == "namespace":
+        service = "github.com/Wei-Shaw/sub2api/internal/service"
+        service_rows = [json.loads(line) for line in raw.splitlines() if line.startswith("{")]
+        service_rows = [row for row in service_rows if row.get("Package") == service]
+        service_counts = Counter((row.get("Action"), row.get("Test")) for row in service_rows)
+        bridge = "TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire"
+        projection = "TestOpenAILossyProtocolDiscoveryNamespaceProjection"
+        service_leaves = {f"{bridge}/lossy={value}" for value in ("false", "true")}
+        service_leaves |= {f"{projection}/{case}" for case in ("completed", "status_omitted", "pending", "failed", "null_status", "unknown_carrier", "compact")}
+        service_failed = {f"{projection}/{case}" for case in ("completed", "status_omitted")} if phase == "RED" else set()
+        for name in service_leaves:
+            outcome = "fail" if name in service_failed else "pass"
+            if service_counts["run", name] != 1 or service_counts[outcome, name] != 1 or service_counts["pass", name] + service_counts["fail", name] != 1:
+                raise ValueError(f"missing/incorrect namespace control: {name}")
+            if name in service_failed:
+                output = "".join(row.get("Output", "") for row in service_rows if row.get("Test") == name)
+                if "LOSSY_DISCOVERY_NAMESPACE_LOST" not in output:
+                    raise ValueError(f"missing namespace business assertion: {name}")
+        if service_counts["fail" if service_failed else "pass", None] != 1:
+            raise ValueError("missing service package terminal")
+        for row in service_rows:
+            if row.get("Action") == "fail" and row.get("Test") not in service_failed | ({projection, None} if service_failed else set()):
+                raise ValueError("unrelated service failure in namespace evidence")
     expected_status = 1 if expected_failed else 0
     if status != expected_status or counts["fail" if expected_failed else "pass", None] != 1:
         raise ValueError("unexpected exit/package terminal")

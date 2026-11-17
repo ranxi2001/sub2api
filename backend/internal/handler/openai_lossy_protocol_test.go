@@ -177,7 +177,7 @@ func lossyProtocolLoopOptions(lossy, functionUpstream bool) (httpRebuildFixtureO
 		case "fc_loop_inspect":
 			index = 1
 			require.Equal(t, "function_call", call.Get("type").String())
-			require.Equal(t, "fixture_tools", call.Get("namespace").String())
+			require.Equal(t, "fixture_tools", call.Get("namespace").String(), "LOSSY_DISCOVERY_NAMESPACE_LOST: delivered call namespace must survive result submission")
 			require.Equal(t, "inspect", call.Get("name").String())
 			require.JSONEq(t, `{"path":"sum.go","limit":1}`, call.Get("arguments").String())
 			result = `{"type":"function_call_output","call_id":"fc_loop_inspect","output":"fixture inspect: Sum(2,3)=5"}`
@@ -229,7 +229,7 @@ func lossyProtocolLoopOptions(lossy, functionUpstream bool) (httpRebuildFixtureO
 					require.Equal(t, pair.name, call.Get("name").String())
 					require.Equal(t, pair.id, call.Get("call_id").String())
 					if pair.kind == "function_call" {
-						require.Equal(t, "fixture_tools", call.Get("namespace").String())
+						require.Equal(t, "fixture_tools", call.Get("namespace").String(), "LOSSY_DISCOVERY_NAMESPACE_LOST: delivered call namespace must survive result submission")
 						require.JSONEq(t, `{"path":"sum.go","limit":1}`, call.Get("arguments").String())
 					} else {
 						require.Equal(t, "read sum.go", call.Get("input").String())
