@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"strings"
+
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -99,7 +101,13 @@ func RegisterUserRoutes(
 		// API Key管理
 		keys := authenticated.Group("/keys")
 		{
-			keys.GET("", h.APIKey.List)
+			keys.GET("", func(c *gin.Context) {
+				if strings.EqualFold(strings.TrimSpace(c.Query("sort_by")), "usage") {
+					panelRateLimiter.Heavy()(c)
+					return
+				}
+				c.Next()
+			}, h.APIKey.List)
 			// 必须在动态 /:id 路由之前注册，避免被参数路由吞掉。
 			keys.GET("/concurrency", h.APIKey.GetConcurrencyQueue)
 			keys.GET("/:id", h.APIKey.GetByID)

@@ -999,6 +999,10 @@ describe('user KeysView column settings', () => {
     expect(getDashboardApiKeysUsage).toHaveBeenLastCalledWith([1], expect.objectContaining({
       start_date: formatDateLocalInput(start), end_date: formatDateLocalInput(end), timezone: getBrowserTimeZone(),
     }))
+    expect(listKeys).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({
+      sort_by: 'usage', sort_order: 'desc',
+      start_date: formatDateLocalInput(start), end_date: formatDateLocalInput(end), timezone: getBrowserTimeZone(),
+    }), expect.any(Object))
     wrapper.findComponent(DateRangePicker).vm.$emit('change', {
       startDate: '2026-10-01', endDate: '2026-10-31', preset: null,
     })
@@ -1008,6 +1012,44 @@ describe('user KeysView column settings', () => {
     expect(getDashboardApiKeysUsage).toHaveBeenLastCalledWith([1], expect.objectContaining({
       start_date: '2026-10-01', end_date: '2026-10-31', timezone: getBrowserTimeZone(),
     }))
+    expect(listKeys).toHaveBeenLastCalledWith(2, 20, expect.objectContaining({
+      sort_by: 'usage', sort_order: 'desc',
+      start_date: '2026-10-01', end_date: '2026-10-31', timezone: getBrowserTimeZone(),
+    }), expect.any(Object))
+  })
+
+  it('marks usage descending by default and toggles the actual header in both directions', async () => {
+    const wrapper = await mountView(true)
+    const header = wrapper.findAll('th').find(th => th.text() === 'Usage')!
+    expect(header.attributes('aria-sort')).toBe('descending')
+    for (const order of ['asc', 'desc'] as const) {
+      await header.trigger('click')
+      await flushPromises()
+      expect(header.attributes('aria-sort')).toBe(order === 'asc' ? 'ascending' : 'descending')
+      expect(listKeys).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({
+        sort_by: 'usage', sort_order: order, timezone: getBrowserTimeZone(),
+      }), expect.any(Object))
+    }
+  })
+
+  it('restarts at page one and clears selection on range changes while preserving sort direction', async () => {
+    const wrapper = await mountView()
+    const table = wrapper.findComponent({ name: 'DataTable' })
+    table.vm.$emit('sort', 'usage', 'asc')
+    await flushPromises()
+    await wrapper.get('[data-test="page-2"]').trigger('click')
+    await flushPromises()
+    table.vm.$emit('update:selectedKeys', [1])
+    await nextTick()
+    wrapper.findComponent(DateRangePicker).vm.$emit('change', {
+      startDate: '2026-10-05', endDate: '2026-10-06', preset: null,
+    })
+    await flushPromises()
+    expect(table.props('selectedKeys')).toEqual([])
+    expect(listKeys).toHaveBeenLastCalledWith(1, 20, expect.objectContaining({
+      sort_by: 'usage', sort_order: 'asc',
+      start_date: '2026-10-05', end_date: '2026-10-06', timezone: getBrowserTimeZone(),
+    }), expect.any(Object))
   })
 
   it('offers calendar ranges without a 24-hour shortcut in the actual usage picker', async () => {
@@ -1252,6 +1294,8 @@ describe('user KeysView column settings', () => {
     { key: 'current_concurrency', order: 'asc' },
     { key: 'group', order: 'asc' },
     { key: 'group', order: 'desc' },
+    { key: 'usage', order: 'asc' },
+    { key: 'usage', order: 'desc' },
   ] as const)('keeps filters and resets pagination and selection when sorting $key $order', async ({ key, order }) => {
     getAvailableGroups.mockResolvedValue([{ id: 42, name: 'OpenAI' }])
     const wrapper = await mountView()
@@ -1291,6 +1335,11 @@ describe('user KeysView column settings', () => {
         group_id: 42,
         sort_by: key,
         sort_order: order,
+        ...(key === 'usage' ? {
+          start_date: expect.any(String),
+          end_date: expect.any(String),
+          timezone: getBrowserTimeZone(),
+        } : {}),
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )

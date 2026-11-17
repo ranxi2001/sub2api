@@ -157,4 +157,7 @@ type APIKeyListFilters struct {
 	Search  string
 	Status  string
 	GroupID *int64 // nil=不筛选, 0=无分组, >0=指定分组
+	// Usage sort bounds are inclusive start / exclusive end, matching the usage column.
+	UsageStartTime time.Time
+	UsageEndTime   time.Time
 }

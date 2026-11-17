@@ -724,28 +724,10 @@ func (h *UsageHandler) DashboardAPIKeysUsage(c *gin.Context) {
 
 	// Omitted dates preserve the existing rolling 30-day total. Explicit dates
 	// include both calendar days in the caller's timezone, including DST changes.
-	var startTime, endTime time.Time
-	if req.StartDate != "" || req.EndDate != "" {
-		if req.StartDate == "" || req.EndDate == "" {
-			response.BadRequest(c, "start_date and end_date must be provided together")
-			return
-		}
-		var err error
-		startTime, err = timezone.ParseInUserLocation("2006-01-02", req.StartDate, req.Timezone)
-		if err != nil {
-			response.BadRequest(c, "Invalid start_date, use YYYY-MM-DD")
-			return
-		}
-		endTime, err = timezone.ParseInUserLocation("2006-01-02", req.EndDate, req.Timezone)
-		if err != nil {
-			response.BadRequest(c, "Invalid end_date, use YYYY-MM-DD")
-			return
-		}
-		if startTime.After(endTime) {
-			response.BadRequest(c, "start_date must be on or before end_date")
-			return
-		}
-		endTime = endTime.AddDate(0, 0, 1)
+	startTime, endTime, err := parseAPIKeyUsageRange(req.StartDate, req.EndDate, req.Timezone)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
 	}
 
 	if len(req.APIKeyIDs) == 0 {

@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
+	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -515,7 +516,11 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 		WithGroup().
 		Offset(params.Offset()).
 		Limit(params.Limit())
-	for _, order := range apiKeyListOrder(params) {
+	orders := apiKeyListOrder(params)
+	if strings.EqualFold(strings.TrimSpace(params.SortBy), "usage") {
+		orders = apiKeyUsageOrder(filters.UsageStartTime, filters.UsageEndTime, params.NormalizedSortOrder(pagination.SortOrderDesc))
+	}
+	for _, order := range orders {
 		keysQuery = keysQuery.Order(order)
 	}
 
@@ -703,6 +708,42 @@ func (r *apiKeyRepository) ListByGroupID(ctx context.Context, groupID int64, par
 		return nil, nil, err
 	}
 	return outKeys, paginationResultFromTotal(int64(total), params), nil
+}
+
+// apiKeyUsageOrder sums actual cost for each owned, filtered key before LIMIT/OFFSET.
+// The per-key date lookup uses the existing (api_key_id, created_at) covering index.
+func apiKeyUsageOrder(start, end time.Time, sortOrder string) []func(*entsql.Selector) {
+	now := time.Now()
+	if start.IsZero() {
+		start = now.AddDate(0, 0, -30)
+	}
+	if end.IsZero() {
+		end = now
+	}
+	return []func(*entsql.Selector){func(s *entsql.Selector) {
+		builder := entsql.Dialect(s.Dialect())
+		usage := builder.Table(usagelog.Table)
+		total := builder.Select(entsql.Sum(usage.C(usagelog.FieldActualCost))).From(usage).
+			Where(entsql.And(
+				entsql.ColumnsEQ(usage.C(usagelog.FieldAPIKeyID), s.C(apikey.FieldID)),
+				entsql.GTE(usage.C(usagelog.FieldCreatedAt), start),
+				entsql.LT(usage.C(usagelog.FieldCreatedAt), end),
+			))
+		s.OrderExpr(entsql.ExprFunc(func(b *entsql.Builder) {
+			b.WriteString("COALESCE((").Join(total).WriteString("), 0)")
+			if sortOrder == pagination.SortOrderAsc {
+				b.WriteString(" ASC")
+			} else {
+				b.WriteString(" DESC")
+			}
+		}))
+		// Stable ties prevent zero-usage keys from moving unpredictably across pages.
+		if sortOrder == pagination.SortOrderAsc {
+			s.OrderBy(entsql.Asc(s.C(apikey.FieldID)))
+		} else {
+			s.OrderBy(entsql.Desc(s.C(apikey.FieldID)))
+		}
+	}}
 }
 
 func apiKeyListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {

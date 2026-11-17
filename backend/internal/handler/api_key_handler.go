@@ -138,6 +138,14 @@ func (h *APIKeyHandler) List(c *gin.Context) {
 			filters.GroupID = &gid
 		}
 	}
+	if strings.EqualFold(strings.TrimSpace(params.SortBy), "usage") {
+		start, end, err := parseAPIKeyUsageRange(c.Query("start_date"), c.Query("end_date"), c.Query("timezone"))
+		if err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+		filters.UsageStartTime, filters.UsageEndTime = start, end
+	}
 
 	keys, result, err := h.apiKeyService.List(c.Request.Context(), subject.UserID, params, filters)
 	if err != nil {
