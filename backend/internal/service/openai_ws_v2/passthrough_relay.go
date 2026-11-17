@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -313,7 +314,7 @@ func Relay(
 				Direction:    "client_to_upstream",
 				MessageType:  relayMessageTypeString(firstMessageType),
 				PayloadBytes: len(firstClientMessage),
-				Error:        err.Error(),
+				Error:        relayErrorString(err),
 			})
 			return result, &RelayExit{Stage: "write_upstream", Err: err}
 		}
@@ -549,7 +550,7 @@ func runClientToUpstream(
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:     "read_client_failed",
 				Direction: "client_to_upstream",
-				Error:     err.Error(),
+				Error:     relayErrorString(err),
 				Graceful:  isDisconnectError(err),
 			})
 			exitCh <- relayExitSignal{stage: "read_client", err: err, graceful: isDisconnectError(err)}
@@ -562,7 +563,7 @@ func runClientToUpstream(
 				Direction:    "client_to_upstream",
 				MessageType:  relayMessageTypeString(msgType),
 				PayloadBytes: len(payload),
-				Error:        err.Error(),
+				Error:        relayErrorString(err),
 			})
 			exitCh <- relayExitSignal{stage: "write_upstream", err: err}
 			return
@@ -606,12 +607,12 @@ func runUpstreamToClient(
 			// the adapter does not report relay_completed with an active turn.
 			if graceful && state.hasUnfinishedTurn() {
 				graceful = false
-				err = errors.New("upstream websocket closed before terminal event: " + err.Error())
+				err = fmt.Errorf("upstream websocket closed before terminal event: %w", err)
 			}
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "read_upstream_failed",
 				Direction:       "upstream_to_client",
-				Error:           err.Error(),
+				Error:           relayErrorString(err),
 				Graceful:        graceful,
 				WroteDownstream: wroteDownstream,
 			})
@@ -642,7 +643,7 @@ func runUpstreamToClient(
 					MessageType:     relayMessageTypeString(msgType),
 					PayloadBytes:    len(payload),
 					WroteDownstream: wroteDownstream,
-					Error:           err.Error(),
+					Error:           relayErrorString(err),
 				})
 				exitCh <- relayExitSignal{
 					stage:           "upstream_message",
@@ -707,7 +708,7 @@ func runUpstreamToClient(
 				MessageType:     relayMessageTypeString(msgType),
 				PayloadBytes:    len(payload),
 				WroteDownstream: wroteDownstream,
-				Error:           writeErr.Error(),
+				Error:           relayErrorString(writeErr),
 			})
 			exitCh <- relayExitSignal{stage: "write_client", err: writeErr, wroteDownstream: wroteDownstream}
 			return
@@ -796,10 +797,7 @@ func relayDirectionFromStage(stage string) string {
 }
 
 func relayErrorString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
+	return ErrorStringForLog(err)
 }
 
 func observeUpstreamMessage(

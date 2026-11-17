@@ -11,6 +11,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// The real service wrapper exposes this source contract while retaining its
+// private type. The socket regression also exercises the actual wrapper.
+type wsIngressSourceTestError struct {
+	stage string
+	cause error
+}
+
+func (e *wsIngressSourceTestError) Error() string                { return e.cause.Error() }
+func (e *wsIngressSourceTestError) Unwrap() error                { return e.cause }
+func (e *wsIngressSourceTestError) OpenAIWSIngressStage() string { return e.stage }
+
+func TestOpenAIWSIngressSourceAttribution(t *testing.T) {
+	wrap := func(stage string, cause error) error {
+		return fmt.Errorf("fixture adapter: %w", &wsIngressSourceTestError{stage: stage, cause: cause})
+	}
+	normal := coderws.CloseError{Code: coderws.StatusNormalClosure, Reason: "fixture peer done"}
+	for _, tc := range []struct {
+		name   string
+		err    error
+		report bool
+	}{
+		{"upstream_read_1000", wrap("read_upstream", normal), true},
+		{"upstream_write_1000", wrap("write_upstream", normal), true},
+		{"client_read_1000", wrap("read_client", normal), false},
+		{"client_read_canceled", wrap("read_client", context.Canceled), false},
+		{"gateway_normal", service.NewOpenAIWSClientCloseError(coderws.StatusNormalClosure, "websocket idle timeout", context.DeadlineExceeded), false},
+		{"gateway_canceled", service.NewOpenAIWSClientCloseError(coderws.StatusGoingAway, "websocket request canceled", context.Canceled), false},
+		{"completed_then_close", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			marker := "ISSUE906_CLIENT_CLOSE_REPORTED"
+			if tc.report {
+				marker = "ISSUE906_UPSTREAM_HEALTH_REPORT_SKIPPED"
+				var closeErr coderws.CloseError
+				require.ErrorAs(t, tc.err, &closeErr)
+				require.Equal(t, normal, closeErr, "the original typed cause must survive classification")
+			}
+			require.Equal(t, !tc.report, openAIWSIngressEndedByClient(tc.err), marker)
+			require.Equal(t, tc.report, shouldReportOpenAIWSProxyAccountFailure(tc.err), marker)
+		})
+	}
+}
+
 // issue #6105：入站 Responses WebSocket 的正常结束会被记成账号故障。
 //
 // 归因发生在 openai_gateway_handler.go 的 ingress 收尾处：只有

@@ -233,7 +233,7 @@ func normalizeOpenAIWSTerminalEvent(eventType string) string {
 // markOpenAIWSClientVisibleFailure records only terminal/error protocol events
 // that were delivered to the client. Callers invoke it only after any hidden
 // failover/recovery decision and a successful downstream write.
-func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload []byte) {
+func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload []byte, upstream ...*OpsUpstreamWSFailure) {
 	eventType = strings.TrimSpace(eventType)
 	if eventType != "error" && eventType != "response.failed" {
 		return
@@ -270,7 +270,14 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 	if message == "" {
 		message = "upstream websocket request failed"
 	}
-	MarkOpsStreamFailure(c, errType, code, message, status)
+	var origin *OpsUpstreamWSFailure
+	if len(upstream) > 0 {
+		origin = upstream[0]
+	}
+	MarkOpsStreamErrorValue(c, OpsStreamError{
+		ErrType: errType, Code: code, Message: message, IntendedStatus: status,
+		CountTowardsSLA: true, UpstreamWSFailure: origin,
+	})
 }
 
 func openAIWSPayloadTransientStatus(payload []byte) int {
@@ -833,6 +840,8 @@ func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
 	code := strings.ToLower(strings.TrimSpace(codeRaw))
 	errType := strings.ToLower(strings.TrimSpace(errTypeRaw))
 	switch {
+	case code == "encrypted_agent_recovery_owner_unavailable":
+		return http.StatusConflict
 	case strings.Contains(errType, "invalid_request"),
 		strings.Contains(code, "invalid_request"),
 		strings.Contains(code, "bad_request"),

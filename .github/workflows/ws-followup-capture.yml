@@ -3,8 +3,18 @@ on:
   pull_request:
     paths:
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_ws_forwarder.go'
+      - 'backend/internal/handler/openai_ws_client_close_attribution_test.go'
       - 'backend/internal/service/openai_ws_v2_passthrough_adapter.go'
       - 'backend/internal/service/openai_ws_request_capture.go'
+      - 'backend/internal/service/openai_ws_upstream_close.go'
+      - 'backend/internal/service/openai_ws_close_logging_test.go'
+      - 'backend/internal/service/openai_ws_v2/**'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/service/openai_ws_forwarder_support.go'
+      - 'backend/internal/service/ops_upstream_context.go'
+      - 'backend/internal/handler/ops_error_logger.go'
+      - 'backend/internal/handler/openai_issue905_ws_test.go'
       - 'backend/internal/requestcapture/websocket.go'
       - 'backend/internal/handler/openai_ws_followup_capture_test.go'
       - 'backend/internal/requestcapture/followup_test_support.go'
@@ -75,4 +85,202 @@ jobs:
         with:
           name: ws-followup-capture-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
           path: ${{ runner.temp }}/ws-followup-capture.jsonl
+          if-no-files-found: error
+
+  upstream-close:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Two-turn upstream refusal regression and base comparison
+        shell: bash
+        env:
+          BASE_SHA: a2ed69304aeb20d1ae007d00845c548abdd2ccf3
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/issue905-base" "$BASE_SHA"
+          cp backend/internal/handler/openai_issue905_ws_test.go "$RUNNER_TEMP/issue905-base/backend/internal/handler/"
+          set +e
+          (cd "$RUNNER_TEMP/issue905-base/backend" && go test -json -tags=unit,issue905 ./internal/handler -run '^TestIssue905WSFollowup$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue905-base.jsonl" 2>&1
+          base_result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue905-base.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue905-base.jsonl"
+          python3 - "$base_result" "$RUNNER_TEMP/issue905-base.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[2]) if line.startswith('{')]
+          assert int(sys.argv[1]) == 1, 'base must reproduce the attribution defect'
+          for pointer in ('false', 'true'):
+              assert any(r.get('Test') == 'TestIssue905WSFollowup/completed/pointer='+pointer and r.get('Action') == 'pass' for r in rows), 'baseline success control missing'
+              name = 'TestIssue905WSFollowup/error_event/pointer='+pointer
+              assert any(r.get('Test') == name and r.get('Action') == 'fail' for r in rows), name
+              assert 'ISSUE905_UPSTREAM_SOURCE_LOST' in ''.join(r.get('Output','') for r in rows if r.get('Test') == name), name
+          PY
+          (cd backend && go test -race -json -tags=unit,issue905 ./internal/handler -run '^TestIssue905WSFollowup$' -count=1 -timeout=3m) | tee "$RUNNER_TEMP/issue905-head.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue905-head.jsonl"
+          python3 - "$RUNNER_TEMP/issue905-head.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          for outcome in ('completed', 'error_event', 'close_only', 'unknown_close', 'response_failed', 'multiple_failures'):
+              for pointer in ('false', 'true'):
+                  name = 'TestIssue905WSFollowup/'+outcome+'/pointer='+pointer
+                  assert any(r.get('Test') == name and r.get('Action') == 'pass' for r in rows), name
+          assert not any(r.get('Action') in ('skip', 'fail') for r in rows)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue905-upstream-close-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue905-*.jsonl
+          if-no-files-found: error
+
+  review-close-repair:
+    name: Reviewed close repair (${{ matrix.phase }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Same oracle on reviewed production and candidate
+        shell: bash
+        env:
+          PHASE: ${{ matrix.phase }}
+          REVIEWED_SHA: 6f018b85b4671c3d70b1d4a49e107524d037a0f4
+        run: |
+          set -euo pipefail
+          tested_tree="$GITHUB_WORKSPACE"
+          evidence="$RUNNER_TEMP/issue906-close"
+          mkdir -p "$evidence"
+          git rev-parse HEAD > "$evidence/candidate-sha.txt"
+          if [ "$PHASE" = RED ]; then
+            tested_tree="$RUNNER_TEMP/issue906-reviewed"
+            git worktree add --detach "$tested_tree" "$REVIEWED_SHA"
+            # Exhaustive overlay inventory: test sources only, no production
+            # helper or compatibility shim from the candidate is required.
+            for file in backend/internal/handler/openai_issue905_ws_test.go backend/internal/service/openai_ws_v2/close_cause_test.go; do
+              cp "$file" "$tested_tree/$file"
+              git hash-object "$file" "$tested_tree/$file" >> "$evidence/test-blobs.txt"
+            done
+          fi
+          git -C "$tested_tree" rev-parse HEAD > "$evidence/tested-sha.txt"
+          for file in backend/internal/service/openai_ws_v2/passthrough_relay.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/handler/openai_gateway_handler.go; do
+            git -C "$tested_tree" hash-object "$file" >> "$evidence/production-blobs.txt"
+          done
+          set +e
+          (cd "$tested_tree/backend" && go test -race -json -tags=unit,issue905 ./internal/handler ./internal/service/openai_ws_v2 -run '^(TestIssue905WSFollowup|TestIssue905WSReviewRepair|TestRelayUpstreamCloseCause)$' -count=1 -timeout=5m) > "$evidence/oracle.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$evidence/oracle.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$evidence/oracle.jsonl"
+          python3 - "$PHASE" "$result" "$evidence/oracle.jsonl" <<'PY'
+          import json, sys
+          phase, result, path = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          rows = [json.loads(line) for line in open(path) if line.startswith('{')]
+          actions = {(r.get('Action'), r.get('Test')) for r in rows}
+          root = 'TestIssue905WSReviewRepair/'
+          close_failures = {root+str(code)+'/'+outcome+'/pointer='+pointer
+                            for code in (1000, 1001)
+                            for outcome in ('close_only', 'unknown_close')
+                            for pointer in ('false', 'true')}
+          close_failures.add(root+'1005/unknown_close')
+          log_failures = {root+'1008/'+outcome for outcome in
+                          ('close_only', 'unknown_close', 'error_event', 'response_failed', 'multiple_failures')}
+          typed_failures = {'TestRelayUpstreamCloseCause/'+str(code) for code in (1000, 1001, 1005, 1006)}
+          controls = {root+str(code)+'/completed_normal/pointer='+pointer
+                      for code in (1000, 1001) for pointer in ('false', 'true')}
+          controls |= {'TestIssue905WSFollowup/'+outcome+'/pointer='+pointer
+                       for outcome in ('completed', 'error_event', 'close_only', 'unknown_close', 'response_failed', 'multiple_failures')
+                       for pointer in ('false', 'true')}
+          all_leaves = close_failures | log_failures | typed_failures | controls
+          assert result == (1 if phase == 'RED' else 0), result
+          assert not any(r.get('Action') == 'skip' for r in rows)
+          for name in all_leaves:
+              assert ('run', name) in actions, name
+              action = 'fail' if phase == 'RED' and name not in controls else 'pass'
+              assert (action, name) in actions, (action, name)
+              if action == 'fail':
+                  marker = ('ISSUE906_TYPED_CLOSE_CAUSE_LOST' if name in typed_failures else
+                            'ISSUE906_PRIVATE_CLOSE_REASON_LOGGED' if name in log_failures else
+                            'ISSUE906_UNFINISHED_CLOSE_MISSING')
+                  output = ''.join(r.get('Output', '') for r in rows if r.get('Test') == name)
+                  assert marker in output, (marker, name)
+          if phase == 'GREEN':
+              assert not any(r.get('Action') == 'fail' for r in rows)
+          PY
+      - name: Source attribution oracle against prior handler and candidate
+        shell: bash
+        env:
+          PHASE: ${{ matrix.phase }}
+          PRIOR_SHA: 64872b526a176f5036b5ca1aac61a59c97c1c58e
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/issue906-close"
+          target=backend/internal/handler/openai_gateway_handler.go
+          # This disposable CI checkout restores only the prior handler. Keep
+          # candidate tests and the stage accessor so the defect is isolated.
+          if [ "$PHASE" = RED ]; then
+            git show "$PRIOR_SHA:$target" > "$target"
+          fi
+          git hash-object "$target" backend/internal/service/openai_ws_forwarder.go > "$evidence/attribution-production-blobs.txt"
+          set +e
+          (cd backend && go test -race -json -tags=unit,issue905 ./internal/handler -run '^(TestIssue905WSUpstreamCloseAttribution|TestOpenAIWSIngressSourceAttribution)$' -count=1 -timeout=3m) > "$evidence/attribution.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$evidence/attribution.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$evidence/attribution.jsonl"
+          python3 - "$PHASE" "$result" "$evidence/attribution.jsonl" <<'PY'
+          import json, sys
+          phase, result, path = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          rows = [json.loads(line) for line in open(path) if line.startswith('{')]
+          actions = {(r.get('Action'), r.get('Test')) for r in rows}
+          root = 'TestOpenAIWSIngressSourceAttribution/'
+          markers = {root+name: 'ISSUE906_UPSTREAM_HEALTH_REPORT_SKIPPED'
+                     for name in ('upstream_read_1000', 'upstream_write_1000')}
+          markers.update({root+name: 'ISSUE906_CLIENT_CLOSE_REPORTED'
+                          for name in ('client_read_1000', 'client_read_canceled', 'gateway_normal', 'gateway_canceled')})
+          markers['TestIssue905WSUpstreamCloseAttribution/close_only'] = 'ISSUE906_UPSTREAM_CLOSE_MISCLASSIFIED'
+          controls = {root+'completed_then_close'} | {
+              'TestIssue905WSUpstreamCloseAttribution/'+outcome for outcome in ('completed_normal', 'completed')}
+          assert result == (1 if phase == 'RED' else 0), result
+          for name in set(markers) | controls:
+              assert ('run', name) in actions, name
+              action = 'fail' if phase == 'RED' and name in markers else 'pass'
+              assert (action, name) in actions, (action, name)
+              if action == 'fail':
+                  output = ''.join(r.get('Output', '') for r in rows if r.get('Test') == name)
+                  assert markers[name] in output, (markers[name], name)
+          if phase == 'GREEN':
+              assert not any(r.get('Action') == 'fail' for r in rows)
+          PY
+      - name: Candidate relay and client attribution controls
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        run: |
+          go test -race -tags=unit ./internal/service/openai_ws_v2 -count=1 -timeout=5m
+          go test -race -tags=unit ./internal/handler -run '^TestOpenAIWSIngressEndedByClient' -count=1 -timeout=2m
+          go test -race -tags=unit ./internal/service -run '^TestOpenAIWSCloseLoggingPreserves' -count=1 -timeout=2m
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue906-close-repair-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue906-close/
           if-no-files-found: error
