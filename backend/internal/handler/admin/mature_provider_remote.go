@@ -141,6 +141,9 @@ func providerPublicError(err error) string {
 type providerRemoteError struct {
 	operation string
 	status    int
+	// retryAfter is set only for HTTP 429 when the upstream sent a positive
+	// Retry-After. It is a duration, never a credential or response body.
+	retryAfter time.Duration
 }
 
 func (e *providerRemoteError) Error() string {
@@ -303,7 +306,7 @@ func (r *providerRemote) request(ctx context.Context, method, path string, body 
 			return nil, errProviderAuthentication
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
-			return nil, &providerRemoteError{operation: path, status: res.StatusCode}
+			return nil, &providerRemoteError{operation: path, status: res.StatusCode, retryAfter: providerRetryAfter(res)}
 		}
 		return nil, errProviderResponse
 	}
@@ -318,7 +321,7 @@ func (r *providerRemote) request(ctx context.Context, method, path string, body 
 		return nil, errProviderAuthentication
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, &providerRemoteError{operation: path, status: res.StatusCode}
+		return nil, &providerRemoteError{operation: path, status: res.StatusCode, retryAfter: providerRetryAfter(res)}
 	}
 	if success, ok := envelope["success"].(bool); ok && !success {
 		return nil, errProviderAuthentication

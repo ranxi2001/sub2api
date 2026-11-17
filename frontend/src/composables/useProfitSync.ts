@@ -12,7 +12,7 @@ interface SyncJob extends ProfitDates {
 }
 
 const pollInterval = 3000
-const failureReasons = new Set(['upstream', 'timeout', 'conflict', 'simple_mode', 'internal', 'evidence_budget'])
+const failureReasons = new Set(['upstream', 'timeout', 'conflict', 'simple_mode', 'internal', 'evidence_budget', 'rate_limited'])
 // A navigation during the short POST must not discard its acknowledgement or start another POST.
 const admissions = new Map<string, Promise<{ job_id: string }>>()
 

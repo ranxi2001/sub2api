@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -37,6 +38,9 @@ var (
 type providerAPIError struct {
 	status  int
 	message string
+	// retryAfter is set only for HTTP 429 when the upstream sent a positive
+	// Retry-After. It is a duration, never a credential or response body.
+	retryAfter time.Duration
 }
 
 func (e *providerAPIError) Error() string {

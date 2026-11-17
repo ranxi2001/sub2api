@@ -20,7 +20,7 @@ export interface ProfitMetrics {
  p50_ms: number | null; p90_ms: number | null; p95_ms: number | null; duration_p90_ms: number | null
  latest_config_updated_at: string | null; oldest_config_updated_at: string | null
 }
-export interface OperationsRow extends ProfitMetrics { key: string; name: string; provider_id?: number; provider_site_type?: MatureProvider['site_type']; assignment?: string; channel_id?: number; channel_code?: string; channel_remark?: string; channel_revision?: number }
+export interface OperationsRow extends ProfitMetrics { key: string; name: string; provider_id?: number; provider_site_type?: MatureProvider['site_type']; assignment?: string; channel_id?: number; channel_code?: string; channel_remark?: string; channel_revision?: number; bills_synced_at?: string | null }
 export interface AccountBasis { id: number; name: string; key: string; attribution: string; updated_at: string; deleted: boolean; multiplier: number | null; cost_basis: string }
 export interface OperationsSnapshot {
  scope: OperationsQuery; queried_at: string; attribution: string; currency: string

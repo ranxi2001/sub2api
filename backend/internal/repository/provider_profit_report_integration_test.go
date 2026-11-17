@@ -156,7 +156,7 @@ func TestProviderProfitReportRegisterSiteAfterUsage(t *testing.T) {
 	s, rows = read()
 	require.Len(t, rows, 2)
 	require.NotContains(t, rows, api)
-	check(rows[key], map[string]string{"assignment": `"provider_url"`, "provider_id": fmt.Sprint(pid), "requests": "1", "bill_requests": "0", "upstream_cost": "null"})
+	check(rows[key], map[string]string{"assignment": `"provider_url"`, "provider_id": fmt.Sprint(pid), "requests": "1", "bill_requests": "0", "upstream_cost": "null", "bills_synced_at": "null"})
 	check(s, map[string]string{"requests": "2", "request_income": "100", "supplier_requests": "1", "estimated_requests": "1", "upstream_cost": "null", "gross_profit": "null"})
 	bill := profitRemote(501, 99, "historical-bill", at)
 	bill.Amount, bill.UniqueAtSite = "34", true
@@ -168,6 +168,11 @@ func TestProviderProfitReportRegisterSiteAfterUsage(t *testing.T) {
 	s, rows = read()
 	require.Len(t, rows, 2)
 	check(rows[key], map[string]string{"assignment": `"provider_url"`, "supplier_requests": "1", "bill_requests": "1", "upstream_cost": "34", "gross_profit": "46", "gross_margin": "0.575"})
+	require.NotEqual(t, "null", string(rows[key]["bills_synced_at"]))
+	f.exec(`DELETE FROM provider_profit_sync_runs WHERE provider_id=$1`, pid)
+	_, rows = read()
+	require.NotEqual(t, "null", string(rows[key]["bills_synced_at"]), "saved charges keep a freshness time without a new upstream pull")
+	check(rows[key], map[string]string{"bill_requests": "1", "upstream_cost": "34"})
 	check(rows[fmt.Sprintf("channel:%d", other)], map[string]string{"supplier_requests": "0", "estimated_requests": "1", "upstream_cost": "6", "gross_profit": "14", "gross_margin": "0.7"})
 	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "40", "gross_profit": "60", "gross_margin": "0.6"})
 }

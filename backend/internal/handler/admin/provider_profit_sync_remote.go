@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -60,9 +63,36 @@ const (
 	profitBatchDuration = 4 * time.Second
 	// Estimated retained memory, not a limit on total rows from the upstream.
 	profitEvidenceBudget = 96 << 20
+	// HTTP 429 backoff when the upstream does not send Retry-After.
+	profitRateLimitBase = 2 * time.Second
+	profitRateLimitCap  = 45 * time.Second
 )
 
-var errProviderProfitEvidenceBudget = errors.New("provider usage evidence exceeds the sync memory budget")
+var (
+	errProviderProfitEvidenceBudget = errors.New("provider usage evidence exceeds the sync memory budget")
+	errProfitRateLimited            = errors.New("provider profit sync rate limit exceeded the remaining job time")
+)
+
+// Replaced in tests so a 429 retry does not wait on the wall clock.
+var (
+	profitNow   = time.Now
+	profitSleep = func(ctx context.Context, d time.Duration) error {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+	profitJitter = func(limit time.Duration) time.Duration {
+		if limit <= 0 {
+			return 0
+		}
+		return time.Duration(rand.Int64N(int64(limit)))
+	}
+)
 
 type profitIdentity struct {
 	key     int64
@@ -70,6 +100,7 @@ type profitIdentity struct {
 }
 
 type profitUsageScan struct {
+	provider         int64
 	window           service.ProviderProfitWindow
 	first, end       time.Time // half-open UTC days actually queried
 	query            url.Values
@@ -86,14 +117,16 @@ type profitUsageScan struct {
 // The caller supplies the job deadline and opens a fresh, bounded, revision-
 // pinned session per batch. Never publish intermediate candidates: any later
 // page can still disqualify an earlier row, including across session boundaries.
-func readProviderProfitUsageBatches(ctx context.Context, w service.ProviderProfitWindow, withSession func(func(context.Context, *providerSession) error) error) ([]service.ProviderProfitRemoteCharge, error) {
+func readProviderProfitUsageBatches(ctx context.Context, providerID int64, w service.ProviderProfitWindow, withSession func(func(context.Context, *providerSession) error) error) ([]service.ProviderProfitRemoteCharge, error) {
 	if !w.Valid() {
 		return nil, errProviderResponse
 	}
 	first := w.From.UTC().Truncate(24 * time.Hour)
 	last := w.Until.UTC().Add(-time.Nanosecond).Truncate(24 * time.Hour)
+	// One scan covers every UTC day in the window. A later page can still
+	// disqualify an earlier row, so a finished UTC day is not committed alone.
 	scan := profitUsageScan{
-		window: w, first: first, end: last.AddDate(0, 0, 1), total: -1,
+		provider: providerID, window: w, first: first, end: last.AddDate(0, 0, 1), total: -1,
 		query: url.Values{"timezone": {"UTC"}, "start_date": {first.Format(time.DateOnly)}, "end_date": {last.Format(time.DateOnly)}, "sort_by": {"id"}, "sort_order": {"asc"}},
 		byKey: make(map[profitIdentity]bool), bySite: make(map[string]bool),
 	}
@@ -122,12 +155,115 @@ func readProviderProfitUsageBatches(ctx context.Context, w service.ProviderProfi
 	return unique, nil
 }
 
+func profitIsRateLimited(err error) bool {
+	_, ok := profitRateLimitDelay(err)
+	return ok
+}
+
+func profitRateLimitDelay(err error) (time.Duration, bool) {
+	var remote *providerRemoteError
+	if errors.As(err, &remote) && remote.status == http.StatusTooManyRequests {
+		return remote.retryAfter, true
+	}
+	var api *providerAPIError
+	if errors.As(err, &api) && api.status == http.StatusTooManyRequests {
+		return api.retryAfter, true
+	}
+	return 0, false
+}
+
+func profitBackoff(attempt int, retryAfter time.Duration) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if retryAfter > 0 {
+		return retryAfter
+	}
+	delay := profitRateLimitBase
+	for n := 1; n < attempt; n++ {
+		if delay >= profitRateLimitCap {
+			return profitRateLimitCap
+		}
+		delay *= 2
+	}
+	if delay > profitRateLimitCap {
+		delay = profitRateLimitCap
+	}
+	delay += profitJitter(250 * time.Millisecond)
+	if delay > profitRateLimitCap {
+		delay = profitRateLimitCap
+	}
+	return delay
+}
+
+func profitWaitFits(ctx context.Context, wait time.Duration) bool {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return true
+	}
+	return deadline.Sub(profitNow()) > wait
+}
+
+// profitBackoffWait sleeps after one HTTP 429. A non-429 error is returned
+// unchanged. The wait is not logged with the upstream body or any credential.
+func profitBackoffWait(ctx context.Context, providerID int64, operation string, attempt int, err error) error {
+	retryAfter, limited := profitRateLimitDelay(err)
+	if !limited {
+		return err
+	}
+	delay := profitBackoff(attempt, retryAfter)
+	fields := []any{"provider_id", providerID, "operation", operation, "attempt", attempt, "wait_ms", delay.Milliseconds(), "retry_after_ms", retryAfter.Milliseconds()}
+	if !profitWaitFits(ctx, delay) {
+		slog.Warn("provider profit sync rate limit exhausted", append(fields, "reason", "rate_limited")...)
+		return errProfitRateLimited
+	}
+	slog.Warn("provider profit sync rate limited", fields...)
+	if sleepErr := profitSleep(ctx, delay); sleepErr != nil {
+		if errors.Is(sleepErr, context.DeadlineExceeded) {
+			slog.Warn("provider profit sync rate limit exhausted", append(fields, "reason", "rate_limited")...)
+			return errProfitRateLimited
+		}
+		return sleepErr
+	}
+	return nil
+}
+
+func profitRetry(ctx context.Context, providerID int64, operation string, fn func() error) error {
+	for attempt := 1; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		waitErr := profitBackoffWait(ctx, providerID, operation, attempt, err)
+		if waitErr != nil {
+			return waitErr
+		}
+	}
+}
+
+func (s *profitUsageScan) call(ctx context.Context, session *providerSession, path, operation string) (any, map[string]any, error) {
+	var data any
+	var env map[string]any
+	err := profitRetry(ctx, s.provider, operation, func() error {
+		var callErr error
+		data, env, callErr = session.call(ctx, http.MethodGet, path, nil, nil, true)
+		return callErr
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, env, nil
+}
+
 func (s *profitUsageScan) batch(ctx context.Context, session *providerSession) error {
 	started := time.Now()
 	if session.record.SiteType != "sub2api" {
 		return errProviderResponse
 	}
-	me, env, err := session.call(ctx, http.MethodGet, "/api/v1/auth/me", nil, nil, true)
+	me, env, err := s.call(ctx, session, "/api/v1/auth/me", "auth_me")
 	if err != nil {
 		return err
 	}
@@ -185,7 +321,7 @@ func (s *profitUsageScan) page(ctx context.Context, session *providerSession, of
 	page := offset/size + 1
 	s.query.Set("page", strconv.FormatInt(page, 10))
 	s.query.Set("page_size", strconv.FormatInt(size, 10))
-	data, env, err := session.call(ctx, http.MethodGet, "/api/v1/usage?"+s.query.Encode(), nil, nil, true)
+	data, env, err := s.call(ctx, session, "/api/v1/usage?"+s.query.Encode(), fmt.Sprintf("usage page=%d size=%d", page, size))
 	if err != nil {
 		return nil, err
 	}

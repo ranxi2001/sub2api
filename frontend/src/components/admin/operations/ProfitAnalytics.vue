@@ -54,6 +54,7 @@
                   <template v-if="canSync(row)">
                     <button type="button" class="block text-primary-600 underline" data-testid="sync-bill" :title="t('profitOps.syncWindow')" :disabled="syncState(row)?.busy" @click="sync(row)">{{ t(syncState(row)?.message === 'syncDisconnected' ? 'profitOps.syncCheck' : 'profitOps.syncCharges') }}</button>
                     <p v-if="syncState(row)" :role="syncState(row)?.error ? 'alert' : 'status'" class="mt-1 text-xs" :class="{ 'text-red-600': syncState(row)?.error }">{{ syncText(row) }}</p>
+                    <p class="mt-1 text-xs text-gray-500" data-testid="bills-freshness">{{ billsFreshness(row) }}</p>
                   </template>
                   <span v-else-if="row.provider_site_type === 'newapi' && row.bill_requests < row.supplier_requests" class="block text-xs text-gray-500">{{ t('profitOps.syncUnsupported') }}</span>
                 </td>
@@ -128,6 +129,15 @@ function syncState(row: OperationsRow) { return billSync.state(row.provider_id, 
 function syncText(row: OperationsRow) {
  const job = syncState(row)
  return job ? t(`profitOps.${job.message}`, { provider: row.name, from: job.from, until: job.until, matched: job.matched, unmatched: job.unmatched }) : ''
+}
+function billsFreshness(row: OperationsRow) {
+ const raw = row.bills_synced_at
+ if (typeof raw === 'string' && raw) {
+  const at = new Date(raw)
+  if (Number.isFinite(at.getTime())) return t('profitOps.savedBills', { time: at.toLocaleString() })
+ }
+ if (row.bill_requests > 0) return t('profitOps.savedBillsUntimed')
+ return t('profitOps.noSavedBills')
 }
 function sync(row: OperationsRow) {
  if (canSync(row) && row.provider_id) void billSync.sync(row.provider_id, applied.value)

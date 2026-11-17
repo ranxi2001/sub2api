@@ -32,6 +32,9 @@ export default {
   "syncWindow": "Sync this provider’s bills for the applied dates, regardless of other filters.",
   "syncUnsupported": "Request-level bill sync is not supported for New API.",
   "syncCharges": "Sync upstream bills",
+  "savedBills": "Using saved bills from the last successful sync ({time}). Sync again to refresh.",
+  "savedBillsUntimed": "Using saved bills. Sync again to refresh.",
+  "noSavedBills": "No saved bills for this window. Sync upstream bills when you want to load them.",
   "syncStarting": "Requesting a bill sync for {provider}…",
   "syncing": "Bills are syncing in the background. You can leave this page and return to check progress.",
   "syncCheck": "Check sync status",
@@ -44,6 +47,7 @@ export default {
   "syncFailure": {
     "upstream": "Could not read complete bills from the provider. Check its connection and billing access, then try again.",
     "timeout": "The sync timed out. Try again with a shorter date range.",
+    "rate_limited": "The provider asked to slow down. Not enough time remained in this sync to retry, so no partial bills were saved. Try again later.",
     "conflict": "The provider changed during the sync. Refresh the report and confirm the provider before trying again.",
     "simple_mode": "This provider uses Simple Mode. Its usage records cannot be used as bills.",
     "internal": "The sync failed. Refresh the report before trying again. If it fails again, check the server logs.",

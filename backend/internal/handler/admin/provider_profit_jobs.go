@@ -10,7 +10,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-const profitJobTimeout = 30 * time.Minute
+// Tests may shorten this. Production jobs keep the 30-minute limit.
+var profitJobTimeout = 30 * time.Minute
 
 var errProfitJobsBusy = errors.New("another bill sync is running")
 

@@ -150,7 +150,30 @@ it('syncs only an eligible Sub2API row using the applied dates, prevents double 
   expect(w.get('[data-testid="sync-bill"]').attributes('disabled')).toBeUndefined(); expect(post).toHaveBeenCalledTimes(1); w.unmount()
 })
 
-it.each(['upstream', 'timeout', 'conflict', 'simple_mode', 'evidence_budget', 'internal', 'Bearer fake-private-text'] as const)('shows only local advice after a late job failure: %s', async reason => {
+it.each(['en', 'zh'] as const)('shows saved-bill freshness for the selected window and does not sync on open (%s)', async lang => {
+  const labels = lang === 'en' ? enProfit : zhProfit
+  snapshot = q => {
+    const data = readSnapshot(q)
+    data.usage.rows[0] = { ...providerRow, bills_synced_at: '2026-10-20T01:02:03Z' }
+    data.usage.rows.push({ ...providerRow, key: 'channel:19', name: 'Quiet', provider_id: 8, bill_requests: 0, upstream_cost: null, gross_profit: null, gross_margin: null })
+    return data
+  }
+  const w = open(lang); await flushPromises()
+  expect(post).not.toHaveBeenCalled()
+  expect(get.mock.calls.some(([url]) => String(url).includes('/profit-charges/'))).toBe(false)
+  const rows = w.findAll('[data-testid="profit-drilldown"] tbody tr')
+  const saved = rows[0]!.get('[data-testid="bills-freshness"]').text()
+  const prefix = labels.savedBills.split('{time}')[0]!
+  expect(saved.startsWith(prefix)).toBe(true)
+  expect(saved.length).toBeGreaterThan(prefix.length + 4)
+  expect(saved).not.toContain('{time}')
+  expect(rows[0]!.get('[data-testid="sync-bill"]').text()).toBe(labels.syncCharges)
+  expect(rows[1]!.get('[data-testid="bills-freshness"]').text()).toBe(labels.noSavedBills)
+  expect(rows[1]!.get('[data-testid="sync-bill"]').text()).toBe(labels.syncCharges)
+  w.unmount()
+})
+
+it.each(['upstream', 'timeout', 'conflict', 'simple_mode', 'evidence_budget', 'internal', 'rate_limited', 'Bearer fake-private-text'] as const)('shows only local advice after a late job failure: %s', async reason => {
   const w = open('zh'); await flushPromises()
   post.mockResolvedValue({ data: { job_id: 'late-failure' } })
   await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()

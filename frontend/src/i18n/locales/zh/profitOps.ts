@@ -32,6 +32,9 @@ export default {
   "syncWindow": "同步该供应商在已应用时间范围内的账单，不受其他筛选条件影响。",
   "syncUnsupported": "暂不支持同步 New API 的逐笔账单。",
   "syncCharges": "同步上游账单",
+  "savedBills": "报表使用已保存的账单（最近成功同步：{time}）。手动同步可更新。",
+  "savedBillsUntimed": "报表使用已保存的账单。需要更新时再手动同步。",
+  "noSavedBills": "此时段没有已保存的账单。需要时请点击同步上游账单。",
   "syncStarting": "正在提交 {provider} 的账单同步请求…",
   "syncing": "账单正在后台同步。可以离开此页，稍后回来查看进度。",
   "syncCheck": "查看同步状态",
@@ -44,6 +47,7 @@ export default {
   "syncFailure": {
     "upstream": "未能从供应商读取完整账单。请检查供应商连接和账单读取权限后重试。",
     "timeout": "账单同步超时，请缩小时间范围后重试。",
+    "rate_limited": "供应商要求放慢读取。在本次同步的剩余时间内无法继续重试，没有写入不完整的账单。请稍后再试。",
     "conflict": "同步期间供应商信息发生了变化，请刷新报表并核对供应商后重试。",
     "simple_mode": "该供应商使用简易模式（Simple Mode），不能将其用量记录作为计费账单。",
     "internal": "账单同步失败，请刷新报表后重试。若仍失败，请检查服务端日志。",

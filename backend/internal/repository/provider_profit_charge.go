@@ -186,6 +186,11 @@ func (r *channelRepository) ReconcileProviderProfitCharges(ctx context.Context, 
 			break
 		}
 	}
+	// Record the completed window in the same transaction as the charges. A
+	// conflict or a failed commit leaves the previous success untouched.
+	if _, err = tx.ExecContext(ctx, providerProfitSyncRunSQL, id, w.From, w.Until, out.Matched, out.Unmatched); err != nil {
+		return zero, err
+	}
 	if err = tx.Commit(); err != nil {
 		return zero, err
 	}

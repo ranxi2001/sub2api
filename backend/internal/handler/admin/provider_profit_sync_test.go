@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -76,20 +77,31 @@ func profitPageSized(page, size, total int, rows []map[string]any) map[string]an
 
 func profitHandlerCall(t *testing.T, site, body string, remote func(*http.Request) (int, any)) (*profitSyncStore, *httptest.ResponseRecorder) {
 	t.Helper()
+	return profitHandlerCallHeaders(t, site, body, func(r *http.Request) (int, any, http.Header) {
+		status, data := remote(r)
+		return status, data, nil
+	})
+}
+
+func profitHandlerCallHeaders(t *testing.T, site, body string, remote func(*http.Request) (int, any, http.Header)) (*profitSyncStore, *httptest.ResponseRecorder) {
+	t.Helper()
 	s := &profitSyncStore{p: service.MatureProvider{ID: 5, Revision: 7, BaseURL: "https://wallet.invalid", SiteType: site, AuthMode: "token"}}
 	h := NewChannelHandler(service.NewChannelService(s, nil, nil, nil, nil), nil, nil)
 	t.Cleanup(h.StopMatureProviderRefresh)
 	h.SetMatureProviderDependencies(profitFakeCrypt{}, &http.Client{Transport: profitTransport(func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, "wallet.invalid", r.URL.Host)
 		require.Equal(t, "Bearer fixture-access", r.Header.Get("Authorization"))
-		status, data := remote(r)
+		status, data, header := remote(r)
 		env := map[string]any{"code": 0, "data": data}
 		if status != 200 {
 			env = map[string]any{"code": status, "message": "private-remote-fixture"}
 		}
 		raw, err := json.Marshal(env)
 		require.NoError(t, err)
-		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(raw))}, nil
+		if header == nil {
+			header = make(http.Header)
+		}
+		return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(bytes.NewReader(raw))}, nil
 	})})
 	r := gin.New()
 	r.POST("/admin/providers/:id/profit-charges/sync", h.SyncProviderProfitCharges)
@@ -100,6 +112,19 @@ func profitHandlerCall(t *testing.T, site, body string, remote func(*http.Reques
 		require.NotContains(t, w.Body.String(), secret)
 	}
 	return s, w
+}
+
+func stubProfitBackoff(t *testing.T) *[]time.Duration {
+	t.Helper()
+	var waits []time.Duration
+	prevSleep, prevJitter := profitSleep, profitJitter
+	profitJitter = func(time.Duration) time.Duration { return 0 }
+	profitSleep = func(ctx context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return ctx.Err()
+	}
+	t.Cleanup(func() { profitSleep, profitJitter = prevSleep, prevJitter })
+	return &waits
 }
 
 func TestProviderProfitSyncExactUsageWithoutWalletProof(t *testing.T) {
@@ -377,4 +402,115 @@ func TestProviderProfitSyncEvidenceBudget(t *testing.T) {
 	require.True(t, s.byKey[profitIdentity{4, "old"}])
 	row["id"], row["request_id"] = json.Number("22"), "new"
 	require.ErrorIs(t, s.observe(row), errProviderProfitEvidenceBudget)
+}
+
+func TestProfitRateLimitBackoffAndRetryAfter(t *testing.T) {
+	prev := profitJitter
+	profitJitter = func(time.Duration) time.Duration { return 0 }
+	t.Cleanup(func() { profitJitter = prev })
+	require.Equal(t, 2*time.Second, profitBackoff(1, 0))
+	require.Equal(t, 4*time.Second, profitBackoff(2, 0))
+	require.Equal(t, 8*time.Second, profitBackoff(3, 0))
+	require.Equal(t, profitRateLimitCap, profitBackoff(10, 0))
+	require.Equal(t, 7*time.Second, profitBackoff(4, 7*time.Second))
+
+	retryAfter := func(status int, value string) time.Duration {
+		t.Helper()
+		return providerRetryAfter(&http.Response{StatusCode: status, Header: http.Header{"Retry-After": []string{value}}})
+	}
+	require.Equal(t, 5*time.Second, retryAfter(http.StatusTooManyRequests, "5"))
+	require.Zero(t, retryAfter(http.StatusTooManyRequests, "0"))
+	require.Zero(t, retryAfter(http.StatusTooManyRequests, "soon"))
+	require.Zero(t, retryAfter(http.StatusBadGateway, "5"))
+	when := time.Now().Add(9 * time.Second).UTC()
+	delay := retryAfter(http.StatusTooManyRequests, when.Format(http.TimeFormat))
+	require.InDelta(t, float64(9*time.Second), float64(delay), float64(time.Second))
+}
+
+func TestProviderProfitSyncRetries429ThenReconciles(t *testing.T) {
+	waits := stubProfitBackoff(t)
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	auth := 0
+	s, w := profitHandlerCallHeaders(t, "sub2api", profitWindowBody, func(r *http.Request) (int, any, http.Header) {
+		switch r.URL.Path {
+		case "/api/v1/auth/me":
+			auth++
+			if auth == 1 {
+				return http.StatusTooManyRequests, nil, http.Header{"Retry-After": []string{"5"}}
+			}
+			return 200, map[string]any{"id": 7, "run_mode": "standard"}, nil
+		case "/api/v1/usage":
+			require.Equal(t, "1", r.URL.Query().Get("page"))
+			return 200, profitPage(1, 1, []map[string]any{profitRow(1, 4, "billed-once")}), nil
+		default:
+			t.Fatalf("unexpected route %s", r.URL.Path)
+			return 0, nil, nil
+		}
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []time.Duration{5 * time.Second}, *waits)
+	require.Equal(t, 1, s.writes)
+	require.Len(t, s.charges, 1)
+	require.Equal(t, "billed-once", s.charges[0].RequestID)
+	text := logs.String()
+	require.Contains(t, text, "provider profit sync rate limited")
+	require.Contains(t, text, "operation=auth_me")
+	require.Contains(t, text, "attempt=1")
+	require.Contains(t, text, "wait_ms=5000")
+	require.Contains(t, text, "retry_after_ms=5000")
+	for _, secret := range []string{"private-remote-fixture", "fixture-access", "fixture-cipher", "private-key-fixture"} {
+		require.NotContains(t, text, secret)
+	}
+}
+
+func TestProviderProfitSyncRetriesUsageAnchorAndLaterSession(t *testing.T) {
+	waits := stubProfitBackoff(t)
+	var bill profitLiveBill
+	authLeft, pageLeft, anchorLeft := 1, 1, 1
+	s, w := profitHandlerCallHeaders(t, "sub2api", profitWindowBody, func(r *http.Request) (int, any, http.Header) {
+		switch r.URL.Path {
+		case "/api/v1/auth/me":
+			if authLeft > 0 {
+				authLeft--
+				return http.StatusTooManyRequests, nil, nil
+			}
+		case "/api/v1/usage":
+			if r.URL.Query().Get("page_size") == "1" && anchorLeft > 0 {
+				anchorLeft--
+				return http.StatusTooManyRequests, nil, nil
+			}
+			if r.URL.Query().Get("page_size") != "1" && pageLeft > 0 {
+				pageLeft--
+				return http.StatusTooManyRequests, nil, nil
+			}
+		default:
+			t.Fatalf("unexpected route %s", r.URL.Path)
+		}
+		status, data := bill.serve(t, r)
+		return status, data, nil
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []time.Duration{2 * time.Second, 2 * time.Second, 2 * time.Second}, *waits)
+	require.Equal(t, 1, s.writes)
+	require.Len(t, s.charges, profitInitialBill-1)
+	require.Zero(t, authLeft)
+	require.Zero(t, pageLeft)
+	require.Zero(t, anchorLeft)
+}
+
+func TestProviderProfitSyncDoesNotBackoffOnOtherHTTPErrors(t *testing.T) {
+	prev := profitSleep
+	profitSleep = func(context.Context, time.Duration) error { t.Fatal("non-429 response was retried"); return nil }
+	t.Cleanup(func() { profitSleep = prev })
+	s, w := profitHandlerCall(t, "sub2api", profitWindowBody, func(r *http.Request) (int, any) {
+		if r.URL.Path == "/api/v1/auth/me" {
+			return 200, map[string]any{"id": 7, "run_mode": "standard"}
+		}
+		return http.StatusBadGateway, nil
+	})
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	require.Zero(t, s.writes)
 }

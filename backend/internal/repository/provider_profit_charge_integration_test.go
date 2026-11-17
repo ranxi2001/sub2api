@@ -79,6 +79,8 @@ func (f *profitChargeFixture) counts(w service.ProviderProfitWindow, m, u int, r
 	out, err := f.sync(w, rows...)
 	require.NoError(f.t, err)
 	require.Equal(f.t, service.ProviderProfitSyncResult{Matched: m, Unmatched: u}, out)
+	require.EqualValues(f.t, 1, f.id(`SELECT count(*) FROM provider_profit_sync_runs WHERE provider_id=$1 AND window_from=$2 AND window_until=$3`, f.pid, w.From, w.Until))
+	require.EqualValues(f.t, m, f.id(`SELECT matched FROM provider_profit_sync_runs WHERE provider_id=$1 AND window_from=$2 AND window_until=$3`, f.pid, w.From, w.Until))
 }
 func (f *profitChargeFixture) snapshot(q string) string {
 	f.t.Helper()
@@ -166,6 +168,8 @@ func TestProviderProfitChargesLargeWindowAtomicReplay(t *testing.T) {
 	require.Zero(t, out)
 	require.EqualValues(t, 2, f.id(`SELECT count(*) FROM provider_profit_charges`))
 	require.Zero(t, f.id(`SELECT count(settled_amount) FROM provider_profit_charges`))
+	require.EqualValues(t, 1, f.id(`SELECT count(*) FROM provider_profit_sync_runs`))
+	require.EqualValues(t, 2, f.id(`SELECT matched FROM provider_profit_sync_runs`))
 
 	last.Amount = "0.125"
 	for range 2 {

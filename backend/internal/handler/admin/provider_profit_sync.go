@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -84,6 +85,8 @@ func (h *ChannelHandler) SyncProviderProfitCharges(c *gin.Context) {
 		response.Error(c, http.StatusBadGateway, "Could not verify a complete provider usage response; no charges saved")
 	case "evidence_budget":
 		response.BadRequest(c, "Bill sync exceeded the working memory budget; try fewer UTC dates")
+	case "rate_limited":
+		response.Error(c, http.StatusTooManyRequests, "The provider asked to slow down and the remaining sync time was not enough to finish reading bills; no charges saved")
 	case "timeout":
 		response.Error(c, http.StatusGatewayTimeout, "Provider reconciliation timed out")
 	default:
@@ -120,6 +123,14 @@ func (h *ChannelHandler) runProfitSync(ctx context.Context, p service.MatureProv
 				entered = true
 				return read(batch, s)
 			})
+			// Login can be rate-limited before this batch reads a page. Retrying
+			// that sign-in does not replay rows already observed.
+			if !entered && profitIsRateLimited(err) {
+				if waitErr := profitBackoffWait(ctx, p.ID, "session", attempt+1, err); waitErr != nil {
+					return waitErr
+				}
+				continue
+			}
 			// A scheduled dashboard refresh can win the revision check while we
 			// wait for its row lock. Revalidate once, but never replay a partial scan.
 			if entered || attempt != 0 || !errors.Is(err, service.ErrMatureProviderConflict) {
@@ -127,7 +138,7 @@ func (h *ChannelHandler) runProfitSync(ctx context.Context, p service.MatureProv
 			}
 		}
 	}
-	bills, err := readProviderProfitUsageBatches(ctx, w, withSession)
+	bills, err := readProviderProfitUsageBatches(ctx, p.ID, w, withSession)
 	reason := "upstream"
 	if err == nil {
 		var result service.ProviderProfitSyncResult
@@ -138,6 +149,8 @@ func (h *ChannelHandler) runProfitSync(ctx context.Context, p service.MatureProv
 		reason = "internal"
 	}
 	switch {
+	case errors.Is(err, errProfitRateLimited):
+		reason = "rate_limited"
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		reason = "timeout"
 	case errors.Is(err, errProviderProfitSimpleMode):
@@ -147,6 +160,8 @@ func (h *ChannelHandler) runProfitSync(ctx context.Context, p service.MatureProv
 	case errors.Is(err, service.ErrMatureProviderConflict), errors.Is(err, service.ErrMatureProviderNotFound):
 		reason = "conflict"
 	}
+	// Reason only. The upstream error text can echo a response body.
+	slog.Warn("provider profit sync failed", "provider_id", p.ID, "reason", reason)
 	return profitJobStatus{Status: "failed", Reason: reason}
 }
 

@@ -104,3 +104,11 @@ WITH locals AS MATERIALIZED (
         (SELECT count(*) FROM same) + (SELECT count(*) FROM inserted) AS matched
 )
 SELECT (SELECT max(id) FROM locals), (SELECT count(*) FROM locals), matched, eligible-matched FROM totals`
+
+// One row per provider and requested window. Repeat syncs refresh the time
+// and counts; they do not insert another receipt. Nothing here expires.
+const providerProfitSyncRunSQL = `
+INSERT INTO provider_profit_sync_runs(provider_id, window_from, window_until, matched, unmatched)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (provider_id, window_from, window_until)
+DO UPDATE SET synced_at = clock_timestamp(), matched = EXCLUDED.matched, unmatched = EXCLUDED.unmatched`
