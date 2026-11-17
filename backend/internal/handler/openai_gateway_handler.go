@@ -28,6 +28,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -4364,7 +4365,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if hasClientCloseErr {
 					closedFields = append(closedFields, zap.String("reason", closeErr.Reason()))
 				} else {
-					closedFields = append(closedFields, zap.Error(err))
+					closedFields = append(closedFields, zap.String("error", openaiwsv2.ErrorStringForLog(err)))
 				}
 				reqLog.Info("openai.websocket_ingress_closed_normally", closedFields...)
 				// A bare coderws.CloseError or a plain cancellation carries no
@@ -4397,7 +4398,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
 			proxyFailedFields := []zap.Field{
 				zap.Int64("account_id", account.ID),
-				zap.Error(err),
+				zap.String("error", openaiwsv2.ErrorStringForLog(err)),
 				zap.String("close_status", closeStatus),
 				zap.String("close_reason", closeReason),
 			}
@@ -5834,10 +5835,7 @@ func summarizeWSCloseErrorForLog(err error) (string, string) {
 	closeReason := "-"
 	var closeErr coderws.CloseError
 	if errors.As(err, &closeErr) {
-		reason := strings.TrimSpace(closeErr.Reason)
-		if reason != "" {
-			closeReason = reason
-		}
+		closeReason = openaiwsv2.CloseReasonForLog(closeErr.Reason)
 	}
 	return closeStatus, closeReason
 }
