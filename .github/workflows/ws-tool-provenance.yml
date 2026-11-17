@@ -11,6 +11,7 @@ on:
       - .github/scripts/ws-tool-provenance-evidence.py
       - .github/scripts/issue871-evidence.py
       - .github/scripts/test_issue871_evidence.py
+      - .github/scripts/prepare-usage-sort-red-fixture.sh
       - backend/internal/repository/gateway_cache_tool_provenance.go
 
 permissions:
@@ -146,6 +147,7 @@ jobs:
             esac
           done
           bash .github/scripts/prepare-free-fast-red-fixtures.sh "$BASELINE" "$RUNNER_TEMP/ws-provenance-red" "$CANDIDATE"
+          bash .github/scripts/prepare-usage-sort-red-fixture.sh "$BASELINE" "$RUNNER_TEMP/ws-provenance-red" "$CANDIDATE"
           set +e
           (cd "$RUNNER_TEMP/ws-provenance-red/backend" && go test -p=2 -tags=unit,ownerconflict ./internal/handler -run '^TestOpenAIWSMixedOwnerToolProvenance$' -count=1 -json -timeout=2m) > "$RUNNER_TEMP/ws-provenance-evidence/red.jsonl" 2>&1
           status=$?

@@ -44,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          go test -mod=readonly -race -json -tags=unit ./internal/service -run '^Test(OpenAILossyProtocol|OpenAIAgentRecoveryCompaction|WithoutOpenAIRemoteCompaction)' -count=1 -timeout=5m | tee "$RUNNER_TEMP/lossy-protocol.jsonl"
+          go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service -run '^Test(OpenAILossyProtocol|OpenAIAgentRecoveryCompaction|WithoutOpenAIRemoteCompaction)' -count=1 -timeout=5m | tee "$RUNNER_TEMP/lossy-protocol.jsonl"
           python3 - "$RUNNER_TEMP/lossy-protocol.jsonl" <<'PY'
           import json, sys
           rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
