@@ -69,6 +69,18 @@ def checks_candidate(sha, filename, job):
     return bool(checkouts) and all(step.get('with', {}).get('ref') == expected for step in checkouts)
 
 
+def successful_job_names(sha, filename, job):
+    """Matrix jobs are reusable only when every expected shard succeeded."""
+    spec = workflow_at(sha, filename)['jobs'][job]
+    matrix = spec.get('strategy', {}).get('matrix')
+    if matrix is None:
+        return {spec.get('name', job)}
+    # Unknown/dynamic matrices fail closed instead of trusting a partial result.
+    if set(matrix) != {'shard'} or 'name' in spec or not isinstance(matrix['shard'], list) or not matrix['shard']:
+        raise ValueError('unsupported evidence matrix')
+    return {f'{job} ({shard})' for shard in matrix['shard']}
+
+
 def fingerprint(sha, filename, job, patterns):
     spec = definition(sha, filename, job)
     # actions:read only permits evidence lookup, not test/runtime behavior.
@@ -162,7 +174,7 @@ def select(filename, scopes, event_name, event, head, evidence=None, force=False
                     continue
                 if (same and checks_candidate(old, filename, job)
                         and checks_candidate(head, filename, job)
-                        and job in evidence.successful_jobs(run['id'])):
+                        and successful_job_names(head, filename, job).issubset(evidence.successful_jobs(run['id']))):
                     selected[job] = (False, f"reused successful run {run['id']} at {old}")
     except Exception as error:
         # Missing token, API limits or unavailable commits must never skip tests.
