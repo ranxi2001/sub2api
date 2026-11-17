@@ -153,3 +153,13 @@ if ! git -C "$tree" grep -q 'InitialAPIKeyDisposition' "$baseline" -- "$contract
     exclude_absent_fixture "$target" "$contract"
   fi
 fi
+
+# Issue907 model-failure tests are unrelated to these historical replay oracles.
+# Full source overlays remove their later production API; preserve every GREEN
+# test and exclude the new fixture only with exact baseline/candidate evidence.
+target=backend/internal/service/openai_ws_model_failure_test.go
+contract=backend/internal/service/openai_ws_forwarder_support.go
+if git -C "$tree" cat-file -e "$candidate:$target" 2>/dev/null &&
+   ! test -f "$tree/backend/internal/service/openai_ws_model_failure.go"; then
+  exclude_absent_fixture "$target" "$contract"
+fi
