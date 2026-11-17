@@ -50,7 +50,7 @@ jobs:
       - name: Candidate session isolation, connection reuse and pool controls
         run: |
           set -euo pipefail
-          (cd backend && go test -race -json -tags=unit,issue905pool ./internal/service -run '^Test(Issue905Pool|OpenAIWSConnPool|OpenAIWSConnReaderLoop|NormalizeOpenAIWSRoutingAffinity)' -count=1 -timeout=5m) | tee "$RUNNER_TEMP/pool-head.jsonl"
+          (cd backend && go test -race -json -tags=unit,issue905pool ./internal/service -run '^Test(Issue905Pool|OpenAIWSConnPool|OpenAIWSConnReaderLoop|NormalizeOpenAIWSRoutingAffinity|OpenAIGatewayService_Forward_WSv2StoreFalseDisableForceNewConn)' -count=1 -timeout=5m) | tee "$RUNNER_TEMP/pool-head.jsonl"
           python3 - "$RUNNER_TEMP/pool-head.jsonl" <<'PY'
           import json,sys
           rows=[json.loads(l) for l in open(sys.argv[1]) if l.startswith('{')]
