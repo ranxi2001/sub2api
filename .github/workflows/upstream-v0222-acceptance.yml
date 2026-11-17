@@ -143,6 +143,8 @@ jobs:
           "$RUNNER_TEMP/sub2api-v0222" -version | tee ../evidence/embed-version.txt
           sha256sum "$RUNNER_TEMP/sub2api-v0222" > ../evidence/embed-binary-sha256.txt
           cp "$RUNNER_TEMP/sub2api-v0222" ../evidence/sub2api
+          go test -c -tags=unit,bridgewarmuplive -ldflags="-s -w" -o ../evidence/http-bridge-live-probe ./internal/handler
+          sha256sum ../evidence/http-bridge-live-probe > ../evidence/live-probe-sha256.txt
       - uses: actions/upload-artifact@v7
         if: always()
         with:
