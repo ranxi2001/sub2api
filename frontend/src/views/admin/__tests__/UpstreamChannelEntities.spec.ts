@@ -24,6 +24,6 @@ it('drills into an explicit ID and shows current members without requiring a URL
  next.usage.members=[{id:41,name:'unknown endpoint',key:'channel:7',attribution:'current_explicit_channel',updated_at:'',deleted:false,multiplier:.25,cost_basis:'current_saved_multiplier'}]
  vi.mocked(readProfitOperations).mockResolvedValue(next)
  const w=mount(ProfitOperationsView);await flushPromises();await w.get('[data-testid="drill-row"]').trigger('click');await flushPromises()
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({channel_id:7,upstream:'',dimension:'account'}),expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({channel_id:7,upstream:'',dimension:'account'}),expect.anything(), false)
  expect(w.get('[data-testid="member-drill"]').text()).toContain('unknown endpoint');expect(w.get('[data-testid="profit-current-channel"]').text()).toContain('#7');w.unmount()
 })

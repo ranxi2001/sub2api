@@ -21,7 +21,7 @@ describe('independent profit operations', () => {
   expect(w.text()).toContain('profitOps.title'); expect(w.text()).toContain('profitOps.formula'); expect(w.text()).toContain('profitOps.attribution')
   expect(w.find('[data-testid="profit-filters"]').exists()).toBe(true)
   expect(w.get('[data-testid="profit-summary"]').text()).toContain('25.00%')
-  expect(readProfitOperations).toHaveBeenCalledWith(expect.objectContaining({ dimension: 'upstream', page: 1 }), expect.anything())
+  expect(readProfitOperations).toHaveBeenCalledWith(expect.objectContaining({ dimension: 'upstream', page: 1 }), expect.anything(), false)
   const q = vi.mocked(readProfitOperations).mock.calls[0]![0]
   expect(q.from).toBe(new Date(2026, 10, 5, 0, 0, 0).toISOString())
   expect(q.until).toBe(new Date(2026, 10, 5, 17, 18, 42).toISOString())
@@ -31,9 +31,9 @@ describe('independent profit operations', () => {
  it('drills from URL to account to model and keeps a frozen half-open range when paging', async () => {
   const w = mount(ProfitOperationsView); await flushPromises(); const original = { ...vi.mocked(readProfitOperations).mock.calls[0]![0] }
   await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
-  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, from: original.from, until: original.until }), expect.anything())
+  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, from: original.from, until: original.until }), expect.anything(), false)
   await w.get('[data-testid="drill-row"]').trigger('click'); await flushPromises()
-  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ upstream: 'https://relay.example:8443/tenant/v1', dimension: 'account', page: 1, account_id: 0 }), expect.anything())
+  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ upstream: 'https://relay.example:8443/tenant/v1', dimension: 'account', page: 1, account_id: 0 }), expect.anything(), false)
   w.unmount()
  })
  it('never renders query failure as a successful zero, and shows null margin as unknown', async () => {
@@ -85,7 +85,7 @@ describe('independent profit operations', () => {
   await w.get('[data-testid="model-scope"]').setValue('upstream')
   await w.get('[data-testid="sort-filter"]').setValue('gross_profit')
   await w.get('[data-testid="profit-filters"]').trigger('submit'); await flushPromises()
-  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'vendor-model', model_scope: 'upstream', sort: 'gross_profit', page: 1 }), expect.anything())
+  expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ model: 'vendor-model', model_scope: 'upstream', sort: 'gross_profit', page: 1 }), expect.anything(), false)
   w.unmount()
  })
 })
@@ -117,7 +117,7 @@ it('applies today at click time after crossing midnight, retaining filters and r
  expect(inputs[1]!.element).toHaveProperty('value', '2026-11-06T00:18')
  vi.setSystemTime(new Date(2026, 10, 6, 1))
  await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything(), false)
  w.unmount()
 })
 
@@ -157,7 +157,7 @@ it.each([
  expect(inputs[1]!.element).toHaveProperty('value', local(end))
  vi.setSystemTime(new Date(2026, 10, 9, 1))
  await w.get('[data-testid="operations-next"]').trigger('click'); await flushPromises()
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: range.from, until: range.until, page: 2 }), expect.anything(), false)
  w.unmount()
 })
 
@@ -174,11 +174,11 @@ it.each([
  vi.setSystemTime(now)
  const w = mount(ProfitOperationsView); await flushPromises()
  await w.get(`[data-testid="${preset}-filter"]`).trigger('click'); await flushPromises()
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString(), page: 1 }), expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString(), page: 1 }), expect.anything(), false)
  // Reapplying the displayed month must also accept the repeated DST hour.
  await w.get('[data-testid="profit-filters"]').trigger('submit'); await flushPromises()
  expect(w.find('[role="alert"]').exists()).toBe(false)
- expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString() }), expect.anything())
+ expect(readProfitOperations).toHaveBeenLastCalledWith(expect.objectContaining({ from: start.toISOString(), until: end.toISOString() }), expect.anything(), false)
  w.unmount()
 })
 

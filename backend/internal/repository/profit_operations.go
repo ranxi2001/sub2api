@@ -340,7 +340,9 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
 		billJoin = ` LEFT JOIN bill_sync ON bill_sync.provider_id = g.provider_id`
 		billField = `,'bills_synced_at',to_jsonb(bill_sync.bills_synced_at)`
 	}
-	costSource := `CASE WHEN g.supplier_requests=0 THEN 'estimate' WHEN $16::bool AND g.wallet_usd_ok AND $18::bool THEN 'wallet_today' WHEN $16::bool AND g.wallet_usd_ok THEN 'wallet_window' WHEN $16::bool AND g.wallet_other_currency THEN 'wallet_currency' WHEN NOT $16::bool AND ($15::bool OR NOT $17::bool) THEN 'wallet_not_split' ELSE 'wallet_unavailable' END`
+	// A missing wallet stays unavailable. wallet_not_split is only for a usable
+	// window amount that must not be divided across account or model rows.
+	costSource := `CASE WHEN g.supplier_requests=0 THEN 'estimate' WHEN NOT g.wallet_usd_ok AND NOT g.wallet_other_currency THEN 'wallet_unavailable' WHEN $16::bool AND g.wallet_usd_ok AND $18::bool THEN 'wallet_today' WHEN $16::bool AND g.wallet_usd_ok THEN 'wallet_window' WHEN $16::bool AND g.wallet_other_currency THEN 'wallet_currency' WHEN NOT $16::bool AND ($15::bool OR NOT $17::bool) THEN 'wallet_not_split' ELSE 'wallet_unavailable' END`
 	// Sort and direction are strictly validated before SQL construction.
 	// Rank after the wallet override so upstream_cost sorts by the displayed amount.
 	rowInner := `SELECT (to_jsonb(g) || jsonb_build_object(
@@ -358,7 +360,7 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
  SELECT COALESCE(explicit_channel_id,0) AS roll_channel,count(*) AS requests,count(provider_id) AS supplier_requests,count(effective_cost) AS estimate_rows,sum(effective_cost) AS estimate_sum` + profitWalletColumns + ` FROM priced GROUP BY COALESCE(explicit_channel_id,0)), wallet_total AS (
  SELECT COALESCE(sum(requests),0) AS requests,COALESCE(bool_or(supplier_requests>0 AND NOT wallet_usd_ok),false) AS blocked,COALESCE(bool_or(supplier_requests>0 AND wallet_other_currency),false) AS other_currency,COALESCE(bool_or(supplier_requests=0 AND estimate_rows IS DISTINCT FROM requests),false) AS estimate_incomplete,COALESCE(sum(wallet_spend) FILTER (WHERE supplier_requests>0 AND wallet_usd_ok),0) AS wallet_sum,COALESCE(sum(estimate_sum) FILTER (WHERE supplier_requests=0 AND estimate_rows=requests),0) AS estimate_sum FROM channel_roll)
  SELECT jsonb_build_object('summary',(SELECT to_jsonb(s) || jsonb_build_object(
- 'cost_source',to_jsonb(CASE WHEN COALESCE(s.supplier_requests,0)=0 THEN 'estimate' WHEN $15::bool THEN 'wallet_not_split' WHEN w.blocked AND w.other_currency THEN 'wallet_currency' WHEN w.blocked OR w.estimate_incomplete THEN 'wallet_unavailable' WHEN NOT $14::bool THEN 'wallet_unavailable' WHEN s.supplier_requests<s.requests THEN 'mixed' WHEN $18::bool THEN 'wallet_today' ELSE 'wallet_window' END),
+ 'cost_source',to_jsonb(CASE WHEN COALESCE(s.supplier_requests,0)=0 THEN 'estimate' WHEN w.blocked AND w.other_currency THEN 'wallet_currency' WHEN w.blocked OR w.estimate_incomplete THEN 'wallet_unavailable' WHEN $15::bool THEN 'wallet_not_split' WHEN s.supplier_requests<s.requests THEN 'mixed' WHEN $18::bool THEN 'wallet_today' ELSE 'wallet_window' END),
  'wallet_basis',to_jsonb(CASE WHEN $18::bool THEN 'wallet_today' ELSE 'wallet_window' END),
  'upstream_cost',CASE WHEN $14::bool AND NOT $15::bool THEN CASE WHEN w.requests=0 THEN to_jsonb(0::numeric) WHEN w.blocked OR w.estimate_incomplete THEN 'null'::jsonb ELSE to_jsonb(w.wallet_sum+w.estimate_sum) END ELSE to_jsonb(s.upstream_cost) END,
  'gross_profit',CASE WHEN $14::bool AND NOT $15::bool THEN CASE WHEN w.requests=0 THEN to_jsonb(0::numeric) WHEN NOT (w.blocked OR w.estimate_incomplete) AND s.request_income IS NOT NULL THEN to_jsonb(s.request_income-(w.wallet_sum+w.estimate_sum)) ELSE 'null'::jsonb END ELSE to_jsonb(s.gross_profit) END,
