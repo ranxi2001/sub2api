@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -1088,6 +1089,18 @@ func lockAndMergeAccountProbeExtra(
 		}
 	}
 
+	if service.AccountPlatformChanging(ctx) {
+		// Quota accounting is account-wide and uses the latest locked row. Other
+		// old-platform runtime state must not be reintroduced by owner merges.
+		portable := service.AccountPlatformPortableExtra(currentExtra)
+		maps.Copy(portable, account.Extra)
+		for _, key := range []string{"quota_used", "quota_daily_used", "quota_daily_start", "quota_weekly_used", "quota_weekly_start"} {
+			if value, ok := currentExtra[key]; ok {
+				portable[key] = value
+			}
+		}
+		extra = portable
+	}
 	return extra, nil
 }
 
