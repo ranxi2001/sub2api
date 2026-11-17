@@ -39,9 +39,13 @@ func (w *openAIWSHTTPWarmup) accept(source []byte, model string, turn int, write
 		return nil, false, nil
 	}
 	input := gjson.GetBytes(source, "input")
-	if turn != 1 || len(source) > openAIWSHTTPWarmupLimit || !openAIEncryptedJSONUnambiguous(source) ||
-		!input.IsArray() || len(input.Array()) != 0 || gjson.GetBytes(source, "previous_response_id").Exists() ||
-		gjson.GetBytes(source, "conversation").Exists() || gjson.GetBytes(source, "prompt").Exists() {
+	emptyInput := !input.Exists() || input.Type == gjson.Null || (input.IsArray() && len(input.Array()) == 0)
+	hasReference := func(field string) bool {
+		value := gjson.GetBytes(source, field)
+		return value.Exists() && value.Type != gjson.Null && !(value.Type == gjson.String && value.String() == "")
+	}
+	if turn != 1 || len(source) > openAIWSHTTPWarmupLimit || !emptyInput ||
+		hasReference("previous_response_id") || hasReference("conversation") || hasReference("prompt") {
 		return nil, true, openAIWSWarmupRefusal()
 	}
 	w.responseID = "resp_sub2api_prewarm_" + uuid.NewString()

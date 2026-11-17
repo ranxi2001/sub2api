@@ -52,3 +52,18 @@ func TestHTTPBridgeWarmupDefaultsAndForeignPointer(t *testing.T) {
 	require.False(t, gjson.GetBytes(next, "generate").Exists())
 	require.Nil(t, w.defaults)
 }
+
+func TestHTTPBridgeWarmupOptionalNulls(t *testing.T) {
+	for _, source := range []string{
+		`{"generate":false,"model":"gpt-5.1"}`,
+		`{"generate":false,"model":"gpt-5.1","input":null,"previous_response_id":null,"conversation":null,"prompt":null}`,
+	} {
+		var w openAIWSHTTPWarmup
+		writes := 0
+		result, handled, err := w.accept([]byte(source), "gpt-5.1", 1, func([]byte) error { writes++; return nil })
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.NotNil(t, result)
+		require.Equal(t, 2, writes)
+	}
+}

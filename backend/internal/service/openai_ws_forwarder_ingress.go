@@ -1496,7 +1496,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			bridgeCtx := context.WithValue(ctx, openAIWSAgentSourceKey{}, currentBridgePayload.clientPayloadRaw)
-			result, warmupHandled, bridgeErr := bridgeWarmup.accept(currentBridgePayload.clientPayloadRaw, currentBridgePayload.originalModel, turn, writeClientMessage)
+			var result *OpenAIForwardResult
+			var bridgeErr error
+			warmupHandled := false
+			if account.IsOpenAIApiKey() {
+				result, warmupHandled, bridgeErr = bridgeWarmup.accept(currentBridgePayload.clientPayloadRaw, currentBridgePayload.originalModel, turn, writeClientMessage)
+			}
 			if !warmupHandled {
 				result, bridgeErr = s.proxyOpenAIWSHTTPBridgeTurn(
 					context.WithValue(bridgeCtx, openAIWSQueueArrivalKey{}, turnArrivedAt),
