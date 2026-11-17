@@ -34,4 +34,25 @@ The file contains JSON data with model pricing information including:
 - Context window sizes
 - Model capabilities
 
-Last updated: 2025-08-10
+## OpenAI short-context update (2026-11-18)
+
+The Standard short-context text rates were checked against the [OpenAI pricing page](https://developers.openai.com/api/docs/pricing?context-length=short). Prices below are USD per 1M tokens; JSON stores USD per token.
+
+| Model | Input | Cached input | Output | 30m cache write | 12h cache write |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| gpt-6.2-astra | 8 | 0.40 | 40 | 10 | 20 |
+| gpt-6.2-sol | 2 | 0.10 | 10 | 2.50 | 5 |
+| gpt-6-astra | 10 | 1 | 50 | 12.50 | 25 |
+| gpt-6.1-sol | 2 | 0.10 | 10 | 2.50 | 5 |
+| gpt-6.1-terra | 1 | 0.05 | 5 | 1.25 | 2.50 |
+| gpt-6-sol | 2 | 0.20 | 10 | 2.50 | 5 |
+| gpt-6-luna | 0.10 | 0.01 | 0.50 | 0.125 | 0.25 |
+| gpt-5.6-sol | 4 | 0.40 | 20 | 5 | 10 |
+| gpt-5.6-terra | 2 | 0.20 | 12 | 2.50 | 5 |
+| gpt-5.6-luna | 0.20 | 0.02 | 1.20 | 0.25 | 0.50 |
+
+The owner explicitly maps `gpt-6.2-astra-pro` to the same prices as `gpt-6.2-astra`; the official page does not list Pro independently. The GPT-5.6 Sol rates are promotional through November 30, 2026. Recheck the official page before updating prices after that date; this snapshot does not invent a future price or schedule a switch.
+
+The bundled data and built-in defaults agree on these Standard rates, including separate cache-write TTLs. Existing GPT-5.6 Sol Fast, Flex and Batch columns are updated with their corresponding official rates. GPT-6 Astra continues to use its existing built-in fallback when absent from the bundled file. The remaining models in the flagship Standard text table already match the bundled input, cached-input and output rates.
+
+This update does not change service-tier eligibility, long-context rules or Ultrafast promotion logic. It does not make these separate policies equivalent to the current official page. In particular, GPT-6.2 Ultrafast's temporary 3x rate and its long-context policy require a separate policy update. Exact remote catalog entries, operator override files, group/channel prices and customer multipliers retain their existing precedence. Updating this file alone does not replace a running deployment's remote catalog or configuration.

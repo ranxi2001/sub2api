@@ -43,28 +43,28 @@ func TestGPT62DefaultPricingAndCacheTTL(t *testing.T) {
 		"bundled":      NewBillingService(&config.Config{}, catalog),
 	} {
 		for _, tc := range []struct {
-			model                      string
-			input, output, write, read float64
+			model                                string
+			input, output, write, write12h, read float64
 		}{
-			{"gpt-6.2-astra", 10e-6, 50e-6, 12.5e-6, 1e-6},
-			{"gpt-6.2-astra-pro", 10e-6, 50e-6, 12.5e-6, 1e-6},
-			{"gpt-6.2-sol", 2e-6, 10e-6, 2.5e-6, 0.1e-6},
+			{"gpt-6.2-astra", 8e-6, 40e-6, 10e-6, 20e-6, 0.4e-6},
+			{"gpt-6.2-astra-pro", 8e-6, 40e-6, 10e-6, 20e-6, 0.4e-6},
+			{"gpt-6.2-sol", 2e-6, 10e-6, 2.5e-6, 5e-6, 0.1e-6},
 		} {
 			t.Run(source+"/"+tc.model, func(t *testing.T) {
 				for _, model := range []string{tc.model, "openai/" + tc.model + "-max"} {
 					price, err := svc.GetModelPricing(model)
 					require.NoError(t, err)
 					require.NotNil(t, price.CacheCreation12hPricePerToken)
-					require.InDelta(t, tc.write, *price.CacheCreation12hPricePerToken, 1e-12)
-					// The supplied cards have no context ranges. A long prompt must
-					// not silently inherit an older model's context surcharge.
+					require.InDelta(t, tc.write12h, *price.CacheCreation12hPricePerToken, 1e-12)
+					// This short-context rate update preserves the independent
+					// existing tier/context policy.
 					tokens := UsageTokens{InputTokens: 300000, OutputTokens: 500, CacheReadTokens: 2000, CacheCreationTokens: 1000, CacheCreation30mTokens: 400, CacheCreation12hTokens: 600}
 					for tier, multiplier := range map[string]float64{"": 1, "priority": 2, "flex": 0.5, "ultrafast": 6} {
 						cost, err := svc.CalculateCostWithServiceTier(model, tokens, 1, tier)
 						require.NoError(t, err)
 						require.InDelta(t, 300000*tc.input*multiplier, cost.InputCost, 1e-10)
 						require.InDelta(t, 500*tc.output*multiplier, cost.OutputCost, 1e-10)
-						require.InDelta(t, 1000*tc.write*multiplier, cost.CacheCreationCost, 1e-10)
+						require.InDelta(t, (400*tc.write+600*tc.write12h)*multiplier, cost.CacheCreationCost, 1e-10)
 						require.InDelta(t, 2000*tc.read*multiplier, cost.CacheReadCost, 1e-10)
 						require.False(t, cost.LongContextBillingApplied)
 					}
