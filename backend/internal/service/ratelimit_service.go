@@ -2883,6 +2883,8 @@ func shouldSkipCodexPlanGatedImageModelCooldown(ctx context.Context, reason, req
 	return IsGPTImageGenerationModel(requestedModel) || IsGPTImageGenerationModel(modelKey)
 }
 
+type upstreamModelNotFoundCanonicalContextKey struct{}
+
 func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string) string {
 	modelKey := strings.TrimSpace(requestedModel)
 	if account == nil || modelKey == "" {
@@ -2890,8 +2892,8 @@ func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Acc
 	}
 	// The OpenAI gateway supplies the already-mapped scheduling model. Preserve
 	// it just as custom model rules do; alias chains must not cool a second model.
-	if account.Platform == PlatformOpenAI {
-		if canonical := tempUnschedulableModel(ctx, nil); canonical != "" {
+	if account.Platform == PlatformOpenAI && ctx != nil {
+		if canonical, _ := ctx.Value(upstreamModelNotFoundCanonicalContextKey{}).(string); canonical != "" {
 			return canonical
 		}
 	}
