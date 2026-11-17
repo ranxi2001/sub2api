@@ -401,6 +401,57 @@ describe('EditAccountModal', () => {
     expect(account.credentials.model_mapping).toEqual({ 'gpt-5.2': 'gpt-5.2' })
   })
 
+  it('shows and saves the cache TTL billing switch after switching OpenAI API key to Anthropic', async () => {
+    const account = { ...buildAccount(), group_ids: [10], extra: {} }
+    updateAccountMock.mockReset().mockResolvedValue({ ...account, platform: 'anthropic' })
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const toggle = '[data-testid="cache-ttl-billing-from-request-toggle"]'
+    const badges = () => wrapper.findAllComponents(NewFeatureBadge).filter(
+      (badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.cacheTtlBillingFromRequest
+    )
+    expect(wrapper.find(toggle).exists()).toBe(false)
+    expect(badges()).toHaveLength(0)
+
+    await wrapper.get('[data-testid="edit-account-platform"]').setValue('anthropic')
+    await flushPromises()
+    expect(wrapper.find(toggle).exists()).toBe(true)
+    expect(badges()).toHaveLength(1)
+    await wrapper.get(toggle).trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      platform: 'anthropic', extra: expect.objectContaining({ cache_ttl_billing_from_request: true })
+    })
+  })
+
+  it('hides the cache TTL billing switch and does not save it after switching Anthropic API key to OpenAI', async () => {
+    const account = {
+      ...buildAccount(), id: 24, platform: 'anthropic', type: 'apikey',
+      credentials: { api_key: 'sk-relay', base_url: 'https://relay.example.com' },
+      extra: { cache_ttl_billing_from_request: true }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue({ ...account, platform: 'openai' })
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const toggle = '[data-testid="cache-ttl-billing-from-request-toggle"]'
+    expect(wrapper.find(toggle).exists()).toBe(true)
+
+    await wrapper.get('[data-testid="edit-account-platform"]').setValue('openai')
+    await flushPromises()
+    expect(wrapper.find(toggle).exists()).toBe(false)
+    expect(wrapper.findAllComponents(NewFeatureBadge).filter(
+      (badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.cacheTtlBillingFromRequest
+    )).toHaveLength(0)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload).toMatchObject({ platform: 'openai' })
+    expect(payload?.extra ?? {}).not.toHaveProperty('cache_ttl_billing_from_request')
+  })
+
   it('preserves common unsaved edits and restores the source platform when the dialog reopens', async () => {
     const wrapper = mountModal()
     await flushPromises()

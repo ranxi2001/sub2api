@@ -856,7 +856,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		if requestedTTL != cacheTTLTarget1h {
 			requestedTTL = cacheTTLTarget5m
 		}
-		cacheTTLOverridden = applyCacheTTLOverride(&result.Usage, requestedTTL)
+		cacheTTLOverridden = reclassifyCacheCreationByRequestedTTL(&result.Usage, requestedTTL)
 	}
 
 	// 获取费率倍数（优先级：用户专属 > 分组默认 > 系统默认）

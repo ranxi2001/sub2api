@@ -2762,7 +2762,7 @@
 
       <!-- Anthropic API Key 按请求 TTL 计费开关 -->
       <div
-        v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
+        v-if="editingAccount?.platform === 'anthropic' && editingAccount?.type === 'apikey'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">

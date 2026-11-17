@@ -1267,7 +1267,7 @@ export default {
           '仅对 Anthropic API Key 生效。开启后，messages/count_tokens 请求将透传上游并仅替换认证，保留计费/并发/审计及必要安全过滤；关闭即可回滚到现有兼容链路。',
         cacheTtlBillingFromRequest: '按客户端请求的缓存 TTL 计费',
         cacheTtlBillingFromRequestDesc:
-          '仅对 Anthropic API Key 生效，适用于上游强制改写缓存 TTL 的二级中转。开启后，缓存写入按客户端请求里的 cache_control.ttl 计费：显式请求 1h 按 1h，未设置或请求 5m 一律按 5m；不改动请求和响应内容。上游不再按 5m 结算时应关闭，否则 5m 请求可能亏损。',
+          '仅对 Anthropic API Key 生效，适用于上游强制改写缓存 TTL 的二级中转。开启后，缓存写入按客户端请求里的 cache_control.ttl 计费：任一断点显式请求 1h 时，该请求的全部缓存写入按 1h 计费（混合 TTL 不按断点拆分）；未设置或只请求 5m 时按 5m 计费；不改动请求和响应内容。上游不再按 5m 结算时应关闭，否则 5m 请求可能亏损。',
         stripClaudeCodeIdentity: '抹除 Claude Code 身份',
         stripClaudeCodeIdentityDesc:
           '仅对 Anthropic API Key 生效。开启后，转发与测试连接时自动剥离 Claude Code / Agent SDK 客户端特征（替换 claude-cli User-Agent、移除 claude-code/oauth beta、剔除 system 中的 x-anthropic-billing-header 块与官方 CLI/SDK 身份句、移除 metadata.user_id），避免限制 Claude Code 调用的官方 API Key（如 sk-ant-usr-* 额度 Key）被上游拒绝并返回余额不足错误。',
