@@ -19,6 +19,11 @@ func TestSchedulerSnapshotConfiguredMembership(t *testing.T) {
 			ctx := context.Background()
 			tx := testEntTx(t)
 			client := tx.Client()
+			// Other integration fixtures may have committed schedulable accounts.
+			// Hide them inside this rollback-only transaction before exercising
+			// simple/ungrouped pools, which deliberately query beyond one group.
+			_, err := client.Account.Update().SetSchedulable(false).Save(ctx)
+			require.NoError(t, err)
 			repo := newAccountRepositoryWithSQL(client, tx, nil)
 			group := mustCreateGroup(t, client, &service.Group{Name: "snapshot-pool", Platform: platform})
 			other := mustCreateGroup(t, client, &service.Group{Name: "snapshot-other", Platform: platform})

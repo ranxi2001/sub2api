@@ -110,7 +110,7 @@ func TestGatewaySnapshotNodeProcess(t *testing.T) {
 		var err error
 		switch {
 		case role == "publisher" && op == "publish":
-			err = cache.SetSnapshot(ctx, bucket, token, []service.Account{{ID: 7, Platform: service.PlatformOpenAI}})
+			err = cache.SetSnapshot(ctx, bucket, token, []service.Account{{ID: 7, Platform: service.PlatformOpenAI, Status: service.StatusActive, Schedulable: true}})
 		case role == "publisher" && op == "retire":
 			err = cache.RetireBucket(ctx, bucket)
 		case role == "publisher" && op == "reopen":

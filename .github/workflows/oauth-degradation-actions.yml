@@ -51,9 +51,28 @@ jobs:
     needs: evidence-validator
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: sub2api_test
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d sub2api_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       GOMAXPROCS: '2'
       GOFLAGS: '-p=2'
+      SUB2API_UPGRADE_TEST_POSTGRES_URL: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
+      HARVEST_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
+      SUB2API_EXPERIMENT_TEST_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
+      # These fixtures append a per-test search_path using lib/pq keyword syntax.
+      SCOPED_ADMIN_TEST_DSN: 'host=127.0.0.1 port=15432 user=fixture password=fixture dbname=sub2api_test sslmode=disable'
+      TRAFFIC_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
+      MATURE_UPGRADE_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable'
+      MATURE_PRODUCTION_MIGRATIONS: '${{ github.workspace }}/mature-baseline/backend/migrations'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -69,10 +88,23 @@ jobs:
         with:
           ref: fb75b87cebe8314d9eba171948367451511f9417 # v2.20.2; run 42662656742
           path: historical-fixtures
+      - uses: actions/checkout@v6
+        with:
+          ref: 321f11c1a4d23302961c223ac030fd09e3f9e6e8 # v2.21.6 deployed migration baseline
+          path: mature-baseline
+          sparse-checkout: backend/migrations
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: candidate/backend/go.mod
           cache-dependency-path: candidate/backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash candidate/.github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
       - name: Baseline behavioral RED
         shell: bash
         run: |
