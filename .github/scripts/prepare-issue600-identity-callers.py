@@ -24,14 +24,3 @@ for name in ('openai_codex_ticket_egress.go', 'openai_gateway_chat_completions.g
     path.write_bytes(updated)
     print(f'identity RED caller={path} candidate={git("rev-parse", f"HEAD:{path}").decode().strip()} adapted={git("hash-object", str(path)).decode().strip()}')
 assert pathlib.Path(contract).read_bytes() == git('show', f'{baseline}:{contract}')
-
-# The retained, independent context normalizer now uses a read-only fast gate.
-# Put that helper in a separate file so the selected handler blob stays exact.
-handler = git('show', 'HEAD:backend/internal/handler/openai_gateway_handler.go').decode()
-start = handler.index('func mayContainCodexCallOutputCandidate(')
-end = handler.index('func normalizeCodexCallOutputBootstrap(', start)
-helpers = 'package handler\n\nimport ("bytes"; "github.com/Wei-Shaw/sub2api/internal/service")\n\n' + handler[start:end]
-helper_path = pathlib.Path('backend/internal/handler/historical_issue600_gate.go')
-assert not helper_path.exists()
-helper_path.write_text(helpers)
-print(f'identity RED independent gate={helper_path} blob={git("hash-object", str(helper_path)).decode().strip()}')

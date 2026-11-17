@@ -51,6 +51,7 @@ jobs:
                 fi ;;
             esac
           done
+          python3 .github/scripts/prepare-upstream-v0222-red-fixtures.py "$baseline" . HEAD
       - name: Authenticated HTTP task continuation
         env:
           PHASE: ${{ matrix.phase }}
