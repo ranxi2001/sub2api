@@ -1207,7 +1207,7 @@
             <p class="input-hint">{{ t('admin.accounts.vertexSaJsonEditHint') }}</p>
           </div>
           <div v-if="!isVertexAPIKeyMode || editVertexProjectId.trim()">
-            <label class="input-label">Location</label>
+            <label class="input-label">Location <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.vertexMultiRegion" :user-id="authStore.user?.id" /></label>
             <select
               v-model="editVertexLocation"
               required
@@ -2369,6 +2369,7 @@
           />
           <span class="text-sm">
             {{ t('admin.accounts.openai.passthroughModelFilter') }}
+            <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.passthroughModelFilter" :user-id="authStore.user?.id" />
             <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.openai.passthroughModelFilterDesc') }}
             </span>
