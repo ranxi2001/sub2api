@@ -755,6 +755,12 @@ func (s *OpenAIGatewayService) checkOpenAIAgentRecoveryCompaction(ctx context.Co
 	if request.disableOwnerBinding {
 		return s.checkOpenAIAgentRecoveryRecords(ctx, request, openAIAgentRecoveryBinding{})
 	}
+	// An omitted-history marker is not an owner. A previous recovery may have
+	// rebuilt this context without opaque items; never dereference or invent its
+	// producer when admitting a native compaction request.
+	if request.owner == nil {
+		return openAIAgentRecoveryError("owner_unavailable")
+	}
 	model := gjson.GetBytes(body, "model").String()
 	url := req.URL.String()
 	if openAIAgentRecoveryWireDigest(url, req.Header, model) == request.owner.wire ||

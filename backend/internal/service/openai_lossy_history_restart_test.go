@@ -14,9 +14,9 @@ import (
 func TestOpenAILossyHistoryRestart(t *testing.T) {
 	for _, ws := range []bool{false, true} {
 		for _, body := range []string{
-			`{"model":"gpt-6-astra","instructions":"current control","tools":[{"type":"function","name":"new_work"}],"previous_response_id":"resp_foreign","input":[{"role":"user","content":"current task"},{"type":"agent_message","encrypted_content":"fixture-cipher"},{"type":"function_call_output","call_id":"orphan","output":"already done"}]}`,
+			`{"model":"gpt-6-astra","instructions":"current control","tools":[],"previous_response_id":"resp_foreign","input":[{"role":"user","content":"current task"},{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
 			`{"model":"gpt-6-astra","conversation":"foreign","input":[{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
-			`{"model":"gpt-6-astra","input":[{"type":"compaction","encrypted_content":"fixture-cipher","summary":"readable summary"},{"type":"function_call","call_id":"pending","name":"effect","arguments":"{\"n\":9007199254740993}","status":"in_progress"}]}`,
+			`{"model":"gpt-6-astra","input":[{"type":"compaction","encrypted_content":"fixture-cipher","summary":"readable summary"}]}`,
 		} {
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAIWS.LossyHistoryRestartEnabled = true

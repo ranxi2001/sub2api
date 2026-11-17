@@ -177,7 +177,9 @@ func (s *OpenAIGatewayService) CanDiscardOpenAI409ResponsePointer(ctx context.Co
 			// requires a successful rebuild and verifies its removal from both
 			// body copies before dispatch; no foreign response is consumed.
 			_, changed := discardOpenAIProviderHistory(body)
-			return changed
+			if changed {
+				return true
+			}
 		}
 	}
 	if s == nil || s.settingService == nil || !openAI409HasReadableIntent(body) || !s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {

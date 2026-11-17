@@ -1,0 +1,112 @@
+name: Lossy recovery protocol
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/openai_lossy*.go'
+      - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_409_omit_history.go'
+      - '.github/workflows/lossy-recovery-protocol.yml'
+  push:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai_lossy*.go'
+      - 'backend/internal/service/openai_agent_message_recovery.go'
+      - 'backend/internal/service/openai_409_omit_history.go'
+      - '.github/workflows/lossy-recovery-protocol.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lossy-recovery-protocol-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Compaction admission and structured tool history
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          go test -mod=readonly -race -json -tags=unit ./internal/service -run '^Test(OpenAILossyProtocol|OpenAIAgentRecoveryCompaction|WithoutOpenAIRemoteCompaction)' -count=1 -timeout=5m | tee "$RUNNER_TEMP/lossy-protocol.jsonl"
+          python3 - "$RUNNER_TEMP/lossy-protocol.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          passed = {row.get('Test') for row in rows if row.get('Action') == 'pass'}
+          for name in ('PreservesAgentInput', 'CompactionPreservesContext', 'OwnerlessCompactionRefused'):
+              assert 'TestOpenAILossyProtocol' + name in passed, name
+          assert not any(row.get('Action') == 'skip' for row in rows)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: lossy-protocol-tests-${{ env.EXPECTED_HEAD_SHA }}
+          path: ${{ runner.temp }}/lossy-protocol.jsonl
+
+  artifact:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Frontend validation and embedded assets
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run check:i18n
+          pnpm exec vue-tsc -b
+          pnpm exec vite build
+      - name: Build immutable Linux amd64 artifact
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          mkdir -p ../artifacts
+          version=$(cat cmd/server/VERSION)
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embed -trimpath -ldflags "-s -w -X main.Version=$version -X main.Commit=$EXPECTED_HEAD_SHA -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildType=hotfix" -o ../artifacts/sub2api ./cmd/server
+          cd ../artifacts
+          sha256sum sub2api > SHA256SUMS
+          printf '%s\n' "$EXPECTED_HEAD_SHA" > SOURCE_COMMIT
+          git -C .. rev-parse HEAD^{tree} > SOURCE_TREE
+          printf 'linux/amd64\n' > ARCHITECTURE
+          ./sub2api --version > VERSION.txt 2>&1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: recovery-protocol-linux-amd64-${{ env.EXPECTED_HEAD_SHA }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
