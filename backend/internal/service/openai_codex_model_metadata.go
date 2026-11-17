@@ -3,8 +3,10 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
@@ -75,7 +77,7 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	parsed, err := url.Parse(baseURL)
 	official := err == nil && (strings.EqualFold(parsed.Hostname(), "api.openai.com") ||
 		(account.IsOpenAIOAuth() && strings.EqualFold(parsed.Hostname(), "chatgpt.com")))
-	if account.IsOpenAI() && (isOpenAIGPT6AstraModel(modelID) || openai.IsGPT61SolModelSpelling(modelID)) && official {
+	if account.IsOpenAI() && (openai.GPT62ModelID(modelID) != "" || isOpenAIGPT6AstraModel(modelID) || openai.IsGPT61SolModelSpelling(modelID) || openai.IsGPT61TerraModelSpelling(modelID)) && official {
 		defaults := map[string]json.RawMessage{
 			"supports_search_tool":  json.RawMessage("true"),
 			"apply_patch_tool_type": json.RawMessage(`"freeform"`),
@@ -102,11 +104,11 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 			capabilities["use_responses_lite"] = json.RawMessage("false")
 		}
 	}
-	// API Astra publicly supports Ultrafast. OAuth must advertise it in its
+	// Official API models can advertise Ultrafast. OAuth must advertise it in its
 	// account manifest; a subscription label alone does not grant the capability.
-	if account.IsOpenAIApiKey() && isOfficialOpenAIModelsBaseURL(baseURL) && isOpenAIGPT6AstraModel(modelID) {
+	if account.IsOpenAIApiKey() && isOfficialOpenAIModelsBaseURL(baseURL) && (openai.GPT62ModelID(modelID) != "" || isOpenAIGPT6AstraModel(modelID)) {
 		tiers := configuredCodexServiceTiersForModel(modelID)
-		tiers = append(tiers, configuredCodexServiceTier{ID: OpenAIFastTierUltrafast, Name: "Ultrafast", Description: "Lowest latency; 6x Standard token pricing."})
+		tiers = append(tiers, configuredCodexServiceTier{ID: OpenAIFastTierUltrafast, Name: "Ultrafast", Description: fmt.Sprintf("Lowest latency; %gx Standard token pricing.", openAIUltrafastMultiplier(modelID, time.Now()))})
 		encoded, err := json.Marshal(tiers)
 		if err != nil {
 			panic(err)

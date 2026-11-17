@@ -1412,7 +1412,7 @@ func normalizeOpenAIOAuthResponsesCompatibilityBody(body []byte) ([]byte, bool, 
 }
 
 func normalizeGPT6ResponsesSampling(body []byte, model string) ([]byte, bool, error) {
-	if (!openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
+	if (!openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model) && openai.GPT62ModelID(model) == "") || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
 		return body, false, nil
 	}
 	out := body
@@ -2135,6 +2135,51 @@ func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicyS
 	return nil
 }
 
+// openAIModelSupportsUltrafast reports whether OpenAI offers the Ultrafast
+// service tier for the model. It is the single
+// source for both the group-forced tier gate and the Ultrafast billing
+// multiplier, so a model can never be forced onto Ultrafast yet billed below it.
+func openAIModelSupportsUltrafast(model string) bool {
+	normalized := normalizeKnownOpenAICodexModel(model)
+	return isOpenAIGPT6AstraModel(normalized) || normalized == "gpt-6.1-sol" || normalized == "gpt-6.2-sol" || normalized == "gpt-6.2-astra"
+}
+
+// openAIGroupForcedServiceTier returns the service_tier that the trusted request
+// Group forces onto an OpenAI-account request for the given upstream model, or
+// "" when the group forces nothing and the client's value is kept.
+//
+// The two group flags are independent and resolve as Ultrafast > Fast > client:
+//   - ForceOpenAIUltrafast applies only to models that support Ultrafast
+//     (openAIModelSupportsUltrafast) and yields "ultrafast".
+//   - Otherwise ForceOpenAIFast yields "priority", for every model.
+//
+// So a group with only ForceOpenAIUltrafast leaves unsupported models to the
+// client, and a group with both flags falls back to Fast for them.
+func openAIGroupForcedServiceTier(ctx context.Context, account *Account, model string) string {
+	if ctx == nil || account == nil || account.Platform != PlatformOpenAI {
+		return ""
+	}
+	group, _ := ctx.Value(ctxkey.Group).(*Group)
+	if !IsGroupContextValid(group) || !groupSupportsOpenAIFast(group.Platform) {
+		return ""
+	}
+	if group.ForceOpenAIUltrafast && openAIModelSupportsUltrafast(model) {
+		// GPT-6.2 API support does not establish subscription entitlement.
+		if base := openai.GPT62ModelID(model); base != "" && account.IsOpenAIOAuthLike() {
+			metadata, ok := account.GetUpstreamModelMetadata(base)
+			if ok && gjson.GetBytes(metadata.CodexToolCapabilities["service_tiers"], `#(id=="ultrafast")`).Exists() {
+				return OpenAIFastTierUltrafast
+			}
+		} else {
+			return OpenAIFastTierUltrafast
+		}
+	}
+	if group.ForceOpenAIFast {
+		return OpenAIFastTierPriority
+	}
+	return ""
+}
+
 // applyOpenAIFastPolicyToBody applies the OpenAI fast policy to a raw request
 // body. When action=filter it removes the service_tier field; when
 // action=block it returns (body, *OpenAIFastBlockedError). On pass it
@@ -2705,7 +2750,7 @@ func validateGPT61CompatRequest(body []byte, model string) error {
 }
 
 func validateGPT61RawEffort(body []byte, model string) error {
-	if !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model) {
+	if !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model) && openai.GPT62ModelID(model) == "" {
 		return nil
 	}
 	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
