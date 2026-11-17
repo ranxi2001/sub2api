@@ -183,6 +183,14 @@ jobs:
             go-tests-v2-${{ runner.os }}-${{ runner.arch }}-integration-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
             ${{ steps.go-cache.outputs.bootstrap }}${{ hashFiles('backend/go.sum') }}
             ${{ steps.go-cache.outputs.bootstrap }}
+      - name: Install Redis for isolated integration fixtures
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          redis-server --version
       - name: Integration tests with timings
         env:
           PROMPT_AUDIT_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/shadow_audit?sslmode=disable'

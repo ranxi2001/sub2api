@@ -77,6 +77,17 @@ class GoTestRunnerTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 runner.main()
 
+    def test_both_suites_provision_native_redis_before_tests(self):
+        # authcache integration tests spawn an isolated process; a Redis service
+        # container alone cannot satisfy their exec.LookPath("redis-server").
+        workflow = yaml.safe_load((runner.ROOT / '.github/workflows/backend-ci.yml').read_text())
+        for job in ('unit-test', 'integration-test'):
+            commands = [step.get('run', '') for step in workflow['jobs'][job]['steps']]
+            install = next(i for i, command in enumerate(commands) if 'redis-server --version' in command)
+            execute = next(i for i, command in enumerate(commands) if 'python3 .github/ci/go_tests.py' in command)
+            self.assertLess(install, execute)
+            self.assertIn('apt-get install -y --no-install-recommends redis-server', commands[install])
+
     def test_gate_rejects_failed_cancelled_or_missing_selected_suites(self):
         workflow = yaml.safe_load((runner.ROOT / '.github/workflows/backend-ci.yml').read_text())
         gate_job = workflow['jobs']['test']
