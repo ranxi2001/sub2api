@@ -135,6 +135,48 @@ func TestProviderProfitChargesRequireUniqueImportedEvidence(t *testing.T) {
 	f.counts(service.ProviderProfitWindow{From: at, Until: at.Add(time.Nanosecond)}, 2, 9, rows...)
 }
 
+func TestProviderProfitChargesLargeWindowAtomicReplay(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	const total = 5207
+	at := f.now()
+	w := service.ProviderProfitWindow{From: at, Until: at.Add(time.Hour)}
+	f.exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,upstream_request_id,model,actual_cost,total_cost,created_at)
+		SELECT $1,$2,$3,'local-'||i,'synthetic-bill-'||i,'fixture-model',1,12,$4 FROM generate_series(1,$5::int) AS i ORDER BY i`, f.user, f.key, f.account, at, total)
+	remote := make([]service.ProviderProfitRemoteCharge, total)
+	for i := range remote {
+		remote[i] = profitRemote(int64(i+1), 11, fmt.Sprintf("synthetic-bill-%d", i+1), at)
+		remote[i].Amount = "0.125"
+	}
+	// The first bill has two local candidates, farther apart than the skew.
+	// Only a whole-window ambiguity check rejects the first one. A second
+	// collision in the upper skew margin is not itself counted as unmatched.
+	f.usage(f.account, remote[0].RequestID, at.Add(time.Minute*20))
+	f.usage(f.account, remote[1].RequestID, w.Until)
+	f.usage(f.account, nil, at)
+	last := &remote[total-1]
+	const matched, unmatched = total - 2, 4
+	// Freeze one good early match and the last. The full bill then promotes
+	// the first and inserts thousands of new rows before the last conflicts.
+	f.counts(w, 2, total, remote[2], *last)
+	debit := "0.1"
+	remote[2].SettledAmount = &debit
+	last.Amount = "9"
+	out, err := f.sync(w, remote...)
+	require.ErrorIs(t, err, service.ErrMatureProviderConflict)
+	require.Zero(t, out)
+	require.EqualValues(t, 2, f.id(`SELECT count(*) FROM provider_profit_charges`))
+	require.Zero(t, f.id(`SELECT count(settled_amount) FROM provider_profit_charges`))
+
+	last.Amount = "0.125"
+	for range 2 {
+		f.counts(w, matched, unmatched, remote...)
+		require.EqualValues(t, matched, f.id(`SELECT count(*) FROM provider_profit_charges`))
+		require.EqualValues(t, 1, f.id(`SELECT count(*) FROM provider_profit_charges WHERE settled_amount=0.1`))
+		require.Equal(t, "650.625", f.snapshot(`SELECT sum(amount)::text FROM provider_profit_charges`))
+		require.Zero(t, f.id(`SELECT count(*) FROM provider_profit_charges WHERE upstream_usage_id IN (1,2)`))
+	}
+}
+
 func TestProviderProfitChargesFreezeOwnershipAndPromoteOnlyMatchingDebit(t *testing.T) {
 	f := newProfitChargeFixture(t)
 	at := f.now()

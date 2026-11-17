@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -66,13 +67,18 @@ func profitRow(id, key int, req string) map[string]any {
 	return map[string]any{"id": id, "api_key_id": key, "user_id": 7, "request_id": req, "created_at": profitInstant, "billing_type": 0, "actual_cost": json.Number("0.123456789012345678901"), "api_key": map[string]any{"key": "private-key-fixture"}}
 }
 func profitPage(page, total int, rows []map[string]any) map[string]any {
-	return map[string]any{"page": page, "total": total, "pages": max(1, (total+99)/100), "page_size": 100, "items": rows}
+	return profitPageSized(page, profitPageSize, total, rows)
+}
+
+func profitPageSized(page, size, total int, rows []map[string]any) map[string]any {
+	return map[string]any{"page": page, "total": total, "pages": max(1, (total+size-1)/size), "page_size": size, "items": rows}
 }
 
 func profitHandlerCall(t *testing.T, site, body string, remote func(*http.Request) (int, any)) (*profitSyncStore, *httptest.ResponseRecorder) {
 	t.Helper()
 	s := &profitSyncStore{p: service.MatureProvider{ID: 5, Revision: 7, BaseURL: "https://wallet.invalid", SiteType: site, AuthMode: "token"}}
 	h := NewChannelHandler(service.NewChannelService(s, nil, nil, nil, nil), nil, nil)
+	t.Cleanup(h.StopMatureProviderRefresh)
 	h.SetMatureProviderDependencies(profitFakeCrypt{}, &http.Client{Transport: profitTransport(func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, "wallet.invalid", r.URL.Host)
 		require.Equal(t, "Bearer fixture-access", r.Header.Get("Authorization"))
@@ -97,10 +103,10 @@ func profitHandlerCall(t *testing.T, site, body string, remote func(*http.Reques
 }
 
 func TestProviderProfitSyncExactUsageWithoutWalletProof(t *testing.T) {
-	rows := make([]map[string]any, 0, 103)
-	for i := 1; i <= 103; i++ {
-		rows = append(rows, profitRow(i, 4, fmt.Sprintf("request-%d", i)))
-		rows[i-1]["actual_cost"] = nil
+	rows := make([]map[string]any, profitPageSize+3)
+	for i := range rows {
+		rows[i] = profitRow(i+1, 4, fmt.Sprintf("request-%d", i+1))
+		rows[i]["actual_cost"] = nil
 	}
 	rows[0] = profitRow(1, 4, "same") // disqualified by page 2's subscription row on this key
 	rows[1] = profitRow(2, 6, "same") // this key is distinct
@@ -122,19 +128,18 @@ func TestProviderProfitSyncExactUsageWithoutWalletProof(t *testing.T) {
 	rows[10] = profitRow(11, 4, "until")
 	rows[10]["created_at"] = "2026-01-11T00:05:00Z"
 	rows[11] = profitRow(12, 4, strings.Repeat("x", 125))
-	rows[100] = profitRow(101, 4, "same")
-	rows[100]["billing_type"] = 1
+	rows[profitPageSize] = profitRow(profitPageSize+1, 4, "same")
+	rows[profitPageSize]["billing_type"] = 1
 	rows[12] = profitRow(13, 4, "free")
 	rows[12]["actual_cost"] = 0
 	rows[13] = profitRow(14, 4, "subscription-bill")
 	rows[13]["subscription_id"], rows[13]["billing_type"] = 9, 1
 	// Outside the window, on a different key, not even priced: can
 	// still conflict when the local key number was never recorded.
-	rows[101] = profitRow(102, 8, "reported-only")
-	rows[101]["created_at"], rows[101]["actual_cost"] = "2026-01-11T00:05:00Z", nil
-	var paths []string
+	rows[profitPageSize+1] = profitRow(profitPageSize+2, 8, "reported-only")
+	rows[profitPageSize+1]["created_at"], rows[profitPageSize+1]["actual_cost"] = "2026-01-11T00:05:00Z", nil
+	dataPages := 0
 	s, w := profitHandlerCall(t, "sub2api", profitWindowBody, func(r *http.Request) (int, any) {
-		paths = append(paths, r.URL.Path)
 		switch r.URL.Path {
 		case "/api/v1/auth/me":
 			return 200, map[string]any{"id": 7, "run_mode": "standard"}
@@ -146,12 +151,17 @@ func TestProviderProfitSyncExactUsageWithoutWalletProof(t *testing.T) {
 			require.Equal(t, "UTC", q.Get("timezone"))
 			require.Equal(t, "id", q.Get("sort_by"))
 			require.Equal(t, "asc", q.Get("sort_order"))
-			require.Equal(t, "100", q.Get("page_size"))
+			if q.Get("page_size") == "1" {
+				require.Equal(t, strconv.Itoa(profitPageSize), q.Get("page"))
+				return 200, profitPageSized(profitPageSize, 1, len(rows), rows[profitPageSize-1:profitPageSize])
+			}
+			dataPages++
+			require.Equal(t, strconv.Itoa(profitPageSize), q.Get("page_size"))
 			if q.Get("page") == "1" {
-				return 200, profitPage(1, len(rows), rows[:100])
+				return 200, profitPage(1, len(rows), rows[:profitPageSize])
 			}
 			require.Equal(t, "2", q.Get("page"))
-			return 200, profitPage(2, len(rows), rows[100:])
+			return 200, profitPage(2, len(rows), rows[profitPageSize:])
 		default:
 			t.Fatalf("unexpected route %s", r.URL.Path)
 			return 0, nil
@@ -160,7 +170,7 @@ func TestProviderProfitSyncExactUsageWithoutWalletProof(t *testing.T) {
 	require.Equal(t, 200, w.Code, w.Body.String())
 	require.JSONEq(t, `{"code":0,"message":"success","data":{"matched":4,"unmatched":3}}`, w.Body.String())
 	require.Equal(t, 1, s.writes)
-	require.Len(t, paths, 3)
+	require.Equal(t, 2, dataPages)
 	require.Len(t, s.charges, 4)
 	require.Equal(t, "same", s.charges[0].RequestID)
 	require.EqualValues(t, 6, s.charges[0].KeyID)
@@ -188,7 +198,7 @@ func TestProviderProfitSyncRejectsBeforeAuthentication(t *testing.T) {
 }
 
 func TestProviderProfitSyncRejectsPartialAndInvalidResponses(t *testing.T) {
-	for _, name := range []string{"simple", "late-http", "truncated", "wrong-page", "changed-total", "wrong-pages", "oversized", "repeated-id", "foreign-user", "bad-time"} {
+	for _, name := range []string{"simple", "late-http", "truncated", "wrong-page", "inconsistent-growth", "shrinking-total", "wrong-pages", "wrong-size", "repeated-id", "foreign-user", "bad-time"} {
 		t.Run(name, func(t *testing.T) {
 			s, w := profitHandlerCall(t, "sub2api", profitWindowBody, func(r *http.Request) (int, any) {
 				switch r.URL.Path {
@@ -199,18 +209,22 @@ func TestProviderProfitSyncRejectsPartialAndInvalidResponses(t *testing.T) {
 					}
 					return 200, map[string]any{"id": 7, "run_mode": mode}
 				case "/api/v1/usage":
-					rows := make([]map[string]any, 100)
+					rows := make([]map[string]any, profitPageSize)
 					for i := range rows {
 						rows[i] = profitRow(i+1, 4, fmt.Sprintf("req-%d", i+1))
 					}
-					if r.URL.Query().Get("page") == "1" {
-						if name == "oversized" {
-							return 200, profitPage(1, 5001, rows)
-						}
-						return 200, profitPage(1, 101, rows)
+					initial := profitPageSize + 1
+					if name == "shrinking-total" {
+						initial++
 					}
-					row := profitRow(101, 4, "req-101")
-					page, total := 2, 101
+					if r.URL.Query().Get("page_size") == "1" {
+						return 200, profitPageSized(profitPageSize, 1, initial, rows[profitPageSize-1:])
+					}
+					if r.URL.Query().Get("page") == "1" {
+						return 200, profitPage(1, initial, rows)
+					}
+					row := profitRow(profitPageSize+1, 4, "last-request")
+					page, total := 2, profitPageSize+1
 					switch name {
 					case "late-http":
 						return 502, nil
@@ -222,10 +236,12 @@ func TestProviderProfitSyncRejectsPartialAndInvalidResponses(t *testing.T) {
 						bad := profitPage(page, total, []map[string]any{row})
 						bad["pages"] = 3
 						return 200, bad
-					case "changed-total":
-						total++
+					case "inconsistent-growth":
+						total++ // advertised more than the final page contains
+					case "wrong-size":
+						return 200, profitPageSized(page, profitPageSize+1, total, []map[string]any{row})
 					case "repeated-id":
-						row["id"] = 100
+						row["id"] = profitPageSize
 					case "foreign-user":
 						row["user_id"] = 9
 					case "bad-time":
@@ -238,11 +254,127 @@ func TestProviderProfitSyncRejectsPartialAndInvalidResponses(t *testing.T) {
 				}
 			})
 			want := 502
-			if name == "simple" || name == "oversized" {
+			if name == "simple" {
 				want = 400
 			}
 			require.Equal(t, want, w.Code, w.Body.String())
 			require.Zero(t, s.writes)
 		})
 	}
+}
+
+// This upstream accepts the real Sub2API page & page_size parameters. It
+// appends two observations after the initial tail was advertised, including
+// a duplicate outside the selected window. Neither can be ignored.
+const profitInitialBill = 5250
+
+type profitLiveBill struct {
+	failLate, replaceUser, moveAnchor bool
+	sessions, anchors, dataPages      int
+}
+
+func (b *profitLiveBill) serve(t *testing.T, r *http.Request) (int, any) {
+	t.Helper()
+	if r.URL.Path == "/api/v1/auth/me" {
+		b.sessions++
+		if b.replaceUser && b.sessions > 1 {
+			return 200, map[string]any{"id": 8, "run_mode": "standard"}
+		}
+		return 200, map[string]any{"id": 7, "run_mode": "standard"}
+	}
+	require.Equal(t, "/api/v1/usage", r.URL.Path)
+	q := r.URL.Query()
+	size, err := strconv.Atoi(q.Get("page_size"))
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, size, 1)
+	require.LessOrEqual(t, size, 1000) // upstream ParsePagination rejects larger values
+	page, err := strconv.Atoi(q.Get("page"))
+	require.NoError(t, err)
+	offset := (page - 1) * size
+	total := profitInitialBill
+	if size == 1 {
+		b.anchors++
+		require.Greater(t, offset, 0)
+	} else {
+		b.dataPages++
+	}
+	if offset+size >= profitInitialBill {
+		total += 2
+	}
+	if b.failLate && offset >= profitInitialBill {
+		return 502, nil
+	}
+	rows := make([]map[string]any, 0, size)
+	for i := offset + 1; i <= min(total, offset+size); i++ {
+		row := profitRow(i, 4, fmt.Sprintf("billed-%d", i))
+		switch i {
+		case profitInitialBill + 1:
+			row["request_id"], row["actual_cost"] = "billed-1", nil
+			row["created_at"] = "2026-01-11T00:05:00Z"
+		case profitInitialBill + 2:
+			row["api_key_id"], row["request_id"] = 7, "billed-2"
+			delete(row, "actual_cost")
+		}
+		if b.moveAnchor && size == 1 {
+			row["id"] = i + 1
+		}
+		rows = append(rows, row)
+	}
+	return 200, profitPageSized(page, size, total, rows)
+}
+
+func TestProviderProfitSyncLargeBillWithLateDuplicates(t *testing.T) {
+	var bill profitLiveBill
+	s, w := profitHandlerCall(t, "sub2api", profitWindowBody, func(r *http.Request) (int, any) { return bill.serve(t, r) })
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, 1, s.writes)
+	require.Len(t, s.charges, profitInitialBill-1)
+	// First row is ambiguous on its known key; second only for unknown-key
+	// attribution. Every earlier page still contributes exactly once.
+	for i, r := range s.charges {
+		require.EqualValues(t, i+2, r.UsageID)
+		require.Equal(t, i != 0, r.UniqueAtSite)
+	}
+	require.Greater(t, s.sessions, 1)
+	require.Equal(t, s.sessions, bill.sessions)
+	require.Equal(t, bill.sessions-1, bill.anchors)
+	require.Equal(t, (profitInitialBill+2+profitPageSize-1)/profitPageSize, bill.dataPages)
+	require.LessOrEqual(t, bill.dataPages+bill.anchors, s.sessions*profitPagesPerBatch)
+}
+
+func TestProviderProfitSyncLargeBillLateFailure(t *testing.T) {
+	bill := profitLiveBill{failLate: true}
+	s, w := profitHandlerCall(t, "sub2api", profitWindowBody, func(r *http.Request) (int, any) { return bill.serve(t, r) })
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	require.Greater(t, (bill.dataPages-1)*profitPageSize, 5000)
+	require.Zero(t, s.writes)
+	require.Nil(t, s.charges)
+}
+
+func TestProviderProfitSyncRejectsChangedSession(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bill profitLiveBill
+	}{{"user", profitLiveBill{replaceUser: true}}, {"anchor", profitLiveBill{moveAnchor: true}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, w := profitHandlerCall(t, "sub2api", profitWindowBody, func(r *http.Request) (int, any) { return tc.bill.serve(t, r) })
+			require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+			require.GreaterOrEqual(t, tc.bill.sessions, 2)
+			require.Zero(t, s.writes)
+		})
+	}
+}
+
+func TestProviderProfitSyncEvidenceBudget(t *testing.T) {
+	// Start at the protective budget rather than building a huge fixture.
+	// Another occurrence of a known pair costs no additional index space;
+	// retaining an entirely new pair fails rather than reporting partial data.
+	s := profitUsageScan{user: 7, retained: profitEvidenceBudget, first: profitInstant, end: profitInstant.Add(time.Hour),
+		byKey: map[profitIdentity]bool{{4, "old"}: false}, bySite: map[string]bool{"old": false}}
+	row := map[string]any{"user_id": json.Number("7"), "api_key_id": json.Number("4"), "created_at": profitInstant.Format(time.RFC3339Nano), "id": json.Number("21"), "request_id": "old"}
+	require.NoError(t, s.observe(row))
+	require.Equal(t, profitEvidenceBudget, s.retained)
+	require.True(t, s.byKey[profitIdentity{4, "old"}])
+	row["id"], row["request_id"] = json.Number("22"), "new"
+	require.ErrorIs(t, s.observe(row), errProviderProfitEvidenceBudget)
 }

@@ -2,20 +2,12 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 	"unicode"
 )
 
-// These limits bound both sides of a reconciliation. An oversized window must
-// be split, never accepted as a partial success.
-const (
-	ProviderProfitMaxRows   = 5000
-	ProviderProfitClockSkew = 5 * time.Minute
-)
-
-var ErrProviderProfitSyncLimit = errors.New("provider usage window exceeds the reconciliation limit")
+const ProviderProfitClockSkew = 5 * time.Minute
 
 // A legacy local ID cut at 128 bytes could lose up to three more bytes
 // when backing up to a valid UTF-8 boundary. Never match a possible prefix.

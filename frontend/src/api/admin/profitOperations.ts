@@ -45,8 +45,13 @@ export async function listProfitProviders(page: number, signal?: AbortSignal) {
 export async function linkProfitChannel(providerId: number, channelId: number, revision: number) {
   await apiClient.put(`/admin/providers/${providerId}/profit-channel`, { channel_id: channelId, revision, confirm: true })
 }
-export async function syncProfitCharges(providerId: number, dates: Pick<OperationsQuery, 'from' | 'until'>) {
-  return (await apiClient.post<{ matched: number; unmatched: number }>(`/admin/providers/${providerId}/profit-charges/sync`, dates, { timeout: 55_000 })).data
+export type ProfitDates = Pick<OperationsQuery, 'from' | 'until'>
+export interface ProfitSyncStatus { status: 'running' | 'succeeded' | 'failed'; matched?: number; unmatched?: number; reason?: string }
+export async function startProfitSync(providerId: number, dates: ProfitDates) {
+  return (await apiClient.post<{ job_id: string }>(`/admin/providers/${providerId}/profit-charges/sync`, dates, { params: { background: true } })).data
+}
+export async function readProfitSync(providerId: number, jobId: string, signal: AbortSignal) {
+  return (await apiClient.get<ProfitSyncStatus>(`/admin/providers/${providerId}/profit-charges/sync/${encodeURIComponent(jobId)}`, { signal })).data
 }
 export async function readExplicitChannelProfitOperations(query: OperationsQuery, channelId: number, signal?: AbortSignal): Promise<OperationsSnapshot> {
  return readProfitOperations({ ...query, upstream: '', channel_id: channelId }, signal)

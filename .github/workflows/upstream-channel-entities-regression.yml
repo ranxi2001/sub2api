@@ -51,8 +51,8 @@ jobs:
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/profit-unit.log"
-          go test -count=1 -v -tags=unit ./internal/service ./internal/handler/admin -run '^Test(ProfitOperations|ProviderProfit|HandEnteredAPIKey|ImportedSub2APIUsage|UpstreamRequestIDFromHeaders|UsageUpstreamRequestIDPtr)' | tee "$log"
-          for name in ProviderProfitSiteKey ProfitOperationsCostMultiplierSourcesAndIndependentValidation HandEnteredAPIKeyReadsDirectUsageIdentifier ProviderProfitSyncExactUsageWithoutWalletProof ProviderProfitSyncRejectsBeforeAuthentication ProviderProfitSyncRejectsPartialAndInvalidResponses; do
+          go test -count=1 -v -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^Test(ProfitOperations|ProviderProfit|HandEnteredAPIKey|ImportedSub2APIUsage|UpstreamRequestIDFromHeaders|UsageUpstreamRequestIDPtr)' | tee "$log"
+          for name in ProviderProfitSiteKey ProfitOperationsCostMultiplierSourcesAndIndependentValidation HandEnteredAPIKeyReadsDirectUsageIdentifier ProviderProfitSyncExactUsageWithoutWalletProof ProviderProfitSyncRejectsBeforeAuthentication ProviderProfitSyncRejectsPartialAndInvalidResponses ProviderProfitSyncLargeBillWithLateDuplicates ProviderProfitSyncLargeBillLateFailure ProviderProfitBackgroundJobSurvivesDisconnect ProviderProfitJobsStopAndRedact ProviderProfitBatchesRecheckRevisionAndReuseLogin ProviderProfitSyncRejectsChangedSession ProviderProfitSyncEvidenceBudget ProfitOperationsRoutesRequireExistingAdministratorAuthentication ProfitOperationsRoutesDenyScopedObserverManagement; do
             grep -Fq -- "--- PASS: Test$name (" "$log"
           done
           if grep -q -- '--- SKIP:' "$log"; then exit 1; fi
@@ -67,11 +67,13 @@ jobs:
         run: |
           set -euo pipefail
           log="$RUNNER_TEMP/profit-postgres.log"
-          go test -count=1 -v -tags=integration ./internal/repository -run '^Test(ProviderProfit|ProfitOperations)' | tee "$log"
-          for name in ReportRegisterSiteAfterUsage BillForHistoricalHandEnteredAccount BillCannotOverrideManualDecisionOrImport ReportPartialThenSettledWithSharedWallet ReportZeroBillAndZeroIncome IndependentOriginAndHistoricalAliases ChargesRequireUniqueImportedEvidence ChargesFreezeOwnershipAndPromoteOnlyMatchingDebit; do
-            grep -Fq -- "--- PASS: TestProviderProfit$name (" "$log"
+          suite=0
+          go test -count=1 -v -tags=integration ./internal/repository -run '^Test(ProviderProfit|ProfitOperations)' | tee "$log" || suite=$?
+          for name in ReportRegisterSiteAfterUsage BillForHistoricalHandEnteredAccount BillCannotOverrideManualDecisionOrImport ReportPartialThenSettledWithSharedWallet ReportZeroBillAndZeroIncome IndependentOriginAndHistoricalAliases ChargesRequireUniqueImportedEvidence ChargesFreezeOwnershipAndPromoteOnlyMatchingDebit ChargesLargeWindowAtomicReplay; do
+            grep -F -- "--- PASS: TestProviderProfit$name (" "$log"
           done
           if grep -q -- '--- SKIP:' "$log"; then exit 1; fi
+          exit "$suite"
   postgres:
     if: ${{ !inputs.bills_only }}
     runs-on: ubuntu-latest

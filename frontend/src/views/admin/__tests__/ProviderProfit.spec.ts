@@ -13,7 +13,8 @@ import zhProvider from '@/i18n/locales/zh/matureProviders'
 import zhChannels from '@/i18n/locales/zh/upstreamEntities'
 
 vi.mock('@/api/client', () => ({ apiClient: { get: vi.fn(), put: vi.fn(), post: vi.fn() } }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 41 }, isAdmin: true }) }))
+const admin = vi.hoisted(() => ({ user: { id: 41 }, isAdmin: true }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => admin }))
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('@/components/admin/operations/SmartOpsNav.vue', () => ({ default: { template: '<nav />' } }))
 const providerRoute = '/admin/profit-operations/providers', snapshotRoute = '/admin/profit-operations/snapshot'
@@ -28,10 +29,14 @@ function readSnapshot(scope: OperationsQuery) {
 const get = vi.mocked(apiClient.get), put = vi.mocked(apiClient.put), post = vi.mocked(apiClient.post)
 let readProviders: (page: number) => Promise<ProfitProviderPage>
 let snapshot = readSnapshot
+const jobRoute = '/admin/providers/4/profit-charges/sync'
+let jobStatus: (url: string) => Promise<unknown>
 beforeEach(() => {
-  vi.resetAllMocks(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-20T16:30:00Z'))
+  admin.user.id = 41; localStorage.clear(); vi.resetAllMocks(); vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(new Date('2026-10-20T16:30:00Z'))
+  jobStatus = async () => ({ status: 'running' })
   snapshot = readSnapshot; readProviders = async () => readPage()
   get.mockImplementation(async (url, config) => {
+    if (/^\/admin\/providers\/\d+\/profit-charges\/sync\//.test(url)) return { data: await jobStatus(url) }
     if (url === providerRoute) return { data: await readProviders(config?.params.page) }
     if (url === snapshotRoute) return { data: snapshot(config?.params) }
     if (url === '/admin/upstream-channels') return { data: { items: [], total: 0 } }
@@ -127,14 +132,134 @@ it('syncs only an eligible Sub2API row using the applied dates, prevents double 
   const w = open(); await flushPromises(); await w.get('[data-testid="yesterday-filter"]').trigger('click'); await flushPromises()
   const { from, until } = scope(); await w.get('input[type="datetime-local"]').setValue('2026-10-01T00:00'); expect(post).not.toHaveBeenCalled()
   expect(w.findAll('[data-testid="sync-bill"]')).toHaveLength(1); expect(w.text()).toContain(enProfit.syncUnsupported)
-  let done!: (v: { data: { matched: number; unmatched: number } }) => void
-  post.mockImplementationOnce(() => new Promise(resolve => { done = resolve }))
+  let accepted!: (v: { data: { job_id: string } }) => void
+  post.mockImplementationOnce(() => new Promise(resolve => { accepted = resolve }))
   const act = w.get('[data-testid="sync-bill"]'); await act.trigger('click'); await act.trigger('click')
-  expect(post).toHaveBeenCalledTimes(1); expect(post).toHaveBeenCalledWith('/admin/providers/4/profit-charges/sync', { from, until }, { timeout: 55_000 })
-  done({ data: { matched: 0, unmatched: 3 } }); await flushPromises(); expect(w.get('[role="status"]').text()).toContain('Alpha: 0 matched, 3 unmatched'); expect(w.get('[role="status"]').text()).toContain(until)
+  expect(post).toHaveBeenCalledTimes(1); expect(post).toHaveBeenCalledWith(jobRoute, { from, until }, { params: { background: true } })
+  accepted({ data: { job_id: 'fixture-id' } }); await flushPromises()
+  expect(get).toHaveBeenCalledWith(`${jobRoute}/fixture-id`, { signal: expect.anything() })
+  expect(act.attributes('disabled')).toBeDefined(); expect(w.get('[role="status"]').text()).toContain('background')
+  expect(w.get('[data-testid="refresh-operations"]').attributes('disabled')).toBeUndefined()
+  let finish!: (result: unknown) => void
+  jobStatus = () => new Promise(resolve => { finish = resolve })
+  await vi.advanceTimersByTimeAsync(60_000)
+  expect(get.mock.calls.filter(([url]) => url === `${jobRoute}/fixture-id`)).toHaveLength(2) // no overlapping polls
+  finish({ status: 'succeeded', matched: 0, unmatched: 3 }); await flushPromises()
+  expect(w.get('[role="status"]').text()).toContain('Alpha: 0 matched, 3 unmatched'); expect(w.get('[role="status"]').text()).toContain(until)
   expect(scope()).toMatchObject({ from, until }); expect(get.mock.calls.filter(([url]) => url === snapshotRoute)).toHaveLength(3)
-  post.mockRejectedValueOnce(new Error('fixture unavailable')); await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
-  expect(w.get('[role="alert"]').text()).toContain('Could not confirm the sync'); expect(w.text()).not.toContain('0 matched'); w.unmount()
+  expect(w.get('[data-testid="sync-bill"]').attributes('disabled')).toBeUndefined(); expect(post).toHaveBeenCalledTimes(1); w.unmount()
+})
+
+it.each(['upstream', 'timeout', 'conflict', 'simple_mode', 'evidence_budget', 'internal', 'Bearer fake-private-text'] as const)('shows only local advice after a late job failure: %s', async reason => {
+  const w = open('zh'); await flushPromises()
+  post.mockResolvedValue({ data: { job_id: 'late-failure' } })
+  await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  expect(w.get('[role="status"]').text()).toBe(zhProfit.syncing)
+  jobStatus = async () => ({ status: 'failed', reason, message: 'fake-private-text', matched: 1234 })
+  await vi.advanceTimersByTimeAsync(60_000); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toBe(zhProfit.syncFailure[reason === 'Bearer fake-private-text' ? 'internal' : reason])
+  expect(w.text()).not.toMatch(/fake-private-text|1234/); expect(w.find('[role="status"]').exists()).toBe(false)
+  expect(post).toHaveBeenCalledTimes(1); expect(get.mock.calls.filter(([url]) => url === snapshotRoute)).toHaveLength(1)
+  w.unmount()
+})
+
+it('retries a lost status read with GET only and treats 404 as expired', async () => {
+  const w = open(); await flushPromises()
+  post.mockResolvedValue({ data: { job_id: 'interrupted' } })
+  jobStatus = async () => { throw { status: 503, message: 'fake-private-text' } }
+  await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toBe(enProfit.syncDisconnected)
+  expect(w.get('[data-testid="sync-bill"]').text()).toBe(enProfit.syncCheck)
+  jobStatus = async () => { throw { status: 404 } }
+  await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toBe(enProfit.syncExpired); expect(w.get('[data-testid="sync-bill"]').text()).toBe(enProfit.syncCharges)
+  expect(post).toHaveBeenCalledTimes(1); expect(get.mock.calls.filter(([url]) => url === `${jobRoute}/interrupted`)).toHaveLength(2)
+  expect(w.text()).not.toContain('fake-private-text'); w.unmount()
+  const reopened = open(); await flushPromises(); expect(get.mock.calls.filter(([url]) => url === `${jobRoute}/interrupted`)).toHaveLength(2); reopened.unmount()
+})
+
+it('shows actionable admission errors without echoing the response or polling', async () => {
+  const w = open(); await flushPromises()
+  post.mockRejectedValueOnce({ status: 429, message: 'fake-private-text' })
+  await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toBe(enProfit.syncBusy)
+  post.mockRejectedValueOnce({ status: 503, message: 'fake-private-text' })
+  await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  expect(w.get('[role="alert"]').text()).toBe(enProfit.syncUnconfirmed); expect(w.text()).not.toContain('fake-private-text')
+  expect(get.mock.calls.filter(([url]) => url.includes('/profit-charges/'))).toHaveLength(0); w.unmount()
+})
+
+it('resumes the saved job and exact dates on reopen without trusting a late reply after unmount', async () => {
+  const w = open(); await flushPromises()
+  const { from, until } = scope()
+  let finish!: (result: unknown) => void
+  jobStatus = () => new Promise(resolve => { finish = resolve })
+  post.mockResolvedValueOnce({ data: { job_id: 'reopen', private: 'fake-private-text' } })
+  await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  const signal = get.mock.calls.find(([url]) => url === `${jobRoute}/reopen`)![1]!.signal!
+  expect(JSON.stringify(localStorage)).not.toContain('fake-private-text'); w.unmount(); expect(signal.aborted).toBe(true)
+  finish({ status: 'succeeded', matched: 77, unmatched: 88 }); await flushPromises(); await vi.advanceTimersByTimeAsync(60_000)
+  expect(get.mock.calls.filter(([url]) => url === snapshotRoute)).toHaveLength(1)
+  jobStatus = async () => ({ status: 'running' })
+  admin.user.id = 42
+  const otherAdmin = open(); await flushPromises()
+  expect(otherAdmin.find('[role="status"]').exists()).toBe(false); expect(scope().until).not.toBe(until)
+  expect(get.mock.calls.filter(([url]) => url === `${jobRoute}/reopen`)).toHaveLength(1); otherAdmin.unmount()
+  admin.user.id = 41
+  const reopened = open(); await flushPromises()
+  expect(scope()).toMatchObject({ from, until }); expect(get.mock.calls.filter(([url]) => url === `${jobRoute}/reopen`)).toHaveLength(2)
+  expect(reopened.get('[role="status"]').text()).toBe(enProfit.syncing); expect(reopened.text()).not.toContain('77 matched')
+  reopened.unmount(); await vi.advanceTimersByTimeAsync(60_000)
+  expect(get.mock.calls.filter(([url]) => url === `${jobRoute}/reopen`)).toHaveLength(2); expect(post).toHaveBeenCalledTimes(1)
+})
+
+it('keeps an admission in flight across navigation and polls only from the remounted view', async () => {
+  const w = open(); await flushPromises()
+  let accept!: (result: { data: { job_id: string } }) => void
+  post.mockImplementationOnce(() => new Promise(resolve => { accept = resolve }))
+  await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises(); w.unmount()
+  const reopened = open(); await flushPromises(); await reopened.get('[data-testid="sync-bill"]').trigger('click')
+  expect(post).toHaveBeenCalledTimes(1)
+  accept({ data: { job_id: 'accepted-after-leaving' } }); await flushPromises()
+  expect(reopened.get('[role="status"]').text()).toBe(enProfit.syncing)
+  expect(get.mock.calls.filter(([url]) => url === `${jobRoute}/accepted-after-leaving`)).toHaveLength(1); reopened.unmount()
+})
+
+it('does not start a sync on reload if the admission response was lost; retry uses the original dates', async () => {
+  const w = open(); await flushPromises()
+  const { from, until } = scope()
+  post.mockRejectedValueOnce({ status: 0 })
+  await w.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises(); w.unmount()
+  await vi.advanceTimersByTimeAsync(60_000)
+  const reopened = open(); await flushPromises()
+  expect(scope()).toMatchObject({ from, until }); expect(reopened.get('[role="alert"]').text()).toBe(enProfit.syncUnconfirmed)
+  expect(post).toHaveBeenCalledTimes(1)
+  post.mockResolvedValueOnce({ data: { job_id: 'reused' } })
+  jobStatus = async () => ({ status: 'succeeded' })
+  await reopened.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  expect(post.mock.calls[1]).toEqual(post.mock.calls[0]); expect(reopened.get('[role="status"]').text()).toBe(enProfit.syncComplete)
+  expect(reopened.text()).not.toContain('0 matched'); reopened.unmount()
+})
+
+it('never puts a late status in another provider row or date window', async () => {
+  snapshot = q => { const data = readSnapshot(q); data.usage.rows.push({ ...providerRow, key: 'channel:28', channel_id: 28, provider_id: 9, name: 'Beta' }); return data }
+  const w = open(); await flushPromises()
+  const acceptA = { data: { job_id: 'a' } }, acceptB = { data: { job_id: 'b' } }
+  post.mockResolvedValueOnce(acceptA).mockResolvedValueOnce(acceptB)
+  let finishA!: (v: unknown) => void, finishB!: (v: unknown) => void
+  jobStatus = url => new Promise(resolve => { if (url === `${jobRoute}/a`) finishA = resolve; else finishB = resolve })
+  const rows = w.findAll('[data-testid="profit-drilldown"] tbody tr')
+  await rows[0]!.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  expect(rows[1]!.find('[role="status"]').exists()).toBe(false)
+  await rows[1]!.get('[data-testid="sync-bill"]').trigger('click'); await flushPromises()
+  finishB({ status: 'failed', reason: 'conflict' }); await flushPromises()
+  expect(rows[1]!.get('[role="alert"]').text()).toBe(enProfit.syncFailure.conflict)
+  expect(rows[0]!.find('[role="alert"]').exists()).toBe(false)
+  await w.get('[data-testid="yesterday-filter"]').trigger('click'); await flushPromises()
+  finishA({ status: 'succeeded', matched: 111, unmatched: 222 }); await flushPromises()
+  expect(w.find('[role="status"]').exists()).toBe(false); expect(w.find('[role="alert"]').exists()).toBe(false)
+  expect(w.text()).not.toContain('111 matched'); expect(get.mock.calls.filter(([url]) => url === snapshotRoute)).toHaveLength(2)
+  w.unmount()
 })
 
 it('still lets an admin page through channel links without requesting wallet data to render the report', async () => {

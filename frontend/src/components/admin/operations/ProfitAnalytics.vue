@@ -26,8 +26,6 @@
           <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.profitOperationsTimeRanges" :user-id="auth.user?.id" />
         </div>
       </form>
-      <p v-if="syncMessage" role="status" class="text-sm">{{ syncMessage }}</p>
-      <p v-if="syncError" role="alert" class="text-sm text-red-600">{{ syncError }}</p>
       <p v-if="error" role="alert" class="text-red-600">{{ error }}</p><p v-if="loading" role="status">{{ t('profitOps.loading') }}</p>
       <template v-if="snapshot && !error">
         <p class="break-words text-xs text-gray-500" data-testid="applied-scope">{{ snapshot.scope.from }} ≤ t &lt; {{ snapshot.scope.until }} · <span v-if="applied.channel_id" data-testid="profit-current-channel">{{ t('profitOps.entityScope') }} #{{ applied.channel_id }} · </span>{{ snapshot.currency }} · {{ t('profitOps.queried') }} {{ snapshot.queried_at }}</p>
@@ -53,7 +51,10 @@
                 </th>
                 <td v-for="key in amountKeys" :key="key" class="whitespace-nowrap p-2 tabular-nums"><span v-if="metricLabel(key, row) !== metricLabel(key, snapshot.usage.summary)" class="block text-xs text-gray-500">{{ metricLabel(key, row) }}</span><span :data-field="key">{{ formatMetric(row, key) }}</span></td>
                 <td class="p-2"><span data-testid="cost-source">{{ sourceLabel(row) }}</span>
-                  <button v-if="canSync(row)" type="button" class="block text-primary-600 underline" data-testid="sync-bill" :title="t('profitOps.syncWindow')" :disabled="syncing" @click="sync(row)">{{ t('profitOps.syncCharges') }}</button>
+                  <template v-if="canSync(row)">
+                    <button type="button" class="block text-primary-600 underline" data-testid="sync-bill" :title="t('profitOps.syncWindow')" :disabled="syncState(row)?.busy" @click="sync(row)">{{ t(syncState(row)?.message === 'syncDisconnected' ? 'profitOps.syncCheck' : 'profitOps.syncCharges') }}</button>
+                    <p v-if="syncState(row)" :role="syncState(row)?.error ? 'alert' : 'status'" class="mt-1 text-xs" :class="{ 'text-red-600': syncState(row)?.error }">{{ syncText(row) }}</p>
+                  </template>
                   <span v-else-if="row.provider_site_type === 'newapi' && row.bill_requests < row.supplier_requests" class="block text-xs text-gray-500">{{ t('profitOps.syncUnsupported') }}</span>
                 </td>
                 <td>{{ number(row.p50_ms, 0) }} / {{ number(row.p90_ms, 0) }} / {{ number(row.p95_ms, 0) }}<span class="block text-xs">{{ t('profitOps.samples') }} {{ row.samples }} / {{ t('profitOps.unknown') }} {{ row.unknown_samples }}</span></td><td>{{ number(row.duration_p90_ms,0) }}</td>
@@ -81,7 +82,8 @@ import { useAuthStore } from '@/stores/auth'
 import SmartOpsNav from './SmartOpsNav.vue'
 import UpstreamChannelManager from './UpstreamChannelManager.vue'
 import ProfitProviders from './ProfitProviders.vue'
-import { readProfitOperations, syncProfitCharges, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
+import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
+import { useProfitSync } from '@/composables/useProfitSync'
 const { t } = useI18n()
 const auth = useAuthStore()
 const amountKeys = ['requests','standard_charge','request_income','upstream_cost','gross_profit','gross_margin'] as const
@@ -116,22 +118,19 @@ function formatMetric(m: ProfitMetrics, key: Metric) {
  if (key === 'gross_margin') return m.gross_margin == null || !Number.isFinite(m.gross_margin) ? t('profitOps.unknown') : `${(m.gross_margin * 100).toFixed(2)}%`
  return number(m[key], key === 'requests' ? 0 : 6)
 }
-const syncing = ref(false), syncMessage = ref(''), syncError = ref('')
+const billSync = useProfitSync(auth.isAdmin ? auth.user?.id : undefined, dates => {
+ if (applied.value.from === dates.from && applied.value.until === dates.until) void load()
+})
 function canSync(row: OperationsRow) {
  return auth.isAdmin && applied.value.dimension === 'upstream' && Number.isSafeInteger(row.provider_id) && Number(row.provider_id) > 0 && row.provider_site_type === 'sub2api'
 }
-async function sync(row: OperationsRow) {
- if (!canSync(row) || !row.provider_id || syncing.value) return
- const { from, until } = applied.value
- syncing.value = true; syncError.value = ''; syncMessage.value = t('profitOps.syncing', { provider: row.name })
- try {
-  const counts = await syncProfitCharges(row.provider_id, { from, until })
-  if (!alive) return
-  if (![counts?.matched, counts?.unmatched].every(n => Number.isSafeInteger(n) && n >= 0)) throw new Error('Missing sync counts')
-  syncMessage.value = t('profitOps.syncResult', { provider: row.name, ...counts, from, until })
-  await load()
- } catch { if (alive) { syncMessage.value = ''; syncError.value = t('profitOps.syncFailed', { provider: row.name }) } }
- finally { syncing.value = false }
+function syncState(row: OperationsRow) { return billSync.state(row.provider_id, applied.value) }
+function syncText(row: OperationsRow) {
+ const job = syncState(row)
+ return job ? t(`profitOps.${job.message}`, { provider: row.name, from: job.from, until: job.until, matched: job.matched, unmatched: job.unmatched }) : ''
+}
+function sync(row: OperationsRow) {
+ if (canSync(row) && row.provider_id) void billSync.sync(row.provider_id, applied.value)
 }
 async function load() {
  const id=++request; controller?.abort(); controller=new AbortController(); loading.value=true; error.value=''; snapshot.value=null
@@ -186,6 +185,13 @@ function drill(row:OperationsRow){if(applied.value.dimension==='upstream'){const
 function selectUpstream(key:string,channelID=0){applied.value={...applied.value,upstream:channelID?'':key,channel_id:channelID,account_id:0,dimension:'account',page:1};draft.value={...applied.value};void load()}
 function selectAccount(id:number){applied.value={...applied.value,account_id:id,dimension:'model',page:1};draft.value={...applied.value};void load()}
 function overview(){applied.value={...applied.value,upstream:'',channel_id:0,account_id:0,dimension:'upstream',page:1};draft.value={...applied.value};void load()}
-onMounted(load)
+onMounted(() => {
+ const dates = billSync.restore()
+ if (dates) {
+  applied.value = { ...applied.value, ...dates }; draft.value = { ...applied.value }
+  from.value = local(new Date(dates.from)); until.value = local(new Date(dates.until))
+ }
+ void load()
+})
 onBeforeUnmount(()=>{alive=false;request++;controller?.abort()})
 </script>
