@@ -43,6 +43,17 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Feature-specific execution with test event evidence
         run: python3 .github/scripts/upstream-v0222-acceptance.py '${{ matrix.mode }}'
+      - name: Candidate allocation benchmarks and in-process legacy controls
+        if: ${{ !cancelled() && matrix.mode == 'unit' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          go version > "$EVIDENCE_DIR/benchmark-environment.txt"
+          lscpu >> "$EVIDENCE_DIR/benchmark-environment.txt"
+          cd backend
+          go test -tags=unit ./internal/service ./internal/repository -run '^$' -bench '^Benchmark(EnforceCacheControlLimit|RequestToolHelpers|ClaudeMimicDebugLine|SchedulerRebuildBatchQueryReuse|SchedulerCacheAccountPayloadReuse)$' -benchmem -benchtime=500ms -count=3 2>&1 | tee "$EVIDENCE_DIR/benchmarks.log"
+          # These are fixture microbenchmarks, not production load or p95 claims.
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -83,6 +94,7 @@ jobs:
           mapfile -t specs < <(python3 .github/scripts/upstream-v0222-acceptance.py frontend-list)
           pnpm --dir frontend exec vitest run "${specs[@]}" --maxWorkers=1 --minWorkers=1 --no-file-parallelism --reporter=default --reporter=json --outputFile="$GITHUB_WORKSPACE/evidence/frontend.json" 2>&1 | tee evidence/frontend.log
       - name: Build actual frontend for production embedding
+        id: frontend-build
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
@@ -90,8 +102,10 @@ jobs:
           mkdir -p backend/internal/web/dist
           cp -a frontend/dist/. backend/internal/web/dist/
       - name: Embedded HTML cache and nonce contract
+        if: ${{ !cancelled() && steps.frontend-build.outcome == 'success' }}
         run: python3 .github/scripts/upstream-v0222-acceptance.py embed
       - name: Production embed binary and build identity
+        if: ${{ !cancelled() && steps.frontend-build.outcome == 'success' }}
         run: |
           set -euo pipefail
           cd backend

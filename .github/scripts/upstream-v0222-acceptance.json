@@ -2171,7 +2171,13 @@
       "734b922bd8e71b33ff34901c1601d49afa8dbc3d"
     ],
     "scope_gate": "账号测试默认claude-sonnet-4-6 + 显式模型不覆盖",
-    "tests": [],
+    "tests": [
+      {
+        "name": "TestAccountTestService_ClaudeDefaultAndExplicitModelsReachUpstream",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
     "frontend": []
   },
   {
