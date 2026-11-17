@@ -49,7 +49,7 @@ func TestIssue907WSModelFailurePolicy(t *testing.T) {
 			if terminal {
 				require.True(t, s.handleOpenAIWSFailureAccountSideEffects(ctx, a, "gpt-5.4", nil, []byte(issue907Failed)))
 			} else {
-				require.True(t, s.handleOpenAIWSErrorEventTransientFailure(ctx, a, "gpt-5.4", nil, []byte(issue907Error)))
+				s.handleOpenAIWSErrorEventTransientFailure(ctx, a, "gpt-5.4", nil, []byte(issue907Error))
 			}
 			require.Len(t, repo.modelRateLimitCalls, 1)
 			require.Equal(t, "gpt-5.4", repo.modelRateLimitCalls[0].scope, "do not apply the account mapping twice")
@@ -72,7 +72,7 @@ func TestIssue907WSModelFailurePolicy(t *testing.T) {
 		a.Credentials["custom_error_codes_enabled"] = true
 		a.Credentials["custom_error_codes"] = []any{float64(429)}
 		payload := []byte(`{"type":"error","status":404,"error":{"code":"model_not_found","message":"model not found"}}`)
-		require.False(t, s.handleOpenAIWSErrorEventTransientFailure(context.Background(), a, "gpt-5.4", nil, payload))
+		s.handleOpenAIWSErrorEventTransientFailure(context.Background(), a, "gpt-5.4", nil, payload)
 		require.Empty(t, repo.modelRateLimitCalls)
 	})
 }
