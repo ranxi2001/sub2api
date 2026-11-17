@@ -29,8 +29,27 @@ jobs:
   regressions-and-evidence:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: sub2api_test
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d sub2api_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports: ['16379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       NODE_OPTIONS: --max-old-space-size=6144
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable
+      SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
       USER_LIVE_LOAD_BASE: 321f11c1a4d23302961c223ac030fd09e3f9e6e8
       USER_LIVE_LOAD_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:

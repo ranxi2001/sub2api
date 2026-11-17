@@ -25,6 +25,23 @@ jobs:
     name: Feature assertions (${{ matrix.mode }})
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: sub2api_test
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d sub2api_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports: ['16379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +49,8 @@ jobs:
     env:
       EVIDENCE_DIR: ${{ github.workspace }}/evidence/${{ matrix.mode }}
       CI: 'true'
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable
+      SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
     steps:
       - uses: actions/checkout@v6
         with:
