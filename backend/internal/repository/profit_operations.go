@@ -246,11 +246,12 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
 		dimension = `CASE $8 WHEN 'public' THEN public_model WHEN 'recorded' THEN model WHEN 'upstream' THEN COALESCE(upstream_model,'(unknown upstream model)') END`
 		name = dimension
 	}
-	// Freshness only. Cost still comes from matched request bills, not this timestamp.
+	// Freshness only. Join after grouping so provider_id in the aggregates stays
+	// unambiguous, and cost still comes from matched request bills.
 	syncFrom := ""
-	bucketsFrom := ` FROM priced GROUP BY `
+	order := f.Sort + " " + f.Direction + " NULLS LAST,key ASC"
+	rowQuery := `SELECT * FROM buckets ORDER BY ` + order
 	if channelFields != "" {
-		channelFields += `,max(bill_sync.bills_synced_at) AS bills_synced_at`
 		syncFrom = `, bill_sync AS (
  SELECT provider_id, max(mark_at) AS bills_synced_at FROM (
   SELECT provider_id, synced_at AS mark_at FROM provider_profit_sync_runs
@@ -259,13 +260,12 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
   SELECT provider_id, captured_at FROM provider_profit_charges
   WHERE local_created_at >= $1 AND local_created_at < $2
  ) marks GROUP BY provider_id)`
-		bucketsFrom = ` FROM priced LEFT JOIN bill_sync ON bill_sync.provider_id = priced.provider_id GROUP BY `
+		rowQuery = `SELECT buckets.*, bill_sync.bills_synced_at FROM buckets LEFT JOIN bill_sync ON bill_sync.provider_id = buckets.provider_id ORDER BY ` + order
 	}
-	order := f.Sort + " " + f.Direction + " NULLS LAST,key ASC"
 	// Sort and direction are strictly validated before SQL construction.
-	query := profitOperationsBase + syncFrom + `, buckets AS (SELECT ` + dimension + ` AS key,` + name + ` AS name,` + profitOperationsAggregate + channelFields + bucketsFrom + dimension + `), summary AS (SELECT ` + profitOperationsAggregate + ` FROM priced)
+	query := profitOperationsBase + syncFrom + `, buckets AS (SELECT ` + dimension + ` AS key,` + name + ` AS name,` + profitOperationsAggregate + channelFields + ` FROM priced GROUP BY ` + dimension + `), summary AS (SELECT ` + profitOperationsAggregate + ` FROM priced)
  SELECT jsonb_build_object('summary',(SELECT to_jsonb(s) FROM summary s),'total',(SELECT count(*) FROM buckets),
- 'rows',COALESCE((SELECT jsonb_agg(to_jsonb(b)) FROM (SELECT * FROM buckets ORDER BY ` + order + ` LIMIT $9 OFFSET $10)b),'[]'::jsonb),
+ 'rows',COALESCE((SELECT jsonb_agg(to_jsonb(b)) FROM (` + rowQuery + ` LIMIT $9 OFFSET $10)b),'[]'::jsonb),
  'accounts',COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM (SELECT id,name,key,attribution,updated_at,deleted,multiplier,cost_basis,url_key,channel_id,channel_name,channel_code,channel_remark,channel_revision,assignment FROM accounts_config WHERE id IN (SELECT account_id FROM scoped) OR ($5::bigint>0 AND id IN (SELECT id FROM cohort)) ORDER BY id LIMIT 100)c),'[]'::jsonb),
  'members',COALESCE((SELECT jsonb_agg(to_jsonb(m)) FROM (SELECT id,name,key,attribution,updated_at,deleted,multiplier,cost_basis,url_key,channel_id,channel_name,channel_code,channel_remark,channel_revision,assignment,schedulable,concurrency,status FROM cohort c WHERE ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6)) ORDER BY id LIMIT $9 OFFSET $10)m),'[]'::jsonb),
  'member_total',(SELECT count(*) FROM cohort c WHERE ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),

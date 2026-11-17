@@ -9,9 +9,11 @@ CREATE TABLE provider_profit_sync_runs (
     synced_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     matched BIGINT NOT NULL CHECK (matched >= 0),
     unmatched BIGINT NOT NULL CHECK (unmatched >= 0),
-    PRIMARY KEY (provider_id, window_from, window_until),
-    CHECK (window_from < window_until)
+    PRIMARY KEY (provider_id, window_from, window_until)
 );
+-- No window_from < window_until check. PostgreSQL timestamptz is microsecond
+-- precision, so a valid sub-microsecond Go window can round to equal bounds.
+-- Rejecting that insert would roll back an otherwise complete charge reconcile.
 
 -- Supports the report's "charges captured inside this window" freshness lookup.
 CREATE INDEX provider_profit_charge_local_captured

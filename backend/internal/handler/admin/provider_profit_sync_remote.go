@@ -382,7 +382,9 @@ func (s *profitUsageScan) observe(row map[string]any) error {
 	}
 	billing, ok := profitInt(row["billing_type"])
 	sub, subOK := profitInt(row["subscription_id"])
-	if !ok || !(billing == int64(service.BillingTypeBalance) && row["subscription_id"] == nil || billing == int64(service.BillingTypeSubscription) && subOK && sub > 0) {
+	balanceBill := billing == int64(service.BillingTypeBalance) && row["subscription_id"] == nil
+	subscriptionBill := billing == int64(service.BillingTypeSubscription) && subOK && sub > 0
+	if !ok || (!balanceBill && !subscriptionBill) {
 		return nil
 	}
 	amount, ok := profitDecimal(row["actual_cost"])

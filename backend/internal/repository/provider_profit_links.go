@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -71,7 +72,12 @@ func (r *channelRepository) ListProviderProfitLinks(ctx context.Context, page, s
 
 func isProviderProfitForeignKeyViolation(err error) bool {
 	var p *pq.Error
-	return errors.As(err, &p) && p.Code == "23503"
+	if errors.As(err, &p) && (p.Code == "23503" || p.Code == "23001" || strings.HasPrefix(p.Constraint, "provider_profit_")) {
+		return true
+	}
+	// PostgreSQL 18 reports ON DELETE RESTRICT as restrict_violation (23001).
+	// Match the constraint text if the driver does not surface that code.
+	return err != nil && strings.Contains(err.Error(), "provider_profit_links_channel_id_fkey")
 }
 
 func (r *channelRepository) SetProviderProfitLink(ctx context.Context, id int64, m service.ProviderProfitLinkMutation) (*service.ProviderProfitLink, error) {

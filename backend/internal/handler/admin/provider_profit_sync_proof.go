@@ -11,6 +11,8 @@ import (
 // Separate from usage-bill synchronization. If settlement evidence is requested,
 // only a first-batch 404/405 denotes an unsupported endpoint; a partial or
 // invalid lookup cannot prove settlement.
+//
+//nolint:unused // settlement lookup is intentionally unwired; wallet debits are not a bill source
 func readProviderProfitProofs(ctx context.Context, s *providerSession, rows []service.ProviderProfitRemoteCharge) error {
 	for start := 0; start < len(rows); start += 100 {
 		batch := rows[start:min(start+100, len(rows))]
