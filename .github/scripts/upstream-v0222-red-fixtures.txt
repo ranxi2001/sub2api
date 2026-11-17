@@ -10,6 +10,7 @@ backend/internal/handler/gateway_helper_ping_test.go
 backend/internal/handler/gateway_sticky_writeback_test.go
 backend/internal/handler/grok_media_errors_test.go
 backend/internal/handler/openai_codex_call_output_gate_test.go
+backend/internal/handler/openai_codex_page_context_test.go
 backend/internal/handler/openai_gateway_messages_pre_content_failover_test.go
 backend/internal/handler/openai_native_anthropic_endpoint_test.go
 backend/internal/handler/openai_page_context_test.go

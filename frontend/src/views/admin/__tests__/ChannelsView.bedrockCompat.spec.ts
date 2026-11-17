@@ -1,4 +1,5 @@
 import { defineComponent } from 'vue'
+import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, CreateChannelRequest, UpdateChannelRequest } from '@/api/admin/channels'
@@ -31,6 +32,7 @@ vi.mock('vue-i18n', async () => ({
 function mountView() {
   return mount(ChannelsView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         AppLayout: defineComponent({ template: '<main><slot /></main>' }),
         TablePageLayout: defineComponent({

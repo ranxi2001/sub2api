@@ -368,10 +368,10 @@ func (h prefixHook) prefixCmd(cmd redisclient.Cmder) {
 
 	switch strings.ToLower(cmd.Name()) {
 	case "get", "getset", "set", "setnx", "setex", "psetex", "incr", "decr", "incrby", "expire", "pexpire", "ttl", "pttl",
-		"hgetall", "hget", "hset", "hdel", "hincrbyfloat", "exists",
+		"hgetall", "hget", "hset", "hdel", "hincrbyfloat",
 		"zadd", "zcard", "zrange", "zrangebyscore", "zrem", "zremrangebyscore", "zrevrange", "zrevrangebyscore", "zscore":
 		prefixOne(1)
-	case "mget":
+	case "mget", "exists":
 		for i := 1; i < len(args); i++ {
 			prefixOne(i)
 		}

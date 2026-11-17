@@ -14,15 +14,7 @@ import (
 // items without a corresponding model call. Preserve their text as user context
 // before ordinary tool-output validation, including when replaying tool history.
 // Unrecognized outputs and items carrying a call identity remain untouched.
-func normalizeCodexPageContext(body []byte) ([]byte, bool) {
-	return normalizeCodexContext(body, false)
-}
-
 func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
-	return normalizeCodexContext(body, true)
-}
-
-func normalizeCodexContext(body []byte, additional bool) ([]byte, bool) {
 	if !mayContainCodexCallOutputCandidate(body, "codex_apps_open_page", "codex_apps_selected_page_part_", "browser_info", "goal_objective", "untrusted_context") {
 		return body, false
 	}
@@ -32,7 +24,7 @@ func normalizeCodexContext(body []byte, additional bool) ([]byte, bool) {
 	}
 	hasContext := false
 	input.ForEach(func(_, item gjson.Result) bool {
-		hasContext = isCodexContext(item, additional)
+		hasContext = isCodexContext(item)
 		return !hasContext
 	})
 	if !hasContext || !hasUniqueJSONMembers(body) {
@@ -41,7 +33,7 @@ func normalizeCodexContext(body []byte, additional bool) ([]byte, bool) {
 	var items []json.RawMessage
 	changed := false
 	input.ForEach(func(_, item gjson.Result) bool {
-		if !isCodexContext(item, additional) {
+		if !isCodexContext(item) {
 			items = append(items, json.RawMessage(item.Raw))
 			return true
 		}
@@ -77,9 +69,7 @@ func normalizeCodexContext(body []byte, additional bool) ([]byte, bool) {
 	return normalized, true
 }
 
-func isCodexPageContext(item gjson.Result) bool { return isCodexContext(item, false) }
-
-func isCodexContext(item gjson.Result, additional bool) bool {
+func isCodexContext(item gjson.Result) bool {
 	if item.Get("type").String() != "function_call_output" || item.Get("namespace").String() != "agent" {
 		return false
 	}
@@ -94,7 +84,7 @@ func isCodexContext(item gjson.Result, additional bool) bool {
 		return false
 	}
 	name := item.Get("name").String()
-	if additional && (name == "browser_info" || name == "goal_objective" || name == "untrusted_context") {
+	if name == "browser_info" || name == "goal_objective" || name == "untrusted_context" {
 		return strings.TrimSpace(output.String()) != ""
 	}
 	if name == "codex_apps_open_page" {
