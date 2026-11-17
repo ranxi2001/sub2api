@@ -189,14 +189,22 @@ type OpsRecoveryFailure struct {
 	RequestWritten *bool // nil means no proof of whether the generation was sent
 }
 
+// OpsUpstreamWSFailure is set at the native upstream socket boundary, never
+// inferred from an error code. HTTP 101 is not an upstream business status.
+type OpsUpstreamWSFailure struct {
+	Phase     string
+	CloseCode int
+}
+
 // OpsStreamError 描述承载在 2xx 响应上的带内错误：网关在响应状态已固化为 200 之后
 // 就地以 SSE error 帧返回的错误（并发限流回退、Wait 后二次计费校验失败、流开始后才无
 // 可用账号等），以及上游 2xx 正文或事件里携带的错误结果（NonStream 标记非流式正文）。
 // 由于 HTTP 状态码停留在 2xx，ops_error_logger 中间件在 status<400 分支消费该标记并
 // 补记错误日志；标记方是 handler.handleStreamingAwareError 或各 service 的带内检测。
 type OpsStreamError struct {
-	RecoveryFailure  *OpsRecoveryFailure
-	TransportFailure *OpsTransportFailure
+	UpstreamWSFailure *OpsUpstreamWSFailure
+	RecoveryFailure   *OpsRecoveryFailure
+	TransportFailure  *OpsTransportFailure
 	// BridgeFailure is set only by the local BPS conversion boundary. It keeps
 	// real upstream HTTP evidence while assigning failure ownership to gateway.
 	BridgeFailure *basispoints.BridgeFailure

@@ -1593,7 +1593,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
 				if msgType == coderws.MessageText && writeErr == nil {
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
-					markOpenAIWSClientVisibleFailure(c, eventType, payload)
+					markOpenAIWSClientVisibleFailure(c, eventType, payload, &OpsUpstreamWSFailure{Phase: "upstream_event"})
 				}
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
@@ -1798,6 +1798,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		turnCount,
 	)
 
+	// The relay has joined both directions; snapshot the real upstream close
+	// before handler cleanup or generic client-request classification loses it.
+	if relayExit.Stage == "read_upstream" && activeTurn.Load() != 0 {
+		markOpenAIWSUpstreamClose(c, relayExit.Err)
+	}
 	relayErr := relayExit.Err
 	var firstOutputTimeoutErr *openAIWSPassthroughFirstOutputTimeoutError
 	if errors.As(relayErr, &firstOutputTimeoutErr) {
@@ -1962,10 +1967,7 @@ func openaiwsv2RelayMessageTypeName(msgType coderws.MessageType) string {
 }
 
 func relayErrorText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
+	return openaiwsv2.ErrorStringForLog(err)
 }
 
 func openAIWSFirstTokenMsForLog(firstTokenMs *int) int {
