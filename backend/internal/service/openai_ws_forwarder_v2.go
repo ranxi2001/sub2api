@@ -1113,6 +1113,8 @@ readLoop:
 				}
 				result := resultWithUsage()
 				result.ObservedUsageOnError = true
+				result.ImageCount = imageCounter.Count()
+				result.ImageOutputSizes = imageCounter.Sizes()
 				return result, ErrOpenAIWSModelUnavailable
 			}
 			// A terminal event must be the final JSON document in its WS message.
