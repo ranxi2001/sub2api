@@ -7,6 +7,7 @@ export const NEW_FEATURE_NOTICES = {
   groupForceUltrafast: 'group-force-ultrafast-initial-announcement',
   passthroughModelFilter: 'openai-passthrough-model-filter-initial-announcement',
   vertexMultiRegion: 'vertex-multi-region-initial-announcement',
+  accountEditPlatform: 'account-edit-platform-initial-announcement',
   groupFreeUltrafast: 'group-free-ultrafast-initial-announcement',
   oauthAPIKeyDisposition: 'oauth-initial-apikey-disposition',
   matureProviders: 'mature-provider-operations-initial-announcement',

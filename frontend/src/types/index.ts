@@ -1823,6 +1823,7 @@ export interface AccountGroupBinding {
 }
 
 export interface UpdateAccountRequest {
+	platform?: AccountPlatform
   name?: string
   notes?: string | null
   type?: AccountType

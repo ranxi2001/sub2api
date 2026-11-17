@@ -1,5 +1,10 @@
 export default {
     accounts: {
+      platformSwitch: {
+        hint: 'Choose a platform compatible with this credential type. The API key and custom URL are retained; verify that the target supports this upstream.',
+        resetHint: 'Switching resets model mappings, platform-specific settings and incompatible groups. Review and save the target settings before synchronizing models or refreshing usage.',
+        boundCredentials: 'This authorization type or shadow account is bound to its platform. Create and authorize an account on the target platform.'
+      },
       timer: {
         "manage": "Scheduled tasks",
         "planType": "Task type",

@@ -472,6 +472,7 @@ type ShadowOptions struct {
 
 type UpdateAccountInput struct {
 	ProxyMode           string // 受限写入在验权后选择代理。
+	Platform            string // Empty preserves the existing platform.
 	Name                string
 	Notes               *string
 	Type                string // Account type: oauth, setup-token, apikey

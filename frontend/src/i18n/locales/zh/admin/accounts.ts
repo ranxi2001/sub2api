@@ -1,5 +1,10 @@
 export default {
     accounts: {
+      platformSwitch: {
+        hint: '可切换到兼容当前凭证类型的平台。API Key 和自定义地址保留，请确认目标平台支持该上游。',
+        resetHint: '切换后将重置模型映射、平台专属设置及不兼容分组。请检查目标平台配置，保存后再同步模型或刷新用量。',
+        boundCredentials: '当前授权类型或影子账号与平台绑定。请在目标平台新建账号并完成授权。'
+      },
       timer: {
         "manage": "定时任务",
         "planType": "任务类型",

@@ -48,7 +48,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       NODE_OPTIONS: --max-old-space-size=6144
-      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable&TimeZone=UTC
       SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
       USER_LIVE_LOAD_BASE: 321f11c1a4d23302961c223ac030fd09e3f9e6e8
       USER_LIVE_LOAD_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -81,6 +81,8 @@ jobs:
         working-directory: backend
         env:
           CI: 'true'
+          # Provision services before the race binary starts; the harness keeps
+          # the same migrations and integration assertions with these endpoints.
         run: |
           set -o pipefail
           go test -race -tags=integration ./internal/repository -run '^(TestUserLiveLoadRegional|TestRegionalAdmissionLiveExactTransferMigrationAndAbort)' -count=1 -v -timeout=12m 2>&1 | tee "$USER_LIVE_LOAD_EVIDENCE/integration.log"

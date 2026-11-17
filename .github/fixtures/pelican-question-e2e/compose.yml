@@ -18,7 +18,9 @@ services:
     # The stock entrypoint changes ownership before dropping privileges.
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U fixture -d fixture"]
+      # The entrypoint's temporary init server accepts Unix sockets before the
+      # final TCP listener starts. Match the application's actual connection.
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U fixture -d fixture"]
       interval: 2s
       timeout: 3s
       retries: 30

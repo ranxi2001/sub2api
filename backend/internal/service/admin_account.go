@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/accounttimer"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -647,6 +648,11 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
+	if input.Platform != "" && s.entClient != nil && dbent.TxFromContext(ctx) == nil {
+		return s.scopedAdminTransaction(ctx, id, false, func(txctx context.Context) (*Account, error) {
+			return s.UpdateAccount(txctx, id, input)
+		})
+	}
 	// This DTO edits account settings, not the scheduling permission. Dedicated
 	// single/bulk switch APIs carry manual intent; an ordinary edit must neither
 	// overwrite a concurrently executed timer nor cancel plans via inherited intent.
@@ -663,6 +669,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if err := prepareVertexAuthModeUpdate(account, input); err != nil {
+		return nil, err
+	}
+	if input.Platform != "" && input.Platform != account.Platform {
+		account, err = s.prepareAccountPlatformChange(ctx, account, input)
+		if err != nil {
+			return nil, err
+		}
+		ctx = WithAccountPlatformChange(ctx)
 	}
 	if (account.Platform == PlatformTypeSafe || account.Platform == PlatformMistral || account.Platform == PlatformQwen) && input.Type != "" && input.Type != AccountTypeAPIKey {
 		return nil, fmt.Errorf("%s accounts only support apikey credentials", account.Platform)
