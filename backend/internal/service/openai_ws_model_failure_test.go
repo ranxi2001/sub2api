@@ -157,6 +157,32 @@ func TestIssue907HTTPToWSModelFailure(t *testing.T) {
 	}
 }
 
+func TestIssue907LegacyWSBufferedProgressDoesNotAllowReplay(t *testing.T) {
+	for _, progress := range []string{
+		`{"type":"response.created","response":{"id":"resp_fixture907"}}`,
+		`{"type":"response.output_item.added","item":{"type":"function_call","call_id":"fixture_call","name":"lookup"}}`,
+	} {
+		t.Run(progress, func(t *testing.T) {
+			conn := &openAIWSCaptureConn{events: [][]byte{[]byte(progress), []byte(issue907Error)}}
+			s := wsSSETestService(t, &wsSSETestDialer{conn: conn}, &httpUpstreamRecorder{})
+			repo := &modelNotFoundAccountRepoStub{}
+			s.rateLimitService = &RateLimitService{accountRepo: repo}
+			a := wsSSETestAccount()
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			body := map[string]any{"model": "gpt-5.4", "stream": true, "input": "hello"}
+			_, err := s.forwardOpenAIWSV2(context.Background(), c, a, body, "", "", "fixture-token",
+				NewOpenAIWSProtocolResolver(s.cfg).Resolve(a), true, true, "gpt-5.4", "gpt-5.4", time.Now(), 1, "", new(bool))
+			require.Error(t, err)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover), "buffering progress is not proof that replay is safe")
+			require.Contains(t, w.Body.String(), "model_not_found")
+			issue907AssertCooldown(t, s, repo, a, "gpt-5.4")
+		})
+	}
+}
+
 func TestIssue907NativeWSModelFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {

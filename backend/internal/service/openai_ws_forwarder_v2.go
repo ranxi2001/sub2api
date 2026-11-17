@@ -960,7 +960,9 @@ readLoop:
 			}
 			eventCtx := openAIWSForwardStreamPhaseContext(openAI429LeaseObservation(ctx, lease), wsOutputStarted, message)
 			modelUnavailable := s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), message)
-			if modelUnavailable && !wroteDownstream && openAIWSModelFailureCanReplay(ctx, payloadAsJSONBytes(payload)) {
+			// Legacy SSE can buffer response.created/tool events before client output.
+			// Their presence must not grant a new model-error replay opportunity.
+			if modelUnavailable && !wroteDownstream && len(bufferedStreamEvents) == 0 && openAIWSModelFailureCanReplay(ctx, payloadAsJSONBytes(payload)) {
 				lease.MarkBroken()
 				return nil, s.newOpenAIWSModelFailoverError(account, message)
 			}
