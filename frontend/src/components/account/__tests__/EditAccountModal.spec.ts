@@ -152,6 +152,7 @@ const SelectStub = defineComponent({
 const GroupSelectorStub = defineComponent({
   name: 'GroupSelector',
   props: {
+    platform: { type: String, default: '' },
     modelValue: {
       type: Array,
       default: () => []
@@ -355,6 +356,74 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('keeps the target platform announcement independent, shared and persistent', async () => {
+    const noticeId = NEW_FEATURE_NOTICES.accountEditPlatform
+    localStorage.removeItem('sub2api:new-feature-notices:v1:41')
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useNewFeatureNoticeStore().dismiss(41, NEW_FEATURE_NOTICES.apiKeyModelPolicy)
+    const wrapper = mountModal()
+    await flushPromises()
+    const announcement = wrapper.findAllComponents(NewFeatureBadge).find(badge => badge.props('noticeId') === noticeId)!
+    expect(announcement.find('button').exists()).toBe(true)
+    const sibling = mount(NewFeatureBadge, { props: { noticeId, userId: 41 }, global: { plugins: [pinia] } })
+    await announcement.get('button').trigger('click')
+    expect(sibling.find('button').exists()).toBe(false)
+    wrapper.unmount()
+    sibling.unmount()
+    setActivePinia(createPinia())
+    const reloaded = mountModal()
+    await flushPromises()
+    expect(reloaded.get('[data-testid="edit-account-platform-section"]').find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+    const notices = useNewFeatureNoticeStore()
+    expect(notices.isDismissed(41, NEW_FEATURE_NOTICES.apiKeyModelPolicy)).toBe(true)
+    expect(notices.isDismissed(41, NEW_FEATURE_NOTICES.usageRateCard)).toBe(false)
+  })
+
+  it('switches API key platform and saves the target form without stale mappings or groups', async () => {
+    const account = { ...buildAccount(), group_ids: [10], extra: { openai_passthrough: true } }
+    updateAccountMock.mockReset().mockResolvedValue({ ...account, platform: 'anthropic' })
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-testid="edit-account-platform"]').setValue('anthropic')
+    await flushPromises()
+    expect(wrapper.getComponent({ name: 'GroupSelector' }).props('platform')).toBe('anthropic')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledWith(1, expect.objectContaining({
+      platform: 'anthropic', group_ids: [], credentials: expect.objectContaining({ base_url: 'https://api.openai.com' })
+    }))
+    const payload = updateAccountMock.mock.calls[0][1]
+    expect(payload.credentials.model_mapping).toBeUndefined()
+    expect(payload.extra.openai_passthrough).toBeUndefined()
+    expect(account.platform).toBe('openai')
+    expect(account.credentials.model_mapping).toEqual({ 'gpt-5.2': 'gpt-5.2' })
+  })
+
+  it('preserves common unsaved edits and restores the source platform when the dialog reopens', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('Renamed fixture')
+    await wrapper.get('[data-testid="edit-account-platform"]').setValue('gemini')
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-tour="edit-account-form-name"]').element.value).toBe('Renamed fixture')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="edit-account-platform"]').element.value).toBe('openai')
+  })
+
+  it('offers compatible Google service account platforms and explains platform-bound OAuth accounts', async () => {
+    const vertex = mountModal(buildVertexAccount())
+    await flushPromises()
+    expect(vertex.get('[data-testid="edit-account-platform"]').findAll('option').map(option => option.attributes('value'))).toEqual(['anthropic', 'gemini'])
+    const oauth = mountModal(buildOpenAIOAuthParentAccount())
+    await flushPromises()
+    expect(oauth.get('[data-testid="edit-account-platform"]').attributes('disabled')).toBeDefined()
+    expect(oauth.text()).toContain('admin.accounts.platformSwitch.boundCredentials')
+  })
+
   it.each(['agentIdentity', 'personalAccessToken', 'personal_access_token'])('keeps unsupported %s identities on the existing single proxy selector', async authMode => {
     const account = { ...buildOpenAIOAuthParentAccount(), proxy_id: 45, credentials: { auth_mode: authMode } }
     const wrapper = mountModal(account)

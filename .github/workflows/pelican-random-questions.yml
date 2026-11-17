@@ -137,7 +137,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose up --detach --no-build --pull never --wait --wait-timeout 180 postgres redis fake-upstream app
+          if ! docker compose up --detach --no-build --pull never --wait --wait-timeout 180 postgres redis fake-upstream app; then
+            # Emit only fixed diagnostic phrases, never full application logs,
+            # configuration, credentials or generated bootstrap values.
+            docker compose logs --no-color app | grep -Eo \
+              'Auto setup failed|Failed to load config|Failed to initialize logger|Failed to initialize application|Failed to start server|connection refused|connection reset by peer|server closed the connection unexpectedly|database system is starting up|database system is shutting down|SQLSTATE [A-Z0-9]{5}|permission denied|no space left on device' \
+              | sort -u > "$EVIDENCE_DIR/startup-diagnostics.txt" || true
+            cat "$EVIDENCE_DIR/startup-diagnostics.txt"
+            exit 1
+          fi
           docker compose exec -T postgres psql --username fixture --dbname fixture --set ON_ERROR_STOP=1 < seed.sql
           # Start the browser as a service (not `compose run` with a second network).
           docker compose up --detach --no-build --pull never browser
