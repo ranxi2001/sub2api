@@ -39,7 +39,7 @@ class GoTestRunnerTests(unittest.TestCase):
         captured, log = io.StringIO(), io.StringIO()
         with patch('sys.stdout', io.StringIO()):
             terminals = runner.collect(io.StringIO(raw), captured, log)
-        self.assertEqual(captured.getvalue(), raw)
+        self.assertEqual([json.loads(line) for line in captured.getvalue().splitlines()], events)
         self.assertEqual(log.getvalue(), 'make command\nfixture output\n')
         self.assertEqual([e['Action'] for e in terminals], ['pass', 'skip', 'fail'])
         report = {'suite': 'unit', 'shard': 0, 'total': 4, 'runs': [

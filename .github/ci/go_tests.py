@@ -28,13 +28,13 @@ def collect(stream, events, log):
     """Stream output without retaining test logs in memory; preserve raw JSON."""
     terminals = []
     for line in stream:
-        events.write(line)
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             print(line, end='', flush=True)
             log.write(line)
             continue
+        events.write(line)
         output = event.get('Output', '')
         if output:
             print(output, end='', flush=True)

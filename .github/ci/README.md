@@ -31,7 +31,7 @@ python3 -m unittest discover -s .github/ci -p 'test_*.py' -v
 
 每个 job 输出 summary 和保留 14 天的 `go-unit-<shard>-<attempt>` / `go-integration-<attempt>` artifact：
 
-- `*.jsonl`：原始 `go test -json` 事件流（含 make 命令行，解析时跳过非 JSON 行）。
+- `*.jsonl`：原始 `go test -json` 事件流，可直接使用 jq；make 命令回显等非 JSON 文本保留在 `.log` 中。
 - `*.log`：还原的测试输出；编译器 stderr 另见 Actions 日志。
 - `timings.json`、`summary.md`：命令墙钟时间、退出码、package / case 最慢 30 项、pass/fail/skip 计数。
 - `shards.json`：四片完整包列表，便于核对漏测或重新平衡。
