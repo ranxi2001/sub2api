@@ -49,7 +49,7 @@ func TestIssue842HTTPBuilderChangesStopBeforeNetwork(t *testing.T) {
 					accounts[i].Type = kind
 					accounts[i].Credentials = map[string]any{"api_key": "fixture842", "access_token": "fixture842", "base_url": srv.URL}
 				}
-				body, _ := issue842History(t, false, "reasoning_status")
+				body, want := issue842History(t, false, "reasoning_status")
 				settingsRepo := &issue842Settings{values: map[string]string{}}
 				switch change {
 				case "namespace":
@@ -69,6 +69,17 @@ func TestIssue842HTTPBuilderChangesStopBeforeNetwork(t *testing.T) {
 				h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 				issue805Policy(t, h.cfg, true)
 				answer := issue758Request(t, h, body)
+				if change == "timezone" {
+					require.Equal(t, http.StatusOK, answer.Code, "Issue892 permits the administrator's finite timezone projection: %s", answer.Body.String())
+					want, setErr := sjson.Set(want, "input.1.content", "<environment_context>\n<timezone>"+service.DefaultOpenAIRequestTimezone+"</timezone>\n</environment_context>")
+					require.NoError(t, setErr)
+					u.mu.Lock()
+					defer u.mu.Unlock()
+					require.Len(t, u.frames, 1)
+					require.JSONEq(t, gjson.Get(want, "input").Raw, gjson.GetBytes(u.frames[0], "input").Raw)
+					require.Equal(t, "9007199254740993", gjson.GetBytes(u.frames[0], "input.1.sequence").Raw)
+					return
+				}
 				require.Equal(t, http.StatusConflict, answer.Code, answer.Body.String())
 				require.Contains(t, answer.Body.String(), "encrypted_agent_recovery_wire_changed")
 				u.mu.Lock()

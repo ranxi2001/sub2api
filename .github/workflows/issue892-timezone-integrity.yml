@@ -1,0 +1,169 @@
+name: Issue892 protected timezone projection
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai*.go'
+      - 'backend/internal/service/setting_request_timezone*.go'
+      - 'backend/internal/handler/openai*.go'
+      - '.github/scripts/assert-issue895-review-red.py'
+      - '.github/scripts/test_assert_issue895_review_red.py'
+      - '.github/workflows/issue892-timezone-integrity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue892-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASELINE_SHA: 321f11c1a4d23302961c223ac030fd09e3f9e6e8
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: issue892
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d issue892"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis fixture
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Exact clean candidate GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/issue892"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue892/candidate.txt"
+          python3 -B -m unittest discover -s .github/scripts -p 'test_assert_issue895_review_red.py' -v 2>&1 | tee "$RUNNER_TEMP/issue892/review-red-verifier-tests.log"
+          bash -n .github/scripts/prepare-ws-owner-red-fixtures.sh
+          gofmt -d backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_issue892_timezone_test.go backend/internal/handler/openai_issue892_timezone_test.go backend/internal/handler/openai_issue842_boundaries_test.go > "$RUNNER_TEMP/issue892/format.patch"
+          cat "$RUNNER_TEMP/issue892/format.patch"
+          test ! -s "$RUNNER_TEMP/issue892/format.patch"
+          cd backend
+          go test -mod=readonly -race -json -tags=unit ./internal/service ./internal/handler -run '^Test(Issue(892|842|805)|OpenAI400History|ForwardEncryptedContentSSERetry|EncryptedSSERetry|RequestTimezone|OpenAIAgentRecoveryCompaction|WithoutOpenAIRemoteCompaction)' -count=1 -timeout=12m 2>&1 | tee "$RUNNER_TEMP/issue892/green.jsonl"
+          if grep -Eiq '"Action":"skip"|no tests to run|panic:|panic_recovered|WARNING: DATA RACE' "$RUNNER_TEMP/issue892/green.jsonl"; then exit 1; fi
+          python3 - "$RUNNER_TEMP/issue892/green.jsonl" <<'PY'
+          import json, sys
+          events = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          passed = {(e.get('Package', '').rsplit('/', 1)[-1], e.get('Test')) for e in events if e.get('Action') == 'pass'}
+          for name in ('FrozenAccountTimezoneProjection', 'AccountReselectionUsesOriginalSource', 'TimezonePolicyControlsProjection', 'ManualTimezone400Recovery', 'OpaqueEnvironmentProjectionRefused', 'ActualSendOpaqueIntegrityAndDelivery', 'PreparedUnknownOwnerRechecksFences'):
+              assert ('service', 'TestIssue892' + name) in passed, name
+          for name in ('HTTPManualTimezone', 'WSManualTimezone', 'OpaqueEnvironmentAdapters', 'HTTP64SwitchMatrix'):
+              assert ('handler', 'TestIssue892' + name) in passed, name
+          import itertools
+          for optout, beta, recovery, stream, scenario in itertools.product(('false', 'true'), ('false', 'true'), ('false', 'true'), ('false', 'true'), ('unknown_top', 'unknown_part', 'same', 'reasoning400')):
+              name = f'TestIssue892HTTP64SwitchMatrix/optout={optout}/beta={beta}/recovery400={recovery}/stream={stream}/{scenario}'
+              assert ('handler', name) in passed, name
+          for kind, mode, scenario in itertools.product(('oauth', 'apikey'), ('http', 'ctx_pool', 'passthrough', 'http_bridge'), ('mismatch', 'aligned', 'pending', 'failed')):
+              assert ('handler', f'TestIssue892OpaqueEnvironmentAdapters/{kind}/{mode}/{scenario}') in passed
+          PY
+          test -z "$(git status --porcelain)"
+      - name: Frozen production behavioral RED with identical new tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/issue892-red" "$BASELINE_SHA"
+          test "$(git -C "$RUNNER_TEMP/issue892-red" rev-parse HEAD)" = "$BASELINE_SHA"
+          test -z "$(git -C "$RUNNER_TEMP/issue892-red" status --porcelain)"
+          git rev-parse "$BASELINE_SHA" "$BASELINE_SHA^{tree}" > "$RUNNER_TEMP/issue892/baseline.txt"
+          # No production overlay: the entire old tree stays at the frozen SHA.
+          # Only the two new test files are copied, with their Git blobs verified.
+          for target in backend/internal/service/openai_issue892_timezone_test.go backend/internal/handler/openai_issue892_timezone_test.go; do
+            test ! -e "$RUNNER_TEMP/issue892-red/$target"
+            git show "$EXPECTED_HEAD_SHA:$target" > "$RUNNER_TEMP/issue892-red/$target"
+            expected=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
+            actual=$(git hash-object "$RUNNER_TEMP/issue892-red/$target")
+            echo "$target expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue892/test-blobs.txt"
+            test "$expected" = "$actual"
+          done
+          cd "$RUNNER_TEMP/issue892-red"
+          git diff --exit-code
+          git status --porcelain > "$RUNNER_TEMP/issue892/red-status.txt"
+          set +e
+          (cd backend && go test -mod=readonly -json -tags=unit ./internal/handler -run '^TestIssue892((HTTP|WS)ManualTimezone|HTTP64SwitchMatrix)$' -count=1 -timeout=6m) > "$RUNNER_TEMP/issue892/red.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue892/red.jsonl"
+          test "$result" -ne 0
+          if grep -Eiq 'build failed|no tests to run|undefined:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|"Action":"skip"|context deadline exceeded' "$RUNNER_TEMP/issue892/red.jsonl"; then exit 1; fi
+          python3 - "$RUNNER_TEMP/issue892/red.jsonl" <<'PY'
+          import itertools, json, sys
+          events = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          failed = {e.get('Test') for e in events if e.get('Action') == 'fail'}
+          def require_red(name, marker, websocket=False):
+              assert name in failed, f'missing behavioral RED: {name}'
+              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
+              assert marker in output, f'wrong failure point: {name}'
+              assert 'encrypted_agent_recovery_wire_changed' in output or (websocket and 'close_status=1008' in output), f'not an integrity policy refusal: {name}'
+          for kind, stream, owner in itertools.product(('oauth', 'apikey'), ('false', 'true'), ('unknown', 'same', 'other')):
+              require_red(f'TestIssue892HTTPManualTimezone/{kind}/stream={stream}/owner={owner}', 'Issue892 manual timezone full history must reach selected account once')
+          for kind, mode, owner in itertools.product(('oauth', 'apikey'), ('ctx_pool', 'passthrough', 'http_bridge'), ('unknown', 'same', 'other')):
+              require_red(f'TestIssue892WSManualTimezone/{kind}/{mode}/owner={owner}', 'Issue892 WS manual timezone full history must reach selected account once', websocket=True)
+          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
+          corrected = 0
+          for optout, beta, recovery, stream, scenario in itertools.product(('false', 'true'), ('false', 'true'), ('false', 'true'), ('false', 'true'), ('unknown_top', 'unknown_part', 'same', 'reasoning400')):
+              name = f'TestIssue892HTTP64SwitchMatrix/optout={optout}/beta={beta}/recovery400={recovery}/stream={stream}/{scenario}'
+              if optout == 'true' and (scenario == 'same' or (scenario.startswith('unknown_') and beta == 'false')):
+                  require_red(name, 'Issue892 64-case matrix must preserve switch semantics')
+                  corrected += 1
+              else:
+                  assert name in passed, f'matrix control failed on baseline: {name}'
+          assert corrected == 16
+          PY
+          git diff --exit-code
+      - name: Review F1 behavioral RED at the independently reviewed head
+        shell: bash
+        run: |
+          set -euo pipefail
+          reviewed=0fd8d600532bd759b2c33526db4773c615e1bc58
+          git worktree add --detach "$RUNNER_TEMP/issue895-review-red" "$reviewed"
+          cd "$RUNNER_TEMP/issue895-review-red"
+          test "$(git rev-parse HEAD)" = "$reviewed"
+          target=backend/internal/service/openai_issue892_timezone_test.go
+          git show "$EXPECTED_HEAD_SHA:$target" > "$target"
+          test "$(git hash-object "$target")" = "$(git rev-parse "$EXPECTED_HEAD_SHA:$target")"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue892/review-red-source.txt"
+          git diff --exit-code -- 'backend/**/*.go' ':!backend/**/*_test.go'
+          set +e
+          (cd backend && go test -mod=readonly -json -tags=unit ./internal/service -run '^TestIssue892(OpaqueEnvironmentProjectionRefused|ActualSendOpaqueIntegrityAndDelivery|PreparedUnknownOwnerRechecksFences|ManualTimezone400Recovery)$' -count=1 -timeout=2m) > "$RUNNER_TEMP/issue892/review-red.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue892/review-red.jsonl"
+          test "$result" -ne 0
+          if grep -Eiq 'build failed|no tests to run|undefined:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|"Action":"skip"|context deadline exceeded' "$RUNNER_TEMP/issue892/review-red.jsonl"; then exit 1; fi
+          python3 -B "$GITHUB_WORKSPACE/.github/scripts/assert-issue895-review-red.py" "$result" "$RUNNER_TEMP/issue892/review-red.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue892-${{ env.EXPECTED_HEAD_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue892/
+          if-no-files-found: error

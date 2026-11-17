@@ -58,6 +58,12 @@ func (s *OpenAIGatewayService) prepareOpenAI400HistoryRecovery(ctx context.Conte
 		return refuse("delivery_unconfirmed")
 	}
 	expectedInput := r.inputDigest
+	if r.nativeReplayPrepared && !r.omittedHistory {
+		if r.nativeAccountID != account.ID {
+			return refuse("history_integrity")
+		}
+		expectedInput = r.nativeInputDigest
+	}
 	if r.omittedHistory && r.apiReplayPrepared {
 		expectedInput = r.apiInputDigest
 	}
@@ -87,6 +93,9 @@ func (s *OpenAIGatewayService) prepareOpenAI400HistoryRecovery(ctx context.Conte
 	// remains unchanged. Original keys/known/owner are retained for record and
 	// route checks; omitted inputs must never be published as consumed inputs.
 	next.inputDigest = openAIAgentRecoveryInputDigest(clean)
+	if next.nativeReplayPrepared && !next.omittedHistory {
+		next.nativeInputDigest = next.inputDigest
+	}
 	if next.omittedHistory && next.apiReplayPrepared {
 		// The retry skips native adaptation, so its final-send expectation must
 		// include this omission while retaining the frozen controls and route.

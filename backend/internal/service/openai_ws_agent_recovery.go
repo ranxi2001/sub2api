@@ -152,13 +152,12 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 			return nil, err
 		}
 		if r.service.preserveOpenAIAgentHistory(source) {
-			if account.UsesOpenAICodexProtocol() {
-				clean, err = projectOpenAIOAuthReasoningMetadata(clean)
-				if err != nil {
-					return nil, err
-				}
+			clean, err = r.service.projectOpenAIAgentAccountReplay(r.ctx, account, clean, "ws")
+			if err != nil {
+				return nil, err
 			}
-			// Freeze before compatibility, timezone, OAuth or tool builders.
+			// Freeze the finite account projection before compatibility, OAuth
+			// or tool builders. Every turn/account starts from its source frame.
 			// begin may refresh owner records, but cannot trust a new input.
 			model := gjson.GetBytes(source, "model").String()
 			if initial != nil {
@@ -166,6 +165,7 @@ func (r *openAIWSAgentRecovery) prepareReadable(account *Account, source []byte)
 			}
 			ctx := r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, clean, r.session, model)
 			r.protected = openAIAgentRecoveryFromContext(ctx)
+			r.protected.nativeAccountID = account.ID
 			r.protectedSource = openAIAgentRecoveryInputDigest(source)
 			r.protectedControls = openAI409ControlsDigest(source)
 		}
@@ -286,6 +286,9 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	ctx := r.service.WithOpenAIAgentMessageRecovery(r.ctx, r.c, source, r.session, model)
 	if r.protected != nil {
+		if r.protected.nativeAccountID != account.ID {
+			return openAIAgentRecoveryRefusal(ctx, "route_identity")
+		}
 		if openAIAgentRecoveryInputDigest(source) != r.protectedSource || openAI409ControlsDigest(source) != r.protectedControls {
 			return openAIAgentRecoveryRefusal(ctx, "input_integrity")
 		}
