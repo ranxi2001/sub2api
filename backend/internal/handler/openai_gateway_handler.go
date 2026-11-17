@@ -5143,12 +5143,19 @@ func closeOpenAIWSFailoverExhausted(c *gin.Context, conn *coderws.Conn, failover
 	errorCode := "upstream_ws_failover_exhausted"
 	message := "upstream websocket proxy failed"
 	closeStatus := coderws.StatusInternalError
+	writeErrorFrame := false
 
 	if failoverErr != nil {
 		if reason := strings.TrimSpace(string(failoverErr.Reason)); reason != "" {
 			errorCode = reason
 		}
-		if failoverErr.Stage == service.GatewayFailureStageAccountAuth {
+		if failoverErr.Reason == service.OpenAIWSModelUnavailableReason {
+			intendedStatus = failoverErr.StatusCode
+			errorType, errorCode = "invalid_request_error", "model_not_found"
+			message = "requested model is unavailable on eligible upstream accounts; reconnect with complete context"
+			closeStatus = coderws.StatusTryAgainLater
+			writeErrorFrame = true
+		} else if failoverErr.Stage == service.GatewayFailureStageAccountAuth {
 			intendedStatus = http.StatusServiceUnavailable
 			errorType = "api_error"
 			message = service.GrokCredentialUnavailableClientMessage
@@ -5176,12 +5183,15 @@ func closeOpenAIWSFailoverExhausted(c *gin.Context, conn *coderws.Conn, failover
 	if failoverErr != nil {
 		if code, safeMessage, ok := service.OpenAIUpstreamRecoveryRateLimit(failoverErr.StatusCode, failoverErr.ResponseBody); ok {
 			errorCode, message = code, safeMessage
-			payload, _ := json.Marshal(gin.H{"type": "error", "status": intendedStatus,
-				"error": gin.H{"type": errorType, "code": errorCode, "message": message}})
-			writeCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
-			_ = service.WriteCapturedWSClient(writeCtx, conn, coderws.MessageText, payload)
-			cancel()
+			writeErrorFrame = true
 		}
+	}
+	if writeErrorFrame {
+		payload, _ := json.Marshal(gin.H{"type": "error", "status": intendedStatus,
+			"error": gin.H{"type": errorType, "code": errorCode, "message": message}})
+		writeCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		_ = service.WriteCapturedWSClient(writeCtx, conn, coderws.MessageText, payload)
+		cancel()
 	}
 	service.MarkOpsStreamFailure(c, errorType, errorCode, message, intendedStatus)
 	closeOpenAIClientWS(conn, closeStatus, message)

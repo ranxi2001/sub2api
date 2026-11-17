@@ -962,7 +962,7 @@ readLoop:
 			modelUnavailable := s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), message)
 			// Legacy SSE can buffer response.created/tool events before client output.
 			// Their presence must not grant a new model-error replay opportunity.
-			if modelUnavailable && !wroteDownstream && len(bufferedStreamEvents) == 0 && openAIWSModelFailureCanReplay(ctx, payloadAsJSONBytes(payload)) {
+			if modelUnavailable && !wroteDownstream && len(bufferedStreamEvents) == 0 && wsHeaders.Get(openAIWSTurnStateHeader) == "" && openAIWSModelFailureCanReplay(ctx, payloadAsJSONBytes(payload)) {
 				lease.MarkBroken()
 				return nil, s.newOpenAIWSModelFailoverError(account, message)
 			}

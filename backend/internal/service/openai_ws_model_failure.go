@@ -8,6 +8,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+const OpenAIWSModelUnavailableReason GatewayFailureReason = "openai_ws_model_unavailable"
+
 // A successful WS handshake says nothing about a subsequent model rejection.
 // Preserve explicit event status, including the top-level status used by Codex.
 func openAIWSModelFailureStatus(account *Account, payload []byte) int {
@@ -64,7 +66,7 @@ func openAIWSModelFailureCanReplay(ctx context.Context, payload []byte) bool {
 		return false
 	}
 	root := gjson.ParseBytes(payload)
-	if !root.IsObject() || openAIWSHasOpaqueField(root, 0) {
+	if !root.IsObject() || openAIWSModelFailureHasCiphertext(root, 0) {
 		return false
 	}
 	for _, key := range []string{"previous_response_id", "conversation", "conversation_id"} {
@@ -80,17 +82,56 @@ func openAIWSModelFailureCanReplay(ctx context.Context, payload []byte) bool {
 		return false
 	}
 	for _, item := range input.Array() {
+		if !item.IsObject() {
+			return false
+		}
 		if kind := item.Get("type").String(); kind != "" && kind != "message" {
 			return false
 		}
-		if item.Get("role").String() == "assistant" || !openAIWSPlainItem([]byte(item.Raw)) {
+		switch item.Get("role").String() {
+		case "user", "system", "developer":
+		default:
 			return false
+		}
+		content := item.Get("content")
+		if content.Type == gjson.String {
+			continue
+		}
+		if !content.IsArray() {
+			return false
+		}
+		for _, part := range content.Array() {
+			if !part.IsObject() || part.Get("text").Type != gjson.String {
+				return false
+			}
+			if kind := part.Get("type").String(); kind != "input_text" && kind != "text" {
+				return false
+			}
 		}
 	}
 	return true
 }
 
+// Keep this guard independent of the optional history reconstruction machinery.
+// Reject nested ciphertext even when it is attached to an otherwise plain item.
+func openAIWSModelFailureHasCiphertext(value gjson.Result, depth int) bool {
+	if depth > 64 {
+		return true
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return false
+	}
+	opaque := false
+	value.ForEach(func(key, child gjson.Result) bool {
+		opaque = key.String() == "encrypted_content" || openAIWSModelFailureHasCiphertext(child, depth+1)
+		return !opaque
+	})
+	return opaque
+}
+
 func (s *OpenAIGatewayService) newOpenAIWSModelFailoverError(account *Account, payload []byte) *UpstreamFailoverError {
 	_, _, message := parseOpenAIWSErrorEventFields(payload)
-	return s.newOpenAIAccountFailoverError(account, openAIWSModelFailureStatus(account, payload), nil, payload, message, false, false)
+	failure := s.newOpenAIAccountFailoverError(account, openAIWSModelFailureStatus(account, payload), nil, payload, message, false, false)
+	failure.Reason = OpenAIWSModelUnavailableReason
+	return failure
 }

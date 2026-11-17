@@ -85,6 +85,9 @@ func TestIssue907WSModelReplaySafety(t *testing.T) {
 		{`{"input":"hello"}`, true},
 		{`{"generate":false,"input":[]}`, true},
 		{`{"input":[{"role":"user","content":"hello"}]}`, true},
+		{`{"input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}]}`, true},
+		{`{"input":[{"role":"user","content":[{"type":"input_image","image_url":"https://example.invalid/fixture.png"}]}]}`, false},
+		{`{"input":[{"role":"tool","content":"result"}]}`, false},
 		{`{"input":"hello","previous_response_id":"resp_old"}`, false},
 		{`{"input":"hello","conversation":"conv_old"}`, false},
 		{`{"input":[{"role":"assistant","content":"old output"}]}`, false},
@@ -103,10 +106,11 @@ func TestIssue907WSModelReplaySafety(t *testing.T) {
 func TestIssue907HTTPToWSModelFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
-		name, prefix, input, failure string
-		failover                     bool
+		name, prefix, input, failure, turnState string
+		failover                                bool
 	}{
 		{name: "fresh_request", failover: true},
+		{name: "turn_state", turnState: "fixture-old-turn-state"},
 		{name: "metadata_commits_existing_boundary", prefix: issue776RateLimits},
 		{name: "after_output", prefix: `{"type":"response.output_text.delta","delta":"fixture"}`},
 		{name: "opaque_history", input: `[{"type":"reasoning","encrypted_content":"synthetic"}]`},
@@ -131,6 +135,7 @@ func TestIssue907HTTPToWSModelFailure(t *testing.T) {
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set(openAIWSTurnStateHeader, tc.turnState)
 			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 			input := tc.input
 			if input == "" {
@@ -186,10 +191,11 @@ func TestIssue907LegacyWSBufferedProgressDoesNotAllowReplay(t *testing.T) {
 func TestIssue907NativeWSModelFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
-		name, input                    string
+		name, input, turnState         string
 		prewarm, passthrough, failover bool
 	}{
 		{name: "fresh", input: `"hello"`, failover: true},
+		{name: "turn_state", input: `"hello"`, turnState: "fixture-old-turn-state"},
 		{name: "encrypted_first_turn", input: `[{"type":"reasoning","encrypted_content":"synthetic"}]`},
 		{name: "prewarm_then_task", input: `"real task"`, prewarm: true},
 		{name: "passthrough", input: `"hello"`, passthrough: true},
@@ -232,7 +238,9 @@ func TestIssue907NativeWSModelFailure(t *testing.T) {
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), &coderws.DialOptions{
+				HTTPHeader: http.Header{openAIWSTurnStateHeader: {tc.turnState}},
+			})
 			require.NoError(t, err)
 			defer func() { _ = client.CloseNow() }()
 			if tc.prewarm {

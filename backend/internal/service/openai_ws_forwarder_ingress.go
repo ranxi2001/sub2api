@@ -2049,7 +2049,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if eventType == "error" {
 				eventCtx := openAIWSForwardStreamPhaseContext(openAI429LeaseObservation(ctx, lease), turnOutputStarted, upstreamMessage)
 				modelUnavailable = s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
-				if modelUnavailable && turn == 1 && !wroteDownstream && openAIWSModelFailureCanReplay(ctx, payload) {
+				if modelUnavailable && turn == 1 && !wroteDownstream && wsHeaders.Get(openAIWSTurnStateHeader) == "" && openAIWSModelFailureCanReplay(ctx, payload) {
 					lease.MarkBroken()
 					return nil, s.newOpenAIWSModelFailoverError(account, upstreamMessage)
 				}
