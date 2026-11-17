@@ -3761,6 +3761,46 @@ describe('OpenAI connection account type boundary in the actual editor', () => {
     expect(mimicExtra).not.toHaveProperty('anthropic_mimic_claude_code_deduct_tokens')
   })
 
+  it('restores and saves the Anthropic API key cache TTL billing-from-request switch', async () => {
+    const account = {
+      ...buildAccount(),
+      id: 22,
+      platform: 'anthropic',
+      type: 'apikey',
+      credentials: { api_key: 'sk-relay', base_url: 'https://relay.example.com' },
+      extra: { anthropic_passthrough: true, cache_ttl_billing_from_request: true, unrelated: 'preserve' }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    const toggle = () => wrapper.get('[data-testid="cache-ttl-billing-from-request-toggle"]')
+    expect(toggle().classes()).toContain('bg-primary-600')
+
+    const badges = () => wrapper.findAllComponents(NewFeatureBadge).filter(
+      (badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.cacheTtlBillingFromRequest
+    )
+    expect(badges()).toHaveLength(1)
+    expect(badges()[0].props('userId')).toBe(41)
+    await badges()[0].get('button').trigger('click')
+    expect(badges().filter((badge) => badge.find('button').exists())).toHaveLength(0)
+
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      anthropic_passthrough: true, cache_ttl_billing_from_request: true, unrelated: 'preserve'
+    })
+
+    await toggle().trigger('click')
+    await flushPromises()
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const disabledExtra = updateAccountMock.mock.calls[1]?.[1]?.extra
+    expect(disabledExtra).toMatchObject({ anthropic_passthrough: true, unrelated: 'preserve' })
+    expect(disabledExtra).not.toHaveProperty('cache_ttl_billing_from_request')
+  })
+
   it.each([false, true])('restores and changes Anthropic estimated deduction from %s', async (deduct) => {
     const account = {
       ...buildAccount(),

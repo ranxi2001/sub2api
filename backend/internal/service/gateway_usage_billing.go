@@ -850,6 +850,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
 		applyCacheTTLOverride(&result.Usage, overrideTarget)
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
+	} else if account.IsCacheTTLBillingFromRequestEnabled() {
+		// 上游强制改写 TTL 时，按客户端请求的档位计费；未显式请求 1h 一律按 5m。
+		requestedTTL := result.RequestedCacheTTL
+		if requestedTTL != cacheTTLTarget1h {
+			requestedTTL = cacheTTLTarget5m
+		}
+		cacheTTLOverridden = applyCacheTTLOverride(&result.Usage, requestedTTL)
 	}
 
 	// 获取费率倍数（优先级：用户专属 > 分组默认 > 系统默认）

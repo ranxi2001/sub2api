@@ -2831,6 +2831,20 @@ func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
 	return ok && enabled
 }
 
+const cacheTTLBillingFromRequestExtraKey = "cache_ttl_billing_from_request"
+
+// IsCacheTTLBillingFromRequestEnabled 返回 Anthropic API Key 账号是否按客户端请求的缓存 TTL 计费。
+// 字段：accounts.extra.cache_ttl_billing_from_request。
+// 用于二级中转：上游强制改写缓存 TTL 并按其它档位结算时，缓存写入改按客户端请求里的
+// cache_control.ttl 归类；客户端未显式请求 1h 时一律按 5m 计费。
+func (a *Account) IsCacheTTLBillingFromRequestEnabled() bool {
+	if a == nil || a.Platform != PlatformAnthropic || a.Type != AccountTypeAPIKey || a.Extra == nil {
+		return false
+	}
+	enabled, ok := a.Extra[cacheTTLBillingFromRequestExtraKey].(bool)
+	return ok && enabled
+}
+
 const anthropicStripClaudeCodeIdentityExtraKey = "anthropic_strip_claude_code_identity"
 
 // IsAnthropicStripClaudeCodeIdentityEnabled 返回 Anthropic API Key 账号是否启用

@@ -145,6 +145,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			return nil, err
 		}
 	}
+	// 按请求 TTL 计费：在任何请求体改写之前读取客户端原始的 cache_control.ttl。
+	requestedCacheTTL := ""
+	if account.IsCacheTTLBillingFromRequestEnabled() {
+		requestedCacheTTL = requestedAnthropicCacheTTL(parsed.Body.Bytes())
+	}
 	// Anthropic Fast is requested with speed=fast rather than OpenAI's
 	// service_tier. Attach it at this shared boundary so passthrough, OAuth and
 	// partial-stream results all use the same billing and usage-log path.
@@ -153,6 +158,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if tier := anthropicSpeedServiceTier(account, parsed.Speed, anthropicSpeedModel(parsed, result)); tier != nil {
 				result.ServiceTier = tier
 			}
+			result.RequestedCacheTTL = requestedCacheTTL
 			attachClaudeCodeMimicInjection(c, account, result)
 		}
 	}()
