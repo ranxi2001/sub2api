@@ -22,7 +22,7 @@ func TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire(t *testing.T) {
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")),
+		Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"id\":\"fc_fixture_inspect\",\"call_id\":\"call_inspect_fixture\",\"name\":\"fixture_tools__inspect\",\"arguments\":\"{}\",\"status\":\"completed\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")),
 	}}
 	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
 	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
@@ -58,6 +58,12 @@ func TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire(t *testing.T) {
 	require.Contains(t, output.Get("output").String(), "inspect")
 	require.NotEmpty(t, events)
 	require.Equal(t, "response.completed", gjson.GetBytes(events[len(events)-1], "type").String())
+	call := gjson.GetBytes(events[len(events)-1], "response.output.0")
+	require.Equal(t, "function_call", call.Get("type").String())
+	require.Equal(t, "fixture_tools", call.Get("namespace").String())
+	require.Equal(t, "inspect", call.Get("name").String())
+	require.Equal(t, "call_inspect_fixture", call.Get("call_id").String())
+	require.JSONEq(t, "{}", call.Get("arguments").String())
 }
 
 func TestOpenAILossyProtocolWebSocketDeltaPreservesHistory(t *testing.T) {
