@@ -453,6 +453,13 @@ func TestIssue892HTTP64SwitchMatrix(t *testing.T) {
 								require.NotContains(t, string(bodies[offset]), "fixture-matrix892-top")
 								require.Equal(t, "9007199254740993", gjson.GetBytes(bodies[offset], "input.1.sequence").Raw)
 							} else {
+								if !disabled {
+									// Independent legacy strict-protocol oracle: the
+									// existing normalizer removes reasoning.content.
+									// Protected opt-out history must retain that text.
+									want, err = sjson.Delete(want, "input.5.content")
+									require.NoError(t, err)
+								}
 								require.JSONEq(t, gjson.Get(want, "input").Raw, gjson.GetBytes(bodies[offset], "input").Raw)
 								require.Equal(t, "9007199254740993", gjson.GetBytes(bodies[offset], "input.1.sequence").Raw)
 							}

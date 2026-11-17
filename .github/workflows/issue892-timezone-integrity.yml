@@ -7,6 +7,8 @@ on:
       - 'backend/internal/service/openai*.go'
       - 'backend/internal/service/setting_request_timezone*.go'
       - 'backend/internal/handler/openai*.go'
+      - '.github/scripts/assert-issue895-review-red.py'
+      - '.github/scripts/test_assert_issue895_review_red.py'
       - '.github/workflows/issue892-timezone-integrity.yml'
   workflow_dispatch:
 
@@ -61,6 +63,7 @@ jobs:
           test -z "$(git status --porcelain)"
           mkdir -p "$RUNNER_TEMP/issue892"
           git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/issue892/candidate.txt"
+          python3 -B -m unittest discover -s .github/scripts -p 'test_assert_issue895_review_red.py' -v 2>&1 | tee "$RUNNER_TEMP/issue892/review-red-verifier-tests.log"
           bash -n .github/scripts/prepare-ws-owner-red-fixtures.sh
           gofmt -d backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_issue892_timezone_test.go backend/internal/handler/openai_issue892_timezone_test.go backend/internal/handler/openai_issue842_boundaries_test.go > "$RUNNER_TEMP/issue892/format.patch"
           cat "$RUNNER_TEMP/issue892/format.patch"
@@ -157,24 +160,7 @@ jobs:
           cat "$RUNNER_TEMP/issue892/review-red.jsonl"
           test "$result" -ne 0
           if grep -Eiq 'build failed|no tests to run|undefined:|panic:|panic_recovered|fatal error:|runtime error:|WARNING: DATA RACE|"Action":"skip"|context deadline exceeded' "$RUNNER_TEMP/issue892/review-red.jsonl"; then exit 1; fi
-          python3 - "$RUNNER_TEMP/issue892/review-red.jsonl" <<'PY'
-          import itertools, json, sys
-          events = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
-          failed = {e.get('Test') for e in events if e.get('Action') == 'fail'}
-          passed = {e.get('Test') for e in events if e.get('Action') == 'pass'}
-          for kind, mode in itertools.product(('oauth', 'apikey'), ('http', 'ws')):
-              name = f'TestIssue892OpaqueEnvironmentProjectionRefused/{kind}/{mode}'
-              assert name in failed, name
-              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
-              assert 'Issue895 F1 projection must refuse a changed opaque envelope' in output, name
-          for mode, mutation in itertools.product(('http', 'ws'), ('envelope', 'drop')):
-              name = f'TestIssue892ActualSendOpaqueIntegrityAndDelivery/{mode}/{mutation}'
-              assert name in failed, name
-              output = ''.join(e.get('Output', '') for e in events if e.get('Test') == name)
-              assert 'Issue895 F1 actual send must reject a changed opaque item' in output, name
-          for name in ('PreparedUnknownOwnerRechecksFences', 'ManualTimezone400Recovery'):
-              assert 'TestIssue892' + name in passed, name
-          PY
+          python3 -B "$GITHUB_WORKSPACE/.github/scripts/assert-issue895-review-red.py" "$result" "$RUNNER_TEMP/issue892/review-red.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
