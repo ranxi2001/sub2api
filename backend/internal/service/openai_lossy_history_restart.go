@@ -54,6 +54,12 @@ func (s *OpenAIGatewayService) PrepareOpenAILossyHistoryRestart(ctx context.Cont
 // Tool declarations, discovery results, calls and outputs stay on the ordinary
 // recovery path with its existing pairing, ownership and delivery checks.
 func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
+	// A delta can inherit tools and task context through its provider pointer
+	// without repeating either in this frame. Only the ordinary recovery path
+	// can resolve that state; absence of local declarations is not text-only.
+	if openAI409HasProviderState(body) {
+		return body, false
+	}
 	for _, field := range []string{"tools", "additional_tools"} {
 		tools := gjson.GetBytes(body, field)
 		if tools.Exists() && tools.Type != gjson.Null && (!tools.IsArray() || len(tools.Array()) > 0) {
@@ -61,7 +67,7 @@ func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
 		}
 	}
 	input := gjson.GetBytes(body, "input")
-	needs := openAI409HasProviderState(body)
+	needs := false
 	for _, item := range input.Array() {
 		kind := item.Get("type").String()
 		if strings.HasSuffix(kind, "_call") || strings.HasSuffix(kind, "_call_output") ||

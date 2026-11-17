@@ -14,8 +14,8 @@ import (
 func TestOpenAILossyHistoryRestart(t *testing.T) {
 	for _, ws := range []bool{false, true} {
 		for _, body := range []string{
-			`{"model":"gpt-6-astra","instructions":"current control","tools":[],"previous_response_id":"resp_foreign","input":[{"role":"user","content":"current task"},{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
-			`{"model":"gpt-6-astra","conversation":"foreign","input":[{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
+			`{"model":"gpt-6-astra","instructions":"current control","tools":[],"input":[{"role":"user","content":"current task"},{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
+			`{"model":"gpt-6-astra","input":[{"type":"agent_message","encrypted_content":"fixture-cipher"}]}`,
 			`{"model":"gpt-6-astra","input":[{"type":"compaction","encrypted_content":"fixture-cipher","summary":"readable summary"}]}`,
 		} {
 			cfg := &config.Config{}

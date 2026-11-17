@@ -15,14 +15,16 @@ import (
 
 func TestOpenAILossyProtocolPreservesAgentInput(t *testing.T) {
 	for name, body := range map[string]string{
-		"declarations":     `{"tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}],"previous_response_id":"resp_fixture","input":[{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
-		"additional_tools": `{"additional_tools":[{"type":"function","name":"fixture"}],"input":[{"type":"reasoning","encrypted_content":"fixture-opaque"}]}`,
-		"function_pair":    `{"previous_response_id":"resp_fixture","input":[{"type":"function_call","call_id":"call_fixture","namespace":"functions","name":"exec","arguments":"{\"n\":9007199254740993}"},{"type":"function_call_output","call_id":"call_fixture","output":"fixture result"}]}`,
-		"custom_pair":      `{"input":[{"type":"custom_tool_call","call_id":"call_fixture","name":"exec","input":"fixture command"},{"type":"custom_tool_call_output","call_id":"call_fixture","output":"fixture result"}]}`,
-		"discovery":        `{"input":[{"type":"tool_search_call","call_id":"search_fixture","arguments":{}},{"type":"tool_search_output","call_id":"search_fixture","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}]}]}`,
-		"orphan":           `{"input":[{"type":"function_call_output","call_id":"missing","output":"fixture result"},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
-		"pending":          `{"input":[{"type":"function_call","call_id":"call_fixture","name":"fixture","arguments":"{}","status":"in_progress"}]}`,
-		"compact_trigger":  `{"input":[{"type":"agent_message","encrypted_content":"fixture-opaque"},{"type":"compaction_trigger"}]}`,
+		"inherited_tools_delta": `{"previous_response_id":"resp_fixture","input":[{"role":"user","content":"continue fixture task"}]}`,
+		"conversation_delta":    `{"conversation":"fixture_conversation","input":"continue fixture task"}`,
+		"declarations":          `{"tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}],"previous_response_id":"resp_fixture","input":[{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"additional_tools":      `{"additional_tools":[{"type":"function","name":"fixture"}],"input":[{"type":"reasoning","encrypted_content":"fixture-opaque"}]}`,
+		"function_pair":         `{"previous_response_id":"resp_fixture","input":[{"type":"function_call","call_id":"call_fixture","namespace":"functions","name":"exec","arguments":"{\"n\":9007199254740993}"},{"type":"function_call_output","call_id":"call_fixture","output":"fixture result"}]}`,
+		"custom_pair":           `{"input":[{"type":"custom_tool_call","call_id":"call_fixture","name":"exec","input":"fixture command"},{"type":"custom_tool_call_output","call_id":"call_fixture","output":"fixture result"}]}`,
+		"discovery":             `{"input":[{"type":"tool_search_call","call_id":"search_fixture","arguments":{}},{"type":"tool_search_output","call_id":"search_fixture","tools":[{"type":"namespace","name":"functions","tools":[{"type":"custom","name":"exec"}]}]}]}`,
+		"orphan":                `{"input":[{"type":"function_call_output","call_id":"missing","output":"fixture result"},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"pending":               `{"input":[{"type":"function_call","call_id":"call_fixture","name":"fixture","arguments":"{}","status":"in_progress"}]}`,
+		"compact_trigger":       `{"input":[{"type":"agent_message","encrypted_content":"fixture-opaque"},{"type":"compaction_trigger"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			original := []byte(body)
