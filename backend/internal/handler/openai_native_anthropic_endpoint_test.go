@@ -78,7 +78,7 @@ func TestOpenAINativeAnthropicEndpointDiagnostics(t *testing.T) {
 					upstream := &nativeEndpointUpstream{mode: mode}
 					cfg := &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{AllowInsecureHTTP: true}}}
 					gateway := service.NewOpenAIGatewayService(
-						nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream,
+						nil, nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream,
 						nil, nil, nil, nil, nil, nil, nil, nil,
 					)
 					account := &service.Account{

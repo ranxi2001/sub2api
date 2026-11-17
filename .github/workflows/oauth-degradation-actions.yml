@@ -98,7 +98,7 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git -C candidate fetch --no-tags --depth=1 origin 0c038c595c771c38f4e7d94b5022272b512662ac
-          (cd candidate && git diff --name-only --diff-filter=ACM 0c038c595c771c38f4e7d94b5022272b512662ac HEAD -- '*.go' | xargs -r gofmt -d) > evidence/timezone-gofmt.diff
+          (cd candidate && git diff --name-only --diff-filter=ACM 0c038c595c771c38f4e7d94b5022272b512662ac HEAD -- '*.go' | xargs -r -n 32 gofmt -d) > evidence/timezone-gofmt.diff
           cat evidence/timezone-gofmt.diff
           test ! -s evidence/timezone-gofmt.diff
       - name: Original time.Local race on isolated pre-fix checkout

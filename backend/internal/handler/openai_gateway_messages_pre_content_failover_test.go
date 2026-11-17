@@ -124,7 +124,7 @@ func serveMessagesScenario(t *testing.T, sc preContentFailoverScenario) (*httpte
 	billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingCache.Stop)
 	gateway := service.NewOpenAIGatewayService(
-		repo, nil, nil, nil, nil, nil, nil, cfg, nil, nil,
+		repo, nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil,
 		service.NewBillingService(cfg, nil), nil, billingCache, upstream,
 		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil,
 	)

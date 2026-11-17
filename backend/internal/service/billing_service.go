@@ -97,7 +97,7 @@ type BillingCache interface {
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
 type ModelPricing struct {
-	UltrafastMultiplier float64
+	UltrafastMultiplier                float64
 	InputPricePerToken                 float64 // 每token输入价格 (USD)
 	InputPricePerTokenPriority         float64 // priority service tier 下每token输入价格 (USD)
 	ImageInputPricePerToken            float64 // 图片输入 token 价格 (USD)，用于多模态 embedding 等图文不同价场景；为 0 时回退到 InputPricePerToken

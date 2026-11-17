@@ -403,6 +403,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	streamInterval := anthropicNativeStreamInterval(s.cfg)
 	pump := newAnthropicNativeLinePump(scanner, streamInterval)
 	defer pump.stop()
+	streamStatus := &anthropicCompatStream{body: resp.Body}
 
 	logReadErr := func(err error) {
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -487,6 +488,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 				return onIdle()
 			}
 			logReadErr(rerr)
+			streamStatus.readErr = rerr
 			if !terminalSeen && !clientDisconnected {
 				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
 					return resultWithUsage(), resetErr
@@ -505,6 +507,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			}
 			// EOF / 读错误：事件行后流终止，进入 finalize。
 			logReadErr(rerr)
+			streamStatus.readErr = rerr
 			if !terminalSeen && !clientDisconnected {
 				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
 					return resultWithUsage(), resetErr
@@ -529,6 +532,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 			return resultWithUsage(), writeNativeAnthropicSemanticFailure(c, []byte(payload), originalModel)
 		}
 		terminalSeen = terminalSeen || event.Type == "message_stop"
+		streamStatus.observe(&event, payload)
 
 		// Forward received usage regardless of the client stream_options.
 		// The intermediate Responses converter synthesizes usage even when absent.
@@ -537,6 +541,15 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		if processAnthropicEvent(&event) {
 			return resultWithUsage(), nil
 		}
+	}
+
+	streamStatus.clientDisconnected = clientDisconnected
+	if failure := streamStatus.failure(); failure != nil {
+		_ = resp.Body.Close()
+		if !clientDisconnected {
+			writeAnthropicCompatCCStreamFailure(c, failure)
+		}
+		return resultWithUsage(), failure.err
 	}
 
 	// Finalize both state machines（客户端已断开时仍执行，保证 usage 汇总完整）。

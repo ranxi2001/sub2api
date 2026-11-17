@@ -23,6 +23,9 @@ func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
 }
 
 func normalizeCodexContext(body []byte, additional bool) ([]byte, bool) {
+	if !mayContainCodexCallOutputCandidate(body, "codex_apps_open_page", "codex_apps_selected_page_part_", "browser_info", "goal_objective", "untrusted_context") {
+		return body, false
+	}
 	input := gjson.GetBytes(body, "input")
 	if !input.IsArray() {
 		return body, false
