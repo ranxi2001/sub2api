@@ -42,7 +42,7 @@ func (w *openAIWSHTTPWarmup) accept(source []byte, model string, turn int, write
 	emptyInput := !input.Exists() || input.Type == gjson.Null || (input.IsArray() && len(input.Array()) == 0)
 	hasReference := func(field string) bool {
 		value := gjson.GetBytes(source, field)
-		return value.Exists() && value.Type != gjson.Null && !(value.Type == gjson.String && value.String() == "")
+		return value.Exists() && value.Type != gjson.Null && (value.Type != gjson.String || value.String() != "")
 	}
 	if turn != 1 || len(source) > openAIWSHTTPWarmupLimit || !emptyInput ||
 		hasReference("previous_response_id") || hasReference("conversation") || hasReference("prompt") {
