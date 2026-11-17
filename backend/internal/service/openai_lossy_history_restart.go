@@ -69,9 +69,15 @@ func discardOpenAIProviderHistory(body []byte) ([]byte, bool) {
 	input := gjson.GetBytes(body, "input")
 	needs := false
 	for _, item := range input.Array() {
+		if !item.IsObject() {
+			return body, false
+		}
 		kind := item.Get("type").String()
-		if strings.HasSuffix(kind, "_call") || strings.HasSuffix(kind, "_call_output") ||
-			kind == "tool_search_output" || kind == "compaction_trigger" {
+		// Discovery, approval and future protocol items need not use a _call
+		// suffix. Only known history envelopes may be projected to text.
+		switch kind {
+		case "", "message", "reasoning", "agent_message", "compaction", "compaction_summary":
+		default:
 			return body, false
 		}
 		if (kind != "" && kind != "message") || openAILossyHasOpaqueField(item, 0) {

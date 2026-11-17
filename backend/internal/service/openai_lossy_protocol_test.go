@@ -25,6 +25,11 @@ func TestOpenAILossyProtocolPreservesAgentInput(t *testing.T) {
 		"orphan":                `{"input":[{"type":"function_call_output","call_id":"missing","output":"fixture result"},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
 		"pending":               `{"input":[{"type":"function_call","call_id":"call_fixture","name":"fixture","arguments":"{}","status":"in_progress"}]}`,
 		"compact_trigger":       `{"input":[{"type":"agent_message","encrypted_content":"fixture-opaque"},{"type":"compaction_trigger"}]}`,
+		"mcp_discovery":         `{"input":[{"type":"mcp_list_tools","server_label":"fixture","tools":[{"name":"exec","input_schema":{"type":"object"}}]}]}`,
+		"mcp_approval_request":  `{"input":[{"type":"mcp_approval_request","id":"approval_fixture","name":"exec","arguments":"{}","server_label":"fixture"}]}`,
+		"mcp_approval_response": `{"input":[{"type":"mcp_approval_response","approval_request_id":"approval_fixture","approve":true}]}`,
+		"unknown_item":          `{"input":[{"type":"future_tool_catalog","tools":[{"name":"exec"}]},{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
+		"malformed_item":        `{"input":[null,{"type":"agent_message","encrypted_content":"fixture-opaque"}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			original := []byte(body)
