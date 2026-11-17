@@ -9,6 +9,7 @@ on:
       - 'backend/internal/repository/*regional*live*'
       - 'backend/internal/repository/user_live_load*'
       - 'backend/internal/handler/admin/user*'
+      - 'backend/internal/service/ops_concurrency.go'
       - 'frontend/src/components/user/UserLiveUsageCell.vue'
       - 'frontend/src/components/user/__tests__/UserLiveUsageCell.spec.ts'
       - 'frontend/src/views/admin/UsersView.vue'
@@ -26,7 +27,7 @@ concurrency:
 
 jobs:
   regressions-and-evidence:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       NODE_OPTIONS: --max-old-space-size=6144

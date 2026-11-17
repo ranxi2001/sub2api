@@ -246,12 +246,7 @@ func (c *regionalConcurrencyCache) RefreshLiveLease(ctx context.Context, a, u, k
 		// This auxiliary proof never changes the existing SQL admission/refresh
 		// outcome. Missing/expired proof stays unknown until the lease is closed.
 		// State and account identity fence a refresh delayed behind close/migrate.
-		_, _ = c.database().ExecContext(ctx, `UPDATE regional_live_handoffs
-SET identity=jsonb_set(identity,'{_user_stats_expires_at}',to_jsonb(extract(epoch FROM clock_timestamp())+$6))
-WHERE region_id=$1 AND lease_id=$2 AND state='active'
-AND (identity->>'AccountID')::bigint=$3 AND (identity->>'UserID')::bigint=$4
-AND (identity->>'APIKeyID')::bigint=$5
-AND (identity->>'_user_stats_expires_at')::numeric>extract(epoch FROM clock_timestamp())`, c.region(), id, a, u, k, liveLeaseTTLSeconds)
+		_ = c.refreshUserLiveLoadProof(ctx, r)
 	}
 	return held, nil
 }

@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
@@ -308,13 +309,15 @@ func (s *OpsService) listAllActiveUsersForOps(ctx context.Context) ([]User, erro
 	return out, nil
 }
 
-// getUsersLoadMapBestEffort returns user load info for the given users.
-func (s *OpsService) getUsersLoadMapBestEffort(ctx context.Context, users []User) map[int64]*UserLoadInfo {
-	if s == nil || s.concurrencyService == nil {
-		return map[int64]*UserLoadInfo{}
-	}
+var errOpsUserConcurrencyUnavailable = infraerrors.ServiceUnavailable("OPS_USER_CONCURRENCY_UNAVAILABLE", "Current user concurrency is unavailable; retry later")
+
+// getUsersLoadMap requires a complete measurement before publishing a snapshot.
+func (s *OpsService) getUsersLoadMap(ctx context.Context, users []User) (map[int64]*UserLoadInfo, error) {
 	if len(users) == 0 {
-		return map[int64]*UserLoadInfo{}
+		return map[int64]*UserLoadInfo{}, nil
+	}
+	if s == nil || s.concurrencyService == nil {
+		return nil, errOpsUserConcurrencyUnavailable
 	}
 
 	// De-duplicate IDs (and keep the max concurrency to avoid under-reporting).
@@ -344,16 +347,17 @@ func (s *OpsService) getUsersLoadMapBestEffort(ctx context.Context, users []User
 		}
 		part, err := s.concurrencyService.GetUsersLoadBatch(ctx, batch[i:end])
 		if err != nil {
-			// Best-effort: return zeros rather than failing the ops UI.
-			log.Printf("[Ops] GetUsersLoadBatch failed: %v", err)
-			continue
+			return nil, errOpsUserConcurrencyUnavailable.WithCause(err)
 		}
-		for k, v := range part {
-			out[k] = v
+		for _, user := range batch[i:end] {
+			if part[user.ID] == nil {
+				return nil, errOpsUserConcurrencyUnavailable
+			}
+			out[user.ID] = part[user.ID]
 		}
 	}
 
-	return out
+	return out, nil
 }
 
 // GetUserConcurrencyStats returns real-time concurrency usage for all active users.
@@ -367,8 +371,11 @@ func (s *OpsService) GetUserConcurrencyStats(ctx context.Context) (map[int64]*Us
 		return nil, nil, err
 	}
 
+	loadMap, err := s.getUsersLoadMap(ctx, users)
+	if err != nil {
+		return nil, nil, err
+	}
 	collectedAt := time.Now()
-	loadMap := s.getUsersLoadMapBestEffort(ctx, users)
 
 	result := make(map[int64]*UserConcurrencyInfo)
 
@@ -378,12 +385,8 @@ func (s *OpsService) GetUserConcurrencyStats(ctx context.Context) (map[int64]*Us
 		}
 
 		load := loadMap[u.ID]
-		currentInUse := int64(0)
-		waiting := int64(0)
-		if load != nil {
-			currentInUse = int64(load.CurrentConcurrency)
-			waiting = int64(load.WaitingCount)
-		}
+		currentInUse := int64(load.CurrentConcurrency)
+		waiting := int64(load.WaitingCount)
 
 		// Skip users with no concurrency activity
 		if currentInUse == 0 && waiting == 0 {
