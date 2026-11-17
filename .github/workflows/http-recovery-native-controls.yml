@@ -52,6 +52,7 @@ jobs:
                 fi ;;
             esac
           done
+          python3 .github/scripts/prepare-upstream-v0222-red-fixtures.py "$baseline" . HEAD
           bash .github/scripts/prepare-usage-sort-red-fixture.sh "$baseline" . "${{ github.event.pull_request.head.sha }}"
       - name: Authenticated HTTP task continuation
         env:

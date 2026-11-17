@@ -8,6 +8,9 @@ on:
       - 'backend/internal/repository/*oauth*'
       - 'backend/internal/repository/*timezone*'
       - '.github/workflows/oauth-degradation-actions.yml'
+      - '.github/scripts/assert-test-log-clean.sh'
+      - '.github/scripts/test_assert_test_log_clean.py'
+      - '.github/workflows/oauth-degradation-native-controls.yml'
   pull_request:
     branches: [production]
     paths:
@@ -15,10 +18,37 @@ on:
       - 'backend/internal/repository/*oauth*'
       - 'backend/internal/repository/*timezone*'
       - '.github/workflows/oauth-degradation-actions.yml'
+      - '.github/scripts/assert-test-log-clean.sh'
+      - '.github/scripts/test_assert_test_log_clean.py'
+      - '.github/workflows/oauth-degradation-native-controls.yml'
 permissions:
   contents: read
 jobs:
+  evidence-validator:
+    name: Fail-closed evidence mutation selftest
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Execute the workflow gates with valid and contaminated logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha || github.sha }}'
+          git rev-parse HEAD > evidence/validator-head.txt
+          python3 .github/scripts/test_assert_test_log_clean.py -v 2>&1 | tee evidence/validator-selftest.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oauth-evidence-validator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/
+          if-no-files-found: error
   unit:
+    needs: evidence-validator
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -57,7 +87,7 @@ jobs:
           set -e
           cat evidence/red.log
           test "$result" -ne 0
-          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:' evidence/red.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh red evidence/red.log
           grep -F 'degradation hold must prevent' evidence/red.log
           grep -F 'enabling degradation action requires' evidence/red.log
       - name: Exact candidate GREEN
@@ -67,12 +97,14 @@ jobs:
           git -C candidate rev-parse HEAD | tee evidence/green-head.txt
           (cd candidate/backend && go test -race -tags=unit ./internal/service ./internal/handler/admin -run 'TestOAuthAutoConfig|TestOAuthInitial|TestOAuthModelMapping|TestModelBilling|TestOAuthDegradation|TestAutoConfig|TestAdvanceConcurrency|TestOpenAITwoFAAdmission|TestQualityModel|TestAccountIsModelSupported|TestGPT55Retirement' -count=1 -v) 2>&1 | tee evidence/green.log
           (cd candidate/backend && go test -race -tags=unit ./internal/repository -count=1 -v) 2>&1 | tee evidence/repository-unit.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/green.log evidence/repository-unit.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: oauth-degradation-unit-${{ github.event_name }}-${{ github.run_id }}
           path: evidence/
   timezone-race:
+    needs: evidence-validator
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -82,8 +114,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: candidate
+      - uses: actions/checkout@v6
+        with:
+          ref: 256d5b1fc082b6eef493843fa557dc0be2129f1a
+          path: retention-baseline
       - uses: actions/checkout@v6
         with:
           ref: 0c038c595c771c38f4e7d94b5022272b512662ac
@@ -98,7 +134,7 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git -C candidate fetch --no-tags --depth=1 origin 0c038c595c771c38f4e7d94b5022272b512662ac
-          (cd candidate && git diff --name-only --diff-filter=ACM 0c038c595c771c38f4e7d94b5022272b512662ac HEAD -- '*.go' | xargs -r gofmt -d) > evidence/timezone-gofmt.diff
+          (cd candidate && git diff --name-only --diff-filter=ACM 0c038c595c771c38f4e7d94b5022272b512662ac HEAD -- '*.go' | xargs -r -n 32 gofmt -d) > evidence/timezone-gofmt.diff
           cat evidence/timezone-gofmt.diff
           test ! -s evidence/timezone-gofmt.diff
       - name: Original time.Local race on isolated pre-fix checkout
@@ -116,23 +152,56 @@ jobs:
           cat evidence/timezone-red.log
           printf '%s\n' "$result" > evidence/timezone-red-exit.txt
           test "$result" -ne 0
-          ! grep -Eq -- 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|signal:|SIGSEGV|--- SKIP:' evidence/timezone-red.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh race-red evidence/timezone-red.log
           grep -F 'WARNING: DATA RACE' evidence/timezone-red.log
           grep -F 'internal/pkg/timezone.Init()' evidence/timezone-red.log
           grep -F 'time.Now()' evidence/timezone-red.log
           grep -F 'repository.useGroupUsageRepositoryTestTimezone()' evidence/timezone-red.log
+      - name: Pre-repair production cleanup with the same candidate assertions (RED)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C retention-baseline rev-parse HEAD > evidence/retention-red-head.txt
+          test "$(git -C candidate rev-parse HEAD)" = '${{ github.event.pull_request.head.sha || github.sha }}'
+          for file in dashboard_aggregation_group_usage_test.go usage_log_repo_group_summary_test.go; do
+            cp "candidate/backend/internal/repository/$file" "retention-baseline/backend/internal/repository/$file"
+            cmp "candidate/backend/internal/repository/$file" "retention-baseline/backend/internal/repository/$file"
+            sha256sum "candidate/backend/internal/repository/$file" >> evidence/retention-oracle-sha256.txt
+          done
+          set +e
+          (cd retention-baseline/backend && go test -race -tags=unit ./internal/repository -run '^TestDashboardAggregationRepositoryCleanupUsageLogs|^TestUsageLogRepositoryGetAllGroupUsageSummary' -count=1 -v) > evidence/retention-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/retention-red.log
+          printf '%s\n' "$result" > evidence/retention-red-exit.txt
+          test "$result" -ne 0
+          bash candidate/.github/scripts/assert-test-log-clean.sh red evidence/retention-red.log
+          grep -F -- '--- FAIL: TestDashboardAggregationRepositoryCleanupUsageLogsExpiresWholeDaysBeforeDeleting' evidence/retention-red.log
+          grep -F -- '--- FAIL: TestDashboardAggregationRepositoryCleanupUsageLogsMidnightDSTGap' evidence/retention-red.log
+          grep -F -- '--- FAIL: TestUsageLogRepositoryGetAllGroupUsageSummaryMidnightDSTGap' evidence/retention-red.log
+          grep -F 'arguments do not match' evidence/retention-red.log
+          grep -F -- '--- PASS: TestUsageLogRepositoryGetAllGroupUsageSummaryTailStartsAtExpiredBefore' evidence/retention-red.log
       - name: Exact head isolated clocks and all repository timezone unit assertions
         shell: bash
         run: |
           set -euo pipefail
           (cd candidate/backend && go test -race -tags=unit ./internal/repository -run '^TestRepositoryTimezoneIsolation$|^TestUsageTrend|^TestUsageLogRepositoryGetAllGroupUsageSummary|^TestDashboardAggregationRepository|^TestUsageCleanupRepository' -count=1 -v) 2>&1 | tee evidence/timezone-green.log
-          ! grep -Eq -- 'WARNING: DATA RACE|--- SKIP:|no tests to run' evidence/timezone-green.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/timezone-green.log
+      - name: Original upstream merge-only scheduler regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd candidate/backend && go test -race -tags=unit ./internal/service -run '^TestSchedulerSnapshotValuesReaderFiltersTimeBlockedAccounts$|^TestSchedulerFallbackPublishesPoolAndReturnsSchedulable$' -count=1 -v) 2>&1 | tee evidence/merge-scheduler-green.log
+          grep -F -- '--- PASS: TestSchedulerSnapshotValuesReaderFiltersTimeBlockedAccounts ' evidence/merge-scheduler-green.log
+          grep -F -- '--- PASS: TestSchedulerFallbackPublishesPoolAndReturnsSchedulable ' evidence/merge-scheduler-green.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/merge-scheduler-green.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: oauth-degradation-timezone-race-${{ github.run_id }}
           path: evidence/
   postgres:
+    needs: evidence-validator
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -162,7 +231,7 @@ jobs:
           set -e
           cat evidence/postgres-red.log
           test "$result" -ne 0
-          ! grep -Eq 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|--- SKIP:' evidence/postgres-red.log
+          bash .github/scripts/assert-test-log-clean.sh red evidence/postgres-red.log
           grep -F 'OAuth degradation startup must apply' evidence/postgres-red.log
           grep -F 'stale editor must not erase' evidence/postgres-red.log
       - name: Migrated disposable PostgreSQL and Redis
@@ -172,13 +241,14 @@ jobs:
           mkdir -p evidence
           git rev-parse HEAD > evidence/integration-head.txt
           (cd backend && go test -tags=integration ./internal/repository -run '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres|^TestAstraGroups|^TestAstraSchedulingModes|^TestOpenAITwoFAAdmission|^TestQualityActionsRestore|^TestQualityIsolation|^TestQualityBPSAndQuarantineCoexist|^TestQualityCoexist' -count=1 -v -timeout=15m) 2>&1 | tee evidence/postgres.log
-          ! grep -Eq -- '--- SKIP:|no tests to run' evidence/postgres.log
+          bash .github/scripts/assert-test-log-clean.sh green evidence/postgres.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: oauth-degradation-postgres-${{ github.event_name }}-${{ github.run_id }}
           path: evidence/
   integration-race:
+    needs: evidence-validator
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -189,7 +259,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: candidate
       - name: Use Ubuntu HTTPS mirror for CI dependencies
         run: bash candidate/.github/scripts/ci-ubuntu-mirrors.sh
@@ -244,7 +314,7 @@ jobs:
           cat evidence/chain-red.log
           printf '%s\n' "$result" > evidence/chain-red-exit.txt
           test "$result" -ne 0
-          ! grep -Eq -- 'build failed|setup failed|undefined:|syntax error:|no tests to run|panic:|signal:|SIGSEGV|fatal error:|WARNING: DATA RACE|--- SKIP:' evidence/chain-red.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh red evidence/chain-red.log
           grep -F 'real degradation worker must commit treatment before cache compensation' evidence/chain-red.log
           grep -F -- '--- FAIL: TestOAuthDegradationOutboxSchedulerChain' evidence/chain-red.log
       - name: Reviewed implementation control (coverage gap versus new defect)
@@ -253,7 +323,7 @@ jobs:
           set -euo pipefail
           cp historical-fixtures/backend/internal/repository/oauth_degradation_chain_integration_test.go historical-fixtures/backend/internal/repository/oauth_degradation_race_integration_test.go reviewed/backend/internal/repository/
           bash candidate/.github/scripts/oauth-degradation-integration-race.sh reviewed-integration-race "$GITHUB_WORKSPACE/reviewed" '^TestOAuthDegradationOutboxSchedulerChain$|^TestOAuthDegradationDeterministic|^TestOAuthDegradationTransactionFailures$' 15m
-          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/reviewed-integration-race.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/reviewed-integration-race.log
       - name: Exact head real PostgreSQL Redis evaluator outbox and scheduler race GREEN
         shell: bash
         run: |
@@ -261,14 +331,15 @@ jobs:
           (cd candidate/backend && go list -deps -test -race -tags=integration ./internal/repository) > evidence/instrumented-dependencies.txt
           bash candidate/.github/scripts/oauth-degradation-integration-race.sh integration-race "$GITHUB_WORKSPACE/candidate" '^TestOAuthDegradation|^TestAutoConfigConcurrent|^TestAccountPerformancePostgres|^TestAstraGroups|^TestAstraSchedulingModes|^TestOpenAITwoFAAdmission|^TestQualityActionsRestore|^TestQualityIsolation|^TestQualityBPSAndQuarantineCoexist|^TestQualityCoexist' 15m
           bash candidate/.github/scripts/oauth-degradation-integration-race.sh timezone-integration-race "$GITHUB_WORKSPACE/candidate" '^TestGroupUsage|^TestUsageTrendAggregateTimezoneRealBuckets$|^TestUsageLogRolling24HoursHalfOpenBoundaries$|^TestPelicanGroupTestRepo_CostsSurviveRetentionAndPlanDeletion$' 15m
-          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/timezone-integration-race.log
-          ! grep -Eq -- '--- SKIP:|no tests to run|WARNING: DATA RACE' evidence/integration-race.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/timezone-integration-race.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/integration-race.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: oauth-degradation-integration-race-${{ github.run_id }}-${{ github.run_attempt }}
           path: evidence/
   ui:
+    needs: evidence-validator
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -303,7 +374,7 @@ jobs:
           cat evidence/ui-red.log
           test "$result" -ne 0
           grep -F 'missing degradation action business controls' evidence/ui-red.log
-          ! grep -Eq 'Failed to resolve|Transform failed|No test files found' evidence/ui-red.log
+          bash .github/scripts/assert-test-log-clean.sh red evidence/ui-red.log
       - name: Actual Vue settings and notices
         shell: bash
         run: |

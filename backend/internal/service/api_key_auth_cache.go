@@ -62,6 +62,9 @@ type APIKeyAuthUserSnapshot struct {
 
 	// UserGroupDeniedModels 该 API Key 对应的 (user, group) 禁用模型；准入与模型列表据此拒绝 / 过滤。
 	UserGroupDeniedModels []string `json:"user_group_denied_models,omitempty"`
+	// UserGroupRPMOverrideGroupID 是成功查询 override 的分组（0 = 未查询或查询失败），
+	// 让 checkRPM 区分"该分组确认无 override"与"需要回源"。
+	UserGroupRPMOverrideGroupID int64 `json:"user_group_rpm_override_group_id,omitempty"`
 }
 
 // APIKeyAuthGroupSnapshot 分组快照
@@ -117,6 +120,7 @@ type APIKeyAuthGroupSnapshot struct {
 	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
 	AllowLive                   bool                              `json:"allow_live"`
 	ForceOpenAIFast             bool                              `json:"force_openai_fast"`
+	ForceOpenAIUltrafast        bool                              `json:"force_openai_ultrafast"`
 	FreeOpenAIFast              bool                              `json:"free_openai_fast"`
 	FreeOpenAIUltrafast         bool                              `json:"free_openai_ultrafast"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`

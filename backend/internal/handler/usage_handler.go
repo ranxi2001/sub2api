@@ -480,6 +480,9 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	}
 	if !isObserverUsageRequest(c) {
 		stats.TotalAccountCost = nil
+		for i := range stats.Endpoints {
+			stats.Endpoints[i].AccountCost = 0
+		}
 		stats.UpstreamEndpoints = nil
 		stats.EndpointPaths = nil
 	}

@@ -187,6 +187,7 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 // projectAccountModelAliases retains the source entry's metadata, never changes
 // the shared response, and never synthesizes models absent from this account.
 func projectAccountModelAliases(body []byte, account *Account, group *Group, codex bool) ([]byte, error) {
+	passthrough := account.IsOpenAIPassthroughEnabled()
 	var groupID *int64
 	if group != nil {
 		groupID = &group.ID
@@ -195,7 +196,7 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 	if codex {
 		field, idField = "models", "slug"
 	}
-	if !account.hasOAuthInitialModelSelection() && (account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0) {
+	if !account.hasOAuthInitialModelSelection() && ((passthrough && !account.IsOpenAIPassthroughModelFilterEnabled()) || len(account.GetModelMapping()) == 0) {
 		if len(account.GroupAllowedModels(derefGroupID(groupID))) == 0 {
 			return body, nil
 		}
@@ -261,6 +262,10 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 			continue
 		}
 		target, matched := account.ResolveMappedModel(id)
+		if passthrough {
+			// Filtering changes eligibility, never the upstream/public model name.
+			target, matched = id, account.IsModelSupported(id)
+		}
 		allowed := matched || (account.IsOpenAIModelMappingAliases() && account.IsModelSupported(id))
 		raw, available := byID[strings.TrimSpace(target)]
 		if !available || !allowed {

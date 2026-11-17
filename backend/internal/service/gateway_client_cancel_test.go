@@ -263,3 +263,7 @@ func (w *claudeNotifyWriter) Write(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+func (w *claudeNotifyWriter) WriteString(value string) (int, error) {
+	return w.Write([]byte(value))
+}

@@ -5,6 +5,8 @@ set -euo pipefail
 tree="${2:-.}"
 baseline=$(git -C "$tree" rev-parse "$1^{commit}")
 candidate=$(git -C "$tree" rev-parse "${3:-HEAD}^{commit}")
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$script_dir/prepare-upstream-v0222-red-fixtures.py" "$baseline" "$tree" "$candidate"
 
 exclude_absent_fixture() {
   local target="$1" contract="$2"

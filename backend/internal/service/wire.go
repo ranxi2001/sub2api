@@ -1200,7 +1200,34 @@ var ProviderSet = wire.NewSet(
 	NewSupportTicketService,
 	NewChannelMonitorRequestTemplateService,
 	ProvideUserPlatformQuotaUsageFlusher,
+	NewUsageBillingLaneCombiner,
+	ProvideUsageBillingRepository,
 )
+
+// ProvideUsageBillingRepository 以按用户合并结算的通道作为各服务使用的计费仓储。
+func ProvideUsageBillingRepository(lanes *UsageBillingLaneCombiner) UsageBillingRepository {
+	if durable, ok := lanes.repo.(DurableUsageBillingRepository); ok {
+		return &durableUsageBillingLanes{UsageBillingLaneCombiner: lanes, DurableUsageBillingRepository: durable}
+	}
+	return lanes
+}
+
+// Staged delivery keeps its transactional journal and cache acknowledgement.
+// Direct Apply users still use lanes; journal application is not batched.
+type durableUsageBillingLanes struct {
+	*UsageBillingLaneCombiner
+	DurableUsageBillingRepository
+}
+
+// Preserve retry rotation so a failed cache invalidation cannot starve later receipts.
+func (r *durableUsageBillingLanes) DeferUsageBillingCache(ctx context.Context, key UsageBillingEventKey) error {
+	if retry, ok := r.DurableUsageBillingRepository.(interface {
+		DeferUsageBillingCache(context.Context, UsageBillingEventKey) error
+	}); ok {
+		return retry.DeferUsageBillingCache(ctx, key)
+	}
+	return nil
+}
 
 // ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
 func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {

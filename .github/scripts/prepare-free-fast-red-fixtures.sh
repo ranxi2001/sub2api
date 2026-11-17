@@ -5,6 +5,8 @@ set -euo pipefail
 baseline="$1"
 tree="${2:-.}"
 candidate="${3:-HEAD}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$script_dir/prepare-upstream-v0222-red-fixtures.py" "$baseline" "$tree" "$candidate"
 if test -f "$tree/backend/internal/service/customer_cost_details.go"; then exit 0; fi
 if git -C "$tree" cat-file -e "$baseline:backend/internal/service/customer_cost_details.go" 2>/dev/null; then
   echo 'baseline snapshot implementation unexpectedly absent' >&2; exit 1

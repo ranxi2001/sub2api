@@ -75,9 +75,9 @@ try {
     const saved = await page.evaluate(() => window.__ultraFixture.writes[0])
     assert.equal(saved.free_openai_ultrafast, true); assert.equal(saved.free_openai_fast, true); assert.equal(saved.force_openai_fast, false)
     await openEdit(); assert.equal(await toggle.getAttribute('aria-checked'), 'true')
-    await section().locator('[data-testid="new-feature-badge"]').click()
+    await toggle.locator('xpath=..').locator('[data-testid="new-feature-badge"]').click()
     await page.reload(); await openEdit(); assert.equal(await toggle.getAttribute('aria-checked'), 'true')
-    assert.equal(await section().locator('[data-testid="new-feature-badge"]').count(), 0); await shot('reloaded')
+    assert.equal(await toggle.locator('xpath=..').locator('[data-testid="new-feature-badge"]').count(), 0); await shot('reloaded')
     await page.evaluate(() => document.documentElement.classList.add('dark')); await shot('dark')
     await page.close()
   }

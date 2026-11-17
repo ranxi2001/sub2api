@@ -1,0 +1,138 @@
+name: Upstream v0.2.22 dynamic acceptance
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/scripts/upstream-v0222-acceptance.*'
+      - '.github/workflows/upstream-v0222-acceptance.yml'
+permissions:
+  contents: read
+concurrency:
+  group: v0222-acceptance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  GOMAXPROCS: '2'
+  GOFLAGS: '-p=2'
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+  TZ: UTC
+jobs:
+  backend:
+    name: Feature assertions (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: sub2api_test
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d sub2api_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports: ['16379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [unit, integration]
+    env:
+      EVIDENCE_DIR: ${{ github.workspace }}/evidence/${{ matrix.mode }}
+      CI: 'true'
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable
+      SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Feature-specific execution with test event evidence
+        run: python3 .github/scripts/upstream-v0222-acceptance.py '${{ matrix.mode }}'
+      - name: Candidate allocation benchmarks and in-process legacy controls
+        if: ${{ !cancelled() && matrix.mode == 'unit' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          go version > "$EVIDENCE_DIR/benchmark-environment.txt"
+          lscpu >> "$EVIDENCE_DIR/benchmark-environment.txt"
+          cd backend
+          go test -tags=unit ./internal/service ./internal/repository -run '^$' -bench '^Benchmark(EnforceCacheControlLimit|RequestToolHelpers|ClaudeMimicDebugLine|SchedulerRebuildBatchQueryReuse|SchedulerCacheAccountPayloadReuse)$' -benchmem -benchtime=500ms -count=3 2>&1 | tee "$EVIDENCE_DIR/benchmarks.log"
+          # These are fixture microbenchmarks, not production load or p95 claims.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: upstream-v0222-${{ matrix.mode }}-${{ env.EXPECTED_HEAD_SHA }}
+          path: evidence/
+          if-no-files-found: error
+  frontend-embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+      EVIDENCE_DIR: ${{ github.workspace }}/evidence/embed
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Feature components and all new feature notice IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          git rev-parse HEAD > evidence/frontend-head.txt
+          mapfile -t specs < <(python3 .github/scripts/upstream-v0222-acceptance.py frontend-list)
+          pnpm --dir frontend exec vitest run "${specs[@]}" --maxWorkers=1 --minWorkers=1 --no-file-parallelism --reporter=default --reporter=json --outputFile="$GITHUB_WORKSPACE/evidence/frontend.json" 2>&1 | tee evidence/frontend.log
+      - name: Build actual frontend for production embedding
+        id: frontend-build
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend run build 2>&1 | tee evidence/frontend-build.log
+          test -s backend/internal/web/dist/index.html
+      - name: Embedded HTML cache and nonce contract
+        if: ${{ !cancelled() && steps.frontend-build.outcome == 'success' }}
+        run: python3 .github/scripts/upstream-v0222-acceptance.py embed
+      - name: Production embed binary and build identity
+        if: ${{ !cancelled() && steps.frontend-build.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          cd backend
+          CGO_ENABLED=0 go build -tags embed -trimpath -ldflags="-X main.Commit=$EXPECTED_HEAD_SHA" -o "$RUNNER_TEMP/sub2api-v0222" ./cmd/server
+          "$RUNNER_TEMP/sub2api-v0222" -version | tee ../evidence/embed-version.txt
+          sha256sum "$RUNNER_TEMP/sub2api-v0222" > ../evidence/embed-binary-sha256.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: upstream-v0222-frontend-embed-${{ env.EXPECTED_HEAD_SHA }}
+          path: evidence/
+          if-no-files-found: error

@@ -17,6 +17,29 @@ import (
 
 const cloudflareMessagesTestBaseURL = "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai"
 
+func TestAccountTestService_ClaudeDefaultAndExplicitModelsReachUpstream(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		requested string
+		forwarded string
+	}{
+		{"default", "", "claude-sonnet-4-6"},
+		{"explicit", "claude-haiku-4-5", "claude-haiku-4-5"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := newAnthropicAPIKeyAccountForTest()
+			upstream := &anthropicHTTPUpstreamRecorder{resp: adaptiveCNAnthropicTestResponse()}
+			svc := &AccountTestService{cfg: &config.Config{}, httpUpstream: upstream}
+			c, recorder := newTestContext()
+			require.NoError(t, svc.testClaudeAccountConnection(c, account, tc.requested))
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, tc.forwarded, gjson.GetBytes(upstream.lastBody, "model").String())
+			require.Contains(t, recorder.Body.String(), `"model":"`+tc.forwarded+`"`)
+			require.Contains(t, recorder.Body.String(), `"success":true`)
+		})
+	}
+}
+
 func TestAnthropicMessagesURL_EntryPoints(t *testing.T) {
 	for _, tt := range []struct {
 		name    string

@@ -55,7 +55,7 @@ type performanceExportRepo struct {
 	accounts []Account
 }
 
-func (r *performanceExportRepo) ListSchedulableUngroupedByPlatform(context.Context, string) ([]Account, error) {
+func (r *performanceExportRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]Account, error) {
 	return r.accounts, nil
 }
 

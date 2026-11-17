@@ -1,0 +1,2983 @@
+[
+  {
+    "id": "F01",
+    "feature": "分组强制 Ultra Fast：OpenAI / Composite 分组可强制 service_tier=ultrafast，仅对支持的模型（GPT-6 Astra、GPT-6.1 Sol）生效，可与强制 Fast 并存（优先级 Ultra Fast > Fast > 客户端）",
+    "source_commits": [
+      "330198321f2f1862397363cae6d451dbf9a6ff76",
+      "ad9eeedebbd87fb2e0d311fed7c5e7369b15d02e"
+    ],
+    "scope_gate": "模型门控/优先级/关闭默认 + PG迁移读回 + FreeFast互斥账务 + group badge/native",
+    "tests": [
+      {
+        "name": "TestGroupForceOpenAIUltrafastMigration",
+        "package": "migrations",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSetOpenAIFastPolicySettings_Validation",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastInjectsAndOverridesTier",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastStillHonorsGlobalPolicy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIModelSupportsUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIGroupForcedServiceTier",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastSkipsUnsupportedModels",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyOpenAIFastPolicyToBody_GroupForceFastAndUltrafastTogether",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPassthroughBilling_BlockedFrameDoesNotMutateServiceTier",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestWSResponseCreate_GroupForceUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGroupBillsOpenAIFastAtStandardRequiresOpenAIAccount",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGroupBillsOpenAIFastAtStandardExcludesUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAdminServiceCreateGroupHonorsExplicitImageGenerationDisabled",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAdminService_CreateGroup_NormalizesForceOpenAIUltrafastByPlatform",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAdminService_CreateGroup_AllowsForcingFastAndUltrafastTogether",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAdminService_CreateGroup_UnsupportedPlatformIgnoresBothForcedTiers",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAdminService_UpdateGroup_ForceOpenAIUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIGatewayService_OAuthPassthrough_GroupForceOpenAIUltrafastOverridesClientTier",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIGatewayService_OAuthLegacy_GroupForceOpenAIUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAPIKeyAuthSnapshotGroupForceOpenAIFastRoundtrip",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAPIKeyAuthSnapshotGroupForceOpenAIUltrafastRoundtrip",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestFreeUltrafastGroupPersistence",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGetByKeyForAuthCarriesGroupForceOpenAIUltrafast",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupRequestsDecodeForceOpenAIFast",
+        "package": "internal/handler/admin",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGroupRequestsDecodeForceOpenAIUltrafast",
+        "package": "internal/handler/admin",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGroupMapperExposesForceOpenAIFastOnlyToAdmins",
+        "package": "internal/handler/dto",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGroupMapperExposesForceOpenAIUltrafastOnlyToAdmins",
+        "package": "internal/handler/dto",
+        "mode": "unit"
+      }
+    ],
+    "frontend": [
+      "src/views/admin/__tests__/GroupsView.codexManifest.spec.ts",
+      "src/views/admin/__tests__/GroupsView.openaiForcedTier.spec.ts",
+      "src/views/admin/__tests__/groupsOpenAIFast.spec.ts"
+    ]
+  },
+  {
+    "id": "F02",
+    "feature": "Vertex 多区域：Gemini 账号支持 us/eu 多区域端点，不支持的模型自动走 global；发往多区域的请求在默认定价下按 1.1 倍计费（分组/渠道自定义价格不受影响）",
+    "source_commits": [
+      "b32ad6dfe113ed3e0ad64679d5c06adec6241961",
+      "68071ddde1ee4de8fb31b82536568cd831fde7be",
+      "2164ea48781731d3d129268d33c4220f55e6183b"
+    ],
+    "scope_gate": "us/eu/global真实请求 + default×1.1及自定义价不叠加 + PG/reload + account badge/native",
+    "tests": [
+      {
+        "name": "TestResolveAccountStatsCost_DeepSeekPricingPriority",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_NilChannelService",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_EmptyUpstreamModel",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_GetChannelForGroupReturnsNil",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_HitsCustomRule",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_ApplyPricingToAccountStats_UsesTotalCost",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_FallsBackToLiteLLM",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_UpstreamPriceFactorScalesModelFilePricingOnly",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_FallbackHonorsAnthropicFast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_Gemini36FlashTierUsesFallbackPricing",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_AllMiss_ReturnsNil",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_NilBillingService_SkipsLiteLLM",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResolveAccountStatsCost_CustomRulePriorityOverApplyPricing",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyAccountStatsCost_UsesUsageLogServiceTier",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyAccountStatsCost_LongContextFollowsAccountGate",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildVertexGeminiAccountURL",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiCachedContentStoragePricingAndSurcharge",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUpstreamPriceMultiplierScalesTokenCostOnly",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUpstreamPriceMultiplierSkipsConfiguredPricing",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyUpstreamPriceFactorTokenModeOnly",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardListModels_ResponseOverReadLimitFails",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardModels_VertexMultiRegionAccountReadsGlobalList",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestVertexAPIHost",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAccountVertexLocationResolvesMultiRegionPerModel",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildVertexGeminiAccountURLMultiRegion",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildVertexAnthropicURLMultiRegionHost",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiCachedContentLocationInBody",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiCachedContentVertexURLsMultiRegion",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildVertexPublisherModelsURLMultiRegionHost",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildVertexBatchPredictionJobsEndpointMultiRegionHost",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestVertexUpstreamPriceMultiplier",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiForwardNative_VertexMultiRegionAccountRoutesByModelAndCachedContent",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiCompatForwards_VertexMultiRegionSetsUpstreamPriceMultiplier",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F03",
+    "feature": "新增 Gemini 4 Carbon 模型支持，补齐 Gemini 4 Hydrogen 计费",
+    "source_commits": [
+      "d70a23f84b7329ca76dacae590df132993d415fc",
+      "32e70f3d4048ce5978dc15f72d5dd81f2e383a28"
+    ],
+    "scope_gate": "Carbon/Hydrogen模型路由与fallback账务 + 历史数据不重价",
+    "tests": [
+      {
+        "name": "TestDefaultAntigravityModelMapping_Gemini4ArgonAndClaude55Models",
+        "package": "internal/domain",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuiltinGeminiCacheStoragePrice",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDefaultPricingIncludesGemini4ArgonCyberAndPriorityRates",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBillingService_Gemini4HydrogenFallbackIsBillable",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDefaultPricingIncludesGemini4HydrogenRates",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyGeminiCompatThinkingConfig",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiCarbonPricingAliases",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiCarbonFallbackBilling",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDefaultPricingIncludesGeminiCarbon",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDefaultModels_ContainsImageModels",
+        "package": "internal/pkg/geminicli",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGoogleOneModels_ExcludeUnsupportedNewAndImageModels",
+        "package": "internal/pkg/geminicli",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDefaultModels_ContainsFallbackCatalogModels",
+        "package": "internal/pkg/gemini",
+        "mode": "unit"
+      },
+      {
+        "name": "TestHasFallbackModel_RecognizesCustomtoolsModel",
+        "package": "internal/pkg/gemini",
+        "mode": "unit"
+      },
+      {
+        "name": "TestHasFallbackModel_Carbon",
+        "package": "internal/pkg/gemini",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSupportsMultimodalFunctionResponses",
+        "package": "internal/pkg/gemini",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCarbonGenerationThinkingLevels",
+        "package": "internal/pkg/antigravity",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCarbonTierPreservesUpstreamSelection",
+        "package": "internal/pkg/antigravity",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCarbonTransformUsesMappedModelForThinking",
+        "package": "internal/pkg/antigravity",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDefaultModels_ContainsNewAndLegacyImageModels",
+        "package": "internal/pkg/antigravity",
+        "mode": "unit"
+      },
+      {
+        "name": "TestIsGeminiReasoningModel_IncludesProAgent",
+        "package": "internal/pkg/antigravity",
+        "mode": "unit"
+      }
+    ],
+    "frontend": [
+      "src/composables/__tests__/useModelWhitelist.spec.ts"
+    ]
+  },
+  {
+    "id": "F04",
+    "feature": "OpenAI 透传账号可选按模型白名单过滤调度",
+    "source_commits": [
+      "9d5fb150b9fd8b0febed777da618b17cdf9f876c",
+      "121a4cca17ae153bf675f40d14919738c0411f70"
+    ],
+    "scope_gate": "白名单开/关调度与快照、无候选拒绝 + 创建/编辑/批量保存重载 + badge/native",
+    "tests": [
+      {
+        "name": "TestOpenAIPassthroughModelFilterEligibility",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIPassthroughModelFilterMixedPoolSelection",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIPassthroughModelFilterPreservesForwardBody",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIPassthroughModelFilterGroupCatalog",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestProjectAccountModelsPassthroughIgnoresStaleMappings",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestProjectAccountModelsPassthroughFilterKeepsSourceNames",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildSchedulerMetadataAccount_KeepsOpenAIPassthroughForModelGate",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildSchedulerMetadataAccount_KeepsOpenAIPassthroughModelFilter",
+        "package": "internal/repository",
+        "mode": "unit"
+      }
+    ],
+    "frontend": [
+      "src/components/account/__tests__/BulkEditAccountModal.spec.ts",
+      "src/components/account/__tests__/CreateAccountModal.spec.ts",
+      "src/components/account/__tests__/EditAccountModal.spec.ts"
+    ]
+  },
+  {
+    "id": "F05",
+    "feature": "并发等待 ping 支持配置 concurrency.ping_interval=0 关闭，避免提前写入 HTTP 状态码",
+    "source_commits": [
+      "fe40612b804dc848be85fcf677bb4e23824918d8"
+    ],
+    "scope_gate": "ping=0/非0在排队/提交前后真实HTTP状态及取消",
+    "tests": [
+      {
+        "name": "TestValidateConcurrencyPingInterval",
+        "package": "internal/config",
+        "mode": "unit"
+      },
+      {
+        "name": "TestConcurrencyWaitPingInterval",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestConcurrencyWaitWithoutPingAcquiresSlot",
+        "package": "internal/handler",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F06",
+    "feature": "同一用户的扣费按用户通道合并结算，消除余额热点行排队，单用户高并发下延迟与内存显著下降",
+    "source_commits": [
+      "2101f4f94005518529f0b391d823ef1cd2ade4c5"
+    ],
+    "scope_gate": "实际Apply lane并发/错误/幂等PG；journal路径明确未采用lane，不能宣称全路径优化；性能实测",
+    "tests": [
+      {
+        "name": "TestUsageBillingLane_HoldMethodsPassThrough",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_MissingRequestIDAppliesDirectly",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_IdleLaneAppliesImmediately",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_QueuedRequestsSettleAsOneBatch",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_DifferentUsersSettleIndependently",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_SplitsQueueByMaxBatchSize",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_BatchErrorFallsBackToSingleApply",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_PerCommandOutcomeErrorReachesItsCaller",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_ApplyPanicDeliversErrorAndLaneKeepsWorking",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_StopWaitsForQueuedCommandsThenBypassesLanes",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_StopOnNilCombiner",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_ConcurrentUsersReceiveTheirOwnResults",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_QueuedRequestTimeoutStartsWhenSettlementStarts",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_FallbackSharesOneDeadline",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingLane_FallbackPanicOnlyFailsThatRequest",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageBillingRepositoryApplyBatch_MatchesSequentialApply",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageBillingRepositoryApplyBatch_DuplicateAndConflictingRequests",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageBillingRepositoryApplyBatch_ArchivedRequestsAreNotReapplied",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageBillingLaneCombiner_ConcurrentRequestsOfOneUser",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageBillingRepositoryApplyBatch_RejectsNonFiniteAmounts",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestAccountRepositoryBatchUpdateLastUsed_LocksRowsInIDOrder",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestAccountRepositoryBatchUpdateLastUsed_DoesNotBlockForeignKeyShareLocks",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestProvideCleanup_WithMinimalDependencies_NoPanic",
+        "package": "cmd/server",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F07",
+    "feature": "调度快照加载与数据库回源按 bucket 合并，减少大分组选号时的重复加载与整组复制",
+    "source_commits": [
+      "9c3280098623989bac4d631fd8534d1c0e0ac672"
+    ],
+    "scope_gate": "两原merge回归 + bucket并发coalesce/取消/深拷贝/撤销 + 性能实测",
+    "tests": [
+      {
+        "name": "TestSchedulerFallbackConcurrentMissesShareOneDBLoad",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerFallbackCanceledWaiterLeavesSharedLoadRunning",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerSnapshotListUsesValuesReaderWithoutCopy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestFilterAccountsBySchedulingThresholdCompactsInPlace",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoRepeatReadsFetchTagsAndExpiredLastUsed",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoLastUsedIsFreshAndCopiesAreIndependent",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoPlatformRevisionScopesInvalidation",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoMaxAgeBoundsUnversionedWrites",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoStaleGraceIsBounded",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoVersionChangeWaitsForReload",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoConcurrentLoadsAreCoalesced",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoCanceledWaiterDoesNotAbortSharedLoad",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoReloadReusesUnchangedMasters",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoReloadRedecodesMastersAfterRuntimeMappingChange",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoStaleEntryStartsOneBackgroundReload",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerCacheSnapshotMemoLastUsedWriteInvalidatesLocalCache",
+        "package": "internal/repository",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F08",
+    "feature": "请求体热点路径改用零拷贝读取，Anthropic 请求路径与流事件转发减少 JSON 解码与复制",
+    "source_commits": [
+      "ade20f4e4749b743dab268e006d3ad10b58af554",
+      "1546c0c18e97225cc657444ea8406d1088ebd740",
+      "71ef5770547e16007ea0c41ad94f43698d091d59"
+    ],
+    "scope_gate": "真实请求路径/错误/SSE保真 + 分配量性能实测",
+    "tests": [
+      {
+        "name": "TestBuildDynamicToolMap_FakeNameShape",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestReverseToolNamesStringMatchesBytes",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCompactionTriggerOrderFastPathMatchesDecode",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCompactionTriggerOrderFastPathMatchesDecodeRandomized",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestHasCompactionTriggerInInputLiteralGate",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResponsesInputHasFunctionCallOutputNamed",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIRequestBodyHasToolsMatchesScan",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDeleteJSONPathIfPresent",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSanitizeBedrockCacheControlMatchesCopyingScan",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestExtractBedrockChunkDataReadsEscapedAndPlainBase64",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestEnforceCacheControlLimitMatchesLegacy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestEnforceCacheControlLimitMatchesLegacyRandomized",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestEnforceCacheControlLimitDoesNotMutateInput",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCacheControlTTLOrderMatchesLegacy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForceEphemeralCacheControlTTLDoesNotMutateInput",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestRequestJSONHelpersMatchLegacy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestClaudeMimicDebugLineIsLazyAndMatchesEager",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestToolHelpersMatchLegacy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncBillingHeaderVersionMatchesLegacy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestParseSSEUsage_StartOutputIsCumulativeNotAddedTwice",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSSEEventNeedsJSONParse",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestHandleStreamingResponse_FastPathForwardsDeltaBytesVerbatim",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestJSONMayEscapePlainASCII",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCodexCallOutputGateSkipsDeclaredToolsWithoutCandidate",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCodexCallOutputGateAdmitsEveryRewrite",
+        "package": "internal/handler",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F09",
+    "feature": "分组日汇总重建与保留期清理不再阻塞 usage_logs 写入，避免清理期间用量记录丢失",
+    "source_commits": [
+      "829bf2cdb9a6a235a5d447ccd92405dbbc123577"
+    ],
+    "scope_gate": "PG旧数据迁移/并发写/重建/保留清理 + 时区/DST水位 + 失败回滚",
+    "tests": [
+      {
+        "name": "TestMigration223TracksConfiguredTimezone",
+        "package": "migrations",
+        "mode": "unit"
+      },
+      {
+        "name": "TestMigration251AddsExpiredFloorAndNonBlockingBuildMarks",
+        "package": "migrations",
+        "mode": "unit"
+      },
+      {
+        "name": "TestRequestLogRetention_RuntimePolicy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestRuntimeLogConfig_RequestRetentionCompatibility",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestRequestLogRetention_CutoffAlignsToConfiguredDayStart",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGroupUsageDayBoundariesSkipMidnightDSTGap",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGroupUsageDayBoundariesUseFirstOfRepeatedMidnight",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageLogRepositoryGetAllGroupUsageSummaryUsesRollupTail",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageLogRepositoryGetAllGroupUsageSummaryFallsBackWhenWatermarkInvalid",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageLogRepositoryGetAllGroupUsageSummaryTailStartsAtExpiredBefore",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGroupUsageRollupSyncDoesNotBlockUsageWritesDuringBuild",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupRetentionCleanupKeepsPublishedWatermark",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupTriggersIgnoreRowsBeforeExpiredFloor",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupTriggersMarkDirtyDuringBuild",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupBuildKeyShareDoesNotBlockLateWrites",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupSyncSkipsWhileAnotherBuildHoldsLock",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupSyncRecoversFromInterruptedBuild",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupBulkDeleteDuringBuildWritesStateOnce",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupInvalidateAtStartsFromExpiredFloor",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupSyncKeepsPreviousDayBucketAcrossMidnightDSTGap",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestGroupUsageRollupRetentionCleanupSkipsPartitionDropOnLockTimeout",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsNoopsWithoutLockingAtCurrentDate",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsSkipsWhenAnotherBuildHoldsLock",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsBuildsAndPublishesInSeparateTransactions",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsRebuildsDirtyRangeBeforeFullPublish",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsStopsAfterMaxRoundsWithoutOverPublishing",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsPublishKeepsUnmarkedInvalidation",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsFullRebuildExcludesExpiredRows",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsKeepsRetainedFromAtExpiredFloor",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsClearsStaleBuildMarkWhenPublished",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositorySyncGroupUsageRollupsAbortsWhenBuildMarkReplaced",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryRecomputeRangeLeavesGroupRollupRebuildToSync",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryRecomputeRangeStopsWhenInvalidationFails",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryCleanupUsageLogsExpiresWholeDaysBeforeDeleting",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryCleanupUsageLogsPartitionedInvalidatesRetainedRowsAfterDrop",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryCleanupUsageLogsStopsWhenExpireFails",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryCleanupUsageLogsBatchFailureStopsWithoutSync",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryCleanupUsageLogsSkipsPartitionWhenDropLockTimesOut",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageCleanupRepositoryDeleteUsageLogsBatch",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageCleanupRepositoryDeleteUsageLogsBatchDoesNotLockGroupRollupState",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageCleanupRepositoryDeleteUsageLogsBatchQueryError",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageLogRepositoryGetAllGroupUsageSummaryMidnightDSTGap",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDashboardAggregationRepositoryCleanupUsageLogsMidnightDSTGap",
+        "package": "internal/repository",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F10",
+    "feature": "上游死连接检测由约 165 秒缩短到约 30 秒",
+    "source_commits": [
+      "5854a1db43ad36f2c9c42e66f3dd1147a1bccff8"
+    ],
+    "scope_gate": "真实socket超时/平台降级；30s主张需实际测量",
+    "tests": [
+      {
+        "name": "TestUpstreamDialerSetsKeepAliveAndUserTimeoutOnTheSocket",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNewUpstreamDialerHasBoundedTimeout",
+        "package": "internal/repository",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F11",
+    "feature": "启动时远程价格哈希检查改为后台进行，不再阻塞服务启动",
+    "source_commits": [
+      "c45ef4116f0cb680a6fc87bb2e75d78869140e81"
+    ],
+    "scope_gate": "启动不阻塞 + hash异步成功/失败/取消",
+    "tests": [
+      {
+        "name": "TestPricingStartupDoesNotWaitForRemoteHash",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPricingStartupBackgroundCheckDownloadsWhenHashDiffers",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPricingStartupBackgroundCheckKeepsLocalDataWhenHashFetchFails",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F12",
+    "feature": "Gemini 原生请求按稳定前缀生成粘性会话哈希，提升隐式缓存命中",
+    "source_commits": [
+      "b6c21cd5e75acfab663a5b916572d9ed56c70d8a"
+    ],
+    "scope_gate": "稳定前缀hash/换号/真实usage + 付费路径PG记录",
+    "tests": [
+      {
+        "name": "TestGenerateGeminiDigestSessionKey",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_StableAcrossTurns",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_SeedFormat",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_DistinguishesEachSeedField",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_FirstUserSkipsLeadingModelContent",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_RoleOmittedCountsAsUser",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_NonTextPartAnchors",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_NormalizesJSONFormatting",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_EmptyWithoutFirstUserContent",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F13",
+    "feature": "Bedrock 按错误语义区分封号、用例缺失、限流与内容过滤，429 只冷却对应模型",
+    "source_commits": [
+      "23ac69a0219c77e29de7b8f4195a40ccc745a7b4"
+    ],
+    "scope_gate": "语义分类矩阵 + 模型级429隔离 + 中断usage",
+    "tests": [
+      {
+        "name": "TestBedrockUpstreamErrors_AccountBlockedDisablesAndFailsOver",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_UseCaseMissingDisablesAndFailsOver",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_TempUnschedRuleOverridesAccountLevelDefaults",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_ThrottlingCoolsOnlyRequestedModel",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_DailyTokenRuleTakesPrecedenceOverThrottlingCooldown",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockThrottlingWithoutModelFallsBackToAccountCooldown",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_ContentFilterReturnsRequestErrorWithoutFailover",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_ServerErrorsStillFailOverWithoutPenalty",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_OtherValidationErrorsReturnToClient",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardBedrockStreamInterruptionKeepsObservedUsage",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_AccountBlockedMatchesWholeMessageOnly",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_EchoedRequestContentDoesNotDisableAccount",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_ChannelMappedModelCoolsSchedulingKey",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_ThrottlingCooldownDisabledWritesNothing",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBedrockUpstreamErrors_ContentFilterOnlyForRewrittenServerErrors",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F14",
+    "feature": "Kimi 支持新版月度套餐额度解析",
+    "source_commits": [
+      "c54ebd4f124e88ece35dcc97cff9266ad4d61090",
+      "694d09379b24d93a4a57ad5dda1c0bf8d940707d"
+    ],
+    "scope_gate": "新旧月套餐/缺失窗口/异常清理 + UI snapshot",
+    "tests": [
+      {
+        "name": "TestParseKimiUsageTiers_LimitZero",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestParseKimiUsageTiers_MonthlyPlan",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestParseKimiUsageTiers_MonthlyPicksMaxUsage",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestParseKimiUsageTiers_LegacyWithUsedRatio",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCNQuotaExtraUpdates",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCNQuotaExtraUpdatesClearsAbsentWindows",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestParseKimiUsageTiers_RejectsMalformedWindows",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestParseKimiUsageTiers_KeepsLegalEdgeValues",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestParseZhipuTokenTiers_SkipsMissingPercentage",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F15",
+    "feature": "Codex 分叉会话沿用父会话的 prompt cache key，保留缓存命中",
+    "source_commits": [
+      "74ba91aa6b6d130d0b0029fabffed6ce3425dffe"
+    ],
+    "scope_gate": "分叉/父cache key + 正反例最终wire",
+    "tests": [
+      {
+        "name": "TestCodexRequestBodyIdentityNamespaceIsStablePerOAuthAccount",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCodexForkKeepsParentPromptCacheKeyUpstream",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCodexTurnMetadataRewritePreservesHeaderSafeJSON",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F16",
+    "feature": "模型白名单禁止添加通配符条目并给出提示",
+    "source_commits": [
+      "97705d147edef9ae673b2c0bd200b9f8b0558b7a",
+      "24d77b3306385e2ccb2d3336b3ea1a4aad4cb438",
+      "346a7dac0261416e5cb1edc05317f68796417020",
+      "7e75ee4b65f56fadce41b093c106c33c6663b12e"
+    ],
+    "scope_gate": "前后端通配符拒绝/合法输入修正 + UI中英文",
+    "tests": [],
+    "frontend": [
+      "src/components/account/__tests__/ModelWhitelistSelector.spec.ts"
+    ]
+  },
+  {
+    "id": "F17",
+    "feature": "修复 GPT-6.1 Sol 的 Ultra Fast 计费倍率（由 2 倍修正为 6 倍，与 Astra 一致）",
+    "source_commits": [
+      "ad9eeedebbd87fb2e0d311fed7c5e7369b15d02e",
+      "926d3cd86d8b104d59c1dfd474863d9a0223c953"
+    ],
+    "scope_gate": "Sol/Astra ×standard/fast/ultrafast ×FreeFast账务PG/历史快照",
+    "tests": [
+      {
+        "name": "TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastInjectsAndOverridesTier",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastStillHonorsGlobalPolicy",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIModelSupportsUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIGroupForcedServiceTier",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyOpenAIFastPolicyToBody_GroupForceUltrafastSkipsUnsupportedModels",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyOpenAIFastPolicyToBody_GroupForceFastAndUltrafastTogether",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestWSResponseCreate_GroupForceUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAdminService_CreateGroup_NormalizesForceOpenAIUltrafastByPlatform",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAdminService_CreateGroup_AllowsForcingFastAndUltrafastTogether",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAdminService_UpdateGroup_ForceOpenAIUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAstraUltrafastPricingUsesSixTimesStandard",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIUltrafastGateMatchesBilling",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIGatewayService_OAuthLegacy_GroupForceOpenAIUltrafast",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": [
+      "src/views/admin/__tests__/GroupsView.openaiForcedTier.spec.ts",
+      "src/views/admin/__tests__/groupsOpenAIFast.spec.ts"
+    ]
+  },
+  {
+    "id": "F18",
+    "feature": "修复 Gemini 粘性会话换号时强制按缓存读取计费的问题，改为按上游实际用量计费",
+    "source_commits": [
+      "b6c21cd5e75acfab663a5b916572d9ed56c70d8a",
+      "8d57f461ca85f89cef0bf94ae71acc01e35042ca"
+    ],
+    "scope_gate": "换号/未换号/cache开关真实provider usage→PG journal",
+    "tests": [
+      {
+        "name": "TestGenerateGeminiDigestSessionKey",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_StableAcrossTurns",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_SeedFormat",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_DistinguishesEachSeedField",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_FirstUserSkipsLeadingModelContent",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_RoleOmittedCountsAsUser",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_NonTextPartAnchors",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_NormalizesJSONFormatting",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGenerateGeminiContentSessionHash_EmptyWithoutFirstUserContent",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F19",
+    "feature": "修复 Gemini 流式同名并行工具调用、分片工具调用参数快照丢失的问题",
+    "source_commits": [
+      "b0d60a8c867b54919bccdb6dca8eb86dde2644b5",
+      "27a61be4c9e72857fcde5b0d6085d31bdb73d10b",
+      "ce026a2cbf1e1d366ddd64fe098e8a0334949a7b"
+    ],
+    "scope_gate": "同名并行、多片段、final string/JSON snapshot真实SSE",
+    "tests": [
+      {
+        "name": "TestGeminiParallelToolStreams",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F20",
+    "feature": "修复 Gemini 兼容入口未转发 response_format 结构化输出的问题",
+    "source_commits": [
+      "5846bfbbfaccb3bfad8f3bc006e2619306aaadb4"
+    ],
+    "scope_gate": "真实Gemini入口response_format/schema；已合并886 tools/functions丢失另有未闭合窄缺陷",
+    "tests": [
+      {
+        "name": "TestApplyGeminiChatResponseFormat",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiForwardAsChatCompletions_ForwardsResponseFormat",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGeminiForwardAsChatCompletions_CodeAssistKeepsResponseSchemaBytes",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F21",
+    "feature": "修复 Antigravity 兼容流思考内容未流式输出、空流后未释放粘性账号的问题",
+    "source_commits": [
+      "e055d7bafc5b7eda444e0ec7c7aed99e2c802de1",
+      "5cbcb1b59104333a74520e4da6d57de8180358da",
+      "d3716a1730e81ba53fd9011ae6091b670a72f6df"
+    ],
+    "scope_gate": "headers后首内容前thought/keepalive/timeout + 已提交空流释放sticky",
+    "tests": [
+      {
+        "name": "TestAntigravityCompatEmptyStreamAfterKeepaliveIsCommittedNoContent",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAntigravityCompatPreContentTimeoutAfterKeepaliveIsCommittedNoContent",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAntigravityCompatEmptyStreamBeforeKeepaliveStaysFailover",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestReleaseStickySessionAfterCommittedNoContent",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAntigravityCompatEmptyAfterKeepaliveReportsStreamError",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAntigravityCompatGeminiThinkingConfig",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAntigravityCompatHeaderWaitExceedingPreContentLimitDoesNotAbortStream",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAntigravityCompatInterleavedThoughtChunksResetIdleTimeout",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F22",
+    "feature": "修复 OpenAI 首个输出前的上游 keepalive 未转发、keepalive 后 SSE 错误无法下发的问题",
+    "source_commits": [
+      "c1c9d195b3a4c7f4af5673d032c12083d4ae8cb1",
+      "f1013f177f7a5918af5816f0235a61ea71699efd",
+      "1280006a1f3bb7e8b29b487410b5763e06594cd1"
+    ],
+    "scope_gate": "首输出前keepalive + 已提交SSE安全error/DONE + spool失败fallback",
+    "tests": [
+      {
+        "name": "TestGatewayUpstreamErrorAfterKeepalive",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGatewayForwardErrorAfterKeepalive",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIStreamMetadataAndKeepaliveBeforeOverloadFailOver",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIStreamKeepaliveOnlyFailureDoesNotRecordFirstToken",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAINativeMetadataAndKeepaliveDoNotDisarmFirstOutputTimeout",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAINativeStreamForwardsUpstreamKeepaliveBeforeFirstOutput",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAINativeStreamKeepaliveThenFailoverContinuesWithNextAccount",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAINativeStreamKeepaliveAfterOutputStaysInOrder",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAINativeStreamKeepaliveDoesNotResetFirstOutputTimeout",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestWriteAnthropicErrorAfterCommittedSSE",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_OpenCodeUnsupportedModelAfterCommittedSSEIsSSEError",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesKeepaliveThenFailoverExhaustedEndsWithSSEError",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesFailoverThenSecondAccountReadErrorEndsWithSSEError",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesFailoverThenSecondAccountCredentialErrorEndsWithSSEError",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesSlotAcquireFailureAfterKeepaliveIsSSE",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesFailoverExhaustedAppliesFailedFrameRule",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesFirstEventFailedFrameExhaustedAppliesRule",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesNonStreamFailedFrameExhaustedAppliesRule",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesHTTPStatusFailoverExhaustedIgnoresPassthroughRule",
+        "package": "internal/handler",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F23",
+    "feature": "修复 OpenAI 兼容路径输出后的流错误未应用账号副作用、Messages 桥接首包前错误未 failover 的问题",
+    "source_commits": [
+      "975b2807d12966823ace2428290ce53c72d59dc6",
+      "38eb97bd7a2ac4635e0ba5e38a963b49554efa58"
+    ],
+    "scope_gate": "首包前failover/输出后不可重放 + account副作用/usage",
+    "tests": [
+      {
+        "name": "TestForwardAsChatCompletions_StreamErrorAfterOutputAppliesAccountSideEffects",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_StreamErrorAfterOutputAppliesAccountSideEffects",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsChatCompletions_StreamErrorBeforeOutputCountsOnce",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_StreamErrorBeforeOutputCountsOnce",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_PreContentFailedFailsOver",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_PreContentMissingTerminalFailsOver",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_PreContentReadErrorDoesNotFailOver",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_PreContentPingKeepsFailover",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_ContentReleasedNeverFailsOver",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_TerminalBeforeContentReleasesPrelude",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsAnthropic_IntervalTimeoutReleasesPrelude",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestWriteAnthropicErrorAfterCommittedSSE",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesFailsOverAfterKeepaliveOnlyWrite",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIMessagesKeepaliveThenFailoverExhaustedEndsWithSSEError",
+        "package": "internal/handler",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F24",
+    "feature": "修复 OpenAI 工具 Schema 中 patternProperties、Python re 不支持的正则、嵌套 schema 编辑的兼容问题",
+    "source_commits": [
+      "dd6329b983eb3b3adf61159944d3c3644d14048f",
+      "e0cf4984f0d7c0d54ccb2d36292272a4231c07be",
+      "af187f9a50fcae3884875e94338088990dec00f8",
+      "6613ced57314baf6f70fe589d295b3982d6d36a0"
+    ],
+    "scope_gate": "完整嵌套schema/正则/patternProperties/additionalProperties最终wire",
+    "tests": [
+      {
+        "name": "TestSanitizeOpenAIResponsesToolSchemaPatterns_RemovesLookaroundOnly",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSanitizeOpenAIResponsesToolSchemaPatterns_DropsPythonRegexIncompatiblePatterns",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSanitizeOpenAIResponsesToolSchemaPatterns_DropsUnicodePropertyEscape",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSanitizeOpenAIResponsesToolSchemaPatterns_DropsUnsupportedPatternProperties",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSanitizeOpenAIResponsesToolSchemaPatterns_ReopensClosedObjectAfterDroppedPattern",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSanitizeOpenAIResponsesToolSchemaPatterns_KeepsAdditionalPropertiesSchemaWhenNoPatternKeyDropped",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSanitizeOpenAIResponsesToolSchemaPatterns_KeepsClosedObjectWhenNoPatternKeyDropped",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSanitizeOpenAIResponsesToolSchemaPatterns_EnclosingEditSupersedesNestedEdits",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyOpenAIResponsesToolSchemaEdits_ContainmentOrdering",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIResponsesToolSchemaPlatformGate_ReopensClosedObject",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F25",
+    "feature": "修复 Codex additional_tools 声明 ID 被改写、HTTP Responses 额外上下文未规范化的问题",
+    "source_commits": [
+      "fd648775810ed4348a44daaacaf38042d4927486",
+      "8dcdfff22a7ad9568a1c2f88900809dd8eeb4f56",
+      "a0a03be96d81fd1aae4a989500cd4a2752212e80"
+    ],
+    "scope_gate": "UUID/nonUUID additional_tools + HTTP额外上下文与安全边界",
+    "tests": [
+      {
+        "name": "TestFilterCodexInput_AdditionalToolsDeclarationID",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestFilterCodexInput_AdditionalToolsUUID",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIResponsesCompatibility_AdditionalToolsUUID",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAIGatewayService_OAuthAdditionalToolsDeclarationID",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexPageContextFirstMessage",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexAdditionalUntrustedContext",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexAdditionalUntrustedContextPreservesRealAndMalformedOutputs",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexAdditionalUntrustedContextBlankCallIDsAndMixedInput",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexAdditionalUntrustedContextRejectsDuplicateMembers",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexPageContextPreservesHistoryAndToolValidation",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexPageContextMixedBootstrap",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexPageContextMultipart",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNormalizeCodexPageContextRejectsUnrelatedOrMalformedItems",
+        "package": "internal/handler",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F26",
+    "feature": "修复 Chat Completions 转 Responses 时 json_schema 默认 strict、对话中途 system 消息、加密函数调用内容丢失的问题",
+    "source_commits": [
+      "d085bb1a377bb42248da3bfa6d12cf205769fb56",
+      "6c79fdfc7ab55e2c067b475ee4a498efd12423c2",
+      "4584dcb39228ec606193f63d79b7a465e8751c1e"
+    ],
+    "scope_gate": "CC→Responses strict=false/system→developer/加密function保真",
+    "tests": [
+      {
+        "name": "TestOpenAIResponsesSealedFunctionCallRoundTrip",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAnthropicToResponses_MidConversationSystemBecomesDeveloper",
+        "package": "internal/pkg/apicompat",
+        "mode": "unit"
+      },
+      {
+        "name": "TestChatCompletionsToResponses_ResponseFormatJsonSchema",
+        "package": "internal/pkg/apicompat",
+        "mode": "unit"
+      },
+      {
+        "name": "TestChatCompletionsToResponses_ResponseFormatJsonSchemaDefaultsStrictFalse",
+        "package": "internal/pkg/apicompat",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F27",
+    "feature": "修复 Chat Completions 转 Anthropic 时客户端 metadata.user_id 丢失的问题（API Key 账号）",
+    "source_commits": [
+      "1f2242436293c1a64e5e17b17ca1033af902f232"
+    ],
+    "scope_gate": "API-key CC→Anthropic metadata.user_id最终wire",
+    "tests": [
+      {
+        "name": "TestWithChatCompletionsMetadataUserID_Carries",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestWithChatCompletionsMetadataUserID_KeepsEscapesAndOtherKeysOut",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestWithChatCompletionsMetadataUserID_LeavesBodyAlone",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsChatCompletions_CarriesMetadataUserID",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardAsChatCompletions_OAuthAccountKeepsSynthesizedMetadataUserID",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestForwardChatCompletionsViaNativeAnthropic_CarriesMetadataUserID",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F28",
+    "feature": "修复 Anthropic 兼容路由未执行 effort 策略、per-turn beta 丢失输出配置的问题",
+    "source_commits": [
+      "d850b8e3a25ce1e19d9e6c23965344000927a4bd",
+      "bd89d3d943c0b2dafaf927f6665ea90ccfaaada8"
+    ],
+    "scope_gate": "effort策略/per-turn beta/output_config最终wire",
+    "tests": [
+      {
+        "name": "TestForward_PerTurnControlMessageOutputConfig",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildUpstreamRequest_PerTurnControlPolicyFilter",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGatewayCompatibilityHandlersReasoningEffortPolicy",
+        "package": "internal/handler",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F29",
+    "feature": "修复 Composite 路由响应中公开模型名未还原、模型改写范围过大的问题",
+    "source_commits": [
+      "aee71b85b9df233f914ddd6be46f51a2edd40f23",
+      "7349750c017ca0d4efbb63cc109c6692fcc4d228"
+    ],
+    "scope_gate": "Composite公开model仅message_start改写/其余帧不污染",
+    "tests": [
+      {
+        "name": "TestCompositeRouteRestoresPublicModelOnAnthropicForward",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCompositeRouteRestoresPublicModelOnResponsesBridge",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCompositeRouteRestoresPublicModelOnChatCompletionsBridge",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestRestoreCompositeClientModelOnlyWhenRouteRewroteModel",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCompositeRouteStreamRewritesOnlyMessageStartModel",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCompositeRoutePassthroughStreamKeepsMessageStartWithoutModel",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F30",
+    "feature": "修复 count_tokens 透传重复请求头的问题",
+    "source_commits": [
+      "2b86d2f6a023bc7d1442bc2a350cb952d3616cb6"
+    ],
+    "scope_gate": "count_tokens实际代理headers单值与重复输入",
+    "tests": [
+      {
+        "name": "TestCountTokensPassthroughSendsOneContentTypeAndVersion",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildClaudeMimicDebugLineReadsRawCasedHeaders",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F31",
+    "feature": "修复客户端断开后粘性绑定未写入的问题",
+    "source_commits": [
+      "733722f8c7de5f459a490957c36344cb8e20b019"
+    ],
+    "scope_gate": "client断开后sticky持久写；取消/资源回收",
+    "tests": [
+      {
+        "name": "TestGatewayMessagesStickyWritebackAfterForward",
+        "package": "internal/handler",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F32",
+    "feature": "修复 Claude 并发 token 轮换后请求失败的问题",
+    "source_commits": [
+      "b0f6f8391153ee4ce6753d1733ab54a1c2c81b71"
+    ],
+    "scope_gate": "并发token轮换一次有界恢复/无无限重试",
+    "tests": [
+      {
+        "name": "TestGatewayService_RotatedClaudeToken",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F33",
+    "feature": "修复 Claude 账号测试默认模型，改为 claude-sonnet-4-6",
+    "source_commits": [
+      "734b922bd8e71b33ff34901c1601d49afa8dbc3d"
+    ],
+    "scope_gate": "账号测试默认claude-sonnet-4-6 + 显式模型不覆盖",
+    "tests": [
+      {
+        "name": "TestAccountTestService_ClaudeDefaultAndExplicitModelsReachUpstream",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F34",
+    "feature": "修复 Fable 周额度读取与 7d_oi 窗口恢复后模型限流未解除的问题，5h 窗口滚动不再清空周用量读数",
+    "source_commits": [
+      "c115dc27ab2e21e121874555b630ba77348badcf",
+      "4114fedd1892ee8b14aec40c716f5685edf9663a",
+      "c829317fc5987b5d0608c861230b45325dd70d31"
+    ],
+    "scope_gate": "Fable scoped weekly/7d_oi恢复/5h滚动snapshot读回",
+    "tests": [
+      {
+        "name": "TestPassiveUsageClearsExhaustedFableLimitAfterQuotaReset",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPassiveUsageKeepsFableLimitWhenUtilizationMissing",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPassiveUsageKeepsFableLimitWhileWindowStillRejected",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPassiveUsageKeepsFableLimitWhenUtilizationStillHigh",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPassiveUsageKeepsCreditsRequiredLimit",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPassiveUsageKeepsOtherModelLimitsWhenRecoveringFable",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestPassiveUsageKeepsLimitWhenClearFails",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncActiveToPassiveClearsExhaustedFableLimit",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncActiveToPassive_WritesFiveHourSessionWindowEnd",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncActiveToPassive_SkipsSessionWindowEndWhenResetMissing",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUpdateSessionWindow_RolloverKeepsCurrentWeeklyReadings",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestRolloverPassiveUsageClears",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildUsageInfo_SevenDayFable",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildUsageInfo_ScopedFableLimits",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncActiveToPassive_WritesFableExtras",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestClaudeUsageFetcher_ScopedFableRoundTrip",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestClaudeUsageServiceSuite",
+        "package": "internal/repository",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F35",
+    "feature": "修复 5h 窗口起点与额度重置时间不对齐的问题",
+    "source_commits": [
+      "fa910c1c3842a627a3b9372bf73e7cee11b26593"
+    ],
+    "scope_gate": "active reset窗口/时区边界与5h对齐",
+    "tests": [
+      {
+        "name": "TestUsageLogRepoSuite",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathConcurrent",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathDuplicateRequestID",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryFlushCreateBatch_DeduplicatesSameKeyInMemory",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreateBestEffort_QueueFullBlocksUntilCtxDeadline",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreateBestEffort_QueueFullWaitsForDrain",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathCanceledContextMarksNotPersisted",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathQueueFullMarksNotPersisted",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathCanceledAfterQueueMarksNotPersisted",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryFlushCreateBatch_CanceledRequestReturnsNotPersisted",
+        "package": "internal/repository",
+        "mode": "integration"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F36",
+    "feature": "修复调度快照遗漏冷却中账号、openai_capabilities 与透传模型过滤配置的问题",
+    "source_commits": [
+      "636981b28b22fb217222035617c77e7cf7adbe60",
+      "39bac35a374f53264a353b69ed21661de9849971",
+      "cca745e8beefa08e1afa1312e64f7f04b98bcfce",
+      "121a4cca17ae153bf675f40d14919738c0411f70"
+    ],
+    "scope_gate": "冷却到期自动恢复/保留openai_capabilities与model_filter快照",
+    "tests": [
+      {
+        "name": "TestSchedulerFallbackReturnsDBAccountsWhenBucketRetired",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestInflightEstimate_AccountLevelMappingFallsBackLikeBilling",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestInflightEstimate_NoGroupKeyUsesUngroupedAccountMapping",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestInflightEstimate_AccountMappingNoNegativeCaching",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerSnapshotRecoversTransientCooldownWithoutIntervalRebuild",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerMetadataKeepsOpenAICapabilities",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerMetadataDropsUnlistedCredentials",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildSchedulerMetadataAccount_KeepsOpenAIPassthroughForModelGate",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBuildSchedulerMetadataAccount_KeepsOpenAIPassthroughModelFilter",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSchedulerSnapshotConfiguredMembership",
+        "package": "internal/repository",
+        "mode": "integration"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F37",
+    "feature": "修复 RPM 覆盖值误用于其他分组、分组倍率/RPM 同步失败时清空覆盖配置的问题",
+    "source_commits": [
+      "76221c9cb04a8b09484626456f33fcc75b4ce697",
+      "37a0f3870b5a269b2957987d86bc76022710bca1",
+      "98a44ba3f36f3acfd77cebc796fc10248c582018"
+    ],
+    "scope_gate": "group RPM隔离/transaction rollback + PG/reload；无每请求额外query",
+    "tests": [
+      {
+        "name": "TestBillingCacheService_CheckRPM_OverrideFromAnotherGroupMustNotApply",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBillingCacheService_CheckRPM_SnapshotOverrideAppliesForItsOwnGroup",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBillingCacheService_CheckRPM_NilUserIsNoop",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBillingCacheService_CheckRPM_SnapshotConfirmedNoOverrideSkipsLookup",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBillingCacheService_CheckRPM_SnapshotForAnotherGroupStillLooksUp",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAPIKeyAuthSnapshotRecordsResolvedRPMOverrideGroup",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncGroupRateMultipliersCommitsInOneTransaction",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncGroupRateMultipliersRollsBackOnInsertFailure",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncGroupRPMOverridesCommitsInOneTransaction",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSyncGroupRPMOverridesRollsBackOnInsertFailure",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDedupeGroupRateMultiplierEntriesKeepsLastValue",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDedupeGroupRPMOverrideEntriesKeepsLastValue",
+        "package": "internal/repository",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F38",
+    "feature": "修复支付宝退款重试可能重复退款的问题",
+    "source_commits": [
+      "43511b40e977060ba173b68dbb6fd1e89d2fe578"
+    ],
+    "scope_gate": "退款重试稳定幂等ID；离线mock不得真实支付",
+    "tests": [
+      {
+        "name": "TestAlipayRefundRecordsOutRequestNoAsRefundID",
+        "package": "internal/payment/provider",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAlipayRefundOutRequestNoIsStableAcrossRetries",
+        "package": "internal/payment/provider",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAlipayRefundRetryDoesNotDoubleRefund",
+        "package": "internal/payment/provider",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F39",
+    "feature": "修复按账户筛选时模型/端点分布的实际扣费被替换为账号成本的问题",
+    "source_commits": [
+      "d05e8ef033db09bef1c77fe579801591322bc7cb"
+    ],
+    "scope_gate": "真实repository account-filter model/endpoint actual_cost不替换采购成本",
+    "tests": [
+      {
+        "name": "TestGeminiAggregateUsageUsesAccountCost",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageLogRepoSuite",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathConcurrent",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathDuplicateRequestID",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryFlushCreateBatch_DeduplicatesSameKeyInMemory",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreateBestEffort_QueueFullBlocksUntilCtxDeadline",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreateBestEffort_QueueFullWaitsForDrain",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathCanceledContextMarksNotPersisted",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathQueueFullMarksNotPersisted",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryCreate_BatchPathCanceledAfterQueueMarksNotPersisted",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestUsageLogRepositoryFlushCreateBatch_CanceledRequestReturnsNotPersisted",
+        "package": "internal/repository",
+        "mode": "integration"
+      },
+      {
+        "name": "TestScanUsageLogRequestTypeAndLegacyFallback",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageLogRepositoryGetModelStatsAccountFilterKeepsActualCost",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageLogRepositoryGetEndpointStatsAccountFilterKeepsActualCost",
+        "package": "internal/repository",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F40",
+    "feature": "修复 Chat 回退与原生 Anthropic 路径响应模型记录丢失的问题",
+    "source_commits": [
+      "d30179f4b5c8f56750fea3d6a7a3f74d50796230",
+      "ac981240cc44f4e61bf76aa1b67eb1a5436aab30",
+      "b9d02c31a5ba47d21262ad50a37599456033e861",
+      "de34f50c1a2a723ae8717f56c964f1ebef3fc6ea",
+      "c487b215faea7a4158c20e74c5796d51c4393471",
+      "90f115132490b39be090459455cdb51fdda43df9"
+    ],
+    "scope_gate": "Chat fallback/native Anthropic response_model→usage repository + 错误诊断endpoint",
+    "tests": [
+      {
+        "name": "TestNativeAnthropicResponseObservationReachesUsage",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestNativeAnthropicResponseObservationRespectsBillingSource",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAnthropicCompatUpstreamObservation",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestChatFallbackResponseObservationReachesUsage",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F41",
+    "feature": "修复 DeepSeek 显式 token 价格覆盖不生效的问题，补充硅基流动 Qwen3-Embedding / Reranker 兜底定价",
+    "source_commits": [
+      "b7878328b699bd5f5b61e10df2db74a3723dfc7a",
+      "43c1ca01483c4e21b2dd62bd1168cf374436b9ca",
+      "796455c1c9f57241c82115e78dcb67938609af4d"
+    ],
+    "scope_gate": "DeepSeek显式0/价格覆盖 + Embedding/Reranker兜底usage账务",
+    "tests": [
+      {
+        "name": "TestCalculateOpenAIRecordUsageCost_EmptyCandidatesIsPricingUnavailable",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCalculateOpenAIRecordUsageCost_Qwen3EmbeddingFallback",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCalculateOpenAIRecordUsageCost_Qwen3RerankerFallback",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGetFallbackPricing_FamilyMatching",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGetModelPricing_Qwen3EmbeddingFallback",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGetModelPricing_Qwen3RerankerFallback",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCalculateCostUnified_DeepseekProRetainsRatesAfterSeptember14",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDeepseekOverrideFileTokenPrices",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDeepseekOverrideFileReloadRestoresOfficialPolicy",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F42",
+    "feature": "修复联网搜索在部分平台忽略账号级模式的问题",
+    "source_commits": [
+      "a0340d4ddeb5831e53910dc7f93c3d3fc95bfb53"
+    ],
+    "scope_gate": "每平台×账号模式×渠道开关最终wire正反例",
+    "tests": [
+      {
+        "name": "TestShouldEmulateWebSearchFor_AccountChannelModes",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F43",
+    "feature": "修复 OpenAI 额度刷新失败导致渠道监控在异常与正常间反复切换的问题",
+    "source_commits": [
+      "e677462549985a360fe032d2b66334bbbdfcad12",
+      "bf3951a59e23974f6efecfe62e835c701e73fa25",
+      "c4ff9b90a917ff8b321a92819d143c969dbb0d82"
+    ],
+    "scope_gate": "quota刷新失败保留freshness/monitor不翻error/真实缓存读回",
+    "tests": [
+      {
+        "name": "TestAccountUsageService_GetOpenAIUsage_DoesNotPromoteCodexExtraToRateLimit",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAccountUsageService_GetOpenAIUsage_PreservesSnapshotObservationTime",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAccountUsageService_GetOpenAIUsage_RefreshFailureKeepsCachedDataAndReportsError",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAccountUsageService_GetOpenAIUsage_RefreshFailureWithoutSnapshot",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGetOpenAIUsage_SparkShadow_WritesExtraAndReturnsNonEmptyWindows",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGetOpenAIUsage_SparkShadow_FailedOrEmptyQueryDoesNotRefreshSnapshot",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageFailureInfo_ClassificationMatrix",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUsageQuotaTiers_NilAndEmptyInputs",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestDeriveQuotaCheckResult_StatusMatrix",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestQuotaFetcher_OpenAIQuotaRefreshFailureDoesNotFlap",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": [
+      "src/components/account/__tests__/AccountUsageCell.spec.ts"
+    ]
+  },
+  {
+    "id": "F44",
+    "feature": "修复 Grok 媒体错误信息丢失、服务端搜索调用混入工具调用的问题",
+    "source_commits": [
+      "70ad8365d9b5a0be5ebaf3c0065ff385f8c081fd",
+      "c8f4264f8fe8a450e1448f5d4ba07d768243ba77",
+      "03a489e43e5103a488387e6b96602bff57a73af7"
+    ],
+    "scope_gate": "xAI扁平error只限Grok + 媒体原码/信息 + server-search不计工具",
+    "tests": [
+      {
+        "name": "TestGrokUpstreamErrorMessageFormats",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGrokUpstreamErrorCodeFormats",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestSharedUpstreamErrorExtractorsIgnoreXAIFlatShape",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestOpenAICompatibleModelNotFoundIgnoresTopLevelCode",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGrokMediaUpstreamErrorFields",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGrokMediaErrorRewritesKeepPriority",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGrokMediaRetryableErrorKeepsOriginalBody",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCountGrokNativeSearchCallsFromJSONBytes",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestCountGrokNativeSearchCalls_ServerSideSearchCustomToolCall",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGrokServerSideSearchCustomToolCallIsNotAClientToolCall",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGrokServerSideSearchCountsEveryPrefixAndKeepsClientTools",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestServerSideSearchRuleAppliesOnlyToGrokAccounts",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestGrokImagesPreservesUpstreamErrorOnSyncAndAsyncRoutes",
+        "package": "internal/handler",
+        "mode": "unit"
+      },
+      {
+        "name": "TestIsServerSideSearchCall",
+        "package": "internal/pkg/apicompat",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResponsesEventToAnthropicEvents_ServerSideSearchIsNotToolUse",
+        "package": "internal/pkg/apicompat",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResponsesEventToAnthropicEvents_ServerSideSearchKeepsClientToolCall",
+        "package": "internal/pkg/apicompat",
+        "mode": "unit"
+      },
+      {
+        "name": "TestResponsesEventToChatChunks_ServerSideSearchIsNotToolCall",
+        "package": "internal/pkg/apicompat",
+        "mode": "unit"
+      },
+      {
+        "name": "TestBufferedResponseAccumulator_ServerSideSearchIsNotRebuiltAsFunctionCall",
+        "package": "internal/pkg/apicompat",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F45",
+    "feature": "修复国内厂商额度单元格与 Gemini 用量刷新时不更新或消失的问题",
+    "source_commits": [
+      "849aa593d4ac56519e8b5fb98fb7031d3cbe0d43",
+      "e95e9eb748b9eb2c2abd90abc8f4b7c5d73f3b11",
+      "177243016569651b7dc9141a58b13d97cd5b8a88"
+    ],
+    "scope_gate": "CN usage cell快照更新/Gemini refetch保留显示 + native UI",
+    "tests": [],
+    "frontend": [
+      "src/components/account/__tests__/CNProviderQuotaCell.spec.ts"
+    ]
+  },
+  {
+    "id": "F46",
+    "feature": "修复渠道 Bedrock 兼容开关保存类型错误的问题",
+    "source_commits": [
+      "5c96ee4d2941b484fe1960a8d57acaa739b62507"
+    ],
+    "scope_gate": "Bedrock bool DTO→PG→GET reload + UI交互",
+    "tests": [],
+    "frontend": [
+      "src/views/admin/__tests__/ChannelsView.bedrockCompat.spec.ts"
+    ]
+  },
+  {
+    "id": "F47",
+    "feature": "修复设置注入的 HTML 被缓存导致品牌信息过期与 CSP nonce 不匹配的问题",
+    "source_commits": [
+      "f1394a1ab4ab22e2e221e0df20a6d898074567f0"
+    ],
+    "scope_gate": "settings HTML cache-control/CSP nonce两个连续请求与静态资源兼容",
+    "tests": [
+      {
+        "name": "TestFrontendServer_ServeIndexHTML",
+        "package": "internal/web",
+        "mode": "embed"
+      },
+      {
+        "name": "TestFrontendServer_NoStoreHeadersOnEveryHTMLPath",
+        "package": "internal/web",
+        "mode": "embed"
+      },
+      {
+        "name": "TestApplyHTMLNoCacheHeaders",
+        "package": "internal/web",
+        "mode": "unit"
+      },
+      {
+        "name": "TestApplyHTMLNoCacheHeadersReplacesExistingValues",
+        "package": "internal/web",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F48",
+    "feature": "修复登录回填邮箱身份失败时 panic 的问题",
+    "source_commits": [
+      "197109ebce6ab4700052aad261b7200574b8932e"
+    ],
+    "scope_gate": "邮箱身份回填失败安全错误、不panic与正常登录对照",
+    "tests": [
+      {
+        "name": "TestAuthServiceRecordSuccessfulLoginBackfillsEmailIdentity",
+        "package": "internal/service",
+        "mode": "unit"
+      },
+      {
+        "name": "TestAuthServiceRecordSuccessfulLogin_EmailIdentityOwnedByAnotherUser",
+        "package": "internal/service",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  },
+  {
+    "id": "F49",
+    "feature": "修复无法设置 TCP_USER_TIMEOUT 的平台上上游拨号失败的问题",
+    "source_commits": [
+      "94e56dd192c14b300d9dc514b276164263a5b160"
+    ],
+    "scope_gate": "TCP_USER_TIMEOUT setsockopt不支持时dial继续 + 支持平台仍设置",
+    "tests": [
+      {
+        "name": "TestUpstreamDialerSetsKeepAliveAndUserTimeoutOnTheSocket",
+        "package": "internal/repository",
+        "mode": "unit"
+      },
+      {
+        "name": "TestUpstreamDialerIgnoresUserTimeoutFailure",
+        "package": "internal/repository",
+        "mode": "unit"
+      }
+    ],
+    "frontend": []
+  }
+]

@@ -378,9 +378,15 @@ func cnProviderThresholdCandidates(account *Account, provider string) []*account
 	return candidates
 }
 
-// cnQuotaHasMonthlyWindow 报告供应商的额度快照是否含月度窗口（OpenCode Go、Command Code、Mistral）。
+// cnQuotaHasMonthlyWindow 报告供应商的额度快照是否含月度窗口（OpenCode Go、
+// Command Code、Mistral 与 Kimi 新套餐）。
 func cnQuotaHasMonthlyWindow(provider string) bool {
-	return provider == PlatformOpenCodeGo || provider == PlatformCommandCode || provider == PlatformMistral
+	switch provider {
+	case PlatformOpenCodeGo, PlatformCommandCode, PlatformKimi, PlatformMistral:
+		return true
+	default:
+		return false
+	}
 }
 
 func cnThresholdCandidate(extra map[string]any, provider, window string) *accountSchedulingThresholdCandidate {

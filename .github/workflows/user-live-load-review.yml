@@ -33,27 +33,23 @@ jobs:
       postgres:
         image: postgres:18.1-alpine3.23
         env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
           POSTGRES_DB: sub2api_test
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432/tcp
+        ports: ['15432:5432']
         options: >-
-          --health-cmd "pg_isready -U postgres -d sub2api_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+          --health-cmd "pg_isready -U fixture -d sub2api_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
       redis:
         image: redis:8.4-alpine
-        ports:
-          - 6379/tcp
+        ports: ['16379:6379']
         options: >-
           --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+          --health-interval 5s --health-timeout 5s --health-retries 12
     env:
       NODE_OPTIONS: --max-old-space-size=6144
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable&TimeZone=UTC
+      SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
       USER_LIVE_LOAD_BASE: 321f11c1a4d23302961c223ac030fd09e3f9e6e8
       USER_LIVE_LOAD_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -87,8 +83,6 @@ jobs:
           CI: 'true'
           # Provision services before the race binary starts; the harness keeps
           # the same migrations and integration assertions with these endpoints.
-          SUB2API_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/sub2api_test?sslmode=disable&TimeZone=UTC
-          SUB2API_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/0
         run: |
           set -o pipefail
           go test -race -tags=integration ./internal/repository -run '^(TestUserLiveLoadRegional|TestRegionalAdmissionLiveExactTransferMigrationAndAbort)' -count=1 -v -timeout=12m 2>&1 | tee "$USER_LIVE_LOAD_EVIDENCE/integration.log"

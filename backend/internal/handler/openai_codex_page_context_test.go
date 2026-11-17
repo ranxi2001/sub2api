@@ -91,7 +91,7 @@ func TestOpenAIResponsesCodexPageContextReachesUpstream(t *testing.T) {
 func TestNormalizeCodexPageContextPreservesHistoryAndOrder(t *testing.T) {
 	const history = `{"type":"function_call","name":"lookup","call_id":"call-1","arguments":"{}"},{"type":"function_call_output","call_id":"call-1","output":"done"},{"type":"item_reference","id":"item-1"}`
 	body := []byte(`{"model":"gpt-5.5","previous_response_id":"resp-1","metadata":{"integer":9007199254740993},"input":[{"role":"developer","content":"before"},` + codexPageContextInput + `,` + history + `,{"role":"user","content":"after"}]}`)
-	got, changed := normalizeCodexPageContext(body)
+	got, changed := normalizeCodexUntrustedContext(body)
 	require.True(t, changed)
 	require.Equal(t, "resp-1", gjson.GetBytes(got, "previous_response_id").String())
 	require.Equal(t, "9007199254740993", gjson.GetBytes(got, "metadata.integer").Raw)
@@ -108,7 +108,7 @@ func TestNormalizeCodexPageContextPreservesHistoryAndOrder(t *testing.T) {
 		require.False(t, item.Get("id").Exists())
 		require.False(t, item.Get("internal_chat_message_metadata_passthrough").Exists())
 	}
-	again, changedAgain := normalizeCodexPageContext(got)
+	again, changedAgain := normalizeCodexUntrustedContext(got)
 	require.False(t, changedAgain)
 	require.Equal(t, got, again)
 }
@@ -147,7 +147,7 @@ func TestNormalizeCodexPageContextRecognizesOnlyKnownEnvelopes(t *testing.T) {
 				"type": "function_call_output", "namespace": "agent", "name": tt.tool, "output": tt.output,
 			}}})
 			require.NoError(t, err)
-			got, changed := normalizeCodexPageContext(body)
+			got, changed := normalizeCodexUntrustedContext(body)
 			require.Equal(t, tt.change, changed)
 			if changed {
 				require.Equal(t, "<external_"+tt.tool+">\n"+tt.output.(string)+"\n</external_"+tt.tool+">", gjson.GetBytes(got, "input.0.content.0.text").String())
@@ -163,14 +163,14 @@ func TestNormalizeCodexPageContextPreservesCallIdentities(t *testing.T) {
 		for _, id := range []any{"call-real", 42, nil, false} {
 			body, err := sjson.SetBytes([]byte(`{"input":[`+codexPageContextInput+`]}`), "input.0."+field, id)
 			require.NoError(t, err)
-			got, changed := normalizeCodexPageContext(body)
+			got, changed := normalizeCodexUntrustedContext(body)
 			require.True(t, changed, "the independent snapshot still normalizes")
 			require.JSONEq(t, gjson.GetBytes(body, "input.0").Raw, gjson.GetBytes(got, "input.0").Raw)
 		}
 		for _, id := range []string{"", "  "} {
 			body, err := sjson.SetBytes([]byte(`{"input":[`+codexPageContextInput+`]}`), "input.0."+field, id)
 			require.NoError(t, err)
-			got, changed := normalizeCodexPageContext(body)
+			got, changed := normalizeCodexUntrustedContext(body)
 			require.True(t, changed)
 			require.Equal(t, "message", gjson.GetBytes(got, "input.0.type").String())
 		}
@@ -188,7 +188,7 @@ func TestNormalizeCodexPageContextLeavesUnrecognizedRequestsUnchanged(t *testing
 		strings.Replace(body, `"id":"context-open"`, `"call_id":"real","call_id":""`, 1),
 		body + `trailing`,
 	} {
-		got, changed := normalizeCodexPageContext([]byte(invalid))
+		got, changed := normalizeCodexUntrustedContext([]byte(invalid))
 		require.False(t, changed, invalid)
 		require.Equal(t, invalid, string(got))
 	}
@@ -197,7 +197,7 @@ func TestNormalizeCodexPageContextLeavesUnrecognizedRequestsUnchanged(t *testing
 func TestNormalizeCodexPageContextDoesNotBypassToolOutputValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"input":[` + codexPageContextInput + `,{"type":"function_call_output","name":"ordinary_tool","output":"done"}]}`)
-	got, changed := normalizeCodexPageContext(body)
+	got, changed := normalizeCodexUntrustedContext(body)
 	require.True(t, changed)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -214,7 +214,7 @@ func TestNormalizeCodexPageContextCoexistsWithBootstrapMessages(t *testing.T) {
 		{`{"type":"function_call_output","namespace":"codex_app","name":"send_message_to_thread","output":` + mustJSON(t, delegationEnvelope) + `}`, normalizeCodexDelegationBootstrap},
 		{`{"type":"function_call_output","namespace":"codex_app","name":"automation_update","output":"<heartbeat><automation_id>test</automation_id></heartbeat>"}`, normalizeCodexAutomationBootstrap},
 	} {
-		got, changed := normalizeCodexPageContext([]byte(`{"input":[` + codexPageContextInput + `,` + bootstrap.item + `]}`))
+		got, changed := normalizeCodexUntrustedContext([]byte(`{"input":[` + codexPageContextInput + `,` + bootstrap.item + `]}`))
 		require.True(t, changed)
 		got, changed = bootstrap.normalize(got)
 		require.True(t, changed)

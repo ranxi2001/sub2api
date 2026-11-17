@@ -120,14 +120,15 @@ func hasOpenAIResponsesNamespaceToolDeclaration(body []byte) bool {
 		return found
 	}
 
-	if hasNamespaceTool(gjson.GetBytes(body, "tools")) {
+	root := parseRawJSONView(body)
+	if hasNamespaceTool(root.Get("tools")) {
 		return true
 	}
 
 	// Responses Lite and tool discovery carry declarations inside input.
 	// Recognize those catalogs before stripping call metadata; neither this
 	// representation check nor preserving a namespace grants recovery proof.
-	input := gjson.GetBytes(body, "input")
+	input := root.Get("input")
 	if !input.IsArray() {
 		return false
 	}
@@ -204,7 +205,9 @@ func stripOpenAIResponsesInputNamespaces(body []byte, keepToolCallNamespaces boo
 	if !bytes.Contains(body, []byte(`"namespace"`)) {
 		return body, nil
 	}
-	input := gjson.GetBytes(body, "input")
+	// Zero-copy view: input.Raw aliases body and is only read below; the
+	// rebuilt array is written into a fresh buffer.
+	input := parseRawJSONView(body).Get("input")
 	if !input.IsArray() {
 		return body, nil
 	}

@@ -49,6 +49,9 @@ jobs:
               git show "77455cf755fa0f119367b911704f11df88e7917e:$file" > "$file"
             done
           fi
+          if [ "$PHASE" = RED ]; then
+            python3 .github/scripts/prepare-issue600-identity-callers.py
+          fi
           {
             echo "candidate=$EXPECTED_HEAD phase=$PHASE baseline=77455cf755fa0f119367b911704f11df88e7917e"
             for file in "${files[@]}"; do

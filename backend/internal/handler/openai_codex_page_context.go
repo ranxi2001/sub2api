@@ -14,14 +14,22 @@ import (
 // items without a corresponding model call. Preserve their text as user context
 // before ordinary tool-output validation, including when replaying tool history.
 // Unrecognized outputs and items carrying a call identity remain untouched.
+// Keep the established handler entry point for pinned recovery callers.
 func normalizeCodexPageContext(body []byte) ([]byte, bool) {
+	return normalizeCodexUntrustedContext(body)
+}
+
+func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
+	if !mayContainCodexCallOutputCandidate(body, "codex_apps_open_page", "codex_apps_selected_page_part_", "browser_info", "goal_objective", "untrusted_context") {
+		return body, false
+	}
 	input := gjson.GetBytes(body, "input")
 	if !input.IsArray() {
 		return body, false
 	}
 	hasContext := false
 	input.ForEach(func(_, item gjson.Result) bool {
-		hasContext = isCodexPageContext(item)
+		hasContext = isCodexContext(item)
 		return !hasContext
 	})
 	if !hasContext || !hasUniqueJSONMembers(body) {
@@ -30,16 +38,21 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 	var items []json.RawMessage
 	changed := false
 	input.ForEach(func(_, item gjson.Result) bool {
-		if !isCodexPageContext(item) {
+		if !isCodexContext(item) {
 			items = append(items, json.RawMessage(item.Raw))
 			return true
+		}
+		name, output := item.Get("name").String(), item.Get("output").String()
+		text := "<external_" + name + ">\n" + output + "\n</external_" + name + ">"
+		if name == "browser_info" || name == "goal_objective" || name == "untrusted_context" {
+			text = "<external_" + name + ">" + output + "</external_" + name + ">"
 		}
 		message, err := json.Marshal(map[string]any{
 			"type": "message",
 			"role": "user",
 			"content": []any{map[string]any{
 				"type": "input_text",
-				"text": "<external_" + item.Get("name").String() + ">\n" + item.Get("output").String() + "\n</external_" + item.Get("name").String() + ">",
+				"text": text,
 			}},
 		})
 		if err != nil {
@@ -61,7 +74,7 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 	return normalized, true
 }
 
-func isCodexPageContext(item gjson.Result) bool {
+func isCodexContext(item gjson.Result) bool {
 	if item.Get("type").String() != "function_call_output" || item.Get("namespace").String() != "agent" {
 		return false
 	}
@@ -76,6 +89,9 @@ func isCodexPageContext(item gjson.Result) bool {
 		return false
 	}
 	name := item.Get("name").String()
+	if name == "browser_info" || name == "goal_objective" || name == "untrusted_context" {
+		return strings.TrimSpace(output.String()) != ""
+	}
 	if name == "codex_apps_open_page" {
 		return validCodexPageSnapshot(output.String())
 	}
