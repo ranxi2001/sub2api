@@ -5,14 +5,57 @@ package service
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+func TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire(t *testing.T) {
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")),
+	}}
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
+	c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
+	SetOpenAIWSRecoveryPrincipal(c, 715, 715)
+	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	body := []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"tools":[{"type":"tool_search"}],"input":[{"role":"user","content":"Continue fixture task with discovered tools"},{"type":"agent_message","encrypted_content":"fixture-opaque","content":[{"type":"input_text","text":"fixture progress"}]},{"type":"tool_search_call","call_id":"call_search_fixture","arguments":{"query":"fixture"},"status":"completed"},{"type":"tool_search_output","call_id":"call_search_fixture","execution":"client","status":"completed","tools":[{"type":"namespace","name":"fixture_tools","tools":[{"type":"function","name":"inspect","description":"Inspect fixture state","parameters":{"type":"object"}}]}]}]}`)
+	ctx := svc.WithOpenAIWSAgentRecovery(context.Background(), c, body, "fixture-session", "gpt-5.1")
+	ctx, clean, changed, err := svc.PrepareOpenAI409ReadableContinuation(ctx, c, body, "fixture-session", "gpt-5.1")
+	require.NoError(t, err)
+	require.True(t, changed, "exercise Beta history rebuild, not just ordinary bridge adaptation")
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}
+	manager := newOpenAIWSAgentRecovery(svc, ctx, c)
+	defer manager.abort()
+	ctx = context.WithValue(ctx, openAIWSAgentRecoveryKey{}, manager)
+	prepared, err := manager.prepareReadable(account, clean)
+	require.NoError(t, err)
+	var events [][]byte
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(ctx, c, account, "fixture-token", prepared, len(prepared), "gpt-5.1", "", "", "", "", 1,
+		func(event []byte) error { events = append(events, append([]byte(nil), event...)); return nil })
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotContains(t, string(upstream.lastBody), "fixture-opaque")
+	require.Equal(t, "function", gjson.GetBytes(upstream.lastBody, `tools.#(name==tool_search).type`).String())
+	require.Equal(t, "function", gjson.GetBytes(upstream.lastBody, `tools.#(name==fixture_tools__inspect).type`).String())
+	output := gjson.GetBytes(upstream.lastBody, `input.#(type==function_call_output)`)
+	require.Equal(t, "call_search_fixture", output.Get("call_id").String())
+	require.Contains(t, output.Get("output").String(), "fixture_tools")
+	require.Contains(t, output.Get("output").String(), "inspect")
+	require.NotEmpty(t, events)
+	require.Equal(t, "response.completed", gjson.GetBytes(events[len(events)-1], "type").String())
+}
 
 func TestOpenAILossyProtocolWebSocketDeltaPreservesHistory(t *testing.T) {
 	for _, marker := range []string{"transport", "recovery_context"} {

@@ -7,6 +7,7 @@ on:
       - 'backend/internal/service/openai_agent_message_recovery.go'
       - 'backend/internal/service/openai_account_scheduler.go'
       - 'backend/internal/service/openai_409_omit_history.go'
+      - 'backend/internal/handler/openai_lossy_protocol_test.go'
       - '.github/workflows/lossy-recovery-protocol.yml'
   push:
     branches: [production]
@@ -15,6 +16,7 @@ on:
       - 'backend/internal/service/openai_agent_message_recovery.go'
       - 'backend/internal/service/openai_account_scheduler.go'
       - 'backend/internal/service/openai_409_omit_history.go'
+      - 'backend/internal/handler/openai_lossy_protocol_test.go'
       - '.github/workflows/lossy-recovery-protocol.yml'
   workflow_dispatch:
 
@@ -41,17 +43,24 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Install isolated Redis for real HTTP recovery fixtures
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
       - name: Compaction admission and structured tool history
         working-directory: backend
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
-          go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service -run '^Test(OpenAILossyProtocol|OpenAIAgentRecoveryCompaction|WithoutOpenAIRemoteCompaction)' -count=1 -timeout=5m | tee "$RUNNER_TEMP/lossy-protocol.jsonl"
+          go test -mod=readonly -race -json -tags=unit,lossyprotocol ./internal/service ./internal/handler -run '^Test(OpenAILossyProtocol|OpenAIAgentRecoveryCompaction|WithoutOpenAIRemoteCompaction)' -count=1 -timeout=8m | tee "$RUNNER_TEMP/lossy-protocol.jsonl"
           python3 - "$RUNNER_TEMP/lossy-protocol.jsonl" <<'PY'
           import json, sys
           rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
           passed = {row.get('Test') for row in rows if row.get('Action') == 'pass'}
-          for name in ('PreservesAgentInput', 'CompactionPreservesContext', 'OwnerlessCompactionRefused', 'WebSocketDeltaPreservesHistory'):
+          for name in ('PreservesAgentInput', 'CompactionPreservesContext', 'OwnerlessCompactionRefused', 'WebSocketDeltaPreservesHistory', 'BetaToolStateWire', 'BetaDiscoveryHTTPBridgeWire'):
               assert 'TestOpenAILossyProtocol' + name in passed, name
           assert not any(row.get('Action') == 'skip' for row in rows)
           PY
