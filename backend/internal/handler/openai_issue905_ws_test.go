@@ -1,4 +1,4 @@
-//go:build unit
+//go:build unit && issue905
 
 package handler
 
