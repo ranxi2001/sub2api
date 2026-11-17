@@ -712,7 +712,10 @@ func upstreamModelRegistryBaseURL(account *Account) string {
 	case account.IsGemini():
 		return account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
 	case account.IsAnthropic():
-		return account.GetBaseURL()
+		if baseURL := strings.TrimSpace(account.GetCredential("base_url")); baseURL != "" {
+			return baseURL
+		}
+		return "https://api.anthropic.com"
 	case account.Platform == PlatformAntigravity:
 		return account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
 	default:
@@ -763,6 +766,8 @@ func matchModelsDevProviderByKnownHost(registry map[string]modelsDevProvider, ac
 	}
 	providerID := ""
 	switch host {
+	case "api.anthropic.com":
+		providerID = "anthropic"
 	case "api.openai.com", "chatgpt.com":
 		providerID = "openai"
 	case "opencode.ai":
