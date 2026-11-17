@@ -50,12 +50,9 @@ backend/internal/service/account_usage_service_fable_test.go
 backend/internal/service/account_usage_service_spark_shadow_test.go
 backend/internal/service/account_usage_service_test.go
 backend/internal/service/account_usage_session_window_test.go
-backend/internal/service/admin_group_duplicate_test.go
 backend/internal/service/admin_service_clear_error_test.go
-backend/internal/service/admin_service_group_test.go
 backend/internal/service/antigravity_compat_committed_no_content_test.go
 backend/internal/service/antigravity_gateway_compat_test.go
-backend/internal/service/api_key_auth_cache_openai_fast_test.go
 backend/internal/service/auth_service_identity_sync_test.go
 backend/internal/service/billing_cache_service_rpm_test.go
 backend/internal/service/billing_inflight_reservation_test.go

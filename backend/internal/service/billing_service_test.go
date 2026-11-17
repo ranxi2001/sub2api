@@ -2361,16 +2361,18 @@ func TestOpenAIUltrafastGateMatchesBilling(t *testing.T) {
 	} {
 		pricing, err := svc.GetModelPricing(tt.model)
 		require.NoError(t, err, tt.model)
-		require.Equal(t, tt.want, configuredServiceTierMultiplier(OpenAIFastTierUltrafast, pricing), tt.model)
+		require.Equal(t, 6.0, configuredServiceTierMultiplier(OpenAIFastTierUltrafast, pricing), tt.model)
 		require.Equal(t, tt.want == 6, openAIModelSupportsUltrafast(tt.model), tt.model)
 
+		// Fork keeps the existing 6x customer UltraFast rate on every model;
+		// only the two upstream-supported models may be forced into that tier.
 		// 渠道自定义价格与显式 Fast 倍率都不改变 Ultrafast 倍率。
 		custom, fast := 1e-6, 3.0
 		channelPricing, err := svc.GetModelPricingWithChannel(tt.model, &ChannelModelPricing{
 			InputPrice: &custom, OutputPrice: &custom, FastMultiplier: &fast,
 		})
 		require.NoError(t, err, tt.model)
-		require.Equal(t, tt.want, configuredServiceTierMultiplier(OpenAIFastTierUltrafast, channelPricing), tt.model)
+		require.Equal(t, 6.0, configuredServiceTierMultiplier(OpenAIFastTierUltrafast, channelPricing), tt.model)
 	}
 }
 

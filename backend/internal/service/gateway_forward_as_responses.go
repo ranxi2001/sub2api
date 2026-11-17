@@ -428,6 +428,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	streamStatus := &anthropicCompatStream{body: resp.Body}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -458,6 +459,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 
 		observer.ObserveAnthropic([]byte(payload))
+		streamStatus.observe(&event, payload)
 		// Stop queued success events after a terminal safety rejection.
 		if event.Type == "error" {
 			if isAnthropicCompatSafetyRejection([]byte(payload)) {
@@ -518,6 +520,24 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 				zap.String("request_id", requestID),
 			)
 		}
+	}
+
+	streamStatus.readErr = scanner.Err()
+	if failure := streamStatus.failure(); failure != nil {
+		result := &ForwardResult{
+			UpstreamResponseServiceTier: observer.ServiceTier(),
+			RequestID:                   requestID,
+			UpstreamHeaders:             resp.Header,
+			Usage:                       usage,
+			Model:                       originalModel,
+			UpstreamModel:               mappedModel,
+			ReasoningEffort:             reasoningEffort,
+			Stream:                      false,
+			Duration:                    time.Since(startTime),
+		}
+		applyObservedGatewayResponseModel(c, result)
+		writeResponsesError(c, http.StatusBadGateway, failure.errType, failure.message)
+		return result, failure.err
 	}
 
 	if finalResp == nil {

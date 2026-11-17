@@ -258,6 +258,16 @@ func (r *staleReadRepository) ListSchedulableByPlatform(ctx context.Context, pla
 	}
 	return accounts, err
 }
+func (r *staleReadRepository) ListModelAvailabilityCandidates(ctx context.Context, groupID *int64, platforms []string, includeGrouped bool) ([]service.Account, error) {
+	accounts, err := r.AccountRepository.ListModelAvailabilityCandidates(ctx, groupID, platforms, includeGrouped)
+	close(r.entered)
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return accounts, err
+}
 func (r *staleReadRepository) WithLatestSchedulerAccounts(ctx context.Context, ids []int64, publish func([]service.Account) error) error {
 	return r.AccountRepository.(service.LatestSchedulerAccountsRepository).WithLatestSchedulerAccounts(ctx, ids, publish)
 }

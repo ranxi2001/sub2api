@@ -76,7 +76,7 @@ func forwardGrokCustomToolCallStream(t *testing.T, path string, streaming bool, 
 	}
 	c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("api_key", &APIKey{ID: 88000})
+	c.Set("api_key", &APIKey{ID: 88000, AllowLongContext: true})
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},

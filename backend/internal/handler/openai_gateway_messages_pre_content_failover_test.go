@@ -111,11 +111,18 @@ func servePreContentFailoverMessages(t *testing.T, accountCount int) (*httptest.
 	})
 }
 
+type preContentAdmissionRepo struct{ *grokCredentialHandlerRepo }
+
+func (r *preContentAdmissionRepo) GetOpenAITurnAdmission(ctx context.Context, id int64) (*service.Account, *service.Account, error) {
+	account, err := r.GetByID(ctx, id)
+	return account, nil, err
+}
+
 func serveMessagesScenario(t *testing.T, sc preContentFailoverScenario) (*httptest.ResponseRecorder, *preContentFailoverUpstream) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	groupID := int64(9101)
-	repo := &grokCredentialHandlerRepo{accounts: sc.accounts, missingOnGet: map[int64]bool{}}
+	repo := &preContentAdmissionRepo{&grokCredentialHandlerRepo{accounts: sc.accounts, missingOnGet: map[int64]bool{}}}
 	upstream := &preContentFailoverUpstream{respond: sc.respond}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Gateway.MaxAccountSwitches = 3

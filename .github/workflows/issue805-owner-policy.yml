@@ -114,8 +114,10 @@ jobs:
             expected_contract=$(git rev-parse "$baseline:$contract")
             test "$(git hash-object "$contract")" = "$expected_contract"
             expected=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
-            test "$(git hash-object "$target")" = "$expected"
-            rm -- "$target"
+            if test -f "$target"; then
+              test "$(git hash-object "$target")" = "$expected"
+              rm -- "$target"
+            fi
             test ! -e "$target"
             echo "$target test=candidate-only blob=$expected contract=$expected_contract actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
           fi

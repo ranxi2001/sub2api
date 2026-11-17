@@ -88,7 +88,7 @@ func TestForwardGrokResponsesChatRefusalStaysOnAccount(t *testing.T) {
 			name:        "default response",
 			wantStatus:  http.StatusForbidden,
 			wantType:    "invalid_request_error",
-			wantMessage: "Request blocked by upstream content policy",
+			wantMessage: "I'm sorry, I can't help with that request.",
 		},
 		{
 			name:        "passthrough rule localizes",

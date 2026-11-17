@@ -23,6 +23,7 @@ for target in \
   backend/internal/service/openai_agent_recovery_diagnostics.go \
   backend/internal/service/openai_agent_replay_metadata.go \
   backend/internal/service/openai_account_scheduler.go \
+  backend/internal/service/openai_gateway_request_body.go \
   backend/internal/service/openai_ws_agent_recovery.go \
   backend/internal/service/openai_ws_forwarder_ingress.go \
   backend/internal/service/openai_ws_http_bridge.go \

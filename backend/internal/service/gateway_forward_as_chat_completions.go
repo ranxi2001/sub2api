@@ -282,6 +282,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
+	streamStatus := &anthropicCompatStream{body: resp.Body}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -306,6 +307,7 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 
 		observer.ObserveAnthropic([]byte(payload))
+		streamStatus.observe(&event, payload)
 		if event.Type == "error" {
 			if isAnthropicCompatSafetyRejection([]byte(payload)) {
 				message := sanitizeUpstreamErrorMessage(gjson.Get(payload, "error.message").String())
@@ -362,6 +364,24 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 				zap.String("request_id", requestID),
 			)
 		}
+	}
+
+	streamStatus.readErr = scanner.Err()
+	if failure := streamStatus.failure(); failure != nil {
+		result := &ForwardResult{
+			UpstreamResponseServiceTier: observer.ServiceTier(),
+			RequestID:                   requestID,
+			UpstreamHeaders:             resp.Header,
+			Usage:                       usage,
+			Model:                       originalModel,
+			UpstreamModel:               mappedModel,
+			ReasoningEffort:             reasoningEffort,
+			Stream:                      false,
+			Duration:                    time.Since(startTime),
+		}
+		applyObservedGatewayResponseModel(c, result)
+		writeGatewayCCError(c, http.StatusBadGateway, failure.errType, failure.message)
+		return result, failure.err
 	}
 
 	if finalResp == nil {
