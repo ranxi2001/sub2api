@@ -101,24 +101,7 @@ jobs:
           # fixture absent from this baseline; do not remove it a second time.
           bash "$GITHUB_WORKSPACE/.github/scripts/prepare-replay-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/replay-fixtures.txt"
           bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/moderation-fixtures.txt"
-          # The unrelated usage-sort fixture requires fields absent in this
-          # full historical APIKeyListFilters. Keep it in every candidate GREEN;
-          # omit only its exact post-baseline blob from this disposable RED.
-          target=backend/internal/handler/api_key_handler_usage_sort_test.go
-          contract=backend/internal/service/api_key.go
-          if git cat-file -e "$EXPECTED_HEAD_SHA:$target" 2>/dev/null; then
-            if git cat-file -e "$baseline:$target" 2>/dev/null || git grep -q 'UsageStartTime' "$baseline" -- "$contract"; then
-              echo 'historical usage fixture exclusion requires a baseline without the fixture and its API' >&2
-              exit 1
-            fi
-            expected_contract=$(git rev-parse "$baseline:$contract")
-            test "$(git hash-object "$contract")" = "$expected_contract"
-            expected=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
-            test "$(git hash-object "$target")" = "$expected"
-            rm -- "$target"
-            test ! -e "$target"
-            echo "$target test=candidate-only blob=$expected contract=$expected_contract actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
-          fi
+          bash "$GITHUB_WORKSPACE/.github/scripts/prepare-usage-sort-red-fixture.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee -a "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
           # The selected regression and its shared harness must remain exact
           # candidate blobs. The clean GREEN checkout retains all new tests.
           for target in backend/internal/handler/openai_issue805_delivery_test.go backend/internal/handler/openai_issue805_owner_policy_test.go backend/internal/handler/openai_issue805_ws_test.go backend/internal/handler/openai_issue715_recovery_test.go backend/internal/handler/openai_responses_failover_cancel_test.go; do

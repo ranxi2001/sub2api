@@ -17,6 +17,11 @@ fi
 expected_contract=$(git -C "$tree" rev-parse "$baseline:$contract")
 test "$(git -C "$tree" hash-object "$contract")" = "$expected_contract"
 expected=$(git -C "$tree" rev-parse "$candidate:$target")
+if ! test -e "$tree/$target"; then
+  test "$(git -C "$tree" diff --name-only --diff-filter=D "$candidate" -- "$target")" = "$target"
+  printf 'usage-sort fixture already excluded baseline=%s candidate=%s blob=%s contract=%s path=%s\n' "$baseline" "$candidate" "$expected" "$expected_contract" "$target"
+  exit 0
+fi
 test "$(git -C "$tree" hash-object "$target")" = "$expected"
 rm -- "$tree/$target"
 test ! -e "$tree/$target"

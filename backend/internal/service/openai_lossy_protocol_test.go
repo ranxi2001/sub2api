@@ -24,7 +24,7 @@ func TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire(t *testing.T) {
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 		Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"id\":\"fc_fixture_inspect\",\"call_id\":\"call_inspect_fixture\",\"name\":\"fixture_tools__inspect\",\"arguments\":\"{}\",\"status\":\"completed\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")),
 	}}
-	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, settingService: NewSettingService(&codexPolicyMigrationRepoStub{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, settingService: NewSettingService(&contentModerationTestSettingRepo{values: map[string]string{SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "true"}}, nil)}
 	c, _ := newTurnStateTestContext(t, 715, "fixture-session")
 	c.Set("api_key", &APIKey{ID: 715, GroupID: int64Ptr(715)})
 	SetOpenAIWSRecoveryPrincipal(c, 715, 715)
@@ -35,7 +35,7 @@ func TestOpenAILossyProtocolBetaDiscoveryHTTPBridgeWire(t *testing.T) {
 	ctx, clean, changed, err := svc.PrepareOpenAI409ReadableContinuation(ctx, c, body, "fixture-session", "gpt-5.1")
 	require.NoError(t, err)
 	require.True(t, changed, "exercise Beta history rebuild, not just ordinary bridge adaptation")
-	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{715}}
 	manager := newOpenAIWSAgentRecovery(svc, ctx, c)
 	defer manager.abort()
 	ctx = context.WithValue(ctx, openAIWSAgentRecoveryKey{}, manager)

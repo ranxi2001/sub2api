@@ -22,7 +22,7 @@ func TestOpenAILossyProtocolBetaToolStateWire(t *testing.T) {
 		for _, stream := range []bool{false, true} {
 			for _, kind := range []string{"discovery", "mcp"} {
 				t.Run(fmt.Sprintf("%s/stream=%t/%s", account, stream, kind), func(t *testing.T) {
-					const discovery = `[{"type":"tool_search_call","call_id":"call_fixture_search","arguments":{"query":"fixture"},"status":"completed"},{"type":"tool_search_output","call_id":"call_fixture_search","status":"completed","execution":"client","tools":[{"type":"namespace","name":"fixture_tools","tools":[{"type":"function","name":"inspect","description":"Inspect fixture state","parameters":{"type":"object","properties":{}}}]}]}]`
+					const discovery = `[{"type":"tool_search_call","call_id":"tsc_fixture_search","arguments":{"query":"fixture"},"status":"completed"},{"type":"tool_search_output","call_id":"tsc_fixture_search","status":"completed","execution":"client","tools":[{"type":"namespace","name":"fixture_tools","tools":[{"type":"function","name":"inspect","description":"Inspect fixture state","parameters":{"type":"object","properties":{}}}]}]}]`
 					const mcp = `[{"type":"mcp_list_tools","id":"fixture_list","server_label":"fixture","tools":[{"name":"inspect","description":"Inspect fixture state","input_schema":{"type":"object"}}]},{"type":"mcp_approval_request","id":"fixture_approval","server_label":"fixture","name":"inspect","arguments":"{}"},{"type":"mcp_approval_response","approval_request_id":"fixture_approval","approve":true}]`
 					option := httpRebuildFixtureOptions{
 						request: func(body map[string]any, _ bool) {
@@ -55,7 +55,7 @@ func TestOpenAILossyProtocolBetaToolStateWire(t *testing.T) {
 								require.True(t, gjson.GetBytes(body, `tools.#(type==tool_search)`).Exists())
 								call := gjson.GetBytes(body, `input.#(type==tool_search_call)`)
 								result := gjson.GetBytes(body, `input.#(type==tool_search_output)`)
-								require.Equal(t, "call_fixture_search", call.Get("call_id").String())
+								require.Equal(t, "tsc_fixture_search", call.Get("call_id").String())
 								require.Equal(t, call.Get("call_id").String(), result.Get("call_id").String())
 								require.Equal(t, "fixture_tools", result.Get("tools.0.name").String())
 								require.Equal(t, "inspect", result.Get("tools.0.tools.0.name").String())

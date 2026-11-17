@@ -18,6 +18,7 @@ on:
       - '.github/scripts/test_assert_ws_readable.py'
       - '.github/scripts/prepare-moderation-red-fixtures.sh'
       - '.github/scripts/prepare-replay-red-fixtures.sh'
+      - '.github/scripts/prepare-usage-sort-red-fixture.sh'
       - '.github/workflows/shadow-review-repair.yml'
 permissions:
   contents: read
@@ -97,6 +98,7 @@ jobs:
             bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$BASELINE_SHA"
             bash "$GITHUB_WORKSPACE/.github/scripts/prepare-replay-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/shadow-repair-evidence/replay-fixtures.txt"
             bash "$GITHUB_WORKSPACE/.github/scripts/prepare-moderation-red-fixtures.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/shadow-repair-evidence/moderation-fixtures.txt"
+            bash "$GITHUB_WORKSPACE/.github/scripts/prepare-usage-sort-red-fixture.sh" "$BASELINE_SHA" . "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/shadow-repair-evidence/usage-fixtures.txt"
           fi
           for target in backend/internal/handler/openai_409_shadow_race_test.go backend/internal/handler/openai_409_shadow_http_test.go backend/internal/securityaudit/prompt_recovered_context_test.go backend/internal/service/openai_409_readable_shadow.go; do
             git hash-object "$target" >> "$RUNNER_TEMP/shadow-repair-evidence/blobs.txt"
@@ -171,6 +173,7 @@ jobs:
             bash .github/scripts/exclude-later-http2-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA"
             bash .github/scripts/prepare-replay-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/shadow-repair-evidence/async-replay-fixtures.txt"
             bash .github/scripts/prepare-moderation-red-fixtures.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/shadow-repair-evidence/async-moderation-fixtures.txt"
+            bash .github/scripts/prepare-usage-sort-red-fixture.sh "$baseline" "$tested_tree" "$CANDIDATE_SHA" | tee "$RUNNER_TEMP/shadow-repair-evidence/async-usage-fixtures.txt"
           fi
           for target in backend/internal/securityaudit/prompt_service.go backend/internal/securityaudit/prompt_repository.go backend/internal/securityaudit/prompt_recovered_context_test.go; do
             git hash-object "$tested_tree/$target" >> "$RUNNER_TEMP/shadow-repair-evidence/async-blobs.txt"
