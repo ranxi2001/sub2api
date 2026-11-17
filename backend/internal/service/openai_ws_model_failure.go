@@ -8,7 +8,10 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const OpenAIWSModelUnavailableReason GatewayFailureReason = "openai_ws_model_unavailable"
+type openAIWSModelRejectionError struct{ payload []byte }
+
+func (e *openAIWSModelRejectionError) Error() string { return ErrOpenAIWSModelUnavailable.Error() }
+func (e *openAIWSModelRejectionError) Unwrap() error { return ErrOpenAIWSModelUnavailable }
 
 // A successful WS handshake says nothing about a subsequent model rejection.
 // Preserve explicit event status, including the top-level status used by Codex.
@@ -62,6 +65,7 @@ func (s *OpenAIGatewayService) handleOpenAIWSModelFailure(ctx context.Context, a
 // This predicate never transforms the request or discards client history.
 func openAIWSModelFailureCanReplay(ctx context.Context, payload []byte) bool {
 	if !OpenAIWSAgentRecoveryCanRetry(ctx) || OpenAIAgentRecoveryNoReplay(ctx) ||
+		codexWSAnchorFromContext(ctx) != nil ||
 		!openAIEncryptedJSONUnambiguous(payload) {
 		return false
 	}

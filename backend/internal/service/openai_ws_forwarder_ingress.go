@@ -2046,10 +2046,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			// after the write, and the failure frame itself must not count as output.
 			turnOutputStarted := wroteDownstream
 			modelUnavailable := false
+			if eventType == "response.failed" && openAIWSModelFailureStatus(account, upstreamMessage) != 0 {
+				s.handleOpenAIWSModelFailure(ctx, account, mappedModel, upstreamMessage)
+				modelUnavailable = true
+			}
 			if eventType == "error" {
 				eventCtx := openAIWSForwardStreamPhaseContext(openAI429LeaseObservation(ctx, lease), turnOutputStarted, upstreamMessage)
-				modelUnavailable = s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
-				if modelUnavailable && turn == 1 && !wroteDownstream && wsHeaders.Get(openAIWSTurnStateHeader) == "" && openAIWSModelFailureCanReplay(ctx, payload) {
+				modelHandled := s.handleOpenAIWSErrorEventTransientFailure(eventCtx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
+				modelUnavailable = openAIWSModelFailureStatus(account, upstreamMessage) != 0
+				if modelHandled && turn == 1 && !wroteDownstream && wsHeaders.Get(openAIWSTurnStateHeader) == "" && openAIWSModelFailureCanReplay(ctx, payload) {
 					lease.MarkBroken()
 					return nil, s.newOpenAIWSModelFailoverError(account, upstreamMessage)
 				}
@@ -2219,14 +2224,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					markOpenAIWSClientVisibleFailure(c, eventType, upstreamMessage)
 				}
 			}
-			if modelUnavailable {
+			if modelUnavailable && !isTerminalEvent {
 				lease.MarkBroken()
 				return nil, NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater,
 					"model unavailable on this account; reconnect with complete context",
-					errors.New("upstream websocket model unavailable"))
+					ErrOpenAIWSModelUnavailable)
 			}
 			if isTerminalEvent {
-				terminalEvent := s.handleOpenAIWSTerminalTransientFailure(openAIWSForwardStreamPhaseContext(openAI429LeaseObservation(ctx, lease), turnOutputStarted, upstreamMessage), account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
+				terminalEvent := normalizeOpenAIWSTerminalEvent(eventType)
+				if !modelUnavailable {
+					terminalEvent = s.handleOpenAIWSTerminalTransientFailure(openAIWSForwardStreamPhaseContext(openAI429LeaseObservation(ctx, lease), turnOutputStarted, upstreamMessage), account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
+				}
 				// 客户端已断连时，上游连接的 session 状态不可信，标记 broken 避免回池复用。
 				if clientDisconnected {
 					lease.MarkBroken()
@@ -2293,6 +2301,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					result.ImageInputSize = imageInputSize
 					result.ImageOutputSizes = imageCounter.Sizes()
 					result.BillingModel = imageBillingModel
+				}
+				if modelUnavailable {
+					lease.MarkBroken()
+					result.ObservedUsageOnError = true
+					return result, NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater,
+						"model unavailable on this account; reconnect with complete context", ErrOpenAIWSModelUnavailable)
 				}
 				return result, nil
 			}
@@ -2954,6 +2968,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 
 		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort, currentClientPayload)
+		if errors.Is(relayErr, ErrOpenAIWSModelUnavailable) {
+			sessionLease.MarkBroken()
+			if hooks != nil && hooks.AfterTurn != nil {
+				hooks.AfterTurn(turn, result, relayErr)
+			}
+			return relayErr
+		}
 		if relayErr != nil && smartStrict {
 			sessionLease.MarkBroken()
 			if hooks != nil && hooks.AfterTurn != nil {

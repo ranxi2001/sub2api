@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,26 @@ import (
 const issue907Error = `{"type":"error","status":400,"error":{"type":"invalid_request_error","code":"model_not_found","message":"The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."}}`
 const issue907Failed = `{"type":"response.failed","response":{"status":"failed","error":{"type":"invalid_request_error","code":"model_not_found","message":"The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."}}}`
 const issue907Complete = `{"type":"response.completed","response":{"id":"resp_fixture907","model":"gpt-5.4","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":0}}}`
+
+type issue907CanceledRepo struct {
+	modelNotFoundAccountRepoStub
+	stateContextErr error
+}
+
+func (r *issue907CanceledRepo) SetModelRateLimit(ctx context.Context, id int64, model string, until time.Time, reason ...string) error {
+	r.stateContextErr = ctx.Err()
+	return r.modelNotFoundAccountRepoStub.SetModelRateLimit(ctx, id, model, until, reason...)
+}
+
+func TestIssue907CancellationStillPersistsModelCooldown(t *testing.T) {
+	repo := &issue907CanceledRepo{}
+	s := &OpenAIGatewayService{rateLimitService: &RateLimitService{accountRepo: repo}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.handleOpenAIWSErrorEventTransientFailure(ctx, wsSSETestAccount(), "gpt-5.4", nil, []byte(issue907Error))
+	require.NoError(t, repo.stateContextErr, "the state write must receive an uncanceled, bounded context")
+	require.Len(t, repo.modelRateLimitCalls, 1)
+}
 
 func issue907AssertCooldown(t *testing.T, s *OpenAIGatewayService, repo *modelNotFoundAccountRepoStub, account *Account, model string) {
 	t.Helper()
@@ -78,6 +99,8 @@ func TestIssue907WSModelFailurePolicy(t *testing.T) {
 }
 
 func TestIssue907WSModelReplaySafety(t *testing.T) {
+	anchorCtx := context.WithValue(context.Background(), codexWSAnchorContextKey{}, &codexWSAnchorTurn{})
+	require.False(t, openAIWSModelFailureCanReplay(anchorCtx, []byte(`{"input":"hello"}`)), "private Astra anchors are never a migratable first request")
 	for _, tc := range []struct {
 		body string
 		want bool
@@ -103,11 +126,45 @@ func TestIssue907WSModelReplaySafety(t *testing.T) {
 	}
 }
 
+func TestIssue907ModelRejectionDoesNotPenalizeOtherModels(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+	limiter, redis := qualitySignalTestLimiter(t)
+	limiter.accountRepo = &modelNotFoundAccountRepoStub{}
+	s := &OpenAIGatewayService{rateLimitService: limiter}
+	s.settingService = NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{openAIAdvancedSchedulerSettingKey: "true"}}, nil)
+	limiter.settingService = s.settingService
+	s.initOpenAIAccountScheduler()
+	a := wsSSETestAccount()
+	// Seed a healthy account score, which is shared by every model on A.
+	s.openaiAccountStats.reportAt(a.ID, true, nil, time.Now())
+	before, _, _ := s.openaiAccountStats.snapshot(a.ID)
+	for _, payload := range []string{issue907Error, issue907Failed} {
+		s.handleOpenAIWSFailureAccountSideEffects(context.Background(), a, "gpt-5.4", nil, []byte(payload))
+	}
+	require.False(t, redis.Exists(quality5xxPendingKey), "a model 400 must not schedule any 5xx quality plan")
+	for _, observed := range []error{ErrOpenAIWSModelUnavailable, s.newOpenAIWSModelFailoverError(a, []byte(issue907Error))} {
+		for range 10 {
+			s.ReportOpenAIAccountScheduleResult(a, "gpt-5.4", false, nil, observed)
+		}
+	}
+	after, _, _ := s.openaiAccountStats.snapshot(a.ID)
+	require.Equal(t, before, after, "model X rejection must leave the score used by model Y unchanged")
+	require.False(t, s.newOpenAIWSModelFailoverError(a, []byte(issue907Error)).ShouldReportAccountScheduleFailure())
+	s.ReportOpenAIAccountScheduleResult(a, "gpt-5.6", false, nil, errors.New("fixture network failure"))
+	control, _, _ := s.openaiAccountStats.snapshot(a.ID)
+	require.Greater(t, control, after, "the enabled account scorer must still observe ordinary failures")
+	// Control: ordinary 5xx still reaches the queue.
+	s.handleOpenAIWSFailureAccountSideEffects(context.Background(), a, "gpt-5.6", nil,
+		[]byte(`{"type":"response.failed","response":{"error":{"code":"server_error","message":"fixture"}}}`))
+	require.True(t, redis.Exists(quality5xxPendingKey))
+}
+
 func TestIssue907HTTPToWSModelFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
 		name, prefix, input, failure, turnState string
-		failover                                bool
+		failover, prewarm                       bool
 	}{
 		{name: "fresh_request", failover: true},
 		{name: "turn_state", turnState: "fixture-old-turn-state"},
@@ -115,6 +172,9 @@ func TestIssue907HTTPToWSModelFailure(t *testing.T) {
 		{name: "after_output", prefix: `{"type":"response.output_text.delta","delta":"fixture"}`},
 		{name: "opaque_history", input: `[{"type":"reasoning","encrypted_content":"synthetic"}]`},
 		{name: "failed_terminal", failure: issue907Failed},
+		{name: "generate_prewarm_error", prewarm: true, failover: true},
+		{name: "generate_prewarm_failed", prewarm: true, failover: true, failure: issue907Failed},
+		{name: "generate_prewarm_opaque", prewarm: true, input: `[{"type":"reasoning","encrypted_content":"synthetic"}]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			failure := tc.failure
@@ -129,6 +189,7 @@ func TestIssue907HTTPToWSModelFailure(t *testing.T) {
 			dialer := &wsSSETestDialer{conn: conn}
 			httpPeer := &httpUpstreamRecorder{}
 			s := wsSSETestService(t, dialer, httpPeer)
+			s.cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = tc.prewarm
 			repo := &modelNotFoundAccountRepoStub{}
 			s.rateLimitService = &RateLimitService{accountRepo: repo}
 			a := wsSSETestAccount()
@@ -151,12 +212,16 @@ func TestIssue907HTTPToWSModelFailure(t *testing.T) {
 				require.False(t, c.Writer.Written())
 			} else {
 				require.Contains(t, w.Body.String(), "model_not_found")
+				require.ErrorIs(t, err, ErrOpenAIWSModelUnavailable, "the outer handler must retain model-scoped attribution")
 			}
 			issue907AssertCooldown(t, s, repo, a, "gpt-5.4")
 			require.EqualValues(t, 1, dialer.calls.Load())
 			require.Nil(t, httpPeer.lastReq, "do not retry a submitted WS request over HTTP")
 			conn.mu.Lock()
 			require.Len(t, conn.writes, 1)
+			if tc.prewarm {
+				require.Equal(t, false, conn.writes[0]["generate"])
+			}
 			conn.mu.Unlock()
 		})
 	}
@@ -165,6 +230,7 @@ func TestIssue907HTTPToWSModelFailure(t *testing.T) {
 func TestIssue907LegacyWSBufferedProgressDoesNotAllowReplay(t *testing.T) {
 	for _, progress := range []string{
 		`{"type":"response.created","response":{"id":"resp_fixture907"}}`,
+		`{"type":"response.output_item.done","item":{"type":"web_search_call","id":"fixture_search","status":"completed"}}`,
 		`{"type":"response.output_item.added","item":{"type":"function_call","call_id":"fixture_call","name":"lookup"}}`,
 	} {
 		t.Run(progress, func(t *testing.T) {
@@ -191,21 +257,27 @@ func TestIssue907LegacyWSBufferedProgressDoesNotAllowReplay(t *testing.T) {
 func TestIssue907NativeWSModelFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, tc := range []struct {
-		name, input, turnState         string
-		prewarm, passthrough, failover bool
+		name, input, turnState, failure string
+		prewarm, passthrough, failover  bool
 	}{
 		{name: "fresh", input: `"hello"`, failover: true},
 		{name: "turn_state", input: `"hello"`, turnState: "fixture-old-turn-state"},
 		{name: "encrypted_first_turn", input: `[{"type":"reasoning","encrypted_content":"synthetic"}]`},
 		{name: "prewarm_then_task", input: `"real task"`, prewarm: true},
 		{name: "passthrough", input: `"hello"`, passthrough: true},
+		{name: "failed_after_prewarm", input: `[{"type":"reasoning","encrypted_content":"synthetic"},{"type":"function_call","call_id":"fixture","name":"lookup","arguments":"{}"},{"type":"function_call_output","call_id":"fixture","output":"done"}]`, prewarm: true, failure: issue907Failed},
+		{name: "passthrough_failed", input: `"hello"`, passthrough: true, failure: issue907Failed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := &openAIWSCaptureConn{}
 			if tc.prewarm {
 				upstream.events = append(upstream.events, []byte(issue907Complete))
 			}
-			upstream.events = append(upstream.events, []byte(issue907Error))
+			failure := tc.failure
+			if failure == "" {
+				failure = issue907Error
+			}
+			upstream.events = append(upstream.events, []byte(failure))
 			s := wsSSETestService(t, &wsSSETestDialer{conn: upstream}, &httpUpstreamRecorder{})
 			repo := &modelNotFoundAccountRepoStub{}
 			s.rateLimitService = &RateLimitService{accountRepo: repo}
@@ -233,7 +305,12 @@ func TestIssue907NativeWSModelFailure(t *testing.T) {
 					done <- err
 					return
 				}
-				done <- s.ProxyResponsesWebSocketFromClient(ctx, c, conn, a, "fixture-token", first, nil)
+				forwardErr := s.ProxyResponsesWebSocketFromClient(ctx, c, conn, a, "fixture-token", first, nil)
+				var closeErr *OpenAIWSClientCloseError
+				if errors.As(forwardErr, &closeErr) {
+					_ = conn.Close(closeErr.StatusCode(), closeErr.Reason())
+				}
+				done <- forwardErr
 			}))
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -255,13 +332,18 @@ func TestIssue907NativeWSModelFailure(t *testing.T) {
 				require.Error(t, readErr)
 			} else {
 				require.NoError(t, readErr)
-				require.JSONEq(t, issue907Error, string(response))
+				require.JSONEq(t, failure, string(response))
+				_, _, closeErr := client.Read(ctx)
+				require.Equal(t, coderws.StatusTryAgainLater, coderws.CloseStatus(closeErr))
 			}
 			_ = client.CloseNow()
 			select {
 			case forwardErr := <-done:
 				var failover *UpstreamFailoverError
 				require.Equal(t, tc.failover, errors.As(forwardErr, &failover))
+				if !tc.failover {
+					require.ErrorIs(t, forwardErr, ErrOpenAIWSModelUnavailable)
+				}
 			case <-ctx.Done():
 				t.Fatal("native forwarding did not stop")
 			}
@@ -272,6 +354,9 @@ func TestIssue907NativeWSModelFailure(t *testing.T) {
 				wantWrites = 2
 			}
 			require.Len(t, upstream.writes, wantWrites, "never replay the original prewarm or strip history")
+			actualInput, marshalErr := json.Marshal(upstream.writes[len(upstream.writes)-1]["input"])
+			require.NoError(t, marshalErr)
+			require.JSONEq(t, tc.input, string(actualInput), "the current task history must reach upstream intact")
 			upstream.mu.Unlock()
 		})
 	}

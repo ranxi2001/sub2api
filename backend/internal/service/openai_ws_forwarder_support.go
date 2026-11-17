@@ -137,6 +137,12 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			)
 		}
 
+		if openAIWSModelFailureStatus(account, message) != 0 {
+			model, _ := payload["model"].(string)
+			s.handleOpenAIWSModelFailure(ctx, account, model, message)
+			lease.MarkBroken()
+			return &openAIWSModelRejectionError{payload: append([]byte(nil), message...)}
+		}
 		if eventType == "error" {
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
 			prewarmModel, _ := reqBody["model"].(string)
@@ -365,10 +371,10 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 	if eventType != "error" {
 		return false
 	}
-	s.rateLimitService.observeQualityStatus(ctx, account, openAIStreamFailureStatus(payload, extractOpenAISSEErrorMessage(payload)))
-	if s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload) {
-		return true
+	if openAIWSModelFailureStatus(account, payload) != 0 {
+		return s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload)
 	}
+	s.rateLimitService.observeQualityStatus(ctx, account, openAIStreamFailureStatus(payload, extractOpenAISSEErrorMessage(payload)))
 	status := openAIWSPayloadTransientStatus(payload)
 	if status != 0 {
 		if status == http.StatusTooManyRequests {
@@ -386,10 +392,10 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
-	s.rateLimitService.observeQualityStatus(ctx, account, status)
-	if s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload) {
-		return true
+	if openAIWSModelFailureStatus(account, payload) != 0 {
+		return s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload)
 	}
+	s.rateLimitService.observeQualityStatus(ctx, account, status)
 	switch status {
 	case http.StatusUnauthorized, http.StatusTooManyRequests, 529:
 		s.handleOpenAIStreamTerminalAccountSideEffectsWithContext(ctx, account, payload, message, headers, canonicalModel)
