@@ -41,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        behavior: [red, negative_red, backoff_red, green]
+        behavior: [red, negative_red, backoff_red, edit_red, green]
     services:
       postgres:
         image: postgres:18.1-alpine3.23
@@ -85,8 +85,11 @@ jobs:
             elif [ "$BEHAVIOR" = negative_red ]; then
               original=e9e2d4ac9a18f9eeab510cfb2c4213e6041455d6
               source=backend/internal/repository/account_repo.go
-            else
+            elif [ "$BEHAVIOR" = backoff_red ]; then
               original=48ae8cfef14dab52e90e5103057dc65f5d601dea
+              source=backend/internal/repository/account_repo.go
+            else
+              original=0e2b93a9c99f329748fc43f3f4f625a17c253db0
               source=backend/internal/repository/account_repo.go
             fi
             expected_blob="$(git rev-parse "$original:$source")"
@@ -146,6 +149,17 @@ jobs:
               done
             done
           fi
+          if [ "$BEHAVIOR" = edit_red ]; then
+            parent=TestIssue817GrokNegativePreservesAdaptiveCooldown
+            pattern='^TestIssue817GrokNegativePreservesAdaptiveCooldown$/(forty_minutes|thirty_minutes_exact|ten_minutes_exact)$'
+            diagnostic='stale configuration edit must preserve the latest negative generation and history'
+            children=()
+            for tier in forty_minutes thirty_minutes_exact ten_minutes_exact; do
+              for negative in shorter_429 equal_429 exhausted_200; do
+                children+=("$tier/$negative")
+              done
+            done
+          fi
           set +e
           bash .github/scripts/issue817-race-gate.sh "$BEHAVIOR" "$PWD" "$pattern" > evidence/grok-gate.log 2>&1
           result=$?
@@ -196,14 +210,17 @@ jobs:
           for name in TestIssue817SaveResultFailureDoesNotAcknowledge TestIssue817ConnectivitySaveFailureDoesNotCompleteOrRecover TestIssue817QuotaSkipPreservesPending5xxExecution; do
             grep -F -- "--- PASS: $name (" evidence/retained.log
           done
-          pattern='^TestAccountRepoSuite$/(TestSetRateLimitedIfLaterDoesNotShortenReset|TestClearRateLimitIfObservedProtectsRearmed429Generation|TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset)$'
+          pattern='^TestAccountRepoSuite$/(TestSetRateLimitedIfLaterDoesNotShortenReset|TestClearRateLimitIfObservedProtectsRearmed429Generation|TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset|TestGrokConfigurationEditRuntimeBoundary)$'
           (cd backend && go test -race -tags=integration ./internal/repository -run "$pattern" -count=1 -v -timeout=10m) > evidence/generation-contracts.log 2>&1
           cat evidence/generation-contracts.log
           if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|SIGSEGV|\[build failed\]' evidence/generation-contracts.log; then
             exit 1
           fi
-          for name in TestSetRateLimitedIfLaterDoesNotShortenReset TestClearRateLimitIfObservedProtectsRearmed429Generation TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset; do
+          for name in TestSetRateLimitedIfLaterDoesNotShortenReset TestClearRateLimitIfObservedProtectsRearmed429Generation TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset TestGrokConfigurationEditRuntimeBoundary; do
             grep -F -- "--- PASS: TestAccountRepoSuite/$name (" evidence/generation-contracts.log
+          done
+          for name in grok_oauth grok_apikey other_oauth; do
+            grep -F -- "--- PASS: TestAccountRepoSuite/TestGrokConfigurationEditRuntimeBoundary/$name (" evidence/generation-contracts.log
           done
           (cd backend && go test -race -tags=unit ./internal/service -run '^TestGrokAdaptiveCooldownRequiresMatchingHistory$' -count=1 -v -timeout=10m) > evidence/history-controls.log 2>&1
           cat evidence/history-controls.log

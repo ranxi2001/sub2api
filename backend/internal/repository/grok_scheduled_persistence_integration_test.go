@@ -371,7 +371,9 @@ func TestIssue817GrokNegativePreservesAdaptiveCooldown(t *testing.T) {
 				scheduled := service.NewScheduledTestService(NewScheduledTestPlanRepository(integrationDB), NewScheduledTestResultRepository(integrationDB))
 				_, executor := service.NewGrokConnectivityRunnerForTesting(scheduled, accounts, &issue817GrokHTTP{client: server.Client(), target: target})
 				previousGeneration := started
-				for range 2 {
+				var staleEdit *service.Account
+				var staleBillingEdit *service.Account
+				for observation := range 2 {
 					c, _ := gin.CreateTestContext(httptest.NewRecorder())
 					c.Request = httptest.NewRequest(http.MethodPost, "/offline/backoff-test", nil)
 					err = executor.TestAccountConnection(c, id, "grok-4.5", "", service.AccountTestModeDefault)
@@ -391,9 +393,44 @@ func TestIssue817GrokNegativePreservesAdaptiveCooldown(t *testing.T) {
 					require.True(t, limited)
 					require.True(t, afterExpiry.Add(tc.next).Equal(next), "actual negative must preserve the exact adaptive cooldown tier after expiry")
 					previousGeneration = *account.RateLimitedAt
+					if observation == 0 {
+						// An actual name edit reads G1 before the next HTTP negative
+						// commits G2. Saving this snapshot must not resurrect G1.
+						staleEdit = account
+						billingSnapshot := *account
+						staleBillingEdit = &billingSnapshot
+					}
 				}
 				account, err := accounts.GetByID(ctx, id)
 				require.NoError(t, err)
+				generation := *account.RateLimitedAt
+				history := account.Extra[service.GrokRateLimitHistoryExtraKey]
+				staleGeneration := *staleEdit.RateLimitedAt
+				staleEdit.Name = "stale name edit after G2"
+				require.NoError(t, accounts.Update(ctx, staleEdit))
+				account, err = accounts.GetByID(ctx, id)
+				require.NoError(t, err)
+				require.NotNil(t, account.RateLimitedAt)
+				require.NotNil(t, account.RateLimitResetAt)
+				require.True(t, generation.Equal(*account.RateLimitedAt), "stale configuration edit must preserve the latest negative generation and history")
+				require.Equal(t, "stale name edit after G2", account.Name)
+				require.True(t, reset.Equal(*account.RateLimitResetAt))
+				require.Equal(t, history, account.Extra[service.GrokRateLimitHistoryExtraKey])
+				require.True(t, generation.Equal(*staleEdit.RateLimitedAt), "the returned edit snapshot must reflect the committed generation")
+				cleared, err := accounts.(*accountRepository).ClearRateLimitIfObserved(ctx, id, staleGeneration, reset)
+				require.NoError(t, err)
+				require.False(t, cleared, "a positive that observed G1 cannot clear G2 after a name edit")
+				// The admin path normally uses the billing-settings capability.
+				staleBillingEdit.Name = "stale billing-settings name edit"
+				require.NoError(t, accounts.(service.AccountBillingSettingsRepository).UpdateWithAccountBillingSettings(ctx, staleBillingEdit, nil, nil, nil))
+				account, err = accounts.GetByID(ctx, id)
+				require.NoError(t, err)
+				require.True(t, generation.Equal(*account.RateLimitedAt))
+				require.Equal(t, history, account.Extra[service.GrokRateLimitHistoryExtraKey])
+				afterEditExpiry := reset.Add(time.Second)
+				afterEditNext, limited := service.GrokRepeated429ResetForTesting(account, afterEditExpiry)
+				require.True(t, limited)
+				require.True(t, afterEditExpiry.Add(tc.next).Equal(afterEditNext), "stale configuration edit must preserve the adaptive cooldown tier after expiry")
 				// The scheduler projection and an ordinary account edit must retain
 				// the history bound to the current recovery generation.
 				account.Extra = filterSchedulerExtra(account.Extra)
@@ -414,10 +451,21 @@ func TestIssue817GrokNegativePreservesAdaptiveCooldown(t *testing.T) {
 				require.NoError(t, err)
 				next, _ = service.GrokRepeated429ResetForTesting(account, newBoundary.Add(time.Second))
 				require.True(t, newBoundary.Add(time.Second+10*time.Minute).Equal(next))
+				beforeClear := account
 				require.NoError(t, accounts.ClearRateLimit(ctx, id))
+				require.NoError(t, accounts.Update(ctx, beforeClear))
+				account, err = accounts.GetByID(ctx, id)
+				require.NoError(t, err)
+				require.Nil(t, account.RateLimitedAt, "an ordinary stale edit cannot undo an explicit clear")
+				require.Nil(t, account.RateLimitResetAt)
 				require.NoError(t, accounts.(*accountRepository).SetRateLimitedIfLater(ctx, id, reset))
 				account, err = accounts.GetByID(ctx, id)
 				require.NoError(t, err)
+				rearmedGeneration := *account.RateLimitedAt
+				require.NoError(t, accounts.Update(ctx, beforeClear))
+				account, err = accounts.GetByID(ctx, id)
+				require.NoError(t, err)
+				require.True(t, rearmedGeneration.Equal(*account.RateLimitedAt), "an ordinary stale edit cannot undo an explicit re-arm")
 				next, _ = service.GrokRepeated429ResetForTesting(account, afterExpiry)
 				require.True(t, afterExpiry.Add(10*time.Minute).Equal(next))
 			})

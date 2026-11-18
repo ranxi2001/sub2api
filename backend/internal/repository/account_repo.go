@@ -635,6 +635,10 @@ func (r *accountRepository) updateAccount(
 	account.Schedulable = updated.Schedulable
 	account.Status = updated.Status
 	account.ErrorMessage = derefString(updated.ErrorMessage)
+	if account.IsGrokOAuth() && !service.AccountPlatformChanging(ctx) {
+		account.RateLimitedAt = updated.RateLimitedAt
+		account.RateLimitResetAt = updated.RateLimitResetAt
+	}
 	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
 	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
 	if contextTx == nil {
@@ -716,15 +720,21 @@ func (r *accountRepository) updateLockedAccount(
 	} else {
 		builder.ClearExpiresAt()
 	}
-	if account.RateLimitedAt != nil {
-		builder.SetRateLimitedAt(*account.RateLimitedAt)
-	} else {
-		builder.ClearRateLimitedAt()
-	}
-	if account.RateLimitResetAt != nil {
-		builder.SetRateLimitResetAt(*account.RateLimitResetAt)
-	} else {
-		builder.ClearRateLimitResetAt()
+	// Ordinary Grok OAuth configuration edits do not own runtime generations.
+	// The row is locked and its history was merged above; leave the matching
+	// timestamps in that row intact. Explicit runtime setters/clears and platform
+	// transitions retain their separate write paths.
+	if !account.IsGrokOAuth() || service.AccountPlatformChanging(ctx) {
+		if account.RateLimitedAt != nil {
+			builder.SetRateLimitedAt(*account.RateLimitedAt)
+		} else {
+			builder.ClearRateLimitedAt()
+		}
+		if account.RateLimitResetAt != nil {
+			builder.SetRateLimitResetAt(*account.RateLimitResetAt)
+		} else {
+			builder.ClearRateLimitResetAt()
+		}
 	}
 	if account.OverloadUntil != nil {
 		builder.SetOverloadUntil(*account.OverloadUntil)

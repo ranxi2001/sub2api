@@ -997,6 +997,50 @@ func (s *AccountRepoSuite) TestGrokNegativeObservationAdvancesGenerationWithoutS
 	}
 }
 
+func (s *AccountRepoSuite) TestGrokConfigurationEditRuntimeBoundary() {
+	for _, tc := range []struct {
+		name     string
+		platform string
+		kind     string
+	}{
+		{name: "grok_oauth", platform: service.PlatformGrok, kind: service.AccountTypeOAuth},
+		{name: "grok_apikey", platform: service.PlatformGrok, kind: service.AccountTypeAPIKey},
+		{name: "other_oauth", platform: service.PlatformAnthropic, kind: service.AccountTypeOAuth},
+	} {
+		s.Run(tc.name, func() {
+			account := mustCreateAccount(s.T(), s.client, &service.Account{Name: tc.name, Platform: tc.platform, Type: tc.kind})
+			account, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			reset := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+			s.Require().NoError(s.repo.SetRateLimited(s.ctx, account.ID, reset))
+			current, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			account.Name = "configuration only"
+			s.Require().NoError(s.repo.Update(s.ctx, account))
+			stored, err := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(err)
+			if tc.platform == service.PlatformGrok && tc.kind == service.AccountTypeOAuth {
+				s.Require().NotNil(stored.RateLimitedAt)
+				s.Require().True(current.RateLimitedAt.Equal(*stored.RateLimitedAt))
+				s.Require().True(reset.Equal(*stored.RateLimitResetAt))
+				// An explicitly validated platform transition retains its caller
+				// write semantics rather than inheriting the old Grok runtime.
+				stored.Platform = service.PlatformAnthropic
+				stored.Type = service.AccountTypeAPIKey
+				stored.RateLimitedAt, stored.RateLimitResetAt = nil, nil
+				s.Require().NoError(s.repo.Update(service.WithAccountPlatformChange(s.ctx), stored))
+				stored, err = s.repo.GetByID(s.ctx, account.ID)
+				s.Require().NoError(err)
+				s.Require().Nil(stored.RateLimitedAt)
+				s.Require().Nil(stored.RateLimitResetAt)
+			} else {
+				s.Require().Nil(stored.RateLimitedAt, "non-Grok OAuth edit semantics remain unchanged")
+				s.Require().Nil(stored.RateLimitResetAt)
+			}
+		})
+	}
+}
+
 func (s *AccountRepoSuite) TestClearRateLimit() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-clear"})
 	until := time.Now().Add(1 * time.Hour)
