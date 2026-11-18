@@ -2415,12 +2415,14 @@ const handleClose = () => {
 const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise<boolean> => {
   if (!canPreCheck()) return true
   if (mixedChannelConfirmed.value) return true
+  const generation = dialogGeneration
 
   try {
     const result = await adminAPI.accounts.checkMixedChannelRisk({
       platform: targetSelectedPlatforms.value[0],
       group_ids: groupIds.value
     })
+    if (generation !== dialogGeneration || !props.show) return false
     if (!result.has_risk) return true
 
     pendingUpdatesForConfirm.value = built
@@ -2428,6 +2430,7 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
     showMixedChannelWarning.value = true
     return false
   } catch (error: any) {
+    if (generation !== dialogGeneration || !props.show) return false
     appStore.showError(error.message || t('admin.accounts.bulkEdit.failed'))
     return false
   }

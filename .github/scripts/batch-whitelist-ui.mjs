@@ -34,8 +34,11 @@ try {
     await loadLocaleMessages('zh')
     i18n.global.locale.value='zh'
     window.calls=[]
+    window.requests=[]
     apiClient.defaults.adapter=async config=>{
       const url=config.url
+      window.requests.push({method:config.method,url})
+      if(config.method !== 'get' && !url.endsWith('/models/sync-upstream')) throw Error('Unexpected fixture write '+url)
       let data={}
       if(url.endsWith('/models/sync-upstream')){
         window.calls.push(url)
@@ -85,7 +88,7 @@ try {
       await page.waitForFunction(()=>window.calls.length===3)
       assert.deepEqual(await page.evaluate(()=>window.calls),[41,42,42].map(id=>'/admin/accounts/'+id+'/models/sync-upstream'))
     }
-    manifest.screenshots.push({name,viewport,box,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')})
+    manifest.screenshots.push({name,viewport,box,sha256:createHash('sha256').update(readFileSync(path)).digest('hex'), requests:await page.evaluate(()=>window.requests)})
     await page.close()
   }
   writeFileSync(join(out, mode+'-manifest.json'), JSON.stringify(manifest,null,2)+'\n')

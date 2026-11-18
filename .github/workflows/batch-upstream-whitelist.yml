@@ -3,9 +3,14 @@ on:
   pull_request:
     paths:
       - 'frontend/src/components/account/*UpstreamWhitelist*'
+      - 'frontend/src/composables/useBatchUpstreamWhitelist.ts'
+      - 'frontend/src/components/account/BulkEditAccountModal.vue'
       - 'frontend/src/components/account/__tests__/BatchUpstreamWhitelist*'
       - 'backend/internal/**/**batch_whitelist*'
       - 'backend/internal/service/upstream_model_mapping_sync.go'
+      - 'backend/internal/service/upstream_models.go'
+      - 'backend/internal/service/openai_excel_bps_model_access.go'
+      - 'backend/internal/handler/admin/account_handler.go'
       - '.github/workflows/batch-upstream-whitelist.yml'
       - '.github/scripts/batch-whitelist-ui.mjs'
 permissions:

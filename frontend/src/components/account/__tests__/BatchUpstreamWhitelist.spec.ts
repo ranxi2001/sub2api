@@ -110,7 +110,7 @@ describe('batch upstream whitelist', () => {
     expect(bulkWrites).toHaveLength(1)
   })
 
-  it('does not submit an old preflight after closing and reopening another selection', async () => {
+  it.each([false, true])('does not retain an old preflight after reopening (risk=%s)', async risk => {
     let release!: (value: object) => void
     checkRisk = () => new Promise(resolve => { release = resolve })
     const w = fixture([41,42], async id => applied(id))
@@ -121,8 +121,9 @@ describe('batch upstream whitelist', () => {
     await flushPromises()
     await w.setProps({show:false})
     await w.setProps({show:true,accountIds:[77]})
-    release({has_risk:false})
+    release({has_risk:risk})
     await flushPromises()
+    expect(w.findComponent({ name: 'ConfirmDialog' }).props('show'), 'old confirmation must not target the new selection').toBe(false)
     expect(bulkWrites, 'old preflight cannot target the new selection').toEqual([])
   })
 
