@@ -27,7 +27,7 @@
           <div class="grid gap-3 sm:grid-cols-3">
             <label v-for="field in moneyFields" :key="field" class="block text-sm">
               <span class="mb-1 block">{{ t(`autoCredit.${field}`) }}</span>
-              <input v-model="form[field]" :name="field" type="text" inputmode="decimal" maxlength="16" autocomplete="off" class="input w-full" :disabled="busy || loading" :required="form.enabled" />
+              <input v-model="form[field]" :name="field" type="text" inputmode="decimal" maxlength="16" autocomplete="off" class="input w-full" :disabled="busy || loading" :required="form.enabled" @input="editedMoneyFields.add(field)" />
             </label>
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('autoCredit.precision') }}</p>
@@ -84,6 +84,7 @@ const state = ref<AutoCreditState | null>(null)
 const status = ref<CreditStatus>('all')
 const statuses: CreditStatus[] = ['all', 'pending', 'settled']
 const moneyFields = ['threshold', 'amount', 'cap'] as const
+const editedMoneyFields = new Set<(typeof moneyFields)[number]>()
 const form = reactive({ enabled: false, notify_email: false, threshold: '', amount: '', cap: '' })
 const error = ref('')
 const loading = ref(false)
@@ -116,7 +117,13 @@ function apply(s: AutoCreditState) {
   state.value = s
   form.enabled = s.config.enabled
   form.notify_email = s.config.notify_email ?? false
-  for (const field of moneyFields) form[field] = s.config[field] ?? ''
+  for (const field of moneyFields) form[field] = s.config[field] == null ? '' : Number(s.config[field]).toFixed(2)
+  editedMoneyFields.clear()
+}
+function moneyValue(field: (typeof moneyFields)[number]) {
+  // Display rounding must not change saved amounts when only toggling settings.
+  if (!editedMoneyFields.has(field) && state.value) return state.value.config[field]
+  return form[field].trim() || null
 }
 async function load(older = false) {
   if (!props.show || !props.user || !auth.isAdmin) return
@@ -136,7 +143,7 @@ async function save() {
   busy.value = true; error.value = ''
   try {
     const s = await saveAutoCredit(props.user.id, { version: state.value.config.version, enabled: form.enabled, notify_email: form.notify_email,
-      threshold: form.threshold.trim() || null, amount: form.amount.trim() || null, cap: form.cap.trim() || null })
+      threshold: moneyValue('threshold'), amount: moneyValue('amount'), cap: moneyValue('cap') })
     if (current !== generation) return
     status.value = 'all'; confirming.value = null; apply(s); emit('success')
   } catch (e) { if (current === generation) error.value = message(e) }
