@@ -77,7 +77,7 @@ jobs:
           grep -F 'whitelist discovery must not disable an account' "$RUNNER_TEMP/read-policy-red.log"
           grep -F 'stale native cache cannot authorize a replacement whitelist' "$RUNNER_TEMP/read-policy-red.log"
           grep -F 'BPS fresh cache must also be bypassed' "$RUNNER_TEMP/read-policy-red.log"
-          ! grep -Eq 'build failed|setup failed|undefined:|no tests to run|panic:' "$RUNNER_TEMP/read-policy-red.log"
+          if grep -Eq 'build failed|setup failed|undefined:|no tests to run|panic:|WARNING: DATA RACE|--- SKIP:' "$RUNNER_TEMP/read-policy-red.log"; then exit 1; fi
       - name: Candidate handler and catalog policies
         working-directory: backend
         run: |
