@@ -6,7 +6,7 @@ import (
 )
 
 // Both routes are registered only within the authenticated admin route group.
-func (h *AccountTokenGuardHandler) CredentialEncryption(c *gin.Context) {
+func (h *OpenAIReloginHandler) CredentialEncryption(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	status, err := h.reauth.CredentialEncryptionStatus()
 	if err != nil {
@@ -16,7 +16,7 @@ func (h *AccountTokenGuardHandler) CredentialEncryption(c *gin.Context) {
 	response.Success(c, status)
 }
 
-func (h *AccountTokenGuardHandler) InitializeCredentialEncryption(c *gin.Context) {
+func (h *OpenAIReloginHandler) InitializeCredentialEncryption(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	status, err := h.reauth.InitializeCredentialEncryption()
 	if err != nil {

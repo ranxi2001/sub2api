@@ -146,7 +146,7 @@ sessionExport: {
 
   legacyEngine: "Keep existing account settings",
   legacyEngineHint: "No global engine is selected yet. Existing accounts keep their engine; new accounts use the local worker. Selecting an engine applies it to all password/TOTP accounts. Email OTP continues locally.",
-  sessionStudioGlobalHint: "Subsequent password/TOTP re-logins send account email, password and TOTP secret to the Session Studio service configured in Credential Guard. The service uses its own egress, not account proxies. Email OTP stays local. Failures do not switch engines.",
+  sessionStudioGlobalHint: "Subsequent password/TOTP re-logins send account email, password and TOTP secret to the Session Studio service configured in Credential Operations. The service uses its own egress, not account proxies. Email OTP stays local. Failures do not switch engines.",
   workerConcurrency: "Local worker count",
   workerConcurrencyHint: "Saved immediately; 1–16 processes per worker instance. Updated workers sync about every 5 seconds; shrinking waits for active tasks to finish. Session Studio tasks also use processes. Older workers must be upgraded.",
   automation: "Automation",
@@ -158,7 +158,7 @@ sessionExport: {
   localWorkerEngine: 'Local Worker (default)',
   sessionStudioEngine: 'Session Studio (temporary fast path)',
   localWorkerEngineHint: 'Sign in using your own Worker and the selected account proxy.',
-  sessionStudioEngineHint: 'Sends this account’s email, password and TOTP secret to the re-login service configured in Credential Guard. Password / TOTP only; uses the service’s egress instead of the account proxy. No automatic engine fallback. Upgrade the Worker first.',
+  sessionStudioEngineHint: 'Sends this account’s email, password and TOTP secret to the re-login service configured in Credential Operations. Password / TOTP only; uses the service’s egress instead of the account proxy. No automatic engine fallback. Upgrade the Worker first.',
   runtimeTitle: 'Automatic re-login service',
   runtimeManaged: 'Prepared and managed by the application. Password / 2FA needs no extra setup.',
   runtimeExternal: 'Using the existing external re-login service.',

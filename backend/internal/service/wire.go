@@ -1132,7 +1132,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpsCleanupService,
 	ProvideOpsScheduledReportService,
 	ProvideAccountOpsService,
-	ProvideAccountTokenGuardService,
+	NewOpenAIReloginService,
 	ProvideAccountTokenGuardV2Service,
 	NewEmailService,
 	NewNotificationEmailService,
@@ -1346,16 +1346,6 @@ func ProvideAccountOpsService(settings SettingRepository, repo AccountOpsReposit
 	svc.autoAccounts, _ = accounts.(AccountConcurrencyRepository)
 	svc.autoGroups = groups
 	svc.start(cfg.RunsBackgroundJobs())
-	return svc
-}
-
-// ProvideAccountTokenGuardService 创建并启动「凭证守护」后台巡检（智能运维子页面）。
-func ProvideAccountTokenGuardService(settings SettingRepository, repo AccountTokenGuardRepository,
-	accounts AccountRepository, admin AdminService, invalidator TokenCacheInvalidator,
-	cfg *config.Config,
-) *AccountTokenGuardService {
-	svc := NewAccountTokenGuardService(settings, repo, accounts, admin, invalidator)
-	startBackgroundService(cfg, svc)
 	return svc
 }
 

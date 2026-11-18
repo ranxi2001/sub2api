@@ -9,7 +9,7 @@ export default {
   "automatic": "Authorize with saved password / 2FA",
   "browser": "Browser authorization",
   "refresh": "Refresh status",
-  "loginHint": "Automatic authorization reuses the password and TOTP saved in Credential Guard. Use browser authorization for initial consent or additional verification. Tokens refresh automatically afterward.",
+  "loginHint": "Automatic authorization reuses the password and TOTP saved in Credential Operations. Use browser authorization for initial consent or additional verification. Tokens refresh automatically afterward.",
   "running": "SIWC authorization in progress…",
   "continue": "Open ChatGPT authorization ↗",
   "authLink": "Full authorization URL",

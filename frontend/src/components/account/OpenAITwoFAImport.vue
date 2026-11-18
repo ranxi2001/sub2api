@@ -1,35 +1,35 @@
 <template>
   <div class="space-y-4">
     <CredentialEncryptionSetup @ready="encryptionReady = $event" />
-    <p class="input-hint">{{ t('tokenGuard.twoFA.hint') }}</p>
-    <a href="/admin/token-guard" target="_blank" rel="noopener noreferrer" class="text-primary-600">
-      {{ t('tokenGuard.twoFA.settings') }}
+    <p class="input-hint">{{ t('openaiRelogin.twoFA.hint') }}</p>
+    <a href="/admin/token-guard-v2#relogin-service" target="_blank" rel="noopener noreferrer" class="text-primary-600">
+      {{ t('openaiRelogin.twoFA.settings') }}
     </a>
     <template v-if="!rows.length">
-      <label for="two-fa-credentials" class="input-label">{{ t('tokenGuard.twoFA.credentials') }}</label>
+      <label for="two-fa-credentials" class="input-label">{{ t('openaiRelogin.twoFA.credentials') }}</label>
       <textarea id="two-fa-credentials" v-model="raw" class="input font-mono" rows="6"
         autocomplete="off" autocapitalize="off" :spellcheck="false" :disabled="busy"
-        :placeholder="t('tokenGuard.twoFA.placeholder')" />
+        :placeholder="t('openaiRelogin.twoFA.placeholder')" />
     </template>
     <p v-if="error" role="alert" class="text-sm text-red-600">{{ error }}</p>
     <p v-if="!busy && hasOwnedJobs" role="status" class="input-hint" data-testid="two-fa-owned-jobs">
-      {{ t('tokenGuard.twoFA.ownedJobs') }}
+      {{ t('openaiRelogin.twoFA.ownedJobs') }}
     </p>
     <ul v-if="rows.length" class="space-y-2" aria-live="polite">
       <li v-for="(row, index) in rows" :key="row.entry.email" class="flex justify-between gap-4 text-sm">
         <span>{{ index + 1 }}. {{ row.entry.email }}</span>
-        <span>{{ t(`tokenGuard.twoFA.states.${row.status}`) }}</span>
+        <span>{{ t(`openaiRelogin.twoFA.states.${row.status}`) }}</span>
       </li>
     </ul>
     <div class="flex gap-3">
       <button v-if="!busy && (!rows.length || hasPending)" type="button" class="btn btn-primary" :disabled="!encryptionReady" data-testid="two-fa-start" @click="run">
-        {{ t(rows.length ? 'tokenGuard.twoFA.retry' : 'tokenGuard.twoFA.start') }}
+        {{ t(rows.length ? 'openaiRelogin.twoFA.retry' : 'openaiRelogin.twoFA.start') }}
       </button>
       <button v-if="busy || hasOwnedJobs" type="button" class="btn btn-secondary" :disabled="busy && stopRequested" data-testid="two-fa-stop" @click="stop">
-        {{ t('tokenGuard.twoFA.stop') }}
+        {{ t('openaiRelogin.twoFA.stop') }}
       </button>
       <button v-if="!busy && rows.length" type="button" class="btn btn-secondary" :disabled="hasOwnedJobs" @click="reset">
-        {{ t('tokenGuard.twoFA.reset') }}
+        {{ t('openaiRelogin.twoFA.reset') }}
       </button>
     </div>
   </div>
@@ -39,16 +39,16 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import CredentialEncryptionSetup from './CredentialEncryptionSetup.vue'
 import { useI18n } from 'vue-i18n'
-import { deleteTwoFALogin, getTwoFALogin, parseTwoFALoginText, startTwoFALogin } from '@/api/admin/accountTokenGuard'
-import type { TokenGuardReloginAccount } from '@/api/admin/accountTokenGuard'
+import { deleteTwoFALogin, getTwoFALogin, parseTwoFALoginText, startTwoFALogin } from '@/api/admin/openaiRelogin'
+import type { OpenAIReloginCredentials } from '@/api/admin/openaiRelogin'
 
 const props = defineProps<{
-  importCredential: (credential: Record<string, unknown>, email: string, login: TokenGuardReloginAccount, signal?: AbortSignal) => Promise<'created' | 'skipped'>
+  importCredential: (credential: Record<string, unknown>, email: string, login: OpenAIReloginCredentials, signal?: AbortSignal) => Promise<'created' | 'skipped'>
 }>()
 const emit = defineEmits<{ busy: [value: boolean] }>()
 const { t } = useI18n()
 type Row = {
-  entry: TokenGuardReloginAccount
+  entry: OpenAIReloginCredentials
   status: 'pending' | 'login' | 'importing' | 'created' | 'skipped' | 'failed' | 'importFailed'
   credential?: Record<string, unknown>
   jobId?: string
@@ -121,7 +121,7 @@ async function run() {
       rows.value = parseTwoFALoginText(raw.value).map(entry => ({ entry, status: 'pending' }))
       raw.value = ''
     } catch {
-      error.value = t('tokenGuard.twoFA.invalid')
+      error.value = t('openaiRelogin.twoFA.invalid')
       return
     }
   }

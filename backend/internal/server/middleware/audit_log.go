@@ -111,6 +111,7 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
+	"GET /api/v1/admin/account-ops/relogin/config":                            "admin.relogin.config.read",
 	"GET /api/v1/admin/ops/ai/actions":                                        "admin.ops.ai.actions.read",
 	"GET /api/v1/admin/ops/ai/runs":                                           "admin.ops.ai.runs.read",
 	"GET /api/v1/admin/ops/ai/runs/:id":                                       "admin.ops.ai.run.read",
@@ -188,7 +189,8 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/accounts/:id/export-session":                                       {},
 	"PUT /api/v1/admin/account-ops/webhooks/:id":                                           {},
 	"PUT /api/v1/admin/account-ops/config":                                                 {},
-	"POST /api/v1/admin/account-ops/token-guard/two-fa-login":                              {},
+	"PUT /api/v1/admin/account-ops/relogin/config":                                         {},
+	"POST /api/v1/admin/account-ops/relogin/two-fa-login":                                  {},
 	"POST /api/v1/auth/passkey/login/finish":                                               {},
 	"POST /api/v1/user/passkeys/register/finish":                                           {},
 	"POST /api/v1/admin/accounts/import/codex-session":                                     {},

@@ -690,7 +690,7 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 	ticket.AccountID = account.ID
 	s.openaiCodexTickets.Store(openAICodexTicketKey(account.ID, model), ticket)
 	if s.accountRepo == nil {
-		recordCodexHarvestTicketStore(account, &incoming, standby)
+
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -705,7 +705,7 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 		)
 		return err
 	}
-	recordCodexHarvestTicketStore(account, &incoming, standby)
+
 	return nil
 }
 
@@ -933,7 +933,7 @@ func (s *OpenAIGatewayService) codexTicketChatHeld(accountID int64) bool {
 	return ctr != nil && atomic.LoadInt64(ctr) > 0
 }
 
-func (s *OpenAIGatewayService) manualHarvestLiveModels(account *Account, models []string) map[string]struct{} {
+func (s *OpenAIGatewayService) liveCodexTicketModels(account *Account, models []string) map[string]struct{} {
 	got := map[string]struct{}{}
 	if s == nil || account == nil {
 		return got
@@ -949,20 +949,11 @@ func (s *OpenAIGatewayService) manualHarvestLiveModels(account *Account, models 
 	return got
 }
 
-func (s *OpenAIGatewayService) markManualHarvestLiveModels(account *Account, models []string, got map[string]struct{}) {
-	if got == nil {
-		return
-	}
-	for model := range s.manualHarvestLiveModels(account, models) {
-		got[model] = struct{}{}
-	}
-}
-
 func (s *OpenAIGatewayService) accountHasLiveCodexTicket(account *Account) bool {
 	if s == nil || account == nil {
 		return false
 	}
-	return len(s.manualHarvestLiveModels(account, s.openAICodexTicketConfig().Models)) > 0
+	return len(s.liveCodexTicketModels(account, s.openAICodexTicketConfig().Models)) > 0
 }
 
 // Harvest-excluded is harvest-scope only: accounts outside selected groups
@@ -1203,7 +1194,7 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 		})
 		defer s.codexHarvest.setRuntime(func(r *CodexHarvestRuntime) { r.Running = false; r.CurrentNode = "" })
 	}
-	observeCodexHarvestProxy(ctx, s.openAICodexTicketHarvestProxySetting(ctx))
+
 	accounts, err := s.accountRepo.ListByPlatform(ctx, PlatformOpenAI)
 	if err != nil {
 		logger.L().Warn("openai_codex_ticket list accounts failed", zap.Error(err))

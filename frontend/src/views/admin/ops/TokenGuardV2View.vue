@@ -40,6 +40,7 @@
           <p v-if="runtimeSaving" role="status" class="mt-2 text-xs">{{ t('tokenGuardV2.saving') }}</p>
         </div>
       </CredentialEncryptionSetup>
+      <OpenAIReloginSettings class="mb-5" />
 
       <section v-if="status.worker" class="mb-5 rounded-xl border border-gray-200 p-4 dark:border-gray-700" data-testid="reauth-runtime-status" role="status">
         <strong>{{ t('tokenGuardV2.runtimeTitle') }}</strong>
@@ -223,6 +224,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import CredentialEncryptionSetup from '@/components/account/CredentialEncryptionSetup.vue'
 import OpenAITOTPDialog from '@/components/account/OpenAITOTPDialog.vue'
 import SmartOpsNav from '@/components/admin/operations/SmartOpsNav.vue'
+import OpenAIReloginSettings from '@/components/admin/operations/OpenAIReloginSettings.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { BaseDialog, Pagination } from '@/components/common'
 import { list as listAccounts } from '@/api/admin/accounts'

@@ -146,7 +146,7 @@ sessionExport: {
 
   legacyEngine: "沿用已有账号设置",
   legacyEngineHint: "尚未统一设置引擎，已有账号保持原选择，新账号使用本地 Worker。切换后统一应用到所有账密 / TOTP 账号，邮箱链接仍使用本地流程。",
-  sessionStudioGlobalHint: "所有账密 / TOTP 账号的后续重登会将邮箱、密码和 TOTP 密钥发送到凭证守护配置的 Session Studio 服务，使用服务端出口，不使用账号代理。邮箱链接仍使用本地流程；失败不会切换引擎。",
+  sessionStudioGlobalHint: "所有账密 / TOTP 账号的后续重登会将邮箱、密码和 TOTP 密钥发送到凭证运营的重登服务配置的 Session Studio 服务，使用服务端出口，不使用账号代理。邮箱链接仍使用本地流程；失败不会切换引擎。",
   workerConcurrency: "本地 Worker 数量",
   workerConcurrencyHint: "切换即保存，范围 1–16；新版 Worker 约每 5 秒同步数量，减少时等待正在执行的任务完成。数量按每个 Worker 实例计算，Session Studio 任务也占用进程；旧版 Worker 需升级后生效。",
   automation: "运行开关",
@@ -158,7 +158,7 @@ sessionExport: {
   localWorkerEngine: '本地 Worker（默认）',
   sessionStudioEngine: 'Session Studio（临时提速）',
   localWorkerEngineHint: '在自己的 Worker 中完成登录，使用所选账号代理。',
-  sessionStudioEngineHint: '将此账号的邮箱、密码和 TOTP 密钥发送到凭证守护中配置的重登服务。仅支持密码 / TOTP，使用服务端出口，不使用账号代理；失败不会自动切换引擎。需先升级 Worker。',
+  sessionStudioEngineHint: '将此账号的邮箱、密码和 TOTP 密钥发送到凭证运营中配置的重登服务。仅支持密码 / TOTP，使用服务端出口，不使用账号代理；失败不会自动切换引擎。需先升级 Worker。',
   runtimeTitle: '自动重登服务',
   runtimeManaged: '由程序自动准备和管理，账密 / 2FA 无需额外配置。',
   runtimeExternal: '当前使用已有的独立重登服务。',

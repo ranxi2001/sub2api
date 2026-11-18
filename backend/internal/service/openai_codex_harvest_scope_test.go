@@ -313,16 +313,3 @@ func TestCodexHarvestOAuthScopeDefaultsAndOptOut(t *testing.T) {
 	s.refreshOpenAICodexTickets(context.Background())
 	require.Equal(t, []int64{2}, u.ids)
 }
-
-func TestCodexHarvestSelectedAccountControlsReflectOptIn(t *testing.T) {
-	account := harvestScopeAccount(1, true)
-	s, _, _ := harvestScopeService(t, `{"mode":"selected_accounts"}`, []Account{account}, 1)
-	snapshot := BuildCodexHarvestFlow(t.Context(), &config.Config{}, s.settingService, []Account{account})
-	require.Len(t, snapshot.Accounts, 1)
-	require.False(t, snapshot.Accounts[0].HarvestSelected, "unselected account must offer Enable harvest")
-	require.False(t, snapshot.Accounts[0].InScope)
-	account.Extra = map[string]any{OpenAICodexSkipHarvestExtraKey: false}
-	snapshot = BuildCodexHarvestFlow(t.Context(), &config.Config{}, s.settingService, []Account{account})
-	require.True(t, snapshot.Accounts[0].HarvestSelected)
-	require.True(t, snapshot.Accounts[0].InScope)
-}

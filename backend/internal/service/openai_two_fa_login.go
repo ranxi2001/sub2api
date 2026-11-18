@@ -10,7 +10,7 @@ import (
 )
 
 // Login jobs keep token results in bounded, short-lived memory. Successful logins
-// save the supplied password/2FA to the guard without enabling it or creating accounts.
+// return tokens; encrypted credential enrollment belongs to credential operations.
 type OpenAITwoFALoginJob struct {
 	ID         string         `json:"id"`
 	Status     string         `json:"status"`
@@ -19,7 +19,7 @@ type OpenAITwoFALoginJob struct {
 	expiry     *time.Timer
 }
 
-func ValidateOpenAITwoFALogin(entry AccountTokenGuardReloginAccount) error {
+func ValidateOpenAITwoFALogin(entry OpenAIReloginCredentials) error {
 	email := strings.TrimSpace(entry.Email)
 	address, err := mail.ParseAddress(email)
 	if err != nil || address.Address != email || len(email) > 320 ||
@@ -30,28 +30,17 @@ func ValidateOpenAITwoFALogin(entry AccountTokenGuardReloginAccount) error {
 	return nil
 }
 
-func (s *AccountTokenGuardService) StartTwoFALogin(ctx context.Context, entry AccountTokenGuardReloginAccount) (*OpenAITwoFALoginJob, error) {
-	return s.startTwoFALogin(ctx, entry, true)
-}
-
-// Operations imports save their login method through the encrypted per-account
-// API after identity deduplication returns the account ID. Do not also enroll
-// them in the legacy guard's plaintext settings.
-func (s *AccountTokenGuardService) StartTwoFALoginForOperations(ctx context.Context, entry AccountTokenGuardReloginAccount) (*OpenAITwoFALoginJob, error) {
-	return s.startTwoFALogin(ctx, entry, false)
-}
-
-func (s *AccountTokenGuardService) startTwoFALogin(ctx context.Context, entry AccountTokenGuardReloginAccount, saveToLegacyGuard bool) (*OpenAITwoFALoginJob, error) {
+func (s *OpenAIReloginService) StartTwoFALogin(ctx context.Context, entry OpenAIReloginCredentials) (*OpenAITwoFALoginJob, error) {
 	if err := ValidateOpenAITwoFALogin(entry); err != nil {
 		return nil, err
 	}
 	cfg, err := s.GetConfig(ctx)
 	if err != nil {
-		return nil, errors.New("无法读取凭证守护配置")
+		return nil, errors.New("无法读取凭证运营配置")
 	}
 	// Explicit login works while scheduled inspection/automatic relogin is off.
 	if err := validateGuardHTTPURL(cfg.ReloginEndpoint, "relogin_endpoint"); err != nil {
-		return nil, errors.New("请在凭证守护中配置有效的重登接口")
+		return nil, errors.New("请在凭证运营中配置有效的重登接口")
 	}
 	entry.Email = strings.ToLower(strings.TrimSpace(entry.Email))
 	entry.MFASecret = strings.TrimSpace(entry.MFASecret)
@@ -77,26 +66,13 @@ func (s *AccountTokenGuardService) startTwoFALogin(ctx context.Context, entry Ac
 		}
 		if loginErr != nil {
 			// Neither provider errors nor request data may be reflected to clients.
-			slog.Warn("account_token_guard_two_fa_login_failed",
+			slog.Warn("openai_two_fa_login_failed",
 				"job_id", job.ID,
 				"stage", "relogin",
 				"reason", safeTwoFALoginError(loginErr, entry),
 			)
 			job.Status = "failed"
 			return
-		}
-		// Persist verified login credentials before the client imports tokens and
-		// clears its password/MFA input. Never report success on a failed save.
-		if saveToLegacyGuard {
-			if err := s.saveTwoFALoginAccount(loginCtx, entry); err != nil {
-				slog.Warn("account_token_guard_two_fa_login_failed",
-					"job_id", job.ID,
-					"stage", "save_guard_credentials",
-					"reason", safeTwoFALoginError(err, entry),
-				)
-				job.Status = "failed"
-				return
-			}
 		}
 		job.Credential = twoFALoginCredential(credential, entry.Email)
 		job.Status = "succeeded"
@@ -108,7 +84,7 @@ func (s *AccountTokenGuardService) startTwoFALogin(ctx context.Context, entry Ac
 // allowing an upstream response or an accidentally wrapped secret to become a
 // log entry. The relogin path already reduces network and provider failures to
 // short error codes; this is a final redaction, length and control-character guard.
-func safeTwoFALoginError(err error, entry AccountTokenGuardReloginAccount) string {
+func safeTwoFALoginError(err error, entry OpenAIReloginCredentials) string {
 	if err == nil {
 		return "unknown"
 	}
@@ -136,27 +112,6 @@ func safeTwoFALoginError(err error, entry AccountTokenGuardReloginAccount) strin
 	return reason
 }
 
-// Merge into the latest persisted config, not the snapshot from login start:
-// logins can take minutes, and other imports/config edits may finish meanwhile.
-func (s *AccountTokenGuardService) saveTwoFALoginAccount(ctx context.Context, entry AccountTokenGuardReloginAccount) error {
-	s.configMu.Lock()
-	defer s.configMu.Unlock()
-	cfg, err := s.getConfigLocked(ctx)
-	if err != nil {
-		return err
-	}
-	// GetConfig also caches this slice; do not mutate the published snapshot.
-	accounts := make([]AccountTokenGuardReloginAccount, 0, len(cfg.ReloginAccounts)+1)
-	for _, existing := range cfg.ReloginAccounts {
-		if existing.Email != entry.Email {
-			accounts = append(accounts, existing)
-		}
-	}
-	cfg.ReloginAccounts = append(accounts, entry)
-	_, err = s.saveConfigLocked(ctx, cfg)
-	return err
-}
-
 // Only token/session fields enter the existing Session importer. Discard any
 // echoed password, MFA secret, or unexpected service configuration fields.
 func twoFALoginCredential(in map[string]any, email string) map[string]any {
@@ -174,7 +129,7 @@ func twoFALoginCredential(in map[string]any, email string) map[string]any {
 	return out
 }
 
-func (s *AccountTokenGuardService) TwoFALogin(id string) (*OpenAITwoFALoginJob, bool) {
+func (s *OpenAIReloginService) TwoFALogin(id string) (*OpenAITwoFALoginJob, bool) {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	job, ok := s.logins[id]
@@ -191,7 +146,7 @@ func (s *AccountTokenGuardService) TwoFALogin(id string) (*OpenAITwoFALoginJob, 
 	return snapshot, true
 }
 
-func (s *AccountTokenGuardService) DeleteTwoFALogin(id string) {
+func (s *OpenAIReloginService) DeleteTwoFALogin(id string) {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	if job, ok := s.logins[id]; ok {
@@ -202,7 +157,7 @@ func (s *AccountTokenGuardService) DeleteTwoFALogin(id string) {
 	}
 }
 
-func (s *AccountTokenGuardService) clearTwoFALogins() {
+func (s *OpenAIReloginService) clearTwoFALogins() {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	for id, job := range s.logins {

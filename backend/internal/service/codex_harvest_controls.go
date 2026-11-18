@@ -202,8 +202,7 @@ func NewCodexHarvestService(nodes CodexHarvestNodeRepository, settings SettingRe
 	return &CodexHarvestService{nodes: nodes, settings: settings, defaults: v, current: v, wake: make(chan struct{}, 1)}
 }
 
-func ProvideCodexHarvestService(nodes CodexHarvestNodeRepository, settings SettingRepository, cfg *config.Config, flows CodexHarvestFlowRepository) *CodexHarvestService {
-	bindCodexHarvestFlowStore(flows)
+func ProvideCodexHarvestService(nodes CodexHarvestNodeRepository, settings SettingRepository, cfg *config.Config) *CodexHarvestService {
 	return NewCodexHarvestService(nodes, settings, cfg)
 }
 

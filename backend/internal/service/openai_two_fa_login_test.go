@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -41,21 +39,20 @@ func (s *twoFALoginSettings) Set(_ context.Context, _, value string) error {
 	return nil
 }
 
-func newTwoFATestService(t *testing.T, server *httptest.Server) *AccountTokenGuardService {
+func newTwoFATestService(t *testing.T, server *httptest.Server) *OpenAIReloginService {
 	t.Helper()
-	cfg := defaultAccountTokenGuardConfig()
-	cfg.Enabled, cfg.AutoRelogin = false, false
+	cfg := defaultOpenAIReloginConfig()
 	cfg.ReloginEndpoint = server.URL
 	cfg.ReloginHeaders["X-Test-Client"] = "{{uuid}}"
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
-	svc := NewAccountTokenGuardService(&twoFALoginSettings{raw: string(raw)}, nil, nil, nil, nil)
+	svc := NewOpenAIReloginService(&twoFALoginSettings{raw: string(raw)})
 	svc.httpClient = server.Client()
 	t.Cleanup(svc.clearTwoFALogins)
 	return svc
 }
 
-func waitTwoFALogin(t *testing.T, svc *AccountTokenGuardService, id string) *OpenAITwoFALoginJob {
+func waitTwoFALogin(t *testing.T, svc *OpenAIReloginService, id string) *OpenAITwoFALoginJob {
 	t.Helper()
 	var job *OpenAITwoFALoginJob
 	require.Eventually(t, func() bool {
@@ -75,8 +72,8 @@ func TestTwoFALoginForOperationsDoesNotSaveLegacyCredentials(t *testing.T) {
 	settings, ok := svc.settings.(*twoFALoginSettings)
 	require.True(t, ok)
 	before := settings.raw
-	entry := AccountTokenGuardReloginAccount{Email: "operations@example.com", Password: "test-password", MFASecret: "test-secret"}
-	job, err := svc.StartTwoFALoginForOperations(context.Background(), entry)
+	entry := OpenAIReloginCredentials{Email: "operations@example.com", Password: "test-password", MFASecret: "test-secret"}
+	job, err := svc.StartTwoFALogin(context.Background(), entry)
 	require.NoError(t, err)
 	result := waitTwoFALogin(t, svc, job.ID)
 	require.Equal(t, "succeeded", result.Status)
@@ -105,16 +102,11 @@ func TestTwoFALoginInitialLoginWithoutExistingAccount(t *testing.T) {
 	defer server.Close()
 	svc := newTwoFATestService(t, server)
 	ctx, cancel := context.WithCancel(context.Background())
-	job, err := svc.StartTwoFALogin(ctx, AccountTokenGuardReloginAccount{Email: " USER@example.com ", Password: "p,a!ss", MFASecret: "TEST-SECRET"})
+	job, err := svc.StartTwoFALogin(ctx, OpenAIReloginCredentials{Email: " USER@example.com ", Password: "p,a!ss", MFASecret: "TEST-SECRET"})
 	require.NoError(t, err)
 	cancel() // The HTTP request may finish immediately after acceptance.
 	result := waitTwoFALogin(t, svc, job.ID)
 	require.Equal(t, "succeeded", result.Status)
-	cfg, err := svc.GetConfig(context.Background())
-	require.NoError(t, err)
-	require.False(t, cfg.Enabled)
-	require.False(t, cfg.AutoRelogin)
-	require.Equal(t, []AccountTokenGuardReloginAccount{{Email: "user@example.com", Password: "p,a!ss", MFASecret: "TEST-SECRET"}}, cfg.ReloginAccounts)
 	require.Equal(t, "user@example.com", result.Credential["email"])
 	require.Equal(t, "workspace", result.Credential["account_id"])
 	require.NotContains(t, result.Credential, "password")
@@ -145,7 +137,7 @@ func TestTwoFALoginFailureDoesNotExposeProviderData(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, body) }))
 			defer server.Close()
 			svc := newTwoFATestService(t, server)
-			job, err := svc.StartTwoFALogin(context.Background(), AccountTokenGuardReloginAccount{Email: "a@example.com", Password: "secret", MFASecret: "secret"})
+			job, err := svc.StartTwoFALogin(context.Background(), OpenAIReloginCredentials{Email: "a@example.com", Password: "secret", MFASecret: "secret"})
 			require.NoError(t, err)
 			result := waitTwoFALogin(t, svc, job.ID)
 			require.Equal(t, "failed", result.Status)
@@ -153,9 +145,6 @@ func TestTwoFALoginFailureDoesNotExposeProviderData(t *testing.T) {
 			require.NoError(t, err)
 			require.NotContains(t, string(raw), "secret")
 			require.Nil(t, result.Credential)
-			cfg, err := svc.GetConfig(context.Background())
-			require.NoError(t, err)
-			require.Empty(t, cfg.ReloginAccounts)
 			settings, ok := svc.settings.(*twoFALoginSettings)
 			require.True(t, ok)
 			require.Zero(t, settings.writes)
@@ -173,7 +162,7 @@ func TestTwoFALoginCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 	svc := newTwoFATestService(t, server)
-	job, err := svc.StartTwoFALogin(context.Background(), AccountTokenGuardReloginAccount{Email: "a@example.com", Password: "secret", MFASecret: "secret"})
+	job, err := svc.StartTwoFALogin(context.Background(), OpenAIReloginCredentials{Email: "a@example.com", Password: "secret", MFASecret: "secret"})
 	require.NoError(t, err)
 	select {
 	case <-started:
@@ -188,14 +177,11 @@ func TestTwoFALoginCancellation(t *testing.T) {
 	}
 	_, ok := svc.TwoFALogin(job.ID)
 	require.False(t, ok)
-	cfg, err := svc.GetConfig(context.Background())
-	require.NoError(t, err)
-	require.Empty(t, cfg.ReloginAccounts)
 }
 
 func TestTwoFALoginRejectsInvalidInputBeforeNetwork(t *testing.T) {
-	svc := &AccountTokenGuardService{}
-	for _, entry := range []AccountTokenGuardReloginAccount{
+	svc := &OpenAIReloginService{}
+	for _, entry := range []OpenAIReloginCredentials{
 		{Email: "not-email", Password: "p", MFASecret: "s"},
 		{Email: "User <a@example.com>", Password: "p", MFASecret: "s"},
 		{Email: "a@example.com", Password: "p"},
@@ -204,100 +190,4 @@ func TestTwoFALoginRejectsInvalidInputBeforeNetwork(t *testing.T) {
 		_, err := svc.StartTwoFALogin(context.Background(), entry)
 		require.Error(t, err)
 	}
-}
-
-func TestTwoFALoginMergesLatestGuardConfig(t *testing.T) {
-	started, release := make(chan struct{}), make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(started)
-		<-release
-		_, _ = io.WriteString(w, `{"type":"result","payload":{"credential":{"access_token":"test-access","refresh_token":"test-refresh","id_token":"test-id"}}}`)
-	}))
-	defer server.Close()
-	svc := newTwoFATestService(t, server)
-	// Release even if an assertion fails, so the server can close.
-	var once sync.Once
-	unblock := func() { once.Do(func() { close(release) }) }
-	defer unblock()
-	job, err := svc.StartTwoFALogin(context.Background(), AccountTokenGuardReloginAccount{Email: "USER@example.com", Password: "new-password", MFASecret: "new-mfa"})
-	require.NoError(t, err)
-	select {
-	case <-started:
-	case <-time.After(3 * time.Second):
-		t.Fatal("login did not start")
-	}
-	cfg, err := svc.GetConfig(context.Background())
-	require.NoError(t, err)
-	cfg.GroupIDs = []int64{7}
-	cfg.IntervalSeconds = 123
-	cfg.ReloginAccounts = []AccountTokenGuardReloginAccount{
-		{Email: "user@example.com", Password: "old-password", MFASecret: "old-mfa"},
-		{Email: "other@example.com", Password: "other-password", MFASecret: "other-mfa"},
-	}
-	cfg, err = svc.SaveConfig(context.Background(), cfg)
-	require.NoError(t, err)
-	unblock()
-	require.Equal(t, "succeeded", waitTwoFALogin(t, svc, job.ID).Status)
-	saved, err := svc.GetConfig(context.Background())
-	require.NoError(t, err)
-	cfg.ReloginAccounts[1] = AccountTokenGuardReloginAccount{Email: "user@example.com", Password: "new-password", MFASecret: "new-mfa"}
-	require.Equal(t, cfg, saved)
-	// A fresh service must see the credentials, not just the original cache.
-	restarted := NewAccountTokenGuardService(svc.settings, nil, nil, nil, nil)
-	persisted, err := restarted.GetConfig(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, saved, persisted)
-}
-
-func TestTwoFALoginConcurrentGuardEnrollment(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"type":"result","payload":{"credential":{"access_token":"test-access","refresh_token":"test-refresh","id_token":"test-id"}}}`)
-	}))
-	defer server.Close()
-	svc := newTwoFATestService(t, server)
-	var jobs []*OpenAITwoFALoginJob
-	for i := 0; i < 10; i++ {
-		job, err := svc.StartTwoFALogin(context.Background(), AccountTokenGuardReloginAccount{Email: fmt.Sprintf("user%d@example.com", i), Password: "test-password", MFASecret: "test-mfa"})
-		require.NoError(t, err)
-		jobs = append(jobs, job)
-	}
-	for _, job := range jobs {
-		require.Equal(t, "succeeded", waitTwoFALogin(t, svc, job.ID).Status)
-	}
-	cfg, err := svc.GetConfig(context.Background())
-	require.NoError(t, err)
-	require.Len(t, cfg.ReloginAccounts, 10)
-}
-
-func TestTwoFALoginGuardSaveFailureDoesNotReportSuccess(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"type":"result","payload":{"credential":{"access_token":"test-access","refresh_token":"test-refresh","id_token":"test-id"}}}`)
-	}))
-	defer server.Close()
-	svc := newTwoFATestService(t, server)
-	settings, ok := svc.settings.(*twoFALoginSettings)
-	require.True(t, ok)
-	settings.setErr = errors.New("storage-password-canary")
-	job, err := svc.StartTwoFALogin(context.Background(), AccountTokenGuardReloginAccount{Email: "user@example.com", Password: "test-password", MFASecret: "test-mfa"})
-	require.NoError(t, err)
-	result := waitTwoFALogin(t, svc, job.ID)
-	require.Equal(t, "failed", result.Status)
-	require.Nil(t, result.Credential)
-	raw, err := json.Marshal(result)
-	require.NoError(t, err)
-	require.NotContains(t, string(raw), "canary")
-	cfg, err := svc.GetConfig(context.Background())
-	require.NoError(t, err)
-	require.Empty(t, cfg.ReloginAccounts)
-	require.Empty(t, svc.currentConfig().ReloginAccounts)
-	// The same input can be retried after persistence recovers.
-	settings.mu.Lock()
-	settings.setErr = nil
-	settings.mu.Unlock()
-	retry, err := svc.StartTwoFALogin(context.Background(), AccountTokenGuardReloginAccount{Email: "user@example.com", Password: "test-password", MFASecret: "test-mfa"})
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", waitTwoFALogin(t, svc, retry.ID).Status)
-	cfg, err = svc.GetConfig(context.Background())
-	require.NoError(t, err)
-	require.Len(t, cfg.ReloginAccounts, 1)
 }
