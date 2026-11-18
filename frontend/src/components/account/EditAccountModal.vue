@@ -2154,7 +2154,7 @@
         <div>
           <div class="mb-2 flex items-center justify-between gap-1">
             <label class="input-label mb-0" for="account-cost-multiplier">{{ t('admin.accounts.costMultiplier') }}</label>
-            <div v-if="editingAccount?.type === 'apikey' && !isNewAPIUpstream" class="flex shrink-0 items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+            <div v-if="editingAccount?.type === 'apikey'" class="flex shrink-0 items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
               <span>{{ t('admin.accounts.costMultiplierAutoSync') }}</span>
               <Toggle
                 v-model="costMultiplierAutoSync"
@@ -2173,7 +2173,7 @@
             required
             class="input"
             data-testid="account-cost-multiplier"
-            :disabled="isNewAPIUpstream && costMultiplierAutoSync && editingAccount?.extra?.new_api_cost_sync_enabled === true"
+            :disabled="isNewAPIUpstream && costMultiplierAutoSync"
           />
           <p class="input-hint">{{ t('admin.accounts.costMultiplierHint') }}</p>
           <p v-if="isNewAPIUpstream" class="input-hint">{{ t('admin.accounts.upstreamBilling.newAPI.costManagedHint') }}</p>
@@ -7489,7 +7489,7 @@ const handleSubmit = async () => {
     } else {
       delete costExtra.cost_multiplier_auto_sync
     }
-    delete costExtra.new_api_cost_sync_enabled
+    delete costExtra.new_api_apply_usd_rate
     updatePayload.extra = costExtra
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

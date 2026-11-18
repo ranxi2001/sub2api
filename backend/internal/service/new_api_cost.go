@@ -5,11 +5,21 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const NewAPICostSyncExtraKey = "new_api_cost_sync_enabled"
+const NewAPIApplyUSDRateExtraKey = "new_api_apply_usd_rate"
+
+func NewAPIApplyUSDRate(a *Account) bool {
+	if a == nil {
+		return true
+	}
+	enabled, ok := a.Extra[NewAPIApplyUSDRateExtraKey].(bool)
+	return !ok || enabled
+}
 
 // The existing platform catalog decides the fixed conversion. This is not
 // a live exchange rate and is never supplied by the caller.
-func NewAPICostScale(a *Account) float64 {
+func NewAPICostScale(a *Account) float64 { return newAPICostScaleFor(a, NewAPIApplyUSDRate(a)) }
+
+func newAPICostScaleFor(a *Account, applyUSDRate bool) float64 {
 	if a == nil {
 		return 0
 	}
@@ -17,7 +27,7 @@ func NewAPICostScale(a *Account) float64 {
 	if !ok {
 		return 0
 	}
-	if spec.CNProvider {
+	if spec.CNProvider || !applyUSDRate {
 		return 1
 	}
 	return 7
@@ -27,8 +37,7 @@ func NewAPICostSyncEnabled(a *Account) bool {
 	if a == nil || a.Extra[UpstreamBillingProviderExtraKey] != "new_api" || !a.CostMultiplierAutoSyncEnabled() {
 		return false
 	}
-	enabled, _ := a.Extra[NewAPICostSyncExtraKey].(bool)
-	return enabled
+	return true
 }
 
 func NewAPICostToSync(snap *UpstreamBillingProbeSnapshot, scale float64) (float64, bool) {

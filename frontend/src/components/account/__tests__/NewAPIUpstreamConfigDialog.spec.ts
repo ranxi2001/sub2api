@@ -19,8 +19,8 @@ const account = { id: 7, name: 'current' } as Account
 const config: NewAPIUpstreamConfig = {
   account_id: 7, site_url: 'https://upstream.example/tenant', configured: true, user_id: 42,
   encryption_key_configured: true, accounts: [
-    { account_id: 7, name: 'current', configured_user_id: 42, cost_multiplier_scale: 7 },
-    { account_id: 8, name: 'same user', configured_user_id: 42, cost_multiplier_scale: 1 },
+    { account_id: 7, name: 'current', configured_user_id: 42, cn_provider: false, cost_multiplier_scale: 7 },
+    { account_id: 8, name: 'same user', configured_user_id: 42, cn_provider: true, cost_multiplier_scale: 1 },
     { account_id: 9, name: 'other user', configured_user_id: 55 },
     { account_id: 10, name: 'unconfigured' }
   ]
@@ -28,8 +28,8 @@ const config: NewAPIUpstreamConfig = {
 const preview: NewAPIUpstreamPreview = {
   site_url: config.site_url, user_id: 42, wallet: { amount: 12.34, unit: 'USD' },
   accounts: [
-    { account_id: 7, name: 'current', matched: true, token_id: 101, group: 'auto', rate: 0.5, cost_multiplier_scale: 7, token_options: [] },
-    { account_id: 8, name: 'same user', matched: false, cost_multiplier_scale: 1, error: 'ambiguous_token', token_options: [
+    { account_id: 7, name: 'current', matched: true, token_id: 101, group: 'auto', rate: 0.5, cn_provider: false, cost_multiplier_scale: 7, token_options: [] },
+    { account_id: 8, name: 'same user', matched: false, cn_provider: true, cost_multiplier_scale: 1, error: 'ambiguous_token', token_options: [
       { token_id: 102, name: 'candidate one', group: 'default', masked_key: 'ab***yz' },
       { token_id: 103, name: 'candidate two', group: 'premium', masked_key: 'ab***yz' }
     ] }
@@ -75,31 +75,42 @@ describe('New API shared authorization dialog', () => {
       { ...preview.accounts[1], matched: true, group: 'domestic', rate: 0.7 }
     ] })
     const wrapper = await open()
-    await wrapper.get('[data-testid="new-api-cost-sync-7"]').setValue(true)
-    await wrapper.get('[data-testid="new-api-cost-sync-8"]').setValue(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="new-api-apply-usd-rate-7"]').element.checked).toBe(true)
+    await wrapper.get('[data-testid="new-api-apply-usd-rate-7"]').setValue(true)
+    await wrapper.get('[data-testid="new-api-apply-usd-rate-8"]').setValue(true)
     await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
     await flushPromises()
-    expect(api.preview).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7, 8], cost_sync_enabled: { '7': true, '8': true } })
+    expect(api.preview).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7, 8] })
     expect(wrapper.get('[data-testid="new-api-cost-preview-7"]').text()).toContain('0.1,7,0.7')
     expect(wrapper.get('[data-testid="new-api-cost-preview-8"]').text()).toContain('0.7,1,0.7')
     await wrapper.get('[data-testid="new-api-save"]').trigger('click')
-    expect(api.save).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7, 8], cost_sync_enabled: { '7': true, '8': true } })
+    expect(api.save).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7, 8] })
   })
 
-  it('loads sync switches, sends explicit opt-out, and excludes unchecked peers', async () => {
-    api.get.mockResolvedValue({ ...config, accounts: config.accounts.map(row => ({ ...row, cost_sync_enabled: row.account_id === 7 })) })
+  it('keeps cost sync at x1 when USD conversion is unchecked', async () => {
+    api.preview.mockResolvedValue({ ...preview, accounts: [{ ...preview.accounts[0], group: 'foreign', rate: 0.1 }] })
     const wrapper = await open()
-    expect(wrapper.get<HTMLInputElement>('[data-testid="new-api-cost-sync-7"]').element.checked).toBe(true)
-    await wrapper.get('[data-testid="new-api-cost-sync-7"]').setValue(false)
-    await wrapper.get('[data-testid="new-api-cost-sync-8"]').setValue(true)
+    await wrapper.get('[data-testid="new-api-apply-usd-rate-7"]').setValue(false)
+    await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
+    await flushPromises()
+    expect(api.preview).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7, 8], apply_usd_rate: { '7': false } })
+    expect(wrapper.get('[data-testid="new-api-cost-preview-7"]').text()).toContain('0.1,1,0.1')
+  })
+
+  it('loads USD conversion switches, sends explicit opt-out, and excludes unchecked peers', async () => {
+    api.get.mockResolvedValue({ ...config, accounts: config.accounts.map(row => ({ ...row, apply_usd_rate: row.account_id === 7 })) })
+    const wrapper = await open()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="new-api-apply-usd-rate-7"]').element.checked).toBe(true)
+    await wrapper.get('[data-testid="new-api-apply-usd-rate-7"]').setValue(false)
+    await wrapper.get('[data-testid="new-api-apply-usd-rate-8"]').setValue(true)
     await checkbox(wrapper, 8).setValue(false)
     await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
-    expect(api.preview).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7], cost_sync_enabled: { '7': false } })
+    expect(api.preview).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7], apply_usd_rate: { '7': false } })
   })
 
   it('does not derive a cost for an automatic routing group', async () => {
     const wrapper = await open()
-    await wrapper.get('[data-testid="new-api-cost-sync-7"]').setValue(true)
+    await wrapper.get('[data-testid="new-api-apply-usd-rate-7"]').setValue(true)
     await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="new-api-cost-preview-7"]').exists()).toBe(false)

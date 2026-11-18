@@ -199,7 +199,7 @@ func TestNewAPIIntegrationConvertedCostAndConcurrentSettings(t *testing.T) {
 	b, err = ar.GetByID(ctx, b.ID)
 	require.NoError(t, err)
 	enabled, cost := true, 0.7
-	require.NoError(t, r.Save(ctx, &service.NewAPISiteAuthorization{SiteURL: site, UserID: 7, Ciphertext: "fixture-encrypted"}, []service.NewAPIBindingSave{{Account: a, TokenID: 3, Group: "foreign", CostSyncEnabled: &enabled, CostMultiplier: &cost}, {Account: b, TokenID: 4, Group: "domestic", CostSyncEnabled: &enabled, CostMultiplier: &cost}}))
+	require.NoError(t, r.Save(ctx, &service.NewAPISiteAuthorization{SiteURL: site, UserID: 7, Ciphertext: "fixture-encrypted"}, []service.NewAPIBindingSave{{Account: a, TokenID: 3, Group: "foreign", ApplyUSDRate: &enabled, CostMultiplier: &cost}, {Account: b, TokenID: 4, Group: "domestic", ApplyUSDRate: &enabled, CostMultiplier: &cost}}))
 	binding, err := r.GetBinding(ctx, a.ID)
 	require.NoError(t, err)
 	loaded, err := ar.GetByID(ctx, a.ID)
@@ -222,19 +222,29 @@ func TestNewAPIIntegrationConvertedCostAndConcurrentSettings(t *testing.T) {
 	domestic, err = ar.GetByID(ctx, b.ID)
 	require.NoError(t, err)
 	require.Equal(t, 0.2, domestic.CostMultiplier())
-	// An in-flight result must not overwrite an opt-out or its saved manual cost.
-	require.NoError(t, ar.UpdateExtra(ctx, a.ID, map[string]any{service.NewAPICostSyncExtraKey: false, service.AccountCostMultiplierExtraKey: 0.55}))
+	// An in-flight ×7 result must not overwrite the new ×1 setting.
+	require.NoError(t, ar.UpdateExtra(ctx, a.ID, map[string]any{service.NewAPIApplyUSDRateExtraKey: false, service.AccountCostMultiplierExtraKey: 0.55}))
 	require.ErrorIs(t, r.WriteSnapshot(ctx, loaded, binding, snap), service.ErrUpstreamBillingProbeIdentityChanged)
 	loaded, err = ar.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, 0.55, loaded.CostMultiplier())
-	require.False(t, service.NewAPICostSyncEnabled(loaded))
-	p, err := r.GetProfile(ctx, site, 7)
+	require.False(t, service.NewAPIApplyUSDRate(loaded))
+	require.NoError(t, r.WriteSnapshot(ctx, loaded, binding, snap))
+	loaded, err = ar.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	enabled = false
-	require.NoError(t, r.Save(ctx, p, []service.NewAPIBindingSave{{Account: loaded, TokenID: 3, Group: "foreign", CostSyncEnabled: &enabled}}))
+	require.Equal(t, 0.2, loaded.CostMultiplier(), "turning USD conversion off still syncs at x1")
+	// The existing independent manual-cost opt-out still wins.
+	require.NoError(t, ar.UpdateExtra(ctx, a.ID, map[string]any{service.AccountCostAutoSyncExtraKey: false, service.AccountCostMultiplierExtraKey: 0.55}))
+	require.NoError(t, r.WriteSnapshot(ctx, loaded, binding, snap))
 	loaded, err = ar.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, 0.55, loaded.CostMultiplier())
-	require.False(t, service.NewAPICostSyncEnabled(loaded))
+	p, err := r.GetProfile(ctx, site, 7)
+	require.NoError(t, err)
+	enabled = false
+	require.NoError(t, r.Save(ctx, p, []service.NewAPIBindingSave{{Account: loaded, TokenID: 3, Group: "foreign", ApplyUSDRate: &enabled}}))
+	loaded, err = ar.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, 0.55, loaded.CostMultiplier())
+	require.False(t, service.NewAPIApplyUSDRate(loaded))
 }

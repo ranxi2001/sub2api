@@ -20,11 +20,11 @@ type NewAPIAccountBinding struct {
 	Fingerprint, Group string
 }
 type NewAPIBindingSave struct {
-	Account         *Account
-	TokenID         int64
-	Group           string
-	CostSyncEnabled *bool
-	CostMultiplier  *float64
+	Account        *Account
+	TokenID        int64
+	Group          string
+	ApplyUSDRate   *bool
+	CostMultiplier *float64
 }
 type NewAPIAuthorizationRepository interface {
 	GetProfile(context.Context, string, int64) (*NewAPISiteAuthorization, error)
@@ -38,14 +38,16 @@ type NewAPIConfigRequest struct {
 	AccessToken     string           `json:"access_token,omitempty"`
 	AccountIDs      []int64          `json:"account_ids"`
 	TokenSelections map[string]int64 `json:"token_selections,omitempty"`
-	CostSyncEnabled map[string]bool  `json:"cost_sync_enabled,omitempty"`
+	ApplyUSDRate    map[string]bool  `json:"apply_usd_rate,omitempty"`
 }
 type NewAPIConfigAccount struct {
 	AccountID           int64   `json:"account_id"`
 	Name                string  `json:"name"`
 	ConfiguredUserID    *int64  `json:"configured_user_id,omitempty"`
 	CostMultiplierScale float64 `json:"cost_multiplier_scale"`
-	CostSyncEnabled     bool    `json:"cost_sync_enabled"`
+	CNProvider          bool    `json:"cn_provider"`
+	CostAutoSyncEnabled bool    `json:"cost_auto_sync_enabled"`
+	ApplyUSDRate        bool    `json:"apply_usd_rate"`
 }
 type NewAPIConfig struct {
 	AccountID               int64                 `json:"account_id"`
@@ -69,7 +71,9 @@ type NewAPIPreviewAccount struct {
 	Group               string              `json:"group,omitempty"`
 	Rate                *float64            `json:"rate,omitempty"`
 	CostMultiplierScale float64             `json:"cost_multiplier_scale"`
-	CostSyncEnabled     bool                `json:"cost_sync_enabled"`
+	CNProvider          bool                `json:"cn_provider"`
+	CostAutoSyncEnabled bool                `json:"cost_auto_sync_enabled"`
+	ApplyUSDRate        bool                `json:"apply_usd_rate"`
 	CostMultiplier      *float64            `json:"cost_multiplier,omitempty"`
 	Error               string              `json:"error,omitempty"`
 	TokenOptions        []NewAPITokenOption `json:"token_options"`
@@ -128,7 +132,7 @@ func (s *UpstreamBillingProbeService) GetNewAPIConfig(ctx context.Context, id in
 		if e != nil || peerSite != site || peer.GetCredential("api_key") == "" {
 			continue
 		}
-		item := NewAPIConfigAccount{AccountID: peer.ID, Name: peer.Name, CostMultiplierScale: NewAPICostScale(peer), CostSyncEnabled: NewAPICostSyncEnabled(peer)}
+		item := NewAPIConfigAccount{AccountID: peer.ID, Name: peer.Name, CostMultiplierScale: NewAPICostScale(peer), CNProvider: IsCNProvider(peer.Platform), CostAutoSyncEnabled: peer.CostMultiplierAutoSyncEnabled(), ApplyUSDRate: NewAPIApplyUSDRate(peer)}
 		binding, e := s.newAPIRepo.GetBinding(ctx, peer.ID)
 		if e != nil {
 			return nil, newAPIError("storage_unavailable")
@@ -187,7 +191,7 @@ func (s *UpstreamBillingProbeService) verifyNewAPIConfig(ctx context.Context, id
 	if req.UserID <= 0 || len(req.AccountIDs) == 0 || len(req.AccountIDs) > 100 || len(req.AccessToken) > 8192 {
 		return nil, nil, nil, ErrNewAPIConfiguration
 	}
-	for id := range req.CostSyncEnabled {
+	for id := range req.ApplyUSDRate {
 		matched := false
 		for _, accountID := range req.AccountIDs {
 			if id == strconv.FormatInt(accountID, 10) {
@@ -242,12 +246,12 @@ func (s *UpstreamBillingProbeService) verifyNewAPIConfig(ctx context.Context, id
 			return nil, nil, nil, e
 		}
 		out.Wallet.Amount = data.wallet
-		scale := NewAPICostScale(a)
-		costSync := NewAPICostSyncEnabled(a)
-		if value, ok := req.CostSyncEnabled[strconv.FormatInt(accountID, 10)]; ok {
-			costSync = value
+		applyUSDRate := NewAPIApplyUSDRate(a)
+		if value, ok := req.ApplyUSDRate[strconv.FormatInt(accountID, 10)]; ok {
+			applyUSDRate = value
 		}
-		item := NewAPIPreviewAccount{AccountID: a.ID, Name: a.Name, TokenOptions: []NewAPITokenOption{}, CostMultiplierScale: scale, CostSyncEnabled: costSync}
+		scale := newAPICostScaleFor(a, applyUSDRate)
+		item := NewAPIPreviewAccount{AccountID: a.ID, Name: a.Name, TokenOptions: []NewAPITokenOption{}, CostMultiplierScale: scale, CNProvider: IsCNProvider(a.Platform), CostAutoSyncEnabled: a.CostMultiplierAutoSyncEnabled(), ApplyUSDRate: applyUSDRate}
 		matches := matchNewAPITokens(a, data.tokens)
 		selected := req.TokenSelections[strconv.FormatInt(accountID, 10)]
 		var token *NewAPIToken
@@ -292,12 +296,12 @@ func (s *UpstreamBillingProbeService) verifyNewAPIConfig(ctx context.Context, id
 				if r, ok := data.ratios[token.Group]; ok && token.Group != "auto" && !token.CrossGroupRetry && len(token.RouteGroups) <= 1 {
 					item.Rate = &r
 				}
-				if costSync {
+				if a.CostMultiplierAutoSyncEnabled() {
 					if cost, ok := NewAPICostToSync(newAPISnapshot(a, *token, data, 30, s.currentTime().UTC()), scale); ok {
 						item.CostMultiplier = &cost
 					}
 				}
-				bindings = append(bindings, NewAPIBindingSave{Account: a, TokenID: token.ID, Group: token.Group, CostSyncEnabled: &costSync, CostMultiplier: item.CostMultiplier})
+				bindings = append(bindings, NewAPIBindingSave{Account: a, TokenID: token.ID, Group: token.Group, ApplyUSDRate: &applyUSDRate, CostMultiplier: item.CostMultiplier})
 			}
 		}
 		out.Accounts = append(out.Accounts, item)
