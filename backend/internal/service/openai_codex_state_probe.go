@@ -309,6 +309,12 @@ func openAICodexStateProbeUnsupportedReason(account *Account, requestedModel str
 		return "测试数据账号不向上游发真实请求，探针不适用"
 	case account.IsOpenAIAgentIdentity():
 		return "Agent Identity 账号不使用门票，探针不适用"
+	// 托管授权连接的账号由网关在每次发送前挑选连接（prepareAuthConnection），
+	// 探针直接拿账号行取令牌会被 validateAuthConnectionPolicy 以 409
+	// OPENAI_CONNECTION_SELECTION_CHANGED 拒绝，请求根本发不出去。
+	// ignoreBPS 也绕不过这一步，所以无条件判为不适用。
+	case account.HasManagedOpenAIConnections() && account.AuthConnectionID == "":
+		return "该账号走托管授权连接，不经过门票，探针不适用"
 	case !ignoreBPS && account.IsExcelBPSEnabledForModel(requestedModel):
 		return "该账号的这个模型走 Excel/BPS 通道，不经过门票，探针不适用"
 	}
