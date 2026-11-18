@@ -2173,7 +2173,7 @@
             required
             class="input"
             data-testid="account-cost-multiplier"
-            :disabled="isNewAPIUpstream && costMultiplierAutoSync && [1, 7].includes(Number(editingAccount?.extra?.new_api_cost_multiplier_scale))"
+            :disabled="isNewAPIUpstream && costMultiplierAutoSync && editingAccount?.extra?.new_api_cost_sync_enabled === true"
           />
           <p class="input-hint">{{ t('admin.accounts.costMultiplierHint') }}</p>
           <p v-if="isNewAPIUpstream" class="input-hint">{{ t('admin.accounts.upstreamBilling.newAPI.costManagedHint') }}</p>
@@ -7489,7 +7489,7 @@ const handleSubmit = async () => {
     } else {
       delete costExtra.cost_multiplier_auto_sync
     }
-    delete costExtra.new_api_cost_multiplier_scale
+    delete costExtra.new_api_cost_sync_enabled
     updatePayload.extra = costExtra
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

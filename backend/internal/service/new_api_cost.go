@@ -1,25 +1,39 @@
 package service
 
-import "github.com/shopspring/decimal"
+import (
+	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/shopspring/decimal"
+)
 
-const NewAPICostScaleExtraKey = "new_api_cost_multiplier_scale"
+const NewAPICostSyncExtraKey = "new_api_cost_sync_enabled"
 
-// Zero opts out; one keeps the upstream rate, seven converts the owner's
-// foreign-model pricing convention. This is not a live currency exchange rate.
-func ValidNewAPICostScale(scale float64) bool { return scale == 0 || scale == 1 || scale == 7 }
-
+// The existing platform catalog decides the fixed conversion. This is not
+// a live exchange rate and is never supplied by the caller.
 func NewAPICostScale(a *Account) float64 {
-	if a != nil && a.CostMultiplierAutoSyncEnabled() && a.Extra[UpstreamBillingProviderExtraKey] == "new_api" {
-		if scale, ok := accountCostMultiplierNumber(a.Extra[NewAPICostScaleExtraKey]); ok && ValidNewAPICostScale(scale) {
-			return scale
-		}
+	if a == nil {
+		return 0
 	}
-	return 0
+	spec, ok := domain.LookupPlatform(a.Platform)
+	if !ok {
+		return 0
+	}
+	if spec.CNProvider {
+		return 1
+	}
+	return 7
+}
+
+func NewAPICostSyncEnabled(a *Account) bool {
+	if a == nil || a.Extra[UpstreamBillingProviderExtraKey] != "new_api" || !a.CostMultiplierAutoSyncEnabled() {
+		return false
+	}
+	enabled, _ := a.Extra[NewAPICostSyncExtraKey].(bool)
+	return enabled
 }
 
 func NewAPICostToSync(snap *UpstreamBillingProbeSnapshot, scale float64) (float64, bool) {
 	if snap == nil || snap.Status != UpstreamBillingProbeStatusOK || snap.LastAttemptAt.IsZero() ||
-		!ValidNewAPICostScale(scale) || scale == 0 || snap.Data["provider"] != "new_api" ||
+		(scale != 1 && scale != 7) || snap.Data["provider"] != "new_api" ||
 		snap.Data["object"] != "new_api.group_billing" || snap.Data["billing_scope"] != "group" {
 		return 0, false
 	}

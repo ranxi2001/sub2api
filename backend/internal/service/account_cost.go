@@ -57,9 +57,8 @@ func accountCostMultiplierNumber(raw any) (float64, bool) {
 
 // Null removes an override and restores the default; zero is an explicit cost.
 func ValidateAccountCostMultiplierExtra(extra map[string]any) error {
-	if raw := extra[NewAPICostScaleExtraKey]; raw != nil {
-		scale, ok := accountCostMultiplierNumber(raw)
-		if !ok || !ValidNewAPICostScale(scale) {
+	if raw := extra[NewAPICostSyncExtraKey]; raw != nil {
+		if _, ok := raw.(bool); !ok {
 			return ErrNewAPIConfiguration
 		}
 	}

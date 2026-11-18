@@ -2513,7 +2513,7 @@ describe('EditAccountModal', () => {
 
   it('preserves New API converted cost settings when saving an unrelated account edit', async () => {
     const account = buildAccount()
-    account.extra = { ...account.extra, upstream_billing_provider: 'new_api', new_api_cost_multiplier_scale: 7, cost_multiplier_auto_sync: true, cost_multiplier: 0.7 }
+    account.extra = { ...account.extra, upstream_billing_provider: 'new_api', new_api_cost_sync_enabled: true, cost_multiplier_auto_sync: true, cost_multiplier: 0.7 }
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
     updateAccountMock.mockResolvedValue(account)
@@ -2525,7 +2525,7 @@ describe('EditAccountModal', () => {
     const extra = updateAccountMock.mock.calls[0]?.[1].extra
     expect(extra).not.toHaveProperty('cost_multiplier')
     expect(extra).not.toHaveProperty('cost_multiplier_auto_sync')
-    expect(extra).not.toHaveProperty('new_api_cost_multiplier_scale')
+    expect(extra).not.toHaveProperty('new_api_cost_sync_enabled')
   })
 
   it('enabling rate sync also enables probing and stops submitting a manual rate', async () => {

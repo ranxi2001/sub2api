@@ -138,12 +138,9 @@ func (r *newAPIAuthorizationRepository) Save(ctx context.Context, p *service.New
 			return e
 		}
 		costSettings := map[string]any{}
-		if b.CostMultiplierScale != nil {
-			if !service.ValidNewAPICostScale(*b.CostMultiplierScale) {
-				return service.ErrNewAPIConfiguration
-			}
-			costSettings[service.NewAPICostScaleExtraKey] = *b.CostMultiplierScale
-			costSettings[service.AccountCostAutoSyncExtraKey] = *b.CostMultiplierScale != 0
+		if b.CostSyncEnabled != nil {
+			costSettings[service.NewAPICostSyncExtraKey] = *b.CostSyncEnabled
+			costSettings[service.AccountCostAutoSyncExtraKey] = *b.CostSyncEnabled
 		}
 		if b.CostMultiplier != nil {
 			costSettings[service.AccountCostMultiplierExtraKey] = *b.CostMultiplier
@@ -174,7 +171,7 @@ func (r *newAPIAuthorizationRepository) Unbind(ctx context.Context, id int64) er
 		return e
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, e = tx.ExecContext(ctx, `UPDATE accounts SET extra=COALESCE(extra,'{}'::jsonb)-'upstream_billing_provider'-'upstream_billing_site'-'upstream_billing_user_id'-'upstream_billing_probe'-'new_api_cost_multiplier_scale',updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id); e != nil {
+	if _, e = tx.ExecContext(ctx, `UPDATE accounts SET extra=COALESCE(extra,'{}'::jsonb)-'upstream_billing_provider'-'upstream_billing_site'-'upstream_billing_user_id'-'upstream_billing_probe'-'new_api_cost_sync_enabled',updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id); e != nil {
 		return e
 	}
 	if _, e = tx.ExecContext(ctx, `DELETE FROM new_api_account_bindings WHERE account_id=$1`, id); e != nil {
@@ -202,7 +199,7 @@ func (r *newAPIAuthorizationRepository) WriteSnapshot(ctx context.Context, a *se
 		return e
 	}
 	updates := map[string]any{service.UpstreamBillingProbeExtraKey: snap}
-	if a.CostMultiplierAutoSyncEnabled() {
+	if service.NewAPICostSyncEnabled(a) {
 		if cost, ok := service.NewAPICostToSync(snap, service.NewAPICostScale(a)); ok {
 			updates[service.AccountCostMultiplierExtraKey] = cost
 		}
@@ -219,11 +216,11 @@ func (r *newAPIAuthorizationRepository) WriteSnapshot(ctx context.Context, a *se
 	if e != nil {
 		return e
 	}
-	expectedScale, e := json.Marshal(a.Extra[service.NewAPICostScaleExtraKey])
+	expectedCostSync, e := json.Marshal(a.Extra[service.NewAPICostSyncExtraKey])
 	if e != nil {
 		return e
 	}
-	result, e := tx.ExecContext(ctx, `UPDATE accounts a SET extra=COALESCE(extra,'{}'::jsonb)||(CASE WHEN extra @> '{"cost_multiplier_auto_sync":false}'::jsonb THEN $1::jsonb-'cost_multiplier' ELSE $1::jsonb END),updated_at=NOW() WHERE a.id=$2 AND COALESCE(extra->'upstream_billing_probe','null'::jsonb)=$3::jsonb AND COALESCE(extra->'upstream_billing_probe_enabled','null'::jsonb)=$4::jsonb AND COALESCE(extra->'new_api_cost_multiplier_scale','null'::jsonb)=$8::jsonb AND EXISTS(SELECT 1 FROM new_api_account_bindings b WHERE b.account_id=a.id AND b.authorization_id=$5 AND b.upstream_token_id=$6 AND b.account_fingerprint=$7)`, string(payload), a.ID, string(old), string(enabled), b.Profile.ID, b.TokenID, b.Fingerprint, string(expectedScale))
+	result, e := tx.ExecContext(ctx, `UPDATE accounts a SET extra=COALESCE(extra,'{}'::jsonb)||(CASE WHEN extra @> '{"cost_multiplier_auto_sync":false}'::jsonb THEN $1::jsonb-'cost_multiplier' ELSE $1::jsonb END),updated_at=NOW() WHERE a.id=$2 AND COALESCE(extra->'upstream_billing_probe','null'::jsonb)=$3::jsonb AND COALESCE(extra->'upstream_billing_probe_enabled','null'::jsonb)=$4::jsonb AND COALESCE(extra->'new_api_cost_sync_enabled','null'::jsonb)=$8::jsonb AND EXISTS(SELECT 1 FROM new_api_account_bindings b WHERE b.account_id=a.id AND b.authorization_id=$5 AND b.upstream_token_id=$6 AND b.account_fingerprint=$7)`, string(payload), a.ID, string(old), string(enabled), b.Profile.ID, b.TokenID, b.Fingerprint, string(expectedCostSync))
 	if e != nil {
 		return e
 	}

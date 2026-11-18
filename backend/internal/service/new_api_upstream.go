@@ -295,7 +295,7 @@ func newAPISnapshot(a *Account, t NewAPIToken, d *newAPIData, interval int, now 
 		}
 		snap.Data["peak_rate_enabled"] = false
 	}
-	if scale := NewAPICostScale(a); scale != 0 {
+	if scale := NewAPICostScale(a); NewAPICostSyncEnabled(a) {
 		if cost, ok := NewAPICostToSync(snap, scale); ok {
 			snap.Data["cost_multiplier_scale"] = scale
 			snap.Data["cost_multiplier"] = cost

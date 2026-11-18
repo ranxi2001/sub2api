@@ -191,17 +191,22 @@ func TestNewAPIIntegrationDirectOrBulkCredentialsUnbind(t *testing.T) {
 
 func TestNewAPIIntegrationConvertedCostAndConcurrentSettings(t *testing.T) {
 	ctx := context.Background()
-	a, _, site := newAPIIntegrationAccounts(t)
+	a, b, site := newAPIIntegrationAccounts(t)
 	r := NewNewAPIAuthorizationRepository(integrationDB)
 	ar := newAccountRepositoryWithSQL(testEntClient(t), integrationDB, nil)
-	scale, cost := 7.0, 0.7
-	require.NoError(t, r.Save(ctx, &service.NewAPISiteAuthorization{SiteURL: site, UserID: 7, Ciphertext: "fixture-encrypted"}, []service.NewAPIBindingSave{{Account: a, TokenID: 3, Group: "foreign", CostMultiplierScale: &scale, CostMultiplier: &cost}}))
+	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET platform='kimi' WHERE id=$1`, b.ID)
+	require.NoError(t, err)
+	b, err = ar.GetByID(ctx, b.ID)
+	require.NoError(t, err)
+	enabled, cost := true, 0.7
+	require.NoError(t, r.Save(ctx, &service.NewAPISiteAuthorization{SiteURL: site, UserID: 7, Ciphertext: "fixture-encrypted"}, []service.NewAPIBindingSave{{Account: a, TokenID: 3, Group: "foreign", CostSyncEnabled: &enabled, CostMultiplier: &cost}, {Account: b, TokenID: 4, Group: "domestic", CostSyncEnabled: &enabled, CostMultiplier: &cost}}))
 	binding, err := r.GetBinding(ctx, a.ID)
 	require.NoError(t, err)
 	loaded, err := ar.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, 0.7, loaded.CostMultiplier())
 	require.Equal(t, 7.0, service.NewAPICostScale(loaded))
+	require.True(t, service.NewAPICostSyncEnabled(loaded))
 	require.Equal(t, 1.0, loaded.BillingRateMultiplier())
 	snap := &service.UpstreamBillingProbeSnapshot{Status: "ok", LastAttemptAt: time.Now(), Data: map[string]any{"provider": "new_api", "object": "new_api.group_billing", "billing_scope": "group", "effective_rate_multiplier": 0.2}}
 	require.NoError(t, r.WriteSnapshot(ctx, loaded, binding, snap))
@@ -209,29 +214,27 @@ func TestNewAPIIntegrationConvertedCostAndConcurrentSettings(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1.4, loaded.CostMultiplier())
 	require.Equal(t, 1.0, loaded.BillingRateMultiplier())
-	// A probe started before the administrator changed the factor cannot write
-	// the previous conversion or its snapshot after that change.
-	require.NoError(t, ar.UpdateExtra(ctx, a.ID, map[string]any{service.NewAPICostScaleExtraKey: 1.0}))
+	domestic, err := ar.GetByID(ctx, b.ID)
+	require.NoError(t, err)
+	dbinding, err := r.GetBinding(ctx, b.ID)
+	require.NoError(t, err)
+	require.NoError(t, r.WriteSnapshot(ctx, domestic, dbinding, snap))
+	domestic, err = ar.GetByID(ctx, b.ID)
+	require.NoError(t, err)
+	require.Equal(t, 0.2, domestic.CostMultiplier())
+	// An in-flight result must not overwrite an opt-out or its saved manual cost.
+	require.NoError(t, ar.UpdateExtra(ctx, a.ID, map[string]any{service.NewAPICostSyncExtraKey: false, service.AccountCostMultiplierExtraKey: 0.55}))
 	require.ErrorIs(t, r.WriteSnapshot(ctx, loaded, binding, snap), service.ErrUpstreamBillingProbeIdentityChanged)
 	loaded, err = ar.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	require.NoError(t, r.WriteSnapshot(ctx, loaded, binding, snap))
-	loaded, err = ar.GetByID(ctx, a.ID)
-	require.NoError(t, err)
-	require.Equal(t, 0.2, loaded.CostMultiplier())
-	// A concurrent opt-out protects a newly entered manual cost.
-	require.NoError(t, ar.UpdateExtra(ctx, a.ID, map[string]any{service.AccountCostAutoSyncExtraKey: false, service.AccountCostMultiplierExtraKey: 0.55}))
-	require.NoError(t, r.WriteSnapshot(ctx, loaded, binding, snap))
-	loaded, err = ar.GetByID(ctx, a.ID)
-	require.NoError(t, err)
 	require.Equal(t, 0.55, loaded.CostMultiplier())
-	require.Zero(t, service.NewAPICostScale(loaded))
+	require.False(t, service.NewAPICostSyncEnabled(loaded))
 	p, err := r.GetProfile(ctx, site, 7)
 	require.NoError(t, err)
-	scale = 0
-	require.NoError(t, r.Save(ctx, p, []service.NewAPIBindingSave{{Account: loaded, TokenID: 3, Group: "foreign", CostMultiplierScale: &scale}}))
+	enabled = false
+	require.NoError(t, r.Save(ctx, p, []service.NewAPIBindingSave{{Account: loaded, TokenID: 3, Group: "foreign", CostSyncEnabled: &enabled}}))
 	loaded, err = ar.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, 0.55, loaded.CostMultiplier())
-	require.Zero(t, service.NewAPICostScale(loaded))
+	require.False(t, service.NewAPICostSyncEnabled(loaded))
 }

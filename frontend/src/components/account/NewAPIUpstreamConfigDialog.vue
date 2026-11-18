@@ -37,11 +37,11 @@
                   <span v-if="candidate.configured_user_id != null" class="text-xs text-gray-500"> · {{ t('admin.accounts.upstreamBilling.newAPI.boundUser', { id: candidate.configured_user_id }) }}</span>
                 </span>
               </label>
-              <select v-if="accountIds.includes(candidate.account_id)" v-model.number="costScales[candidate.account_id]" class="input w-full text-sm" :aria-label="`${candidate.name} ${t('admin.accounts.upstreamBilling.newAPI.costConversion')}`" :data-testid="`new-api-cost-scale-${candidate.account_id}`">
-                <option :value="0">{{ t('admin.accounts.upstreamBilling.newAPI.costOff') }}</option>
-                <option :value="1">{{ t('admin.accounts.upstreamBilling.newAPI.costDomestic') }}</option>
-                <option :value="7">{{ t('admin.accounts.upstreamBilling.newAPI.costForeign') }}</option>
-              </select>
+              <label v-if="accountIds.includes(candidate.account_id)" class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                <input v-model="costSync[candidate.account_id]" type="checkbox" class="h-4 w-4 rounded border-gray-300" :data-testid="`new-api-cost-sync-${candidate.account_id}`" />
+                {{ t('admin.accounts.upstreamBilling.newAPI.costAutoSync') }}
+                <span class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costPlatformFactor', { factor: candidate.cost_multiplier_scale ?? '-' }) }}</span>
+              </label>
               </div>
             </fieldset>
           </fieldset>
@@ -56,8 +56,8 @@
               <span v-if="row.group" class="text-gray-600 dark:text-gray-300">{{ t('admin.accounts.upstreamBilling.newAPI.group', { name: row.group }) }}</span>
               <span class="text-gray-600 dark:text-gray-300">{{ row.group !== 'auto' && isFixedRate(row.rate) ? t('admin.accounts.upstreamBilling.newAPI.ratio', { value: row.rate }) : t('admin.accounts.upstreamBilling.newAPI.noFixedRatio') }}</span>
             </div>
-            <p v-if="convertedCost(row) != null" class="text-emerald-700 dark:text-emerald-400" :data-testid="`new-api-cost-preview-${row.account_id}`">{{ t('admin.accounts.upstreamBilling.newAPI.costPreview', { rate: row.rate, scale: costScales[row.account_id], cost: convertedCost(row) }) }}</p>
-            <p v-else-if="costScales[row.account_id] && row.matched" class="text-xs text-amber-700 dark:text-amber-400">{{ t('admin.accounts.upstreamBilling.newAPI.costUnavailable') }}</p>
+            <p v-if="convertedCost(row) != null" class="text-emerald-700 dark:text-emerald-400" :data-testid="`new-api-cost-preview-${row.account_id}`">{{ t('admin.accounts.upstreamBilling.newAPI.costPreview', { rate: row.rate, scale: row.cost_multiplier_scale, cost: convertedCost(row) }) }}</p>
+            <p v-else-if="costSync[row.account_id] && row.matched" class="text-xs text-amber-700 dark:text-amber-400">{{ t('admin.accounts.upstreamBilling.newAPI.costUnavailable') }}</p>
             <label v-if="row.token_options?.length && (!row.matched || row.token_options.length > 1)" class="block text-sm text-gray-700 dark:text-gray-200">
               {{ t('admin.accounts.upstreamBilling.newAPI.chooseToken') }}
               <select v-model="tokenSelections[row.account_id]" :disabled="busy" class="input mt-1 w-full" :data-testid="`new-api-token-${row.account_id}`">
@@ -111,7 +111,7 @@ const userId = ref<string | number>('')
 const accessToken = ref('')
 const accountIds = ref<number[]>([])
 const tokenSelections = ref<Record<string, number | undefined>>({})
-const costScales = ref<Record<string, number>>({})
+const costSync = ref<Record<string, boolean>>({})
 const result = ref<NewAPIUpstreamPreview | null>(null)
 const confirmRemove = ref(false)
 let session = 0
@@ -144,7 +144,7 @@ watch(() => [props.show, props.account?.id] as const, async ([show, id]) => {
   const currentSession = ++session
   accessToken.value = ''
   config.value = null
-  costScales.value = {}
+  costSync.value = {}
   userId.value = ''
   accountIds.value = []
   result.value = null
@@ -158,7 +158,7 @@ watch(() => [props.show, props.account?.id] as const, async ([show, id]) => {
     const loaded = await getNewAPIUpstreamConfig(id)
     if (session !== currentSession) return
     config.value = loaded
-    costScales.value = Object.fromEntries(loaded.accounts.map(row => [row.account_id, row.cost_multiplier_scale ?? 0]))
+    costSync.value = Object.fromEntries(loaded.accounts.map(row => [row.account_id, row.cost_sync_enabled === true]))
     userId.value = loaded.user_id ?? ''
     accountIds.value = defaults()
     if (!loaded.encryption_key_configured) error.value = t('admin.accounts.upstreamBilling.newAPI.encryptionRequired')
@@ -182,8 +182,8 @@ const buildRequest = (): NewAPIUpstreamConfigRequest | null => {
     return null
   }
   const selected = Object.fromEntries(Object.entries(tokenSelections.value).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] > 0))
-  const costChanges = Object.fromEntries((config.value?.accounts ?? []).filter(row => accountIds.value.includes(row.account_id) && (costScales.value[row.account_id] ?? 0) !== (row.cost_multiplier_scale ?? 0)).map(row => [row.account_id, costScales.value[row.account_id] ?? 0]))
-  return { user_id: id, ...(Object.keys(costChanges).length ? { cost_multiplier_scales: costChanges } : {}), ...(token ? { access_token: token } : {}), account_ids: [...new Set([props.account!.id, ...accountIds.value])], ...(Object.keys(selected).length ? { token_selections: selected } : {}) }
+  const costChanges = Object.fromEntries((config.value?.accounts ?? []).filter(row => accountIds.value.includes(row.account_id) && (costSync.value[row.account_id] === true) !== (row.cost_sync_enabled === true)).map(row => [row.account_id, costSync.value[row.account_id] === true]))
+  return { user_id: id, ...(Object.keys(costChanges).length ? { cost_sync_enabled: costChanges } : {}), ...(token ? { access_token: token } : {}), account_ids: [...new Set([props.account!.id, ...accountIds.value])], ...(Object.keys(selected).length ? { token_selections: selected } : {}) }
 }
 const verify = async (save: boolean) => {
   if (!canVerify.value || !props.account) return
@@ -230,8 +230,8 @@ const remove = async () => {
   }
 }
 const convertedCost = (row: NewAPIUpstreamPreview['accounts'][number]): string | null => {
-  const scale = costScales.value[row.account_id] ?? 0
-  if (!row.matched || row.group === 'auto' || !isFixedRate(row.rate) || ![1, 7].includes(scale)) return null
+  const scale = row.cost_multiplier_scale ?? 0
+  if (!costSync.value[row.account_id] || !row.matched || row.group === 'auto' || !isFixedRate(row.rate) || ![1, 7].includes(scale)) return null
   const cost = row.rate! * scale
   return Number.isFinite(cost) && cost <= 1000000 ? Number(cost.toFixed(6)).toString() : null
 }

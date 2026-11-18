@@ -33,9 +33,10 @@ func TestNewAPICostConversionIsExplicitAndPreservesRawRatio(t *testing.T) {
 
 func TestNewAPIConfigPreviewsAndSavesIndependentCostScales(t *testing.T) {
 	s, _, h, accounts := newAPIConfigFixture()
+	accounts.accounts[2].Platform = PlatformKimi
 	h.bodies["GET /api/pricing"] = `{"success":true,"group_ratio":{"foreign":0.1,"domestic":0.7}}`
 	h.bodies["GET /api/token/?p=0&page_size=100"] = `{"success":true,"data":{"items":[{"id":3,"key":"abcd**********wxyz","group":"foreign"},{"id":4,"key":"nope**********xxxx","group":"domestic"}],"total":2,"page":1,"page_size":100}}`
-	req := NewAPIConfigRequest{UserID: 7, AccessToken: "fixture-secret", AccountIDs: []int64{1, 2}, CostMultiplierScales: map[string]float64{"1": 7, "2": 1}}
+	req := NewAPIConfigRequest{UserID: 7, AccessToken: "fixture-secret", AccountIDs: []int64{1, 2}, CostSyncEnabled: map[string]bool{"1": true, "2": true}}
 	out, _, bindings, err := s.verifyNewAPIConfig(context.Background(), 1, req)
 	require.NoError(t, err)
 	require.Len(t, bindings, 2)
@@ -43,31 +44,45 @@ func TestNewAPIConfigPreviewsAndSavesIndependentCostScales(t *testing.T) {
 	require.Equal(t, 0.7, *out.Accounts[0].CostMultiplier)
 	require.Equal(t, 0.7, *out.Accounts[1].Rate)
 	require.Equal(t, 0.7, *out.Accounts[1].CostMultiplier)
-	require.Equal(t, 7.0, *bindings[0].CostMultiplierScale)
-	require.Equal(t, 1.0, *bindings[1].CostMultiplierScale)
+	require.True(t, *bindings[0].CostSyncEnabled)
+	require.Equal(t, 7.0, out.Accounts[0].CostMultiplierScale)
+	require.True(t, *bindings[1].CostSyncEnabled)
+	require.Equal(t, 1.0, out.Accounts[1].CostMultiplierScale)
 	require.Empty(t, accounts.accounts[1].Extra, "preview must not write costs")
-	for _, bad := range []map[string]float64{{"1": 2}, {"99": 7}, {"01": 7}, {"1": math.NaN()}} {
-		req.CostMultiplierScales = bad
+	for _, bad := range []map[string]bool{{"99": true}, {"01": true}} {
+		req.CostSyncEnabled = bad
 		_, err = s.SaveNewAPIConfig(context.Background(), 1, req)
 		require.ErrorIs(t, err, ErrNewAPIConfiguration)
 	}
-	req.CostMultiplierScales = nil
+	req.CostSyncEnabled = nil
 	out, _, _, err = s.verifyNewAPIConfig(context.Background(), 1, req)
 	require.NoError(t, err)
 	require.Nil(t, out.Accounts[0].CostMultiplier)
 }
 
 func TestNewAPICostSyncIgnoresDynamicGroupsAndUnboundSettings(t *testing.T) {
-	a := &Account{Extra: map[string]any{NewAPICostScaleExtraKey: 7.0, UpstreamBillingProviderExtraKey: "new_api"}}
+	a := &Account{Platform: PlatformOpenAI, Extra: map[string]any{NewAPICostSyncExtraKey: true, UpstreamBillingProviderExtraKey: "new_api"}}
 	require.Equal(t, 7.0, NewAPICostScale(a))
+	require.True(t, NewAPICostSyncEnabled(a))
 	for _, token := range []NewAPIToken{{Group: "auto"}, {Group: "vip", CrossGroupRetry: true}, {Group: "vip", RouteGroups: []string{"vip", "other"}}} {
 		snap := newAPISnapshot(a, token, &newAPIData{wallet: 1, ratios: map[string]float64{"auto": 0.1, "vip": 0.1}}, 30, time.Now())
 		_, ok := NewAPICostToSync(snap, 7)
 		require.False(t, ok)
 	}
 	a.Extra[AccountCostAutoSyncExtraKey] = false
-	require.Zero(t, NewAPICostScale(a))
+	require.False(t, NewAPICostSyncEnabled(a))
 	delete(a.Extra, AccountCostAutoSyncExtraKey)
 	delete(a.Extra, UpstreamBillingProviderExtraKey)
-	require.Zero(t, NewAPICostScale(a))
+	require.False(t, NewAPICostSyncEnabled(a))
+}
+
+func TestNewAPICostScaleUsesExistingPlatformCatalog(t *testing.T) {
+	for _, platform := range []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax} {
+		require.Equal(t, 1.0, NewAPICostScale(&Account{Platform: platform}))
+	}
+	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformMistral, PlatformQwen} {
+		require.Equal(t, 7.0, NewAPICostScale(&Account{Platform: platform}))
+	}
+	require.Zero(t, NewAPICostScale(nil))
+	require.Zero(t, NewAPICostScale(&Account{Platform: "unregistered"}))
 }
