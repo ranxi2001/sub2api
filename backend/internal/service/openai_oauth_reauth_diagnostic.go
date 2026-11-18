@@ -92,7 +92,7 @@ func sessionStudioError(raw string) (string, *ReauthDiagnostic, bool) {
 
 func validLocalProtocolStage(stage string) bool {
 	switch stage {
-	case "starting", "web_login", "password_accepted", "mfa_challenge", "mfa_accepted", "web_redirect",
+	case "starting", "web_login", "email_verification", "password_accepted", "mfa_challenge", "mfa_accepted", "web_redirect",
 		"oauth_authorize", "session_select", "workspace_select", "callback_validation", "token_exchange", "oauth_output", "completed":
 		return true
 	}

@@ -1,10 +1,10 @@
 // Private, bounded diagnostic snapshots. Never serialize exception text or URLs.
 import fs from 'node:fs';
 
-const stages = new Set(['starting', 'web_login', 'password_accepted', 'mfa_challenge',
+const stages = new Set(['starting', 'web_login', 'email_verification', 'password_accepted', 'mfa_challenge',
   'mfa_accepted', 'web_redirect', 'oauth_authorize', 'session_select',
   'workspace_select', 'callback_validation', 'token_exchange', 'oauth_output', 'completed']);
-const reasons = new Set(['none', 'protocol_error', 'password_rejected', 'totp_rejected',
+const reasons = new Set(['none', 'protocol_error', 'password_rejected', 'totp_rejected', 'email_otp_required',
   'interaction_required', 'security_check', 'session_unavailable', 'workspace_mismatch',
   'callback_missing', 'callback_invalid', 'callback_state_mismatch', 'pkce_invalid',
   'token_exchange_failed', 'credentials_incomplete', 'transport_error', 'runtime_error']);
