@@ -167,6 +167,8 @@ func (usage OpenAIUsage) billingUsageTokens() UsageTokens {
 		CacheCreationTokens:   creationTokens,
 		CacheCreation5mTokens: usage.CacheCreation5mTokens,
 		CacheCreation1hTokens: usage.CacheCreation1hTokens,
+		CacheCreation30mTokens: usage.CacheCreation30mInputTokens,
+		CacheCreation12hTokens: usage.CacheCreation12hInputTokens,
 		CacheReadTokens:       usage.CacheReadInputTokens,
 		ImageOutputTokens:     usage.ImageOutputTokens,
 	}
