@@ -103,8 +103,6 @@ func TestGPT62CompatHTTPRejectsDisabledReasoning(t *testing.T) {
 	}
 }
 
-// The fork keeps a fixed 6x default across the upstream promotion boundary.
-// Explicit channel rates and long-context cards remain independent.
 func TestGPT62PricingAtRequestTime(t *testing.T) {
 	before := time.Date(2027, 3, 1, 7, 59, 59, 0, time.UTC)
 	after := before.Add(time.Second)
@@ -122,7 +120,7 @@ func TestGPT62PricingAtRequestTime(t *testing.T) {
 						tier  string
 						at    time.Time
 						ratio float64
-					}{{"", before, 1}, {"priority", before, 2}, {"flex", before, 0.5}, {"ultrafast", before, 6}, {"ultrafast", after, 6}, {"ultrafast", before, 6}} {
+					}{{"", before, 1}, {"priority", before, 2}, {"flex", before, 0.5}, {"ultrafast", before, 3}, {"ultrafast", after, 6}, {"ultrafast", before, 3}} {
 						input.ServiceTier = tc.tier
 						input.PricingAt = tc.at
 						cost, err := svc.CalculateCostUnified(input)
@@ -140,15 +138,17 @@ func TestGPT62PricingAtRequestTime(t *testing.T) {
 					input.Tokens.InputTokens++
 					cost, err = svc.CalculateCostUnified(input)
 					require.NoError(t, err)
-					require.InDelta(t, 272001*unit, cost.InputCost, 1e-12)
-					require.InDelta(t, 50*unit*5, cost.OutputCost, 1e-12)
+					require.InDelta(t, 272001*unit*2, cost.InputCost, 1e-12)
+					require.InDelta(t, 50*unit*5*1.5, cost.OutputCost, 1e-12)
 					for _, kind := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-						input.DisableModelLongContextPricing = openAIGPT61SolLongContextExempt(&Account{Platform: PlatformOpenAI, Type: kind}, &OpenAIForwardResult{Model: "public", UpstreamModel: model}, input.Tokens)
+						input.DisableModelLongContextPricing = openAISubscriptionLongContextExempt(&Account{Platform: PlatformOpenAI, Type: kind}, &OpenAIForwardResult{Model: "public", UpstreamModel: model})
 						cost, err = svc.CalculateCostUnified(input)
 						require.NoError(t, err)
-						// Fork default cards have no implicit long-context surcharge.
-						require.False(t, cost.LongContextBillingApplied)
-						require.InDelta(t, 272001*unit, cost.InputCost, 1e-12)
+						factor := 2.0
+						if kind == AccountTypeOAuth {
+							factor = 1
+						}
+						require.InDelta(t, 272001*unit*factor, cost.InputCost, 1e-12)
 					}
 				}
 				// Request-specific calculation must not mutate shared fallback pricing.
@@ -292,5 +292,69 @@ func TestGPT62SubscriptionUltrafastInManifestAndForcedRequests(t *testing.T) {
 				require.Equal(t, OpenAIFastTierPriority, forced)
 			}
 		})
+	}
+}
+
+// Exercise the usage-to-debit path with cache-driven long context and a
+// request time on either side of the promotion cutoff (including replay).
+func TestGPT62OfficialUsageTierAndContext(t *testing.T) {
+	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		unit := 2e-6
+		if model == "gpt-6.2-astra" {
+			unit = 8e-6
+		}
+		for _, kind := range []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken} {
+			for _, stamp := range []struct {
+				at     time.Time
+				factor float64
+			}{
+				{time.Date(2027, 3, 1, 7, 59, 59, 0, time.UTC), 3},
+				{time.Date(2027, 3, 1, 8, 0, 0, 0, time.UTC), 6},
+			} {
+				t.Run(fmt.Sprintf("%s/%s/%g", model, kind, stamp.factor), func(t *testing.T) {
+					repo := &openAIRecordUsageLogRepoStub{inserted: true}
+					userRepo := &openAIRecordUsageUserRepoStub{}
+					svc := newOpenAIRecordUsageServiceForTest(repo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+					key := openAIRecordUsageAPIKeyWithGroup(svc, 1, true)
+					key.GroupID = i64p(1)
+					key.Group.RateMultiplier = 1.1
+					svc.channelService = newTestChannelServiceForStats(t, &Channel{ID: 1, Status: StatusActive}, 1, PlatformOpenAI)
+					tier := "ultrafast"
+					err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+						Result: &OpenAIForwardResult{RequestID: t.Name(), Model: model, UpstreamModel: model, ServiceTier: &tier, Duration: time.Second,
+							Usage: OpenAIUsage{InputTokens: 500001, CacheReadInputTokens: 250000, CacheCreationInputTokens: 1000, CacheCreation30mInputTokens: 400, CacheCreation12hInputTokens: 600, OutputTokens: 1000}},
+						APIKey: key, User: &User{ID: 2}, PricingAt: stamp.at,
+						Account: &Account{ID: 3, Platform: PlatformOpenAI, Type: kind, Extra: map[string]any{openAILongContextBillingEnabledKey: true}},
+					})
+					require.NoError(t, err)
+					im, om := 1.0, 1.0
+					if kind == AccountTypeAPIKey {
+						im, om = 2, 1.5
+					}
+					standard := (249001*unit+250000*unit*.05+400*unit*1.25+600*unit*2.5)*im + 1000*unit*5*om
+					want := standard * stamp.factor
+					require.Equal(t, kind == AccountTypeAPIKey, repo.lastLog.LongContextBillingApplied)
+					require.InDelta(t, want, repo.lastLog.TotalCost, 1e-9)
+					require.Equal(t, QuantizeUsageBillingAmount(want*1.1), repo.lastLog.ActualCost)
+					require.InDelta(t, repo.lastLog.ActualCost, userRepo.lastAmount, 1e-9)
+					require.NotNil(t, repo.lastLog.AccountStatsCost)
+					require.InDelta(t, want, *repo.lastLog.AccountStatsCost, 1e-9)
+				})
+			}
+		}
+	}
+}
+
+func TestGPT62ChannelUltrafastOverrideSurvivesPromotionCutoff(t *testing.T) {
+	svc := newTestBillingService()
+	groupID := int64(8907)
+	card := ChannelModelPricing{Platform: PlatformOpenAI, Models: []string{"gpt-6.2-sol"},
+		InputPrice: pricingMultiplier(1e-6), UltrafastMultiplier: pricingMultiplier(1.25)}
+	resolver := NewModelPricingResolver(newChannelServiceWithPricings(groupID, []ChannelModelPricing{card}), svc)
+	for _, at := range []time.Time{time.Date(2027, 3, 1, 7, 59, 59, 0, time.UTC), time.Date(2027, 3, 1, 8, 0, 0, 0, time.UTC)} {
+		cost, err := svc.CalculateCostUnified(CostInput{Ctx: context.Background(), Model: "gpt-6.2-sol", GroupID: &groupID,
+			Tokens: UsageTokens{InputTokens: 1000}, RateMultiplier: 1, ServiceTier: "ultrafast", Resolver: resolver, PricingAt: at})
+		require.NoError(t, err)
+		require.InDelta(t, .00125, cost.TotalCost, 1e-12)
 	}
 }

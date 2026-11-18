@@ -9,7 +9,7 @@
 - `free_openai_fast` 仍只覆盖 Priority/Fast，两项开关互不替代。两项都开时分别按各自档位生效。
 - 上游响应档位能否提升结算档位，继续由账号 `openai_response_tier_billing_enabled` 决定。此开关不隐式开启账号响应计费。
 - 用量记录保留 `service_tier=ultrafast` 和原档位 `total_cost`；余额与 Key 配额扣除 Standard 重新计算的 `actual_cost`。历史 `customer_cost_details.free_ultrafast=true` 保存客户价格明细，用户与管理员用量详情使用该请求快照。
-- 已有历史记录不重新计费。没有客户价格快照的旧折扣记录显示未知客户明细，不从六倍总价反推。
+- 已有历史记录不重新计费。没有客户价格快照的旧折扣记录显示未知客户明细，不从原档位总价反推；GPT-6.2 Sol/Astra 的促销倍率按请求时间切换。
 
 迁移 `381_group_free_openai_ultrafast.sql` 新增默认 false 的非空布尔列。旧二进制可以忽略该列，但回退会停止兑现免费 UltraFast；回滚前先关闭该开关并处理仍在执行的请求。不要在滚动升级尚有旧进程时启用新开关。
 

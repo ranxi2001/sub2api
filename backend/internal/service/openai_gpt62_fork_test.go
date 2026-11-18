@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -60,17 +61,19 @@ func TestGPT62DefaultPricingAndCacheTTL(t *testing.T) {
 					require.NoError(t, err)
 					require.NotNil(t, price.CacheCreation12hPricePerToken)
 					require.InDelta(t, tc.write12h, *price.CacheCreation12hPricePerToken, 1e-12)
-					// This short-context rate update preserves the independent
-					// existing tier/context policy.
+					inputFactor, outputFactor, ultra := 2.0, 1.5, 3.0
+					if tc.model == "gpt-6.2-astra-pro" {
+						inputFactor, outputFactor, ultra = 1, 1, 6
+					}
 					tokens := UsageTokens{InputTokens: 300000, OutputTokens: 500, CacheReadTokens: 2000, CacheCreationTokens: 1000, CacheCreation30mTokens: 400, CacheCreation12hTokens: 600}
-					for tier, multiplier := range map[string]float64{"": 1, "priority": 2, "flex": 0.5, "ultrafast": 6} {
-						cost, err := svc.CalculateCostWithServiceTier(model, tokens, 1, tier)
+					for tier, multiplier := range map[string]float64{"": 1, "priority": 2, "flex": 0.5, "ultrafast": ultra} {
+						cost, err := svc.CalculateCostUnified(CostInput{Model: model, Tokens: tokens, RateMultiplier: 1, ServiceTier: tier, PricingAt: time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)})
 						require.NoError(t, err)
-						require.InDelta(t, 300000*tc.input*multiplier, cost.InputCost, 1e-10)
-						require.InDelta(t, 500*tc.output*multiplier, cost.OutputCost, 1e-10)
-						require.InDelta(t, (400*tc.write+600*tc.write12h)*multiplier, cost.CacheCreationCost, 1e-10)
-						require.InDelta(t, 2000*tc.read*multiplier, cost.CacheReadCost, 1e-10)
-						require.False(t, cost.LongContextBillingApplied)
+						require.InDelta(t, 300000*tc.input*multiplier*inputFactor, cost.InputCost, 1e-10)
+						require.InDelta(t, 500*tc.output*multiplier*outputFactor, cost.OutputCost, 1e-10)
+						require.InDelta(t, (400*tc.write+600*tc.write12h)*multiplier*inputFactor, cost.CacheCreationCost, 1e-10)
+						require.InDelta(t, 2000*tc.read*multiplier*inputFactor, cost.CacheReadCost, 1e-10)
+						require.Equal(t, inputFactor > 1, cost.LongContextBillingApplied)
 					}
 				}
 			})
