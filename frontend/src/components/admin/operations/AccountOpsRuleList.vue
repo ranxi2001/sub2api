@@ -88,7 +88,7 @@
             <td class="px-5 py-4">
               <div class="flex items-center justify-end gap-4">
                 <label v-if="row.balanceRule || row.quotaRule" class="flex items-center gap-1.5 text-xs text-gray-500">
-                  <input type="checkbox" :checked="row.balanceRule?.enabled ?? row.quotaRule?.enabled" :disabled="busy" :aria-label="`${row.group.name} ${t('accountOps.ruleEnabled')}`" @change="emit('toggle', row.group, row.accounts, ($event.target as HTMLInputElement).checked)" />
+                  <input type="checkbox" :data-testid="`toggle-rule-${row.group.id}`" :checked="row.balanceRule?.enabled ?? row.quotaRule?.enabled" :disabled="busy" :aria-label="`${row.group.name} ${t('accountOps.ruleEnabled')}`" @change="emit('toggle', row.group, row.accounts, ($event.target as HTMLInputElement).checked)" />
                   {{ t('accountOps.channelEnabled') }}
                 </label>
                 <button type="button" class="text-sm text-primary-600 hover:underline" :data-testid="`edit-rule-${row.group.id}`" :disabled="selectionUnavailable" @click="editRow(row)">{{ t('accountOps.editRule') }}</button>
