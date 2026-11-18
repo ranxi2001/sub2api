@@ -5,7 +5,6 @@ import type { AccountPerformance, PerformanceConfig, PerformanceEvent } from '@/
  */
 
 import { apiClient } from '../client'
-import { ADMIN_UI_REQUEST_HEADER } from '../adminUIRequest'
 import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/types/openaiReferrals'
 import type {
   Account,

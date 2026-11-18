@@ -62,7 +62,6 @@ type CodexHarvestControlSnapshot struct {
 }
 
 type CodexHarvestService struct {
-	coverage    harvestCoverageTracker
 	nodes       CodexHarvestNodeRepository
 	settings    SettingRepository
 	defaults    CodexHarvestControls

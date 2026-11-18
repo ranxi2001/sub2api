@@ -674,8 +674,6 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 	if ticket.Length == 780 && !ticket.valid(time.Now(), 780) {
 		return errors.New("ticket probe validation required before storage")
 	}
-	incoming := *ticket
-	standby := false
 	s.openaiCodexTicketStateMu.Lock()
 	defer s.openaiCodexTicketStateMu.Unlock()
 	model := normalizeOpenAICodexTicketModel(ticket.Model)
@@ -684,7 +682,6 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 		copy := *current
 		copy.Standby = ticket
 		ticket = &copy
-		standby = true
 	}
 	ticket.Model = model
 	ticket.AccountID = account.ID
@@ -1084,9 +1081,7 @@ func (s *OpenAIGatewayService) StartOpenAICodexTicketHarvester() {
 	s.openaiCodexTicketDone = done
 	go func() {
 		defer close(done)
-		coverageDone := make(chan struct{})
-		go func() { defer close(coverageDone); s.harvestCoverageLoop(ctx) }()
-		defer func() { cancel(); <-coverageDone }()
+		defer cancel()
 		s.openAICodexTicketHarvestLoop(ctx)
 	}()
 	logger.L().Info("openai_codex_ticket harvester started",
