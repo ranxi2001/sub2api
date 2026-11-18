@@ -58,30 +58,6 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 	return changed
 }
 
-// On ChatGPT subscriptions, Pro 200 includes GPT-6.2 Sol Ultrafast and
-// Pro 500 includes both GPT-6.2 models. Workspace grants come from discovery.
-func gpt62PlanIncludesUltrafast(account *Account, base string) bool {
-	if !account.IsOpenAIOAuthLike() || (base != "gpt-6.2-sol" && base != "gpt-6.2-astra") {
-		return false
-	}
-	// Use the same subscription SKU aliases as the account plan picker.
-	plan := strings.Map(func(r rune) rune {
-		switch r {
-		case ' ', '-', '_':
-			return -1
-		}
-		return r
-	}, strings.ToLower(strings.TrimSpace(account.GetCredential("plan_type"))))
-	switch plan {
-	case "pro", "chatgptpro":
-		return base == "gpt-6.2-sol"
-	case "promax":
-		return true
-	default:
-		return false
-	}
-}
-
 func accountCodexToolCapabilities(account *Account, modelID string) map[string]json.RawMessage {
 	capabilities := make(map[string]json.RawMessage)
 	if account == nil {

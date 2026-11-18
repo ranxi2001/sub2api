@@ -2059,7 +2059,7 @@ func (s *BillingService) CalculateCost(model string, tokens UsageTokens, rateMul
 }
 
 func (s *BillingService) CalculateCostWithServiceTier(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string) (*CostBreakdown, error) {
-	return s.calculateCostInternal(model, tokens, rateMultiplier, serviceTier, nil)
+	return s.calculateCostWithServiceTierPolicy(model, tokens, rateMultiplier, serviceTier, true)
 }
 
 func (s *BillingService) calculateCostInternal(model string, tokens UsageTokens, rateMultiplier float64, serviceTier string, channelPricing *ChannelModelPricing) (*CostBreakdown, error) {
@@ -2134,7 +2134,7 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 		return &cloned
 	}
 	normalized := normalizeKnownOpenAICodexModel(model)
-	usesCacheWritePremium := isOpenAIGPT56Model(normalized) || isOpenAIGPT6AstraModel(normalized) || (openai.IsGPT6SolOrLunaModelSpelling(normalized) || openai.IsGPT61SolModelSpelling(normalized) || openai.IsGPT61TerraModelSpelling(normalized) || openai.GPT62ModelID(normalized) != "")
+	usesCacheWritePremium := isOpenAIGPT56Model(normalized) || isOpenAIGPT6AstraModel(normalized) || (openai.IsGPT6SolOrLunaModelSpelling(normalized) || openai.IsGPT61SolModelSpelling(normalized) || openai.IsGPT61TerraModelSpelling(normalized))
 	needsCacheCreationPolicy := usesCacheWritePremium && !pricing.CacheCreationPriceExplicit && (pricing.CacheCreationPricePerToken <= 0 ||
 		(pricing.InputPricePerTokenPriority > 0 && pricing.CacheCreationPricePerTokenPriority <= 0))
 	fastRatio := openAIModelFastPricingRatio(normalized)
@@ -2164,7 +2164,7 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 	}
 	if fastRatio > 0 {
 		enforceOpenAIFastPricingRatio(&cloned, fastRatio)
-		if (openai.IsGPT6SolOrLunaModelSpelling(normalized) || openai.IsGPT61SolModelSpelling(normalized) || openai.IsGPT61TerraModelSpelling(normalized) || openai.GPT62ModelID(normalized) != "") && cloned.CacheCreationPriceExplicit {
+		if (openai.IsGPT6SolOrLunaModelSpelling(normalized) || openai.IsGPT61SolModelSpelling(normalized) || openai.IsGPT61TerraModelSpelling(normalized)) && cloned.CacheCreationPriceExplicit {
 			cloned.CacheCreationPricePerTokenPriority = cloned.CacheCreationPricePerToken * fastRatio
 		}
 	}
@@ -2176,7 +2176,7 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 // 档的模型（如 gpt-5.5-pro、gpt-5.4-mini/nano）返回 0。
 func openAIModelFastPricingRatio(normalized string) float64 {
 	switch normalized {
-	case "gpt-5.4", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.2-astra-pro", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna":
+	case "gpt-5.4", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna":
 		return 2.0
 	case "gpt-5.5":
 		return 2.5
