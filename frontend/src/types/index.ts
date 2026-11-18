@@ -1251,7 +1251,7 @@ export interface NewAPIUpstreamConfig {
   configured: boolean
   user_id?: number
   encryption_key_configured: boolean
-  accounts: Array<{ account_id: number; name: string; configured_user_id?: number }>
+  accounts: Array<{ account_id: number; name: string; configured_user_id?: number; cost_multiplier_scale?: number; cn_provider?: boolean; cost_auto_sync_enabled?: boolean; apply_usd_rate?: boolean }>
 }
 
 export interface NewAPIUpstreamConfigRequest {
@@ -1259,6 +1259,7 @@ export interface NewAPIUpstreamConfigRequest {
   access_token?: string
   account_ids: number[]
   token_selections?: Record<string, number>
+  apply_usd_rate?: Record<string, boolean>
 }
 
 export interface NewAPIUpstreamPreview {
@@ -1272,6 +1273,11 @@ export interface NewAPIUpstreamPreview {
     token_id?: number
     group?: string
     rate?: number
+    cost_multiplier_scale?: number
+    cn_provider?: boolean
+    cost_auto_sync_enabled?: boolean
+    apply_usd_rate?: boolean
+    cost_multiplier?: number
     error?: string
     token_options: Array<{ token_id: number; name: string; group: string; masked_key: string }>
   }>
@@ -1462,6 +1468,7 @@ export interface Account {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_provider?: 'new_api'
+    new_api_apply_usd_rate?: boolean
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
     upstream_billing_probe?: UpstreamBillingProbeSnapshot

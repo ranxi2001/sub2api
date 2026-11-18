@@ -24,13 +24,26 @@
             <p v-if="canRetainCredential" class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.retainTokenHint') }}</p>
             <fieldset class="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-dark-600">
               <legend class="px-1 text-sm font-medium text-gray-700 dark:text-gray-200">{{ t('admin.accounts.upstreamBilling.newAPI.applyToPeers') }}</legend>
-              <label v-for="candidate in config.accounts" :key="candidate.account_id" class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-200">
+              <div class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+                {{ t('admin.accounts.upstreamBilling.newAPI.costConversion') }}
+                <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.newAPICostConversion" :user-id="authStore.user?.id" />
+              </div>
+              <p class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costConversionHint') }}</p>
+              <div v-for="candidate in config.accounts" :key="candidate.account_id" class="space-y-2 rounded-md border border-gray-100 p-2 dark:border-dark-700">
+              <label class="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-200">
                 <input v-model="accountIds" :value="candidate.account_id" type="checkbox" :disabled="candidate.account_id === account?.id" class="mt-0.5 h-4 w-4 rounded border-gray-300" :data-testid="`new-api-account-${candidate.account_id}`" />
                 <span class="min-w-0 break-words">{{ candidate.name }}
                   <span v-if="candidate.account_id === account?.id" class="text-xs text-gray-500"> · {{ t('admin.accounts.upstreamBilling.newAPI.currentAccount') }}</span>
                   <span v-if="candidate.configured_user_id != null" class="text-xs text-gray-500"> · {{ t('admin.accounts.upstreamBilling.newAPI.boundUser', { id: candidate.configured_user_id }) }}</span>
                 </span>
               </label>
+              <label v-if="accountIds.includes(candidate.account_id)" class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                <input v-model="applyUSDRate[candidate.account_id]" type="checkbox" class="h-4 w-4 rounded border-gray-300" :data-testid="`new-api-apply-usd-rate-${candidate.account_id}`" />
+                {{ t('admin.accounts.upstreamBilling.newAPI.applyUSDRate') }}
+                <span class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costPlatformFactor', { factor: conversionFactor(candidate) }) }}</span>
+              </label>
+              <p v-if="accountIds.includes(candidate.account_id) && candidate.cost_auto_sync_enabled === false" class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costSyncPaused') }}</p>
+              </div>
             </fieldset>
           </fieldset>
         </form>
@@ -44,6 +57,9 @@
               <span v-if="row.group" class="text-gray-600 dark:text-gray-300">{{ t('admin.accounts.upstreamBilling.newAPI.group', { name: row.group }) }}</span>
               <span class="text-gray-600 dark:text-gray-300">{{ row.group !== 'auto' && isFixedRate(row.rate) ? t('admin.accounts.upstreamBilling.newAPI.ratio', { value: row.rate }) : t('admin.accounts.upstreamBilling.newAPI.noFixedRatio') }}</span>
             </div>
+            <p v-if="convertedCost(row) != null" class="text-emerald-700 dark:text-emerald-400" :data-testid="`new-api-cost-preview-${row.account_id}`">{{ t('admin.accounts.upstreamBilling.newAPI.costPreview', { rate: row.rate, scale: conversionFactor(row), cost: convertedCost(row) }) }}</p>
+            <p v-else-if="row.cost_auto_sync_enabled === false" class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costSyncPaused') }}</p>
+            <p v-else-if="row.matched" class="text-xs text-amber-700 dark:text-amber-400">{{ t('admin.accounts.upstreamBilling.newAPI.costUnavailable') }}</p>
             <label v-if="row.token_options?.length && (!row.matched || row.token_options.length > 1)" class="block text-sm text-gray-700 dark:text-gray-200">
               {{ t('admin.accounts.upstreamBilling.newAPI.chooseToken') }}
               <select v-model="tokenSelections[row.account_id]" :disabled="busy" class="input mt-1 w-full" :data-testid="`new-api-token-${row.account_id}`">
@@ -78,6 +94,9 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useAuthStore } from '@/stores/auth'
 import { deleteNewAPIUpstreamConfig, getNewAPIUpstreamConfig, previewNewAPIUpstreamConfig, saveNewAPIUpstreamConfig } from '@/api/admin/accounts'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import type { Account, NewAPIUpstreamConfig, NewAPIUpstreamConfigRequest, NewAPIUpstreamPreview } from '@/types'
@@ -85,6 +104,7 @@ import type { Account, NewAPIUpstreamConfig, NewAPIUpstreamConfigRequest, NewAPI
 const props = defineProps<{ show: boolean; account: Account | null }>()
 const emit = defineEmits<{ (event: 'close'): void; (event: 'saved'): void }>()
 const { t } = useI18n()
+const authStore = useAuthStore()
 const config = ref<NewAPIUpstreamConfig | null>(null)
 const loading = ref(false)
 const busy = ref(false)
@@ -93,6 +113,7 @@ const userId = ref<string | number>('')
 const accessToken = ref('')
 const accountIds = ref<number[]>([])
 const tokenSelections = ref<Record<string, number | undefined>>({})
+const applyUSDRate = ref<Record<string, boolean>>({})
 const result = ref<NewAPIUpstreamPreview | null>(null)
 const confirmRemove = ref(false)
 let session = 0
@@ -125,6 +146,7 @@ watch(() => [props.show, props.account?.id] as const, async ([show, id]) => {
   const currentSession = ++session
   accessToken.value = ''
   config.value = null
+  applyUSDRate.value = {}
   userId.value = ''
   accountIds.value = []
   result.value = null
@@ -138,6 +160,7 @@ watch(() => [props.show, props.account?.id] as const, async ([show, id]) => {
     const loaded = await getNewAPIUpstreamConfig(id)
     if (session !== currentSession) return
     config.value = loaded
+    applyUSDRate.value = Object.fromEntries(loaded.accounts.map(row => [row.account_id, row.apply_usd_rate !== false]))
     userId.value = loaded.user_id ?? ''
     accountIds.value = defaults()
     if (!loaded.encryption_key_configured) error.value = t('admin.accounts.upstreamBilling.newAPI.encryptionRequired')
@@ -161,7 +184,8 @@ const buildRequest = (): NewAPIUpstreamConfigRequest | null => {
     return null
   }
   const selected = Object.fromEntries(Object.entries(tokenSelections.value).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isSafeInteger(entry[1]) && entry[1] > 0))
-  return { user_id: id, ...(token ? { access_token: token } : {}), account_ids: [...new Set([props.account!.id, ...accountIds.value])], ...(Object.keys(selected).length ? { token_selections: selected } : {}) }
+  const costChanges = Object.fromEntries((config.value?.accounts ?? []).filter(row => accountIds.value.includes(row.account_id) && (applyUSDRate.value[row.account_id] !== false) !== (row.apply_usd_rate !== false)).map(row => [row.account_id, applyUSDRate.value[row.account_id] !== false]))
+  return { user_id: id, ...(Object.keys(costChanges).length ? { apply_usd_rate: costChanges } : {}), ...(token ? { access_token: token } : {}), account_ids: [...new Set([props.account!.id, ...accountIds.value])], ...(Object.keys(selected).length ? { token_selections: selected } : {}) }
 }
 const verify = async (save: boolean) => {
   if (!canVerify.value || !props.account) return
@@ -206,6 +230,13 @@ const remove = async () => {
   } finally {
     if (session === currentSession) busy.value = false
   }
+}
+const conversionFactor = (row: {account_id: number; cn_provider?: boolean}) => row.cn_provider || applyUSDRate.value[row.account_id] === false ? 1 : 7
+const convertedCost = (row: NewAPIUpstreamPreview['accounts'][number]): string | null => {
+  const scale = conversionFactor(row)
+  if (row.cost_auto_sync_enabled === false || !row.matched || row.group === 'auto' || !isFixedRate(row.rate) || ![1, 7].includes(scale)) return null
+  const cost = row.rate! * scale
+  return Number.isFinite(cost) && cost <= 1000000 ? Number(cost.toFixed(6)).toString() : null
 }
 const isFixedRate = (value?: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0
 const formatWallet = (amount: number) => Number.isFinite(amount) ? `$${amount.toFixed(2)} USD` : '-'
