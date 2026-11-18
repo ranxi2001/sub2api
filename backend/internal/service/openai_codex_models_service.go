@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -443,6 +444,7 @@ type configuredCodexModelDescriptor struct {
 
 type codexModelMetadataOverride struct {
 	UpstreamModelMetadata
+	audioInput              bool
 	reasoningConflict       bool
 	inputModalitiesConflict bool
 }
@@ -1075,6 +1077,7 @@ func buildCodexModelsManifest(
 			// a stale official Astra snapshot cannot downgrade the catalog.
 			descriptor.InputModalities = []string{"text", "image"}
 		}
+		descriptor.InputModalities = codexAudioInputModalities(descriptor.InputModalities, modelMetadata[modelID].audioInput)
 		if metadataModelID != modelID {
 			descriptor.DisplayName = modelID
 			descriptor.Description = configuredCodexCustomDescription
@@ -1099,6 +1102,16 @@ func buildCodexModelsManifest(
 	return json.Marshal(struct {
 		Models []json.RawMessage `json:"models"`
 	}{Models: models})
+}
+
+func codexAudioInputModalities(modalities []string, supported bool) []string {
+	if !supported {
+		return slices.DeleteFunc(modalities, func(modality string) bool { return modality == "audio" })
+	}
+	if !slices.Contains(modalities, "audio") {
+		return append(modalities, "audio")
+	}
+	return modalities
 }
 
 func resolveCodexCatalogMetadataModel(
@@ -2349,9 +2362,21 @@ func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Accou
 			capabilities["multi_agent_version"] = json.RawMessage("null")
 			capabilities["multi_agent_reasoning_effort"] = json.RawMessage("null")
 		}
-		modelMetadata[id] = codexModelMetadataOverride{UpstreamModelMetadata: UpstreamModelMetadata{
-			CodexToolCapabilities: capabilities,
-		}}
+		var modalities []string
+		_ = json.Unmarshal(entry["input_modalities"], &modalities)
+		if len(modalities) == 0 {
+			var declared modelsDevModalities
+			_ = json.Unmarshal(entry["modalities"], &declared)
+			modalities = declared.Input
+		}
+		if len(modalities) == 0 && account != nil {
+			synced, _ := account.GetUpstreamModelMetadata(capabilityModel)
+			modalities = synced.InputModalities
+		}
+		modelMetadata[id] = codexModelMetadataOverride{
+			UpstreamModelMetadata: UpstreamModelMetadata{CodexToolCapabilities: capabilities},
+			audioInput:            accountCodexModelSupportsAudioInput(account, capabilityModel, normalizeCodexInputModalities(modalities)),
+		}
 	}
 	if len(modelIDs) == 0 {
 		return body
@@ -2576,6 +2601,8 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, ac
 		}
 
 		descriptor := newConfiguredCodexModelDescriptor(slug)
+		// A subscription descriptor alone cannot establish audio support for an API key.
+		descriptor.InputModalities = codexAudioInputModalities(descriptor.InputModalities, false)
 		descriptor.SupportsSearchTool = shouldForwardOpenAIResponsesViaRawChatCompletions(account)
 		if accountCodexModelSupportsImageInput(account, slug) {
 			descriptor.InputModalities = []string{"text", "image"}
@@ -2623,6 +2650,15 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, ac
 			imageDetailOriginal := json.RawMessage("true")
 			if !bytes.Equal(bytes.TrimSpace(model["supports_image_detail_original"]), imageDetailOriginal) {
 				model["supports_image_detail_original"] = imageDetailOriginal
+				modelChanged = true
+			}
+		} else if account != nil && resolveUpstreamProtocol(account, APIProtocolResponses, capabilityModel, nil) != APIProtocolResponses {
+			var modalities []string
+			if json.Unmarshal(model["input_modalities"], &modalities) == nil && slices.Contains(modalities, "audio") {
+				model["input_modalities"], err = json.Marshal(codexAudioInputModalities(modalities, false))
+				if err != nil {
+					return nil, fmt.Errorf("encode input modalities for model %q: %w", slug, err)
+				}
 				modelChanged = true
 			}
 		}
