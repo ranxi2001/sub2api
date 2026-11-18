@@ -402,6 +402,7 @@
           <input
             v-model="enableModelRestriction"
             id="bulk-edit-model-restriction-enabled"
+            :disabled="syncBusy"
             type="checkbox"
             aria-controls="bulk-edit-model-restriction-body"
             class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
@@ -409,11 +410,11 @@
         </div>
 
         <BatchUpstreamWhitelist
-          v-if="show && authStore.isAdmin && targetMode === 'selected' && !filteredPreview"
+          v-if="syncAdminId != null"
           v-show="modelRestrictionMode === 'whitelist' && !isOpenAIModelRestrictionDisabled"
-          :account-ids="targetAccountIds"
-          :disabled="submitting"
-          @started="enableModelRestriction = false"
+          :rows="syncRows" :busy="syncBusy" :valid="syncValid" :user-id="syncAdminId"
+          :disabled="submitting || showMixedChannelWarning"
+          @run="startWhitelistSync" @stop="stopSync"
         />
         <div
           id="bulk-edit-model-restriction-body"
@@ -1543,7 +1544,7 @@
         <button
           type="submit"
           form="bulk-edit-account-form"
-          :disabled="submitting"
+          :disabled="submitting || syncBusy"
           class="btn btn-primary"
         >
           <svg
@@ -1587,6 +1588,7 @@
 </template>
 
 <script setup lang="ts">
+import { useBatchUpstreamWhitelist } from '@/composables/useBatchUpstreamWhitelist'
 import BatchUpstreamWhitelist from './BatchUpstreamWhitelist.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
@@ -1667,6 +1669,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   close: []
   updated: []
+  whitelistsSaved: []
 }>()
 
 const { t } = useI18n()
@@ -1679,6 +1682,19 @@ const targetMode = computed(() => props.target?.mode ?? 'selected')
 const targetAccountIds = computed(() => props.target?.mode === 'selected'
   ? props.target.accountIds ?? props.accountIds
   : props.accountIds)
+const syncAdminId = computed(() => props.show && authStore.isAdmin && targetMode.value === 'selected' && !props.filteredPreview
+  ? authStore.user?.id ?? null : null)
+const { rows: syncRows, busy: syncBusy, valid: syncValid, run: runSync, stop: stopSync, leave: leaveSync } = useBatchUpstreamWhitelist(
+  () => syncAdminId.value,
+  () => props.target ? props.target.accountIds ?? [] : props.accountIds,
+  () => emit('whitelistsSaved')
+)
+function startWhitelistSync(retry: boolean) {
+  if (submitting.value || showMixedChannelWarning.value || syncBusy.value || !syncValid.value || syncAdminId.value == null) return
+  // A subsequent form submit must not overwrite individual results with the shared draft.
+  enableModelRestriction.value = false
+  void runSync(retry)
+}
 const targetPreviewCount = computed(() => props.target?.previewCount ?? props.accountIds.length)
 const targetSelectedPlatforms = computed(() => props.target?.selectedPlatforms ?? props.selectedPlatforms)
 const targetSelectedTypes = computed(() => props.target?.selectedTypes ?? props.selectedTypes)
@@ -2384,6 +2400,7 @@ const canPreCheck = () =>
   (targetSelectedPlatforms.value[0] === 'antigravity' || targetSelectedPlatforms.value[0] === 'anthropic')
 
 const handleClose = () => {
+  leaveSync()
   showMixedChannelWarning.value = false
   mixedChannelWarningMessage.value = ''
   pendingUpdatesForConfirm.value = null
@@ -2414,7 +2431,7 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
-  if (bpsDefaults.loading.value) return
+  if (bpsDefaults.loading.value || syncBusy.value) return
   if (targetMode.value === 'selected' && targetAccountIds.value.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return

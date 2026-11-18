@@ -69,6 +69,7 @@ export const NEW_FEATURE_NOTICES = {
   aiOpsProposalCancel: 'ai-ops-proposal-cancel-initial-announcement',
   bepusdtPayment: 'bepusdt-embedded-payment-initial-announcement',
   accountDailyScheduling: 'account-daily-schedulable-timers-initial-announcement',
+  batchUpstreamWhitelist: 'account-batch-upstream-whitelist-v1',
   accountAutoRefreshUpstreamModels: 'account-auto-refresh-upstream-models-initial-announcement',
   streamFirstEventTiming: 'stream-first-event-timing-initial-announcement',
   openaiImageHeaderTimeoutGroups: 'openai-image-header-timeout-groups-initial-announcement',
