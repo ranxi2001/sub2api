@@ -85,7 +85,9 @@ jobs:
             ${{ runner.temp }}/postgres.log
   browser:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v6
         with:
@@ -134,6 +136,8 @@ jobs:
             ${{ runner.temp }}/evidence/*.png
             ${{ runner.temp }}/evidence/*.json
             ${{ runner.temp }}/evidence/*.log
+      - name: Complete frontend CI (lint, typecheck, critical manifest)
+        run: make test-frontend
       - name: Build production frontend
         run: pnpm --dir frontend run build
         env:
