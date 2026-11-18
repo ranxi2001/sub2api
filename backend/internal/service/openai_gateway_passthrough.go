@@ -2487,6 +2487,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 						return resultWithUsage(),
 							s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
 					}
+					// Configured cooldowns are independent of replay eligibility.
+					// Preserve request-scoped errors and bare-error/failed deduplication.
+					accountSideEffectsAllowed := account != nil && account.Platform == PlatformOpenAI && !cyberHit &&
+						!isOpenAIContextWindowError(failedMessage, dataBytes) && !isOpenAIInvalidEncryptedContentSSE(dataBytes, eventType)
+					if codexFailureTerminal && eventType == "error" {
+						bareErrorAccountSideEffectsPending = accountSideEffectsAllowed
+					} else if accountSideEffectsAllowed {
+						s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
+						bareErrorAccountSideEffectsPending = false
+					}
 					if !cyberHit && !sawBareError {
 						if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 							// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与

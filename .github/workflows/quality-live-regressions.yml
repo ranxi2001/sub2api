@@ -36,15 +36,32 @@ jobs:
           set -euo pipefail
           sources=(backend/internal/service/quality_supported_models.go backend/internal/service/openai_codex_models_service.go backend/internal/service/pelican_scheduled.go)
           for source in "${sources[@]}"; do cp "$source" "$RUNNER_TEMP/$(basename "$source")"; done
+          models_caller=backend/internal/service/openai_models_list.go
+          cp "$models_caller" "$RUNNER_TEMP/quality-models-caller-current.go"
           # This later regression calls eligibleQualityModels, absent from the pinned
           # original sources. Keep it out of the historical overlay only; exercise
           # it explicitly with current sources in the next step.
           later_test=backend/internal/service/oauth_degradation_scope_test.go
           cp "$later_test" "$RUNNER_TEMP/oauth-degradation-scope-current.go"
-          trap 'for source in "${sources[@]}"; do cp "$RUNNER_TEMP/$(basename "$source")" "$source"; done; cp "$RUNNER_TEMP/oauth-degradation-scope-current.go" "$later_test"' EXIT
+          trap 'for source in "${sources[@]}"; do cp "$RUNNER_TEMP/$(basename "$source")" "$source"; done; cp "$RUNNER_TEMP/quality-models-caller-current.go" "$models_caller"; cp "$RUNNER_TEMP/oauth-degradation-scope-current.go" "$later_test"' EXIT
           rm "$later_test"
           git fetch --no-tags --depth=1 origin e082313679d5269eef3e3cce4101c22692695371
           for source in "${sources[@]}"; do git show "e082313679d5269eef3e3cce4101c22692695371:$source" > "$source"; done
+          # Keep the selected historical manifest, with only its dependent
+          # caller using the API present in that baseline. Candidate policy
+          # declarations remain available to unrelated retained callers/tests.
+          python3 - "$models_caller" <<'PYTHON'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          current = 's.fetchNativeCodexModelsManifestWithPolicy(ctx, account, clientVersion, "", policy)'
+          historical = 's.fetchNativeCodexModelsManifest(ctx, account, clientVersion, "")'
+          if source.count(current) != 1:
+              raise SystemExit("missing or ambiguous historical manifest caller")
+          path.write_text(source.replace(current, historical, 1))
+          PYTHON
+          echo "historical manifest compatibility caller path=$models_caller blob=$(git hash-object "$models_caller")"
           python3 .github/scripts/quality-live-red-compat.py "$RUNNER_TEMP/quality_supported_models.go"
           set +e
           (cd backend && go test -tags=unit ./internal/service -run '^TestQualityLive' -count=1 -v) > evidence/red-service.log 2>&1

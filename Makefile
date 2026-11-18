@@ -3,6 +3,7 @@
 FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/AccountUsageCell.spec.ts \
 	src/views/admin/__tests__/ChannelsView.bedrockCompat.spec.ts \
+	src/views/admin/__tests__/ChannelsView.ultrafastPricing.spec.ts \
 	src/views/admin/__tests__/GroupsView.codexManifest.spec.ts \
 	src/views/admin/__tests__/GroupsView.openaiForcedTier.spec.ts \
 	src/views/admin/__tests__/groupsOpenAIFast.spec.ts \
@@ -124,6 +125,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
 	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/components/account/__tests__/ExcelBPS403Badge.spec.ts \
+	src/components/account/__tests__/BatchUpstreamWhitelist.spec.ts \
 	src/components/account/__tests__/BulkEditAccountModal.spec.ts \
 	src/constants/__tests__/platforms.spec.ts \
 	src/components/account/__tests__/credentialsBuilder.platformCatalog.spec.ts \

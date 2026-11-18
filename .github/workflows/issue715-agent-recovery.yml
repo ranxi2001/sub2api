@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/scripts/prepare-discovery-red-compat.py'
       - '.github/scripts/test_discovery_red_compat.py'
+      - '.github/scripts/prepare-openai-usage-red-compat.py'
+      - '.github/scripts/test_openai_usage_red_compat.py'
       - '.github/workflows/issue715-agent-recovery.yml'
       - 'backend/internal/service/openai_*'
       - 'backend/internal/handler/openai_*'
@@ -60,8 +62,9 @@ jobs:
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
           bash .github/scripts/historical-recovery-timezone-callers.sh
           targets=(backend/internal/service/openai_codex_model_metadata.go backend/internal/service/openai_codex_models_service.go backend/internal/service/openai_excel_bps_models_manifest.go)
+          models_caller=backend/internal/service/openai_models_list.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "${targets[@]}" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$models_caller" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")
@@ -69,6 +72,21 @@ jobs:
             echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
             test "$expected" = "$actual"
           done
+          # The historical manifest predates the whitelist-only policy API.
+          # Reconnect only its caller; retain candidate policy declarations and
+          # the exact historical capability implementation and test assertions.
+          python3 - "$models_caller" <<'PYTHON'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          current = 's.fetchNativeCodexModelsManifestWithPolicy(ctx, account, clientVersion, "", policy)'
+          historical = 's.fetchNativeCodexModelsManifest(ctx, account, clientVersion, "")'
+          if source.count(current) != 1:
+              raise SystemExit("missing or ambiguous historical manifest caller")
+          path.write_text(source.replace(current, historical, 1))
+          PYTHON
+          echo "historical manifest compatibility caller path=$models_caller blob=$(git hash-object "$models_caller")"
           set +e
           (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715(BridgeDoesNotAdvertiseEncryptedAgent|FetchedAndPinnedBridgeCapabilities|LiveBridgeCapabilityCannotOverrideWire)$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-red.log" 2>&1
           result=$?
@@ -168,6 +186,8 @@ jobs:
           done
           for path in "${added[@]}"; do test ! -e "$path"; done
           bash .github/scripts/historical-ws-projection-types.sh "$original"
+          python3 -m unittest discover -s .github/scripts -p 'test_openai_usage_red_compat.py' -v
+          python3 .github/scripts/prepare-openai-usage-red-compat.py . "$original"
           set +e
           (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue715HTTPResumesSameTaskAcrossTwoTurns$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-recovery-red.log" 2>&1
           result=$?

@@ -1,0 +1,188 @@
+name: Batch upstream whitelist
+on:
+  pull_request:
+    paths:
+      - 'frontend/src/components/account/*UpstreamWhitelist*'
+      - 'frontend/src/composables/useBatchUpstreamWhitelist.ts'
+      - 'frontend/src/components/account/BulkEditAccountModal.vue'
+      - 'frontend/src/components/account/__tests__/BatchUpstreamWhitelist*'
+      - 'backend/internal/**/**batch_whitelist*'
+      - 'backend/internal/service/upstream_model_mapping_sync.go'
+      - 'backend/internal/service/upstream_models.go'
+      - 'backend/internal/service/openai_excel_bps_model_access.go'
+      - 'backend/internal/service/openai_models_list.go'
+      - 'backend/internal/service/openai_codex_models_service.go'
+      - 'backend/internal/service/openai_excel_oauth.go'
+      - 'backend/internal/handler/admin/account_handler.go'
+      - '.github/workflows/batch-upstream-whitelist.yml'
+      - '.github/scripts/batch-whitelist-ui.mjs'
+permissions:
+  contents: read
+concurrency:
+  group: batch-upstream-whitelist-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  BASE: 701612f6e9f7b697eb36397b9fb49bf7324e56a1
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      CI: true
+      GOMAXPROCS: 4
+      GOFLAGS: -p=4
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Same handler oracle on baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/before" "$BASE"
+          file=backend/internal/handler/admin/account_handler_batch_whitelist_test.go
+          cp "$file" "$RUNNER_TEMP/before/$file"
+          cd "$RUNNER_TEMP/before/backend"
+          if go test -v -tags=unit ./internal/handler/admin -run '^TestAccountHandlerBatchUpstreamWhitelist$' -count=1 > "$RUNNER_TEMP/handler-red.log" 2>&1; then exit 1; fi
+          cat "$RUNNER_TEMP/handler-red.log"
+          grep -F 'whitelist-only apply must not persist catalog metadata or quality state' "$RUNNER_TEMP/handler-red.log"
+          grep -F -- '--- FAIL: TestAccountHandlerBatchUpstreamWhitelist' "$RUNNER_TEMP/handler-red.log"
+      - name: Same incomplete-catalog oracle on baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=backend/internal/service/upstream_batch_whitelist_test.go
+          cp "$file" "$RUNNER_TEMP/before/$file"
+          cd "$RUNNER_TEMP/before/backend"
+          if go test -v -tags=unit ./internal/service -run 'TestBatchWhitelistSafety/unconsumed|TestBatchWhitelistBPSPartialCatalog' -count=1 > "$RUNNER_TEMP/catalog-red.log" 2>&1; then exit 1; fi
+          cat "$RUNNER_TEMP/catalog-red.log"
+          grep -F -- '--- FAIL: TestBatchWhitelistSafety/unconsumed' "$RUNNER_TEMP/catalog-red.log"
+          grep -F 'partial BPS/native catalogs cannot replace the entire whitelist' "$RUNNER_TEMP/catalog-red.log"
+      - name: Mapping-only fresh read and account state regression on reviewed head
+        shell: bash
+        run: |
+          set -euo pipefail
+          reviewed=add606e964972ded3d6389790586c781c89a58c1
+          git worktree add --detach "$RUNNER_TEMP/whitelist-read-before" "$reviewed"
+          file=backend/internal/service/upstream_batch_whitelist_read_policy_test.go
+          cp "$file" "$RUNNER_TEMP/whitelist-read-before/$file"
+          cd "$RUNNER_TEMP/whitelist-read-before/backend"
+          if go test -v -tags=unit ./internal/service -run '^TestBatchWhitelistBPS(NativeStructured401IsReadOnly|NativeStaleFailureKeepsMapping|NativeFreshCompleteSuccess|FreshCacheCannotHideFailure|ExpiredGrantDoesNotRefresh)$' -count=1 > "$RUNNER_TEMP/read-policy-red.log" 2>&1; then exit 1; fi
+          cat "$RUNNER_TEMP/read-policy-red.log"
+          grep -F 'whitelist discovery must not disable an account' "$RUNNER_TEMP/read-policy-red.log"
+          grep -F 'stale native cache cannot authorize a replacement whitelist' "$RUNNER_TEMP/read-policy-red.log"
+          grep -F 'BPS fresh cache must also be bypassed' "$RUNNER_TEMP/read-policy-red.log"
+          if grep -Eq 'build failed|setup failed|undefined:|no tests to run|panic:|WARNING: DATA RACE|--- SKIP:' "$RUNNER_TEMP/read-policy-red.log"; then exit 1; fi
+      - name: OAuth credential lifecycle oracle on frozen reviewed head
+        shell: bash
+        run: |
+          set -euo pipefail
+          reviewed=2f6e9cd7eeb9e7093fa37e1f7ae9d4bd1db7ac79
+          git worktree add --detach "$RUNNER_TEMP/whitelist-oauth-before" "$reviewed"
+          # Preserve the complete historical production tree and its helpers.
+          # Only the new oracle crosses into the frozen baseline.
+          file=backend/internal/service/upstream_batch_whitelist_oauth_policy_test.go
+          cp "$file" "$RUNNER_TEMP/whitelist-oauth-before/$file"
+          cd "$RUNNER_TEMP/whitelist-oauth-before/backend"
+          if go test -v -tags=unit ./internal/service -run '^TestBatchWhitelistOAuthCredentialLifecycleRejected$' -count=1 > "$RUNNER_TEMP/oauth-policy-red.log" 2>&1; then exit 1; fi
+          cat "$RUNNER_TEMP/oauth-policy-red.log"
+          grep -F 'whitelist-only OAuth discovery must not enter token providers' "$RUNNER_TEMP/oauth-policy-red.log"
+          grep -F 'whitelist-only OAuth discovery must not refresh credentials' "$RUNNER_TEMP/oauth-policy-red.log"
+          for platform in antigravity gemini; do
+            for state in expired_refresh_success expired_refresh_error missing_expiry missing_project ready cached_token; do
+              grep -F -- "--- FAIL: TestBatchWhitelistOAuthCredentialLifecycleRejected/$platform/$state" "$RUNNER_TEMP/oauth-policy-red.log"
+            done
+          done
+          if grep -Eq 'build failed|setup failed|undefined:|no tests to run|panic:|WARNING: DATA RACE|--- SKIP:' "$RUNNER_TEMP/oauth-policy-red.log"; then exit 1; fi
+      - name: Candidate handler and catalog policies
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -v -tags=unit ./internal/handler/admin ./internal/service ./internal/server/middleware -run 'Test(AccountHandler(Batch|SyncUpstreamModels)|BatchWhitelist|ApplyUpstreamModels|AutomaticUpstreamModels|FetchUpstreamSupportedModels|FetchOpenAIModelsList|FetchCodexModelsManifest(OAuth|AgentIdentity401|APIKey401)|SyncUpstreamModelCatalog|ReconciledUpstreamModels|ExcelBPSAccess|ExcelBPSMixed|ExcelOAuthRefresh|AdminAuth)' -count=1 | tee "$RUNNER_TEMP/handler-green.log"
+          for name in OAuthCredentialLifecycleRejected OAuthLegacySyncStillUsesTokenProvider OAuthPlatformAPIKeyStillApplies; do
+            grep -F -- "--- PASS: TestBatchWhitelist$name " "$RUNNER_TEMP/handler-green.log"
+          done
+      - name: Build production server
+        run: make -C backend build
+      - name: PostgreSQL application, scheduler invalidation and stale edit protection
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -v -tags=integration ./internal/repository ./internal/handler/admin -run '^Test(BatchWhitelistPostgresHandlerReadback|ApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler)$' -count=1 | tee "$RUNNER_TEMP/postgres.log"
+          grep -F -- '--- PASS: TestBatchWhitelistPostgresHandlerReadback' "$RUNNER_TEMP/postgres.log"
+          grep -F -- '--- PASS: TestApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler' "$RUNNER_TEMP/postgres.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: whitelist-contract-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/handler-red.log
+            ${{ runner.temp }}/handler-green.log
+            ${{ runner.temp }}/catalog-red.log
+            ${{ runner.temp }}/read-policy-red.log
+            ${{ runner.temp }}/oauth-policy-red.log
+            ${{ runner.temp }}/postgres.log
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Mounted action before and after
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/evidence"
+          mkdir -p "$out"
+          base="$RUNNER_TEMP/before"
+          git worktree add --detach "$base" "$BASE"
+          pnpm --dir "$base/frontend" install --frozen-lockfile
+          oracle=src/components/account/__tests__/BatchUpstreamWhitelist.spec.ts
+          cp "frontend/$oracle" "$base/frontend/$oracle"
+          if pnpm --dir "$base/frontend" exec vitest run "$oracle" -t 'submits each selected ID' > "$out/ui-red.log" 2>&1; then exit 1; fi
+          grep -F 'selected accounts need a per-account upstream action: expected false to be true' "$out/ui-red.log"
+          pnpm --dir frontend exec vitest run "$oracle" src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts | tee "$out/ui-green.log"
+      - name: Install isolated Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Render original and candidate components
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/browser
+        run: |
+          script="$PWD/.github/scripts/batch-whitelist-ui.mjs"
+          (cd "$RUNNER_TEMP/before/frontend" && node "$script" before "$RUNNER_TEMP/evidence")
+          (cd frontend && node "$script" after "$RUNNER_TEMP/evidence")
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: whitelist-ui-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/evidence/*.png
+            ${{ runner.temp }}/evidence/*.json
+            ${{ runner.temp }}/evidence/*.log
+      - name: Complete frontend CI (lint, typecheck, critical manifest)
+        run: make test-frontend
+      - name: Build production frontend
+        run: pnpm --dir frontend run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144

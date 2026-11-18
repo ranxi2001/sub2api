@@ -87,13 +87,23 @@ func excelBPSAccessModelsBody(raw []byte) ([]byte, error) {
 // FetchExcelBPSModelsList uses a separate fresh-only cache scoped by bearer,
 // account and proxy identity. Expired permissions are never served stale.
 func (s *OpenAIGatewayService) FetchExcelBPSModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	return s.fetchExcelBPSModelsListWithPolicy(ctx, account, openAIModelsReadDefault)
+}
+
+func (s *OpenAIGatewayService) fetchExcelBPSModelsListWithPolicy(ctx context.Context, account *Account, policy openAIModelsReadPolicy) (*OpenAIModelsResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if s == nil || s.httpUpstream == nil || account == nil || !account.IsOpenAI() || !account.IsExcelBPSEnabled() {
 		return nil, fmt.Errorf("excel BPS model discovery is unavailable")
 	}
-	token, err := s.getExcelBPSAccessToken(ctx, account)
+	var token string
+	var err error
+	if policy == openAIModelsReadWhitelist {
+		token, err = s.getExcelBPSAccessTokenReadOnly(ctx, account)
+	} else {
+		token, err = s.getExcelBPSAccessToken(ctx, account)
+	}
 	if err != nil {
 		if IsExcelAuthorizationError(err) {
 			return nil, err
@@ -112,17 +122,25 @@ func (s *OpenAIGatewayService) FetchExcelBPSModelsList(ctx context.Context, acco
 	request.Body = nil
 	request.ContentLength = 0
 	request.Header.Set("Accept", "application/json")
+	if policy == openAIModelsReadWhitelist {
+		request.Header.Set("Cache-Control", "no-cache")
+		request.Header.Del("If-None-Match")
+	}
 	request.URL.Path = "/basispoints/api/responses/access"
 	request.URL.RawQuery = "include_models=true"
 	proxy := upstreamModelsProxyURL(account)
 	identity := openAIModelsRequest{url: request.URL.String(), headers: request.Header, proxyURL: fmt.Sprintf("%s|bps_pool:%s|managed:%t", proxy, account.ExcelBPSProxySource(), account.IsExcelBPSMihomoEnabled()), accountID: account.ID, credentialAccountID: account.ID, standardModelsList: true}
 	key := buildOpenAIModelsCacheKey(identity)
-	if cached, state := s.excelBPSModelsCache.get(key, time.Now()); state == openAIModelsCacheFresh {
-		return openAIModelsResponseForClient(cached, ""), nil
+	if policy != openAIModelsReadWhitelist {
+		if cached, state := s.excelBPSModelsCache.get(key, time.Now()); state == openAIModelsCacheFresh {
+			return openAIModelsResponseForClient(cached, ""), nil
+		}
 	}
 	fetch := func(fetchCtx context.Context) (*OpenAIModelsResponse, error) {
-		if cached, state := s.excelBPSModelsCache.get(key, time.Now()); state == openAIModelsCacheFresh {
-			return cached, nil
+		if policy != openAIModelsReadWhitelist {
+			if cached, state := s.excelBPSModelsCache.get(key, time.Now()); state == openAIModelsCacheFresh {
+				return cached, nil
+			}
 		}
 		fetchCtx, cancel := context.WithTimeout(fetchCtx, 5*time.Second)
 		defer cancel()
@@ -166,8 +184,15 @@ func (s *OpenAIGatewayService) FetchExcelBPSModelsList(ctx context.Context, acco
 			return nil, err
 		}
 		manifest := &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}
-		s.excelBPSModelsCache.set(key, manifest, time.Now())
+		if policy != openAIModelsReadWhitelist {
+			s.excelBPSModelsCache.set(key, manifest, time.Now())
+		}
 		return manifest, nil
+	}
+	if policy == openAIModelsReadWhitelist {
+		// No shared cache, detached singleflight or background work can verify
+		// the current destructive edit. Cancellation belongs to this caller.
+		return fetch(ctx)
 	}
 	if HasAPIKeyAdmissionOwner(ctx) {
 		result, err := fetch(ctx)
@@ -281,21 +306,31 @@ func applyExcelBPSEffortsToManifest(body, access []byte, account *Account) ([]by
 // Independent BPS discovery applies to the actual selected model route. Native
 // models keep their own source; a native source failure cannot invent BPS access.
 func (s *OpenAIGatewayService) fetchExcelBPSAccountModels(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
-	access, accessErr := s.FetchExcelBPSModelsList(ctx, account)
+	return s.fetchExcelBPSAccountModelsWithPolicy(ctx, account, false)
+}
+
+func (s *OpenAIGatewayService) fetchExcelBPSAccountModelsWithPolicy(ctx context.Context, account *Account, requireComplete bool) (*OpenAIModelsResponse, error) {
+	policy := openAIModelsReadDefault
+	if requireComplete {
+		policy = openAIModelsReadWhitelist
+	}
+	access, accessErr := s.fetchExcelBPSModelsListWithPolicy(ctx, account, policy)
 	if accessErr != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if account.IsExcelOAuth() || account.isExcelBPSAllModelsEnabled() {
+		if requireComplete || account.IsExcelOAuth() || account.isExcelBPSAllModelsEnabled() {
 			return nil, accessErr
 		}
 		access = &OpenAIModelsResponse{Body: []byte(`{"object":"list","data":[]}`)}
 	}
 	var native []byte
 	if !account.IsExcelOAuth() && !account.isExcelBPSAllModelsEnabled() {
-		response, err := s.fetchNativeOpenAIModelsList(ctx, account)
+		response, err := s.fetchNativeOpenAIModelsListWithPolicy(ctx, account, policy)
 		if err == nil {
 			native = response.Body
+		} else if requireComplete {
+			return nil, err
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

@@ -127,13 +127,24 @@ jobs:
             test "$(git hash-object "$target")" = "$baseline_blob"
             printf 'path=%s candidate_blob=%s restored_baseline_blob=%s\n' "$target" "$candidate_blob" "$baseline_blob" >> "$manifest"
           done
+          # Restoring the token lifecycle above removes its later read-only
+          # whitelist helper. Pin only the dependent catalog caller to the
+          # exact pre-helper source; keep the original config-switch defects.
+          caller_baseline=add606e964972ded3d6389790586c781c89a58c1
+          target=backend/internal/service/openai_excel_bps_model_access.go
+          candidate_blob=$(git rev-parse "$candidate:$target")
+          test "$(git hash-object "$target")" = "$candidate_blob"
+          git show "$caller_baseline:$target" > "$target"
+          baseline_blob=$(git rev-parse "$caller_baseline:$target")
+          test "$(git hash-object "$target")" = "$baseline_blob"
+          printf 'compatibility_caller=%s baseline=%s candidate_blob=%s restored_baseline_blob=%s\n' "$target" "$caller_baseline" "$candidate_blob" "$baseline_blob" >> "$manifest"
           for file in pr885_config_switch_refresh_test.go pr885_siwc_config_switch_test.go pr885_oauth_config_switch_test.go; do
             target="backend/internal/service/$file"
             blob=$(git rev-parse "$candidate:$target")
             test "$(git hash-object "$target")" = "$blob"
             printf 'unchanged_candidate_fixture=%s blob=%s\n' "$target" "$blob" >> "$manifest"
           done
-          expected=$(printf '%s\n' backend/internal/service/openai_excel_oauth.go backend/internal/service/openai_maintenance_proxy.go backend/internal/service/openai_oauth_service.go backend/internal/service/openai_siwc.go backend/internal/service/openai_token_provider.go)
+          expected=$(printf '%s\n' backend/internal/service/openai_excel_bps_model_access.go backend/internal/service/openai_excel_oauth.go backend/internal/service/openai_maintenance_proxy.go backend/internal/service/openai_oauth_service.go backend/internal/service/openai_siwc.go backend/internal/service/openai_token_provider.go)
           test "$(git diff --name-only -- 'backend/**/*.go' ':!backend/**/*_test.go')" = "$expected"
       - name: Require all eight config switch failures to be behavioral
         shell: bash
