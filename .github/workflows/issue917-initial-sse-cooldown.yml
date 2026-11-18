@@ -1,0 +1,126 @@
+name: Issue 917 initial SSE cooldown
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/workflows/issue917-initial-sse-cooldown.yml'
+      - 'backend/internal/handler/openai_issue917_cooldown_test.go'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/handler/anthropic_413_test.go'
+      - 'backend/internal/service/openai_*'
+      - 'backend/internal/service/ratelimit*'
+      - 'backend/internal/service/account*'
+      - 'backend/internal/repository/account*'
+      - 'backend/migrations/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue917-initial-sse-cooldown-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: issue917_fixture
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d issue917_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      ISSUE917_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/issue917_fixture?sslmode=disable'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: RED with original production readers and identical regression
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          evidence="$RUNNER_TEMP/issue917-evidence"
+          mkdir -p "$evidence"
+          baseline=657bb38d141901abcbeef2f178d9234109d37167
+          red_tree="$RUNNER_TEMP/issue917-red"
+          git clone --no-hardlinks --no-checkout "$GITHUB_WORKSPACE" "$red_tree"
+          git -C "$red_tree" checkout --detach "$CANDIDATE_SHA"
+          paths=(backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_passthrough.go)
+          git -C "$red_tree" restore --source="$baseline" --worktree -- "${paths[@]}"
+          for path in "${paths[@]}"; do
+            test "$(git -C "$red_tree" hash-object "$path")" = "$(git rev-parse "$baseline:$path")"
+          done
+          test "$(git -C "$red_tree" hash-object backend/internal/handler/openai_issue917_cooldown_test.go)" = "$(git rev-parse HEAD:backend/internal/handler/openai_issue917_cooldown_test.go)"
+          printf 'candidate=%s\nbaseline_readers=%s\n' "$CANDIDATE_SHA" "$baseline" > "$evidence/identity.txt"
+          git -C "$red_tree" diff -- "${paths[@]}" > "$evidence/red-readers.diff"
+          cd "$red_tree/backend"
+          set +e
+          go test -race -v -tags=unit,issue917pg ./internal/handler -run '^TestIssue917ResponsesCooldown$' -count=1 -timeout=8m > "$evidence/red.log" 2>&1
+          status=$?
+          set -e
+          cat "$evidence/red.log"
+          printf '%s\n' "$status" > "$evidence/red.exitcode"
+          test "$status" -eq 1
+          if grep -Eq 'WARNING: DATA RACE|build failed|setup failed|no tests to run|panic:|fatal error:|test timed out|--- SKIP:' "$evidence/red.log"; then
+            exit 1
+          fi
+          for route in normal passthrough oauth; do
+            grep -F -- "--- FAIL: TestIssue917ResponsesCooldown/$route/initial " "$evidence/red.log"
+          done
+          test "$(grep -Fc 'matched initial SSE error must persist account cooldown' "$evidence/red.log")" -eq 9
+      - name: GREEN on clean exact candidate, plus stream and rule boundaries
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          evidence="$RUNNER_TEMP/issue917-evidence"
+          mkdir -p "$evidence"
+          cd backend
+          set +e
+          go test -race -v -tags=unit,issue917pg ./internal/handler ./internal/service -run '^Test(Issue917ResponsesCooldown|OpenAIStreaming|OpenAIStream|OpenAIResponseFlush|.*TempUnsched|OpenAIResponses_APIKeyPassthrough)' -count=1 -timeout=12m > "$evidence/green.log" 2>&1
+          status=$?
+          set -e
+          cat "$evidence/green.log"
+          printf '%s\n' "$status" > "$evidence/green.exitcode"
+          test "$status" -eq 0
+          if grep -Eq 'WARNING: DATA RACE|no tests to run|--- SKIP:' "$evidence/green.log"; then
+            exit 1
+          fi
+          for route in normal passthrough oauth; do
+            grep -F -- "--- PASS: TestIssue917ResponsesCooldown/$route/initial " "$evidence/green.log"
+            grep -F -- "--- PASS: TestIssue917ResponsesCooldown/$route/threshold_eof " "$evidence/green.log"
+            grep -F -- "--- PASS: TestIssue917ResponsesCooldown/$route/threshold_pair_before_output " "$evidence/green.log"
+            grep -F -- "--- PASS: TestIssue917ResponsesCooldown/$route/threshold_pair_after_output " "$evidence/green.log"
+          done
+      - name: Build production server
+        working-directory: backend
+        env:
+          CGO_ENABLED: '0'
+        run: go build -trimpath -o "$RUNNER_TEMP/issue917-server" ./cmd/server
+      - name: Upload exact-head evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue917-${{ env.CANDIDATE_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue917-evidence
+          if-no-files-found: error
+          retention-days: 14
