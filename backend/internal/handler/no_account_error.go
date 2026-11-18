@@ -93,7 +93,7 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 		blocked, blockedErr := strconv.Atoi(match[3])
 		if poolErr == nil && blockedErr == nil && pool > 0 && pool == blocked {
 			fallback.Code = "image_capability_unavailable"
-			fallback.Message = "No eligible account can serve the requested image-generation tool. For a text-only turn, set tool_choice to none or remove the image tool; otherwise use a group with image-capable accounts."
+			fallback.Message = "No eligible account can serve the requested image-generation tool. For a text-only turn, remove the image tool declaration; otherwise use a group with image-capable accounts."
 			if match[2] == "rate_limited" {
 				fallback.Code = "image_capacity_exhausted"
 				fallback.Message = "All eligible accounts are temporarily rate-limited for the requested image-generation tool. Please retry after image capacity recovers."
