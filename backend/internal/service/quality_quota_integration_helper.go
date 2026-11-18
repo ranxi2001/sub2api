@@ -4,9 +4,12 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 // Integration-only bridge to the actual cron execution and trigger worker.
@@ -56,4 +59,12 @@ func NewGrokConnectivityRunnerForTesting(scheduled *ScheduledTestService, accoun
 	runner.accountTestSvc.grokTokenProvider = NewGrokTokenProvider(accounts, nil)
 	runner.accountTestSvc.cfg = &config.Config{}
 	return runner, runner.accountTestSvc
+}
+
+// Exercise the production adaptive policy at a logical instant after expiry.
+func GrokRepeated429ResetForTesting(account *Account, now time.Time) (time.Time, bool) {
+	retryAfter := 60
+	return grokRateLimitResetAtForAccount(account, &xai.QuotaSnapshot{
+		StatusCode: http.StatusTooManyRequests, RetryAfterSeconds: &retryAfter, UpdatedAt: now.Format(time.RFC3339Nano),
+	}, now)
 }

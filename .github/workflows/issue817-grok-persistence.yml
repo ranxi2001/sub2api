@@ -6,6 +6,8 @@ on:
     paths:
       - 'backend/internal/service/account_test_service.go'
       - 'backend/internal/service/grok_scheduled_test_recovery.go'
+      - 'backend/internal/service/grok_rate_limit_history.go'
+      - 'backend/internal/service/grok_rate_limit_history_test.go'
       - 'backend/internal/service/scheduled_test_runner_service.go'
       - 'backend/internal/service/scheduled_test_port.go'
       - 'backend/internal/service/ratelimit_service.go'
@@ -16,6 +18,7 @@ on:
       - 'backend/internal/pkg/xai/**'
       - 'backend/internal/repository/account_repo.go'
       - 'backend/internal/repository/account_repo_integration_test.go'
+      - 'backend/internal/repository/scheduler_cache.go'
       - 'backend/internal/repository/scheduled_test_repo.go'
       - 'backend/internal/repository/integration_harness_test.go'
       - 'backend/go.mod'
@@ -38,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        behavior: [red, negative_red, green]
+        behavior: [red, negative_red, backoff_red, green]
     services:
       postgres:
         image: postgres:18.1-alpine3.23
@@ -79,8 +82,11 @@ jobs:
             if [ "$BEHAVIOR" = red ]; then
               original=45ebcb708867dd61caae10435d19d2df17cd41f3
               source=backend/internal/service/account_test_service.go
-            else
+            elif [ "$BEHAVIOR" = negative_red ]; then
               original=e9e2d4ac9a18f9eeab510cfb2c4213e6041455d6
+              source=backend/internal/repository/account_repo.go
+            else
+              original=48ae8cfef14dab52e90e5103057dc65f5d601dea
               source=backend/internal/repository/account_repo.go
             fi
             expected_blob="$(git rev-parse "$original:$source")"
@@ -107,6 +113,7 @@ jobs:
           set -euo pipefail
           pattern='^TestIssue817GrokScheduledRecoveryRequiresSavedResult$/(headerless_create|available_create)$'
           children=(headerless_create available_create)
+          parent=TestIssue817GrokScheduledRecoveryRequiresSavedResult
           diagnostic='Grok observer must keep the observed limit until result Create succeeds'
           if [ "$BEHAVIOR" = negative_red ]; then
             pattern='^TestIssue817GrokScheduledRecoveryRequiresSavedResult$/negative_(shorter_429|equal_429|exhausted_200)_auto_(off|on)_(saved|prune)$'
@@ -114,10 +121,10 @@ jobs:
             diagnostic='actual negative observation must survive deferred positive recovery'
           fi
           if [ "$BEHAVIOR" = green ]; then
-            pattern='^(TestIssue817GrokScheduledRecoveryRequiresSavedResult|TestIssue817GrokManualRecoveryRemainsImmediate)$'
+            pattern='^(TestIssue817GrokScheduledRecoveryRequiresSavedResult|TestIssue817GrokManualRecoveryRemainsImmediate|TestIssue817GrokNegativePreservesAdaptiveCooldown)$'
             children+=(headerless_saved available_saved headerless_prune available_prune auto_recover_off_create auto_recover_off_saved 429_create 429_saved exhausted_200_create exhausted_200_saved failed_stream_create failed_stream_saved newer_generation owned_pause_and_model)
           fi
-          if [ "$BEHAVIOR" != red ]; then
+          if [ "$BEHAVIOR" = green ] || [ "$BEHAVIOR" = negative_red ]; then
             for negative in shorter_429 equal_429 later_429 exhausted_200; do
               for auto in off on; do
                 for fault in saved create prune; do
@@ -125,6 +132,17 @@ jobs:
                     children+=("negative_${negative}_auto_${auto}_${fault}")
                   fi
                 done
+              done
+            done
+          fi
+          if [ "$BEHAVIOR" = backoff_red ]; then
+            parent=TestIssue817GrokNegativePreservesAdaptiveCooldown
+            pattern='^TestIssue817GrokNegativePreservesAdaptiveCooldown$/(forty_minutes|thirty_minutes_exact|thirty_minutes_below)$'
+            diagnostic='actual negative must preserve the exact adaptive cooldown tier after expiry'
+            children=()
+            for tier in forty_minutes thirty_minutes_exact thirty_minutes_below; do
+              for negative in shorter_429 equal_429 exhausted_200; do
+                children+=("$tier/$negative")
               done
             done
           fi
@@ -140,10 +158,10 @@ jobs:
           if [ "$BEHAVIOR" != green ]; then
             test "$result" -eq 1
             for child in "${children[@]}"; do
-              grep -F -- "--- FAIL: TestIssue817GrokScheduledRecoveryRequiresSavedResult/$child (" evidence/grok-gate.log
+              grep -F -- "--- FAIL: $parent/$child (" evidence/grok-gate.log
               # Each child must reach its own named business assertion.
-              awk -v child="$child" -v diagnostic="$diagnostic" '
-                $0 ~ "=== RUN.*TestIssue817GrokScheduledRecoveryRequiresSavedResult/" child "$" { active=1; next }
+              awk -v parent="$parent" -v child="$child" -v diagnostic="$diagnostic" '
+                $0 ~ "=== RUN.*" parent "/" child "$" { active=1; next }
                 active && /=== RUN/ { active=0 }
                 active && index($0,diagnostic) { found=1 }
                 END { exit !found }
@@ -157,6 +175,11 @@ jobs:
             grep -F -- '--- PASS: TestIssue817GrokManualRecoveryRemainsImmediate (' evidence/grok-gate.log
             for mode in default text; do
               grep -F -- "--- PASS: TestIssue817GrokManualRecoveryRemainsImmediate/$mode (" evidence/grok-gate.log
+            done
+            for tier in forty_minutes thirty_minutes_exact thirty_minutes_below ten_minutes_exact ten_minutes_below; do
+              for negative in shorter_429 equal_429 exhausted_200; do
+                grep -F -- "--- PASS: TestIssue817GrokNegativePreservesAdaptiveCooldown/$tier/$negative (" evidence/grok-gate.log
+              done
             done
           fi
       - name: Retain merged SaveResult and quota contracts
@@ -181,6 +204,14 @@ jobs:
           fi
           for name in TestSetRateLimitedIfLaterDoesNotShortenReset TestClearRateLimitIfObservedProtectsRearmed429Generation TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset; do
             grep -F -- "--- PASS: TestAccountRepoSuite/$name (" evidence/generation-contracts.log
+          done
+          (cd backend && go test -race -tags=unit ./internal/service -run '^TestGrokAdaptiveCooldownRequiresMatchingHistory$' -count=1 -v -timeout=10m) > evidence/history-controls.log 2>&1
+          cat evidence/history-controls.log
+          if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|SIGSEGV|\[build failed\]' evidence/history-controls.log; then
+            exit 1
+          fi
+          for name in matching old_generation old_reset invalid_duration overflow zero legacy; do
+            grep -F -- "--- PASS: TestGrokAdaptiveCooldownRequiresMatchingHistory/$name (" evidence/history-controls.log
           done
       - uses: actions/upload-artifact@v7
         if: always()

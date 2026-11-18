@@ -320,3 +320,107 @@ func TestIssue817GrokManualRecoveryRemainsImmediate(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue817GrokNegativePreservesAdaptiveCooldown(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		previous time.Duration
+		next     time.Duration
+	}{
+		{name: "forty_minutes", previous: 40 * time.Minute, next: time.Hour},
+		{name: "thirty_minutes_exact", previous: 30 * time.Minute, next: time.Hour},
+		{name: "thirty_minutes_below", previous: 30*time.Minute - time.Microsecond, next: 30 * time.Minute},
+		{name: "ten_minutes_exact", previous: 10 * time.Minute, next: 30 * time.Minute},
+		{name: "ten_minutes_below", previous: 10*time.Minute - time.Microsecond, next: 10 * time.Minute},
+	} {
+		for _, negative := range []string{"shorter_429", "equal_429", "exhausted_200"} {
+			t.Run(tc.name+"/"+negative, func(t *testing.T) {
+				ctx := context.Background()
+				now := time.Now().UTC().Truncate(time.Microsecond)
+				reset := now.Add(5 * time.Minute)
+				started := reset.Add(-tc.previous)
+				credentials, err := json.Marshal(map[string]any{"access_token": "offline-access", "refresh_token": "offline-refresh", "expires_at": now.Add(time.Hour).Format(time.RFC3339)})
+				require.NoError(t, err)
+				var id int64
+				require.NoError(t, integrationDB.QueryRow(`INSERT INTO accounts(name,platform,type,status,schedulable,credentials,rate_limited_at,rate_limit_reset_at)
+ VALUES('issue817 backoff','grok','oauth','active',true,$1::jsonb,$2,$3) RETURNING id`, string(credentials), started, reset).Scan(&id))
+				t.Cleanup(func() {
+					_, _ = integrationDB.Exec(`DELETE FROM scheduler_outbox WHERE account_id=$1`, id)
+					_, _ = integrationDB.Exec(`DELETE FROM accounts WHERE id=$1`, id)
+				})
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					boundary := reset
+					if negative == "shorter_429" {
+						boundary = now.Add(time.Minute)
+						w.Header().Set("Retry-After", "60")
+					}
+					w.Header().Set("X-Ratelimit-Limit-Requests", "10")
+					w.Header().Set("X-Ratelimit-Remaining-Requests", "0")
+					w.Header().Set("X-Ratelimit-Reset-Requests", boundary.Format(time.RFC3339Nano))
+					if negative != "exhausted_200" {
+						w.WriteHeader(http.StatusTooManyRequests)
+						_, _ = w.Write([]byte(`{"error":{"message":"offline negative backoff observation"}}`))
+						return
+					}
+					_, _ = w.Write([]byte("data: {\"type\":\"response.completed\"}\n\n"))
+				}))
+				t.Cleanup(server.Close)
+				target, err := url.Parse(server.URL)
+				require.NoError(t, err)
+				accounts := NewAccountRepository(integrationEntClient, integrationDB, nil)
+				scheduled := service.NewScheduledTestService(NewScheduledTestPlanRepository(integrationDB), NewScheduledTestResultRepository(integrationDB))
+				_, executor := service.NewGrokConnectivityRunnerForTesting(scheduled, accounts, &issue817GrokHTTP{client: server.Client(), target: target})
+				previousGeneration := started
+				for range 2 {
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/offline/backoff-test", nil)
+					err = executor.TestAccountConnection(c, id, "grok-4.5", "", service.AccountTestModeDefault)
+					if negative == "exhausted_200" {
+						require.NoError(t, err)
+					} else {
+						require.ErrorContains(t, err, "429")
+					}
+					account, err := accounts.GetByID(ctx, id)
+					require.NoError(t, err)
+					require.NotNil(t, account.RateLimitedAt)
+					require.NotNil(t, account.RateLimitResetAt)
+					require.True(t, account.RateLimitedAt.After(previousGeneration))
+					require.True(t, reset.Equal(*account.RateLimitResetAt))
+					afterExpiry := reset.Add(time.Second)
+					next, limited := service.GrokRepeated429ResetForTesting(account, afterExpiry)
+					require.True(t, limited)
+					require.True(t, afterExpiry.Add(tc.next).Equal(next), "actual negative must preserve the exact adaptive cooldown tier after expiry")
+					previousGeneration = *account.RateLimitedAt
+				}
+				account, err := accounts.GetByID(ctx, id)
+				require.NoError(t, err)
+				// The scheduler projection and an ordinary account edit must retain
+				// the history bound to the current recovery generation.
+				account.Extra = filterSchedulerExtra(account.Extra)
+				afterExpiry := reset.Add(time.Second)
+				next, _ := service.GrokRepeated429ResetForTesting(account, afterExpiry)
+				require.True(t, afterExpiry.Add(tc.next).Equal(next))
+				delete(account.Extra, service.GrokRateLimitHistoryExtraKey)
+				require.NoError(t, accounts.Update(ctx, account))
+				account, err = accounts.GetByID(ctx, id)
+				require.NoError(t, err)
+				next, _ = service.GrokRepeated429ResetForTesting(account, afterExpiry)
+				require.True(t, afterExpiry.Add(tc.next).Equal(next))
+				// Reset extension starts a new window, so old tier evidence must
+				// not leak into that window or survive a clear/re-arm generation.
+				newBoundary := reset.Add(time.Minute)
+				require.NoError(t, accounts.(*accountRepository).SetRateLimitedIfLater(ctx, id, newBoundary))
+				account, err = accounts.GetByID(ctx, id)
+				require.NoError(t, err)
+				next, _ = service.GrokRepeated429ResetForTesting(account, newBoundary.Add(time.Second))
+				require.True(t, newBoundary.Add(time.Second+10*time.Minute).Equal(next))
+				require.NoError(t, accounts.ClearRateLimit(ctx, id))
+				require.NoError(t, accounts.(*accountRepository).SetRateLimitedIfLater(ctx, id, reset))
+				account, err = accounts.GetByID(ctx, id)
+				require.NoError(t, err)
+				next, _ = service.GrokRepeated429ResetForTesting(account, afterExpiry)
+				require.True(t, afterExpiry.Add(10*time.Minute).Equal(next))
+			})
+		}
+	}
+}
