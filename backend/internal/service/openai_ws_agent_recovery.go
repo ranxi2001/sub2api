@@ -69,7 +69,7 @@ type openAIWSAgentRecovery struct {
 	acceptedHistoryTools             map[string]openAIWSAcceptedToolHistory
 	pendingHistoryTools              map[string]openAIWSAcceptedToolHistory
 	historicalToolIDs                map[[32]byte]struct{}
-	historicalToolIDsExhausted        bool
+	historicalToolIDsExhausted       bool
 	deliveredTools                   map[string]openAIWSDeliveredTool
 	pendingTools                     map[string]openAIWSDeliveredTool
 	localHistory                     openAIWSLocalHistory
