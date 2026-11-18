@@ -29,6 +29,8 @@ describe("groupsOpenAIFast", () => {
       });
       expect(locale.groups.openaiFast.ultrafastHint).toContain("GPT-6 Astra");
       expect(locale.groups.openaiFast.ultrafastHint).toContain("GPT-6.1 Sol");
+      expect(locale.groups.openaiFast.ultrafastHint).toContain("GPT-6.2");
+      expect(locale.groups.openaiFast.ultrafastHint).not.toContain("2027");
     }
   });
 

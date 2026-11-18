@@ -72,3 +72,5 @@
 CI 首轮发现缺少 GPT-6.2 描述解析 helper；补入上游旧依赖 `bea67f412` 中的 `codexInstructionsTemplate`，仅补当前 GPT-6.2 调用所需 helper，不改 fork 的 GPT-6.1 Sol 默认 instructions 策略。
 
 补齐 fork 渠道价卡导入/导出和批量编辑的 Ultra Fast 字段保留，沿用正数校验；增加往返与批量提交回归。为上游渠道视图测试补充 fork 已有的管理员 store fixture。
+
+前端 CI 发现 Ultra Fast 帮助文案与 fork 规则不一致：恢复 `service_tier=ultrafast` 说明，将上游促销价改为本站固定 6 倍及渠道覆盖说明，保留新增套餐权益信息。新增渠道倍率视图回归已纳入 Makefile 的 CI 关键用例。定位 CI 后，后端模型/TTL/渠道倍率/转换边界定向用例通过；前端 6 文件、120 项定向用例通过。
