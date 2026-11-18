@@ -378,11 +378,11 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			if kind != "function_call" && kind != "custom_tool_call" && kind != "tool_search_call" {
 				continue
 			}
-			if acceptsPriorToolPair(r.acceptedHistoryTools, account, r.request.model, item, proof.history) {
-				continue
-			}
 			fingerprint, valid := openAIToolFingerprint(item)
 			observed, found := r.deliveredTools[r.request.model+"\x00"+item.Get("call_id").String()]
+			if !found && acceptsPriorToolPair(r.acceptedHistoryTools, account, r.request.model, item, proof.history) {
+				continue
+			}
 			if !valid || !found || observed.conflicted || observed.fingerprint != fingerprint || observed.accountID != account.ID || observed.config != openAIAgentRecoveryConfig(account, r.request.model) {
 				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r.request)
 			}
@@ -588,7 +588,8 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 				// pendingTools coalesces item.done and terminal observations
 				// within one generation. An existing delivered identity is a
 				// later generation reusing the call ID, even if bytes match.
-				observed.conflicted = observed.conflicted || old.conflicted || exists
+				_, reusedHistoricalID := r.acceptedHistoryTools[key]
+				observed.conflicted = observed.conflicted || old.conflicted || exists || reusedHistoricalID
 				r.deliveredTools[key] = observed
 			}
 			for _, key := range request.keys {
