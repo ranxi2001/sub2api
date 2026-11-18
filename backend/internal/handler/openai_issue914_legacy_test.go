@@ -48,7 +48,7 @@ func issue914Body(t *testing.T, change string, stream bool) string {
 	}
 	set("store", false)
 	set("instructions", "Continue the synthetic task.")
-	set("client_metadata.window_id", "fixture-window-1")
+	set("client_metadata.x-codex-window-id", "fixture-window-1")
 	switch change {
 	case "metadata":
 		set("input.0.internal_chat_message_metadata_passthrough", map[string]any{"turn_id": "fixture-turn"})
@@ -232,7 +232,7 @@ func TestIssue914LegacyWSCompatibility(t *testing.T) {
 							require.NoError(t, err)
 							field := "instructions"
 							if change == "window" {
-								field = "client_metadata.window_id"
+								field = "client_metadata.x-codex-window-id"
 							}
 							body, err = sjson.Set(body, field, "fixture-next-turn")
 							require.NoError(t, err)
