@@ -55,4 +55,3 @@ export async function getTwoFALogin(id: string, options?: { signal?: AbortSignal
 export async function deleteTwoFALogin(id: string): Promise<void> {
   await apiClient.delete(`${twoFALoginPath}/${id}`)
 }
-
