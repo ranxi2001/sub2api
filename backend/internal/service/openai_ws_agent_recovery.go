@@ -65,6 +65,8 @@ type openAIWSAgentRecovery struct {
 	completedAccount                 int64
 	completedModel                   string
 	completedBridge                  openAIWSBridgeResponseAnchor
+	acceptedHistoryTools             map[string]openAIWSAcceptedToolHistory
+	pendingHistoryTools              map[string]openAIWSAcceptedToolHistory
 	deliveredTools                   map[string]openAIWSDeliveredTool
 	pendingTools                     map[string]openAIWSDeliveredTool
 	localHistory                     openAIWSLocalHistory
@@ -261,6 +263,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	r.itemDone = nil
 	r.pendingTools = nil
+	r.pendingHistoryTools = nil
 	if req.GetBody != nil {
 		// HTTP builders can still normalize the prepared body. Validate the
 		// built request's bytes, rather than replacing them with the earlier
@@ -375,6 +378,9 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			if kind != "function_call" && kind != "custom_tool_call" && kind != "tool_search_call" {
 				continue
 			}
+			if acceptsPriorToolPair(r.acceptedHistoryTools, account, r.request.model, item, proof.history) {
+				continue
+			}
 			fingerprint, valid := openAIToolFingerprint(item)
 			observed, found := r.deliveredTools[r.request.model+"\x00"+item.Get("call_id").String()]
 			if !valid || !found || observed.conflicted || observed.fingerprint != fingerprint || observed.accountID != account.ID || observed.config != openAIAgentRecoveryConfig(account, r.request.model) {
@@ -432,6 +438,9 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		return err
 	}
 	r.finish = finish
+	if mode == "http_bridge" {
+		r.pendingHistoryTools = acceptedOpenAIWSToolHistory(source, account, r.request.model)
+	}
 	r.stageLocalHistory(source)
 	if r.request.owner != nil || len(r.request.items) > 0 || r.request.omittedHistory ||
 		(r.service.settingService != nil && r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx)) {
@@ -538,6 +547,9 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		}
 		r.finish(completed)
 		if completed {
+			if r.pendingHistoryTools != nil {
+				r.acceptedHistoryTools = r.pendingHistoryTools
+			}
 			r.completedResponse, r.completedAccount, r.completedModel = responseID, request.delivery.binding.accountID, request.model
 			r.completedBridge = openAIWSBridgeResponseAnchor{response: responseID, model: request.model, session: request.session,
 				account: request.delivery.binding.accountID, key: request.keyID, user: request.userID, group: request.groupID, config: request.delivery.binding.config}
