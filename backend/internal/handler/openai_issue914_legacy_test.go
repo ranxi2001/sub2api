@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -108,7 +109,11 @@ func issue914HTTPNode(t *testing.T, u *issue805Oracle, legacy bool, accounts []s
 	upstream := &issue842Transport{HTTPUpstream: testutil.NewRealHTTPUpstream(cfg), target: target}
 	usage := &readable409UsageRepo{}
 	clients := issue805Redis(t)
-	h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, upstream, repository.NewGatewayCache(clients()), service.NewSettingService(&issue842Settings{values: issue914Settings()}, cfg), usage, accounts...)
+	settings := issue914Settings()
+	if !legacy {
+		settings = issue892Settings()
+	}
+	h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, upstream, repository.NewGatewayCache(clients()), service.NewSettingService(&issue842Settings{values: settings}, cfg), usage, accounts...)
 	h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	issue914Policy(t, h.cfg, legacy)
 	return h, usage
@@ -122,6 +127,9 @@ func TestIssue914LegacyHTTPCompatibility(t *testing.T) {
 				h, usage := issue914HTTPNode(t, u, true, issue715Accounts()[:1])
 				body := issue914Body(t, change, stream)
 				c, rec := newIssue715Context(t, body)
+				key, exists := c.Get(string(middleware.ContextKeyAPIKey))
+				require.True(t, exists)
+				key.(*service.APIKey).Group.AllowImageGeneration = true
 				c.Request.Header.Set("session_id", "fixture-914")
 				if change == "lite_namespace" || change == "lite_search" {
 					c.Request.Header.Set("X-OpenAI-Internal-Codex-Responses-Lite", "true")
@@ -188,13 +196,18 @@ func issue914WSNode(t *testing.T, kind, mode, upstream string, cache service.Gat
 func TestIssue914LegacyWSCompatibility(t *testing.T) {
 	for _, kind := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
 		for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeHTTPBridge} {
-			for _, change := range []string{"metadata", "declaration_id", "compaction_order", "custom_bridge", "instructions", "window", "plaintext_instructions"} {
+			for _, change := range []string{"metadata", "declaration_id", "schema", "reserved_name", "lite_namespace", "lite_search", "compaction_order", "custom_bridge", "instructions", "window", "plaintext_instructions"} {
 				t.Run(kind+"/"+mode+"/"+change, func(t *testing.T) {
 					clients := issue805Redis(t)
 					u := &issue805Oracle{}
 					srv := u.server(t)
 					h := issue914WSNode(t, kind, mode, srv.URL, repository.NewGatewayCache(clients()))
 					body := issue914Body(t, change, true)
+					if change == "lite_namespace" || change == "lite_search" {
+						var err error
+						body, err = sjson.Set(body, "client_metadata.ws_request_header_x_openai_internal_codex_responses_lite", "true")
+						require.NoError(t, err)
+					}
 					if change == "plaintext_instructions" {
 						var err error
 						body, err = sjson.Delete(body, "input.0")
