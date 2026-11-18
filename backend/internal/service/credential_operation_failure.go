@@ -105,6 +105,8 @@ func credentialOperationCode(code string) string {
 		return "requires_relogin"
 	case "password_rejected", "invalid_password", "incorrect_password":
 		return "password_rejected"
+	case "email_otp_required":
+		return "email_otp_required"
 	case "totp_rejected", "mfa_required", "otp_required", "email_verification_required", "interaction_required":
 		return "mfa_required"
 	case "security_check", "security_check_required", "challenge_required", "session_blocked_by_cyber_policy", "cyber_policy":
@@ -229,6 +231,8 @@ func credentialOperationFailure(code, stage string, at *time.Time) *CredentialOp
 		action = "update_password"
 	case "mfa_required":
 		action = "complete_verification"
+	case "email_otp_required":
+		action = "complete_email_verification"
 	case "security_check", "authorization_denied":
 		action = "review_authorization"
 	case "rate_limited", "timeout", "transport_error", "service_error":

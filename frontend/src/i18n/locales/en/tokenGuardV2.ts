@@ -18,6 +18,7 @@ export default {
   "unknownTime": "Time not recorded",
   "automationBlocked": "Automation is restricted; review this failure and the re-login budget",
   "reasons": {
+    "email_otp_required": "Email verification code required",
     "phone_verification_required": "Phone verification required",
     "account_deactivated": "Account deactivated",
     "account_deleted": "Account deleted",
@@ -39,6 +40,7 @@ export default {
     "reauthorize": "Check login settings and authorize again.",
     "update_password": "Verify and update the saved login password.",
     "complete_verification": "Complete official verification manually and check MFA / verification code settings.",
+    "complete_email_verification": "This login requires an email code; an authenticator 2FA code cannot replace it. Reauthorize the account from Account Management and complete email verification in the browser.",
     "review_authorization": "Review official authorization or security verification requirements manually.",
     "check_service_later": "Check network or service availability; retry later under the existing policy.",
     "review_diagnostics": "Review this operation’s safe stage and code to confirm the cause manually."

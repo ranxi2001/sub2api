@@ -74,6 +74,20 @@ func TestCredentialOperationWorkerFailurePersistsThroughSafeDTO(t *testing.T) {
 	}
 }
 
+func TestCredentialOperationEmailVerificationIsNotTOTP(t *testing.T) {
+	svc, _, repo, updater, _, _ := newReauthTestService("acct-1")
+	repo.task = &OpenAIOAuthReauthTaskRecord{ID: 7, AccountID: 42, Status: OpenAIOAuthReauthStatusRunning, WorkerID: "worker-a"}
+	raw := "local_protocol_failed stage=email_verification reason=email_otp_required elapsed_ms=120 exit=1"
+	require.NoError(t, svc.FailTask(context.Background(), 7, "worker-a", raw))
+	view := safeReauthTask(repo.task)
+	require.Equal(t, "email_verification", view.Diagnostic.Stage)
+	require.Equal(t, "email_otp_required", view.Diagnostic.Reason)
+	require.Equal(t, "email_otp_required", view.Failure.Code)
+	require.Equal(t, "complete_email_verification", view.Failure.Action)
+	require.Equal(t, "email_verification", view.Failure.Stage)
+	require.False(t, updater.applied)
+}
+
 type credentialRefreshClient struct {
 	OpenAIOAuthClient
 	err error

@@ -27,8 +27,27 @@ export class TlsFingerprintTransport {
     if (route === 'GET /api/auth/csrf') return Response.json({csrfToken: 'synthetic-csrf'}, {
       headers: {'set-cookie': '__Host-next-auth.csrf-token=synthetic-csrf; Path=/; Secure'},
     });
-    if (route === 'POST /api/auth/signin/openai') return Response.json({url: 'https://auth.openai.com/log-in/password'});
+    if (route === 'POST /api/auth/signin/openai') {
+      if (mode.startsWith('login-entry-')) {
+        return Response.json({url: target.searchParams.has('login_hint')
+          ? 'https://auth.openai.com/email-verification' : 'https://auth.openai.com/log-in'});
+      }
+      return Response.json({url: 'https://auth.openai.com/log-in/password'});
+    }
     if (route === 'GET /log-in/password' || route === 'GET /log-in') return html();
+    if (route === 'GET /email-verification') return html();
+    if (route === 'POST /api/accounts/authorize/continue') {
+      assert.equal(target.origin, 'https://auth.openai.com');
+      assert.deepEqual(JSON.parse(options.body), {username: {kind: 'email', value: 'test@example.test'}});
+      assert.ok(options.headers.get('openai-sentinel-token'));
+      if (mode === 'login-entry-rejected') return Response.json({error: {code: 'account_deactivated'}}, {status: 403});
+      const destinations = {
+        'login-entry-email': 'https://auth.openai.com/email-verification',
+        'login-entry-untrusted': 'https://untrusted.example/log-in/password',
+        'login-entry-missing': '',
+      };
+      return Response.json({continue_url: destinations[mode] ?? 'https://auth.openai.com/log-in/password'});
+    }
     if (route === 'POST /api/accounts/password/verify') {
       assert.equal(JSON.parse(options.body).password, 'synthetic-password');
       if (mode === 'operation-error') return Response.json(JSON.parse(process.env.CODEX_TEST_ERROR), {status: 400});

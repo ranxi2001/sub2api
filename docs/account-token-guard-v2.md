@@ -117,6 +117,8 @@ Worker 单元测试使用离线协议替身及本地假邮箱；真实密码/TOT
 
 Session Studio 的 JSON / NDJSON 解析一收到终态即返回，不等连接 EOF；响应设置大小和时间边界，拒绝重定向，第三方原始错误及登录输出不写入日志。本地流程在真实执行完成前不再提前上报 `password_submitted` / `mfa_submitted`，避免将整个登录时间误显示为密码阶段停滞。
 
+本地 Codex 密码重登使用 `screen_hint=login` 打开登录入口，不传 `login_hint`；通过登录页提交邮箱，再按服务端返回的登录方式继续。服务端返回密码页时使用已保存的密码和 TOTP；已有登录态和直接密码页仍沿用原流程。若服务端要求邮箱验证码，则以 `stage=email_verification / reason=email_otp_required` 结束本次任务，不提交密码或 TOTP 来替代邮件验证，也不自动重发验证码。凭证运营显示「需要邮箱验证码」并提示到账号管理中使用浏览器重新授权。此时尚未完成 OAuth，不回写令牌；身份校验、并发凭据保护和原有重登预算保持不变。
+
 Session Studio 事件流使用 `type=result` 与对象类型的 `payload` 表示终态；`type=progress` / `heartbeat` 是通知，其中的 `error` 信息或 `active` 状态不结束登录。其他类型不含结果字段的普通通知继续忽略，带 `payload` / `credential` / `error` / `status` 的未知类型则拒绝，避免跳过含义不明的结果。旧版无事件类型的 JSON 结果继续兼容：`credential`、非空 `error` 或明确成功 / 失败状态可结束解析，单独的 `active` / `error=null` 不表示完成。首个终态失败、无效终态或不完整 OAuth 凭据均会拒绝，不会跳过它们接受后续成功；完整凭据仍须经过后端身份校验与 CAS 写回。
 
 客户端现在拒绝重复 JSON 字段，避免后一个同名字段覆盖终态失败；失败任务可展示 HTTP/事件解析/终态/凭据校验/提交的白名单阶段、原因及耗时，HTTP 拒绝显示状态码。这只能说明客户端观察位置，不能证明远端内部 OAuth 失败根因或账号恢复。明确的 models 403 会话/策略拒绝保存 blocked 原因并阻止自动重登，不通过新登录或换会话绕过。源码参考、完整边界和验收 gate 见 [Session Studio 对照说明](reauth-session-studio-reference.md)。
