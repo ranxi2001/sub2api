@@ -20,6 +20,14 @@ import (
 )
 
 func TestHTTPBridgeWarmupThenToolContinuation(t *testing.T) {
+	runHTTPBridgeWarmupToolContinuation(t, false)
+}
+
+func TestHTTPBridgeWarmupWithPriorCompletedToolHistory(t *testing.T) {
+	runHTTPBridgeWarmupToolContinuation(t, true)
+}
+
+func runHTTPBridgeWarmupToolContinuation(t *testing.T, priorTools bool) {
 	var calls atomic.Int32
 	bodies := make(chan []byte, 4)
 	const tool = `[{"type":"function","name":"fixture_once","parameters":{"type":"object","properties":{"n":{"type":"integer","maximum":9007199254740993}},"required":["n"],"additionalProperties":false},"strict":true}]`
@@ -73,7 +81,11 @@ func TestHTTPBridgeWarmupThenToolContinuation(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, owner, "local prefill must not mint provider ownership")
 	require.Empty(t, h.usageLogs, "local prefill must not create usage")
-	send(fmt.Sprintf(`{"type":"response.create","previous_response_id":%q,"input":[{"role":"user","content":"fixture original task"}]}`, localID))
+	prior := ""
+	if priorTools {
+		prior = `,{"type":"function_call","call_id":"call_prior_completed","name":"fixture_once","arguments":"{\"n\":1}","status":"completed"},{"type":"function_call_output","call_id":"call_prior_completed","output":"prior receipt"}`
+	}
+	send(fmt.Sprintf(`{"type":"response.create","previous_response_id":%q,"input":[{"role":"user","content":"fixture original task"}%s]}`, localID, prior))
 	first := read()
 	require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
 	require.Equal(t, "call_fixture_once", gjson.GetBytes(first, "response.output.1.call_id").String())
@@ -95,13 +107,17 @@ func TestHTTPBridgeWarmupThenToolContinuation(t *testing.T) {
 	require.Equal(t, "9007199254740993", gjson.GetBytes(firstBody, "tools.0.parameters.properties.n.maximum").Raw)
 	require.Equal(t, gjson.False, gjson.GetBytes(firstBody, "store").Type)
 	items := gjson.GetBytes(secondBody, "input").Array()
-	require.Len(t, items, 4)
+	offset := 0
+	if priorTools {
+		offset = 2
+	}
+	require.Len(t, items, 4+offset)
 	require.Equal(t, "fixture original task", items[0].Get("content").String())
-	require.Equal(t, "fixture plan retained", items[1].Get("content.0.text").String())
-	require.Equal(t, "call_fixture_once", items[2].Get("call_id").String())
-	require.Equal(t, `{"n":9007199254740993}`, items[2].Get("arguments").String())
-	require.Equal(t, "call_fixture_once", items[3].Get("call_id").String())
-	require.Equal(t, "fixture result", items[3].Get("output").String())
+	require.Equal(t, "fixture plan retained", items[1+offset].Get("content.0.text").String())
+	require.Equal(t, "call_fixture_once", items[2+offset].Get("call_id").String())
+	require.Equal(t, `{"n":9007199254740993}`, items[2+offset].Get("arguments").String())
+	require.Equal(t, "call_fixture_once", items[3+offset].Get("call_id").String())
+	require.Equal(t, "fixture result", items[3+offset].Get("output").String())
 	require.False(t, gjson.GetBytes(secondBody, "previous_response_id").Exists())
 	require.Eventually(t, func() bool { return len(h.usageLogs) == 2 }, time.Second, 5*time.Millisecond, "only actual generations may be billed")
 }

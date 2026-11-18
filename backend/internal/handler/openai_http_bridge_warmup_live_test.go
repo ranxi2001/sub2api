@@ -177,7 +177,7 @@ func TestHTTPBridgeWarmupLive(t *testing.T) {
 		report["outcome"] = "warmup_called_provider"
 		return
 	}
-	if !send(map[string]any{"type": "response.create", "previous_response_id": localID, "tool_choice": map[string]string{"type": "function", "name": "fixture_echo"}, "input": []any{map[string]string{"role": "user", "content": "Call fixture_echo with text ping exactly once. This is a synthetic protocol test."}}}) {
+	if !send(map[string]any{"type": "response.create", "previous_response_id": localID, "tool_choice": map[string]string{"type": "function", "name": "fixture_echo"}, "input": []any{map[string]string{"role": "user", "content": "Call fixture_echo with text ping exactly once. This is a synthetic protocol test."}, map[string]string{"type": "function_call", "call_id": "fixture_old_completed", "name": "fixture_echo", "arguments": `{"text":"previous"}`, "status": "completed"}, map[string]string{"type": "function_call_output", "call_id": "fixture_old_completed", "output": "previous receipt"}}}) {
 		return
 	}
 	first := read("turn1")
