@@ -1524,6 +1524,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
 			}
+			if result != nil {
+				// The HTTP payload can contain a policy rewrite or replayed configuration from an earlier turn.
+				result.RequestedReasoningEffort = currentBridgePayload.requestedReasoningEffort
+			}
 			if bridgeErr != nil && ctx.Err() != nil {
 				bridgeErr = clientReader.closeForControl(ctx)
 			} else if errors.Is(bridgeErr, errOpenAIWSUsageDrainExpired) && clientReader.disconnected() {
