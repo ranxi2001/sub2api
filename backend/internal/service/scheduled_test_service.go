@@ -98,11 +98,18 @@ func (s *ScheduledTestService) ListResults(ctx context.Context, planID int64, li
 // SaveResult inserts a result and prunes old entries beyond maxResults. Account plans
 // only feed the admin history; the user showcase is fed by group tests.
 func (s *ScheduledTestService) SaveResult(ctx context.Context, planID int64, maxResults int, result *ScheduledTestResult) error {
+	_, err := s.saveResult(ctx, planID, maxResults, result)
+	return err
+}
+
+// saveResult separates durable insertion from best-effort history retention.
+// A prune failure must not cause an already executed test to be replayed.
+func (s *ScheduledTestService) saveResult(ctx context.Context, planID int64, maxResults int, result *ScheduledTestResult) (saved bool, err error) {
 	result.PlanID = planID
 	if _, err := s.resultRepo.Create(ctx, result); err != nil {
-		return err
+		return false, err
 	}
-	return s.resultRepo.PruneOldResults(ctx, planID, maxResults)
+	return true, s.resultRepo.PruneOldResults(ctx, planID, maxResults)
 }
 
 func computeNextRun(cronExpr string, from time.Time) (time.Time, error) {

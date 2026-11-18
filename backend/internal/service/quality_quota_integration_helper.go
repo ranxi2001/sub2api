@@ -31,3 +31,18 @@ func (s *ScheduledTestRunnerService) RunQuotaScheduledPlanForTesting(ctx context
 func (s *ScheduledTestRunnerService) StartQuotaTriggerWorkerForTesting() {
 	s.startQualityTriggers()
 }
+
+// Drive one actual worker attempt synchronously, including the ACK boundary.
+func (s *ScheduledTestRunnerService) RunQualityTriggerForTesting(ctx context.Context, entry qualityqueue.Signal) error {
+	return s.runQualityTrigger(ctx, entry)
+}
+
+// Connectivity tests use the real background executor's synthetic account path.
+func NewConnectivityRunnerForTesting(scheduled *ScheduledTestService, accounts AccountRepository) *ScheduledTestRunnerService {
+	return &ScheduledTestRunnerService{
+		planRepo:       scheduled.planRepo,
+		scheduledSvc:   scheduled,
+		accountTestSvc: &AccountTestService{accountRepo: accounts},
+		rateLimitSvc:   NewRateLimitService(accounts, nil, nil, nil, nil),
+	}
+}
