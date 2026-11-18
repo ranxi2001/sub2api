@@ -905,12 +905,17 @@ func (s *AccountRepoSuite) TestSetRateLimitedIfLaterDoesNotShortenReset() {
 	s.repo.schedulerCache = cacheRecorder
 
 	s.Require().NoError(s.repo.SetRateLimitedIfLater(s.ctx, account.ID, later))
+	before, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(before.RateLimitedAt)
 	s.Require().NoError(s.repo.SetRateLimitedIfLater(s.ctx, account.ID, earlier))
 
 	got, err := s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().NotNil(got.RateLimitResetAt)
 	s.Require().WithinDuration(later, *got.RateLimitResetAt, time.Second)
+	s.Require().NotNil(got.RateLimitedAt)
+	s.Require().True(before.RateLimitedAt.Equal(*got.RateLimitedAt), "non-Grok shorter observations retain the existing no-op behavior")
 	s.Require().Len(cacheRecorder.setAccounts, 2)
 	s.Require().NotNil(cacheRecorder.setAccounts[1].RateLimitResetAt)
 	s.Require().WithinDuration(later, *cacheRecorder.setAccounts[1].RateLimitResetAt, time.Second)
@@ -964,6 +969,32 @@ func (s *AccountRepoSuite) TestClearRateLimitIfObservedProtectsRearmed429Generat
 	s.Require().NotNil(retyped.RateLimitedAt)
 	s.Require().NotNil(retyped.RateLimitResetAt)
 	s.Require().WithinDuration(rearmedReset, *retyped.RateLimitResetAt, time.Second)
+}
+
+func (s *AccountRepoSuite) TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name: "grok-negative-generation", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth,
+	})
+	reset := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	// A future observed timestamp forces strict advancement independent of
+	// clock precision/skew. Two repository instances share only the database.
+	observed := time.Now().Add(time.Minute).UTC().Truncate(time.Microsecond)
+	_, err := s.client.Account.UpdateOneID(account.ID).SetRateLimitedAt(observed).SetRateLimitResetAt(reset).Save(s.ctx)
+	s.Require().NoError(err)
+	other := newAccountRepositoryWithSQL(s.client, s.repo.sql, nil)
+	for _, candidate := range []time.Time{reset.Add(-time.Minute), reset} {
+		s.Require().NoError(other.SetRateLimitedIfLater(s.ctx, account.ID, candidate))
+		current, err := s.repo.GetByID(s.ctx, account.ID)
+		s.Require().NoError(err)
+		s.Require().NotNil(current.RateLimitedAt)
+		s.Require().NotNil(current.RateLimitResetAt)
+		s.Require().True(current.RateLimitedAt.After(observed), "Grok negative must advance even with equal/shorter reset and a future prior clock")
+		s.Require().True(reset.Equal(*current.RateLimitResetAt))
+		cleared, err := s.repo.ClearRateLimitIfObserved(s.ctx, account.ID, observed, reset)
+		s.Require().NoError(err)
+		s.Require().False(cleared)
+		observed = *current.RateLimitedAt
+	}
 }
 
 func (s *AccountRepoSuite) TestClearRateLimit() {

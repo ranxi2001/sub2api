@@ -22,8 +22,9 @@ import (
 // repository CAS and result insertion. No provider or OAuth refresh is called.
 type issue817GrokHTTP struct {
 	service.HTTPUpstream
-	client *http.Client
-	target *url.URL
+	client   *http.Client
+	target   *url.URL
+	negative bool
 }
 
 func (u *issue817GrokHTTP) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -31,6 +32,9 @@ func (u *issue817GrokHTTP) Do(req *http.Request, _ string, _ int64, _ int) (*htt
 	endpoint := *req.URL
 	endpoint.Scheme, endpoint.Host = u.target.Scheme, u.target.Host
 	local.URL = &endpoint
+	if u.negative {
+		local.Header.Set("X-Issue817-Negative", "true")
+	}
 	return u.client.Do(local)
 }
 
@@ -57,14 +61,16 @@ func (r *issue817GrokResults) PruneOldResults(ctx context.Context, planID int64,
 }
 
 func TestIssue817GrokScheduledRecoveryRequiresSavedResult(t *testing.T) {
-	for _, tc := range []struct {
+	type scenario struct {
 		name        string
 		response    string
 		fault       string
 		autoRecover bool
 		newer       bool
 		owned       bool
-	}{
+		negative    string
+	}
+	cases := []scenario{
 		{name: "headerless_create", response: "headerless", fault: "create", autoRecover: true},
 		{name: "available_create", response: "available", fault: "create", autoRecover: true},
 		{name: "headerless_saved", response: "headerless", autoRecover: true},
@@ -81,7 +87,20 @@ func TestIssue817GrokScheduledRecoveryRequiresSavedResult(t *testing.T) {
 		{name: "failed_stream_saved", response: "failed_stream", autoRecover: true},
 		{name: "newer_generation", response: "available", autoRecover: true, newer: true},
 		{name: "owned_pause_and_model", response: "available", autoRecover: true, owned: true},
-	} {
+	}
+	for _, negative := range []string{"shorter_429", "equal_429", "later_429", "exhausted_200"} {
+		for _, auto := range []bool{false, true} {
+			mode := "auto_off"
+			if auto {
+				mode = "auto_on"
+			}
+			for _, fault := range []string{"saved", "create", "prune"} {
+				cases = append(cases, scenario{name: "negative_" + negative + "_" + mode + "_" + fault,
+					response: "available", negative: negative, autoRecover: auto, fault: fault, owned: true})
+			}
+		}
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			accounts := NewAccountRepository(integrationEntClient, integrationDB, nil)
@@ -114,6 +133,26 @@ func TestIssue817GrokScheduledRecoveryRequiresSavedResult(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
+				if r.Header.Get("X-Issue817-Negative") == "true" {
+					reset := resetAt
+					switch tc.negative {
+					case "shorter_429":
+						reset = now.Add(time.Minute)
+						w.Header().Set("Retry-After", "60")
+					case "later_429":
+						reset = resetAt.Add(time.Hour)
+					}
+					w.Header().Set("X-Ratelimit-Limit-Requests", "10")
+					w.Header().Set("X-Ratelimit-Remaining-Requests", "0")
+					w.Header().Set("X-Ratelimit-Reset-Requests", reset.Format(time.RFC3339Nano))
+					if tc.negative != "exhausted_200" {
+						w.WriteHeader(http.StatusTooManyRequests)
+						_, _ = w.Write([]byte(`{"error":{"message":"actual concurrent negative"}}`))
+						return
+					}
+					_, _ = w.Write([]byte("data: {\"type\":\"response.completed\"}\n\n"))
+					return
+				}
 				if tc.response == "available" || tc.response == "exhausted" {
 					w.Header().Set("X-Ratelimit-Limit-Requests", "10")
 					remaining := "9"
@@ -139,6 +178,8 @@ func TestIssue817GrokScheduledRecoveryRequiresSavedResult(t *testing.T) {
 			target, err := url.Parse(server.URL)
 			require.NoError(t, err)
 			results := &issue817GrokResults{ScheduledTestResultRepository: NewScheduledTestResultRepository(integrationDB), failCreate: tc.fault == "create", failPrune: tc.fault == "prune"}
+			var negativeExecutor *service.AccountTestService
+			var negativeLimitedAt, negativeResetAt time.Time
 			results.beforeCreate = func() {
 				require.Equal(t, int32(1), calls.Load(), "real HTTP must reach the observer before Create")
 				account, err := accounts.GetByID(ctx, accountID)
@@ -160,15 +201,49 @@ func TestIssue817GrokScheduledRecoveryRequiresSavedResult(t *testing.T) {
 					_, err = integrationDB.Exec(`UPDATE accounts SET rate_limited_at=$2,rate_limit_reset_at=$3 WHERE id=$1`, accountID, limitedAt, resetAt)
 					require.NoError(t, err)
 				}
+				if tc.negative != "" {
+					// A second executor/repository performs an actual negative HTTP
+					// observation while the scheduled positive is awaiting Create.
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/offline/concurrent-test", nil)
+					negativeErr := negativeExecutor.TestAccountConnection(c, accountID, "grok-4.5", "", service.AccountTestModeDefault)
+					if tc.negative == "exhausted_200" {
+						require.NoError(t, negativeErr)
+					} else {
+						require.ErrorContains(t, negativeErr, "429")
+					}
+					negative, err := accounts.GetByID(ctx, accountID)
+					require.NoError(t, err)
+					require.NotNil(t, negative.RateLimitedAt)
+					require.NotNil(t, negative.RateLimitResetAt)
+					negativeLimitedAt, negativeResetAt = *negative.RateLimitedAt, *negative.RateLimitResetAt
+					if tc.negative == "later_429" {
+						require.True(t, negativeResetAt.After(resetAt))
+					} else {
+						require.True(t, resetAt.Equal(negativeResetAt), "negative observation must not shorten the existing reset")
+					}
+				}
 			}
 			scheduled := service.ProvideScheduledTestService(plans, results, nil, nil)
 			runner, _ := service.NewGrokConnectivityRunnerForTesting(scheduled, accounts, &issue817GrokHTTP{client: server.Client(), target: target})
+			_, negativeExecutor = service.NewGrokConnectivityRunnerForTesting(scheduled, NewAccountRepository(integrationEntClient, integrationDB, nil),
+				&issue817GrokHTTP{client: server.Client(), target: target, negative: true})
 			require.Equal(t, tc.fault != "create", runner.RunQuotaScheduledPlanForTesting(ctx, plan))
-			require.Equal(t, int32(1), calls.Load(), "persistence failure must not replay the HTTP probe")
+			expectedCalls := int32(1)
+			if tc.negative != "" {
+				expectedCalls++
+			}
+			require.Equal(t, expectedCalls, calls.Load(), "only the planned probe and explicit negative may run")
 			account, err := accounts.GetByID(ctx, accountID)
 			require.NoError(t, err)
 			positive := tc.response == "headerless" || tc.response == "available"
-			if positive && tc.fault != "create" && !tc.newer {
+			if tc.negative != "" {
+				require.NotNil(t, account.RateLimitedAt, "actual negative observation must survive deferred positive recovery")
+				require.NotNil(t, account.RateLimitResetAt)
+				require.True(t, negativeLimitedAt.Equal(*account.RateLimitedAt))
+				require.True(t, negativeResetAt.Equal(*account.RateLimitResetAt))
+				require.True(t, negativeLimitedAt.After(limitedAt), "every actual negative must advance the recovery generation")
+			} else if positive && tc.fault != "create" && !tc.newer {
 				require.Nil(t, account.RateLimitedAt)
 				require.Nil(t, account.RateLimitResetAt)
 			} else {

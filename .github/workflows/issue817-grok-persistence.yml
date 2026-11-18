@@ -15,6 +15,7 @@ on:
       - 'backend/internal/service/grok_token_provider.go'
       - 'backend/internal/pkg/xai/**'
       - 'backend/internal/repository/account_repo.go'
+      - 'backend/internal/repository/account_repo_integration_test.go'
       - 'backend/internal/repository/scheduled_test_repo.go'
       - 'backend/internal/repository/integration_harness_test.go'
       - 'backend/go.mod'
@@ -37,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        behavior: [red, green]
+        behavior: [red, negative_red, green]
     services:
       postgres:
         image: postgres:18.1-alpine3.23
@@ -74,11 +75,18 @@ jobs:
           mkdir -p evidence
           git rev-parse HEAD | tee evidence/head.txt
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          if [ "$BEHAVIOR" = red ]; then
-            original=45ebcb708867dd61caae10435d19d2df17cd41f3
-            source=backend/internal/service/account_test_service.go
-            git rev-parse "$original:$source" > evidence/original-blob.txt
+          if [ "$BEHAVIOR" != green ]; then
+            if [ "$BEHAVIOR" = red ]; then
+              original=45ebcb708867dd61caae10435d19d2df17cd41f3
+              source=backend/internal/service/account_test_service.go
+            else
+              original=e9e2d4ac9a18f9eeab510cfb2c4213e6041455d6
+              source=backend/internal/repository/account_repo.go
+            fi
+            expected_blob="$(git rev-parse "$original:$source")"
+            printf '%s %s %s\n' "$original" "$source" "$expected_blob" > evidence/original-blob.txt
             git show "$original:$source" > "$source"
+            test "$(git hash-object "$source")" = "$expected_blob"
             git diff --stat > evidence/red-source-diff.txt
           else
             git diff --exit-code
@@ -99,9 +107,26 @@ jobs:
           set -euo pipefail
           pattern='^TestIssue817GrokScheduledRecoveryRequiresSavedResult$/(headerless_create|available_create)$'
           children=(headerless_create available_create)
+          diagnostic='Grok observer must keep the observed limit until result Create succeeds'
+          if [ "$BEHAVIOR" = negative_red ]; then
+            pattern='^TestIssue817GrokScheduledRecoveryRequiresSavedResult$/negative_(shorter_429|equal_429|exhausted_200)_auto_(off|on)_(saved|prune)$'
+            children=()
+            diagnostic='actual negative observation must survive deferred positive recovery'
+          fi
           if [ "$BEHAVIOR" = green ]; then
             pattern='^(TestIssue817GrokScheduledRecoveryRequiresSavedResult|TestIssue817GrokManualRecoveryRemainsImmediate)$'
             children+=(headerless_saved available_saved headerless_prune available_prune auto_recover_off_create auto_recover_off_saved 429_create 429_saved exhausted_200_create exhausted_200_saved failed_stream_create failed_stream_saved newer_generation owned_pause_and_model)
+          fi
+          if [ "$BEHAVIOR" != red ]; then
+            for negative in shorter_429 equal_429 later_429 exhausted_200; do
+              for auto in off on; do
+                for fault in saved create prune; do
+                  if [ "$BEHAVIOR" = green ] || { [ "$negative" != later_429 ] && [ "$fault" != create ]; }; then
+                    children+=("negative_${negative}_auto_${auto}_${fault}")
+                  fi
+                done
+              done
+            done
           fi
           set +e
           bash .github/scripts/issue817-race-gate.sh "$BEHAVIOR" "$PWD" "$pattern" > evidence/grok-gate.log 2>&1
@@ -112,15 +137,15 @@ jobs:
           if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|segmentation fault|SIGSEGV|\[build failed\]|setup failed' evidence/grok-gate.log; then
             exit 1
           fi
-          if [ "$BEHAVIOR" = red ]; then
+          if [ "$BEHAVIOR" != green ]; then
             test "$result" -eq 1
             for child in "${children[@]}"; do
               grep -F -- "--- FAIL: TestIssue817GrokScheduledRecoveryRequiresSavedResult/$child (" evidence/grok-gate.log
-              # Each child must reach the pre-Create business assertion itself.
-              awk -v child="$child" '
+              # Each child must reach its own named business assertion.
+              awk -v child="$child" -v diagnostic="$diagnostic" '
                 $0 ~ "=== RUN.*TestIssue817GrokScheduledRecoveryRequiresSavedResult/" child "$" { active=1; next }
                 active && /=== RUN/ { active=0 }
-                active && /Grok observer must keep the observed limit until result Create succeeds/ { found=1 }
+                active && index($0,diagnostic) { found=1 }
                 END { exit !found }
               ' evidence/grok-gate.log
             done
@@ -147,6 +172,15 @@ jobs:
           fi
           for name in TestIssue817SaveResultFailureDoesNotAcknowledge TestIssue817ConnectivitySaveFailureDoesNotCompleteOrRecover TestIssue817QuotaSkipPreservesPending5xxExecution; do
             grep -F -- "--- PASS: $name (" evidence/retained.log
+          done
+          pattern='^TestAccountRepoSuite$/(TestSetRateLimitedIfLaterDoesNotShortenReset|TestClearRateLimitIfObservedProtectsRearmed429Generation|TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset)$'
+          (cd backend && go test -race -tags=integration ./internal/repository -run "$pattern" -count=1 -v -timeout=10m) > evidence/generation-contracts.log 2>&1
+          cat evidence/generation-contracts.log
+          if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|SIGSEGV|\[build failed\]' evidence/generation-contracts.log; then
+            exit 1
+          fi
+          for name in TestSetRateLimitedIfLaterDoesNotShortenReset TestClearRateLimitIfObservedProtectsRearmed429Generation TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset; do
+            grep -F -- "--- PASS: TestAccountRepoSuite/$name (" evidence/generation-contracts.log
           done
       - uses: actions/upload-artifact@v7
         if: always()
