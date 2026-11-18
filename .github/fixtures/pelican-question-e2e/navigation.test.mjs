@@ -55,7 +55,9 @@ test('navigation waits for destination requests before returning', async () => {
   page.goto = async (url, options) => { page.calls.push({ url, options }); page.emit('request', pending) }
   let returned = false
   const done = navigation.goto('http://app:8080/admin/accounts').then(() => { returned = true })
-  await nextTask()
+  const deadline = Date.now() + 2_000
+  while (!page.calls.length && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10))
+  assert.equal(page.calls.length, 1, 'destination navigation has started')
   assert.equal(returned, false)
   page.emit('requestfinished', pending)
   await done
@@ -109,3 +111,42 @@ test('document readiness consumes the same deadline rather than granting another
   await done
   assert.equal(failed, true)
 })
+
+for (const action of ['goto', 'reload']) {
+  test(`${action}: deferred auth after document load must finish before unloading`, async () => {
+    const page = new Page()
+    const navigation = createPageNavigation(page)
+    const auth = {}
+    const done = action === 'goto' ? navigation.goto('http://app:8080/admin/accounts') : navigation.reload()
+    await nextTask()
+    // A completed document can schedule its first API request in a later task.
+    page.emit('request', auth)
+    await new Promise(resolve => setTimeout(resolve, 300))
+    assert.equal(page.calls.length, 0, 'deferred auth must not be aborted by navigation')
+    page.emit('requestfinished', auth)
+    await done
+    assert.equal(page.calls.length, 1)
+  })
+}
+
+for (const action of ['goto', 'reload']) {
+  test(`${action}: destination response observer excludes old-document polling during drain`, async () => {
+    const page = new Page()
+    const navigation = createPageNavigation(page)
+    const oldRequest = {}
+    page.emit('request', oldRequest)
+    const captured = []
+    const arm = () => page.once('response', response => captured.push(response))
+    const navigate = page[action].bind(page)
+    page[action] = async (...args) => {
+      await navigate(...args)
+      page.emit('response', { document: 'destination' })
+    }
+    const done = action === 'goto' ? navigation.goto('http://app:8080/admin/accounts', arm) : navigation.reload(arm)
+    await nextTask()
+    page.emit('response', { document: 'old' })
+    page.emit('requestfinished', oldRequest)
+    await done
+    assert.deepEqual(captured, [{ document: 'destination' }])
+  })
+}

@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/scripts/prepare-discovery-red-compat.py'
       - '.github/scripts/test_discovery_red_compat.py'
+      - '.github/scripts/prepare-openai-usage-red-compat.py'
+      - '.github/scripts/test_openai_usage_red_compat.py'
       - '.github/workflows/issue715-agent-recovery.yml'
       - 'backend/internal/service/openai_*'
       - 'backend/internal/handler/openai_*'
@@ -168,6 +170,8 @@ jobs:
           done
           for path in "${added[@]}"; do test ! -e "$path"; done
           bash .github/scripts/historical-ws-projection-types.sh "$original"
+          python3 -m unittest discover -s .github/scripts -p 'test_openai_usage_red_compat.py' -v
+          python3 .github/scripts/prepare-openai-usage-red-compat.py . "$original"
           set +e
           (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue715HTTPResumesSameTaskAcrossTwoTurns$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-recovery-red.log" 2>&1
           result=$?

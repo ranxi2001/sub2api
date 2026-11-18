@@ -3,6 +3,7 @@
 FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/AccountUsageCell.spec.ts \
 	src/views/admin/__tests__/ChannelsView.bedrockCompat.spec.ts \
+	src/views/admin/__tests__/ChannelsView.ultrafastPricing.spec.ts \
 	src/views/admin/__tests__/GroupsView.codexManifest.spec.ts \
 	src/views/admin/__tests__/GroupsView.openaiForcedTier.spec.ts \
 	src/views/admin/__tests__/groupsOpenAIFast.spec.ts \

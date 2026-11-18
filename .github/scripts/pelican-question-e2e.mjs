@@ -207,7 +207,7 @@ async function browser() {
     page.setDefaultTimeout(20_000)
     page.on('requestfailed', request => {
       const url = new URL(request.url())
-      state.requestFailures.push({ method: request.method(), path: url.pathname, reason: request.failure()?.errorText })
+      state.requestFailures.push({ stage, method: request.method(), path: url.pathname, reason: request.failure()?.errorText })
     })
     // Console text and exception messages can contain application data. Retain
     // only their types; scenario assertion failures carry safe fixture context.

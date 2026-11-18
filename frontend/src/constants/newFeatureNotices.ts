@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  channelUltrafastPricing: 'channel-ultrafast-pricing-initial-announcement',
   groupForceUltrafast: 'group-force-ultrafast-initial-announcement',
   passthroughModelFilter: 'openai-passthrough-model-filter-initial-announcement',
   vertexMultiRegion: 'vertex-multi-region-initial-announcement',

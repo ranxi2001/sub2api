@@ -1153,6 +1153,7 @@ function addPricingEntry(sectionIdx: number) {
     cache_read_price: null,
     fast_multiplier: null,
     flex_multiplier: null,
+    ultrafast_multiplier: null,
     reasoning_effort_multipliers: null,
     image_input_price: null,
     image_output_price: null,
@@ -1193,6 +1194,7 @@ async function syncLatestModels(sectionIdx: number) {
       cache_read_price: null,
       fast_multiplier: null,
       flex_multiplier: null,
+      ultrafast_multiplier: null,
       reasoning_effort_multipliers: null,
       image_input_price: null,
       image_output_price: null,
@@ -1428,6 +1430,7 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
         cache_read_price: mTokToPerToken(entry.cache_read_price),
         fast_multiplier: entry.fast_multiplier != null && entry.fast_multiplier !== '' ? Number(entry.fast_multiplier) : null,
         flex_multiplier: entry.flex_multiplier != null && entry.flex_multiplier !== '' ? Number(entry.flex_multiplier) : null,
+        ultrafast_multiplier: entry.ultrafast_multiplier != null && entry.ultrafast_multiplier !== '' ? Number(entry.ultrafast_multiplier) : null,
         reasoning_effort_multipliers: formReasoningEffortMultipliersToAPI(entry.reasoning_effort_multipliers),
         image_input_price: mTokToPerToken(entry.image_input_price),
         image_output_price: mTokToPerToken(entry.image_output_price),
@@ -1522,6 +1525,7 @@ function apiToForm(channel: Channel): PlatformSection[] {
         cache_read_price: perTokenToMTok(p.cache_read_price),
         fast_multiplier: p.fast_multiplier,
         flex_multiplier: p.flex_multiplier,
+        ultrafast_multiplier: p.ultrafast_multiplier,
         reasoning_effort_multipliers: p.reasoning_effort_multipliers ? { ...p.reasoning_effort_multipliers } : null,
         image_input_price: perTokenToMTok(p.image_input_price),
         image_output_price: perTokenToMTok(p.image_output_price),
@@ -1871,7 +1875,8 @@ async function handleSubmit() {
   for (const section of form.platforms.filter(s => s.enabled)) {
     for (const entry of section.model_pricing) {
       if (!isValidPositiveMultiplier(entry.fast_multiplier) ||
-          !isValidPositiveMultiplier(entry.flex_multiplier)) {
+          !isValidPositiveMultiplier(entry.flex_multiplier) ||
+          !isValidPositiveMultiplier(entry.ultrafast_multiplier)) {
         const platformLabel = t('admin.groups.platforms.' + section.platform, catalogPlatformLabel(section.platform))
         const modelLabel = entry.models.join(', ') || t('admin.channels.form.unnamed')
         appStore.showError(`${platformLabel} - ${modelLabel}: ${t('admin.channels.form.multiplierPositive')}`)
