@@ -467,7 +467,7 @@
             <Icon name="shield" size="sm" />
             <div>
               <span class="block text-sm font-medium text-gray-900 dark:text-white">2FA</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('tokenGuard.twoFA.label') }}</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('openaiRelogin.twoFA.label') }}</span>
             </div>
           </button>
 
@@ -482,7 +482,7 @@
             </div>
           </button>
         </div>
-        <p v-if="isOpenAITwoFA" class="input-hint">{{ t('tokenGuard.twoFA.nameHint') }}</p>
+        <p v-if="isOpenAITwoFA" class="input-hint">{{ t('openaiRelogin.twoFA.nameHint') }}</p>
         <div v-if="isOpenAIBPSOAuth" class="mt-3 space-y-2" data-testid="bps-oauth-models">
           <p class="input-hint">{{ t('admin.accounts.oauth.openai.excelLoginHint') }}</p>
           <label class="input-label">{{ t('admin.accounts.openai.excelBPSModels') }}</label>
@@ -4377,7 +4377,7 @@ import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@
 
 import OpenAITwoFAImport from './OpenAITwoFAImport.vue'
 import { createTokenGuardV2Account } from '@/api/admin/accountTokenGuardV2'
-import type { TokenGuardReloginAccount } from '@/api/admin/accountTokenGuard'
+import type { OpenAIReloginCredentials } from '@/api/admin/openaiRelogin'
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -4517,7 +4517,7 @@ const { t } = useI18n()
 const browserTimeZone = getBrowserTimeZone()
 
 const oauthStepTitle = computed(() => {
-  if (isOpenAITwoFA.value) return t('tokenGuard.twoFA.title')
+  if (isOpenAITwoFA.value) return t('openaiRelogin.twoFA.title')
   if (isOpenAIBPSOAuth.value) return t('admin.accounts.oauth.openai.excelTitle')
   if (form.platform === 'openai') return t('admin.accounts.oauth.openai.title')
   if (form.platform === 'gemini') return t('admin.accounts.oauth.gemini.title')
@@ -7434,7 +7434,7 @@ const containsUnsupportedProxyGroupIdentity = (content: string): boolean => {
 }
 
 // Reuse Session import normalization and identity deduplication after 2FA login.
-const importTwoFACredential = async (credential: Record<string, unknown>, email: string, login: TokenGuardReloginAccount, signal?: AbortSignal): Promise<'created' | 'skipped'> => {
+const importTwoFACredential = async (credential: Record<string, unknown>, email: string, login: OpenAIReloginCredentials, signal?: AbortSignal): Promise<'created' | 'skipped'> => {
   signal?.throwIfAborted()
   if (!validateOpenAIRequestProxies()) throw new Error(t('admin.accounts.openai.proxyNoUsable'))
   const credentialExtras = buildOpenAICodexImportCredentialExtras()

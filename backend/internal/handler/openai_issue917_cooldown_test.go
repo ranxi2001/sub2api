@@ -138,9 +138,9 @@ func TestIssue917ResponsesCooldown(t *testing.T) {
 		t.Run(route.name, func(t *testing.T) {
 			for _, tc := range []struct {
 				name, timing, keyword, body string
-				disabled                   bool
-				threshold                  int
-				cooldown                   bool
+				disabled                    bool
+				threshold                   int
+				cooldown                    bool
 			}{
 				{name: "initial", timing: "after_stream", body: issue917BareError, cooldown: true},
 				{name: "after_output", timing: "after_stream", body: issue917Delta + issue917BareError, cooldown: true},

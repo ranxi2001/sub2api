@@ -674,8 +674,6 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 	if ticket.Length == 780 && !ticket.valid(time.Now(), 780) {
 		return errors.New("ticket probe validation required before storage")
 	}
-	incoming := *ticket
-	standby := false
 	s.openaiCodexTicketStateMu.Lock()
 	defer s.openaiCodexTicketStateMu.Unlock()
 	model := normalizeOpenAICodexTicketModel(ticket.Model)
@@ -684,13 +682,12 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 		copy := *current
 		copy.Standby = ticket
 		ticket = &copy
-		standby = true
 	}
 	ticket.Model = model
 	ticket.AccountID = account.ID
 	s.openaiCodexTickets.Store(openAICodexTicketKey(account.ID, model), ticket)
 	if s.accountRepo == nil {
-		recordCodexHarvestTicketStore(account, &incoming, standby)
+
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -705,7 +702,7 @@ func (s *OpenAIGatewayService) storeOpenAICodexTicket(ctx context.Context, accou
 		)
 		return err
 	}
-	recordCodexHarvestTicketStore(account, &incoming, standby)
+
 	return nil
 }
 
@@ -933,7 +930,7 @@ func (s *OpenAIGatewayService) codexTicketChatHeld(accountID int64) bool {
 	return ctr != nil && atomic.LoadInt64(ctr) > 0
 }
 
-func (s *OpenAIGatewayService) manualHarvestLiveModels(account *Account, models []string) map[string]struct{} {
+func (s *OpenAIGatewayService) liveCodexTicketModels(account *Account, models []string) map[string]struct{} {
 	got := map[string]struct{}{}
 	if s == nil || account == nil {
 		return got
@@ -949,20 +946,11 @@ func (s *OpenAIGatewayService) manualHarvestLiveModels(account *Account, models 
 	return got
 }
 
-func (s *OpenAIGatewayService) markManualHarvestLiveModels(account *Account, models []string, got map[string]struct{}) {
-	if got == nil {
-		return
-	}
-	for model := range s.manualHarvestLiveModels(account, models) {
-		got[model] = struct{}{}
-	}
-}
-
 func (s *OpenAIGatewayService) accountHasLiveCodexTicket(account *Account) bool {
 	if s == nil || account == nil {
 		return false
 	}
-	return len(s.manualHarvestLiveModels(account, s.openAICodexTicketConfig().Models)) > 0
+	return len(s.liveCodexTicketModels(account, s.openAICodexTicketConfig().Models)) > 0
 }
 
 // Harvest-excluded is harvest-scope only: accounts outside selected groups
@@ -1093,9 +1081,7 @@ func (s *OpenAIGatewayService) StartOpenAICodexTicketHarvester() {
 	s.openaiCodexTicketDone = done
 	go func() {
 		defer close(done)
-		coverageDone := make(chan struct{})
-		go func() { defer close(coverageDone); s.harvestCoverageLoop(ctx) }()
-		defer func() { cancel(); <-coverageDone }()
+		defer cancel()
 		s.openAICodexTicketHarvestLoop(ctx)
 	}()
 	logger.L().Info("openai_codex_ticket harvester started",
@@ -1203,7 +1189,7 @@ func (s *OpenAIGatewayService) refreshOpenAICodexTickets(ctx context.Context) {
 		})
 		defer s.codexHarvest.setRuntime(func(r *CodexHarvestRuntime) { r.Running = false; r.CurrentNode = "" })
 	}
-	observeCodexHarvestProxy(ctx, s.openAICodexTicketHarvestProxySetting(ctx))
+
 	accounts, err := s.accountRepo.ListByPlatform(ctx, PlatformOpenAI)
 	if err != nil {
 		logger.L().Warn("openai_codex_ticket list accounts failed", zap.Error(err))

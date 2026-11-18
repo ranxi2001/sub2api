@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { filterSmartOpsSidebar } from '../smartOpsSidebar'
 import { DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS, SMART_OPS_MENU_ITEMS } from '@/constants/smartOpsMenu'
 
-const smartOps = { path: '/admin/smart-ops', children: [{ path: '/admin/token-guard' }, { path: '/admin/harvest-flow' }, { path: '/admin/qqbot/overview' }] }
+const smartOps = { path: '/admin/smart-ops', children: [{ path: '/admin/account-ops' }, { path: '/admin/group-cache-tests' }, { path: '/admin/qqbot/overview' }] }
 const settings = { path: '/admin/settings' }
 describe('smart operations sidebar visibility', () => {
   it('shows exactly the six default entries when preferences are absent', () => {
@@ -19,8 +19,8 @@ describe('smart operations sidebar visibility', () => {
   })
   it('honors an explicit show-all preference and hides only the chosen children', () => {
     expect(filterSmartOpsSidebar([smartOps, settings], [])).toEqual([smartOps, settings])
-    expect(filterSmartOpsSidebar([smartOps, settings], ['/admin/token-guard', '/admin/settings'])).toEqual([
-      { ...smartOps, children: [{ path: '/admin/harvest-flow' }, { path: '/admin/qqbot/overview' }] }, settings,
+    expect(filterSmartOpsSidebar([smartOps, settings], ['/admin/account-ops', '/admin/settings'])).toEqual([
+      { ...smartOps, children: [{ path: '/admin/group-cache-tests' }, { path: '/admin/qqbot/overview' }] }, settings,
     ])
     expect(smartOps.children).toHaveLength(3)
   })

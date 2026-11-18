@@ -151,7 +151,7 @@ func (s *OpenAIGatewayService) tryBorrowStoredAstraTicket(ctx context.Context, a
 	ctx = context.WithValue(ctx, codex780SeedContextKey{}, codex780Seed{state: seed.State, cookies: seed.HarvestCookies})
 	ctx = context.WithValue(ctx, codexMintEdgeContextKey{}, seed.EdgeIP)
 	result = s.executeCodexHarvestProbe(ctx, account, token, model, proxy, timeout, admitted, session)
-	recordCodexHarvestProbe(account, model, result.Kind, seed.HarvestNodeName, safeCodexHarvestError(result.Err), result.Status, len(result.State), result.Shape.Blocks, 780, 33, result.ProbeVerified)
+
 	if result.Kind != "success" {
 		return true, result
 	}

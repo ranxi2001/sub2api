@@ -85,13 +85,14 @@ describe('AppSidebar smart operations group', () => {
   const smartOpsBlock = componentSource.match(/path: '\/admin\/smart-ops'[\s\S]*?\n {4}\] \},/)?.[0] ?? ''
   const pathsIn = (source: string) => [...source.matchAll(/path: '([^']+)'/g)].map(match => match[1])
 
-  it('nests request capture and the ticket harvest flow under 智能运维', () => {
+  it('keeps request capture and excludes retired operations pages', () => {
     expect(smartOpsBlock).not.toBe('')
     expect(smartOpsBlock).toMatch(/path: '\/admin\/request-captures'[^\n]*featureFlag: \(\) => adminSettingsStore\.requestCaptureEnabled/)
-    expect(smartOpsBlock).toContain("path: '/admin/harvest-flow'")
+    expect(smartOpsBlock).not.toContain("path: '/admin/harvest-flow'")
+    expect(smartOpsBlock).not.toContain("path: '/admin/token-guard'")
     // Each entry is declared once, so neither is still a top-level item.
     expect(componentSource.match(/path: '\/admin\/request-captures'/g)).toHaveLength(1)
-    expect(componentSource.match(/path: '\/admin\/harvest-flow'/g)).toHaveLength(1)
+    expect(componentSource.match(/path: '\/admin\/harvest-flow'/g)).toBeNull()
   })
 
   it('keeps the group in the same order as the 智能运维 tab bar', () => {

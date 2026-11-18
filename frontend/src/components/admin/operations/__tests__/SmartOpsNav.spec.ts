@@ -12,12 +12,12 @@ import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import type { User } from '@/types'
 
 const smartOpsPaths = ['/admin/lottery', '/admin/auto-config', '/admin/priority-scheduling',
-  '/admin/qqbot/overview', '/admin/channel-operations', '/admin/profit-operations', '/admin/account-quality', '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
+  '/admin/qqbot/overview', '/admin/channel-operations', '/admin/profit-operations', '/admin/account-quality', '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
 
 async function mountAt(path: string) {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [...smartOpsPaths, '/admin/request-captures', '/admin/ai-ops', '/admin/harvest-flow'].map(route => ({ path: route, component: { template: '<div />' } }))
+    routes: [...smartOpsPaths, '/admin/request-captures', '/admin/ai-ops'].map(route => ({ path: route, component: { template: '<div />' } }))
   })
   await router.push(path)
   await router.isReady()
@@ -40,16 +40,16 @@ describe('SmartOpsNav', () => {
     expect(wrapper.find('[aria-current="page"]').text()).toBe('lottery.adminTitle')
   })
 
-  it('ends with the ticket harvest flow and hides request capture while the feature is off', async () => {
-    const wrapper = await mountAt('/admin/harvest-flow')
-    expect(hrefs(wrapper)).toEqual([...smartOpsPaths, '/admin/ai-ops', '/admin/harvest-flow'])
-    expect(wrapper.find('[aria-current="page"]').text()).toBe('nav.harvestFlow')
+  it('keeps credential operations and hides request capture while the feature is off', async () => {
+    const wrapper = await mountAt('/admin/token-guard-v2')
+    expect(hrefs(wrapper)).toEqual([...smartOpsPaths, '/admin/ai-ops'])
+    expect(wrapper.find('[aria-current="page"]').text()).toBe('tokenGuardV2.title')
   })
 
   it('lists request capture before the ticket harvest flow when the feature is on', async () => {
     useAdminSettingsStore().setRequestCaptureEnabledLocal(true)
     const wrapper = await mountAt('/admin/request-captures')
-    expect(hrefs(wrapper)).toEqual([...smartOpsPaths, '/admin/request-captures', '/admin/ai-ops', '/admin/harvest-flow'])
+    expect(hrefs(wrapper)).toEqual([...smartOpsPaths, '/admin/request-captures', '/admin/ai-ops'])
     expect(wrapper.find('[aria-current="page"]').text()).toBe('admin.requestCapture.title')
   })
 

@@ -146,11 +146,10 @@ func (s *OpenAIGatewayService) observeCodexTicketResponse(req *http.Request, res
 				next.HarvestCookiesAt = now
 			}
 		} else if current.Standby.valid(now, targetLen) {
-			recordCodexHarvestTicketReject(account, model, "response_mismatch", len(returned), shape.Blocks)
+
 			next = *current.Standby
 		} else {
 			next.Revoked = true
-			recordCodexHarvestTicketReject(account, model, "response_mismatch", len(returned), shape.Blocks)
 		}
 		s.openaiCodexTickets.Store(openAICodexTicketKey(account.ID, model), &next)
 		if s.accountRepo != nil {

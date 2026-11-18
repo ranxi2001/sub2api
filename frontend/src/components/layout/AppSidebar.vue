@@ -325,7 +325,6 @@ const OpsMonitoringIcon = { render: () => h(Icon, { name: 'monitorPulse' }) }
 const SmartOpsIcon = { render: () => h(Icon, { name: 'cpu' }) }
 const QualityOpsIcon = { render: () => h(Icon, { name: 'badge', size: 'sm' }) }
 const AccountOpsIcon = { render: () => h(Icon, { name: 'userCog', size: 'sm' }) }
-const TokenGuardIcon = { render: () => h(Icon, { name: 'shieldKey', size: 'sm' }) }
 const CredentialOpsIcon = { render: () => h(Icon, { name: 'credentialOps', size: 'sm' }) }
 const PelicanTestsIcon = { render: () => h(Icon, { name: 'beaker', size: 'sm' }) }
 const SupportTicketIcon = { render: () => h(Icon, { name: 'chat' }) }
@@ -526,9 +525,6 @@ const GlobeIcon = {
     )
 }
 
-const FlowIcon = {
-  render: () => h(Icon, { name: 'swap', size: 'sm' })
-}
 
 const ServerIcon = {
   render: () =>
@@ -896,13 +892,11 @@ const adminNavItems = computed((): NavItem[] => {
       { path: '/admin/account-quality', label: t('qualityOps.title'), icon: QualityOpsIcon, noticeId: NEW_FEATURE_NOTICES.qualityRetestRest },
       { path: '/admin/controlled-experiments', label: t('controlledExperiments.title'), icon: QualityOpsIcon },
       { path: '/admin/account-ops', label: t('accountOps.title'), icon: AccountOpsIcon },
-      { path: '/admin/token-guard', label: t('tokenGuard.title'), icon: TokenGuardIcon },
       { path: '/admin/token-guard-v2', label: t('tokenGuardV2.title'), icon: CredentialOpsIcon },
       { path: '/admin/pelican-tests', label: t('pelicanTests.title'), icon: PelicanTestsIcon },
       { path: '/admin/group-cache-tests', label: t('admin.groupCacheTest.title'), icon: QualityOpsIcon },
       { path: '/admin/request-captures', label: t('admin.requestCapture.title'), icon: RequestCaptureIcon, featureFlag: () => adminSettingsStore.requestCaptureEnabled },
       { path: '/admin/ai-ops', label: t('aiOps.title'), icon: SmartOpsIcon, noticeId: NEW_FEATURE_NOTICES.aiOpsCodex, featureFlag: () => authStore.isAdmin },
-      { path: '/admin/harvest-flow', label: t('nav.harvestFlow'), icon: FlowIcon },
     ] },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },

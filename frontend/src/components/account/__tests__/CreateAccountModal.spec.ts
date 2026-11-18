@@ -2,10 +2,10 @@ vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template:
 vi.mock('@/api/admin/upstreamChannels', () => ({ listUpstreamChannels: vi.fn(), readChannelBindings: vi.fn(), bindChannelAccounts: vi.fn() }))
 import { readChannelBindings, listUpstreamChannels } from '@/api/admin/upstreamChannels'
 import UpstreamChannelSelector from '../UpstreamChannelSelector.vue'
-import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/accountTokenGuard'
+import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/openaiRelogin'
 
-vi.mock('@/api/admin/accountTokenGuard', async original => ({
-  ...await original<typeof import('@/api/admin/accountTokenGuard')>(),
+vi.mock('@/api/admin/openaiRelogin', async original => ({
+  ...await original<typeof import('@/api/admin/openaiRelogin')>(),
   startTwoFALogin: vi.fn(), getTwoFALogin: vi.fn(), deleteTwoFALogin: vi.fn(),
 }))
 
@@ -1053,7 +1053,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       expect(startTwoFALogin).toHaveBeenCalledTimes(3)
       expect(wrapper.getComponent(OpenAITwoFAImport).vm.$.uid).toBe(original.vm.$.uid)
       expect(wrapper.emitted('close')).toBeUndefined()
-      expect(original.get('[data-testid="two-fa-owned-jobs"]').text()).toContain('tokenGuard.twoFA.ownedJobs')
+      expect(original.get('[data-testid="two-fa-owned-jobs"]').text()).toContain('openaiRelogin.twoFA.ownedJobs')
       expect(original.get('[data-testid="two-fa-start"]').attributes('disabled')).toBeUndefined()
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
       await selectButtonByText(wrapper, 'common.back')

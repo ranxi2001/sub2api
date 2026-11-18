@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -94,8 +93,6 @@ func TestScheduledAstraCandyIsObservationOnly(t *testing.T) {
 }
 
 func TestScheduledAstraCandyAsyncDeduplicatesAndSurvivesCallerCancellation(t *testing.T) {
-	resetCodexHarvestFlow()
-	t.Cleanup(resetCodexHarvestFlow)
 	s, _, a, ticket, h := candyFixture(t)
 	entered, unblock := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
@@ -126,14 +123,7 @@ func TestScheduledAstraCandyAsyncDeduplicatesAndSurvivesCallerCancellation(t *te
 	s.observeScheduledAstraCandy(ctx, h, a, ticket)
 	waitCandy(t, s)
 	require.Equal(t, int32(1), calls.Load())
-	snapshot := BuildCodexHarvestFlow(t.Context(), &config.Config{}, nil, []Account{*a})
-	require.Equal(t, "candy_fail", snapshot.Events[0].Kind)
-	require.Equal(t, "candy_incorrect", snapshot.Stages[4].Detail)
-	require.Zero(t, snapshot.Counts.SelectSkip)
-	require.Zero(t, snapshot.Counts.SelectFail)
-	public, _ := json.Marshal(snapshot.Events)
-	require.NotContains(t, string(public), ticket.State)
-	require.NotContains(t, string(public), "target-token")
+
 }
 
 func TestScheduledAstraCandyBusinessStreamDoesNotWaitOrChange(t *testing.T) {

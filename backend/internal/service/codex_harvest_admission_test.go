@@ -97,36 +97,6 @@ func TestCodex780AdmissionRequiresOriginalTicketContinuation(t *testing.T) {
 	}
 }
 
-func TestCodex780ProbeStageDoesNotReuseOldSuccess(t *testing.T) {
-	now := time.Now()
-	legacy := CodexHarvestFlowEvent{At: now, Kind: "probe_hit", Result: "success", Length: 780, Blocks: 33, ExpectedLength: 780}
-	require.NotEqual(t, "ok", probeValidationStageFromEvents(map[string]CodexHarvestFlowEvent{"probe": legacy}).Status)
-	legacy.Reason = "probe_verified"
-	require.Equal(t, "probe_verified", probeValidationStageFromEvents(map[string]CodexHarvestFlowEvent{"probe": legacy}).Detail)
-	for _, result := range []string{"probe_reissued", "probe_inconclusive", "network_error"} {
-		latest := CodexHarvestFlowEvent{At: now, Result: result, Kind: "probe_miss", ExpectedLength: 780, Length: 780, Blocks: 33}
-		stage := probeValidationStageFromEvents(map[string]CodexHarvestFlowEvent{
-			"probe":           latest,
-			"probe:probe_hit": {At: now.Add(-time.Minute), Kind: "probe_hit", Result: "success", Length: 780, Blocks: 33},
-		})
-		require.NotEqual(t, "ok", stage.Status)
-		require.Equal(t, result, stage.Detail)
-	}
-	for _, rule := range []string{ManualHarvestNodeSwitchRejectedOnly, ManualHarvestNodeSwitchRejectedOr2Fail} {
-		require.True(t, manualHarvestShouldSwitch(rule, 1, "probe_reissued"))
-	}
-}
-
-func TestCodex780FlowIgnoresLegacyHostFilter(t *testing.T) {
-	account := ticketTestAccount(1)
-	now := time.Now()
-	ticket := &openAICodexTicket{ProbeVerified: true, AccountID: 1, Model: "gpt-6-astra", State: mint780State(now), Length: 780, Transport: "sse", Gateway: "unified-123", IssuedAt: now, ExpiresAt: now.Add(240 * time.Second), HarvestCookies: mint780Pair(now.Add(time.Hour), "unified-123")}
-	account.Extra = map[string]any{openAICodexTicketExtraKey("gpt-6-astra"): ticket}
-	controls := &CodexHarvestService{current: CodexHarvestControls{Transport: "sse", TargetGateway: "unified-88"}, loadedUntil: now.Add(time.Hour)}
-	snapshot := BuildCodexHarvestFlow(context.Background(), &config.Config{Gateway: config.GatewayConfig{OpenAICodexTicket: config.OpenAICodexTicketConfig{Enabled: true, TargetLength: 780, Models: []string{"gpt-6-astra"}}}}, nil, []Account{*account}, controls)
-	require.Equal(t, 1, snapshot.Counts.TicketsReady)
-}
-
 func TestCodex780BusinessReplacementRequiresFreshProbe(t *testing.T) {
 	for _, change := range []string{"state", "route"} {
 		t.Run(change, func(t *testing.T) {

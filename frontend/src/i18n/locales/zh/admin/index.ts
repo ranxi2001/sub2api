@@ -12,7 +12,6 @@ import audit from './audit'
 import promptAudit from './promptAudit'
 import safetyPromptAudit from './safetyPromptAudit'
 import plugins from './plugins'
-import harvestFlow from './harvestFlow'
 
 export default {
   ...moderationUsers,
@@ -29,5 +28,4 @@ export default {
   ...promptAudit,
   ...safetyPromptAudit,
   ...plugins,
-  ...harvestFlow,
 }
