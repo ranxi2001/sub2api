@@ -1305,6 +1305,13 @@ export default {
       targetNoWildcard: '目标模型不能包含通配符 *',
       searchModels: '搜索模型...',
       noMatchingModels: '没有匹配的模型',
+      batchUpstream: {
+        start: '批量同步上游模型',
+        hint: '按选中账号各自的上游目录立即保存白名单。其他编辑需单独提交。',
+        saved: '已保存',
+        failed: '失败',
+        pending: '待处理',
+      },
       fillRelatedModels: '同步最新支持模型',
       syncUpstreamModels: '同步上游支持的模型',
       syncUpstreamModelsLoading: '同步上游中...',

@@ -408,6 +408,13 @@
           />
         </div>
 
+        <BatchUpstreamWhitelist
+          v-if="show && authStore.isAdmin && targetMode === 'selected' && !filteredPreview"
+          v-show="modelRestrictionMode === 'whitelist' && !isOpenAIModelRestrictionDisabled"
+          :account-ids="targetAccountIds"
+          :disabled="submitting"
+          @started="enableModelRestriction = false"
+        />
         <div
           id="bulk-edit-model-restriction-body"
           :class="!enableModelRestriction && 'pointer-events-none opacity-50'"
@@ -1580,6 +1587,7 @@
 </template>
 
 <script setup lang="ts">
+import BatchUpstreamWhitelist from './BatchUpstreamWhitelist.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { DEFAULT_ACCOUNT_COST_MULTIPLIER, isValidAccountCostMultiplier } from '@/utils/accountCost'
@@ -1640,6 +1648,7 @@ import type { OpenAIWSMode } from '@/utils/openaiWsMode'
 interface Props {
   show: boolean
   accountIds: number[]
+  filteredPreview?: boolean
   selectedPlatforms: AccountPlatform[]
   selectedTypes: AccountType[]
   target?: {

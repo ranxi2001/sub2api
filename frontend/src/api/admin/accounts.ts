@@ -648,6 +648,7 @@ export interface SyncUpstreamModelsResult {
 }
 
 export interface SyncUpstreamModelsOptions {
+  whitelist_only?: boolean
   apply?: boolean
   automatic?: boolean
 }

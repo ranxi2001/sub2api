@@ -1195,6 +1195,13 @@ export default {
       targetNoWildcard: 'Target model cannot contain wildcard *',
       searchModels: 'Search models...',
       noMatchingModels: 'No matching models',
+      batchUpstream: {
+        start: 'Batch sync upstream models',
+        hint: 'Save each selected account’s own upstream whitelist immediately. Other edits are saved separately.',
+        saved: 'Saved',
+        failed: 'Failed',
+        pending: 'Waiting',
+      },
       fillRelatedModels: 'Sync latest supported models',
       syncUpstreamModels: 'Sync upstream supported models',
       syncUpstreamModelsLoading: 'Syncing upstream...',
