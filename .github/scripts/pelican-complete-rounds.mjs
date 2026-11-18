@@ -13,8 +13,10 @@ const pause = () => new Promise(resolve => setTimeout(resolve, 250))
 export function createPageNavigation(page) {
   const pending = new Set()
   const waiters = new Set()
-  page.on('request', request => pending.add(request))
+  let activity = 0
+  page.on('request', request => { activity++; pending.add(request) })
   const completed = request => {
+    activity++
     pending.delete(request)
     if (!pending.size) for (const resolve of [...waiters]) resolve()
   }
@@ -27,14 +29,24 @@ export function createPageNavigation(page) {
     // Document load + our real completion inventory does not depend on that
     // stale frame flag. Keep one 20s deadline, including document readiness.
     await page.waitForLoadState('load', { timeout: 20_000 })
-    while (pending.size) await new Promise((resolve, reject) => {
-      const done = () => { clearTimeout(timer); waiters.delete(done); resolve() }
-      const timer = setTimeout(() => {
-        waiters.delete(done)
-        reject(new Error('browser requests did not finish before navigation'))
-      }, Math.max(0, deadline - Date.now()))
-      waiters.add(done)
-    })
+    for (;;) {
+      while (pending.size) await new Promise((resolve, reject) => {
+        const done = () => { clearTimeout(timer); waiters.delete(done); resolve() }
+        const timer = setTimeout(() => {
+          waiters.delete(done)
+          reject(new Error('browser requests did not finish before navigation'))
+        }, Math.max(0, deadline - Date.now()))
+        waiters.add(done)
+      })
+      // load can fire before Vue schedules its auth refresh. Observe a quiet
+      // interval after draining, so that deferred requests cannot be aborted
+      // by the next document navigation. Keep the original total deadline.
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) throw new Error('browser requests did not finish before navigation')
+      const observed = activity
+      await new Promise(resolve => setTimeout(resolve, Math.min(250, remaining)))
+      if (!pending.size && activity === observed) return
+    }
   }
   return {
     settle,
