@@ -84,3 +84,5 @@ CI 首轮发现缺少 GPT-6.2 描述解析 helper；补入上游旧依赖 `bea67
 完整单元回归补充：原生 Anthropic→Responses/Chat 缓冲转换现在复用既有终态检查；仅有缓存 usage 后 EOF 返回 502 并保留 usage，不再伪装成功。保留 stop_reason 兼容收尾、HTTP/2 reset 特殊处理与语义错误路径。上游对应测试保留，错误码按 fork 的 `stream_incomplete` 契约适配。
 
 隔离 Pelican E2E 在两个运行中都仅记录一次 `/api/v1/auth/me` 的 `net::ERR_ABORTED`，其余业务场景通过。导航 helper 增加请求清空后的 250ms 静默窗口，覆盖 load 后延迟发起的认证请求，仍使用同一个 20s 总截止时间、保留全部 requestfailed 记录。9 项导航回归通过；完整 E2E 以最终 PR 检查为准。
+
+E2E 分组历史回读的监听在导航排空后安装，避免把旧页面轮询响应当作新页面结果；新增 goto/reload 两个旧响应负控，11 项导航回归通过。

@@ -128,3 +128,25 @@ for (const action of ['goto', 'reload']) {
     assert.equal(page.calls.length, 1)
   })
 }
+
+for (const action of ['goto', 'reload']) {
+  test(`${action}: destination response observer excludes old-document polling during drain`, async () => {
+    const page = new Page()
+    const navigation = createPageNavigation(page)
+    const oldRequest = {}
+    page.emit('request', oldRequest)
+    const captured = []
+    const arm = () => page.once('response', response => captured.push(response))
+    const navigate = page[action].bind(page)
+    page[action] = async (...args) => {
+      await navigate(...args)
+      page.emit('response', { document: 'destination' })
+    }
+    const done = action === 'goto' ? navigation.goto('http://app:8080/admin/accounts', arm) : navigation.reload(arm)
+    await nextTask()
+    page.emit('response', { document: 'old' })
+    page.emit('requestfinished', oldRequest)
+    await done
+    assert.deepEqual(captured, [{ document: 'destination' }])
+  })
+}

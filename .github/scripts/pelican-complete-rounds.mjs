@@ -50,8 +50,18 @@ export function createPageNavigation(page) {
   }
   return {
     settle,
-    async goto(url) { await settle(); await page.goto(url, { waitUntil: 'load' }); await settle() },
-    async reload() { await settle(); await page.reload({ waitUntil: 'load' }); await settle() },
+    async goto(url, beforeNavigate = () => {}) {
+      await settle()
+      beforeNavigate()
+      await page.goto(url, { waitUntil: 'load' })
+      await settle()
+    },
+    async reload(beforeNavigate = () => {}) {
+      await settle()
+      beforeNavigate()
+      await page.reload({ waitUntil: 'load' })
+      await settle()
+    },
   }
 }
 
@@ -141,9 +151,13 @@ export async function completeScheduledRounds(c) {
   }
 
   async function groupHistory(label, expected) {
-    const listed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-test-results'
-      && response.request().method() === 'GET' && response.status() === 200)
-    await navigation.goto(`${origin}/admin/pelican-tests`)
+    // Arm after old-document polling has drained. Its response body disappears
+    // on navigation and must never stand in for the destination's history.
+    let listed
+    await navigation.goto(`${origin}/admin/pelican-tests`, () => {
+      listed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-test-results'
+        && response.request().method() === 'GET' && response.status() === 200)
+    })
     const response = await listed
     const list = unwrap(await response.json())
     assert.equal(list.total, expected.length)
@@ -393,10 +407,11 @@ export async function completeScheduledRounds(c) {
     const stored = await readGroupPlan()
     assert.deepEqual(stored.pelican_config, body.pelican_config)
     await form.waitFor({ state: 'hidden' })
-    await navigation.settle()
-    const listRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-tests'
-      && response.request().method() === 'GET')
-    await navigation.reload()
+    let listRead
+    await navigation.reload(() => {
+      listRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-tests'
+        && response.request().method() === 'GET')
+    })
     const listResponse = await listRead
     assert.equal(listResponse.status(), 200)
     const list = unwrap(await listResponse.json())
