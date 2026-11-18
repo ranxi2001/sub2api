@@ -4,6 +4,45 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {createProtocolDiagnostics, validateCodexCallback, credentialOperationReason, parseOperationJSON, observeProtocolResponse} from './openai_codex_diagnostics.mjs';
+import {resolveCodexLoginPage} from './openai_codex_login.mjs';
+
+test('login entry never posts identity or follows a password page on an untrusted origin', async () => {
+  const options = {authBase: 'https://auth.openai.com', email: 'test@example.test', deviceId: 'synthetic-device'};
+  const helpers = {
+    createSentinelHeaders: async () => ({}),
+    authJsonStep: async () => { throw new Error('UNEXPECTED_IDENTITY_SUBMISSION'); },
+    getContinueUrl: data => data.continue_url,
+  };
+  const client = {follow: async () => { throw new Error('UNEXPECTED_FOLLOW'); }};
+  for (const finalUrl of ['https://untrusted.example/log-in', 'https://untrusted.example/log-in/password',
+    'http://auth.openai.com/log-in', 'https://user@auth.openai.com/log-in', 'https://chatgpt.com/log-in']) {
+    await assert.rejects(resolveCodexLoginPage(client, {finalUrl}, options, helpers), {message: 'protocol_error'});
+  }
+  for (const continue_url of ['https://untrusted.example/log-in/password', '//untrusted.example/log-in/password',
+    'https://user@auth.openai.com/log-in/password', '/log-in/password#private', '/unknown', '']) {
+    await assert.rejects(resolveCodexLoginPage(client, {finalUrl: options.authBase + '/log-in'}, options,
+      {...helpers, authJsonStep: async () => ({data: {continue_url}})}), {message: 'protocol_error'});
+  }
+  await assert.rejects(resolveCodexLoginPage(
+    {follow: async () => ({finalUrl: 'https://untrusted.example/log-in/password'})},
+    {finalUrl: options.authBase + '/log-in'}, options,
+    {...helpers, authJsonStep: async () => ({data: {continue_url: '/log-in/password'}})}), {message: 'protocol_error'});
+});
+
+test('email verification remains distinct from TOTP in the private diagnostic', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-email-test-'));
+  try {
+    const file = path.join(root, 'diagnostic.json');
+    const channel = createProtocolDiagnostics(file, 7);
+    channel.mark('email_verification');
+    channel.fail(new Error('email_otp_required'));
+    const value = JSON.parse(fs.readFileSync(file));
+    assert.equal(value.stage, 'email_verification');
+    assert.equal(value.reason, 'email_otp_required');
+    channel.fail(new Error('email_otp_required synthetic-private'));
+    assert.equal(JSON.parse(fs.readFileSync(file)).reason, 'protocol_error');
+  } finally { fs.rmSync(root, {recursive: true, force: true}); }
+});
 
 test('actual error envelopes classify only codes and full allowlisted messages', () => {
   const fixtures = JSON.parse(fs.readFileSync(new URL('./fixtures/credential-operation-errors.json', import.meta.url)));

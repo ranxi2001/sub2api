@@ -18,6 +18,7 @@ export default {
   "unknownTime": "时间未记录",
   "automationBlocked": "自动操作受限，请查看本次异常与重登预算",
   "reasons": {
+    "email_otp_required": "需要邮箱验证码",
     "phone_verification_required": "需要手机号验证",
     "account_deactivated": "账号已被停用",
     "account_deleted": "账号已删除",
@@ -39,6 +40,7 @@ export default {
     "reauthorize": "请检查登录配置并重新授权。",
     "update_password": "请确认并更新已保存的登录密码。",
     "complete_verification": "请人工完成官方验证，并检查 MFA / 验证码配置。",
+    "complete_email_verification": "本次登录要求邮箱验证码，身份验证器的 2FA 验证码不能代替。请到账号管理中重新授权，使用浏览器完成邮箱验证。",
     "review_authorization": "请人工检查官方授权或安全验证要求。",
     "check_service_later": "请检查网络或服务可用性，稍后按既有策略重试。",
     "review_diagnostics": "请查看本次安全阶段和短码，人工确认原因。"

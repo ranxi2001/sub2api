@@ -17,10 +17,10 @@ except ImportError:
 
 PINNED_PROTOCOL_BLOB = 'ff2db2507e401c29fa78705e44f5b40a3108a8c6'
 BOUND_PROTOCOL_BLOB = '7d5143da87e36ad79c2d050003df99319736b866'
-STAGES = frozenset(('starting', 'web_login', 'password_accepted', 'mfa_challenge',
+STAGES = frozenset(('starting', 'web_login', 'email_verification', 'password_accepted', 'mfa_challenge',
                    'mfa_accepted', 'web_redirect', 'oauth_authorize', 'session_select',
                    'workspace_select', 'callback_validation', 'token_exchange', 'oauth_output', 'completed'))
-REASONS = frozenset(('none', 'protocol_error', 'password_rejected', 'totp_rejected',
+REASONS = frozenset(('none', 'protocol_error', 'password_rejected', 'totp_rejected', 'email_otp_required',
                     'interaction_required', 'security_check', 'session_unavailable', 'workspace_mismatch',
                     'callback_missing', 'callback_invalid', 'callback_state_mismatch', 'pkce_invalid',
                     'token_exchange_failed', 'credentials_incomplete', 'transport_error', 'runtime_error',
@@ -36,6 +36,7 @@ def codex_source(source):
         raise ValueError('unsupported_codex_runtime_layout')
     source = replace_exact(source, 'import crypto from "node:crypto";', '''import crypto from "node:crypto";
 import {createProtocolDiagnostics, validateCodexCallback, observeProtocolResponse, isTotpRejectionResponse} from "./openai_codex_diagnostics.mjs";
+import {resolveCodexLoginPage} from "./openai_codex_login.mjs";
 const protocolDiagnostic = createProtocolDiagnostics(process.env.SUB2API_PROTOCOL_DIAGNOSTIC_PATH,
   Number(process.env.SUB2API_PROTOCOL_TASK_ID));
 console.log = console.warn = console.error = () => {};''')
@@ -43,6 +44,33 @@ console.log = console.warn = console.error = () => {};''')
         ('    assertOk(result, `${method} ${url}`);', '    if (new URL(url).pathname === "/api/accounts/mfa/verify" && isTotpRejectionResponse(result)) throw new Error(`HTTP ${result.res.status} invalid_otp`);\n    observeProtocolResponse(result);\n    assertOk(result, `${method} ${url}`);'),
         ('async function loginChatgptWeb(client, { chatgptBase, authBase, email, rl, password, totpSecret }) {',
          'async function loginChatgptWeb(client, { chatgptBase, authBase, email, rl, password, totpSecret }) {\n  protocolDiagnostic.mark("web_login");'),
+        ('      screen_hint: "login_or_signup",\n      login_hint: email,', '      screen_hint: "login",'),
+        ('  const authPage = await client.follow(signin.url, { referer: `${chatgptBase}/` });\n  console.log(`[info] Auth page: ${safeUrl(authPage.finalUrl)}`);',
+         '''  let authPage = await client.follow(signin.url, { referer: `${chatgptBase}/` });
+  authPage = await resolveCodexLoginPage(client, authPage, {authBase, email, deviceId},
+    {createSentinelHeaders, authJsonStep, getContinueUrl});'''),
+        ('''async function verifyEmailOtp(client, { authBase, rl, deviceId, referer }) {
+  for (;;) {
+    const emailCode = await askEmailOtp(rl, client, authBase);
+    try {
+      const sentinelHeaders = await createSentinelHeaders(client, {
+        authBase,
+        deviceId,
+        flow: "email_otp_validate",
+      });
+      const { data } = await authJsonStep(client, authBase, "POST", "/api/accounts/email-otp/validate", {
+        code: emailCode,
+      }, { referer, headers: sentinelHeaders });
+      return data;
+    } catch (error) {
+      if (!isRejectedEmailOtpError(error)) throw error;
+      console.log("[email-otp-rejected] 邮箱验证码错误，请重新输入，或输入 r 重新发送。");
+    }
+  }
+}''', '''async function verifyEmailOtp() {
+  protocolDiagnostic.mark("email_verification");
+  throw new Error("email_otp_required");
+}'''),
         ('      console.log("[ok] Password accepted");', '      protocolDiagnostic.mark("password_accepted");'),
         ('  console.log("[mfa] TOTP 2FA challenge reached.");', '  protocolDiagnostic.mark("mfa_challenge");'),
         ('      console.log("[ok] 2FA verification accepted");', '      protocolDiagnostic.mark("mfa_accepted");'),
@@ -137,6 +165,7 @@ def prepare_codex_runtime(root: Path, temporary: Path) -> Path:
     script = staged / 'src/protocol-login.mjs'
     script.write_text(patched)
     shutil.copy2(Path(__file__).with_name('openai_codex_diagnostics.mjs'), script.parent)
+    shutil.copy2(Path(__file__).with_name('openai_codex_login.mjs'), script.parent)
     return script
 
 

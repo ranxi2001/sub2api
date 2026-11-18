@@ -7,6 +7,17 @@ import en from '@/i18n/locales/en/tokenGuardV2'
 import { safeOperationFailure, safeDiagnosticToken } from '@/utils/credentialOperationFailure'
 
 describe('credential operation failure display', () => {
+  it('directs email-code failures to browser reauthorization without blaming TOTP', () => {
+    const failure = safeOperationFailure({ code: 'email_otp_required', stage: 'email_verification' })
+    expect(failure.action).toBe('complete_email_verification')
+    expect(failure.category).toBe('email_otp_required')
+    expect(safeDiagnosticToken(failure.stage)).toBe('email_verification')
+    expect(safeDiagnosticToken(failure.code)).toBe('email_otp_required')
+    const view = mount(View, { props: { failure }, global: { plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh: { tokenGuardV2: zh } } })] } })
+    expect(view.text()).toContain('需要邮箱验证码')
+    expect(view.text()).toContain('使用浏览器完成邮箱验证')
+    expect(view.text()).not.toContain(zh.operationFailure.reasons.mfa_required)
+  })
   it('preserves fixed identity validation reasons and drops arbitrary identity text', () => {
     for (const reason of ['account_id_missing', 'account_id_mismatch', 'user_id_missing', 'email_missing', 'token_account_conflict', 'id_token_invalid']) {
       expect(safeDiagnosticToken(reason)).toBe(reason)
