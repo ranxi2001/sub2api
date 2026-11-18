@@ -20,9 +20,11 @@ type NewAPIAccountBinding struct {
 	Fingerprint, Group string
 }
 type NewAPIBindingSave struct {
-	Account *Account
-	TokenID int64
-	Group   string
+	Account             *Account
+	TokenID             int64
+	Group               string
+	CostMultiplierScale *float64
+	CostMultiplier      *float64
 }
 type NewAPIAuthorizationRepository interface {
 	GetProfile(context.Context, string, int64) (*NewAPISiteAuthorization, error)
@@ -32,15 +34,17 @@ type NewAPIAuthorizationRepository interface {
 	WriteSnapshot(context.Context, *Account, *NewAPIAccountBinding, *UpstreamBillingProbeSnapshot) error
 }
 type NewAPIConfigRequest struct {
-	UserID          int64            `json:"user_id"`
-	AccessToken     string           `json:"access_token,omitempty"`
-	AccountIDs      []int64          `json:"account_ids"`
-	TokenSelections map[string]int64 `json:"token_selections,omitempty"`
+	UserID               int64              `json:"user_id"`
+	AccessToken          string             `json:"access_token,omitempty"`
+	AccountIDs           []int64            `json:"account_ids"`
+	TokenSelections      map[string]int64   `json:"token_selections,omitempty"`
+	CostMultiplierScales map[string]float64 `json:"cost_multiplier_scales,omitempty"`
 }
 type NewAPIConfigAccount struct {
-	AccountID        int64  `json:"account_id"`
-	Name             string `json:"name"`
-	ConfiguredUserID *int64 `json:"configured_user_id,omitempty"`
+	AccountID           int64   `json:"account_id"`
+	Name                string  `json:"name"`
+	ConfiguredUserID    *int64  `json:"configured_user_id,omitempty"`
+	CostMultiplierScale float64 `json:"cost_multiplier_scale"`
 }
 type NewAPIConfig struct {
 	AccountID               int64                 `json:"account_id"`
@@ -57,14 +61,16 @@ type NewAPITokenOption struct {
 	MaskedKey string `json:"masked_key"`
 }
 type NewAPIPreviewAccount struct {
-	AccountID    int64               `json:"account_id"`
-	Name         string              `json:"name"`
-	Matched      bool                `json:"matched"`
-	TokenID      *int64              `json:"token_id,omitempty"`
-	Group        string              `json:"group,omitempty"`
-	Rate         *float64            `json:"rate,omitempty"`
-	Error        string              `json:"error,omitempty"`
-	TokenOptions []NewAPITokenOption `json:"token_options"`
+	AccountID           int64               `json:"account_id"`
+	Name                string              `json:"name"`
+	Matched             bool                `json:"matched"`
+	TokenID             *int64              `json:"token_id,omitempty"`
+	Group               string              `json:"group,omitempty"`
+	Rate                *float64            `json:"rate,omitempty"`
+	CostMultiplierScale float64             `json:"cost_multiplier_scale"`
+	CostMultiplier      *float64            `json:"cost_multiplier,omitempty"`
+	Error               string              `json:"error,omitempty"`
+	TokenOptions        []NewAPITokenOption `json:"token_options"`
 }
 type NewAPIPreview struct {
 	SiteURL string `json:"site_url"`
@@ -120,7 +126,7 @@ func (s *UpstreamBillingProbeService) GetNewAPIConfig(ctx context.Context, id in
 		if e != nil || peerSite != site || peer.GetCredential("api_key") == "" {
 			continue
 		}
-		item := NewAPIConfigAccount{AccountID: peer.ID, Name: peer.Name}
+		item := NewAPIConfigAccount{AccountID: peer.ID, Name: peer.Name, CostMultiplierScale: NewAPICostScale(peer)}
 		binding, e := s.newAPIRepo.GetBinding(ctx, peer.ID)
 		if e != nil {
 			return nil, newAPIError("storage_unavailable")
@@ -179,6 +185,18 @@ func (s *UpstreamBillingProbeService) verifyNewAPIConfig(ctx context.Context, id
 	if req.UserID <= 0 || len(req.AccountIDs) == 0 || len(req.AccountIDs) > 100 || len(req.AccessToken) > 8192 {
 		return nil, nil, nil, ErrNewAPIConfiguration
 	}
+	for id, scale := range req.CostMultiplierScales {
+		matched := false
+		for _, accountID := range req.AccountIDs {
+			if id == strconv.FormatInt(accountID, 10) {
+				matched = true
+				break
+			}
+		}
+		if !matched || !ValidNewAPICostScale(scale) {
+			return nil, nil, nil, ErrNewAPIConfiguration
+		}
+	}
 	profile, e := s.newAPIRepo.GetProfile(ctx, site, req.UserID)
 	if e != nil {
 		return nil, nil, nil, newAPIError("storage_unavailable")
@@ -222,7 +240,13 @@ func (s *UpstreamBillingProbeService) verifyNewAPIConfig(ctx context.Context, id
 			return nil, nil, nil, e
 		}
 		out.Wallet.Amount = data.wallet
-		item := NewAPIPreviewAccount{AccountID: a.ID, Name: a.Name, TokenOptions: []NewAPITokenOption{}}
+		scale := NewAPICostScale(a)
+		var requestedScale *float64
+		if value, ok := req.CostMultiplierScales[strconv.FormatInt(accountID, 10)]; ok {
+			scale = value
+			requestedScale = &value
+		}
+		item := NewAPIPreviewAccount{AccountID: a.ID, Name: a.Name, TokenOptions: []NewAPITokenOption{}, CostMultiplierScale: scale}
 		matches := matchNewAPITokens(a, data.tokens)
 		selected := req.TokenSelections[strconv.FormatInt(accountID, 10)]
 		var token *NewAPIToken
@@ -264,10 +288,15 @@ func (s *UpstreamBillingProbeService) verifyNewAPIConfig(ctx context.Context, id
 				tID := token.ID
 				item.TokenID = &tID
 				item.Group = sanitizeUpstreamBalanceText(token.Group, 128)
-				if r, ok := data.ratios[token.Group]; ok && !token.CrossGroupRetry && len(token.RouteGroups) <= 1 {
+				if r, ok := data.ratios[token.Group]; ok && token.Group != "auto" && !token.CrossGroupRetry && len(token.RouteGroups) <= 1 {
 					item.Rate = &r
 				}
-				bindings = append(bindings, NewAPIBindingSave{Account: a, TokenID: token.ID, Group: token.Group})
+				if requestedScale != nil || a.CostMultiplierAutoSyncEnabled() {
+					if cost, ok := NewAPICostToSync(newAPISnapshot(a, *token, data, 30, s.currentTime().UTC()), scale); ok {
+						item.CostMultiplier = &cost
+					}
+				}
+				bindings = append(bindings, NewAPIBindingSave{Account: a, TokenID: token.ID, Group: token.Group, CostMultiplierScale: &scale, CostMultiplier: item.CostMultiplier})
 			}
 		}
 		out.Accounts = append(out.Accounts, item)

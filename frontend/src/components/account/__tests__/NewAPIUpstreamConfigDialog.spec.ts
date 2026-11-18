@@ -1,3 +1,7 @@
+import { createPinia } from 'pinia'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { Account, NewAPIUpstreamConfig, NewAPIUpstreamPreview } from '@/types'
@@ -8,6 +12,7 @@ vi.mock('@/api/admin/accounts', () => ({
   getNewAPIUpstreamConfig: api.get, previewNewAPIUpstreamConfig: api.preview,
   saveNewAPIUpstreamConfig: api.save, deleteNewAPIUpstreamConfig: api.remove
 }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 42 } }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${Object.values(params).join(',')}` : key }) }))
 
 const account = { id: 7, name: 'current' } as Account
@@ -31,8 +36,8 @@ const preview: NewAPIUpstreamPreview = {
   ]
 }
 let wrappers: VueWrapper[] = []
-const open = async (props = {}) => {
-  const wrapper = mount(NewAPIUpstreamConfigDialog, { props: { show: true, account, ...props }, global: { stubs: { Teleport: true } } })
+const open = async (props = {}, pinia = createPinia(), realBadges = false) => {
+  const wrapper = mount(NewAPIUpstreamConfigDialog, { props: { show: true, account, ...props }, global: { plugins: [pinia], stubs: { Teleport: true, NewFeatureBadge: !realBadges } } })
   wrappers.push(wrapper)
   await flushPromises()
   return wrapper
@@ -62,6 +67,66 @@ describe('New API shared authorization dialog', () => {
     await checkbox(wrapper, 10).setValue(true)
     await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
     expect(api.preview).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7, 8, 10] })
+  })
+
+  it('converts foreign cost at ×7 and domestic cost at ×1 without changing raw ratios', async () => {
+    api.preview.mockResolvedValue({ ...preview, accounts: [
+      { ...preview.accounts[0], group: 'foreign', rate: 0.1 },
+      { ...preview.accounts[1], matched: true, group: 'domestic', rate: 0.7 }
+    ] })
+    const wrapper = await open()
+    await wrapper.get('[data-testid="new-api-cost-scale-7"]').setValue('7')
+    await wrapper.get('[data-testid="new-api-cost-scale-8"]').setValue('1')
+    await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
+    await flushPromises()
+    expect(api.preview).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7, 8], cost_multiplier_scales: { '7': 7, '8': 1 } })
+    expect(wrapper.get('[data-testid="new-api-cost-preview-7"]').text()).toContain('0.1,7,0.7')
+    expect(wrapper.get('[data-testid="new-api-cost-preview-8"]').text()).toContain('0.7,1,0.7')
+    await wrapper.get('[data-testid="new-api-save"]').trigger('click')
+    expect(api.save).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7, 8], cost_multiplier_scales: { '7': 7, '8': 1 } })
+  })
+
+  it('loads conversion choices, sends explicit opt-out, and excludes unchecked peers', async () => {
+    api.get.mockResolvedValue({ ...config, accounts: config.accounts.map(row => ({ ...row, cost_multiplier_scale: row.account_id === 7 ? 7 : 1 })) })
+    const wrapper = await open()
+    expect(wrapper.get<HTMLSelectElement>('[data-testid="new-api-cost-scale-7"]').element.value).toBe('7')
+    await wrapper.get('[data-testid="new-api-cost-scale-7"]').setValue('0')
+    await wrapper.get('[data-testid="new-api-cost-scale-8"]').setValue('7')
+    await checkbox(wrapper, 8).setValue(false)
+    await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
+    expect(api.preview).toHaveBeenCalledWith(7, { user_id: 42, account_ids: [7], cost_multiplier_scales: { '7': 0 } })
+  })
+
+  it('does not derive a cost for an automatic routing group', async () => {
+    const wrapper = await open()
+    await wrapper.get('[data-testid="new-api-cost-scale-7"]').setValue('7')
+    await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="new-api-cost-preview-7"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.accounts.upstreamBilling.newAPI.costUnavailable')
+  })
+
+  it('announces cost conversion independently and shares persistent dismissals', async () => {
+    localStorage.clear()
+    const pinia = createPinia()
+    const store = useNewFeatureNoticeStore(pinia)
+    store.dismiss(42, 'previous-feature')
+    const wrapper = await open({}, pinia, true)
+    const badge = wrapper.getComponent(NewFeatureBadge)
+    expect(badge.props('noticeId')).toBe(NEW_FEATURE_NOTICES.newAPICostConversion)
+    expect(badge.find('button').exists()).toBe(true)
+    const sibling = mount(NewFeatureBadge, { props: { userId: 42, noticeId: NEW_FEATURE_NOTICES.newAPICostConversion }, global: { plugins: [pinia] } })
+    wrappers.push(sibling)
+    await sibling.get('button').trigger('click')
+    expect(badge.find('button').exists()).toBe(false)
+    expect(sibling.find('button').exists()).toBe(false)
+    const reloaded = await open({}, createPinia(), true)
+    expect(reloaded.getComponent(NewFeatureBadge).find('button').exists()).toBe(false)
+    const persisted = useNewFeatureNoticeStore(createPinia())
+    expect(persisted.isDismissed(42, 'previous-feature')).toBe(true)
+    expect(persisted.isDismissed(42, 'future-feature')).toBe(false)
+    expect(persisted.isDismissed(43, NEW_FEATURE_NOTICES.newAPICostConversion)).toBe(false)
+    localStorage.clear()
   })
 
   it('requires a non-whitespace access token for a new upstream user', async () => {
