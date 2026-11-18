@@ -1,4 +1,6 @@
 export default {
+  "accountBalanceNotification": "Request balance error notifications",
+  "accountBalanceNotificationHint": "Controls email and robot alerts for insufficient-balance request errors from this account. Balance thresholds are configured separately; the global switch must also be enabled.",
   "providerBalanceSource": "Provider wallet balance",
   "providerRefreshDisabled": "Scheduled provider refresh is off. Configure it in channel operations.",
   "manageProviderBalance": "View / refresh provider balance",

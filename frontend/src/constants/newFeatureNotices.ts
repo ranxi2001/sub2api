@@ -5,6 +5,7 @@
  */
 export const NEW_FEATURE_NOTICES = {
   newAPICostConversion: 'new-api-cost-conversion-20261119',
+  accountOpsBalanceNotification: 'account-ops-per-account-balance-notification-20261119',
   channelUltrafastPricing: 'channel-ultrafast-pricing-initial-announcement',
   groupForceUltrafast: 'group-force-ultrafast-initial-announcement',
   passthroughModelFilter: 'openai-passthrough-model-filter-initial-announcement',
