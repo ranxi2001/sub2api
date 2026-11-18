@@ -97,6 +97,15 @@ describe('New API shared authorization dialog', () => {
     expect(wrapper.get('[data-testid="new-api-cost-preview-7"]').text()).toContain('0.1,1,0.1')
   })
 
+  it('preserves the independent manual-cost setting in the preview', async () => {
+    api.preview.mockResolvedValue({ ...preview, accounts: [{ ...preview.accounts[0], group: 'foreign', rate: 0.1, cost_auto_sync_enabled: false }] })
+    const wrapper = await open()
+    await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="new-api-cost-preview-7"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.accounts.upstreamBilling.newAPI.costSyncPaused')
+  })
+
   it('loads USD conversion switches, sends explicit opt-out, and excludes unchecked peers', async () => {
     api.get.mockResolvedValue({ ...config, accounts: config.accounts.map(row => ({ ...row, apply_usd_rate: row.account_id === 7 })) })
     const wrapper = await open()

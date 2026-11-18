@@ -61,7 +61,7 @@ func TestNewAPIIntegrationSharedEncryptedRotationAndUnbind(t *testing.T) {
 	require.NoError(t, r.WriteSnapshot(ctx, loaded, bb, snap))
 	updated, e := ar.GetByID(ctx, b.ID)
 	require.NoError(t, e)
-	require.Equal(t, 0.7, updated.CostMultiplier())
+	require.Equal(t, 63.0, updated.CostMultiplier(), "existing New API accounts default to applying the non-CN factor")
 	require.Equal(t, 1.0, updated.BillingRateMultiplier())
 	require.Equal(t, "new_api", updated.Extra[service.UpstreamBillingProviderExtraKey])
 	require.True(t, updated.Extra[service.UpstreamBillingProbeEnabledExtraKey].(bool))
