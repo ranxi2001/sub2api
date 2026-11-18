@@ -1214,6 +1214,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			hooks.TurnStarted(1, turnArrivedAt)
 		}
 	}
+	var bridgeWarmup openAIWSHTTPWarmup
 	readClientMessage := func(nextTurn int) ([]byte, error) {
 		idleTimeout := s.openAIWSIngressInterTurnIdleTimeout()
 		readCtx := ctx
@@ -1253,7 +1254,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if hooks != nil && hooks.TurnStarted != nil {
 			hooks.TurnStarted(nextTurn, turnArrivedAt)
 		}
-		return payload, nil
+		return bridgeWarmup.nextFrame(payload, ResolveOpenAIWSClientReadLimitBytes(s.cfg))
 	}
 
 	firstPayload, err := parseClientPayload(1, firstClientMessage)
@@ -1495,21 +1496,29 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			bridgeCtx := context.WithValue(ctx, openAIWSAgentSourceKey{}, currentBridgePayload.clientPayloadRaw)
-			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
-				context.WithValue(bridgeCtx, openAIWSQueueArrivalKey{}, turnArrivedAt),
-				c,
-				account,
-				token,
-				bridgePayloadRaw,
-				bridgePayloadBytes,
-				currentBridgePayload.originalModel,
-				currentBridgePayload.imageBillingModel,
-				currentBridgePayload.imageSizeTier,
-				currentBridgePayload.imageInputSize,
-				grokCacheIdentity,
-				turn,
-				writeClientMessage,
-			)
+			var result *OpenAIForwardResult
+			var bridgeErr error
+			warmupHandled := false
+			if account.IsOpenAIApiKey() {
+				result, warmupHandled, bridgeErr = bridgeWarmup.accept(currentBridgePayload.clientPayloadRaw, currentBridgePayload.originalModel, turn, writeClientMessage)
+			}
+			if !warmupHandled {
+				result, bridgeErr = s.proxyOpenAIWSHTTPBridgeTurn(
+					context.WithValue(bridgeCtx, openAIWSQueueArrivalKey{}, turnArrivedAt),
+					c,
+					account,
+					token,
+					bridgePayloadRaw,
+					bridgePayloadBytes,
+					currentBridgePayload.originalModel,
+					currentBridgePayload.imageBillingModel,
+					currentBridgePayload.imageSizeTier,
+					currentBridgePayload.imageInputSize,
+					grokCacheIdentity,
+					turn,
+					writeClientMessage,
+				)
+			}
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
 			}
@@ -1535,7 +1544,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
-				hooks.AfterTurn(turn, result, bridgeErr)
+				observedResult := result
+				if warmupHandled {
+					observedResult = nil
+				}
+				hooks.AfterTurn(turn, observedResult, bridgeErr)
 			}
 			if bridgeErr != nil {
 				if smartStrict {
@@ -1585,10 +1598,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				turnState = bridgeTurnState
 			}
 			responseID := strings.TrimSpace(result.RequestID)
-			if smartStrict {
+			if smartStrict && !warmupHandled {
 				smartSession.LastResponse = responseID
 			}
-			if responseID != "" && stateStore != nil {
+			if responseID != "" && stateStore != nil && !warmupHandled {
 				ttl := s.openAIWSResponseStickyTTL()
 				logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
 			}

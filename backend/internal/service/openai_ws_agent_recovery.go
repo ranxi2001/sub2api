@@ -65,6 +65,8 @@ type openAIWSAgentRecovery struct {
 	completedAccount                 int64
 	completedModel                   string
 	completedBridge                  openAIWSBridgeResponseAnchor
+	acceptedHistoryTools             map[string]openAIWSAcceptedToolHistory
+	pendingHistoryTools              map[string]openAIWSAcceptedToolHistory
 	deliveredTools                   map[string]openAIWSDeliveredTool
 	pendingTools                     map[string]openAIWSDeliveredTool
 	localHistory                     openAIWSLocalHistory
@@ -261,6 +263,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	}
 	r.itemDone = nil
 	r.pendingTools = nil
+	r.pendingHistoryTools = nil
 	if req.GetBody != nil {
 		// HTTP builders can still normalize the prepared body. Validate the
 		// built request's bytes, rather than replacing them with the earlier
@@ -377,6 +380,9 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			}
 			fingerprint, valid := openAIToolFingerprint(item)
 			observed, found := r.deliveredTools[r.request.model+"\x00"+item.Get("call_id").String()]
+			if !found && acceptsPriorToolPair(r.acceptedHistoryTools, account, r.request.model, item, proof.history) {
+				continue
+			}
 			if !valid || !found || observed.conflicted || observed.fingerprint != fingerprint || observed.accountID != account.ID || observed.config != openAIAgentRecoveryConfig(account, r.request.model) {
 				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r.request)
 			}
@@ -432,6 +438,9 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 		return err
 	}
 	r.finish = finish
+	if mode == "http_bridge" {
+		r.pendingHistoryTools = acceptedOpenAIWSToolHistory(source, account, r.request.model)
+	}
 	r.stageLocalHistory(source)
 	if r.request.owner != nil || len(r.request.items) > 0 || r.request.omittedHistory ||
 		(r.service.settingService != nil && r.service.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx)) {
@@ -538,6 +547,9 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		}
 		r.finish(completed)
 		if completed {
+			if r.pendingHistoryTools != nil {
+				r.acceptedHistoryTools = r.pendingHistoryTools
+			}
 			r.completedResponse, r.completedAccount, r.completedModel = responseID, request.delivery.binding.accountID, request.model
 			r.completedBridge = openAIWSBridgeResponseAnchor{response: responseID, model: request.model, session: request.session,
 				account: request.delivery.binding.accountID, key: request.keyID, user: request.userID, group: request.groupID, config: request.delivery.binding.config}
@@ -576,7 +588,8 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 				// pendingTools coalesces item.done and terminal observations
 				// within one generation. An existing delivered identity is a
 				// later generation reusing the call ID, even if bytes match.
-				observed.conflicted = observed.conflicted || old.conflicted || exists
+				_, reusedHistoricalID := r.acceptedHistoryTools[key]
+				observed.conflicted = observed.conflicted || old.conflicted || exists || reusedHistoricalID
 				r.deliveredTools[key] = observed
 			}
 			for _, key := range request.keys {
@@ -1287,4 +1300,68 @@ func (s *OpenAIGatewayService) restartOpenAIWSClientReadableHistory(ctx context.
 	r.inputDigest = openAIAgentRecoveryInputDigest(clean)
 	r.replayControlsDigest = openAI409ControlsDigest(clean)
 	return next, clean, true
+}
+
+// Paired client history accepted by a completed generation is context, not
+// proof that this connection executed the old tool. It never enters shared
+// provenance and only permits the same unchanged pair on this bridge/account.
+type openAIWSAcceptedToolHistory struct {
+	fingerprint string
+	result      [32]byte
+	account     int64
+	config      [32]byte
+}
+
+func openAIWSToolResultDigest(item gjson.Result) [32]byte {
+	return openAIAgentRecoveryInputDigest([]byte(`{"input":[` + item.Raw + `]}`))
+}
+
+func acceptedOpenAIWSToolHistory(source []byte, account *Account, model string) map[string]openAIWSAcceptedToolHistory {
+	if account == nil || !account.IsOpenAIApiKey() || len(source) > 8<<20 ||
+		gjson.GetBytes(source, "previous_response_id").String() != "" || gjson.GetBytes(source, "conversation").Exists() ||
+		len(openAIAgentRecoveryItemDigests(source)) != 0 || !openAIEncryptedJSONUnambiguous(source) {
+		return nil
+	}
+	if _, reason := inspectOpenAIWSCompletedTools(source); reason != "" {
+		return nil
+	}
+	normalized, _, err := sanitizeOpenAIResponsesInputItemIDs(source)
+	if err != nil {
+		return nil
+	}
+	results := map[string]gjson.Result{}
+	for _, item := range gjson.GetBytes(normalized, "input").Array() {
+		if kind := item.Get("type").String(); kind == "function_call_output" || kind == "custom_tool_call_output" {
+			results[item.Get("call_id").String()] = item
+		}
+	}
+	accepted := map[string]openAIWSAcceptedToolHistory{}
+	for _, item := range gjson.GetBytes(normalized, "input").Array() {
+		kind := item.Get("type").String()
+		if kind != "function_call" && kind != "custom_tool_call" {
+			continue
+		}
+		fingerprint, valid := openAIToolFingerprint(item)
+		id := item.Get("call_id").String()
+		result, found := results[id]
+		if !valid || !found || result.Get("type").String() != kind+"_output" || len(accepted) >= 1024 {
+			return nil
+		}
+		accepted[model+"\x00"+id] = openAIWSAcceptedToolHistory{fingerprint: fingerprint, result: openAIWSToolResultDigest(result), account: account.ID, config: openAIAgentRecoveryConfig(account, model)}
+	}
+	return accepted
+}
+
+func acceptsPriorToolPair(acceptedTools map[string]openAIWSAcceptedToolHistory, account *Account, model string, call gjson.Result, history []byte) bool {
+	accepted, ok := acceptedTools[model+"\x00"+call.Get("call_id").String()]
+	fingerprint, valid := openAIToolFingerprint(call)
+	if !ok || !valid || accepted.account != account.ID || accepted.config != openAIAgentRecoveryConfig(account, model) || accepted.fingerprint != fingerprint {
+		return false
+	}
+	for _, item := range gjson.GetBytes(history, "input").Array() {
+		if item.Get("type").String() == call.Get("type").String()+"_output" && item.Get("call_id").String() == call.Get("call_id").String() {
+			return accepted.result == openAIWSToolResultDigest(item)
+		}
+	}
+	return false
 }
