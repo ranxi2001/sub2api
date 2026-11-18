@@ -103,7 +103,7 @@ def main():
             if args.shard == 0:
                 report['runs'].append(run_command(['make', 'test-collection', 'TEST_FLAGS=-json'], output, 'collection'))
             if shards[args.shard]:
-                report['runs'].append(run_command(['make', 'test-unit-packages', 'TEST_FLAGS=-json',
+                report['runs'].append(run_command(['make', 'test-unit-packages', 'TEST_FLAGS=-json -timeout=20m',
                                                   'TEST_PACKAGES=' + ' '.join(shards[args.shard])], output, 'unit'))
         else:
             report['runs'].append(run_command(['make', 'test-integration', 'TEST_FLAGS=-json -count=1'], output, 'integration'))

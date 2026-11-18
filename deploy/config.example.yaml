@@ -300,6 +300,10 @@ gateway:
   # 默认严格；true 不保证密文兼容，不解除权限/额度/并发和交付安全检查。
   # 所有节点统一配置、排空旧 WS 后重启；详见 docs/encrypted-agent-owner-policy.md。
   disable_encrypted_agent_owner_binding: false
+  # Opt-in v2.20-style forwarding without the newer agent recovery integrity gates.
+  # Takes precedence over owner opt-out, 400/409 history rebuild and lossy restart.
+  # See docs/openai-legacy-compatibility.md; restart all traffic-serving nodes together.
+  openai_legacy_compatibility_mode: false
   # Grok text Responses first-byte timeout (seconds, 0=disabled; default 120)
   # Grok 文本 Responses 首字节超时时间（秒，0=禁用；默认 120）
   grok_response_header_timeout: 120

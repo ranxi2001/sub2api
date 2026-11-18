@@ -70,6 +70,9 @@ func (r *openAIAgentRecoveryRequest) shadowEpochKey(item [32]byte) string {
 // client intent or unpaired tool work. Existing readable requests never consult
 // shadow. A miss/error leaves ordinary routing/refusal intact, never invents text.
 func (s *OpenAIGatewayService) RestoreOpenAIReadableShadow(ctx context.Context, c *gin.Context, body []byte, session string) (restoredCtx context.Context, restoredBody []byte) {
+	if s.openAILegacyCompatibility() {
+		return ctx, body
+	}
 	state := openAIRecoveryShadowState{lookup: "not_consulted", epoch: "not_checked"}
 	defer func() { restoredCtx = context.WithValue(restoredCtx, openAIRecoveryShadowStateKey{}, state) }()
 	if s == nil || s.settingService == nil || openAI409HasReadableIntent(body) ||

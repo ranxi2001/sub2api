@@ -25,6 +25,8 @@ python3 -m unittest discover -s .github/ci -p 'test_*.py' -v
 
 `.github/ci/go_tests.py` 从 `go list -tags=unit ./...` 动态发现全部包，再按 `go-test-weights.json` 的历史耗时从重到轻分配。新包按 1 秒估算并自动纳入；无测试包也保留。权重仅影响分配，不筛选测试。初始权重来自 [2026-11-17 的成功运行](https://github.com/ranxi2001/sub2api/actions/runs/44150112506)，其中 handler 581.520 秒、service 363.216 秒。包内用例尚未进一步拆分，因此单个重包仍可能决定单元测试关键路径。
 
+单元测试的每个 package 显式使用 `-timeout=20m`，容纳已接近 Go 默认 10 分钟上限的 handler 全量套件；四分片仍运行全部用例，job 的 40 分钟上限继续生效。
+
 运行仍经过 backend Makefile：`test-unit-packages` 接收包列表，嵌套收款模块的 `test-collection` 在第 0 片执行一次；默认 `make test-unit` 仍包含两者。单元测试保留 Go 测试结果缓存。集成测试保留 PostgreSQL/Redis、Docker testcontainers 和 `GOFLAGS=-p=1`，增加 `-count=1` 确保外部服务检查实际执行。原先单独运行的 `TestUsageTrendAggregateTimezone` 已包含在完整集成套件内，不再重复启动仓库集成环境。每个单元分片和集成 runner 都安装并检查 redis-server，分别满足快照适配器和认证缓存跨进程 Pub/Sub 用例；服务容器不能替代这些用例自行启动的独立 Redis 进程。
 
 缓存按 OS、架构、go.mod/go.sum、suite/分片与源码 SHA 分隔，按同一依赖和分片前缀恢复最近的编译缓存；各分片不竞争同一写入 key。相同 key 的成功重跑可直接命中。分片缓存未命中时，使用与 setup-go 相同的绝对路径和键格式，按当前 Go 版本/runner 镜像回退读取 production 已有的共享缓存（先匹配 go.sum，再匹配版本前缀），只向分片 key 写入；避免新 PR 因无法读取其他 PR 的专属缓存而完全冷启动。独立 runner 会增加总资源和冷启动开销；这里不变更 Runner 账户配额，也不使用生产服务器编译。
