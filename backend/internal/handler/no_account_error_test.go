@@ -392,3 +392,21 @@ func TestGPT55RetirementEmptyListingDoesNotUseDefaults(t *testing.T) {
 	require.Empty(t, service.ModelListingSource(service.PlatformOpenAI, []string{}, []string{"gpt-5.5"}))
 	require.Equal(t, []string{"gpt-5.5"}, service.ModelListingSource(service.PlatformOpenAI, nil, []string{"gpt-5.5"}))
 }
+
+func TestSelectionFailureImageCapabilityDoesNotHideTextModel(t *testing.T) {
+	fallback := noAccountErrorClassification{Status: 503, ErrType: "api_error", Message: "Service temporarily unavailable"}
+	for _, tc := range []struct{ details, code string }{
+		{"pool=3, filtered: image_model_not_supported=3", "image_capability_unavailable"},
+		{"pool=3, filtered: image_model_not_authorized=3", "image_capability_unavailable"},
+		{"pool=3, filtered: image_model_rate_limited=3", "image_capacity_exhausted"},
+		{"pool=3, filtered: image_model_not_supported=1 not_schedulable=2", ""},
+		{"pool=0, filtered: image_model_not_supported=0", ""},
+	} {
+		t.Run(tc.details, func(t *testing.T) {
+			got := classifySelectionFailureError(fmt.Errorf("no available OpenAI accounts (%s)", tc.details), fallback)
+			require.Equal(t, 503, got.Status)
+			require.Equal(t, tc.code, got.Code)
+			require.False(t, got.ModelNotFound)
+		})
+	}
+}

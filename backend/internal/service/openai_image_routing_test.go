@@ -34,6 +34,8 @@ func TestOpenAIImageRoutingModelAllowlist(t *testing.T) {
 		{"explicit tool choice", `{"tool_choice":{"type":"namespace","name":"image_gen"}}`, "gpt-image-2", true},
 		{"passive namespace", `{"tools":[{"type":"namespace","name":"image_gen","tools":[]}]}`, "", false},
 		{"plain text", `{"input":"hello"}`, "", false},
+		{"disabled native tool before choice", `{"tools":[{"type":"image_generation"}],"tool_choice":"none"}`, "", false},
+		{"disabled native tool after choice", `{"tool_choice":"none","tools":[{"type":"image_generation"}]}`, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := WithOpenAIImageGenerationRequest(context.Background(), imageRoutingTextModel, []byte(tc.payload))

@@ -175,3 +175,32 @@ func TestOpsUpstreamCannotClaimClientCancellation(t *testing.T) {
 		})
 	}
 }
+
+func TestOpsServerlessCancellationIsClientOutcome(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+	repo := &ingressRejectOpsRepo{}
+	ops := service.NewOpsService(repo, &ingressRejectSettingRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	settings, err := ops.GetOpsAdvancedSettings(context.Background())
+	require.NoError(t, err)
+	settings.IgnoreContextCanceled = false
+	_, err = ops.UpdateOpsAdvancedSettings(context.Background(), settings)
+	require.NoError(t, err)
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(ops))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		// Internal marker produced by the actual transfer cancellation boundary.
+		c.Set("serverless.forward_client_canceled", true)
+	})
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	require.Empty(t, w.Body.String())
+	require.Len(t, opsErrorLogQueue, 1)
+	flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
+	require.Len(t, repo.entries, 1)
+	row := repo.entries[0]
+	require.Equal(t, 499, row.StatusCode)
+	require.Equal(t, service.OpsClientCanceledCode, row.ErrorType)
+	require.Equal(t, "client", row.ErrorOwner)
+	require.Equal(t, "client_request", row.ErrorSource)
+	require.Nil(t, row.UpstreamStatusCode)
+}

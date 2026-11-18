@@ -223,7 +223,13 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 		_, raw, e := h.clientConn.Read(readCtx)
 		if e == nil {
 			require.Equal(t, "error", gjson.GetBytes(raw, "type").String())
+			if fence == "missing_history" {
+				require.Equal(t, "previous_response_not_found", gjson.GetBytes(raw, "error.code").String())
+				require.EqualValues(t, 400, gjson.GetBytes(raw, "status").Int())
+			}
 			_, _, e = h.clientConn.Read(readCtx)
+		} else if fence == "missing_history" {
+			t.Fatalf("missing continuation must deliver the recovery event: %v", e)
 		}
 		select {
 		case <-finished:
