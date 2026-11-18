@@ -51,7 +51,7 @@ func TestAccountOpsBalanceNotificationObserveAndQueuedDelivery(t *testing.T) {
 	cfg := defaultAccountOpsConfig()
 	cfg.Enabled, cfg.Recipient = true, "ops@example.test"
 	cfg.GroupsInitialized = true
-	cfg.Groups = []AccountOpsGroup{{ID: "manual-example", Name: "Example", AccountIDs: []int64{7, 8}}}
+	cfg.Groups = []AccountOpsGroup{{ID: manualAccountOpsGroupID("example"), Name: "Example", AccountIDs: []int64{7, 8}}}
 	require.NoError(t, svc.SaveConfig(ctx, cfg))
 	account := &Account{ID: 7, Platform: PlatformOpenAI}
 	body := []byte(`{"error":{"code":"insufficient_balance"}}`)
