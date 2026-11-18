@@ -22,6 +22,13 @@ import (
 )
 
 const forwardHeader = "X-Sub2api-Route"
+const forwardClientCanceledKey = "serverless.forward_client_canceled"
+
+// ForwardClientCanceled is set only by the forwarding boundary after the
+// incoming request was canceled. Upstream error bodies cannot set this marker.
+func ForwardClientCanceled(c *gin.Context) bool {
+	return c != nil && c.GetBool(forwardClientCanceledKey)
+}
 
 type ticket struct {
 	Node  string `json:"node"`
@@ -272,7 +279,11 @@ func (m *Manager) Route(c *gin.Context, keyID int64, clientIP string) {
 		return
 	}
 	m.forward(c, *target, clientIP)
-	m.Record(c.Request.Context(), target.ID, country, reason, c.Writer.Status())
+	status := c.Writer.Status()
+	if ForwardClientCanceled(c) {
+		status = 499
+	}
+	m.Record(c.Request.Context(), target.ID, country, reason, status)
 }
 func approved(cfg Config, p Pod, newBinding bool) bool {
 	for _, policy := range cfg.Pods {
@@ -314,6 +325,17 @@ func (m *Manager) forward(c *gin.Context, p Pod, clientIP string) {
 			// Raw transport errors may contain capability URLs or credentials.
 			requestID, _ := r.Context().Value(ctxkey.RequestID).(string)
 			clientRequestID, _ := r.Context().Value(ctxkey.ClientRequestID).(string)
+			if errors.Is(err, context.Canceled) && errors.Is(c.Request.Context().Err(), context.Canceled) {
+				c.Set(forwardClientCanceledKey, true)
+				m.logger.InfoContext(r.Context(), "serverless.forward_client_canceled",
+					slog.String("component", "serverless"),
+					slog.String("request_id", requestID),
+					slog.String("client_request_id", clientRequestID),
+					slog.String("pod_id", p.ID),
+					slog.Int64("duration_ms", time.Since(started).Milliseconds()))
+				// No error body is sent to a departed client and no POST is replayed.
+				return
+			}
 			m.logger.WarnContext(r.Context(), "serverless.forward_failed",
 				slog.String("component", "serverless"),
 				slog.String("request_id", requestID),
