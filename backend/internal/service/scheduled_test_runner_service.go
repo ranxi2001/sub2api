@@ -200,10 +200,13 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 	if !saved {
 		return false
 	}
+	if result.Status == "success" {
+		result.grokRecovery.complete(ctx, s.accountTestSvc.accountRepo)
+	}
 
 	// Auto-recover account if test succeeded and auto_recover is enabled.
 	if result.Status == "success" && plan.AutoRecover {
-		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID)
+		s.tryRecoverAccount(ctx, plan.AccountID, plan.ID, result.grokRecovery)
 	}
 
 	nextRun, err := computeNextRun(plan.CronExpression, time.Now())
@@ -219,12 +222,17 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 }
 
 // tryRecoverAccount attempts to recover an account from recoverable runtime state.
-func (s *ScheduledTestRunnerService) tryRecoverAccount(ctx context.Context, accountID int64, planID int64) {
+func (s *ScheduledTestRunnerService) tryRecoverAccount(ctx context.Context, accountID int64, planID int64, grokRecovery ...*grokTestRecovery) {
 	if s.rateLimitSvc == nil {
 		return
 	}
 
-	recovery, err := s.rateLimitSvc.RecoverAccountAfterSuccessfulTest(ctx, accountID)
+	// Grok's observer owns the generation-fenced recovery. Broad recovery here
+	// would clear a newer 429 or an exhausted-200 observation after saving.
+	recovery, err := s.rateLimitSvc.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{
+		preserveGrokScopedBlocks: true,
+		preserveGrokRuntimeState: len(grokRecovery) > 0 && grokRecovery[0] != nil && grokRecovery[0].observed,
+	})
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d auto-recover failed: %v", planID, err)
 		return

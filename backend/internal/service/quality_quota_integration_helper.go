@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/qualityqueue"
 )
 
@@ -45,4 +46,14 @@ func NewConnectivityRunnerForTesting(scheduled *ScheduledTestService, accounts A
 		accountTestSvc: &AccountTestService{accountRepo: accounts},
 		rateLimitSvc:   NewRateLimitService(accounts, nil, nil, nil, nil),
 	}
+}
+
+// Exercise the actual Grok transport/observer/background parser with an offline
+// HTTPUpstream. No alternate execution or recovery implementation is installed.
+func NewGrokConnectivityRunnerForTesting(scheduled *ScheduledTestService, accounts AccountRepository, upstream HTTPUpstream) (*ScheduledTestRunnerService, *AccountTestService) {
+	runner := NewConnectivityRunnerForTesting(scheduled, accounts)
+	runner.accountTestSvc.httpUpstream = upstream
+	runner.accountTestSvc.grokTokenProvider = NewGrokTokenProvider(accounts, nil)
+	runner.accountTestSvc.cfg = &config.Config{}
+	return runner, runner.accountTestSvc
 }
