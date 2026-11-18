@@ -103,6 +103,8 @@ func TestGPT62CompatHTTPRejectsDisabledReasoning(t *testing.T) {
 	}
 }
 
+// The fork keeps a fixed 6x default across the upstream promotion boundary.
+// Explicit channel rates and long-context cards remain independent.
 func TestGPT62PricingAtRequestTime(t *testing.T) {
 	before := time.Date(2027, 3, 1, 7, 59, 59, 0, time.UTC)
 	after := before.Add(time.Second)
@@ -120,7 +122,7 @@ func TestGPT62PricingAtRequestTime(t *testing.T) {
 						tier  string
 						at    time.Time
 						ratio float64
-					}{{"", before, 1}, {"priority", before, 2}, {"flex", before, 0.5}, {"ultrafast", before, 3}, {"ultrafast", after, 6}, {"ultrafast", before, 3}} {
+					}{{"", before, 1}, {"priority", before, 2}, {"flex", before, 0.5}, {"ultrafast", before, 6}, {"ultrafast", after, 6}, {"ultrafast", before, 6}} {
 						input.ServiceTier = tc.tier
 						input.PricingAt = tc.at
 						cost, err := svc.CalculateCostUnified(input)
@@ -138,17 +140,15 @@ func TestGPT62PricingAtRequestTime(t *testing.T) {
 					input.Tokens.InputTokens++
 					cost, err = svc.CalculateCostUnified(input)
 					require.NoError(t, err)
-					require.InDelta(t, 272001*unit*2, cost.InputCost, 1e-12)
-					require.InDelta(t, 50*unit*5*1.5, cost.OutputCost, 1e-12)
+					require.InDelta(t, 272001*unit, cost.InputCost, 1e-12)
+					require.InDelta(t, 50*unit*5, cost.OutputCost, 1e-12)
 					for _, kind := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-						input.DisableModelLongContextPricing = openAISubscriptionLongContextExempt(&Account{Platform: PlatformOpenAI, Type: kind}, &OpenAIForwardResult{Model: "public", UpstreamModel: model})
+						input.DisableModelLongContextPricing = openAIGPT61SolLongContextExempt(&Account{Platform: PlatformOpenAI, Type: kind}, &OpenAIForwardResult{Model: "public", UpstreamModel: model}, input.Tokens)
 						cost, err = svc.CalculateCostUnified(input)
 						require.NoError(t, err)
-						factor := 2.0
-						if kind == AccountTypeOAuth {
-							factor = 1
-						}
-						require.InDelta(t, 272001*unit*factor, cost.InputCost, 1e-12)
+						// Fork default cards have no implicit long-context surcharge.
+						require.False(t, cost.LongContextBillingApplied)
+						require.InDelta(t, 272001*unit, cost.InputCost, 1e-12)
 					}
 				}
 				// Request-specific calculation must not mutate shared fallback pricing.

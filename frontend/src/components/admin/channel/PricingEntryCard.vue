@@ -161,7 +161,7 @@
                 type="number" step="any" min="0.000001" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.multiplierPlaceholder')" />
             </div>
             <div v-if="props.platform === 'openai'">
-              <label class="text-xs text-gray-400">{{ t('admin.channels.form.ultrafastMultiplier') }}</label>
+              <label class="text-xs text-gray-400">{{ t('admin.channels.form.ultrafastMultiplier') }} <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.channelUltrafastPricing" :user-id="noticeUserId" /></label>
               <input :value="entry.ultrafast_multiplier" @input="emitField('ultrafast_multiplier', ($event.target as HTMLInputElement).value)"
                 type="number" step="any" min="0.000001" class="input mt-0.5 text-sm" :placeholder="t('admin.channels.form.multiplierPlaceholder')" />
             </div>

@@ -24,7 +24,11 @@ func TestGPT62ModelIdentityAndReasoning(t *testing.T) {
 		for _, level := range descriptor.SupportedReasoningLevels {
 			levels = append(levels, level.Effort)
 		}
-		require.Equal(t, []string{"low", "medium", "high", "xhigh", "max"}, levels)
+		expectedLevels := []string{"low", "medium", "high", "xhigh", "max"}
+		if model != "gpt-6.2-astra-pro" {
+			expectedLevels = append(expectedLevels, "ultra") // Official 6.2 descriptor.
+		}
+		require.Equal(t, expectedLevels, levels)
 	}
 	for _, unknown := range []string{"gpt-6.2-astral", "gpt-6.2-astra-prototype", "gpt-6.2-astra-pro-preview", "gpt-6.2-solitude", "gpt-6.20-astra"} {
 		require.Empty(t, normalizeOpenAIGPT62Model(unknown), unknown)

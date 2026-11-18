@@ -160,17 +160,17 @@ func (usage OpenAIUsage) billingUsageTokens() UsageTokens {
 		creationTokens = max(usage.CacheCreation5mTokens, 0) + max(usage.CacheCreation1hTokens, 0)
 	}
 	tokens := UsageTokens{
-		InputTokens:           max(usage.InputTokens-usage.CacheReadInputTokens-creationTokens, 0),
-		ImageInputTokens:      max(usage.ImageInputTokens-usage.ImageCacheReadTokens, 0),
-		ImageCacheReadTokens:  usage.ImageCacheReadTokens,
-		OutputTokens:          usage.OutputTokens,
-		CacheCreationTokens:   creationTokens,
-		CacheCreation5mTokens: usage.CacheCreation5mTokens,
-		CacheCreation1hTokens: usage.CacheCreation1hTokens,
+		InputTokens:            max(usage.InputTokens-usage.CacheReadInputTokens-creationTokens, 0),
+		ImageInputTokens:       max(usage.ImageInputTokens-usage.ImageCacheReadTokens, 0),
+		ImageCacheReadTokens:   usage.ImageCacheReadTokens,
+		OutputTokens:           usage.OutputTokens,
+		CacheCreationTokens:    creationTokens,
+		CacheCreation5mTokens:  usage.CacheCreation5mTokens,
+		CacheCreation1hTokens:  usage.CacheCreation1hTokens,
 		CacheCreation30mTokens: usage.CacheCreation30mInputTokens,
 		CacheCreation12hTokens: usage.CacheCreation12hInputTokens,
-		CacheReadTokens:       usage.CacheReadInputTokens,
-		ImageOutputTokens:     usage.ImageOutputTokens,
+		CacheReadTokens:        usage.CacheReadInputTokens,
+		ImageOutputTokens:      usage.ImageOutputTokens,
 	}
 	return tokens
 }
@@ -468,11 +468,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		UpstreamEndpoint:         optionalTrimmedStringPtr(input.UpstreamEndpoint),
 		InputTokens:              actualInputTokens,
 		OutputTokens:             result.Usage.OutputTokens,
-		CacheCreationTokens: billingUsage.CacheCreationInputTokens,
-		CacheCreation5mTokens: billingUsage.CacheCreation5mTokens,
-		CacheCreation1hTokens: billingUsage.CacheCreation1hTokens,
-		CacheCreation30mTokens: billingUsage.CacheCreation30mInputTokens,
-		CacheCreation12hTokens: billingUsage.CacheCreation12hInputTokens,
+		CacheCreationTokens:      billingUsage.CacheCreationInputTokens,
+		CacheCreation5mTokens:    billingUsage.CacheCreation5mTokens,
+		CacheCreation1hTokens:    billingUsage.CacheCreation1hTokens,
+		CacheCreation30mTokens:   billingUsage.CacheCreation30mInputTokens,
+		CacheCreation12hTokens:   billingUsage.CacheCreation12hInputTokens,
 		CacheReadTokens:          result.Usage.CacheReadInputTokens,
 		ImageInputTokens:         result.Usage.ImageInputTokens,
 		ImageOutputTokens:        result.Usage.ImageOutputTokens,
