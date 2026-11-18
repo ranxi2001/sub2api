@@ -16,7 +16,13 @@ class UsageCompatibilityTest(unittest.TestCase):
         for baseline in ('f895ea743f34a4c4ab6c9d01c01e13c931625a6e', '6df0cd5bb0ce4d774d34004008f9dd661d236468'):
             with self.subTest(baseline=baseline), tempfile.TemporaryDirectory() as temp:
                 tree = Path(temp) / 'tree'
-                subprocess.run(['git', 'clone', '--shared', '--no-checkout', str(ROOT), str(tree)], check=True, capture_output=True)
+                subprocess.run(['git', 'init', '-q', str(tree)], check=True, capture_output=True)
+                # A shallow clone can omit detached historical fetches. Share
+                # the already-verified object store directly, without copying
+                # refs or authentication settings from the source checkout.
+                objects = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', '--git-path', 'objects'], text=True).strip()
+                objects = (ROOT / objects).resolve()
+                (tree / '.git/objects/info/alternates').write_text(str(objects) + '\n')
                 original = subprocess.check_output(['git', '-C', str(tree), 'show', baseline + ':' + COMPAT.TARGET])
                 target = tree / COMPAT.TARGET
                 target.parent.mkdir(parents=True)
