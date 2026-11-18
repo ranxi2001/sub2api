@@ -2459,7 +2459,7 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 
 	hasScopedGrokState := account.IsGrok() && !options.preserveGrokScopedBlocks &&
 		(hasGrokModelQuotaBlockForAccount(account.ID) || hasGrokTeamModelRateLimitForAccount(account))
-	if (hasRecoverableRuntimeState(account) || hasScopedGrokState) && !(account.IsGrok() && options.preserveGrokRuntimeState) {
+	if (hasRecoverableRuntimeState(account) || hasScopedGrokState) && (!account.IsGrok() || !options.preserveGrokRuntimeState) {
 		if err := s.clearRateLimit(ctx, accountID, options.preserveGrokScopedBlocks && account.IsGrok()); err != nil {
 			return nil, err
 		}
