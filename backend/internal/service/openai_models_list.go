@@ -13,6 +13,15 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
+type openAIModelsReadPolicy uint8
+
+const (
+	openAIModelsReadDefault openAIModelsReadPolicy = iota
+	// A replacement whitelist needs this request's complete upstream response.
+	// It must not refresh credentials, recover tasks or change account health.
+	openAIModelsReadWhitelist
+)
+
 // FetchOpenAIModelsList discovers a single account's raw public model catalog.
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
@@ -24,6 +33,10 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 }
 
 func (s *OpenAIGatewayService) fetchNativeOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	return s.fetchNativeOpenAIModelsListWithPolicy(ctx, account, openAIModelsReadDefault)
+}
+
+func (s *OpenAIGatewayService) fetchNativeOpenAIModelsListWithPolicy(ctx context.Context, account *Account, policy openAIModelsReadPolicy) (*OpenAIModelsResponse, error) {
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}
@@ -39,9 +52,12 @@ func (s *OpenAIGatewayService) fetchNativeOpenAIModelsList(ctx context.Context, 
 		if s.settingService != nil {
 			clientVersion = s.settingService.GetOpenAICodexClientVersion(ctx)
 		}
-		response, err := s.fetchNativeCodexModelsManifest(ctx, account, clientVersion, "")
+		response, err := s.fetchNativeCodexModelsManifestWithPolicy(ctx, account, clientVersion, "", policy)
 		if err != nil {
 			return nil, err
+		}
+		if response == nil || response.NotModified {
+			return nil, invalidOpenAIModelsList(fmt.Errorf("upstream returned no current model catalog"))
 		}
 		body, err := standardOpenAIModelsBody(response.Body, true)
 		if err != nil {
@@ -60,7 +76,7 @@ func (s *OpenAIGatewayService) fetchNativeOpenAIModelsList(ctx context.Context, 
 		accountConcurrency: account.Concurrency, useAPIKeyUpstream: true,
 		standardModelsList: true,
 	}
-	response, err := s.fetchCachedOpenAIModels(ctx, request, func(fetchCtx context.Context, etag string) (*OpenAIModelsResponse, error) {
+	fetch := func(fetchCtx context.Context, etag string) (*OpenAIModelsResponse, error) {
 		response, err := s.fetchOpenAIModelsUpstream(fetchCtx, request, etag)
 		if err != nil || response.NotModified {
 			return response, err
@@ -72,7 +88,15 @@ func (s *OpenAIGatewayService) fetchNativeOpenAIModelsList(ctx context.Context, 
 		response.Body = body
 		response.ETag = codexModelsManifestBodyETag(body)
 		return response, nil
-	}, "")
+	}
+	var response *OpenAIModelsResponse
+	if policy == openAIModelsReadWhitelist {
+		request.headers.Del("If-None-Match")
+		request.headers.Set("Cache-Control", "no-cache")
+		response, err = fetch(ctx, "")
+	} else {
+		response, err = s.fetchCachedOpenAIModels(ctx, request, fetch, "")
+	}
 	if err != nil {
 		return nil, err
 	}

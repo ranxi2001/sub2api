@@ -10,6 +10,9 @@ on:
       - 'backend/internal/service/upstream_model_mapping_sync.go'
       - 'backend/internal/service/upstream_models.go'
       - 'backend/internal/service/openai_excel_bps_model_access.go'
+      - 'backend/internal/service/openai_models_list.go'
+      - 'backend/internal/service/openai_codex_models_service.go'
+      - 'backend/internal/service/openai_excel_oauth.go'
       - 'backend/internal/handler/admin/account_handler.go'
       - '.github/workflows/batch-upstream-whitelist.yml'
       - '.github/scripts/batch-whitelist-ui.mjs'
@@ -60,11 +63,26 @@ jobs:
           cat "$RUNNER_TEMP/catalog-red.log"
           grep -F -- '--- FAIL: TestBatchWhitelistSafety/unconsumed' "$RUNNER_TEMP/catalog-red.log"
           grep -F 'partial BPS/native catalogs cannot replace the entire whitelist' "$RUNNER_TEMP/catalog-red.log"
+      - name: Mapping-only fresh read and account state regression on reviewed head
+        shell: bash
+        run: |
+          set -euo pipefail
+          reviewed=add606e964972ded3d6389790586c781c89a58c1
+          git worktree add --detach "$RUNNER_TEMP/whitelist-read-before" "$reviewed"
+          file=backend/internal/service/upstream_batch_whitelist_read_policy_test.go
+          cp "$file" "$RUNNER_TEMP/whitelist-read-before/$file"
+          cd "$RUNNER_TEMP/whitelist-read-before/backend"
+          if go test -v -tags=unit ./internal/service -run '^TestBatchWhitelistBPS(NativeStructured401IsReadOnly|NativeStaleFailureKeepsMapping|NativeFreshCompleteSuccess|FreshCacheCannotHideFailure|ExpiredGrantDoesNotRefresh)$' -count=1 > "$RUNNER_TEMP/read-policy-red.log" 2>&1; then exit 1; fi
+          cat "$RUNNER_TEMP/read-policy-red.log"
+          grep -F 'whitelist discovery must not disable an account' "$RUNNER_TEMP/read-policy-red.log"
+          grep -F 'stale native cache cannot authorize a replacement whitelist' "$RUNNER_TEMP/read-policy-red.log"
+          grep -F 'BPS fresh cache must also be bypassed' "$RUNNER_TEMP/read-policy-red.log"
+          ! grep -Eq 'build failed|setup failed|undefined:|no tests to run|panic:' "$RUNNER_TEMP/read-policy-red.log"
       - name: Candidate handler and catalog policies
         working-directory: backend
         run: |
           set -o pipefail
-          go test -v -tags=unit ./internal/handler/admin ./internal/service ./internal/server/middleware -run 'Test(AccountHandler(Batch|SyncUpstreamModels)|BatchWhitelist|ApplyUpstreamModels|AutomaticUpstreamModels|FetchUpstreamSupportedModels|SyncUpstreamModelCatalog|ReconciledUpstreamModels|ExcelBPSAccess|ExcelBPSMixed|AdminAuth)' -count=1 | tee "$RUNNER_TEMP/handler-green.log"
+          go test -v -tags=unit ./internal/handler/admin ./internal/service ./internal/server/middleware -run 'Test(AccountHandler(Batch|SyncUpstreamModels)|BatchWhitelist|ApplyUpstreamModels|AutomaticUpstreamModels|FetchUpstreamSupportedModels|FetchOpenAIModelsList|FetchCodexModelsManifest(OAuth|AgentIdentity401|APIKey401)|SyncUpstreamModelCatalog|ReconciledUpstreamModels|ExcelBPSAccess|ExcelBPSMixed|ExcelOAuthRefresh|AdminAuth)' -count=1 | tee "$RUNNER_TEMP/handler-green.log"
       - name: Build production server
         run: make -C backend build
       - name: PostgreSQL application, scheduler invalidation and stale edit protection
@@ -82,6 +100,7 @@ jobs:
             ${{ runner.temp }}/handler-red.log
             ${{ runner.temp }}/handler-green.log
             ${{ runner.temp }}/catalog-red.log
+            ${{ runner.temp }}/read-policy-red.log
             ${{ runner.temp }}/postgres.log
   browser:
     runs-on: ubuntu-24.04

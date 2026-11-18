@@ -1739,7 +1739,11 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 }
 
 func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
-	useCache := !isFreshOpenAICredentialProbe(ctx)
+	return s.fetchNativeCodexModelsManifestWithPolicy(ctx, account, clientVersion, ifNoneMatch, openAIModelsReadDefault)
+}
+
+func (s *OpenAIGatewayService) fetchNativeCodexModelsManifestWithPolicy(ctx context.Context, account *Account, clientVersion, ifNoneMatch string, policy openAIModelsReadPolicy) (*OpenAIModelsResponse, error) {
+	useCache := policy != openAIModelsReadWhitelist && !isFreshOpenAICredentialProbe(ctx)
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -1750,6 +1754,11 @@ func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Contex
 
 	if credAccount.IsExcelOAuth() {
 		return nil, errExcelOAuthRouteUnavailable
+	}
+	if policy == openAIModelsReadWhitelist && credAccount.IsOpenAIAgentIdentity() {
+		// Even building these headers can create/persist a task. Whitelist
+		// discovery never owns the agent identity task lifecycle.
+		return nil, infraerrors.BadRequest("OPENAI_MODELS_READ_ONLY_ACCOUNT_UNSUPPORTED", "Read-only model discovery does not support agent identity accounts")
 	}
 	clientVersion = strings.TrimSpace(clientVersion)
 	if clientVersion == "" {
@@ -1850,6 +1859,11 @@ func (s *OpenAIGatewayService) fetchNativeCodexModelsManifest(ctx context.Contex
 	if !useCache {
 		request.headers.Del("If-None-Match")
 		request.headers.Set("Cache-Control", "no-cache")
+	}
+	if policy == openAIModelsReadWhitelist {
+		// Bypass the shared display cache and its detached refresh completely.
+		// Return the actual response before OAuth health handling/task recovery.
+		return s.fetchCodexModelsManifestUpstream(ctx, request, "")
 	}
 	if useAPIKeyUpstream {
 		if !useCache {
