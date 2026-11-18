@@ -147,6 +147,11 @@ func (s *AccountTestService) SyncUpstreamModelCatalogWithOptions(ctx context.Con
 // Mapping-only edits never refresh capability snapshots, observations, quality
 // state or the automatic cooldown. Use only the authenticated live listing.
 func (s *AccountTestService) fetchWhitelistCatalog(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	if account.IsOpenAIAgentIdentity() {
+		// The non-BPS request builder can register and persist an identity task.
+		// Whitelist-only edits never own that credential lifecycle.
+		return nil, newUpstreamModelSyncUnsupportedError("Read-only model discovery does not support agent identity accounts", nil)
+	}
 	var models []string
 	var body []byte
 	var err error
